@@ -6421,6 +6421,16 @@ func TestAlterCollectionField(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:      "reject analyzer params on non-string field",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
 			name:      "invalid enable analyzer value",
 			fieldName: "string_field",
 			properties: []*commonpb.KeyValuePair{
@@ -6536,6 +6546,13 @@ func TestAlterCollectionField(t *testing.T) {
 			fieldName:   "string_field",
 			deleteKeys:  []string{common.EnableAnalyzerKey, common.AnalyzerParamKey},
 			expectError: false,
+		},
+		{
+			name:        "reject delete analyzer params on non-string field",
+			fieldName:   "array_field",
+			deleteKeys:  []string{common.EnableAnalyzerKey, common.AnalyzerParamKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
 		},
 		{
 			name:        "reject delete analyzer params on text match field",

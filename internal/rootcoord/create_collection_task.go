@@ -230,16 +230,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	// check analyzer was vaild
-	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
-	for _, field := range schema.GetFields() {
-		err := validateAnalyzer(schema, field, &analyzerInfos)
-		if err != nil {
-			return err
-		}
-	}
-
-	fileResourceIds, err := t.Core.validateAnalyzerInfos(ctx, analyzerInfos)
+	fileResourceIds, err := t.Core.validateSchemaAnalyzerFileResources(ctx, schema, activeAnalyzerOnly)
 	if err != nil {
 		return err
 	}
@@ -247,14 +238,27 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 
 	// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
 	// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
+	if err := reserveFileResourceRefs(t.meta, schema.FileResourceIds); err != nil {
+		return err
+	}
 	if len(schema.FileResourceIds) > 0 {
-		if err := t.meta.IncFileResourceRefCnt(schema.FileResourceIds); err != nil {
-			return err
-		}
 		t.heldFileResourceIds = schema.FileResourceIds
 	}
 
 	return validateFieldDataType(schema.GetFields())
+}
+
+const (
+	activeAnalyzerOnly      = false
+	includeInactiveAnalyzer = true
+)
+
+func (c *Core) validateSchemaAnalyzerFileResources(ctx context.Context, schema *schemapb.CollectionSchema, includeInactive bool) ([]int64, error) {
+	analyzerInfos, err := collectAnalyzerInfos(schema, includeInactive)
+	if err != nil {
+		return nil, err
+	}
+	return c.validateAnalyzerInfos(ctx, analyzerInfos)
 }
 
 func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*querypb.AnalyzerInfo) ([]int64, error) {
@@ -932,10 +936,10 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	return nil
 }
 
-func collectAnalyzerInfosForAlter(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {
+func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema, includeInactive bool) ([]*querypb.AnalyzerInfo, error) {
 	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
 	for _, field := range collSchema.GetFields() {
-		if err := validateAnalyzerWithInactive(collSchema, field, &analyzerInfos); err != nil {
+		if err := validateAnalyzerInternal(collSchema, field, &analyzerInfos, includeInactive); err != nil {
 			return nil, err
 		}
 	}
@@ -944,10 +948,6 @@ func collectAnalyzerInfosForAlter(collSchema *schemapb.CollectionSchema) ([]*que
 
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	return validateAnalyzerInternal(collSchema, fieldSchema, analyzerInfos, false)
-}
-
-func validateAnalyzerWithInactive(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
-	return validateAnalyzerInternal(collSchema, fieldSchema, analyzerInfos, true)
 }
 
 func validateAnalyzerInternal(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo, validateInactive bool) error {

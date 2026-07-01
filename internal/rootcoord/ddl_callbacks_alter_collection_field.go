@@ -57,6 +57,9 @@ func validateAlterCollectionFieldAnalyzerMutation(schema *schemapb.CollectionSch
 	if field == nil {
 		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
 	}
+	if !typeutil.IsStringType(field.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
+	}
 	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() || typeutil.IsBm25FunctionInputField(schema, field) {
 		return merr.WrapErrParameterInvalidMsg(
 			"can not alter analyzer params for field %s after text match is enabled or BM25 function depends on it",
@@ -120,28 +123,19 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		return err
 	}
 
-	if hasAnalyzerFieldParamMutation(req) {
+	analyzerFieldParamMutated := hasAnalyzerFieldParamMutation(req)
+	if analyzerFieldParamMutated {
 		if err := validateAlterCollectionFieldAnalyzerParams(req); err != nil {
 			return err
 		}
 		if err := validateAlterCollectionFieldAnalyzerMutation(schema, req.GetFieldName()); err != nil {
 			return err
 		}
-		analyzerInfos, err := collectAnalyzerInfosForAlter(schema)
-		if err != nil {
-			return err
-		}
-		fileResourceIds, err := c.validateAnalyzerInfos(ctx, analyzerInfos)
+		fileResourceIds, err := c.validateSchemaAnalyzerFileResources(ctx, schema, includeInactiveAnalyzer)
 		if err != nil {
 			return err
 		}
 		schema.FileResourceIds = fileResourceIds
-		addedFileResourceIds, _ := diffFileResourceIDs(coll.FileResourceIds, schema.FileResourceIds)
-		if len(addedFileResourceIds) > 0 {
-			if err := c.meta.IncFileResourceRefCnt(addedFileResourceIds); err != nil {
-				return err
-			}
-		}
 	}
 
 	header := &messagespb.AlterCollectionMessageHeader{
@@ -166,7 +160,19 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		WithBody(body).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
+	if analyzerFieldParamMutated {
+		addedFileResourceIds, _ := diffFileResourceIDs(coll.FileResourceIds, schema.FileResourceIds)
+		// Reserve newly referenced file resources immediately before handing the
+		// message to the broadcaster. MetaTable.AlterCollection consumes the
+		// reservation when the schema is applied; replay/replicated tasks without
+		// a local reservation add the refCnt there.
+		if err := reserveAlterCollectionFileResourceRefs(c.meta, coll.CollectionID, addedFileResourceIds); err != nil {
+			return err
+		}
+	}
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		// Same as create collection: once Broadcast is called, the task may
+		// already be pending and recovery will hold the reservation until apply.
 		return err
 	}
 	return nil
