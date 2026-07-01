@@ -1310,6 +1310,51 @@ TEST_F(DiskAnnFileManagerTest, FileCleanupKeepsOtherGeneration) {
     EXPECT_FALSE(local_chunk_manager->Exist(fm2_file));
 }
 
+TEST_F(DiskAnnFileManagerTest,
+       FileCleanupKeepsOtherGenerationAcrossAllLocalPrefixes) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
+    std::vector<std::string> fm2_files;
+    {
+        auto fm1 = CreateFileManager(cm_, fs_);
+        auto fm2 = CreateFileManager(cm_, fs_);
+
+        const std::vector<std::pair<std::string, std::string>> fm1_files = {
+            {fm1->GetLocalIndexObjectPrefix() + "index_data",
+             fm2->GetLocalIndexObjectPrefix() + "index_data"},
+            {fm1->GetLocalTextIndexPrefix() + "text_log_data",
+             fm2->GetLocalTextIndexPrefix() + "text_log_data"},
+            {fm1->GetLocalJsonStatsSharedIndexPrefix() + "shared_index_data",
+             fm2->GetLocalJsonStatsSharedIndexPrefix() + "shared_index_data"},
+            {fm1->GetLocalJsonStatsPrefix() + "meta.json",
+             fm2->GetLocalJsonStatsPrefix() + "meta.json"},
+            {fm1->GetLocalNgramIndexPrefix() + "ngram_index_data",
+             fm2->GetLocalNgramIndexPrefix() + "ngram_index_data"},
+            {fm1->GetLocalRawDataObjectPrefix() + "raw_data",
+             fm2->GetLocalRawDataObjectPrefix() + "raw_data"},
+        };
+
+        for (const auto& [fm1_file, fm2_file] : fm1_files) {
+            local_chunk_manager->CreateFile(fm1_file);
+            local_chunk_manager->CreateFile(fm2_file);
+            ASSERT_TRUE(local_chunk_manager->Exist(fm1_file));
+            ASSERT_TRUE(local_chunk_manager->Exist(fm2_file));
+            fm2_files.push_back(fm2_file);
+        }
+
+        fm1.reset();
+        for (const auto& [fm1_file, fm2_file] : fm1_files) {
+            EXPECT_FALSE(local_chunk_manager->Exist(fm1_file));
+            EXPECT_TRUE(local_chunk_manager->Exist(fm2_file));
+        }
+    }
+
+    for (const auto& fm2_file : fm2_files) {
+        EXPECT_FALSE(local_chunk_manager->Exist(fm2_file));
+    }
+}
+
 TEST_F(DiskAnnFileManagerTest, DirectoryLeaseDefersCleanupUntilRelease) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -1329,6 +1374,27 @@ TEST_F(DiskAnnFileManagerTest, DirectoryLeaseDefersCleanupUntilRelease) {
     }
 
     EXPECT_FALSE(local_chunk_manager->Exist(local_index_file));
+}
+
+TEST_F(DiskAnnFileManagerTest, RawDataDirectoryLeaseDefersCleanupUntilRelease) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto file_manager = CreateFileManager(cm_, fs_);
+    auto local_raw_data_prefix = file_manager->GetLocalRawDataObjectPrefix();
+    auto local_raw_data_file = local_raw_data_prefix + "raw_data";
+
+    {
+        auto lease =
+            file_manager->AcquireLocalDirWriteLease(local_raw_data_prefix);
+        ASSERT_TRUE(lease);
+        local_chunk_manager->CreateFile(local_raw_data_file);
+        ASSERT_TRUE(local_chunk_manager->Exist(local_raw_data_file));
+
+        file_manager->RemoveRawDataFiles();
+        EXPECT_TRUE(local_chunk_manager->Exist(local_raw_data_file));
+    }
+
+    EXPECT_FALSE(local_chunk_manager->Exist(local_raw_data_file));
 }
 
 TEST_F(DiskAnnFileManagerTest, DirectoryLeaseRejectsNewWritersAfterCleanup) {
@@ -1363,6 +1429,41 @@ TEST_F(DiskAnnFileManagerTest, DirectoryLeaseRejectsNewWritersAfterCleanup) {
         },
         SegcoreError);
     EXPECT_FALSE(local_chunk_manager->Exist(local_index_file));
+}
+
+TEST_F(DiskAnnFileManagerTest,
+       RawDataDirectoryLeaseRejectsNewWritersAfterCleanup) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto file_manager = CreateFileManager(cm_, fs_);
+    auto local_raw_data_prefix = file_manager->GetLocalRawDataObjectPrefix();
+    auto local_raw_data_file = local_raw_data_prefix + "raw_data";
+
+    {
+        auto lease =
+            file_manager->AcquireLocalDirWriteLease(local_raw_data_prefix);
+        ASSERT_TRUE(lease);
+        local_chunk_manager->CreateFile(local_raw_data_file);
+        ASSERT_TRUE(local_chunk_manager->Exist(local_raw_data_file));
+
+        file_manager->RemoveRawDataFiles();
+        EXPECT_THROW(
+            {
+                auto blocked = file_manager->AcquireLocalDirWriteLease(
+                    local_raw_data_prefix);
+                (void)blocked;
+            },
+            SegcoreError);
+    }
+
+    EXPECT_THROW(
+        {
+            auto blocked =
+                file_manager->AcquireLocalDirWriteLease(local_raw_data_prefix);
+            (void)blocked;
+        },
+        SegcoreError);
+    EXPECT_FALSE(local_chunk_manager->Exist(local_raw_data_file));
 }
 
 TEST_F(DiskAnnFileManagerTest, FileCleanup) {
