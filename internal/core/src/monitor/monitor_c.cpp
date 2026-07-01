@@ -22,8 +22,7 @@
 namespace {
 
 const char*
-CacheShardDiskUsageDataTypeLabel(
-    milvus::cachinglayer::CellDataType data_type) {
+CacheShardDiskUsageDataTypeLabel(milvus::cachinglayer::CellDataType data_type) {
     switch (data_type) {
         case milvus::cachinglayer::CellDataType::VECTOR_FIELD:
             return "vector_field";
