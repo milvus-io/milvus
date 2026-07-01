@@ -106,6 +106,7 @@ type SegmentAction struct {
 	Scope     querypb.DataScope
 
 	rpcReturned atomic.Bool
+	onFinish    func()
 }
 
 // Deprecate, only for existing unit test
@@ -180,6 +181,17 @@ func segmentInDist(distMgr *meta.DistributionManager, nodeID int64, channelName 
 		meta.WithSegmentID(segmentID),
 	)
 	return len(segments) > 0
+}
+
+func (action *SegmentAction) SetFinishCallback(callback func()) {
+	action.onFinish = callback
+}
+
+func (action *SegmentAction) Finish() {
+	action.rpcReturned.Store(true)
+	if action.onFinish != nil {
+		action.onFinish()
+	}
 }
 
 func (action *SegmentAction) Desc() string {
