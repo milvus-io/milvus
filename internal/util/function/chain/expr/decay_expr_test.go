@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
@@ -223,29 +224,28 @@ func (s *DecayExprTestSuite) TestNewDecayExpr_NumericalStability() {
 // =============================================================================
 
 func (s *DecayExprTestSuite) TestNewDecayExprFromParams_Valid() {
-	// Note: input_column is no longer part of function params, it's handled by MapOp
-	params := map[string]interface{}{
-		"function": "gauss",
-		"origin":   100.0,
-		"scale":    50.0,
-		"offset":   10.0,
-		"decay":    0.3,
+	params := map[string]*schemapb.FunctionParamValue{
+		"function": stringParam("gauss"),
+		"origin":   doubleParam(100.0),
+		"scale":    doubleParam(50.0),
+		"offset":   doubleParam(10.0),
+		"decay":    doubleParam(0.3),
 	}
 
-	expr, err := NewDecayExprFromParams(params)
+	expr, err := NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
 	s.Require().NoError(err)
 	s.NotNil(expr)
 	s.Equal("decay", expr.Name())
 }
 
 func (s *DecayExprTestSuite) TestNewDecayExprFromParams_DefaultValues() {
-	params := map[string]interface{}{
-		"function": "gauss",
-		"origin":   100.0,
-		"scale":    50.0,
+	params := map[string]*schemapb.FunctionParamValue{
+		"function": stringParam("gauss"),
+		"origin":   doubleParam(100.0),
+		"scale":    doubleParam(50.0),
 	}
 
-	expr, err := NewDecayExprFromParams(params)
+	expr, err := NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
 	s.Require().NoError(err)
 
 	decayExpr := expr.(*DecayExpr)
@@ -254,62 +254,56 @@ func (s *DecayExprTestSuite) TestNewDecayExprFromParams_DefaultValues() {
 }
 
 func (s *DecayExprTestSuite) TestNewDecayExprFromParams_MissingRequired() {
-	// Missing function
-	_, err := NewDecayExprFromParams(map[string]interface{}{
-		"origin": 100.0,
-		"scale":  50.0,
-	})
+	_, err := NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"origin": doubleParam(100.0),
+		"scale":  doubleParam(50.0),
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "function")
 
-	// Missing origin
-	_, err = NewDecayExprFromParams(map[string]interface{}{
-		"function": "gauss",
-		"scale":    50.0,
-	})
+	_, err = NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"function": stringParam("gauss"),
+		"scale":    doubleParam(50.0),
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "origin")
 
-	// Missing scale
-	_, err = NewDecayExprFromParams(map[string]interface{}{
-		"function": "gauss",
-		"origin":   100.0,
-	})
+	_, err = NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"function": stringParam("gauss"),
+		"origin":   doubleParam(100.0),
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "scale")
 }
 
 func (s *DecayExprTestSuite) TestNewDecayExprFromParams_WrongTypes() {
-	// function is not string
-	_, err := NewDecayExprFromParams(map[string]interface{}{
-		"function": 123,
-		"origin":   100.0,
-		"scale":    50.0,
-	})
+	_, err := NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"function": intParam(123),
+		"origin":   doubleParam(100.0),
+		"scale":    doubleParam(50.0),
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "must be a string")
 
-	// scale is not number
-	_, err = NewDecayExprFromParams(map[string]interface{}{
-		"function": "gauss",
-		"origin":   100.0,
-		"scale":    "fifty",
-	})
+	_, err = NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"function": stringParam("gauss"),
+		"origin":   doubleParam(100.0),
+		"scale":    stringParam("fifty"),
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "must be a number")
 }
 
 func (s *DecayExprTestSuite) TestNewDecayExprFromParams_NumericConversions() {
-	// Test int values are converted to float64
-	params := map[string]interface{}{
-		"function": "gauss",
-		"origin":   100, // int
-		"scale":    int64(50),
-		"offset":   int32(10),
-		"decay":    float32(0.3),
+	params := map[string]*schemapb.FunctionParamValue{
+		"function": stringParam("gauss"),
+		"origin":   intParam(100),
+		"scale":    intParam(50),
+		"offset":   intParam(10),
+		"decay":    doubleParam(0.3),
 	}
 
-	expr, err := NewDecayExprFromParams(params)
+	expr, err := NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
 	s.Require().NoError(err)
 	s.NotNil(expr)
 }

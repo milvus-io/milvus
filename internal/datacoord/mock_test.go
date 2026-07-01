@@ -1058,6 +1058,10 @@ func (s *mockMixCoord) RestoreSnapshot(ctx context.Context, req *datapb.RestoreS
 	panic("implement me")
 }
 
+func (s *mockMixCoord) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	panic("implement me")
 }

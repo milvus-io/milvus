@@ -271,7 +271,7 @@ Schema::ConvertToArrowSchema() const {
 }
 
 const ArrowSchemaPtr
-Schema::ConvertToLoonArrowSchema() const {
+Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
     arrow::FieldVector arrow_fields;
     arrow_fields.reserve(field_ids_.size());
     for (const auto& field_id : field_ids_) {
@@ -288,6 +288,8 @@ Schema::ConvertToLoonArrowSchema() const {
             !IsSparseFloatVectorDataType(data_type) &&
             data_type != DataType::VECTOR_ARRAY;
         if (is_nullable_dense_vector) {
+            arrow_data_type = arrow::binary();
+        } else if (text_lob_as_binary && data_type == DataType::TEXT) {
             arrow_data_type = arrow::binary();
         } else if (data_type == DataType::VECTOR_ARRAY) {
             arrow_data_type = GetArrowDataTypeForVectorArray(

@@ -111,6 +111,58 @@ func (c *Client) RestoreSnapshot(ctx context.Context, opt RestoreSnapshotOption,
 	return jobID, err
 }
 
+func (c *Client) RestoreExternalSnapshot(ctx context.Context, opt RestoreExternalSnapshotOption, callOptions ...grpc.CallOption) (int64, error) {
+	if opt == nil {
+		return 0, merr.WrapErrParameterInvalid("RestoreExternalSnapshotOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+	if req.DbName == "" {
+		req.DbName = c.getCurrentDB()
+	}
+	if timeout := opt.RequestTimeout(); timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	var jobID int64
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.RestoreExternalSnapshot(ctx, req, callOptions...)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		jobID = resp.GetJobId()
+		return nil
+	})
+	return jobID, err
+}
+
+func (c *Client) ExportSnapshot(ctx context.Context, opt ExportSnapshotOption, callOptions ...grpc.CallOption) (string, error) {
+	if opt == nil {
+		return "", merr.WrapErrParameterInvalid("ExportSnapshotOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+	if req.DbName == "" {
+		req.DbName = c.getCurrentDB()
+	}
+	if timeout := opt.RequestTimeout(); timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	var snapshotMetadataURI string
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.ExportSnapshot(ctx, req, callOptions...)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		snapshotMetadataURI = resp.GetSnapshotMetadataUri()
+		return nil
+	})
+	return snapshotMetadataURI, err
+}
+
 // GetRestoreSnapshotState gets the state of a restore snapshot job
 func (c *Client) GetRestoreSnapshotState(ctx context.Context, opt GetRestoreSnapshotStateOption, callOptions ...grpc.CallOption) (*milvuspb.RestoreSnapshotInfo, error) {
 	if opt == nil {
