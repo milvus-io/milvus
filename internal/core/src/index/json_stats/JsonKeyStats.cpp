@@ -40,6 +40,7 @@
 #include "common/Tracer.h"
 #include "common/jsmn.h"
 #include "fmt/core.h"
+#include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/bson_builder.h"
@@ -1184,6 +1185,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             load_priority_,
             /*eager_load=*/true,
             warmup_policy,
+            support_eviction_,
             fmt::format("jks_{}", field_id_),
             /*fallback_bytes_per_row=*/0,
             shard_);
@@ -1265,6 +1267,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             load_priority_,
             eager_load,
             warmup_policy,
+            support_eviction_,
             fmt::format("jks_{}_{}", field_id_, inner_field_id.get()),
             /*fallback_bytes_per_row=*/0,
             shard_,
@@ -1331,6 +1334,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     load_info.index_size = index_size;
     load_info.load_priority = load_priority_;
     load_info.warmup_policy = warmup_policy;
+    load_info.support_eviction = support_eviction_;
     load_info.shard = shard_;
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
         translator = std::make_unique<
@@ -1366,6 +1370,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_INFO("load json stats for segment {} with load priority: {}",
              segment_id_,
              static_cast<int>(load_priority_));
+    support_eviction_ =
+        GetValueFromConfig<bool>(config, SUPPORT_EVICTION).value_or(true);
     shard_ = GetValueFromConfig<std::string>(config, JSON_STATS_CACHE_SHARD_KEY)
                  .value_or("");
     auto warmup_policy =
