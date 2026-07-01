@@ -154,57 +154,55 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             "division or modulus by zero in JSON field arithmetic expression");
     }
 
-#define BinaryArithRangeJSONCompare(cmp)                                \
-    do {                                                                \
-        for (size_t i = 0; i < size; ++i) {                             \
-            auto offset = i;                                            \
-            if constexpr (filter_type == FilterType::random) {          \
-                offset = (offsets) ? offsets[i] : i;                    \
-            }                                                           \
-            if (valid_data != nullptr && !valid_data[offset]) {         \
-                res[i] = false;                                         \
-                valid_res[i] = false;                                   \
-                continue;                                               \
-            }                                                           \
-            auto x = data[offset].template at<GetType>(pointer);        \
-            if (x.error()) {                                            \
-                if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                    auto x = data[offset].template at<double>(pointer); \
-                    res[i] = !x.error() && (cmp);                       \
-                    continue;                                           \
-                }                                                       \
-                res[i] = false;                                         \
-                continue;                                               \
-            }                                                           \
-            res[i] = (cmp);                                             \
-        }                                                               \
+// For int64_t GetType, uses at_numeric() to extract any JSON number in one
+// parse.  int64 values preserve precision; uint64/double fall back to double.
+// 'cmp' must reference 'json_v' (auto-typed as int64_t or double).
+#define BinaryArithRangeJSONCompareCore(cmp)                                \
+    do {                                                                    \
+        for (size_t i = 0; i < size; ++i) {                                 \
+            auto offset = i;                                                \
+            if constexpr (filter_type == FilterType::random) {              \
+                offset = (offsets) ? offsets[i] : i;                        \
+            }                                                               \
+            if (valid_data != nullptr && !valid_data[offset]) {             \
+                res[i] = false;                                             \
+                valid_res[i] = false;                                       \
+                continue;                                                   \
+            }                                                               \
+            if constexpr (std::is_same_v<GetType, int64_t>) {               \
+                auto x_num = data[offset].at_numeric(pointer);              \
+                if (x_num.error()) {                                        \
+                    res[i] = false;                                         \
+                    valid_res[i] = false;                                   \
+                    continue;                                               \
+                }                                                           \
+                auto n = x_num.value();                                     \
+                if (n.is_int64()) {                                         \
+                    auto json_v = n.get_int64();                            \
+                    res[i] = (cmp);                                         \
+                } else {                                                    \
+                    auto json_v = n.is_uint64()                             \
+                                      ? static_cast<double>(n.get_uint64()) \
+                                      : n.get_double();                     \
+                    res[i] = (cmp);                                         \
+                }                                                           \
+            } else {                                                        \
+                auto x = data[offset].template at<GetType>(pointer);        \
+                if (x.error()) {                                            \
+                    res[i] = false;                                         \
+                    valid_res[i] = false;                                   \
+                    continue;                                               \
+                }                                                           \
+                auto json_v = x.value();                                    \
+                res[i] = (cmp);                                             \
+            }                                                               \
+        }                                                                   \
     } while (false)
 
-#define BinaryArithRangeJSONCompareNotEqual(cmp)                        \
-    do {                                                                \
-        for (size_t i = 0; i < size; ++i) {                             \
-            auto offset = i;                                            \
-            if constexpr (filter_type == FilterType::random) {          \
-                offset = (offsets) ? offsets[i] : i;                    \
-            }                                                           \
-            if (valid_data != nullptr && !valid_data[offset]) {         \
-                res[i] = false;                                         \
-                valid_res[i] = false;                                   \
-                continue;                                               \
-            }                                                           \
-            auto x = data[offset].template at<GetType>(pointer);        \
-            if (x.error()) {                                            \
-                if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                    auto x = data[offset].template at<double>(pointer); \
-                    res[i] = x.error() || (cmp);                        \
-                    continue;                                           \
-                }                                                       \
-                res[i] = true;                                          \
-                continue;                                               \
-            }                                                           \
-            res[i] = (cmp);                                             \
-        }                                                               \
-    } while (false)
+#define BinaryArithRangeJSONCompare(cmp) BinaryArithRangeJSONCompareCore(cmp)
+
+#define BinaryArithRangeJSONCompareNotEqual(cmp) \
+    BinaryArithRangeJSONCompareCore(cmp)
 
 #define BinaryArithRangeJONCompareArrayLength(cmp)              \
     do {                                                        \
@@ -221,9 +219,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             int array_length = 0;                               \
             auto doc = data[offset].doc();                      \
             auto array = doc.at_pointer(pointer).get_array();   \
-            if (!array.error()) {                               \
-                array_length = array.count_elements();          \
+            if (array.error()) {                                \
+                res[i] = false;                                 \
+                valid_res[i] = false;                           \
+                continue;                                       \
             }                                                   \
+            array_length = array.count_elements();              \
             res[i] = (cmp);                                     \
         }                                                       \
     } while (false)
