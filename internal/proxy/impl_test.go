@@ -2276,8 +2276,10 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 			DbName:         "default",
 			CollectionName: "test_collection",
 			Namespace:      &namespace,
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+			SearchInput: &milvuspb.SearchRequest_Ids{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+				},
 			},
 			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
 		}
