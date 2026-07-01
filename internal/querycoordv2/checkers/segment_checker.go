@@ -220,7 +220,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	// compare with targets to find the lack and redundancy of segments
 	lacks, loadPriorities, redundancies, toUpdate := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica, replicaSegmentDist)
 	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, loadPriorities, replica)
-	task.SetReason("lacks of segment", tasks...)
+	task.SetReason(task.ReasonLacksOfSegment, tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 

@@ -85,6 +85,9 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			mlog.Int64("collectionID", req.GetCollectionID()))
 		return nil
 	}
+	if err := s.checkLoadResource(ctx, alterLoadConfigReq); err != nil {
+		return err
+	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
