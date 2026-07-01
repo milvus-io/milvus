@@ -242,8 +242,12 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     using json_index_type = index::JsonInvertedIndex<double>;
     auto json_index = std::unique_ptr<json_index_type>(
         static_cast<json_index_type*>(inv_index.release()));
-    auto json_strs = std::vector<std::string>{
-        R"({"a": 1.0})", R"({"a": "abc"})", R"({"a": 3.0})", R"({"a": null})"};
+    auto json_strs = std::vector<std::string>{R"({"a": 1.0})",
+                                              R"({"a": "abc"})",
+                                              R"({"a": 3.0})",
+                                              R"({"a": null})",
+                                              R"({"b": 2.0})",
+                                              R"({"a": 0.0})"};
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
     auto json_field2 =
@@ -285,7 +289,28 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto final =
         ExecuteQueryExpr(plan, seg.get(), 2 * json_strs.size(), MAX_TIMESTAMP);
-    EXPECT_EQ(final.count(), 2 * json_strs.size() - 2);
+    EXPECT_EQ(final.count(), 4);
+    EXPECT_TRUE(final[2]);
+    EXPECT_TRUE(final[5]);
+    EXPECT_TRUE(final[8]);
+    EXPECT_TRUE(final[11]);
+
+    auto greater_than_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::GreaterThan,
+        val,
+        std::vector<proto::plan::GenericValue>());
+    auto not_greater_than_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, greater_than_expr);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  not_greater_than_expr);
+    final =
+        ExecuteQueryExpr(plan, seg.get(), 2 * json_strs.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 4);
+    EXPECT_TRUE(final[0]);
+    EXPECT_TRUE(final[5]);
+    EXPECT_TRUE(final[6]);
+    EXPECT_TRUE(final[11]);
 }
 
 class JsonIndexExistsTest : public ::testing::TestWithParam<std::string> {};
