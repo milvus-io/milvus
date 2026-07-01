@@ -71,6 +71,30 @@ constexpr uint32_t MARISA_CSR_FORMAT_VERSION = 1;
 constexpr const char* MARISA_CSR_FORMAT_VERSION_META =
     "marisa_csr_format_version";
 
+// Classify a marisa::Exception into a segcore ErrorCode so a trie IO / corruption
+// failure does not collapse to the generic UnexpectedError(2001). io_code is used
+// for MARISA_IO_ERROR (FileReadFailed on load, FileWriteFailed on save);
+// data_code for MARISA_FORMAT_ERROR / MARISA_SIZE_ERROR (DataFormatBroken when
+// reading back a persisted trie means the bytes are corrupt; InvalidParameter
+// when building means the input key set exceeds marisa's limits).
+// MARISA_MEMORY_ERROR is a retriable OOM; anything else is an internal invariant.
+ErrorCode
+ClassifyMarisaError(const marisa::Exception& e,
+                    ErrorCode io_code,
+                    ErrorCode data_code) {
+    switch (e.error_code()) {
+        case MARISA_IO_ERROR:
+            return io_code;
+        case MARISA_FORMAT_ERROR:
+        case MARISA_SIZE_ERROR:
+            return data_code;
+        case MARISA_MEMORY_ERROR:
+            return ErrorCode::MemAllocateFailed;
+        default:
+            return ErrorCode::UnexpectedError;
+    }
+}
+
 }  // namespace
 
 StringIndexMarisa::StringIndexMarisa(
@@ -187,7 +211,15 @@ StringIndexMarisa::BuildWithFieldData(
         }
         total_num_rows += slice_num;
     }
-    trie_.build(keyset, MARISA_LABEL_ORDER);
+    try {
+        trie_.build(keyset, MARISA_LABEL_ORDER);
+    } catch (const marisa::Exception& e) {
+        ThrowInfo(
+            ClassifyMarisaError(
+                e, ErrorCode::UnexpectedError, ErrorCode::InvalidParameter),
+            "failed to build marisa trie: {}",
+            e.what());
+    }
 
     // fill str_ids_
     str_ids_.resize(total_num_rows, MARISA_NULL_KEY_ID);
@@ -232,7 +264,15 @@ StringIndexMarisa::Build(size_t n,
         }
     }
 
-    trie_.build(keyset, MARISA_LABEL_ORDER);
+    try {
+        trie_.build(keyset, MARISA_LABEL_ORDER);
+    } catch (const marisa::Exception& e) {
+        ThrowInfo(
+            ClassifyMarisaError(
+                e, ErrorCode::UnexpectedError, ErrorCode::InvalidParameter),
+            "failed to build marisa trie: {}",
+            e.what());
+    }
     fill_str_ids(n, values, valid_data);
     str_ids_ptr_ = str_ids_.data();
     str_ids_size_ = str_ids_.size();
@@ -252,7 +292,15 @@ StringIndexMarisa::Serialize(const Config& config) {
     auto fd = open(
         file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     AssertInfo(fd != -1, "open file failed");
-    trie_.write(fd);
+    try {
+        trie_.write(fd);
+    } catch (const marisa::Exception& e) {
+        ThrowInfo(
+            ClassifyMarisaError(
+                e, ErrorCode::FileWriteFailed, ErrorCode::DataFormatBroken),
+            "failed to write marisa trie: {}",
+            e.what());
+    }
 
     auto size = get_file_size(fd);
     auto index_data = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
@@ -308,11 +356,29 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     if (config.contains(MMAP_FILE_PATH)) {
         auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
-        trie_.mmap(file_name.c_str());
+        try {
+            trie_.mmap(file_name.c_str());
+        } catch (const marisa::Exception& e) {
+            ThrowInfo(
+                ClassifyMarisaError(
+                    e, ErrorCode::FileReadFailed, ErrorCode::DataFormatBroken),
+                "failed to load marisa trie from {}: {}",
+                file_name,
+                e.what());
+        }
         mmap_file_raii_ = std::move(trie_file_raii);
     } else {
         auto file = File::Open(file_name, O_RDONLY);
-        trie_.read(file.Descriptor());
+        try {
+            trie_.read(file.Descriptor());
+        } catch (const marisa::Exception& e) {
+            ThrowInfo(
+                ClassifyMarisaError(
+                    e, ErrorCode::FileReadFailed, ErrorCode::DataFormatBroken),
+                "failed to load marisa trie from {}: {}",
+                file_name,
+                e.what());
+        }
         mmap_file_raii_ = nullptr;
     }
 
@@ -849,7 +915,15 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     // even if an exception occurs or the process crashes
     unlink(file.c_str());
 
-    trie_.write(fd);
+    try {
+        trie_.write(fd);
+    } catch (const marisa::Exception& e) {
+        ThrowInfo(
+            ClassifyMarisaError(
+                e, ErrorCode::FileWriteFailed, ErrorCode::DataFormatBroken),
+            "failed to write marisa trie: {}",
+            e.what());
+    }
 
     auto size = get_file_size(fd);
     lseek(fd, 0, SEEK_SET);
@@ -905,11 +979,29 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
 
     if (config.contains(MMAP_FILE_PATH)) {
         auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
-        trie_.mmap(file_name.c_str());
+        try {
+            trie_.mmap(file_name.c_str());
+        } catch (const marisa::Exception& e) {
+            ThrowInfo(
+                ClassifyMarisaError(
+                    e, ErrorCode::FileReadFailed, ErrorCode::DataFormatBroken),
+                "failed to load marisa trie from {}: {}",
+                file_name,
+                e.what());
+        }
         mmap_file_raii_ = std::move(trie_file_raii);
     } else {
         auto file = File::Open(file_name, O_RDONLY);
-        trie_.read(file.Descriptor());
+        try {
+            trie_.read(file.Descriptor());
+        } catch (const marisa::Exception& e) {
+            ThrowInfo(
+                ClassifyMarisaError(
+                    e, ErrorCode::FileReadFailed, ErrorCode::DataFormatBroken),
+                "failed to load marisa trie from {}: {}",
+                file_name,
+                e.what());
+        }
         mmap_file_raii_ = nullptr;
     }
 
