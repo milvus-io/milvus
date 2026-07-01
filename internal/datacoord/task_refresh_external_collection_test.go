@@ -1512,11 +1512,9 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 	collectionID := int64(100)
 	partitionID := int64(1)
 	segmentID := int64(10)
-	mt := &meta{
-		collections: newTestCollections(collectionID),
-		segments:    NewCachedSegmentsInfo(),
-		catalog:     &stubCatalog{},
-	}
+	mt := newTestMetaFromCache(t, nil, nil)
+	mt.collections = newTestCollections(collectionID)
+	mt.catalog = &stubCatalog{}
 	oldSeg := &datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1540,7 +1538,7 @@ func TestApplyExternalCollectionSegmentUpdate_UpsertExistingSegment(t *testing.T
 			}},
 		}},
 	}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(oldSeg), 0)
+	assert.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(oldSeg)))
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
 	patched.ManifestPath = `{"base_path":"old","ver":2}`
@@ -1862,11 +1860,9 @@ func TestApplyExternalCollectionSegmentUpdate_RejectDroppedKeptSegment(t *testin
 func TestApplyExternalCollectionSegmentUpdate_NormalizeNewSegmentCollection(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
-	mt := &meta{
-		collections: newTestCollections(collectionID),
-		segments:    NewCachedSegmentsInfo(),
-		catalog:     &stubCatalog{},
-	}
+	mt := newTestMetaFromCache(t, nil, nil)
+	mt.collections = newTestCollections(collectionID)
+	mt.catalog = &stubCatalog{}
 	seg := newTestExternalRefreshSegment(10, 0, 100)
 
 	err := applyExternalCollectionSegmentUpdate(
