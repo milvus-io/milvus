@@ -61,6 +61,184 @@ using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
+namespace {
+
+proto::plan::GenericValue
+Int64Value(int64_t value) {
+    proto::plan::GenericValue val;
+    val.set_int64_val(value);
+    return val;
+}
+
+void
+SetInt64ArrayFieldData(GeneratedData& raw_data,
+                       FieldId field_id,
+                       const std::vector<std::vector<int64_t>>& rows) {
+    ASSERT_EQ(raw_data.raw_->num_rows(), static_cast<int64_t>(rows.size()));
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+
+        auto* arrays =
+            field_data->mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+        for (const auto& row : rows) {
+            auto* array_data = arrays->Add();
+            array_data->mutable_long_data()->mutable_data()->Add(
+                row.data(), row.data() + row.size());
+        }
+        return;
+    }
+    FAIL() << "field id not found: " << field_id.get();
+}
+
+void
+AssertColumnVector(const ColumnVectorPtr& vec,
+                   const std::vector<bool>& expected_bits,
+                   const std::vector<bool>& expected_valid,
+                   const std::string& label) {
+    ASSERT_EQ(vec->size(), expected_bits.size()) << label;
+    ASSERT_EQ(expected_bits.size(), expected_valid.size()) << label;
+    BitsetTypeView bits(vec->GetRawData(), vec->size());
+    BitsetTypeView valid(vec->GetValidRawData(), vec->size());
+    for (size_t i = 0; i < expected_bits.size(); ++i) {
+        EXPECT_EQ(bits[i], expected_bits[i]) << label << ", row " << i;
+        EXPECT_EQ(valid[i], expected_valid[i]) << label << ", row " << i;
+    }
+}
+
+}  // namespace
+
+TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    auto struct_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT64, false);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 2);
+    std::vector<std::vector<int64_t>> rows = {{1, 2}, {}, {3}};
+    SetInt64ArrayFieldData(raw_data, long_array_fid, rows);
+    SetInt64ArrayFieldData(raw_data, struct_array_fid, rows);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = seg->PreInsert(N);
+    seg->Insert(offset,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_promote, nullptr);
+
+    struct Case {
+        std::string name;
+        milvus::expr::TypedExprPtr expr;
+        std::vector<bool> bits;
+        std::vector<bool> valid;
+        std::vector<bool> not_bits;
+        std::vector<bool> not_valid;
+    };
+
+    auto make_cases = [](const expr::ColumnInfo& column) {
+        std::vector<proto::plan::GenericValue> term_values{Int64Value(2)};
+        return std::vector<Case>{
+            {"equal",
+             std::make_shared<expr::UnaryRangeFilterExpr>(
+                 column, proto::plan::OpType::Equal, Int64Value(2)),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+            {"not_equal",
+             std::make_shared<expr::UnaryRangeFilterExpr>(
+                 column, proto::plan::OpType::NotEqual, Int64Value(2)),
+             {false, false, false},
+             {true, false, false},
+             {true, false, false},
+             {true, false, false}},
+            {"binary_range",
+             std::make_shared<expr::BinaryRangeFilterExpr>(
+                 column, Int64Value(1), Int64Value(3), false, false),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+            {"term",
+             std::make_shared<expr::TermFilterExpr>(column, term_values),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+            {"arith",
+             std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                 column,
+                 proto::plan::OpType::Equal,
+                 proto::plan::ArithOpType::Add,
+                 Int64Value(3),
+                 Int64Value(1)),
+             {true, false, false},
+             {true, false, false},
+             {false, false, false},
+             {true, false, false}},
+        };
+    };
+
+    std::vector<std::pair<std::string, FieldId>> fields = {
+        {"array", long_array_fid},
+        {"struct_array", struct_array_fid},
+    };
+    for (const auto& [field_name, field_id] : fields) {
+        auto column =
+            expr::ColumnInfo(field_id, DataType::ARRAY, DataType::INT64, {"1"});
+        for (const auto& testcase : make_cases(column)) {
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, testcase.expr);
+            auto vec = milvus::test::gen_filter_res(
+                plan.get(), seg_promote, N, MAX_TIMESTAMP);
+            AssertColumnVector(vec,
+                               testcase.bits,
+                               testcase.valid,
+                               field_name + " " + testcase.name);
+
+            exec::OffsetVector offsets = {1, 0, 2};
+            auto offset_vec = milvus::test::gen_filter_res(
+                plan.get(), seg_promote, N, MAX_TIMESTAMP, &offsets);
+            AssertColumnVector(
+                offset_vec,
+                {testcase.bits[1], testcase.bits[0], testcase.bits[2]},
+                {testcase.valid[1], testcase.valid[0], testcase.valid[2]},
+                field_name + " " + testcase.name + " offsets");
+
+            auto not_expr = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, testcase.expr);
+            auto not_plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, not_expr);
+            auto not_vec = milvus::test::gen_filter_res(
+                not_plan.get(), seg_promote, N, MAX_TIMESTAMP);
+            AssertColumnVector(not_vec,
+                               testcase.not_bits,
+                               testcase.not_valid,
+                               "not " + field_name + " " + testcase.name);
+
+            auto final =
+                ExecuteQueryExpr(not_plan, seg_promote, N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            for (int i = 0; i < N; ++i) {
+                EXPECT_EQ(final[i],
+                          testcase.not_bits[i] && testcase.not_valid[i])
+                    << "not " << field_name << " " << testcase.name << ", row "
+                    << i;
+            }
+        }
+    }
+}
+
 TEST(Expr, TestArrayRange) {
     std::vector<std::tuple<std::string,
                            std::string,

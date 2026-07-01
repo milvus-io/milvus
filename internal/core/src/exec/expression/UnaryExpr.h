@@ -477,18 +477,23 @@ struct UnaryElementFunc {
     }
 };
 
-#define UnaryArrayCompare(cmp)                                          \
-    do {                                                                \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {    \
-            res[i] = false;                                             \
-        } else {                                                        \
-            if (index >= src[i].length()) {                             \
-                res[i] = false;                                         \
-                continue;                                               \
-            }                                                           \
-            auto array_data = src[i].template get_data<GetType>(index); \
-            res[i] = (cmp);                                             \
-        }                                                               \
+#define UnaryArrayCompare(cmp)                                               \
+    do {                                                                     \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
+            res[i] = false;                                                  \
+        } else {                                                             \
+            if (index < 0) {                                                 \
+                res[i] = false;                                              \
+                continue;                                                    \
+            }                                                                \
+            if (index >= src[offset].length()) {                             \
+                res[i] = false;                                              \
+                valid_res[i] = false;                                        \
+                continue;                                                    \
+            }                                                                \
+            auto array_data = src[offset].template get_data<GetType>(index); \
+            res[i] = (cmp);                                                  \
+        }                                                                    \
     } while (false)
 
 template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
@@ -538,8 +543,13 @@ struct UnaryElementFuncForArray {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = src[offset].is_same_array(val);
                 } else {
+                    if (index < 0) {
+                        res[i] = false;
+                        continue;
+                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -550,8 +560,13 @@ struct UnaryElementFuncForArray {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = !src[offset].is_same_array(val);
                 } else {
+                    if (index < 0) {
+                        res[i] = false;
+                        continue;
+                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -578,8 +593,13 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
+                    if (index < 0) {
+                        res[i] = false;
+                        continue;
+                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -597,8 +617,13 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
+                    if (index < 0) {
+                        res[i] = false;
+                        continue;
+                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
