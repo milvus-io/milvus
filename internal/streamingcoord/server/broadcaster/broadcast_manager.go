@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -212,7 +214,7 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) (*types.BroadcastAppendResult, error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		guards.Unlock()
-		return nil, status.NewOnShutdownError("broadcaster is closing")
+		return nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
 
