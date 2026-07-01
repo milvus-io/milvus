@@ -805,10 +805,6 @@ class TestMilvusClientSearchOrderIndependent(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason="Milvus issue #49879: search with order_by_fields applies offset before scalar ordering",
-        strict=True,
-    )
     def test_milvus_client_search_order_by_with_offset(self):
         """
         target: verify search pagination with order_by_fields applies offset after scalar ordering
