@@ -591,6 +591,14 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.EnableSegmentFilter.GetAsBool())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
+		assert.Equal(t, "queryNode.segcore.tieredStorage.evictable.scalarField", Params.TieredEvictableScalarField.Key)
+		assert.Equal(t, "queryNode.segcore.tieredStorage.evictable.scalarIndex", Params.TieredEvictableScalarIndex.Key)
+		assert.Equal(t, "queryNode.segcore.tieredStorage.evictable.vectorField", Params.TieredEvictableVectorField.Key)
+		assert.Equal(t, "queryNode.segcore.tieredStorage.evictable.vectorIndex", Params.TieredEvictableVectorIndex.Key)
+		assert.True(t, Params.TieredEvictableScalarField.GetAsBool())
+		assert.True(t, Params.TieredEvictableScalarIndex.GetAsBool())
+		assert.True(t, Params.TieredEvictableVectorField.GetAsBool())
+		assert.True(t, Params.TieredEvictableVectorIndex.GetAsBool())
 
 		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))
 

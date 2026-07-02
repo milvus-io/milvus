@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 // CreateCollectionOption is the interface builds CreateCollectionRequest.
@@ -95,6 +96,22 @@ func (opt *createCollectionOption) WithIndexOptions(indexOpts ...CreateIndexOpti
 func (opt *createCollectionOption) WithProperty(key string, value any) *createCollectionOption {
 	opt.properties[key] = fmt.Sprintf("%v", value)
 	return opt
+}
+
+func (opt *createCollectionOption) WithEvictableScalarField(enabled bool) *createCollectionOption {
+	return opt.WithProperty(common.EvictableScalarFieldKey, enabled)
+}
+
+func (opt *createCollectionOption) WithEvictableVectorField(enabled bool) *createCollectionOption {
+	return opt.WithProperty(common.EvictableVectorFieldKey, enabled)
+}
+
+func (opt *createCollectionOption) WithEvictableScalarIndex(enabled bool) *createCollectionOption {
+	return opt.WithProperty(common.EvictableScalarIndexKey, enabled)
+}
+
+func (opt *createCollectionOption) WithEvictableVectorIndex(enabled bool) *createCollectionOption {
+	return opt.WithProperty(common.EvictableVectorIndexKey, enabled)
 }
 
 func (opt *createCollectionOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *createCollectionOption {
@@ -329,6 +346,22 @@ func (opt *alterCollectionPropertiesOption) WithProperty(key string, value any) 
 	return opt
 }
 
+func (opt *alterCollectionPropertiesOption) WithEvictableScalarField(enabled bool) *alterCollectionPropertiesOption {
+	return opt.WithProperty(common.EvictableScalarFieldKey, enabled)
+}
+
+func (opt *alterCollectionPropertiesOption) WithEvictableVectorField(enabled bool) *alterCollectionPropertiesOption {
+	return opt.WithProperty(common.EvictableVectorFieldKey, enabled)
+}
+
+func (opt *alterCollectionPropertiesOption) WithEvictableScalarIndex(enabled bool) *alterCollectionPropertiesOption {
+	return opt.WithProperty(common.EvictableScalarIndexKey, enabled)
+}
+
+func (opt *alterCollectionPropertiesOption) WithEvictableVectorIndex(enabled bool) *alterCollectionPropertiesOption {
+	return opt.WithProperty(common.EvictableVectorIndexKey, enabled)
+}
+
 func (opt *alterCollectionPropertiesOption) Request() *milvuspb.AlterCollectionRequest {
 	return &milvuspb.AlterCollectionRequest{
 		CollectionName: opt.collectionName,
@@ -376,6 +409,10 @@ type alterCollectionFieldPropertiesOption struct {
 func (opt *alterCollectionFieldPropertiesOption) WithProperty(key string, value any) *alterCollectionFieldPropertiesOption {
 	opt.properties[key] = fmt.Sprintf("%v", value)
 	return opt
+}
+
+func (opt *alterCollectionFieldPropertiesOption) WithEvictable(enabled bool) *alterCollectionFieldPropertiesOption {
+	return opt.WithProperty(common.EvictableEnabledKey, enabled)
 }
 
 func (opt *alterCollectionFieldPropertiesOption) Request() *milvuspb.AlterCollectionFieldRequest {

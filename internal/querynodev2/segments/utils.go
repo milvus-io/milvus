@@ -283,6 +283,36 @@ func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
 	return params.Params.QueryNodeCfg.MmapScalarField.GetAsBool()
 }
 
+func isDataEvictableEnable(fieldSchema *schemapb.FieldSchema) bool {
+	enableEvictable, exist := common.IsEvictableEnabled(fieldSchema.GetTypeParams()...)
+	if exist {
+		return enableEvictable
+	}
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return params.Params.QueryNodeCfg.TieredEvictableVectorField.GetAsBool()
+	}
+	return params.Params.QueryNodeCfg.TieredEvictableScalarField.GetAsBool()
+}
+
+func isIndexEvictableEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {
+	enableEvictable, exist := common.IsEvictableEnabled(indexInfo.IndexParams...)
+	if exist {
+		return enableEvictable
+	}
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return params.Params.QueryNodeCfg.TieredEvictableVectorIndex.GetAsBool()
+	}
+	return params.Params.QueryNodeCfg.TieredEvictableScalarIndex.GetAsBool()
+}
+
+func isScalarStatsEvictableEnable(fieldSchema *schemapb.FieldSchema) bool {
+	enableEvictable, exist := common.IsEvictableEnabled(fieldSchema.GetTypeParams()...)
+	if exist {
+		return enableEvictable
+	}
+	return params.Params.QueryNodeCfg.TieredEvictableScalarField.GetAsBool()
+}
+
 func isGrowingMmapEnable() bool {
 	return params.Params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 }

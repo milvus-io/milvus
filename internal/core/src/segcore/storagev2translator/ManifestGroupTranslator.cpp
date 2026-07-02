@@ -75,6 +75,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     milvus::proto::common::LoadPriority load_priority,
     bool eager_load,
     const std::string& warmup_policy,
+    bool support_eviction,
     const std::string& cache_key_suffix,
     int64_t fallback_bytes_per_row,
     std::string shard)
@@ -119,7 +120,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 }(),
                 /* is_index */ false,
                 /* in_load_list*/ eager_load),
-            /* support_eviction */ true,
+            support_eviction,
             std::move(shard)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),

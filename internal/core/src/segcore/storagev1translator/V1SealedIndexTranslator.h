@@ -65,6 +65,7 @@ class V1SealedIndexTranslator : public Translator<milvus::index::IndexBase> {
         int64_t field_id;
         int64_t index_build_id;
         int64_t index_version;
+        bool support_eviction;
     };
 
     index::IndexBasePtr

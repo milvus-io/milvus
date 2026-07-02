@@ -869,14 +869,14 @@ func (sm *snapshotManager) RestoreIndexes(
 			return merr.Wrap(err, "failed to allocate index ID")
 		}
 
-		// Build index model from snapshot data
-		// Note: TypeParams may contain mmap_enabled which should be filtered out
+		// Build index model from snapshot data.
+		// TypeParams may contain runtime configurable params which should be filtered out.
 		index := &model.Index{
 			CollectionID:    collectionID,
 			FieldID:         indexInfo.GetFieldID(),
 			IndexID:         indexID,
 			IndexName:       indexInfo.GetIndexName(),
-			TypeParams:      DeleteParams(indexInfo.GetTypeParams(), []string{common.MmapEnabledKey}),
+			TypeParams:      DeleteParams(indexInfo.GetTypeParams(), runtimeConfigTypeParamKeys()),
 			IndexParams:     indexInfo.GetIndexParams(),
 			CreateTime:      uint64(time.Now().UnixNano()),
 			IsAutoIndex:     indexInfo.GetIsAutoIndex(),

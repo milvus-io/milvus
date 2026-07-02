@@ -338,6 +338,43 @@ func (s *CollectionSuite) TestAlterCollectionProperties() {
 	})
 }
 
+func (s *CollectionSuite) TestCollectionEvictableOptions() {
+	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("vector").WithDim(128).WithDataType(entity.FieldTypeFloatVector))
+
+	createReq := NewCreateCollectionOption(collectionName, schema).
+		WithEvictableScalarField(false).
+		WithEvictableVectorField(false).
+		WithEvictableScalarIndex(false).
+		WithEvictableVectorIndex(false).
+		Request()
+	createProps := entity.KvPairsMap(createReq.GetProperties())
+	s.Equal("false", createProps[common.EvictableScalarFieldKey])
+	s.Equal("false", createProps[common.EvictableVectorFieldKey])
+	s.Equal("false", createProps[common.EvictableScalarIndexKey])
+	s.Equal("false", createProps[common.EvictableVectorIndexKey])
+
+	alterReq := NewAlterCollectionPropertiesOption(collectionName).
+		WithEvictableScalarField(false).
+		WithEvictableVectorField(false).
+		WithEvictableScalarIndex(false).
+		WithEvictableVectorIndex(false).
+		Request()
+	alterProps := entity.KvPairsMap(alterReq.GetProperties())
+	s.Equal("false", alterProps[common.EvictableScalarFieldKey])
+	s.Equal("false", alterProps[common.EvictableVectorFieldKey])
+	s.Equal("false", alterProps[common.EvictableScalarIndexKey])
+	s.Equal("false", alterProps[common.EvictableVectorIndexKey])
+
+	fieldReq := NewAlterCollectionFieldPropertiesOption(collectionName, "vector").
+		WithEvictable(false).
+		Request()
+	fieldProps := entity.KvPairsMap(fieldReq.GetProperties())
+	s.Equal("false", fieldProps[common.EvictableEnabledKey])
+}
+
 func (s *CollectionSuite) TestDropCollectionProperties() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

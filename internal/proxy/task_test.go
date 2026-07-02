@@ -5494,6 +5494,99 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
+func TestAlterCollectionEvictable(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	err := InitMetaCache(ctx, qc)
+	assert.NoError(t, err)
+
+	createCollection := func(t *testing.T, name string) int64 {
+		t.Helper()
+		schema := &schemapb.CollectionSchema{
+			Name: name,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			},
+		}
+		schemaBytes, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		_, err = qc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			DbName:         dbName,
+			CollectionName: name,
+			Schema:         schemaBytes,
+			ShardsNum:      1,
+		})
+		assert.NoError(t, err)
+		resp, err := qc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: name})
+		assert.NoError(t, err)
+		return resp.GetCollectionID()
+	}
+
+	runAlter := func(name string, props []*commonpb.KeyValuePair, deleteKeys []string) error {
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: name,
+				Properties:     props,
+				DeleteKeys:     deleteKeys,
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		return task.PreExecute(ctx)
+	}
+
+	t.Run("accepts collection evictable keys", func(t *testing.T) {
+		collectionName := "test_alter_collection_evictable_" + funcutil.GenRandomStr()
+		createCollection(t, collectionName)
+		props := []*commonpb.KeyValuePair{
+			{Key: common.EvictableScalarFieldKey, Value: "false"},
+			{Key: common.EvictableScalarIndexKey, Value: "true"},
+			{Key: common.EvictableVectorFieldKey, Value: "false"},
+			{Key: common.EvictableVectorIndexKey, Value: "true"},
+		}
+		assert.NoError(t, runAlter(collectionName, props, nil))
+	})
+
+	t.Run("rejects field-level evictable key at collection level", func(t *testing.T) {
+		collectionName := "test_alter_collection_field_evictable_" + funcutil.GenRandomStr()
+		createCollection(t, collectionName)
+		err := runAlter(collectionName, []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "false"}}, nil)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "field level")
+	})
+
+	t.Run("rejects invalid evictable value", func(t *testing.T) {
+		collectionName := "test_alter_collection_invalid_evictable_" + funcutil.GenRandomStr()
+		createCollection(t, collectionName)
+		err := runAlter(collectionName, []*commonpb.KeyValuePair{{Key: common.EvictableScalarFieldKey, Value: "not-bool"}}, nil)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("rejects modifying loaded collection", func(t *testing.T) {
+		collectionName := "test_alter_collection_loaded_evictable_" + funcutil.GenRandomStr()
+		collectionID := createCollection(t, collectionName)
+		qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+			return &querypb.ShowCollectionsResponse{
+				Status:              merr.Success(),
+				CollectionIDs:       []int64{collectionID},
+				InMemoryPercentages: []int64{100},
+			}, nil
+		}
+		t.Cleanup(func() { qc.ShowLoadCollectionsFunc = nil })
+
+		err := runAlter(collectionName, []*commonpb.KeyValuePair{{Key: common.EvictableScalarFieldKey, Value: "false"}}, nil)
+		assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+		err = runAlter(collectionName, nil, []string{common.EvictableScalarFieldKey})
+		assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+	})
+}
+
 func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
@@ -6283,6 +6376,30 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+	// update property "evictable.enabled" but the collection is loaded
+	task = &alterCollectionFieldTask{
+		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "false"}},
+		},
+		mixCoord: qc,
+	}
+	err = task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+	// delete property "evictable.enabled" but the collection is loaded
+	task = &alterCollectionFieldTask{
+		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			DeleteKeys:     []string{common.EvictableEnabledKey},
+		},
+		mixCoord: qc,
+	}
+	err = task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
 func TestAlterCollectionField(t *testing.T) {
@@ -6375,6 +6492,23 @@ func TestAlterCollectionField(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:      "update evictable enabled",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EvictableEnabledKey, Value: "false"},
+			},
+			expectError: false,
+		},
+		{
+			name:      "invalid evictable enabled value",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EvictableEnabledKey, Value: "not-bool"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
 			name:      "invalid property key",
 			fieldName: "string_field",
 			properties: []*commonpb.KeyValuePair{
@@ -6450,6 +6584,12 @@ func TestAlterCollectionField(t *testing.T) {
 			name:        "delete mmap.enabled is allowed",
 			fieldName:   "string_field",
 			deleteKeys:  []string{common.MmapEnabledKey},
+			expectError: false,
+		},
+		{
+			name:        "delete evictable.enabled is allowed",
+			fieldName:   "string_field",
+			deleteKeys:  []string{common.EvictableEnabledKey},
 			expectError: false,
 		},
 		{
@@ -7283,6 +7423,25 @@ func TestHasWarmupProp(t *testing.T) {
 	})
 }
 
+func TestHasEvictableProp(t *testing.T) {
+	t.Run("has field-level evictable key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "false"}}
+		assert.True(t, hasEvictableProp(props...))
+	})
+
+	t.Run("has collection evictable keys", func(t *testing.T) {
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableScalarFieldKey, Value: "false"}))
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableScalarIndexKey, Value: "false"}))
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableVectorFieldKey, Value: "false"}))
+		assert.True(t, hasEvictableProp(&commonpb.KeyValuePair{Key: common.EvictableVectorIndexKey, Value: "false"}))
+	})
+
+	t.Run("no evictable key", func(t *testing.T) {
+		assert.False(t, hasEvictableProp(&commonpb.KeyValuePair{Key: "other_key", Value: "other_value"}))
+		assert.False(t, hasEvictableProp())
+	})
+}
+
 func TestHasPropInDeletekeys(t *testing.T) {
 	t.Run("has mmap key", func(t *testing.T) {
 		keys := []string{common.MmapEnabledKey}
@@ -7299,6 +7458,14 @@ func TestHasPropInDeletekeys(t *testing.T) {
 		assert.Equal(t, common.WarmupScalarIndexKey, hasPropInDeletekeys([]string{common.WarmupScalarIndexKey}))
 		assert.Equal(t, common.WarmupVectorFieldKey, hasPropInDeletekeys([]string{common.WarmupVectorFieldKey}))
 		assert.Equal(t, common.WarmupVectorIndexKey, hasPropInDeletekeys([]string{common.WarmupVectorIndexKey}))
+	})
+
+	t.Run("has evictable keys", func(t *testing.T) {
+		assert.Equal(t, common.EvictableEnabledKey, hasPropInDeletekeys([]string{common.EvictableEnabledKey}))
+		assert.Equal(t, common.EvictableScalarFieldKey, hasPropInDeletekeys([]string{common.EvictableScalarFieldKey}))
+		assert.Equal(t, common.EvictableScalarIndexKey, hasPropInDeletekeys([]string{common.EvictableScalarIndexKey}))
+		assert.Equal(t, common.EvictableVectorFieldKey, hasPropInDeletekeys([]string{common.EvictableVectorFieldKey}))
+		assert.Equal(t, common.EvictableVectorIndexKey, hasPropInDeletekeys([]string{common.EvictableVectorIndexKey}))
 	})
 
 	t.Run("no special key", func(t *testing.T) {

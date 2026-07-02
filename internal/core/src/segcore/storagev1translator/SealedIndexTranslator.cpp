@@ -51,6 +51,7 @@ SealedIndexTranslator::SealedIndexTranslator(
                         load_index_info->dim,
                         load_index_info->index_files,
                         load_index_info->warmup_policy,
+                        load_index_info->support_eviction,
                         load_index_info->load_resource_request}),
       meta_(
           load_index_info->enable_mmap
@@ -75,9 +76,10 @@ SealedIndexTranslator::SealedIndexTranslator(
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata
           // currently only vector index is possible to support lazy load
-          !(IsVectorDataType(load_index_info->field_type) &&
-            knowhere::IndexFactory::Instance().FeatureCheck(
-                index_info_.index_type, knowhere::feature::LAZY_LOAD)),
+          load_index_info->support_eviction &&
+              !(IsVectorDataType(load_index_info->field_type) &&
+                knowhere::IndexFactory::Instance().FeatureCheck(
+                    index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
     load_resource_request_ = EstimateLoadResource();

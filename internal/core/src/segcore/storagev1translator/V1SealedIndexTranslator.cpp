@@ -41,6 +41,7 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
           load_index_info->field_id,
           load_index_info->index_build_id,
           load_index_info->index_version,
+          load_index_info->support_eviction,
       }),
       binary_set_(binary_set),
       key_(fmt::format("seg_{}_si_{}",
@@ -58,7 +59,7 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
               load_index_info->warmup_policy,
               /* is_vector */ IsVectorDataType(load_index_info->field_type),
               /* is_index */ true),
-          /* support_eviction */ false,
+          load_index_info->support_eviction,
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
 }

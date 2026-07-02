@@ -629,6 +629,15 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
+    /**
+     * @brief Get the evictable setting for a specific field or index.
+     *
+     * Checks field-level evictable.enabled first. If absent, falls back to the
+     * collection-level scalar/vector field/index setting.
+     */
+    std::pair<bool, bool>
+    EvictableEnabled(const FieldId& field, bool is_vector, bool is_index) const;
+
     // True if the field carries FieldSchema::is_function_output.
     bool
     is_function_output(const FieldId& field_id) const {
@@ -692,6 +701,14 @@ class Schema {
     std::optional<std::string> warmup_vector_field_ = std::nullopt;
     // Per-field warmup policy (key: "warmup" in field type_params)
     std::unordered_map<FieldId, std::string> warmup_fields_;
+
+    // evictable settings
+    std::optional<bool> evictable_vector_index_ = std::nullopt;
+    std::optional<bool> evictable_scalar_index_ = std::nullopt;
+    std::optional<bool> evictable_scalar_field_ = std::nullopt;
+    std::optional<bool> evictable_vector_field_ = std::nullopt;
+    // Per-field evictable setting (key: "evictable.enabled" in field type_params)
+    std::unordered_map<FieldId, bool> evictable_fields_;
 
     // External collection properties
     std::string

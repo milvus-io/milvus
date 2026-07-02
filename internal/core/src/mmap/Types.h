@@ -64,5 +64,6 @@ struct FieldDataInfo {
     std::shared_ptr<ArrowReaderChannel> arrow_reader_channel;
     bool in_load_list{false};
     std::string shard{};
+    bool support_eviction{true};
 };
 }  // namespace milvus
