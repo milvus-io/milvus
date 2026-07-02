@@ -128,18 +128,6 @@ class JsonScalarIndexWrapper : public BaseIndex {
         return exists_bitset_.clone();
     }
 
-    // JSON brute-force semantics: NotEqual on error (path missing / cast fail)
-    // returns TRUE. Base indexes mask invalid rows to false via valid_bitset_,
-    // which is correct for regular nullable columns but wrong for JSON path
-    // indexes. Fix: OR back the invalid rows after the base NotIn.
-    const TargetBitmap
-    NotIn(size_t n, const T* values) override {
-        auto result = BaseIndex::NotIn(n, values);
-        auto null_rows = BaseIndex::IsNull();
-        result |= null_rows;
-        return result;
-    }
-
     // v2 format: serialize non_exist_offsets (and null_offset for inverted).
     BinarySet
     Serialize(const Config& config) override {
@@ -349,6 +337,19 @@ class JsonScalarIndexWrapper : public BaseIndex {
     std::enable_if_t<std::is_base_of_v<InvertedIndexTantivy<T>, B>>
     BuildInvertedWithJsonFieldData(
         const std::vector<FieldDataPtr>& field_datas) {
+        if (cast_type_.data_type() != JsonCastType::DataType::ARRAY) {
+            auto result = ConvertJsonToTypedFieldData<T>(field_datas,
+                                                         json_schema_,
+                                                         nested_path_,
+                                                         cast_type_,
+                                                         cast_function_);
+            non_exist_offsets_ = std::move(result.non_exist_offsets);
+            auto total_rows = result.field_data->get_num_rows();
+            BaseIndex::BuildWithFieldData({result.field_data});
+            BuildExistsBitset(total_rows);
+            return;
+        }
+
         int64_t total_rows = 0;
         for (const auto& data : field_datas) {
             total_rows += data->get_num_rows();

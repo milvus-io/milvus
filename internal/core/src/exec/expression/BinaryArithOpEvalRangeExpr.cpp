@@ -197,7 +197,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
 // For int64_t GetType, uses at_numeric() to extract any JSON number in one
 // parse.  int64 values preserve precision; uint64/double fall back to double.
 // 'cmp' must reference 'json_v' (auto-typed as int64_t or double).
-#define BinaryArithRangeJSONCompareCore(cmp, error_result)                  \
+#define BinaryArithRangeJSONCompareCore(cmp)                                \
     do {                                                                    \
         for (size_t i = 0; i < size; ++i) {                                 \
             auto offset = i;                                                \
@@ -212,7 +212,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             if constexpr (std::is_same_v<GetType, int64_t>) {               \
                 auto x_num = data[offset].at_numeric(pointer);              \
                 if (x_num.error()) {                                        \
-                    res[i] = (error_result);                                \
+                    res[i] = false;                                         \
+                    valid_res[i] = false;                                   \
                     continue;                                               \
                 }                                                           \
                 auto n = x_num.value();                                     \
@@ -228,7 +229,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             } else {                                                        \
                 auto x = data[offset].template at<GetType>(pointer);        \
                 if (x.error()) {                                            \
-                    res[i] = (error_result);                                \
+                    res[i] = false;                                         \
+                    valid_res[i] = false;                                   \
                     continue;                                               \
                 }                                                           \
                 auto json_v = x.value();                                    \
@@ -237,11 +239,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
         }                                                                   \
     } while (false)
 
-#define BinaryArithRangeJSONCompare(cmp) \
-    BinaryArithRangeJSONCompareCore(cmp, false)
+#define BinaryArithRangeJSONCompare(cmp) BinaryArithRangeJSONCompareCore(cmp)
 
 #define BinaryArithRangeJSONCompareNotEqual(cmp) \
-    BinaryArithRangeJSONCompareCore(cmp, true)
+    BinaryArithRangeJSONCompareCore(cmp)
 
 #define BinaryArithRangeJONCompareArrayLength(cmp)              \
     do {                                                        \
@@ -258,9 +259,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             int array_length = 0;                               \
             auto doc = data[offset].doc();                      \
             auto array = doc.at_pointer(pointer).get_array();   \
-            if (!array.error()) {                               \
-                array_length = array.count_elements();          \
+            if (array.error()) {                                \
+                res[i] = false;                                 \
+                valid_res[i] = false;                           \
+                continue;                                       \
             }                                                   \
+            array_length = array.count_elements();              \
             res[i] = (cmp);                                     \
         }                                                       \
     } while (false)
@@ -712,8 +716,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
+            if (index < 0) {                                    \
+                res[i] = false;                                 \
+                continue;                                       \
+            }                                                   \
             if (index >= data[offset].length()) {               \
                 res[i] = false;                                 \
+                valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
             auto value = data[offset].get_data<GetType>(index); \
