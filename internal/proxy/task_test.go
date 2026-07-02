@@ -6309,6 +6309,43 @@ func TestAlterCollectionField(t *testing.T) {
 				ElementType: schemapb.DataType_Int64,
 				TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
 			},
+			{
+				FieldID:  102,
+				Name:     "text_match_field",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "100"},
+					{Key: "enable_match", Value: "true"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+			{
+				FieldID:  103,
+				Name:     "bm25_input_field",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "100"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+			{
+				FieldID:          104,
+				Name:             "bm25_output_field",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldIds:    []int64{103},
+				InputFieldNames:  []string{"bm25_input_field"},
+				OutputFieldIds:   []int64{104},
+				OutputFieldNames: []string{"bm25_output_field"},
+			},
 		},
 	}
 	schemaBytes, err := proto.Marshal(schema)
@@ -6373,6 +6410,52 @@ func TestAlterCollectionField(t *testing.T) {
 				{Key: common.MmapEnabledKey, Value: "true"},
 			},
 			expectError: false,
+		},
+		{
+			name:      "update analyzer params on inactive string field",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+			expectError: false,
+		},
+		{
+			name:      "reject analyzer params on non-string field",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "invalid enable analyzer value",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "not_bool"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "reject analyzer params on text match field",
+			fieldName: "text_match_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"whitespace"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "reject analyzer params on bm25 input field",
+			fieldName: "bm25_input_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"whitespace"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
 		},
 		{
 			name:      "invalid property key",
@@ -6457,6 +6540,33 @@ func TestAlterCollectionField(t *testing.T) {
 			fieldName:   "string_field",
 			deleteKeys:  []string{MmapEnabledKey},
 			expectError: false,
+		},
+		{
+			name:        "delete analyzer params on inactive string field",
+			fieldName:   "string_field",
+			deleteKeys:  []string{common.EnableAnalyzerKey, common.AnalyzerParamKey},
+			expectError: false,
+		},
+		{
+			name:        "reject delete analyzer params on non-string field",
+			fieldName:   "array_field",
+			deleteKeys:  []string{common.EnableAnalyzerKey, common.AnalyzerParamKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:        "reject delete analyzer params on text match field",
+			fieldName:   "text_match_field",
+			deleteKeys:  []string{common.AnalyzerParamKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:        "reject delete analyzer params on bm25 input field",
+			fieldName:   "bm25_input_field",
+			deleteKeys:  []string{common.AnalyzerParamKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
 		},
 		{
 			name:        "delete max_length is not allowed",

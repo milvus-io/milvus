@@ -4953,7 +4953,28 @@ func TestIsBM25FunctionOutputField(t *testing.T) {
 func TestIsBm25FunctionInputField(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
-			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{FieldID: 100, Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{FieldID: 101, Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldIds:    []int64{100},
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldIds:   []int64{101},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.True(t, IsBm25FunctionInputField(schema, schema.Fields[0]))
+	assert.False(t, IsBm25FunctionInputField(schema, schema.Fields[1]))
+
+	// CreateCollection validation runs before field IDs are assigned, so the
+	// helper must fall back to input field names when IDs are unavailable.
+	schemaWithoutIds := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
 			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
 		},
 		Functions: []*schemapb.FunctionSchema{
@@ -4965,28 +4986,32 @@ func TestIsBm25FunctionInputField(t *testing.T) {
 			},
 		},
 	}
-	assert.True(t, IsBm25FunctionInputField(schema, schema.Fields[0]))
-	assert.False(t, IsBm25FunctionInputField(schema, schema.Fields[1]))
+	assert.True(t, IsBm25FunctionInputField(schemaWithoutIds, schemaWithoutIds.Fields[0]))
+	assert.False(t, IsBm25FunctionInputField(schemaWithoutIds, schemaWithoutIds.Fields[1]))
 
 	// Test with multiple functions, only one is BM25
 	multipleSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
-			{Name: "input_field1", DataType: schemapb.DataType_VarChar},
-			{Name: "input_field2", DataType: schemapb.DataType_VarChar},
-			{Name: "output_field1", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
-			{Name: "output_field2", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+			{FieldID: 100, Name: "input_field1", DataType: schemapb.DataType_VarChar},
+			{FieldID: 101, Name: "input_field2", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "output_field1", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{FieldID: 103, Name: "output_field2", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
 				Name:             "bm25_func",
 				Type:             schemapb.FunctionType_BM25,
+				InputFieldIds:    []int64{100},
 				InputFieldNames:  []string{"input_field1"},
+				OutputFieldIds:   []int64{102},
 				OutputFieldNames: []string{"output_field1"},
 			},
 			{
 				Name:             "other_func",
 				Type:             schemapb.FunctionType_Unknown,
+				InputFieldIds:    []int64{101},
 				InputFieldNames:  []string{"input_field2"},
+				OutputFieldIds:   []int64{103},
 				OutputFieldNames: []string{"output_field2"},
 			},
 		},

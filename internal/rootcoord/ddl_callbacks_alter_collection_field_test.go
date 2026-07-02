@@ -20,10 +20,17 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -123,6 +130,131 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
 	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, "key2")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+}
+
+func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	fieldName := "text"
+	intFieldName := "count"
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+		DbName: dbName,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	testSchema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:       fieldName,
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+			},
+			{
+				Name:     intFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	meta := core.meta.(*MetaTable)
+	resourceID := int64(10001)
+	meta.fileResourceName2Meta = map[string]*internalpb.FileResourceInfo{
+		"dict": {Id: resourceID, Name: "dict", Path: "dict.txt"},
+	}
+	meta.fileResourceID2Meta = map[int64]*internalpb.FileResourceInfo{
+		resourceID: {Id: resourceID, Name: "dict", Path: "dict.txt"},
+	}
+	meta.fileResourceRefCnt = map[int64]int{}
+
+	mixCoord := core.mixCoord.(*mocks.MixCoord)
+	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
+		infos := req.GetAnalyzerInfos()
+		return len(infos) == 1 &&
+			infos[0].GetField() == fieldName &&
+			infos[0].GetParams() == `{"tokenizer":"standard"}`
+	})).Return(&querypb.ValidateAnalyzerResponse{
+		Status:      merr.Success(),
+		ResourceIds: []int64{resourceID},
+	}, nil).Once()
+
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []int64{resourceID}, coll.FileResourceIds)
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"standard"}`)
+
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EnableAnalyzerKey, Value: "not-bool"},
+		},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      intFieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+		},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+
+	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+		Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad analyzer")),
+	}, nil).Once()
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"bad"}`},
+		},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"standard"}`)
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		DeleteKeys:     []string{common.AnalyzerParamKey},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Empty(t, coll.FileResourceIds)
+	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
+	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey)
 }
 
 func assertFieldPropertiesNotFound(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fieldName string, key string) {
