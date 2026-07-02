@@ -798,45 +798,6 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 }
 
 func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.FieldSchema) (*schemapb.VectorField, error) {
-	elementType := field.GetElementType()
 	fieldID := field.GetFieldID()
-	switch elementType {
-	case schemapb.DataType_FloatVector:
-		values := make([]float32, 0, len(vectors)*10)
-		dim := r.id2Dim[fieldID]
-		for _, vectorAny := range vectors {
-			vector, ok := vectorAny.([]any)
-			if !ok {
-				return nil, merr.WrapErrImportFailedMsg("expected slice as vector, but got %T", vectorAny)
-			}
-			if len(vector) != dim {
-				return nil, r.wrapDimError(len(vector), fieldID)
-			}
-			for _, v := range vector {
-				value, ok := v.(json.Number)
-				if !ok {
-					return nil, r.wrapTypeError(value, fieldID)
-				}
-				num, err := strconv.ParseFloat(value.String(), 32)
-				if err != nil {
-					return nil, err
-				}
-				values = append(values, float32(num))
-			}
-		}
-		return &schemapb.VectorField{
-			Dim: int64(dim),
-			Data: &schemapb.VectorField_FloatVector{
-				FloatVector: &schemapb.FloatArray{
-					Data: values,
-				},
-			},
-		}, nil
-
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_BinaryVector,
-		schemapb.DataType_Int8Vector, schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrImportFailedMsg("not implemented element type: %s", elementType.String())
-	default:
-		return nil, merr.WrapErrImportFailedMsg("unsupported element type: %s", elementType.String())
-	}
+	return common.ArrayOfVectorToFieldData(vectors, field, r.id2Dim[fieldID])
 }
