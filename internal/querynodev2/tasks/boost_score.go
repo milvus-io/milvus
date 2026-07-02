@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/apache/arrow/go/v17/arrow"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -34,27 +33,12 @@ import (
 )
 
 const (
-	boostScoreColumnPrefix = "$boost_score_"
-	functionScoreColumn    = "$function_score"
+	boostScoreColumnPrefix = "boost_score_"
+	functionScoreColumn    = "function_score"
 )
 
 func boostScoreColumn(index int) string {
 	return fmt.Sprintf("%s%d", boostScoreColumnPrefix, index)
-}
-
-func boostReduceColumns(cols []string) []string {
-	selected := make([]string, 0, 4)
-	for _, col := range cols {
-		switch {
-		case col == types.IDFieldName,
-			col == types.ScoreFieldName,
-			col == types.SegOffsetFieldName,
-			col == elementIndicesCol,
-			isGroupByColumnName(col):
-			selected = append(selected, col)
-		}
-	}
-	return selected
 }
 
 func extractPlanScorers(serializedPlan []byte) ([]*planpb.ScoreFunction, error) {
@@ -136,9 +120,7 @@ func buildBoostScoreChain(
 		return nil, err
 	}
 
-	boostChain.Select(boostReduceColumns(df.ColumnNames())...)
-	boostChain.Sort(types.ScoreFieldName, true, types.IDFieldName)
-	return boostChain, nil
+	return appendL0RerankReduceContract(boostChain), nil
 }
 
 func appendBoostScoreColumns(
@@ -186,13 +168,16 @@ func appendFinalBoostScore(boostChain *chain.FuncChain, functionScoreCol string,
 }
 
 func (t *SearchTask) applyBoostScores(segDFs []*chain.DataFrame, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) error {
-	if len(segDFs) != len(searchedSegments) {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: DataFrame count %d does not match segment count %d", len(segDFs), len(searchedSegments)))
-	}
-
 	plan, err := extractPlanWithScorers(t.req.GetReq().GetSerializedExprPlan())
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: failed to parse search plan scorers: %v", err))
+	}
+	return t.applyBoostScoresWithPlan(segDFs, plan, searchedSegments, searchReq)
+}
+
+func (t *SearchTask) applyBoostScoresWithPlan(segDFs []*chain.DataFrame, plan *planpb.PlanNode, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) error {
+	if len(segDFs) != len(searchedSegments) {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: DataFrame count %d does not match segment count %d", len(segDFs), len(searchedSegments)))
 	}
 	if plan == nil || len(plan.GetScorers()) == 0 {
 		return nil
@@ -208,55 +193,8 @@ func (t *SearchTask) applyBoostScores(segDFs []*chain.DataFrame, searchedSegment
 		return err
 	}
 
-	boostedDFs := make([]*chain.DataFrame, len(segDFs))
 	scoreFunc := segments.AsyncComputeScorerScoresOnChunkedOffsets
-	boostOneSegment := func(ctx context.Context, i int) error {
-		df := segDFs[i]
-		segment := searchedSegments[i]
-		if df == nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: DataFrame %d is nil", i))
-		}
-
-		boostChain, err := buildBoostScoreChain(df, segment, searchReq, scorers, scoreFunc, functionMode, boostMode)
-		if err != nil {
-			return err
-		}
-
-		boosted, err := boostChain.ExecuteWithContext(ctx, df)
-		if err != nil {
-			return err
-		}
-
-		boostedDFs[i] = boosted
-		return nil
-	}
-
-	if len(segDFs) == 1 {
-		if err := boostOneSegment(t.ctx, 0); err != nil {
-			return err
-		}
-	} else {
-		errGroup, groupCtx := errgroup.WithContext(t.ctx)
-		for i := range segDFs {
-			idx := i
-			errGroup.Go(func() error {
-				return boostOneSegment(groupCtx, idx)
-			})
-		}
-		if err := errGroup.Wait(); err != nil {
-			for _, boosted := range boostedDFs {
-				if boosted != nil {
-					boosted.Release()
-				}
-			}
-			return err
-		}
-	}
-
-	for i, boosted := range boostedDFs {
-		segDFs[i].Release()
-		segDFs[i] = boosted
-	}
-
-	return nil
+	return executeL0RerankChains(t.ctx, segDFs, func(_ context.Context, i int, df *chain.DataFrame) (*chain.FuncChain, error) {
+		return buildBoostScoreChain(df, searchedSegments[i], searchReq, scorers, scoreFunc, functionMode, boostMode)
+	}, "boost_score")
 }
