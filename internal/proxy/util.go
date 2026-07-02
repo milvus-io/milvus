@@ -2071,11 +2071,8 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 		}
 	}
 	for _, structSchema := range schema.GetStructArrayFields() {
-		if structSchema.GetNullable() {
-			continue
-		}
 		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
-			log.Info(context.TODO(), "no corresponding struct fieldData pass in", mlog.String("structFieldSchema", structSchema.GetName()))
+			log.Info("no corresponding struct fieldData pass in", zap.String("structFieldSchema", structSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
 		}
 	}

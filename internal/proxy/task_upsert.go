@@ -561,10 +561,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		for _, structSchema := range it.schema.GetStructArrayFields() {
 			if fieldData, ok := upsertFieldMap[structSchema.GetName()]; ok {
 				insertFieldsToAppend = append(insertFieldsToAppend, fieldData)
-				continue
-			}
-			if structSchema.GetNullable() {
-				insertFieldsToAppend = append(insertFieldsToAppend, GenNullableStructArrayFieldData(structSchema, upsertIDSize))
 			}
 		}
 
@@ -1131,6 +1127,26 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 	}
 }
 
+func storedStructSubFieldName(structName string, fieldName string) string {
+	if typeutil.IsStructSubField(fieldName) {
+		return fieldName
+	}
+	return typeutil.ConcatStructFieldName(structName, fieldName)
+}
+
+func subFieldHasData(fieldData *schemapb.FieldData) bool {
+	switch fieldData.GetType() {
+	case schemapb.DataType_Array:
+		scalars := fieldData.GetScalars()
+		return scalars != nil && scalars.GetArrayData() != nil && len(scalars.GetArrayData().GetData()) > 0
+	case schemapb.DataType_ArrayOfVector:
+		vectors := fieldData.GetVectors()
+		return vectors != nil && vectors.GetVectorArray() != nil && len(vectors.GetVectorArray().GetData()) > 0
+	default:
+		return false
+	}
+}
+
 // ToCompressedFormatNullableStructField converts nullable struct sub-fields from full format to compressed format.
 func ToCompressedFormatNullableStructField(fieldData *schemapb.FieldData) error {
 	structArrays := fieldData.GetStructArrays()
@@ -1247,31 +1263,7 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 			fieldData.GetFieldName(), hasDataCount, len(structArrays.GetFields()))
 	}
 
-	var refValidData []bool
-	var refFieldName string
-	refInitialized := false
 	for _, subField := range structArrays.GetFields() {
-		// Nullable is a property of the whole struct row. The sub-fields
-		// therefore must share the same null mask.
-		if structSchema.GetNullable() {
-			if !refInitialized {
-				refValidData = subField.GetValidData()
-				refFieldName = subField.GetFieldName()
-				refInitialized = true
-			} else {
-				if len(subField.GetValidData()) != len(refValidData) {
-					return merr.WrapErrParameterInvalidMsg("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
-						fieldData.GetFieldName(), refFieldName, len(refValidData), subField.GetFieldName(), len(subField.GetValidData()))
-				}
-				for j := range refValidData {
-					if subField.GetValidData()[j] != refValidData[j] {
-						return merr.WrapErrParameterInvalidMsg("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
-							fieldData.GetFieldName(), j, refFieldName, refValidData[j], subField.GetFieldName(), subField.GetValidData()[j])
-					}
-				}
-			}
-		}
-
 		// Struct sub-fields without ValidData use dense logical rows. With
 		// ValidData, the payload must be compact so FillWithNullValue can expand
 		// it consistently before merge.
