@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -105,18 +106,24 @@ func (si *statsInspector) reloadFromMeta() {
 			st.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}
-		if si.isExternalCollection(st.GetCollectionID()) {
-			mlog.Info(si.ctx, "skip reloading stats task for external collection",
-				mlog.FieldTaskID(st.GetTaskID()),
-				mlog.FieldCollectionID(st.GetCollectionID()))
-			if err := si.mt.statsTaskMeta.MarkTaskCanRecycle(st.GetTaskID()); err != nil {
-				mlog.Warn(si.ctx, "mark stats task can recycle failed",
-					mlog.FieldTaskID(st.GetTaskID()),
-					mlog.Err(err))
-			}
-			continue
-		}
 		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())
+		if si.isExternalCollection(st.GetCollectionID()) {
+			canReload := st.GetSubJobType() == indexpb.StatsSubJob_TextIndexJob ||
+				(st.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob &&
+					segment != nil && canBuildExternalJSONKeyIndex(segment))
+			if !canReload {
+				mlog.Info(si.ctx, "skip reloading stats task for external collection",
+					mlog.FieldTaskID(st.GetTaskID()),
+					mlog.FieldCollectionID(st.GetCollectionID()),
+					mlog.String("subJobType", st.GetSubJobType().String()))
+				if err := si.mt.statsTaskMeta.MarkTaskCanRecycle(st.GetTaskID()); err != nil {
+					mlog.Warn(si.ctx, "mark stats task can recycle failed",
+						mlog.FieldTaskID(st.GetTaskID()),
+						mlog.Err(err))
+				}
+				continue
+			}
+		}
 		taskSlot := int64(0)
 		if segment != nil {
 			taskSlot = calculateStatsTaskSlot(segment.getSegmentSize())
@@ -177,9 +184,11 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bo
 	return false
 }
 
-func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) {
+func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return false
+	}
+	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
 		return false
 	}
 
@@ -197,6 +206,10 @@ func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 		}
 	}
 	return false
+}
+
+func canBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
+	return segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
 }
 
 func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
@@ -247,7 +260,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
-		if collection == nil || collection.IsExternal() {
+		if collection == nil {
 			continue
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -257,8 +270,12 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger 
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
+		allowUnsorted := collection.IsExternal()
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoJSONKeyIndex(seg, needTriggerFieldIDs)
+			if collection.IsExternal() && !canBuildExternalJSONKeyIndex(seg) {
+				return false
+			}
+			return needDoJSONKeyIndex(seg, needTriggerFieldIDs, allowUnsorted)
 		}))
 		if time.Now().Unix()-lastJSONStatsLastTrigger > int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds()) {
 			lastJSONStatsLastTrigger = time.Now().Unix()
@@ -343,13 +360,23 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
 	}
-	if si.isExternalCollection(originSegment.GetCollectionID()) && subJobType != indexpb.StatsSubJob_TextIndexJob {
-		mlog.Info(si.ctx,
-			"skip submit stats task for external collection",
-			mlog.FieldCollectionID(originSegment.GetCollectionID()),
-			mlog.FieldSegmentID(originSegmentID),
-			mlog.String("subJobType", subJobType.String()))
-		return nil
+	if si.isExternalCollection(originSegment.GetCollectionID()) {
+		if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob && !canBuildExternalJSONKeyIndex(originSegment) {
+			mlog.Info(si.ctx,
+				"skip submit external json stats task without v3 manifest",
+				mlog.FieldCollectionID(originSegment.GetCollectionID()),
+				mlog.FieldSegmentID(originSegmentID))
+			return nil
+		}
+		if subJobType != indexpb.StatsSubJob_TextIndexJob &&
+			subJobType != indexpb.StatsSubJob_JsonKeyIndexJob {
+			mlog.Info(si.ctx,
+				"skip submit stats task for external collection",
+				mlog.FieldCollectionID(originSegment.GetCollectionID()),
+				mlog.FieldSegmentID(originSegmentID),
+				mlog.String("subJobType", subJobType.String()))
+			return nil
+		}
 	}
 	taskID, err := si.allocator.AllocID(context.Background())
 	if err != nil {

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -31,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -50,6 +53,16 @@ type statsInspectorSuite struct {
 	scheduler task.GlobalScheduler
 	inspector *statsInspector
 }
+
+type mockeyStatsScheduler struct{}
+
+func (s *mockeyStatsScheduler) Enqueue(task.Task) {}
+
+func (s *mockeyStatsScheduler) AbortAndRemoveTask(int64) {}
+
+func (s *mockeyStatsScheduler) Start() {}
+
+func (s *mockeyStatsScheduler) Stop() {}
 
 func Test_statsInspectorSuite(t *testing.T) {
 	suite.Run(t, new(statsInspectorSuite))
@@ -123,6 +136,12 @@ func (s *statsInspectorSuite) SetupTest() {
 							Key: "enable_analyzer", Value: "true",
 						},
 					},
+				},
+				{
+					FieldID:       202,
+					Name:          "json",
+					DataType:      schemapb.DataType_JSON,
+					ExternalField: "json_col",
 				},
 			},
 		},
@@ -240,6 +259,34 @@ func (s *statsInspectorSuite) TearDownTest() {
 	s.cancel()
 }
 
+func (s *statsInspectorSuite) putExternalSegment(segmentID UniqueID, sorted bool, storageVersion int64, manifestPath string) {
+	s.mt.segments.SetSegment(segmentID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   2,
+			PartitionID:    3,
+			InsertChannel:  "by-dev-rootcoord-dml-channel",
+			IsSorted:       sorted,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      1000,
+			MaxRowNum:      2000,
+			Level:          datapb.SegmentLevel_L1,
+			StorageVersion: storageVersion,
+			ManifestPath:   manifestPath,
+		},
+	})
+}
+
+func (s *statsInspectorSuite) putExternalStatsTask(taskID, segmentID UniqueID, subJobType indexpb.StatsSubJob) {
+	s.mt.statsTaskMeta.tasks.Insert(taskID, &indexpb.StatsTask{
+		CollectionID: 2,
+		TaskID:       taskID,
+		SegmentID:    segmentID,
+		SubJobType:   subJobType,
+		State:        indexpb.JobState_JobStateInProgress,
+	})
+}
+
 func (s *statsInspectorSuite) TestStart() {
 	s.inspector.Start()
 	time.Sleep(10 * time.Millisecond) // Give goroutines some time to start
@@ -276,30 +323,79 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 	segmentID := UniqueID(200)
-	s.mt.segments.segments[segmentID] = &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            segmentID,
-			CollectionID:  2,
-			PartitionID:   3,
-			InsertChannel: "by-dev-rootcoord-dml-channel",
-			IsSorted:      true,
-			State:         commonpb.SegmentState_Flushed,
-			NumOfRows:     1000,
-			MaxRowNum:     2000,
-			Level:         2,
-		},
-	}
+	s.putExternalSegment(segmentID, true, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/200", 1))
 
 	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_Sort, true, nil)
 	s.NoError(err)
 	sortTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_Sort)
 	s.Nil(sortTask)
-	s.alloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
 
 	err = s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_TextIndexJob, true, nil)
 	s.NoError(err)
 	textTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
 	s.NotNil(textTask)
+
+	err = s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+	s.NotNil(jsonTask)
+}
+
+func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalJSONWithoutV3Manifest() {
+	segmentID := UniqueID(205)
+	s.putExternalSegment(segmentID, true, storage.StorageV2, "")
+
+	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+	s.Nil(jsonTask)
+}
+
+func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollectionUnsortedV3() {
+	segmentID := UniqueID(201)
+	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/201", 1))
+
+	lastTrigger := time.Now().Add(-time.Hour).Unix()
+	_, triggered := s.inspector.triggerJSONKeyIndexStatsTask(lastTrigger, 0)
+	s.Equal(1, triggered)
+
+	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+	s.NotNil(jsonTask)
+}
+
+func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollectionSkipsInvalidManifestSegments() {
+	testCases := []struct {
+		name           string
+		segmentID      UniqueID
+		storageVersion int64
+		manifestPath   string
+	}{
+		{
+			name:           "v3_empty_manifest",
+			segmentID:      206,
+			storageVersion: storage.StorageV3,
+		},
+		{
+			name:           "v2_with_manifest",
+			segmentID:      207,
+			storageVersion: storage.StorageV2,
+			manifestPath:   packed.MarshalManifestPath("files/insert_log/2/3/207", 1),
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		s.Run(testCase.name, func() {
+			s.putExternalSegment(testCase.segmentID, false, testCase.storageVersion, testCase.manifestPath)
+
+			lastTrigger := time.Now().Add(-time.Hour).Unix()
+			_, triggered := s.inspector.triggerJSONKeyIndexStatsTask(lastTrigger, 0)
+			s.Equal(0, triggered)
+
+			jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(testCase.segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+			s.Nil(jsonTask)
+		})
+	}
 }
 
 func (s *statsInspectorSuite) TestGetStatsTask() {
@@ -426,16 +522,94 @@ func (s *statsInspectorSuite) TestCleanupStatsTasksLoop() {
 }
 
 func (s *statsInspectorSuite) TestReloadFromMeta() {
+	enqueueCount := 0
+	mockEnqueue := mockey.Mock((*mockeyStatsScheduler).Enqueue).To(
+		func(_ *mockeyStatsScheduler, _ task.Task) {
+			enqueueCount++
+		}).Build()
+	defer mockEnqueue.UnPatch()
+	s.inspector.scheduler = &mockeyStatsScheduler{}
+
 	// Set up some existing tasks
 	s.mt.statsTaskMeta.tasks.Insert(1005, &indexpb.StatsTask{
-		TaskID:     1005,
-		SegmentID:  10,
-		SubJobType: indexpb.StatsSubJob_Sort,
-		State:      indexpb.JobState_JobStateInProgress,
+		CollectionID: 1,
+		TaskID:       1005,
+		SegmentID:    10,
+		SubJobType:   indexpb.StatsSubJob_Sort,
+		State:        indexpb.JobState_JobStateInProgress,
 	})
 
 	// Test reloading
 	s.inspector.reloadFromMeta()
+	s.Equal(1, enqueueCount)
+}
+
+func (s *statsInspectorSuite) TestReloadFromMetaExternalStatsTask() {
+	testCases := []struct {
+		name           string
+		taskID         UniqueID
+		segmentID      UniqueID
+		subJobType     indexpb.StatsSubJob
+		storageVersion int64
+		manifestPath   string
+		expectRecycle  bool
+	}{
+		{
+			name:           "json_v3_manifest",
+			taskID:         1006,
+			segmentID:      202,
+			subJobType:     indexpb.StatsSubJob_JsonKeyIndexJob,
+			storageVersion: storage.StorageV3,
+			manifestPath:   packed.MarshalManifestPath("files/insert_log/2/3/202", 1),
+		},
+		{
+			name:           "json_v2_no_manifest",
+			taskID:         1009,
+			segmentID:      208,
+			subJobType:     indexpb.StatsSubJob_JsonKeyIndexJob,
+			storageVersion: storage.StorageV2,
+			expectRecycle:  true,
+		},
+		{
+			name:           "json_v3_empty_manifest",
+			taskID:         1010,
+			segmentID:      209,
+			subJobType:     indexpb.StatsSubJob_JsonKeyIndexJob,
+			storageVersion: storage.StorageV3,
+			expectRecycle:  true,
+		},
+		{
+			name:       "text",
+			taskID:     1008,
+			segmentID:  204,
+			subJobType: indexpb.StatsSubJob_TextIndexJob,
+		},
+		{
+			name:           "unsupported_sort",
+			taskID:         1007,
+			segmentID:      203,
+			subJobType:     indexpb.StatsSubJob_Sort,
+			storageVersion: storage.StorageV3,
+			manifestPath:   packed.MarshalManifestPath("files/insert_log/2/3/203", 1),
+			expectRecycle:  true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		s.Run(testCase.name, func() {
+			s.mt.statsTaskMeta.tasks = typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+			s.mt.statsTaskMeta.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
+			s.putExternalSegment(testCase.segmentID, false, testCase.storageVersion, testCase.manifestPath)
+			s.putExternalStatsTask(testCase.taskID, testCase.segmentID, testCase.subJobType)
+
+			s.inspector.reloadFromMeta()
+
+			statsTask, ok := s.mt.statsTaskMeta.tasks.Get(testCase.taskID)
+			s.True(ok)
+			s.Equal(testCase.expectRecycle, statsTask.GetCanRecycle())
+		})
+	}
 }
 
 func (s *statsInspectorSuite) TestNeedDoTextIndex() {
