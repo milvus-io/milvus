@@ -17,6 +17,7 @@
 package merr
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -121,7 +122,20 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		err := SegcoreError(2055, "future code")
 		assert.ErrorIs(t, err, ErrSegcore)
 		assert.Equal(t, SystemError, GetErrorType(err))
+		assert.False(t, Status(err).GetRetriable())
 		assert.False(t, IsSegcoreSignal(2055))
+	})
+
+	t.Run("unmapped_code_observer", func(t *testing.T) {
+		// The drift observer fires only for codes absent from the table, with the
+		// raw code, so the node side can bump a metric / log a warning.
+		var got []int32
+		RegisterUnmappedSegcoreCodeObserver(func(code int32) { got = append(got, code) })
+		defer RegisterUnmappedSegcoreCodeObserver(nil)
+
+		_ = SegcoreError(2056, "future code") // unregistered -> observed
+		_ = SegcoreError(2042, "bad param")   // registered -> not observed
+		assert.Equal(t, []int32{2056}, got)
 	})
 
 	t.Run("wire_code_projection", func(t *testing.T) {
@@ -154,52 +168,44 @@ func TestSegcoreErrorClassification(t *testing.T) {
 	})
 }
 
-// TestSegcoreCodeTableCoverage cross-checks segcoreCodeTable against a
-// hand-copied snapshot of the C++ ErrorCode enum. The enum's source of truth
-// lives in the external milvus-common dependency (common/EasyAssert.h, fetched
-// only at C++ build time), so it cannot be parsed from a Go test on a clean
-// checkout — a new C++ code added upstream is therefore NOT detected here; it
-// is caught at runtime by the safe fallback (collapse to plain non-retriable
-// ErrSegcore, pinned in wire_code_projection above). It guards two things:
-//   - regression: codes we deliberately classified must stay registered with
-//     their intended class (a silent edit that drops one fails here);
-//   - drift: a C++ enum value not present in the table falls back to a plain
-//     non-retriable ErrSegcore — t.Log lists those so a maintainer adding a new
-//     C++ code is reminded to classify it here instead of letting it degrade.
+// TestSegcoreCodeTableCoverage is the runtime backstop for the exhaustive
+// classification switch. The SegcoreCode constants are generated from
+// milvus-common's EasyAssert.h and classForCode is //exhaustive:enforce, so the
+// `exhaustive` linter is the primary gate; this test still catches drift if the
+// linter is skipped. It guards two things:
+//   - regression: codes we deliberately classified keep their intended class (a
+//     silent edit that drops one fails here);
+//   - coverage: every generated SegcoreCode is classified by classForCode; a new
+//     C++ code regenerated without a case is reported here (named).
 func TestSegcoreCodeTableCoverage(t *testing.T) {
-	// C++ ErrorCode enum values (common/EasyAssert.h, 2000-2099). Keep in sync
-	// with the C++ side; a new value here that isn't in segcoreCodeTable is
-	// reported below.
-	cppCodes := []int32{
-		2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2009, 2010, 2011,
-		2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022,
-		2023, 2024, 2025, 2026, 2027, 2028, 2030, 2031, 2032, 2033, 2034,
-		2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2099,
-	}
+	// The SegcoreCode constants are generated from milvus-common's EasyAssert.h
+	// (see internal/segcoregen / `make generate-segcore-codes`). classForCode is
+	// marked //exhaustive:enforce, so the `exhaustive` linter is the primary gate
+	// that every generated constant is classified. This test is the runtime
+	// backstop (still catches drift if the linter is skipped) and pins the
+	// regression classifications below.
 
-	// Regression guard: the codes we classified on purpose must stay registered
-	// with the intended property.
-	wantInput := []int32{2007, 2020, 2021, 2022, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
-	wantRetriable := []int32{2012, 2013, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043}
+	// Regression guard: the codes we classified on purpose keep their property.
+	wantInput := []SegcoreCode{2007, 2020, 2021, 2022, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
+	wantRetriable := []SegcoreCode{2012, 2013, 2014, 2015, 2018, 2027, 2034, 2036, 2043, 2045}
 	for _, c := range wantInput {
-		cls, ok := segcoreCodeTable[c]
-		assert.True(t, ok && cls.inputError, "code %d must stay registered as inputError", c)
+		cls, ok := classForCode(c)
+		assert.True(t, ok && cls.inputError, "code %d must stay classified as inputError", int32(c))
 	}
 	for _, c := range wantRetriable {
-		cls, ok := segcoreCodeTable[c]
-		assert.True(t, ok && cls.retriable, "code %d must stay registered as retriable", c)
+		cls, ok := classForCode(c)
+		assert.True(t, ok && cls.retriable, "code %d must stay classified as retriable", int32(c))
 	}
 
-	// Drift guard: every C++ ErrorCode must be classified explicitly. A new
-	// enum value added on the C++ side without a segcoreCodeTable entry fails
-	// here, forcing the author to decide input/retriable/system instead of
-	// silently degrading to the generic non-retriable ErrSegcore fallback.
-	var unregistered []int32
-	for _, c := range cppCodes {
-		if _, ok := segcoreCodeTable[c]; !ok {
-			unregistered = append(unregistered, c)
+	// Drift backstop: every generated SegcoreCode must be classified by
+	// classForCode. A new C++ enum value regenerated without a case there is
+	// reported here (and, before that, fails the exhaustive linter).
+	var unclassified []string
+	for code, name := range segcoreCodeNames {
+		if _, ok := classForCode(code); !ok {
+			unclassified = append(unclassified, fmt.Sprintf("%d(%s)", int32(code), name))
 		}
 	}
-	assert.Empty(t, unregistered, "segcore C++ codes not classified in segcoreCodeTable; "+
-		"register each explicitly (input / retriable / system) in pkg/util/merr/segcore.go: %v", unregistered)
+	assert.Empty(t, unclassified, "generated SegcoreCode constants not classified in classForCode "+
+		"(pkg/util/merr/segcore.go): %v", unclassified)
 }

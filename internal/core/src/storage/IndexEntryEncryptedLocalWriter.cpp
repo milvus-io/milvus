@@ -34,6 +34,7 @@
 #include "storage/Crc32cUtil.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/RemoteOutputStream.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 
@@ -271,9 +272,11 @@ IndexEntryEncryptedLocalWriter::Finish() {
 void
 IndexEntryEncryptedLocalWriter::UploadLocalFile() {
     auto result = fs_->OpenOutputStream(remote_path_);
-    AssertInfo(result.ok(),
-               "Failed to open remote output stream: {}",
-               result.status().ToString());
+    if (!result.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                  "failed to open remote output stream: {}",
+                  result.status().ToString());
+    }
     auto remote_stream =
         std::make_shared<RemoteOutputStream>(std::move(result.ValueOrDie()));
 

@@ -40,6 +40,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "arrow/status.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/metadata.h"
@@ -53,6 +54,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadStream.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 

@@ -71,6 +71,8 @@ set(MILVUS_TEST_FILES
         test_commit_timestamp.cpp
         test_schema_reopen.cpp
         test_growing_concurrent_reopen.cpp
+        test_knowhere_status_mapping.cpp
+        test_storage_error_code.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

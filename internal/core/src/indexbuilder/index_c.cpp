@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "common/Consts.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
@@ -99,9 +100,11 @@ CreateIndexForUT(enum CDataType dtype,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -379,12 +382,8 @@ CreateIndex(CIndex* res_index,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -487,12 +486,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -594,12 +589,8 @@ BuildTextIndex(ProtoLayoutInterface result,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -614,9 +605,11 @@ DeleteIndex(CIndex index) {
         delete cIndex;
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -641,9 +634,11 @@ BuildFloatVecIndex(CIndex index,
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -670,9 +665,11 @@ BuildFloatVecIndexWithValidData(CIndex index,
         cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -698,9 +695,11 @@ BuildFloat16VecIndex(CIndex index,
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -728,9 +727,11 @@ BuildFloat16VecIndexWithValidData(CIndex index,
         cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -756,9 +757,11 @@ BuildBFloat16VecIndex(CIndex index,
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -786,9 +789,11 @@ BuildBFloat16VecIndexWithValidData(CIndex index,
         cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -812,9 +817,11 @@ BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -842,9 +849,11 @@ BuildBinaryVecIndexWithValidData(CIndex index,
         cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -870,9 +879,11 @@ BuildSparseFloatVecIndex(CIndex index,
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -900,9 +911,11 @@ BuildSparseFloatVecIndexWithValidData(CIndex index,
         cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -925,9 +938,11 @@ BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -954,9 +969,11 @@ BuildInt8VecIndexWithValidData(CIndex index,
         cIndex->Build(ds, valid_data, valid_data_len);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -983,9 +1000,11 @@ BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
 
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -1006,9 +1025,11 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
         *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -1028,9 +1049,11 @@ LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
         real_index->Load(*binary_set);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -1050,9 +1073,11 @@ CleanLocalData(CIndex index) {
         cIndex->CleanLocalData();
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -1073,9 +1098,11 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
             reinterpret_cast<milvus::ProtoLayout*>(result));
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }

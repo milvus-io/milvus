@@ -253,14 +253,26 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
                              bool nullable,
                              bool is_field_data) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
-    AssertInfo(ast.ok(), "read start timestamp failed");
+    if (!ast.ok()) {
+        throw SegcoreError(
+            ast.get_error_code(),
+            fmt::format("read start timestamp failed: {}", ast.what()));
+    }
     ast = reader->ReadSingleValue<Timestamp>(end_timestamp);
-    AssertInfo(ast.ok(), "read end timestamp failed");
+    if (!ast.ok()) {
+        throw SegcoreError(
+            ast.get_error_code(),
+            fmt::format("read end timestamp failed: {}", ast.what()));
+    }
 
     int payload_length =
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
-    AssertInfo(res.first.ok(), "read payload failed");
+    if (!res.first.ok()) {
+        throw SegcoreError(
+            res.first.get_error_code(),
+            fmt::format("read payload failed: {}", res.first.what()));
+    }
     payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), payload_length, data_type, nullable, is_field_data);
 }
@@ -532,12 +544,22 @@ LocalInsertEvent::Serialize() {
 
 LocalIndexEvent::LocalIndexEvent(BinlogReaderPtr reader) {
     auto ret = reader->Read(sizeof(index_size), &index_size);
-    AssertInfo(ret.ok(), "read binlog failed");
+    if (!ret.ok()) {
+        throw SegcoreError(ret.get_error_code(),
+                           fmt::format("read binlog failed: {}", ret.what()));
+    }
     ret = reader->Read(sizeof(degree), &degree);
-    AssertInfo(ret.ok(), "read binlog failed");
+    if (!ret.ok()) {
+        throw SegcoreError(ret.get_error_code(),
+                           fmt::format("read binlog failed: {}", ret.what()));
+    }
 
     auto res = reader->Read(index_size);
-    AssertInfo(res.first.ok(), "read payload failed");
+    if (!res.first.ok()) {
+        throw SegcoreError(
+            res.first.get_error_code(),
+            fmt::format("read payload failed: {}", res.first.what()));
+    }
     auto payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), index_size, DataType::INT8, false);
     field_data = payload_reader->get_field_data();

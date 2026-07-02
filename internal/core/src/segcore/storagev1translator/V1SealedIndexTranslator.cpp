@@ -161,8 +161,11 @@ V1SealedIndexTranslator::LoadVecIndex() {
         }
         index->Load(*binary_set_, config);
         return index;
-    } catch (std::exception& e) {
-        throw std::runtime_error(e.what());
+    } catch (const std::exception&) {
+        // Rethrow the original exception: rewrapping it as runtime_error
+        // destroys the SegcoreError type, so the cgo boundary's dynamic_cast
+        // fails and a typed error code collapses to UnexpectedError(2001).
+        throw;
     }
 }
 
@@ -204,8 +207,11 @@ V1SealedIndexTranslator::LoadScalarIndex() {
         }
         index->Load(*binary_set_);
         return index;
-    } catch (std::exception& e) {
-        throw std::runtime_error(e.what());
+    } catch (const std::exception&) {
+        // Rethrow the original exception: rewrapping it as runtime_error
+        // destroys the SegcoreError type, so the cgo boundary's dynamic_cast
+        // fails and a typed error code collapses to UnexpectedError(2001).
+        throw;
     }
 }
 

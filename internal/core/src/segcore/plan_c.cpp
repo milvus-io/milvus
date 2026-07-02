@@ -77,11 +77,12 @@ CreateSearchPlanByExpr(CCollection c_col,
         *res_plan = nullptr;
         return status;
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
         *res_plan = nullptr;
-        return status;
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        *res_plan = nullptr;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 
@@ -103,11 +104,12 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
         *res_placeholder_group = group;
         return status;
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
         *res_placeholder_group = nullptr;
-        return status;
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        *res_placeholder_group = nullptr;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 
@@ -188,11 +190,12 @@ CreateRetrievePlanByExpr(CCollection c_col,
         *res_plan = nullptr;
         return status;
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
         *res_plan = nullptr;
-        return status;
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        *res_plan = nullptr;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 

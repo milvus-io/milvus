@@ -292,6 +292,10 @@ generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
+generate-segcore-codes:
+	@echo "Generating segcore error code list from milvus-common ..."
+	@(env bash $(PWD)/scripts/generate_segcore_codes.sh)
+
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})

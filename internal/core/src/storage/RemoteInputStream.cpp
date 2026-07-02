@@ -16,6 +16,7 @@
 #include "arrow/status.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
 namespace {
@@ -107,7 +108,11 @@ RemoteInputStream::RemoteInputStream(
     std::shared_ptr<arrow::io::RandomAccessFile>&& remote_file)
     : remote_file_(std::move(remote_file)) {
     auto status = remote_file_->GetSize();
-    AssertInfo(status.ok(), "Failed to get size of remote file");
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status.status()),
+                  "Failed to get size of remote file: {}",
+                  status.status().ToString());
+    }
     file_size_ = static_cast<size_t>(status.ValueOrDie());
 }
 
@@ -121,14 +126,16 @@ RemoteInputStream::Read(void* data, size_t size) {
         offset,
         [this, size, data]() { return remote_file_->Read(size, data); },
         [this, offset]() { return remote_file_->Seek(offset); });
-    AssertInfo(
-        status.ok(),
-        "Failed to read from remote input stream, operation: read, offset: {}, "
-        "size: {}, file size: {}, error: {}",
-        offset,
-        size,
-        file_size_,
-        status.status().ToString());
+    if (!status.ok()) {
+        ThrowInfo(
+            ArrowStatusToErrorCode(status.status()),
+            "Failed to read from remote input stream, operation: read, offset: "
+            "{}, size: {}, file size: {}, error: {}",
+            offset,
+            size,
+            file_size_,
+            status.status().ToString());
+    }
     return static_cast<size_t>(status.ValueOrDie());
 }
 
@@ -143,13 +150,15 @@ RemoteInputStream::ReadAt(void* data, size_t offset, size_t size) {
             return remote_file_->ReadAt(offset, size, data);
         },
         []() { return arrow::Status::OK(); });
-    AssertInfo(status.ok(),
-               "Failed to read from remote input stream, operation: read at "
-               "offset, offset: {}, size: {}, file size: {}, error: {}",
-               offset,
-               size,
-               file_size_,
-               status.status().ToString());
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status.status()),
+                  "Failed to read from remote input stream, operation: read at "
+                  "offset, offset: {}, size: {}, file size: {}, error: {}",
+                  offset,
+                  size,
+                  file_size_,
+                  status.status().ToString());
+    }
     return static_cast<size_t>(status.ValueOrDie());
 }
 
@@ -172,15 +181,18 @@ RemoteInputStream::Read(int fd, size_t size) {
                 return remote_file_->Read(read_size, data.data());
             },
             [this, offset]() { return remote_file_->Seek(offset); });
-        AssertInfo(status.ok(),
-                   "Failed to read from remote input stream, operation: read "
-                   "to file, offset: {}, size: {}, rest size: {}, file size: "
-                   "{}, error: {}",
-                   offset,
-                   read_size,
-                   rest_size,
-                   file_size_,
-                   status.status().ToString());
+        if (!status.ok()) {
+            ThrowInfo(
+                ArrowStatusToErrorCode(status.status()),
+                "Failed to read from remote input stream, operation: read "
+                "to file, offset: {}, size: {}, rest size: {}, file size: "
+                "{}, error: {}",
+                offset,
+                read_size,
+                rest_size,
+                file_size_,
+                status.status().ToString());
+        }
         auto bytes_read = status.ValueOrDie();
         AssertInfo(bytes_read > 0,
                    "Failed to read from remote input stream, operation: read "
@@ -212,7 +224,11 @@ RemoteInputStream::Read(int fd, size_t size) {
 size_t
 RemoteInputStream::Tell() const {
     auto status = remote_file_->Tell();
-    AssertInfo(status.ok(), "Failed to tell input stream");
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status.status()),
+                  "Failed to tell input stream: {}",
+                  status.status().ToString());
+    }
     return static_cast<size_t>(status.ValueOrDie());
 }
 

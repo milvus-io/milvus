@@ -185,6 +185,91 @@ KnowhereStatusString(knowhere::Status status) {
     return knowhere::Status2String(status);
 }
 
+// Map a knowhere::Status to a segcore ErrorCode. This is a switch with NO
+// `default:` plus a post-switch fallback, wrapped in -Werror=switch: when
+// knowhere adds a Status, this stops compiling until the new value is
+// classified here, instead of silently collapsing into KnowhereError. The
+// post-switch `return` keeps the function total and guards out-of-range values
+// without suppressing the exhaustiveness warning.
+//
+// Most of knowhere's input-bucket statuses become InvalidParameter, with three
+// deliberate exceptions pulled out of "input": not_implemented /
+// invalid_instruction_set are capability gaps (a feature or CPU-feature gap such
+// as SCANN needing AVX2; the request itself is fine) -> Unsupported; and
+// invalid_serialized_index_type is an incompatible-version / corrupt serialized
+// index read back from storage -> DataFormatBroken. malloc_error and
+// disk_file_error keep their retriable-on-the-Go-side codes. Every remaining
+// inner error -> KnowhereError.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
+inline ErrorCode
+KnowhereStatusToErrorCode(knowhere::Status status) {
+    switch (status) {
+        // Caller-input errors -> InvalidParameter (non-retriable input).
+        case knowhere::Status::invalid_args:
+        case knowhere::Status::invalid_param_in_json:
+        case knowhere::Status::out_of_range_in_json:
+        case knowhere::Status::type_conflict_in_json:
+        case knowhere::Status::invalid_metric_type:
+        case knowhere::Status::empty_index:
+        case knowhere::Status::index_not_trained:
+        case knowhere::Status::index_already_trained:
+        case knowhere::Status::invalid_value_in_json:
+        case knowhere::Status::arithmetic_overflow:
+        case knowhere::Status::invalid_binary_set:
+        case knowhere::Status::invalid_index_error:
+        case knowhere::Status::invalid_cluster_error:
+            return ErrorCode::InvalidParameter;
+        // Capability gaps (feature / CPU-feature not available): the request is
+        // fine, so this is Unsupported, not malformed input.
+        case knowhere::Status::not_implemented:
+        case knowhere::Status::invalid_instruction_set:
+            return ErrorCode::Unsupported;
+        // Incompatible-version / corrupt serialized index read back from storage.
+        case knowhere::Status::invalid_serialized_index_type:
+            return ErrorCode::DataFormatBroken;
+        case knowhere::Status::malloc_error:
+            return ErrorCode::MemAllocateFailed;
+        case knowhere::Status::disk_file_error:
+            return ErrorCode::FileReadFailed;
+        // Server-side inner errors -> generic KnowhereError. timeout is
+        // Cardinal-only (BuildAsync cancel-or-build-timeout, not a search
+        // timeout) and conflates cancel with timeout, so it stays here rather
+        // than mapping to a retriable code.
+        case knowhere::Status::success:
+        case knowhere::Status::faiss_inner_error:
+        case knowhere::Status::hnsw_inner_error:
+        case knowhere::Status::diskann_inner_error:
+        case knowhere::Status::cuvs_inner_error:
+        case knowhere::Status::cardinal_inner_error:
+        case knowhere::Status::cuda_runtime_error:
+        case knowhere::Status::cluster_inner_error:
+        case knowhere::Status::timeout:
+        case knowhere::Status::internal_error:
+        case knowhere::Status::sparse_inner_error:
+        case knowhere::Status::brute_force_inner_error:
+        case knowhere::Status::emb_list_inner_error:
+        case knowhere::Status::aisaq_error:
+        case knowhere::Status::knowhere_inner_error:
+            return ErrorCode::KnowhereError;
+    }
+    return ErrorCode::KnowhereError;
+}
+#pragma GCC diagnostic pop
+
+// Build/add-path variant of KnowhereStatusToErrorCode. It reuses the same
+// (drift-guarded) classification, but reports the generic KnowhereError bucket
+// as IndexBuildError to preserve the "index build failed" context that the build
+// call sites want. Every finer code passes through unchanged, so a build-time
+// OOM (malloc_error -> MemAllocateFailed) or disk read failure (disk_file_error
+// -> FileReadFailed) stays retriable instead of collapsing into a permanent
+// build error, and capability / corrupt-index statuses keep their precise codes.
+inline ErrorCode
+KnowhereBuildStatusToErrorCode(knowhere::Status status) {
+    auto code = KnowhereStatusToErrorCode(status);
+    return code == ErrorCode::KnowhereError ? ErrorCode::IndexBuildError : code;
+}
+
 inline std::vector<IndexType>
 DISK_INDEX_LIST() {
     static std::vector<IndexType> ret{
