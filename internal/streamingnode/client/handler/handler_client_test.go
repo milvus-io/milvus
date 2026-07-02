@@ -194,6 +194,59 @@ func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
 	assert.Nil(t, cps)
 }
 
+func TestHandlerClientReadOnlyAssignmentWaitsForNextAssignment(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	testcases := []struct {
+		name string
+		run  func(*handlerClientImpl) error
+	}{
+		{
+			name: "replicate checkpoint",
+			run: func(handler *handlerClientImpl) error {
+				cp, err := handler.GetReplicateCheckpoint(context.Background(), "pchannel")
+				assert.Nil(t, cp)
+				return err
+			},
+		},
+		{
+			name: "salvage checkpoint",
+			run: func(handler *handlerClientImpl) error {
+				cps, err := handler.GetSalvageCheckpoint(context.Background(), "pchannel")
+				assert.Nil(t, cps)
+				return err
+			},
+		},
+		{
+			name: "producer",
+			run: func(handler *handlerClientImpl) error {
+				producer, err := handler.CreateProducer(context.Background(), &ProducerOptions{PChannel: "pchannel"})
+				assert.Nil(t, producer)
+				return err
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := mock_assignment.NewMockWatcher(t)
+			w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+			w.EXPECT().Watch(mock.Anything, "pchannel", assignment).Return(context.Canceled)
+
+			handler := &handlerClientImpl{
+				lifetime: typeutil.NewLifetime(),
+				watcher:  w,
+			}
+
+			err := tc.run(handler)
+			assert.ErrorIs(t, err, context.Canceled)
+		})
+	}
+}
+
 func TestHandlerClient_PrepareReleaseManualFlush(t *testing.T) {
 	assignment := &types.PChannelInfoAssigned{
 		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},

@@ -42,6 +42,21 @@ func TestNewGRPCStatusFromStreamingError(t *testing.T) {
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
 
 	st = NewGRPCStatusFromStreamingError(
+		NewUnrecoverableError("test"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
+		NewSchemaVersionMismatch("test"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
+		NewRateLimitRejected("test"),
+	)
+	assert.Equal(t, codes.ResourceExhausted, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
 		New(10086, "test"),
 	)
 	assert.Equal(t, codes.Unknown, st.Code())
