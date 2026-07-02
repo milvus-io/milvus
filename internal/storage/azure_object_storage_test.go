@@ -27,6 +27,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,73 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestWaitAzureCopyComplete(t *testing.T) {
+	t.Run("wait until success", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}
+		getter := &fakeAzureCopyStatusGetter{statuses: statuses}
+
+		err := waitAzureCopyComplete(context.Background(), getter, "dst")
+		require.NoError(t, err)
+		require.Equal(t, 2, getter.calls)
+	})
+
+	t.Run("failed status returns error", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypeFailed}
+		getter := &fakeAzureCopyStatusGetter{statuses: statuses, statusDescription: "copy failed"}
+
+		err := waitAzureCopyComplete(context.Background(), getter, "dst")
+		require.Error(t, err)
+	})
+
+	t.Run("aborted status returns error", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypeAborted}
+		getter := &fakeAzureCopyStatusGetter{statuses: statuses}
+
+		err := waitAzureCopyComplete(context.Background(), getter, "dst")
+		require.Error(t, err)
+	})
+
+	t.Run("context canceled returns context error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := waitAzureCopyComplete(ctx, &fakeAzureCopyStatusGetter{}, "dst")
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("pending copy respects caller deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		defer cancel()
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
+		getter := &fakeAzureCopyStatusGetter{statuses: statuses}
+
+		err := waitAzureCopyComplete(ctx, getter, "dst")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
+
+type fakeAzureCopyStatusGetter struct {
+	statuses          []blob.CopyStatusType
+	statusDescription string
+	calls             int
+}
+
+func (f *fakeAzureCopyStatusGetter) GetProperties(ctx context.Context, options *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+	idx := f.calls
+	f.calls++
+	if len(f.statuses) == 0 {
+		return blob.GetPropertiesResponse{}, nil
+	}
+	if idx >= len(f.statuses) {
+		idx = len(f.statuses) - 1
+	}
+	status := f.statuses[idx]
+	return blob.GetPropertiesResponse{
+		CopyStatus:            &status,
+		CopyStatusDescription: &f.statusDescription,
+	}, nil
+}
 
 func TestAzureObjectStorage(t *testing.T) {
 	ctx := context.Background()

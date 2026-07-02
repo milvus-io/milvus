@@ -466,6 +466,61 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T
 	assert.Equal(t, expectedErr, err)
 }
 
+func TestDDLCallbacks_RestoreSnapshotV2AckCallback_External(t *testing.T) {
+	ctx := context.Background()
+
+	restoreExternalDataCalled := false
+	mockRestoreExternalData := mockey.Mock((*snapshotManager).RestoreExternalData).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		sourceCollectionID int64,
+		snapshotName string,
+		snapshotS3Location string,
+		collectionID int64,
+		jobID int64,
+		externalSpec string,
+	) (int64, error) {
+		restoreExternalDataCalled = true
+		assert.Equal(t, int64(100), sourceCollectionID)
+		assert.Equal(t, "test_snapshot", snapshotName)
+		assert.Equal(t, "s3://bucket/files/snapshots/meta.json", snapshotS3Location)
+		assert.Equal(t, int64(200), collectionID)
+		assert.Equal(t, int64(12345), jobID)
+		assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, externalSpec)
+		return jobID, nil
+	}).Build()
+	defer mockRestoreExternalData.UnPatch()
+
+	mockRestoreData := mockey.Mock((*snapshotManager).RestoreData).Return(int64(0), errors.New("must not call local restore")).Build()
+	defer mockRestoreData.UnPatch()
+
+	server := &Server{
+		snapshotManager: &snapshotManager{},
+	}
+	callbacks := &DDLCallbacks{Server: server}
+
+	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
+		WithHeader(&message.RestoreSnapshotMessageHeader{
+			SnapshotName:       "test_snapshot",
+			CollectionId:       200,
+			JobId:              12345,
+			SourceCollectionId: 100,
+			External:           true,
+			SnapshotS3Location: "s3://bucket/files/snapshots/meta.json",
+			ExternalSpec:       `{"extfs":{"region":"us-west-2"}}`,
+		}).
+		WithBody(&message.RestoreSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	err := callbacks.restoreSnapshotV2AckCallback(ctx, message.BroadcastResultRestoreSnapshotMessageV2{
+		Message: message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg),
+	})
+
+	assert.NoError(t, err)
+	assert.True(t, restoreExternalDataCalled)
+}
+
 // --- Test validateRestoreSnapshotResources ---
 
 // newTestSnapshotMeta creates a snapshotMeta with initialized ConcurrentMaps for testing.

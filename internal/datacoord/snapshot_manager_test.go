@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -36,14 +37,43 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type fixedRestoreAllocator struct {
+	id          typeutil.UniqueID
+	allocNStart typeutil.UniqueID
+	allocNEnd   typeutil.UniqueID
+}
+
+func (a *fixedRestoreAllocator) AllocTimestamp(context.Context) (typeutil.Timestamp, error) {
+	return 0, nil
+}
+
+func (a *fixedRestoreAllocator) AllocID(context.Context) (typeutil.UniqueID, error) {
+	return a.id, nil
+}
+
+func (a *fixedRestoreAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	if a.allocNStart != 0 || a.allocNEnd != 0 {
+		return a.allocNStart, a.allocNEnd, nil
+	}
+	return 0, n, nil
+}
+
+func (s *mockMixCoord) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	panic("implement me")
+}
 
 // --- Test CreateSnapshot ---
 
@@ -1806,7 +1836,7 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), map[string]string{}, map[int64]int64{}, snapshotData, int64(42), expectedPinID)
+	err := sm.createRestoreJob(ctx, int64(200), map[string]string{}, map[int64]int64{}, snapshotData, int64(42), expectedPinID, false, "", "")
 	assert.NoError(t, err)
 	require.NotNil(t, captured, "AddJob must be invoked")
 	assert.Equal(t, expectedPinID, captured.GetPinId(), "PinId must be propagated verbatim to the persisted job")
@@ -1872,9 +1902,57 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7))
+	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7), false, "", "")
 	require.NoError(t, err)
 	assert.True(t, addJobCalled)
+}
+
+func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLookup(t *testing.T) {
+	ctx := context.Background()
+	const snapshotLocation = "s3://bucket/files/snapshots/meta.json"
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 10, PartitionId: 20, ChannelName: "source-channel", NumOfRows: 99},
+		},
+	}
+
+	getSegmentCalled := false
+	mGetSegment := mockey.Mock((*meta).GetSegment).To(func(_ *meta, _ context.Context, _ int64) *SegmentInfo {
+		getSegmentCalled = true
+		return nil
+	}).Build()
+	defer mGetSegment.UnPatch()
+	mAddSegment := mockey.Mock((*meta).AddSegment).Return(nil).Build()
+	defer mAddSegment.UnPatch()
+	mUpdateCheckpoint := mockey.Mock((*meta).UpdateChannelCheckpoint).Return(nil).Build()
+	defer mUpdateCheckpoint.UnPatch()
+
+	var captured *datapb.CopySegmentJob
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
+		func(_ *copySegmentMeta, _ context.Context, job CopySegmentJob) error {
+			captured = job.(*copySegmentJob).CopySegmentJob
+			return nil
+		}).Build()
+	defer mAddJob.UnPatch()
+
+	sm := &snapshotManager{
+		meta:            &meta{},
+		allocator:       &fixedRestoreAllocator{allocNStart: 1000, allocNEnd: 1001},
+		handler:         newMockHandler(),
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	err := sm.createRestoreJob(ctx, int64(200), map[string]string{"source-channel": "target-channel"}, map[int64]int64{20: 30}, snapshotData, int64(42), int64(7), true, snapshotLocation, `{"extfs":{"region":"us-west-2"}}`)
+	assert.NoError(t, err)
+	assert.False(t, getSegmentCalled, "external restore must not require source segments in local meta")
+	require.NotNil(t, captured, "AddJob must be invoked")
+	assert.True(t, captured.GetExternal())
+	assert.Equal(t, snapshotLocation, captured.GetSnapshotS3Location())
+	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, captured.GetExternalSpec())
+	assert.Equal(t, int64(1), captured.GetTotalSegments())
+	assert.Len(t, captured.GetIdMappings(), 1)
 }
 
 // TestSnapshotManager_HasActivePins_Delegation verifies the manager-layer wrapper
@@ -1924,7 +2002,7 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7))
+	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), false, "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "alloc segment IDs failed")
 	assert.False(t, addJobCalled, "AddJob must not be called when segment-ID allocation fails")
@@ -2169,9 +2247,15 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		snapshotData *SnapshotData,
 		jobID int64,
 		pinID int64,
+		external bool,
+		snapshotS3Location string,
+		externalSpec string,
 	) error {
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID)
+		assert.False(t, external)
+		assert.Empty(t, snapshotS3Location)
+		assert.Empty(t, externalSpec)
 		return nil
 	}).Build()
 	defer mockCreateJob.UnPatch()
@@ -2411,7 +2495,13 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		snapshotData *SnapshotData,
 		jobID int64,
 		pinID int64,
+		external bool,
+		snapshotS3Location string,
+		externalSpec string,
 	) error {
+		assert.False(t, external)
+		assert.Empty(t, snapshotS3Location)
+		assert.Empty(t, externalSpec)
 		return expectedErr
 	}).Build()
 	defer mockCreateJob.UnPatch()
@@ -2913,6 +3003,258 @@ func TestSnapshotManager_DropSnapshotsByCollection_NoSnapshots(t *testing.T) {
 
 	err := sm.DropSnapshotsByCollection(ctx, 999)
 	assert.NoError(t, err)
+}
+
+func TestSnapshotManager_ExportSnapshot_ResolvesForeignStorageAndUsesTargetManager(t *testing.T) {
+	ctx := context.Background()
+	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	copier := &recordingCrossBucketCopier{sourceCM: sourceCM, targetCM: targetCM}
+	snapshotData := createTestSnapshotData()
+
+	var capturedDirection snapshotstorage.Direction
+	var capturedURI string
+	var capturedSpec string
+	events := make([]string, 0, 4)
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			_ context.Context,
+			_ *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			capturedDirection = direction
+			capturedURI = foreignURI
+			capturedSpec = externalSpec
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket: "foreign-bucket",
+				ForeignCM:     targetCM,
+				Copier:        copier,
+			}, nil
+		}).Build()
+	defer mockResolve.UnPatch()
+
+	mockPin := mockey.Mock((*snapshotMeta).PinSnapshot).To(
+		func(_ *snapshotMeta, _ context.Context, collectionID int64, snapshotName string, ttlSeconds int64) (int64, int, error) {
+			events = append(events, "pin")
+			assert.Equal(t, int64(100), collectionID)
+			assert.Equal(t, "snapshot-1", snapshotName)
+			assert.Greater(t, ttlSeconds, int64(0))
+			return 9001, 1, nil
+		}).Build()
+	defer mockPin.UnPatch()
+	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
+		func(_ *snapshotMeta, _ context.Context, pinID int64) (int64, string, int, error) {
+			events = append(events, "unpin")
+			assert.Equal(t, int64(9001), pinID)
+			return 100, "snapshot-1", 0, nil
+		}).Build()
+	defer mockUnpin.UnPatch()
+
+	mockReadSnapshot := mockey.Mock((*snapshotManager).ReadSnapshotData).To(
+		func(_ *snapshotManager, _ context.Context, collectionID int64, snapshotName string) (*SnapshotData, error) {
+			events = append(events, "read")
+			assert.Equal(t, int64(100), collectionID)
+			assert.Equal(t, "snapshot-1", snapshotName)
+			return snapshotData, nil
+		}).Build()
+	defer mockReadSnapshot.UnPatch()
+
+	mockExport := mockey.Mock(exportSnapshot).To(
+		func(
+			_ context.Context,
+			gotSourceCM storage.ChunkManager,
+			gotTargetCM storage.ChunkManager,
+			gotCopier storage.CrossBucketCopier,
+			sourceBucket string,
+			targetBucket string,
+			gotSnapshot *SnapshotData,
+			targetPath string,
+		) (string, error) {
+			events = append(events, "export")
+			assert.Same(t, sourceCM, gotSourceCM)
+			assert.Same(t, targetCM, gotTargetCM)
+			assert.Same(t, copier, gotCopier)
+			assert.Equal(t, Params.MinioCfg.BucketName.GetValue(), sourceBucket)
+			assert.Equal(t, "foreign-bucket", targetBucket)
+			assert.Same(t, snapshotData, gotSnapshot)
+			assert.Equal(t, "s3://foreign-bucket/export-root", targetPath)
+			return "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", nil
+		}).Build()
+	defer mockExport.UnPatch()
+
+	sm := &snapshotManager{
+		snapshotMeta: &snapshotMeta{
+			reader: NewSnapshotReader(sourceCM),
+		},
+	}
+
+	metadataURI, err := sm.ExportSnapshot(
+		ctx,
+		100,
+		"snapshot-1",
+		"s3://foreign-bucket/export-root",
+		`{"extfs":{"region":"us-west-2"}}`,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", metadataURI)
+	assert.Equal(t, snapshotstorage.DirectionExport, capturedDirection)
+	assert.Equal(t, "s3://foreign-bucket/export-root", capturedURI)
+	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedSpec)
+	assert.Equal(t, []string{"pin", "read", "export", "unpin"}, events)
+}
+
+func TestRestoreExternalSnapshot_RejectsUnsupportedExternalSpecBeforeBroadcast(t *testing.T) {
+	ctx := context.Background()
+	unsupportedSpec := `{"extfs":{"cloud_provider":"aws","role_arn":"arn:aws:iam::1:role/snapshot"}}`
+	snapshotURI := "s3://foreign-bucket/root/snapshots/s1/metadata/1.json"
+
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			_ context.Context,
+			_ *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			_, err := snapshotstorage.ValidateSnapshotForeignStorage(
+				direction,
+				foreignURI,
+				externalSpec,
+			)
+			return nil, err
+		}).Build()
+	defer mockResolve.UnPatch()
+
+	broadcastCalled := false
+	sm := &snapshotManager{}
+	_, err := sm.RestoreExternalSnapshot(
+		ctx,
+		snapshotURI,
+		"target_collection",
+		"target_db",
+		unsupportedSpec,
+		func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
+			return newMockBroadcastAPIImpl(), nil
+		},
+		func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+			broadcastCalled = true
+			return newMockBroadcastAPIImpl(), nil
+		},
+		func(context.Context, string, string) error {
+			return nil
+		},
+		func(context.Context, int64, *SnapshotData) error {
+			return nil
+		},
+	)
+
+	require.Error(t, err)
+	assert.False(t, broadcastCalled)
+}
+
+func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
+	ctx := context.Background()
+	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	foreignSpec := `{"extfs":{"region":"us-west-2"}}`
+	snapshotURI := "s3://foreign-bucket/root/snapshots/s1/metadata/1.json"
+	snapshotData := createTestSnapshotData()
+	snapshotData.SnapshotInfo.Name = "snapshot-1"
+	snapshotData.SnapshotInfo.CollectionId = 100
+	foreignStorageConfig := &indexpb.StorageConfig{
+		BucketName: "foreign-bucket",
+		RootPath:   "root",
+	}
+
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			_ context.Context,
+			_ *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			assert.Equal(t, snapshotstorage.DirectionRestore, direction)
+			assert.Equal(t, snapshotURI, foreignURI)
+			assert.Equal(t, foreignSpec, externalSpec)
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket:        "foreign-bucket",
+				ForeignCM:            sourceCM,
+				ForeignStorageConfig: foreignStorageConfig,
+			}, nil
+		}).Build()
+	defer mockResolve.UnPatch()
+
+	mockReadExternal := mockey.Mock((*snapshotMeta).ReadAndValidateExternalSnapshotDataWithChunkManager).To(
+		func(
+			_ *snapshotMeta,
+			_ context.Context,
+			gotCM storage.ChunkManager,
+			gotURI string,
+			includeSegments bool,
+			gotStorageConfigs ...*indexpb.StorageConfig,
+		) (*SnapshotData, error) {
+			assert.Same(t, sourceCM, gotCM)
+			assert.Equal(t, snapshotURI, gotURI)
+			assert.True(t, includeSegments)
+			require.Len(t, gotStorageConfigs, 1)
+			assert.Same(t, foreignStorageConfig, gotStorageConfigs[0])
+			return snapshotData, nil
+		}).Build()
+	defer mockReadExternal.UnPatch()
+
+	mockValidateCMEK := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer mockValidateCMEK.UnPatch()
+	mockRestoreCollection := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer mockRestoreCollection.UnPatch()
+	mockRestoreIndexes := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+	defer mockRestoreIndexes.UnPatch()
+
+	capture := &captureBroadcastAPI{}
+	sm := &snapshotManager{
+		snapshotMeta: &snapshotMeta{},
+		allocator:    &fixedRestoreAllocator{id: 77},
+	}
+	streaming.SetupNoopWALForTest()
+
+	jobID, err := sm.RestoreExternalSnapshot(
+		ctx,
+		snapshotURI,
+		"target_collection",
+		"target_db",
+		foreignSpec,
+		func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
+			return newMockBroadcastAPIImpl(), nil
+		},
+		func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+			return capture, nil
+		},
+		func(context.Context, string, string) error {
+			return nil
+		},
+		func(context.Context, int64, *SnapshotData) error {
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(77), jobID)
+	require.NotNil(t, capture.captured)
+
+	restoreMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(capture.captured)
+	header := restoreMsg.Header()
+	assert.Equal(t, "snapshot-1", header.GetSnapshotName())
+	assert.Equal(t, int64(200), header.GetCollectionId())
+	assert.Equal(t, int64(77), header.GetJobId())
+	assert.Equal(t, int64(100), header.GetSourceCollectionId())
+	assert.True(t, header.GetExternal())
+	assert.Equal(t, snapshotURI, header.GetSnapshotS3Location())
+	assert.Equal(t, foreignSpec, header.GetExternalSpec())
+	formattedHeader := protojson.Format(header)
+	assert.NotContains(t, formattedHeader, "secret_access_key")
+	assert.NotContains(t, formattedHeader, "credential_json")
+	assert.NotContains(t, formattedHeader, "sas")
+	assert.NotContains(t, formattedHeader, "role_arn")
 }
 
 // --- Test getDBCollectionIDs ---

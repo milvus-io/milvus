@@ -34,15 +34,19 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -60,8 +64,103 @@ type DataNodeServicesSuite struct {
 	cancel        context.CancelFunc
 }
 
+type fakeCopySegmentTask struct {
+	taskID int64
+}
+
+func (t *fakeCopySegmentTask) Execute() []*conc.Future[any] {
+	return nil
+}
+
+func (t *fakeCopySegmentTask) GetJobID() int64 {
+	return 0
+}
+
+func (t *fakeCopySegmentTask) GetTaskID() int64 {
+	return t.taskID
+}
+
+func (t *fakeCopySegmentTask) GetCollectionID() int64 {
+	return 0
+}
+
+func (t *fakeCopySegmentTask) GetPartitionIDs() []int64 {
+	return nil
+}
+
+func (t *fakeCopySegmentTask) GetVchannels() []string {
+	return nil
+}
+
+func (t *fakeCopySegmentTask) GetType() importv2.TaskType {
+	return importv2.CopySegmentTaskType
+}
+
+func (t *fakeCopySegmentTask) GetState() datapb.ImportTaskStateV2 {
+	return datapb.ImportTaskStateV2_Pending
+}
+
+func (t *fakeCopySegmentTask) GetReason() string {
+	return ""
+}
+
+func (t *fakeCopySegmentTask) GetSchema() *schemapb.CollectionSchema {
+	return nil
+}
+
+func (t *fakeCopySegmentTask) GetSlots() int64 {
+	return 0
+}
+
+func (t *fakeCopySegmentTask) GetBufferSize() int64 {
+	return 0
+}
+
+func (t *fakeCopySegmentTask) Cancel() {}
+
+func (t *fakeCopySegmentTask) Clone() importv2.Task {
+	return &fakeCopySegmentTask{taskID: t.taskID}
+}
+
+type fakeCopySegmentStorageFactory struct {
+	cm      storage.ChunkManager
+	configs []*indexpb.StorageConfig
+}
+
+func (f *fakeCopySegmentStorageFactory) NewChunkManager(ctx context.Context, config *indexpb.StorageConfig) (storage.ChunkManager, error) {
+	f.configs = append(f.configs, config)
+	return f.cm, nil
+}
+
+type noopCrossBucketCopier struct{}
+
+func (noopCrossBucketCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+	return nil
+}
+
 func TestDataNodeServicesSuite(t *testing.T) {
 	suite.Run(t, new(DataNodeServicesSuite))
+}
+
+func TestFirstExternalSourceURI(t *testing.T) {
+	got, err := firstExternalSourceURI([]*datapb.CopySegmentSource{
+		{SourceRootPath: "local-root"},
+		{SourceRootPath: "s3://foreign-bucket/foreign-root"},
+	})
+	if err != nil {
+		t.Fatalf("firstExternalSourceURI returned error: %v", err)
+	}
+	if got != "s3://foreign-bucket/foreign-root" {
+		t.Fatalf("firstExternalSourceURI = %q, want source root URI", got)
+	}
+
+	_, err = firstExternalSourceURI([]*datapb.CopySegmentSource{
+		{SourceRootPath: "local-root"},
+		{SourceRootPath: ""},
+	})
+	if err == nil {
+		t.Fatalf("firstExternalSourceURI should reject sources without URI roots")
+	}
 }
 
 func (s *DataNodeServicesSuite) SetupSuite() {
@@ -839,6 +938,185 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
+}
+
+func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesForeignSource() {
+	targetCM := &struct{ storage.ChunkManager }{}
+	sourceCM := &struct{ storage.ChunkManager }{}
+	sourceStorageConfig := &indexpb.StorageConfig{
+		BucketName: "foreign-bucket",
+		RootPath:   "foreign-root",
+	}
+	resolvedCopier := &noopCrossBucketCopier{}
+	factory := &fakeCopySegmentStorageFactory{cm: targetCM}
+	s.node.storageFactory = factory
+
+	targetStorageConfig := &indexpb.StorageConfig{
+		Address:         "localhost:9000",
+		BucketName:      "target-bucket",
+		RootPath:        "target-root",
+		StorageType:     "remote",
+		CloudProvider:   "aws",
+		AccessKeyID:     "target-ak",
+		SecretAccessKey: "target-sk",
+	}
+	req := &datapb.CopySegmentRequest{
+		JobID:         100,
+		TaskID:        201,
+		TaskSlot:      1,
+		StorageConfig: targetStorageConfig,
+		ExternalSpec:  `{"extfs":{"cloud_provider":"aws"}}`,
+		Sources: []*datapb.CopySegmentSource{{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			SourceRootPath: "s3://foreign-bucket/foreign-root",
+		}},
+		Targets: []*datapb.CopySegmentTarget{{
+			CollectionId: 444,
+			PartitionId:  555,
+			SegmentId:    666,
+		}},
+	}
+
+	resolveCalled := false
+	mResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			ctx context.Context,
+			instanceCfg *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			resolveCalled = true
+			s.Equal(snapshotstorage.DirectionCopySource, direction)
+			s.Equal("s3://foreign-bucket/foreign-root", foreignURI)
+			s.Equal(req.GetExternalSpec(), externalSpec)
+			s.Equal("target-bucket", instanceCfg.BucketName)
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket:        "foreign-bucket",
+				ForeignRoot:          "foreign-root",
+				ForeignCM:            sourceCM,
+				ForeignStorageConfig: sourceStorageConfig,
+				Copier:               resolvedCopier,
+			}, nil
+		}).Build()
+	defer mResolve.UnPatch()
+
+	newTaskCalled := false
+	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
+		func(
+			gotReq *datapb.CopySegmentRequest,
+			manager importv2.TaskManager,
+			gotSourceCM storage.ChunkManager,
+			gotTargetCM storage.ChunkManager,
+			gotSourceStorageConfig *indexpb.StorageConfig,
+			gotCopier storage.CrossBucketCopier,
+			sourceBucket string,
+			targetBucket string,
+		) importv2.Task {
+			newTaskCalled = true
+			s.Same(req, gotReq)
+			s.Same(sourceCM, gotSourceCM)
+			s.Same(targetCM, gotTargetCM)
+			s.Same(sourceStorageConfig, gotSourceStorageConfig)
+			s.True(gotCopier == resolvedCopier)
+			s.Equal("foreign-bucket", sourceBucket)
+			s.Equal("target-bucket", targetBucket)
+			return &fakeCopySegmentTask{taskID: gotReq.GetTaskID()}
+		}).Build()
+	defer mNewTask.UnPatch()
+
+	status, err := s.node.CopySegment(s.ctx, req)
+	s.NoError(merr.CheckRPCCall(status, err))
+	s.True(resolveCalled)
+	s.True(newTaskCalled)
+	s.Len(factory.configs, 1)
+	s.Same(targetStorageConfig, factory.configs[0])
+}
+
+func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredentialsFromExternalSpec() {
+	targetCM := &struct{ storage.ChunkManager }{}
+	factory := &fakeCopySegmentStorageFactory{cm: targetCM}
+	s.node.storageFactory = factory
+
+	targetStorageConfig := &indexpb.StorageConfig{
+		Address:         "s3.us-west-2.amazonaws.com",
+		BucketName:      "target-bucket",
+		RootPath:        "target-root",
+		StorageType:     "remote",
+		CloudProvider:   objectstorage.CloudProviderAWS,
+		Region:          "us-west-2",
+		AccessKeyID:     "target-ak",
+		SecretAccessKey: "target-sk",
+	}
+	foreignSpec := `{"extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"foreign-ak","access_key_value":"foreign-sk"}}`
+	req := &datapb.CopySegmentRequest{
+		JobID:         100,
+		TaskID:        202,
+		TaskSlot:      1,
+		StorageConfig: targetStorageConfig,
+		ExternalSpec:  foreignSpec,
+		Sources: []*datapb.CopySegmentSource{{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			SourceRootPath: "s3://foreign-bucket/foreign-root",
+		}},
+		Targets: []*datapb.CopySegmentTarget{{
+			CollectionId: 444,
+			PartitionId:  555,
+			SegmentId:    666,
+		}},
+	}
+
+	var remoteConfigs []objectstorage.Config
+	mRemoteCM := mockey.Mock(storage.NewRemoteChunkManager).To(
+		func(ctx context.Context, cfg *objectstorage.Config) (*storage.RemoteChunkManager, error) {
+			_ = ctx
+			remoteConfigs = append(remoteConfigs, *cfg)
+			return storage.NewRemoteChunkManagerForTesting(nil, cfg.BucketName, cfg.RootPath), nil
+		}).Build()
+	defer mRemoteCM.UnPatch()
+
+	var sourceStorageConfig *indexpb.StorageConfig
+	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
+		func(
+			gotReq *datapb.CopySegmentRequest,
+			manager importv2.TaskManager,
+			gotSourceCM storage.ChunkManager,
+			gotTargetCM storage.ChunkManager,
+			gotSourceStorageConfig *indexpb.StorageConfig,
+			gotCopier storage.CrossBucketCopier,
+			sourceBucket string,
+			targetBucket string,
+		) importv2.Task {
+			sourceStorageConfig = gotSourceStorageConfig
+			s.Same(req, gotReq)
+			s.NotNil(gotSourceCM)
+			s.Same(targetCM, gotTargetCM)
+			s.NotNil(gotCopier)
+			s.Equal("foreign-bucket", sourceBucket)
+			s.Equal("target-bucket", targetBucket)
+			return &fakeCopySegmentTask{taskID: gotReq.GetTaskID()}
+		}).Build()
+	defer mNewTask.UnPatch()
+
+	status, err := s.node.CopySegment(s.ctx, req)
+	s.NoError(merr.CheckRPCCall(status, err))
+	s.Len(factory.configs, 1)
+	s.Same(targetStorageConfig, factory.configs[0])
+	s.Len(remoteConfigs, 2)
+	s.Equal("foreign-ak", remoteConfigs[0].AccessKeyID)
+	s.Equal("foreign-sk", remoteConfigs[0].SecretAccessKeyID)
+	s.Equal("foreign-ak", remoteConfigs[1].AccessKeyID)
+	s.Equal("foreign-sk", remoteConfigs[1].SecretAccessKeyID)
+	s.NotNil(sourceStorageConfig)
+	s.Equal("foreign-ak", sourceStorageConfig.GetAccessKeyID())
+	s.Equal("foreign-sk", sourceStorageConfig.GetSecretAccessKey())
+	s.Equal(foreignSpec, req.GetExternalSpec())
+	s.NotContains(req.GetExternalSpec(), "secret_access_key")
+	s.NotContains(req.GetExternalSpec(), "credential_json")
 }
 
 func (s *DataNodeServicesSuite) TestQueryCopySegment() {

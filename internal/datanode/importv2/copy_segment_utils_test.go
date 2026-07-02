@@ -33,6 +33,40 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
+type copySegmentTestCopier func(context.Context, string, string, string, string) error
+
+func (c copySegmentTestCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+	if c == nil {
+		return nil
+	}
+	return c(ctx, srcBucket, srcObject, dstBucket, dstObject)
+}
+
+func copySegmentAndIndexFilesForTest(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	copiers ...storage.CrossBucketCopier,
+) (*datapb.CopySegmentResult, []string, error) {
+	copier := storage.CrossBucketCopier(copySegmentTestCopier(nil))
+	if len(copiers) > 0 {
+		copier = copiers[0]
+	}
+	return CopySegmentAndIndexFiles(
+		ctx,
+		cm,
+		cm,
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
+		copier,
+		"test-bucket",
+		"test-bucket",
+		source,
+		target,
+		nil,
+	)
+}
+
 func TestGenerateTargetPath(t *testing.T) {
 	source := &datapb.CopySegmentSource{
 		CollectionId: 111,
@@ -139,6 +173,144 @@ func TestGenerateMappingsFromFiles_ExternalTable(t *testing.T) {
 		mappings["files/insert_log/111/222/333/_metadata/manifest.json"])
 }
 
+func TestCollectSegmentFiles_UsesSourceStorageConfigForV3(t *testing.T) {
+	sourceCM := &struct{ storage.ChunkManager }{}
+	sourceCfg := &indexpb.StorageConfig{
+		BucketName: "foreign-source",
+		RootPath:   "foreign-root",
+	}
+	manifestPath := packed.MarshalManifestPath("foreign-root/files/insert_log/100/1/10", 2)
+	source := &datapb.CopySegmentSource{
+		CollectionId:   100,
+		PartitionId:    1,
+		SegmentId:      10,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		SourceRootPath: "s3://foreign-source/foreign-root",
+		InsertBinlogs:  []*datapb.FieldBinlog{},
+	}
+
+	mList := mockey.Mock(listAllFiles).To(
+		func(_ context.Context, cm storage.ChunkManager, basePath string) ([]string, error) {
+			assert.Same(t, sourceCM, cm)
+			assert.Equal(t, "foreign-root/files/insert_log/100/1/10", basePath)
+			return []string{"foreign-root/files/insert_log/100/1/10/_data/0"}, nil
+		}).Build()
+	defer mList.UnPatch()
+
+	mLob := mockey.Mock(packed.GetManifestLobFiles).To(
+		func(path string, cfg *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
+			assert.Equal(t, manifestPath, path)
+			assert.Equal(t, "foreign-source", cfg.GetBucketName())
+			assert.Equal(t, "foreign-root", cfg.GetRootPath())
+			return []packed.LobFileInfo{{
+				Path: "foreign-root/files/insert_log/100/1/lobs/101/_data/0",
+			}}, nil
+		}).Build()
+	defer mLob.UnPatch()
+
+	files, err := collectSegmentFiles(context.Background(), sourceCM, sourceCfg, source)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"foreign-root/files/insert_log/100/1/10/_data/0"}, files.InsertBinlogs)
+	assert.Equal(t, []string{"foreign-root/files/insert_log/100/1/lobs/101/_data/0"}, files.LobFiles)
+}
+
+func TestGenerateTargetPath_RemapExternalRoot(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "source-cluster-root",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: "target-cluster-root",
+	}
+
+	gotPath, err := generateTargetPath(
+		"source-cluster-root/files/insert_log/111/222/333/100/log1.log",
+		source,
+		target,
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "target-cluster-root/files/insert_log/444/555/666/100/log1.log", gotPath)
+}
+
+func TestGenerateTargetPath_RemapExternalS3Root(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "s3://bucket/source-cluster-root",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: "target-cluster-root",
+	}
+
+	gotPath, err := generateTargetPath(
+		"source-cluster-root/files/insert_log/111/222/333/100/log1.log",
+		source,
+		target,
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "target-cluster-root/files/insert_log/444/555/666/100/log1.log", gotPath)
+}
+
+func TestGenerateTargetPath_RemapExternalS3SourcePath(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "source-cluster-root",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: "target-cluster-root",
+	}
+
+	gotPath, err := generateTargetPath(
+		"s3://bucket/source-cluster-root/files/insert_log/111/222/333/100/log1.log",
+		source,
+		target,
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "target-cluster-root/files/insert_log/444/555/666/100/log1.log", gotPath)
+}
+
+func TestGenerateTargetPath_RemapExternalRootRequiresExactPrefix(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "source-cluster-root",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: "target-cluster-root",
+	}
+
+	gotPath, err := generateTargetPath(
+		"source-cluster-root-v2/files/insert_log/111/222/333/100/log1.log",
+		source,
+		target,
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "source-cluster-root-v2/files/insert_log/444/555/666/100/log1.log", gotPath)
+}
+
 func TestGenerateTargetLOBPath(t *testing.T) {
 	source := &datapb.CopySegmentSource{
 		CollectionId: 111,
@@ -194,6 +366,30 @@ func TestGenerateTargetLOBPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateTargetLOBPath_RemapExternalRoot(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "source-cluster-root/",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: "target-cluster-root/",
+	}
+
+	gotPath, err := generateTargetLOBPath(
+		"source-cluster-root/files/insert_log/111/222/lobs/100/_data/abc123.vx",
+		source,
+		target,
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "target-cluster-root/files/insert_log/444/555/lobs/100/_data/abc123.vx", gotPath)
 }
 
 func TestLobFileInfosToPaths(t *testing.T) {
@@ -276,7 +472,7 @@ func TestCollectSegmentFiles_LOBFromManifest(t *testing.T) {
 		ManifestPath:   `{"basePath":"root/insert_log/100/200/1001","version":1}`,
 	}
 
-	files, err := collectSegmentFiles(context.Background(), nil, source)
+	files, err := collectSegmentFiles(context.Background(), nil, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 	assert.NoError(t, err)
 	assert.NotNil(t, files)
 
@@ -491,6 +687,32 @@ func TestGenerateMappingsFromFiles_VectorScalarUsesSourcePathVersion(t *testing.
 	assert.Equal(t, "files/index_v1/444/555/666/2002/1/v1_file", mappings["files/index_v1/111/222/333/1002/1/v1_file"])
 }
 
+func TestGenerateTargetIndexPath_RemapExternalRoot(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		SourceRootPath: "source-cluster-root",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   444,
+		PartitionId:    555,
+		SegmentId:      666,
+		TargetRootPath: "target-cluster-root",
+	}
+
+	gotPath, err := generateTargetIndexPath(
+		"source-cluster-root/files/text_log/123/1/111/222/333/100/index_file",
+		source,
+		target,
+		IndexTypeText,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "target-cluster-root/files/text_log/123/1/444/555/666/100/index_file", gotPath)
+}
+
 func TestTransformFieldBinlogs(t *testing.T) {
 	mappings := map[string]string{
 		"files/insert_log/111/222/333/100/log1.log": "files/insert_log/444/555/666/100/log1.log",
@@ -624,11 +846,9 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 	}
 
 	t.Run("successful copy", func(t *testing.T) {
-		mCopy := mockey.Mock(copyFile).Return(nil).Build()
-		defer mCopy.UnPatch()
 
 		cm := &struct{ storage.ChunkManager }{}
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -640,11 +860,16 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 	})
 
 	t.Run("copy failure", func(t *testing.T) {
-		mCopy := mockey.Mock(copyFile).Return(errors.New("copy failed")).Build()
-		defer mCopy.UnPatch()
-
 		cm := &struct{ storage.ChunkManager }{}
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(
+			context.Background(),
+			cm,
+			source,
+			target,
+			copySegmentTestCopier(func(context.Context, string, string, string, string) error {
+				return errors.New("copy failed")
+			}),
+		)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -883,8 +1108,6 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 	t.Run("success returns all copied files", func(t *testing.T) {
-		mCopy := mockey.Mock(copyFile).Return(nil).Build()
-		defer mCopy.UnPatch()
 		cm := &struct{ storage.ChunkManager }{}
 
 		source := &datapb.CopySegmentSource{
@@ -907,7 +1130,7 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 			SegmentId:    666,
 		}
 
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -918,15 +1141,13 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 
 	t.Run("failure returns partial file list", func(t *testing.T) {
 		callCount := 0
-		mCopy := mockey.Mock(copyFile).
-			To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
-				callCount++
-				if callCount > 1 {
-					return errors.New("copy failed")
-				}
-				return nil
-			}).Build()
-		defer mCopy.UnPatch()
+		copier := copySegmentTestCopier(func(_ context.Context, _, _, _, _ string) error {
+			callCount++
+			if callCount > 1 {
+				return errors.New("copy failed")
+			}
+			return nil
+		})
 		cm := &struct{ storage.ChunkManager }{}
 
 		source := &datapb.CopySegmentSource{
@@ -949,7 +1170,7 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 			SegmentId:    666,
 		}
 
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target, copier)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -1354,7 +1575,7 @@ func TestCopySegmentAndIndexFiles_CreateFileMappingsError(t *testing.T) {
 		SegmentId:    666,
 	}
 
-	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), mockCM, source, target, nil)
+	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), mockCM, source, target)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Nil(t, copiedFiles)
@@ -1699,15 +1920,13 @@ func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 	defer mList.UnPatch()
 
 	copied := make(map[string]string)
-	mCopy := mockey.Mock(copyFile).
-		To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
-			copied[src] = dst
-			return nil
-		}).Build()
-	defer mCopy.UnPatch()
+	copier := copySegmentTestCopier(func(_ context.Context, _, src, _, dst string) error {
+		copied[src] = dst
+		return nil
+	})
 
 	cm := &struct{ storage.ChunkManager }{}
-	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target, copier)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(123), result.GetImportedRows())
 	assert.Equal(t, packed.MarshalManifestPath("files/insert_log/444/555/666", 2), result.GetManifestPath())
@@ -1743,7 +1962,7 @@ func TestCollectSegmentFiles_WithManifest(t *testing.T) {
 		InsertBinlogs:  []*datapb.FieldBinlog{},
 	}
 
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, cm, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 
 	assert.NoError(t, err)
 	assert.Len(t, files.InsertBinlogs, 3)
@@ -1765,7 +1984,7 @@ func TestCollectSegmentFiles_V3MissingManifestPath(t *testing.T) {
 		ManifestPath:   "", // V3 but no manifest
 	}
 
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, cm, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 
 	assert.Error(t, err)
 	assert.Nil(t, files)
@@ -1785,7 +2004,7 @@ func TestCollectSegmentFiles_ManifestUnmarshalFailure(t *testing.T) {
 		ManifestPath:   "invalid-json-not-a-manifest",
 	}
 
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, cm, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 
 	assert.Error(t, err)
 	assert.Nil(t, files)
@@ -1809,7 +2028,7 @@ func TestCollectSegmentFiles_ManifestListFailure(t *testing.T) {
 		ManifestPath:   manifestPath,
 	}
 
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, cm, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 
 	assert.Error(t, err)
 	assert.Nil(t, files)
@@ -1835,7 +2054,7 @@ func TestCollectSegmentFiles_ManifestEmptyFiles(t *testing.T) {
 	}
 
 	// Empty file list is OK for V3 — segment may have only deltas
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, cm, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, files)
@@ -1863,7 +2082,7 @@ func TestCollectSegmentFiles_NoManifest(t *testing.T) {
 		},
 	}
 
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, cm, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 
 	assert.NoError(t, err)
 	assert.Len(t, files.InsertBinlogs, 2)
@@ -2082,16 +2301,14 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		defer mList.UnPatch()
 
 		copiedSrcPaths := make([]string, 0)
-		mCopy := mockey.Mock(copyFile).
-			To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
-				copiedSrcPaths = append(copiedSrcPaths, src)
-				return nil
-			}).Build()
-		defer mCopy.UnPatch()
+		copier := copySegmentTestCopier(func(_ context.Context, _, src, _, _ string) error {
+			copiedSrcPaths = append(copiedSrcPaths, src)
+			return nil
+		})
 
 		cm := &struct{ storage.ChunkManager }{}
 
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target, copier)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -2125,11 +2342,16 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		}).Build()
 		defer mList.UnPatch()
 
-		mCopy := mockey.Mock(copyFile).Return(errors.New("storage unavailable")).Build()
-		defer mCopy.UnPatch()
-
 		cm := &struct{ storage.ChunkManager }{}
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(
+			context.Background(),
+			cm,
+			source,
+			target,
+			copySegmentTestCopier(func(context.Context, string, string, string, string) error {
+				return errors.New("storage unavailable")
+			}),
+		)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -2157,11 +2379,8 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		mList := mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build()
 		defer mList.UnPatch()
 
-		mCopy := mockey.Mock(copyFile).Return(nil).Build()
-		defer mCopy.UnPatch()
-
 		cm := &struct{ storage.ChunkManager }{}
-		result, _, err := CopySegmentAndIndexFiles(context.Background(), cm, badPbSource, target, nil)
+		result, _, err := copySegmentAndIndexFilesForTest(context.Background(), cm, badPbSource, target)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -2192,11 +2411,8 @@ func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 	mList := mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build()
 	defer mList.UnPatch()
 
-	mCopy := mockey.Mock(copyFile).Return(nil).Build()
-	defer mCopy.UnPatch()
-
 	cm := &struct{ storage.ChunkManager }{}
-	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -2229,11 +2445,8 @@ func TestCopySegmentAndIndexFiles_WithoutManifest_Unchanged(t *testing.T) {
 		SegmentId:    666,
 	}
 
-	mCopy := mockey.Mock(copyFile).Return(nil).Build()
-	defer mCopy.UnPatch()
-
 	cm := &struct{ storage.ChunkManager }{}
-	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -2335,11 +2548,8 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 	}).Build()
 	defer mList.UnPatch()
 
-	mCopy := mockey.Mock(copyFile).Return(nil).Build()
-	defer mCopy.UnPatch()
-
 	cm := &struct{ storage.ChunkManager }{}
-	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)

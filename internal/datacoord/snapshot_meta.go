@@ -5,17 +5,23 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"net/url"
+	"path"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -927,7 +933,7 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 	mlog.Info(context.TODO(), "got snapshot from memory before ReadSnapshot",
 		mlog.String("name", snapshotInfo.GetName()),
 		mlog.Int64("id", snapshotInfo.GetId()),
-		mlog.String("s3_location_from_memory", snapshotInfo.GetS3Location()))
+		mlog.String("s3_location_from_memory", redactSnapshotObjectPath(snapshotInfo.GetS3Location())))
 
 	// Step 2: Read snapshot data from S3 using the known metadata path directly
 	snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshotInfo.GetS3Location(), includeSegments)
@@ -940,6 +946,87 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 	snapshotData.SnapshotInfo.S3Location = snapshotInfo.S3Location
 
 	return snapshotData, nil
+}
+
+func (sm *snapshotMeta) ReadExternalSnapshotData(ctx context.Context, snapshotS3Location string, includeSegments bool) (*SnapshotData, error) {
+	return sm.ReadExternalSnapshotDataWithChunkManager(ctx, sm.reader.chunkManager, snapshotS3Location, includeSegments)
+}
+
+func (sm *snapshotMeta) ReadExternalSnapshotDataWithChunkManager(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	snapshotS3Location string,
+	includeSegments bool,
+) (*SnapshotData, error) {
+	logger := mlog.With(zap.String("snapshotS3Location", redactSnapshotObjectPath(snapshotS3Location)))
+
+	if cm == nil {
+		return nil, fmt.Errorf("chunk manager cannot be nil")
+	}
+	if err := validateSnapshotObjectPath(cm, "snapshot_s3_location", snapshotS3Location); err != nil {
+		return nil, err
+	}
+	snapshotData, err := NewSnapshotReader(cm).ReadSnapshot(ctx, snapshotS3Location, includeSegments)
+	if err != nil {
+		logger.Error(ctx, "failed to read external snapshot data from S3", zap.Error(err))
+		return nil, err
+	}
+	snapshotData.SnapshotInfo.S3Location = snapshotS3Location
+	return snapshotData, nil
+}
+
+func (sm *snapshotMeta) ReadAndValidateExternalSnapshotData(ctx context.Context, snapshotS3Location string, includeSegments bool) (*SnapshotData, error) {
+	return sm.ReadAndValidateExternalSnapshotDataWithChunkManager(ctx, sm.reader.chunkManager, snapshotS3Location, includeSegments)
+}
+
+func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	snapshotS3Location string,
+	includeSegments bool,
+	storageConfigs ...*indexpb.StorageConfig,
+) (*SnapshotData, error) {
+	snapshotData, err := sm.ReadExternalSnapshotDataWithChunkManager(ctx, cm, snapshotS3Location, includeSegments)
+	if err != nil {
+		return nil, err
+	}
+	if includeSegments {
+		if err := ValidateSnapshotDataFiles(ctx, cm, snapshotData, storageConfigs...); err != nil {
+			return nil, fmt.Errorf("invalid external snapshot data files: %w", err)
+		}
+	}
+	return snapshotData, nil
+}
+
+func deriveSnapshotRootPath(snapshotS3Location string) string {
+	locationPath := snapshotS3Location
+	if parsed, err := url.Parse(snapshotS3Location); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		if _, objectKey, _, parseErr := snapshotstorage.ParseForeignURI(snapshotS3Location); parseErr == nil {
+			locationPath = objectKey
+		} else {
+			locationPath = strings.TrimPrefix(parsed.Path, "/")
+		}
+	}
+
+	cleanLocation := path.Clean(locationPath)
+	if cleanLocation == "." {
+		return ""
+	}
+
+	parts := strings.Split(cleanLocation, "/")
+	for i, part := range parts {
+		if part == SnapshotRootPath {
+			rootPath := path.Join(parts[:i]...)
+			if rootPath == "." {
+				return ""
+			}
+			if strings.HasPrefix(cleanLocation, "/") && !strings.HasPrefix(rootPath, "/") {
+				return "/" + rootPath
+			}
+			return rootPath
+		}
+	}
+	return ""
 }
 
 // getSnapshotByName is an internal helper that looks up snapshot metadata by name within a collection.

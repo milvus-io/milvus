@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
@@ -32,6 +33,107 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestMinioObjectStorageCopyObjectUsesSingleCopy(t *testing.T) {
+	var gotDst minio.CopyDestOptions
+	var gotSrc minio.CopySrcOptions
+	copyCalled := false
+	composeCalled := false
+	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
+		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
+			copyCalled = true
+			gotDst = dst
+			gotSrc = src
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
+		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ ...minio.CopySrcOptions) (minio.UploadInfo, error) {
+			composeCalled = true
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCompose.UnPatch()
+
+	objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
+	err := objectStorage.CopyObject(context.Background(), "bucket", "src-object", "dst-object")
+	require.NoError(t, err)
+
+	assert.True(t, copyCalled)
+	assert.False(t, composeCalled)
+	assert.Equal(t, "bucket", gotSrc.Bucket)
+	assert.Equal(t, "src-object", gotSrc.Object)
+	assert.Equal(t, "bucket", gotDst.Bucket)
+	assert.Equal(t, "dst-object", gotDst.Object)
+}
+
+func TestMinioObjectStorageCopyObjectCrossBucketUsesSingleCopyForSmallObject(t *testing.T) {
+	var gotDst minio.CopyDestOptions
+	var gotSrc minio.CopySrcOptions
+	copyCalled := false
+	composeCalled := false
+	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
+		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize}, nil).Build()
+	defer mockStat.UnPatch()
+	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
+		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
+			copyCalled = true
+			gotDst = dst
+			gotSrc = src
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
+		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ ...minio.CopySrcOptions) (minio.UploadInfo, error) {
+			composeCalled = true
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCompose.UnPatch()
+
+	objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
+	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
+	require.NoError(t, err)
+
+	assert.True(t, copyCalled)
+	assert.False(t, composeCalled)
+	assert.Equal(t, "src-bucket", gotSrc.Bucket)
+	assert.Equal(t, "src-object", gotSrc.Object)
+	assert.Equal(t, "dst-bucket", gotDst.Bucket)
+	assert.Equal(t, "dst-object", gotDst.Object)
+}
+
+func TestMinioObjectStorageCopyObjectCrossBucketUsesComposeForLargeObject(t *testing.T) {
+	var gotDst minio.CopyDestOptions
+	var gotSrcs []minio.CopySrcOptions
+	copyCalled := false
+	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
+		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize + 1}, nil).Build()
+	defer mockStat.UnPatch()
+	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
+		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ minio.CopySrcOptions) (minio.UploadInfo, error) {
+			copyCalled = true
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
+		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, srcs ...minio.CopySrcOptions) (minio.UploadInfo, error) {
+			gotDst = dst
+			gotSrcs = append([]minio.CopySrcOptions(nil), srcs...)
+			return minio.UploadInfo{}, nil
+		}).Build()
+	defer mockCompose.UnPatch()
+
+	objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
+	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
+	require.NoError(t, err)
+
+	assert.False(t, copyCalled)
+	require.Len(t, gotSrcs, 1)
+	assert.Equal(t, "src-bucket", gotSrcs[0].Bucket)
+	assert.Equal(t, "src-object", gotSrcs[0].Object)
+	assert.Equal(t, int64(0), gotSrcs[0].Start)
+	assert.Equal(t, "dst-bucket", gotDst.Bucket)
+	assert.Equal(t, "dst-object", gotDst.Object)
+}
 
 func TestMinioObjectStorage(t *testing.T) {
 	ctx := context.Background()

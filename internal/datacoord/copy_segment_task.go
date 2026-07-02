@@ -19,6 +19,9 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"path"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/snapshotstorage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -520,11 +524,35 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	ctx := context.Background()
 
 	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+	var (
+		snapshotData *SnapshotData
+		err          error
+	)
+	if job.GetExternal() {
+		resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
+			ctx,
+			snapshotstorage.InstanceConfigFromParamtable(Params),
+			snapshotstorage.DirectionRestore,
+			job.GetSnapshotS3Location(),
+			job.GetExternalSpec(),
+		)
+		if resolveErr != nil {
+			err = resolveErr
+		} else {
+			snapshotData, err = t.snapshotMeta.ReadExternalSnapshotDataWithChunkManager(ctx, resolved.ForeignCM, job.GetSnapshotS3Location(), true)
+		}
+	} else {
+		snapshotData, err = t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+	}
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), mlog.Err(err))...)
 		return nil, err
+	}
+	storageConfig := createStorageConfig()
+	sourceRootPath := ""
+	if job.GetExternal() {
+		sourceRootPath = deriveSnapshotSourceRootURI(job.GetSnapshotS3Location())
 	}
 
 	// Build source segment map for quick lookup
@@ -570,6 +598,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
 			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
 			IsExternalCollection: isExternalCollection,
+			SourceRootPath:       sourceRootPath,
 		}
 		sources = append(sources, source)
 
@@ -608,10 +637,11 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		}
 		// Build target with IDs and buildID mappings
 		target := &datapb.CopySegmentTarget{
-			CollectionId: job.GetCollectionId(),
-			PartitionId:  partitionID,
-			SegmentId:    targetSegID,
-			NewBuildIds:  newBuildIDs,
+			CollectionId:   job.GetCollectionId(),
+			PartitionId:    partitionID,
+			SegmentId:      targetSegID,
+			NewBuildIds:    newBuildIDs,
+			TargetRootPath: storageConfig.GetRootPath(),
 		}
 		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
@@ -633,9 +663,54 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		TaskID:        task.GetTaskId(),
 		Sources:       sources,
 		Targets:       targets,
-		StorageConfig: createStorageConfig(),
+		StorageConfig: storageConfig,
 		TaskSlot:      task.GetTaskSlot(),
+		ExternalSpec:  job.GetExternalSpec(),
 	}, nil
+}
+
+func deriveSnapshotRootURI(snapshotS3Location string) string {
+	root := deriveSnapshotRootPath(snapshotS3Location)
+	if root == "" {
+		return ""
+	}
+	return replaceSnapshotURIObjectKey(snapshotS3Location, root)
+}
+
+func deriveSnapshotSourceRootURI(snapshotS3Location string) string {
+	rootURI := deriveSnapshotRootURI(snapshotS3Location)
+	if rootURI == "" {
+		return ""
+	}
+	return joinSnapshotURI(rootURI, exportedSnapshotFilesPath)
+}
+
+func replaceSnapshotURIObjectKey(snapshotS3Location string, objectKey string) string {
+	objectKey = strings.Trim(objectKey, "/")
+	parsed, err := url.Parse(snapshotS3Location)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return objectKey
+	}
+
+	bucket, _, endpointHost, err := snapshotstorage.ParseForeignURI(snapshotS3Location)
+	if err != nil {
+		parsed.Path = "/" + objectKey
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return strings.TrimSuffix(parsed.String(), "/")
+	}
+	if endpointHost != "" {
+		parts := []string{bucket}
+		if objectKey != "" {
+			parts = append(parts, objectKey)
+		}
+		parsed.Path = "/" + path.Join(parts...)
+	} else {
+		parsed.Path = "/" + objectKey
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimSuffix(parsed.String(), "/")
 }
 
 // ===========================================================================================
