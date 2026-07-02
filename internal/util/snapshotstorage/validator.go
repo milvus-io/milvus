@@ -94,7 +94,6 @@ func ValidateSnapshotForeignStorage(
 		Endpoint:      endpointHost,
 		Scheme:        scheme,
 		HasSpec:       hasSpec,
-		HasLayer2:     hasSpec,
 	}
 	if err := fillValidatedSpecFromExtfs(validated, parsed.Extfs); err != nil {
 		return nil, err

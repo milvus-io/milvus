@@ -622,7 +622,7 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 		resolved, err := snapshotstorage.ResolveForeignStorage(
 			ctx,
 			objectstorageConfigFromIndexConfig(req.GetStorageConfig()),
-			snapshotstorage.CopySource,
+			snapshotstorage.DirectionCopySource,
 			sourceURI,
 			req.GetExternalSpec(),
 		)

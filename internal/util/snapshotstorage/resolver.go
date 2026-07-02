@@ -159,7 +159,7 @@ func validateProviderEndpointPair(
 		}
 	}
 
-	allowlist := snapshotCrossBucketEndpointAllowlist()
+	allowlist := paramtable.Get().DataCoordCfg.SnapshotCrossBucketEndpointAllowlist.GetValue()
 	instanceHost := effectiveEndpointHost(instanceCfg)
 	foreignHost := effectiveEndpointHost(foreignCfg)
 	provider := effectiveCloudProvider(instanceCfg, foreignCfg)
@@ -308,7 +308,7 @@ func selectProviderCopyConfig(
 	validated *ValidatedSpec,
 	direction Direction,
 ) *objectstorage.Config {
-	if validated == nil || !validated.HasLayer2 {
+	if validated == nil || !validated.HasSpec {
 		return instanceCfg
 	}
 	if direction != DirectionRestore && direction != DirectionCopySource {
@@ -456,8 +456,4 @@ func sameAzureAccountEndpoint(instanceCfg, foreignCfg *objectstorage.Config) boo
 		return false
 	}
 	return true
-}
-
-func snapshotCrossBucketEndpointAllowlist() string {
-	return paramtable.Get().DataCoordCfg.SnapshotCrossBucketEndpointAllowlist.GetValue()
 }

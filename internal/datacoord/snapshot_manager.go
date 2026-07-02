@@ -837,7 +837,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 	resolved, err := snapshotstorage.ResolveForeignStorage(
 		ctx,
 		snapshotstorage.InstanceConfigFromParamtable(Params),
-		snapshotstorage.Restore,
+		snapshotstorage.DirectionRestore,
 		snapshotS3Location,
 		externalSpec,
 	)
@@ -984,16 +984,34 @@ func (sm *snapshotManager) ExportSnapshot(
 	resolved, err := snapshotstorage.ResolveForeignStorage(
 		ctx,
 		instanceCfg,
-		snapshotstorage.Export,
+		snapshotstorage.DirectionExport,
 		targetS3Path,
 		externalSpec,
 	)
 	if err != nil {
 		return "", err
 	}
-	if err := validateSnapshotObjectPathForBucket(resolved.ForeignCM, "target_s3_path", targetS3Path, resolved.ForeignBucket); err != nil {
-		return "", merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	pinTTLSeconds := Params.DataCoordCfg.SnapshotRestorePinTTLSeconds.GetAsInt64()
+	pinID, activePins, err := sm.snapshotMeta.PinSnapshot(ctx, collectionID, snapshotName, pinTTLSeconds)
+	if err != nil {
+		logger.Warn(ctx, "failed to pin source snapshot for export", zap.Error(err))
+		return "", merr.Wrap(err, "failed to pin source snapshot for export")
 	}
+	setSnapshotActivePinsGauge(collectionID, snapshotName, activePins)
+	defer func() {
+		collID, snapName, remaining, unpinErr := sm.snapshotMeta.UnpinSnapshot(ctx, pinID)
+		if unpinErr != nil {
+			logger.Warn(ctx, "failed to release export snapshot pin",
+				zap.Int64("pinID", pinID),
+				zap.Error(unpinErr))
+			return
+		}
+		if snapName != "" {
+			setSnapshotActivePinsGauge(collID, snapName, remaining)
+		}
+		logger.Info(ctx, "released export snapshot pin", zap.Int64("pinID", pinID))
+	}()
+
 	snapshotData, err := sm.ReadSnapshotData(ctx, collectionID, snapshotName)
 	if err != nil {
 		logger.Warn(ctx, "failed to read snapshot data for export", zap.Error(err))
@@ -1014,7 +1032,8 @@ func (sm *snapshotManager) ExportSnapshot(
 		logger.Warn(ctx, "failed to export snapshot", zap.Error(err))
 		return "", err
 	}
-	logger.Info(ctx, "export snapshot completed", zapSnapshotMetadataURI(metadataURI))
+	logger.Info(ctx, "export snapshot completed",
+		zap.String("snapshotMetadataURI", redactSnapshotObjectPath(metadataURI)))
 	return metadataURI, nil
 }
 
@@ -1227,7 +1246,7 @@ func (sm *snapshotManager) restoreData(
 		resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
 			ctx,
 			snapshotstorage.InstanceConfigFromParamtable(Params),
-			snapshotstorage.Restore,
+			snapshotstorage.DirectionRestore,
 			snapshotS3Location,
 			externalSpec,
 		)

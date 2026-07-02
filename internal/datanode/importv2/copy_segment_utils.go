@@ -100,18 +100,6 @@ func listAllFiles(ctx context.Context, cm storage.ChunkManager, basePath string)
 	return files, nil
 }
 
-// copyFile copies a single file from src to dst through the provider-side copier.
-func copyFile(
-	ctx context.Context,
-	copier storage.CrossBucketCopier,
-	sourceBucket string,
-	targetBucket string,
-	src string,
-	dst string,
-) error {
-	return copier.CopyCrossBucket(ctx, sourceBucket, src, targetBucket, dst)
-}
-
 // extractFromPb extracts file paths from FieldBinlog list (insert/delta/stats/bm25).
 func extractFromPb(fieldBinlogs []*datapb.FieldBinlog) []string {
 	var paths []string
@@ -374,7 +362,7 @@ func CopySegmentAndIndexFiles(
 			mlog.String("src", src),
 			mlog.String("dst", dst))
 
-		if err := copyFile(ctx, copier, sourceBucket, targetBucket, src, dst); err != nil {
+		if err := copier.CopyCrossBucket(ctx, sourceBucket, src, targetBucket, dst); err != nil {
 			fields := make([]mlog.Field, 0, len(logFields)+3)
 			fields = append(fields, logFields...)
 			fields = append(fields, mlog.String("src", src), mlog.String("dst", dst), mlog.Err(err))
@@ -1006,11 +994,7 @@ const (
 func shortenIndexFilePaths(fullPaths []string) []string {
 	result := make([]string, 0, len(fullPaths))
 	for _, fullPath := range fullPaths {
-		// Extract base filename (last segment after final '/')
-		parts := strings.Split(fullPath, "/")
-		if len(parts) > 0 {
-			result = append(result, parts[len(parts)-1])
-		}
+		result = append(result, path.Base(fullPath))
 	}
 	return result
 }

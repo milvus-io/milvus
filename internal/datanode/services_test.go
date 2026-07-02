@@ -989,7 +989,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesForeignSo
 			externalSpec string,
 		) (*snapshotstorage.ResolvedForeignStorage, error) {
 			resolveCalled = true
-			s.Equal(snapshotstorage.CopySource, direction)
+			s.Equal(snapshotstorage.DirectionCopySource, direction)
 			s.Equal("s3://foreign-bucket/foreign-root", foreignURI)
 			s.Equal(req.GetExternalSpec(), externalSpec)
 			s.Equal("target-bucket", instanceCfg.BucketName)

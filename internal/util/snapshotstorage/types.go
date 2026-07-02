@@ -29,12 +29,6 @@ const (
 	DirectionCopySource
 )
 
-const (
-	Export     = DirectionExport
-	Restore    = DirectionRestore
-	CopySource = DirectionCopySource
-)
-
 type ResolvedForeignStorage struct {
 	ForeignBucket        string
 	ForeignRoot          string
@@ -66,7 +60,6 @@ type ValidatedSpec struct {
 	RawAccessKeyID    string
 	RawSecretKey      string
 	HasSpec           bool
-	HasLayer2         bool
 }
 
 const unsupportedServerSideCopyMessage = "server-side cross-bucket copy is unsupported for this provider/endpoint pair; cross-service copy would require streaming (unsupported)"

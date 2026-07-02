@@ -1346,7 +1346,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *
 			foreignURI string,
 			externalSpec string,
 		) (*snapshotstorage.ResolvedForeignStorage, error) {
-			assert.Equal(t, snapshotstorage.Restore, direction)
+			assert.Equal(t, snapshotstorage.DirectionRestore, direction)
 			assert.Equal(t, "s3://bucket/source-root/snapshots/meta.json", foreignURI)
 			assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, externalSpec)
 			return &snapshotstorage.ResolvedForeignStorage{
@@ -1408,7 +1408,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *
 	require.NotNil(t, req)
 	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, req.GetExternalSpec())
 	require.Len(t, req.GetSources(), 1)
-	assert.Equal(t, "s3://bucket/source-root/files/files", req.GetSources()[0].GetSourceRootPath())
+	assert.Equal(t, "s3://bucket/source-root/files", req.GetSources()[0].GetSourceRootPath())
 }
 
 func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {

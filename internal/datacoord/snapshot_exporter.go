@@ -78,15 +78,7 @@ func exportSnapshot(
 		return "", err
 	}
 	mlog.Info(ctx, "export snapshot completed",
-		zapSnapshotName(snapshot.SnapshotInfo.GetName()),
-		zapSnapshotMetadataURI(writtenURI))
+		zap.String("snapshotName", snapshot.SnapshotInfo.GetName()),
+		zap.String("snapshotMetadataURI", redactSnapshotObjectPath(writtenURI)))
 	return writtenURI, nil
-}
-
-func zapSnapshotName(name string) zap.Field {
-	return zap.String("snapshotName", name)
-}
-
-func zapSnapshotMetadataURI(uri string) zap.Field {
-	return zap.String("snapshotMetadataURI", redactSnapshotObjectPath(uri))
 }

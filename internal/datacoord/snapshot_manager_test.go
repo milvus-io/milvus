@@ -3015,6 +3015,7 @@ func TestSnapshotManager_ExportSnapshot_ResolvesForeignStorageAndUsesTargetManag
 	var capturedDirection snapshotstorage.Direction
 	var capturedURI string
 	var capturedSpec string
+	events := make([]string, 0, 4)
 	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
 		func(
 			_ context.Context,
@@ -3034,8 +3035,26 @@ func TestSnapshotManager_ExportSnapshot_ResolvesForeignStorageAndUsesTargetManag
 		}).Build()
 	defer mockResolve.UnPatch()
 
+	mockPin := mockey.Mock((*snapshotMeta).PinSnapshot).To(
+		func(_ *snapshotMeta, _ context.Context, collectionID int64, snapshotName string, ttlSeconds int64) (int64, int, error) {
+			events = append(events, "pin")
+			assert.Equal(t, int64(100), collectionID)
+			assert.Equal(t, "snapshot-1", snapshotName)
+			assert.Greater(t, ttlSeconds, int64(0))
+			return 9001, 1, nil
+		}).Build()
+	defer mockPin.UnPatch()
+	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
+		func(_ *snapshotMeta, _ context.Context, pinID int64) (int64, string, int, error) {
+			events = append(events, "unpin")
+			assert.Equal(t, int64(9001), pinID)
+			return 100, "snapshot-1", 0, nil
+		}).Build()
+	defer mockUnpin.UnPatch()
+
 	mockReadSnapshot := mockey.Mock((*snapshotManager).ReadSnapshotData).To(
 		func(_ *snapshotManager, _ context.Context, collectionID int64, snapshotName string) (*SnapshotData, error) {
+			events = append(events, "read")
 			assert.Equal(t, int64(100), collectionID)
 			assert.Equal(t, "snapshot-1", snapshotName)
 			return snapshotData, nil
@@ -3053,6 +3072,7 @@ func TestSnapshotManager_ExportSnapshot_ResolvesForeignStorageAndUsesTargetManag
 			gotSnapshot *SnapshotData,
 			targetPath string,
 		) (string, error) {
+			events = append(events, "export")
 			assert.Same(t, sourceCM, gotSourceCM)
 			assert.Same(t, targetCM, gotTargetCM)
 			assert.Same(t, copier, gotCopier)
@@ -3079,9 +3099,10 @@ func TestSnapshotManager_ExportSnapshot_ResolvesForeignStorageAndUsesTargetManag
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json", metadataURI)
-	assert.Equal(t, snapshotstorage.Export, capturedDirection)
+	assert.Equal(t, snapshotstorage.DirectionExport, capturedDirection)
 	assert.Equal(t, "s3://foreign-bucket/export-root", capturedURI)
 	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, capturedSpec)
+	assert.Equal(t, []string{"pin", "read", "export", "unpin"}, events)
 }
 
 func TestRestoreExternalSnapshot_RejectsUnsupportedExternalSpecBeforeBroadcast(t *testing.T) {
@@ -3154,7 +3175,7 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 			foreignURI string,
 			externalSpec string,
 		) (*snapshotstorage.ResolvedForeignStorage, error) {
-			assert.Equal(t, snapshotstorage.Restore, direction)
+			assert.Equal(t, snapshotstorage.DirectionRestore, direction)
 			assert.Equal(t, snapshotURI, foreignURI)
 			assert.Equal(t, foreignSpec, externalSpec)
 			return &snapshotstorage.ResolvedForeignStorage{

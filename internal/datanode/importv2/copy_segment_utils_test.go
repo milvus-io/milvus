@@ -33,12 +33,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
-type chunkManagerCopyCopier struct {
-	cm storage.ChunkManager
-}
+type copySegmentTestCopier func(context.Context, string, string, string, string) error
 
-func (c chunkManagerCopyCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
-	return c.cm.Copy(ctx, srcObject, dstObject)
+func (c copySegmentTestCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+	if c == nil {
+		return nil
+	}
+	return c(ctx, srcBucket, srcObject, dstBucket, dstObject)
 }
 
 func copySegmentAndIndexFilesForTest(
@@ -46,13 +47,18 @@ func copySegmentAndIndexFilesForTest(
 	cm storage.ChunkManager,
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
+	copiers ...storage.CrossBucketCopier,
 ) (*datapb.CopySegmentResult, []string, error) {
+	copier := storage.CrossBucketCopier(copySegmentTestCopier(nil))
+	if len(copiers) > 0 {
+		copier = copiers[0]
+	}
 	return CopySegmentAndIndexFiles(
 		ctx,
 		cm,
 		cm,
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
-		chunkManagerCopyCopier{cm: cm},
+		copier,
 		"test-bucket",
 		"test-bucket",
 		source,
@@ -840,8 +846,6 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 	}
 
 	t.Run("successful copy", func(t *testing.T) {
-		mCopy := mockey.Mock(copyFile).Return(nil).Build()
-		defer mCopy.UnPatch()
 
 		cm := &struct{ storage.ChunkManager }{}
 		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
@@ -856,11 +860,16 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 	})
 
 	t.Run("copy failure", func(t *testing.T) {
-		mCopy := mockey.Mock(copyFile).Return(errors.New("copy failed")).Build()
-		defer mCopy.UnPatch()
-
 		cm := &struct{ storage.ChunkManager }{}
-		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(
+			context.Background(),
+			cm,
+			source,
+			target,
+			copySegmentTestCopier(func(context.Context, string, string, string, string) error {
+				return errors.New("copy failed")
+			}),
+		)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -1099,8 +1108,6 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 	t.Run("success returns all copied files", func(t *testing.T) {
-		mCopy := mockey.Mock(copyFile).Return(nil).Build()
-		defer mCopy.UnPatch()
 		cm := &struct{ storage.ChunkManager }{}
 
 		source := &datapb.CopySegmentSource{
@@ -1134,15 +1141,13 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 
 	t.Run("failure returns partial file list", func(t *testing.T) {
 		callCount := 0
-		mCopy := mockey.Mock(copyFile).
-			To(func(_ context.Context, _ storage.CrossBucketCopier, _, _ string, src, dst string) error {
-				callCount++
-				if callCount > 1 {
-					return errors.New("copy failed")
-				}
-				return nil
-			}).Build()
-		defer mCopy.UnPatch()
+		copier := copySegmentTestCopier(func(_ context.Context, _, _, _, _ string) error {
+			callCount++
+			if callCount > 1 {
+				return errors.New("copy failed")
+			}
+			return nil
+		})
 		cm := &struct{ storage.ChunkManager }{}
 
 		source := &datapb.CopySegmentSource{
@@ -1165,7 +1170,7 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 			SegmentId:    666,
 		}
 
-		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target, copier)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -1915,15 +1920,13 @@ func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 	defer mList.UnPatch()
 
 	copied := make(map[string]string)
-	mCopy := mockey.Mock(copyFile).
-		To(func(_ context.Context, _ storage.CrossBucketCopier, _, _ string, src, dst string) error {
-			copied[src] = dst
-			return nil
-		}).Build()
-	defer mCopy.UnPatch()
+	copier := copySegmentTestCopier(func(_ context.Context, _, src, _, dst string) error {
+		copied[src] = dst
+		return nil
+	})
 
 	cm := &struct{ storage.ChunkManager }{}
-	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
+	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target, copier)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(123), result.GetImportedRows())
 	assert.Equal(t, packed.MarshalManifestPath("files/insert_log/444/555/666", 2), result.GetManifestPath())
@@ -2298,16 +2301,14 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		defer mList.UnPatch()
 
 		copiedSrcPaths := make([]string, 0)
-		mCopy := mockey.Mock(copyFile).
-			To(func(_ context.Context, _ storage.CrossBucketCopier, _, _ string, src, dst string) error {
-				copiedSrcPaths = append(copiedSrcPaths, src)
-				return nil
-			}).Build()
-		defer mCopy.UnPatch()
+		copier := copySegmentTestCopier(func(_ context.Context, _, src, _, _ string) error {
+			copiedSrcPaths = append(copiedSrcPaths, src)
+			return nil
+		})
 
 		cm := &struct{ storage.ChunkManager }{}
 
-		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target, copier)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -2341,11 +2342,16 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		}).Build()
 		defer mList.UnPatch()
 
-		mCopy := mockey.Mock(copyFile).Return(errors.New("storage unavailable")).Build()
-		defer mCopy.UnPatch()
-
 		cm := &struct{ storage.ChunkManager }{}
-		result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
+		result, copiedFiles, err := copySegmentAndIndexFilesForTest(
+			context.Background(),
+			cm,
+			source,
+			target,
+			copySegmentTestCopier(func(context.Context, string, string, string, string) error {
+				return errors.New("storage unavailable")
+			}),
+		)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -2372,9 +2378,6 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 
 		mList := mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build()
 		defer mList.UnPatch()
-
-		mCopy := mockey.Mock(copyFile).Return(nil).Build()
-		defer mCopy.UnPatch()
 
 		cm := &struct{ storage.ChunkManager }{}
 		result, _, err := copySegmentAndIndexFilesForTest(context.Background(), cm, badPbSource, target)
@@ -2407,9 +2410,6 @@ func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 
 	mList := mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build()
 	defer mList.UnPatch()
-
-	mCopy := mockey.Mock(copyFile).Return(nil).Build()
-	defer mCopy.UnPatch()
 
 	cm := &struct{ storage.ChunkManager }{}
 	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
@@ -2444,9 +2444,6 @@ func TestCopySegmentAndIndexFiles_WithoutManifest_Unchanged(t *testing.T) {
 		PartitionId:  555,
 		SegmentId:    666,
 	}
-
-	mCopy := mockey.Mock(copyFile).Return(nil).Build()
-	defer mCopy.UnPatch()
 
 	cm := &struct{ storage.ChunkManager }{}
 	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
@@ -2550,9 +2547,6 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 		}, nil
 	}).Build()
 	defer mList.UnPatch()
-
-	mCopy := mockey.Mock(copyFile).Return(nil).Build()
-	defer mCopy.UnPatch()
 
 	cm := &struct{ storage.ChunkManager }{}
 	result, copiedFiles, err := copySegmentAndIndexFilesForTest(context.Background(), cm, source, target)
