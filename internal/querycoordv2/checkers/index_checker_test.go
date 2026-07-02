@@ -20,11 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -51,6 +53,8 @@ type IndexCheckerSuite struct {
 	nodeMgr   *session.NodeManager
 	targetMgr *meta.MockTargetManager
 }
+
+type indexCheckerBrokerMock struct{ meta.Broker }
 
 func (suite *IndexCheckerSuite) SetupSuite() {
 	paramtable.Init()
@@ -354,6 +358,139 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeReopen)
+}
+
+func (suite *IndexCheckerSuite) TestExternalSchemaBumpSchedulesExistingIndexReopen() {
+	checker := suite.checker
+	ctx := context.Background()
+
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	coll.Schema = &schemapb.CollectionSchema{
+		Name:    "external",
+		Version: 2,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "id", ExternalField: "id"},
+			{FieldID: 101, DataType: schemapb.DataType_FloatVector, Name: "vec", ExternalField: "vec"},
+		},
+	}
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.HandleNodeUp(ctx, 1)
+
+	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
+	segment.SchemaVersion = 1
+	checker.dist.SegmentDistManager.Update(1, segment)
+	suite.broker.EXPECT().ListIndexes(ctx, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(ctx, int64(1), int64(2)).Return(map[int64][]*querypb.FieldIndexInfo{
+		2: {{
+			FieldID:        101,
+			IndexID:        1000,
+			EnableIndex:    true,
+			IndexFilePaths: []string{"index"},
+		}},
+	}, nil)
+
+	tasks := checker.Check(ctx)
+	suite.Require().Len(tasks, 1)
+	suite.Require().Len(tasks[0].Actions(), 1)
+	suite.Equal(task.ActionTypeReopen, tasks[0].Actions()[0].(*task.SegmentAction).Type())
+}
+
+func (suite *IndexCheckerSuite) TestExternalBM25StatsIndexSchedulesReopen() {
+	ctx := context.Background()
+
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	coll.Schema = &schemapb.CollectionSchema{
+		Name: "external",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, Name: "id", ExternalField: "id"},
+			{FieldID: 102, DataType: schemapb.DataType_VarChar, Name: "text", ExternalField: "text"},
+			{FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, Name: "bm25_sparse", IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "bm25_func",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{102},
+			OutputFieldIds: []int64{101},
+		}},
+	}
+	suite.meta.PutCollection(ctx, coll)
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	suite.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.meta.HandleNodeUp(ctx, 1)
+
+	segment := &datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "test-insert-channel",
+		ManifestPath:  `{"base_path":"seg2","ver":1}`,
+		Bm25Statslogs: []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Binlogs: []*datapb.Binlog{{
+				LogPath: "bm25/101/stats",
+			}},
+		}},
+	}
+	indexes := []*indexpb.IndexInfo{{
+		FieldID: 101,
+		IndexID: 1000,
+	}}
+	segmentIndexes := map[int64][]*querypb.FieldIndexInfo{
+		2: {{
+			FieldID:        101,
+			IndexID:        1000,
+			EnableIndex:    true,
+			IndexFilePaths: []string{"index"},
+		}},
+	}
+	broker := &indexCheckerBrokerMock{}
+	mockGetRecoveryInfoV2 := mockey.Mock((*indexCheckerBrokerMock).GetRecoveryInfoV2).
+		To(func(_ *indexCheckerBrokerMock, _ context.Context, _ int64, _ ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+			return []*datapb.VchannelInfo{{
+				CollectionID: segment.GetCollectionID(),
+				ChannelName:  segment.GetInsertChannel(),
+				SeekPosition: &msgpb.MsgPosition{Timestamp: 1},
+			}}, []*datapb.SegmentInfo{segment}, nil
+		}).Build()
+	defer mockGetRecoveryInfoV2.UnPatch()
+	mockListIndexes := mockey.Mock((*indexCheckerBrokerMock).ListIndexes).
+		Return(indexes, nil).
+		Build()
+	defer mockListIndexes.UnPatch()
+	mockGetIndexInfo := mockey.Mock((*indexCheckerBrokerMock).GetIndexInfo).
+		Return(segmentIndexes, nil).
+		Build()
+	defer mockGetIndexInfo.UnPatch()
+
+	targetMgr := meta.NewTargetManager(broker, suite.meta)
+	suite.Require().NoError(targetMgr.UpdateCollectionNextTarget(ctx, 1))
+	suite.Require().True(targetMgr.UpdateCollectionCurrentTarget(ctx, 1))
+
+	checker := NewIndexChecker(suite.meta, suite.checker.dist, broker, suite.nodeMgr, targetMgr)
+	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
+
+	tasks := checker.Check(ctx)
+	suite.Require().Len(tasks, 1)
+	suite.Require().Len(tasks[0].Actions(), 1)
+	suite.Equal(task.ActionTypeReopen, tasks[0].Actions()[0].(*task.SegmentAction).Type())
 }
 
 func TestRemoveRedundantIndex(t *testing.T) {

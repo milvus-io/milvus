@@ -87,7 +87,7 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	}
 }
 
-func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
+func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan, externalCollection bool) error {
 	if !plan.HasFunction() {
 		return nil
 	}
@@ -100,7 +100,7 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 		}
 		return nil
 	case AlterSchemaAddFunctionField:
-		if err := validateAddFunctionFieldAllowed(function); err != nil {
+		if err := validateAddFunctionFieldAllowed(function, externalCollection); err != nil {
 			return err
 		}
 		if err := validateAddFunctionFieldInputOutput(function); err != nil {
@@ -119,10 +119,15 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 	}
 }
 
-func validateAddFunctionFieldAllowed(function *schemapb.FunctionSchema) error {
+func validateAddFunctionFieldAllowed(function *schemapb.FunctionSchema, externalCollection bool) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
 		return nil
+	case schemapb.FunctionType_TextEmbedding:
+		if externalCollection {
+			return nil
+		}
+		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in add_function_field interface")
 	default:
 		return merr.WrapErrParameterInvalidMsg("For now, only BM25 and MinHash functions are supported in add_function_field interface")
 	}
@@ -130,14 +135,9 @@ func validateAddFunctionFieldAllowed(function *schemapb.FunctionSchema) error {
 
 func validateAddFunctionFieldInputOutput(function *schemapb.FunctionSchema) error {
 	switch function.GetType() {
-	case schemapb.FunctionType_BM25:
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash, schemapb.FunctionType_TextEmbedding:
 		if len(function.GetInputFieldNames()) != 1 || len(function.GetOutputFieldNames()) != 1 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function should have exactly one input field and exactly one output field")
-		}
-		return nil
-	case schemapb.FunctionType_MinHash:
-		if len(function.GetInputFieldNames()) != 1 || len(function.GetOutputFieldNames()) != 1 {
-			return merr.WrapErrParameterInvalidMsg("MinHash function should have exactly one input field and exactly one output field")
+			return merr.WrapErrParameterInvalidMsg("%s function should have exactly one input field and exactly one output field", function.GetType().String())
 		}
 		return nil
 	default:

@@ -311,6 +311,14 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		return merr.WrapErrServiceInternalMsg("job %d has no tasks to apply", job.GetJobId())
 	}
 
+	collection := m.mt.GetCollection(job.GetCollectionId())
+	if collection == nil {
+		return merr.WrapErrServiceInternalMsg("collection %d not found in meta", job.GetCollectionId())
+	}
+	if collection.Schema.GetVersion() != job.GetSchemaVersion() {
+		return merr.WrapErrServiceInternalMsg("external collection schema changed during refresh; rerun refresh")
+	}
+
 	keptSet := make(map[int64]struct{})
 	updatedSet := make(map[int64]struct{})
 	keptSegments := make([]int64, 0)
@@ -344,16 +352,25 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		}
 	}
 
-	// Intentionally allow the collection schema to advance while tasks are
-	// running. For the current additive-only scope, an older-schema refresh can
-	// be applied; it may miss newly added external columns, and the next refresh
-	// self-heals them. Segment-level validation still rejects schema-version
-	// rollback, but drop, rename, or type changes need a schema gate or lock
-	// before they are supported.
-	return applyExternalCollectionSegmentUpdate(
+	for _, segment := range updatedSegments {
+		if segment.GetSchemaVersion() != job.GetSchemaVersion() {
+			return merr.WrapErrServiceInternalMsg(
+				"refresh result segment %d schema version %d does not match job schema version %d",
+				segment.GetID(),
+				segment.GetSchemaVersion(),
+				job.GetSchemaVersion(),
+			)
+		}
+	}
+
+	// Schema changes during refresh invalidate the job. The user must rerun
+	// refresh so DataNode builds replacement segments from the current schema.
+	return applyExternalCollectionSegmentUpdateWithSchemaVersion(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
+		true,
+		job.GetSchemaVersion(),
 		keptSegments,
 		updatedSegments,
 		mlog.FieldJobID(job.GetJobId()),
@@ -559,6 +576,7 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	startTime := time.Now().UnixMilli()
 
 	// Phase A: persist the job record in Init state. No explore, no tasks.
+	schemaVersion := collection.Schema.GetVersion()
 	job := &datapb.ExternalCollectionRefreshJob{
 		JobId:          jobID,
 		CollectionId:   collectionID,
@@ -569,6 +587,7 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 		StartTime:      startTime,
 		Progress:       0,
 		TaskIds:        []int64{},
+		SchemaVersion:  schemaVersion,
 	}
 
 	if err := m.refreshMeta.AddJob(job); err != nil {
@@ -782,6 +801,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 			ExploreManifestPath: manifestPath,
 			FileIndexBegin:      chunk.fileIndexBegin,
 			FileIndexEnd:        chunk.fileIndexEnd,
+			SchemaVersion:       job.GetSchemaVersion(),
 		}
 
 		if err = m.refreshMeta.AddTask(task); err != nil {

@@ -92,6 +92,11 @@ func (policy *bumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 		if collection.Schema == nil {
 			continue
 		}
+		if collection.IsExternal() {
+			mlog.Info(ctx, "skip schema bump compaction for external collection",
+				mlog.FieldCollectionID(collection.ID))
+			continue
+		}
 		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
 			mlog.Info(ctx, "skip schema bump compaction for collection due to snapshot compaction block",
 				mlog.FieldCollectionID(collection.ID))

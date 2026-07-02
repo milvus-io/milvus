@@ -504,8 +504,17 @@ TEST_F(SchemaTest, ExternalFunctionOutputUsesFieldIdColumnName) {
 
     EXPECT_EQ(schema->get_storage_column_name(FieldId(101)), "sparse");
     EXPECT_EQ(schema->get_storage_column_name(FieldId(102)), "102");
-    EXPECT_EQ(schema->ResolveColumnFieldId("sparse"), FieldId(101));
-    EXPECT_EQ(schema->ResolveColumnFieldId("102"), FieldId(102));
+    EXPECT_EQ(schema->MustResolveColumnFieldId("sparse"), FieldId(101));
+    EXPECT_EQ(schema->MustResolveColumnFieldId("102"), FieldId(102));
+    auto expect_resolved = [&](const std::string& column, FieldId expected) {
+        auto field_id = schema->ResolveColumnFieldId(column);
+        ASSERT_TRUE(field_id.has_value()) << "column=" << column;
+        EXPECT_EQ(field_id.value(), expected);
+    };
+    expect_resolved("sparse", FieldId(101));
+    expect_resolved("102", FieldId(102));
+    expect_resolved("104", FieldId(104));
+    EXPECT_FALSE(schema->has_field(FieldId(104)));
 
     auto parsed_field_id = ParseFieldIdColumnName("102");
     ASSERT_TRUE(parsed_field_id.has_value());
@@ -523,7 +532,9 @@ TEST_F(SchemaTest, ExternalFunctionOutputUsesFieldIdColumnName) {
     for (const auto& column : invalid_field_id_columns) {
         EXPECT_FALSE(ParseFieldIdColumnName(column).has_value())
             << "column=" << column;
-        EXPECT_THROW(schema->ResolveColumnFieldId(column), std::exception)
+        EXPECT_FALSE(schema->ResolveColumnFieldId(column).has_value())
+            << "column=" << column;
+        EXPECT_THROW(schema->MustResolveColumnFieldId(column), SegcoreError)
             << "column=" << column;
     }
 
@@ -618,8 +629,8 @@ TEST_F(SchemaTest,
 
     EXPECT_EQ(schema->get_storage_column_name(FieldId(101)), "sparse");
     EXPECT_EQ(schema->get_storage_column_name(FieldId(102)), "102");
-    EXPECT_EQ(schema->ResolveColumnFieldId("sparse"), FieldId(101));
-    EXPECT_EQ(schema->ResolveColumnFieldId("102"), FieldId(102));
+    EXPECT_EQ(schema->MustResolveColumnFieldId("sparse"), FieldId(101));
+    EXPECT_EQ(schema->MustResolveColumnFieldId("102"), FieldId(102));
 
     auto columns = schema->GetExternalColumnNames();
     EXPECT_NE(std::find(columns->begin(), columns->end(), "sparse"),

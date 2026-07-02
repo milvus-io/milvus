@@ -2975,6 +2975,80 @@ func TestValidateFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("Valid external TextEmbedding input may be nullable", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "doc",
+					DataType:      schemapb.DataType_VarChar,
+					Nullable:      true,
+					ExternalField: "doc",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "1024"},
+					},
+				},
+				{
+					Name:     "dense",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "embedding_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"doc"},
+					OutputFieldNames: []string{"dense"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "openai"},
+					},
+				},
+			},
+		}
+		err := validator.ValidateFunction(schema, "", true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid internal TextEmbedding input cannot be nullable", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "doc",
+					DataType: schemapb.DataType_VarChar,
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "1024"},
+					},
+				},
+				{
+					Name:     "dense",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "embedding_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"doc"},
+					OutputFieldNames: []string{"dense"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "openai"},
+					},
+				},
+			},
+		}
+		err := validator.ValidateFunction(schema, "", true)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "function input field cannot be nullable")
+	})
+
 	t.Run("Invalid function schema - duplicate function names", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{

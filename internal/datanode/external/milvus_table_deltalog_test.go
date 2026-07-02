@@ -588,7 +588,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctions_Mil
 	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
 
-	mockExec := mockey.Mock(ExecuteFunctionsForSegment).Return("manifest-path", nil).Build()
+	mockExec := mockey.Mock(ExecuteFunctionsForSegment).
+		Return(&FunctionExecutionResult{ManifestPath: "manifest-path"}, nil).
+		Build()
 	defer mockExec.UnPatch()
 	mockAdd := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).
 		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
@@ -601,7 +603,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctions_Mil
 		}).Build()
 	defer mockAdd.UnPatch()
 
-	manifestPath, err := task.createManifestWithFunctions(ctx, 3000, []packed.Fragment{{
+	result, err := task.createManifestWithFunctions(ctx, 3000, []packed.Fragment{{
 		FragmentID: 1,
 		Deltalogs: []*datapb.FieldBinlog{{
 			FieldID: 100,
@@ -611,9 +613,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctions_Mil
 				EntriesNum: 7,
 			}},
 		}},
-	}})
+	}}, nil)
 	s.NoError(err)
-	s.Equal("manifest-with-deltas", manifestPath)
+	s.Require().NotNil(result)
+	s.Equal("manifest-with-deltas", result.ManifestPath)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestAddMilvusTableL0DeltalogsToManifest_RequiresAllocatedLogID() {

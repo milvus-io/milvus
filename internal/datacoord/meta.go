@@ -476,6 +476,9 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *collectionInfo) {
 	mlog.Info(context.TODO(), "meta update: add collection", mlog.Int64("collectionID", collection.ID))
+	// Keep collection cache changes ordered with segment metadata transactions.
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	m.collections.Insert(collection.ID, collection)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
 	mlog.Info(context.TODO(), "meta update: add collection - complete", mlog.Int64("collectionID", collection.ID))
@@ -484,6 +487,9 @@ func (m *meta) AddCollection(collection *collectionInfo) {
 // DropCollection drop a collection from meta
 func (m *meta) DropCollection(collectionID int64) {
 	mlog.Info(context.TODO(), "meta update: drop collection", mlog.Int64("collectionID", collectionID))
+	// Keep collection cache changes ordered with segment metadata transactions.
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	if _, ok := m.collections.GetAndRemove(collectionID); ok {
 		metrics.CleanupDataCoordWithCollectionID(collectionID)
 		metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))

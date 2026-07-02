@@ -43,6 +43,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 		ExternalSpec:  `{"format":"milvus-table"}`,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
 		Schema: &schemapb.CollectionSchema{
+			Version: 7,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			},
@@ -53,6 +54,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 			PartitionID:    partitionID,
 			NumOfRows:      1000,
 			ManifestPath:   oldManifest,
+			SchemaVersion:  6,
 			StorageVersion: storage.StorageV3,
 		}},
 		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
@@ -101,6 +103,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	s.Require().Len(updated, 1)
 	s.Equal(int64(1), updated[0].GetID())
 	s.Equal(newManifest, updated[0].GetManifestPath())
+	s.Equal(req.GetSchema().GetVersion(), updated[0].GetSchemaVersion())
 	s.Equal(updated, result)
 	s.Equal(int64(1), gotSegmentID)
 	s.Equal(newFragments, gotFragments)
