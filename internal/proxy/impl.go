@@ -3027,6 +3027,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		shardClientMgr:         node.shardMgr,
 		enableMaterializedView: node.enableMaterializedView,
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
+		chMgr:                  node.chMgr,
 	}
 
 	succeeded := false
@@ -3254,6 +3255,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		lb:                  node.lbPolicy,
 		shardClientMgr:      node.shardMgr,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
+		chMgr:               node.chMgr,
 	}
 
 	succeeded := false
@@ -3529,6 +3531,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		GuaranteeTimestamp:    request.GuaranteeTimestamp,
 		ConsistencyLevel:      request.ConsistencyLevel,
 		UseDefaultConsistency: request.UseDefaultConsistency,
+		Namespace:             request.Namespace,
 	}
 
 	// Create queryTask to execute the retrieval
@@ -3552,6 +3555,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 		// reQuery defaults to false - we need full query processing:
 		// partition conversion, struct field reconstruction, timestamp handling etc
+		chMgr: node.chMgr,
 	}
 
 	// Execute query
@@ -3828,6 +3832,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		lb:                  node.lbPolicy,
 		shardclientMgr:      node.shardMgr,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
+		chMgr:               node.chMgr,
 	}
 
 	subLabel := GetCollectionRateSubLabel(request)

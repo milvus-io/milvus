@@ -1070,6 +1070,7 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		PartitionNames:        req.GetPartitionNames(),
 		OutputFields:          req.GetOutputFields(),
 		SearchParams:          req.GetRankParams(),
+		Namespace:             req.Namespace,
 		TravelTimestamp:       req.GetTravelTimestamp(),
 		GuaranteeTimestamp:    req.GetGuaranteeTimestamp(),
 		Nq:                    0,
@@ -1079,7 +1080,6 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		SearchByPrimaryKeys:   false,
 		SubReqs:               nil,
 		FunctionScore:         req.FunctionScore,
-		Namespace:             req.Namespace,
 	}
 
 	for _, sub := range req.GetRequests() {

@@ -51,6 +51,7 @@ var (
 type columnBasedDataOption struct {
 	collName      string
 	partitionName string
+	namespace     *string
 	columns       []column.Column
 	partialUpdate bool
 
@@ -379,6 +380,14 @@ func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBas
 	return opt
 }
 
+// WithNamespace scopes the write to a collection namespace. Primary keys are
+// still collection-scoped for delete/upsert tombstones, so callers must keep
+// primary keys unique across namespaces in the same collection.
+func (opt *columnBasedDataOption) WithNamespace(namespace string) *columnBasedDataOption {
+	opt.namespace = &namespace
+	return opt
+}
+
 func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnBasedDataOption {
 	opt.partialUpdate = partialUpdate
 	return opt
@@ -452,6 +461,7 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.InsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		Namespace:       opt.namespace,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -477,6 +487,7 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.UpsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		Namespace:       opt.namespace,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -509,6 +520,36 @@ func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
 	}
 }
 
+func (opt *rowBasedDataOption) WithPartition(partitionName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPartition(partitionName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithNamespace(namespace string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithNamespace(namespace)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithPartialUpdate(partialUpdate bool) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPartialUpdate(partialUpdate)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithArrayAppend(fieldName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithArrayRemove(fieldName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithArrayRemove(fieldName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.FieldPartialUpdateOp_OpType) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithFieldPartialOp(fieldName, op)
+	return opt
+}
+
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
 	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
@@ -522,6 +563,7 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.InsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 	}, nil
@@ -545,6 +587,7 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.UpsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 		PartialUpdate:  partialUpdate,
@@ -586,6 +629,7 @@ type DeleteOption interface {
 type deleteOption struct {
 	collectionName string
 	partitionName  string
+	namespace      *string
 	expr           string
 }
 
@@ -593,6 +637,7 @@ func (opt *deleteOption) Request() *milvuspb.DeleteRequest {
 	return &milvuspb.DeleteRequest{
 		CollectionName: opt.collectionName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		Expr:           opt.expr,
 	}
 }
@@ -614,6 +659,14 @@ func (opt *deleteOption) WithStringIDs(fieldName string, ids []string) *deleteOp
 
 func (opt *deleteOption) WithPartition(partitionName string) *deleteOption {
 	opt.partitionName = partitionName
+	return opt
+}
+
+// WithNamespace scopes the delete request to a collection namespace. Delete
+// tombstones are primary-key based, so callers must keep primary keys unique
+// across namespaces in the same collection.
+func (opt *deleteOption) WithNamespace(namespace string) *deleteOption {
+	opt.namespace = &namespace
 	return opt
 }
 

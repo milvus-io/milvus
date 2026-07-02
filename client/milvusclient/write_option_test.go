@@ -195,6 +195,59 @@ func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnErrors() {
 	}
 }
 
+func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
+	collName := "namespace_write_option"
+	namespace := "tenant_a"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64)),
+	}
+
+	insertOpt := NewColumnBasedInsertOption(collName, column.NewColumnInt64("id", []int64{1})).
+		WithNamespace(namespace)
+	insertReq, err := insertOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(namespace, insertReq.GetNamespace())
+
+	upsertOpt := NewColumnBasedInsertOption(collName, column.NewColumnInt64("id", []int64{1})).
+		WithNamespace(namespace)
+	upsertReq, err := upsertOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(namespace, upsertReq.GetNamespace())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
+	collName := "namespace_row_write_option"
+	namespace := "tenant_a"
+	partition := "partition_a"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("name").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)),
+	}
+	rows := []any{map[string]any{"id": int64(1), "name": "alice"}}
+
+	var insertOpt InsertOption = NewRowBasedInsertOption(collName, rows...).
+		WithPartition(partition).
+		WithNamespace(namespace)
+	insertReq, err := insertOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(partition, insertReq.GetPartitionName())
+	s.Equal(namespace, insertReq.GetNamespace())
+	s.EqualValues(1, insertReq.GetNumRows())
+	s.Len(insertReq.GetFieldsData(), 2)
+
+	var upsertOpt UpsertOption = NewRowBasedInsertOption(collName, rows...).
+		WithPartition(partition).
+		WithNamespace(namespace)
+	upsertReq, err := upsertOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(partition, upsertReq.GetPartitionName())
+	s.Equal(namespace, upsertReq.GetNamespace())
+	s.EqualValues(1, upsertReq.GetNumRows())
+	s.Len(upsertReq.GetFieldsData(), 2)
+}
+
 func TestRowBasedDataOption(t *testing.T) {
 	suite.Run(t, new(ColumnBasedDataOptionSuite))
 }
@@ -208,6 +261,14 @@ func (s *DeleteOptionSuite) TestBasic() {
 	opt := NewDeleteOption(collectionName)
 
 	s.Equal(collectionName, opt.Request().GetCollectionName())
+}
+
+func (s *DeleteOptionSuite) TestWithNamespace() {
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+	namespace := "tenant_a"
+
+	req := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
+	s.Equal(namespace, req.GetNamespace())
 }
 
 func TestDeleteOption(t *testing.T) {
