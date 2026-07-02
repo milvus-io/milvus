@@ -25,23 +25,25 @@ if [ ! -z "$1" ]; then
   timeout=$1
 fi
 
-if [ -z $(get_milvus_process) ]; then
+pids=$(get_milvus_process)
+if [ -z "$pids" ]; then
   echo "No milvus process"
   exit 0
 fi
-kill -15 $(get_milvus_process)
+kill -15 $pids
 
 start=$(date +%s)
 while :
 do
   sleep 1
-  if [ -z $(get_milvus_process) ]; then
+  pids=$(get_milvus_process)
+  if [ -z "$pids" ]; then
     echo "Milvus stopped"
     break
   fi
-  if [ $(( $(date +%s) - $start )) -gt $timeout ]; then
+  if [ $(( $(date +%s) - start )) -gt "$timeout" ]; then
     echo "Milvus timeout stopped"
-    kill -15 $(get_milvus_process)
+    kill -15 $pids
     break
   fi
 done
