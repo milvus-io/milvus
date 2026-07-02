@@ -440,6 +440,17 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         "kwargs, err_msg",
         [
             ({"group_by_field": "brand"}, "search_aggregation and group_by_field are mutually exclusive"),
+            pytest.param(
+                {"group_by_fields": ["brand"]},
+                "group_by_fields and search_aggregation cannot be used simultaneously",
+                marks=pytest.mark.xfail(
+                    reason=(
+                        "Milvus issue #50960: Python MilvusClient.search currently ignores group_by_fields "
+                        "kwargs, so the proxy conflict validation is not reached"
+                    ),
+                    strict=True,
+                ),
+            ),
             (
                 {"search_params": {"metric_type": "L2", "offset": 1}},
                 "offset is not supported with search_aggregation",
@@ -628,7 +639,6 @@ class TestSearchAggregation(TestMilvusClientV2Base):
             for hit in bucket.hits:
                 assert hit.fields.get(field_name) == key
 
-    @pytest.mark.xfail(reason="unstable: top_hits may not include NULL nullable metric rows", strict=False)
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_nullable_metric_field(self):
         """
@@ -1135,7 +1145,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported"}
         self.search(
             client,
             collection_name,
@@ -1162,7 +1172,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported"}
         self.search(
             client,
             collection_name,
@@ -1182,15 +1192,11 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason="search_aggregation top_hits.sort does not support dynamic fields yet",
-        strict=True,
-    )
     def test_search_aggregation_top_hits_sort_by_dynamic_field(self):
         """
-        target: verify top_hits.sort can use a dynamic scalar field.
-        method: make the nearest five rows have reverse dynamic_price values, then sort top_hits by dynamic_price asc.
-        expected: hits are ordered by dynamic_price rather than by vector distance.
+        target: verify top_hits.sort rejects dynamic scalar fields.
+        method: request top_hits sort by an inserted dynamic scalar field.
+        expected: request is rejected because JSON / dynamic top_hits sort is not supported yet.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1199,7 +1205,11 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
         query_vector = [0.0] * ct.default_dim
-        res, _ = self.search(
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "JSON / dynamic fields are not yet supported",
+        }
+        self.search(
             client,
             collection_name,
             data=[query_vector],
@@ -1212,24 +1222,19 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
                 size=1,
                 top_hits=TopHits(size=5, sort=[{dynamic_metric_field: "asc"}]),
             ),
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
-        assert len(res.agg_buckets) == 1
-        assert len(res.agg_buckets[0]) == 1
-        assert [hit.pk for hit in res.agg_buckets[0][0].hits] == [4, 3, 2, 1, 0]
         assert vectors[0] == query_vector
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason="Milvus issue #49842: count(JSON/dynamic field) silently drops search_aggregation metric",
-        strict=True,
-    )
     @pytest.mark.parametrize("metric_field", ["meta", "dynamic_brand"])
-    def test_search_aggregation_count_json_or_dynamic_metric_not_silent_missing(self, metric_field):
+    def test_search_aggregation_count_json_or_dynamic_metric_reject(self, metric_field):
         """
-        target: verify count(JSON/dynamic field) does not silently drop the metric result.
+        target: verify count(JSON/dynamic field) is explicitly rejected.
         method: aggregate by a static scalar field and compute count(meta) or count(dynamic_brand).
-        expected: metric alias is present, or the request is explicitly rejected before execution.
+        expected: request is rejected because JSON / dynamic metric fields are not supported yet.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1238,7 +1243,11 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
         metric_alias = "field_count"
-        res, _ = self.search(
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "JSON / dynamic fields are not yet supported",
+        }
+        self.search(
             client,
             collection_name,
             data=[vectors[0]],
@@ -1252,12 +1261,9 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
                 metrics={metric_alias: {"count": metric_field}},
                 order=[{metric_alias: "desc"}],
             ),
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
-
-        assert len(res.agg_buckets) == 1
-        for bucket in res.agg_buckets[0]:
-            assert metric_alias in bucket.metrics
-            assert bucket.metrics[metric_alias] == bucket.count
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_aggregation_reject_json_group_field(self):
@@ -1270,7 +1276,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         vectors, vector_field, _, json_field, _ = self._prepare_json_field_collection(client, collection_name)
 
-        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported"}
         self.search(
             client,
             collection_name,
@@ -1283,7 +1289,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
-        with pytest.raises(ParamError, match="does not yet support bracketed JSON path expressions"):
+        with pytest.raises(ParamError, match="bracketed JSON path expressions"):
             SearchAggregation(fields=[f"{json_field}['tag']"], size=2)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1301,7 +1307,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
 
         metric_error = {
             ct.err_code: 999,
-            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+            ct.err_msg: "JSON / dynamic fields are not yet supported",
         }
         self.search(
             client,
@@ -1321,7 +1327,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             check_items=metric_error,
         )
 
-        sort_error = {ct.err_code: 999, ct.err_msg: "top_hits.sort JSON path is not yet supported"}
+        sort_error = {ct.err_code: 999, ct.err_msg: "JSON path is not yet supported"}
         self.search(
             client,
             collection_name,
@@ -1416,15 +1422,11 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             assert hit.fields[brand_field] == growing_brand
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(
-        reason="Milvus issue #49841: search_iterator silently drops search_aggregation",
-        strict=True,
-    )
     def test_search_iterator_with_search_aggregation_not_silent_empty(self):
         """
-        target: verify search_iterator does not silently drop search_aggregation results.
+        target: verify search_iterator explicitly rejects search_aggregation.
         method: pass search_aggregation to MilvusClient.search_iterator.
-        expected: iterator either explicitly rejects search_aggregation or returns non-empty aggregation/search results.
+        expected: request is rejected instead of silently dropping search_aggregation.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1449,25 +1451,19 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         normal_iterator.close()
         assert len(normal_batch) > 0
 
-        try:
-            agg_iterator, _ = self.search_iterator(
-                client,
-                collection_name,
-                data=[vectors[0]],
-                batch_size=10,
-                limit=10,
-                search_params={"metric_type": "L2"},
-                output_fields=["id"],
-                search_aggregation=SearchAggregation(fields=["id"], size=2),
-            )
-        except ParamError as e:
-            err_msg = str(e)
-            assert "search_aggregation" in err_msg and "not support" in err_msg
-            return
-
-        agg_batch = agg_iterator.next()
-        agg_iterator.close()
-        assert len(agg_batch) > 0 or hasattr(agg_batch, "agg_buckets")
+        error = {ct.err_code: 999, ct.err_msg: "not supported with search_aggregation"}
+        self.search_iterator(
+            client,
+            collection_name,
+            data=[vectors[0]],
+            batch_size=10,
+            limit=10,
+            search_params={"metric_type": "L2"},
+            output_fields=["id"],
+            search_aggregation=SearchAggregation(fields=["id"], size=2),
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_struct_array_element_search_reject_non_primary_key_aggregation(self):
