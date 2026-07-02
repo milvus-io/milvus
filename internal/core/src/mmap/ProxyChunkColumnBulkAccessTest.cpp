@@ -194,8 +194,8 @@ TEST(ProxyChunkColumnBulkAccess, DISABLED_BenchPrimitiveValueAtRandomOffsets) {
     for (const auto& cfg : configs) {
         const int64_t kCount = cfg.count;
         const int kIters = cfg.iters;
-        auto setup = BuildInt64Group(
-            cfg.num_chunks, cfg.rows_per_chunk, cfg.num_fields);
+        auto setup =
+            BuildInt64Group(cfg.num_chunks, cfg.rows_per_chunk, cfg.num_fields);
         // Fresh offsets per iteration, as in production reduce — reusing
         // one offset set would keep the touched cache lines hot and hide
         // the random-access cost on large segments.
@@ -227,14 +227,12 @@ TEST(ProxyChunkColumnBulkAccess, DISABLED_BenchPrimitiveValueAtRandomOffsets) {
         volatile int64_t sink = dst[kCount / 2];
         (void)sink;
 
-        double ns_per_row =
-            static_cast<double>(elapsed) / (kIters * kCount);
+        double ns_per_row = static_cast<double>(elapsed) / (kIters * kCount);
         std::cout << "[bench] chunks=" << cfg.num_chunks
                   << " rows_per_chunk=" << cfg.rows_per_chunk
                   << " fields=" << cfg.num_fields << " count=" << kCount
                   << " iters=" << kIters << " -> " << ns_per_row
-                  << " ns/row, total "
-                  << (elapsed / 1e6) << " ms" << std::endl;
+                  << " ns/row, total " << (elapsed / 1e6) << " ms" << std::endl;
     }
 }
 
@@ -290,7 +288,7 @@ TEST(ProxyChunkColumnBulkAccess, DISABLED_BenchPrimitiveValueAtConcurrent) {
     double total_rows = static_cast<double>(kThreads) * kIters * kCount;
     std::cout << "[bench] concurrent threads=" << kThreads
               << " chunks=64 rows_per_chunk=65536 fields=8 count=" << kCount
-              << " iters=" << kIters << " -> "
-              << (elapsed / total_rows) << " ns/row aggregate, wall "
-              << (elapsed / 1e6) << " ms" << std::endl;
+              << " iters=" << kIters << " -> " << (elapsed / total_rows)
+              << " ns/row aggregate, wall " << (elapsed / 1e6) << " ms"
+              << std::endl;
 }

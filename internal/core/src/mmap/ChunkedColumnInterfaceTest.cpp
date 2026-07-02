@@ -432,7 +432,8 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
     EXPECT_TRUE(fx.fetched->empty());
 }
 
-TYPED_TEST(ChunkedColumnInterfaceTest, BulkIsValidNonNullableInvokesOncePerRow) {
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BulkIsValidNonNullableInvokesOncePerRow) {
     ColumnSpec spec{{5, 3, 4}, {}, /*nullable=*/false};
     auto fx = TypeParam::Create(spec);
 

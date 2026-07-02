@@ -672,9 +672,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             count,
             [&](Chunk* chunk, int64_t offset_in_chunk, size_t row) {
                 auto valid = chunk->isValid(offset_in_chunk);
-                auto str_view =
-                    static_cast<StringChunk*>(chunk)->operator[](
-                        offset_in_chunk);
+                auto str_view = static_cast<StringChunk*>(chunk)->operator[](
+                    offset_in_chunk);
                 fn(Json(str_view.data(), str_view.size()), row, valid);
             });
     }
