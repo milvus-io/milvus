@@ -23,7 +23,41 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 )
+
+const forceMergeTestGiB = 1024 * 1024 * 1024
+
+func forceMergeSizeGB(size float64) float64 {
+	return size * float64(forceMergeTestGiB)
+}
+
+func newForceMergeTestSegmentsGB(sizes []float64) []*SegmentView {
+	segments := make([]*SegmentView, 0, len(sizes))
+	for i, size := range sizes {
+		id := int64(i + 1)
+		segments = append(segments, &SegmentView{
+			ID:       id,
+			Size:     forceMergeSizeGB(size),
+			startPos: &msgpb.MsgPosition{Timestamp: uint64(i + 1)},
+			dmlPos:   &msgpb.MsgPosition{Timestamp: uint64(i + 101)},
+		})
+	}
+	return segments
+}
+
+func forceMergeTestGroupIDs(groups [][]*SegmentView) [][]int64 {
+	ids := make([][]int64, 0, len(groups))
+	for _, group := range groups {
+		groupIDs := make([]int64, 0, len(group))
+		for _, segment := range group {
+			groupIDs = append(groupIDs, segment.ID)
+		}
+		ids = append(ids, groupIDs)
+	}
+	return ids
+}
 
 func TestForceMergeSegmentView_GetGroupLabel(t *testing.T) {
 	label := &CompactionGroupLabel{
@@ -398,6 +432,116 @@ func TestAdaptiveGroupSegments(t *testing.T) {
 		assert.NotNil(t, groups)
 		assert.Greater(t, len(groups), 0)
 	})
+}
+
+func TestAdaptiveGroupSegments_BoundedForceMergeCut(t *testing.T) {
+	t.Run("production sized input does not collapse into one task", func(t *testing.T) {
+		targetSize := forceMergeSizeGB(4)
+		segments := newForceMergeTestSegmentsGB([]float64{
+			2.40, 2.51, 2.62, 2.73, 2.84, 2.95,
+			2.36, 2.47, 2.58, 2.69, 2.80, 2.91,
+			2.22, 2.33, 2.44, 2.55, 2.66, 2.77,
+			2.88, 2.99, 2.91,
+		})
+
+		groups := adaptiveGroupSegments(segments, targetSize)
+
+		assert.Greater(t, len(groups), 1)
+		assert.InDelta(t, forceMergeSizeGB(55.61), sumSegmentSize(segments), forceMergeSizeGB(0.001))
+		for _, group := range groups {
+			groupSize := sumSegmentSize(group)
+			assert.Less(t, groupSize, sumSegmentSize(segments))
+			if len(group) > 1 {
+				assert.LessOrEqual(t, groupSize, 3*targetSize)
+			}
+		}
+	})
+
+	t.Run("ties pick the two target ceiling for more parallel tasks", func(t *testing.T) {
+		targetSize := forceMergeSizeGB(10)
+		segments := newForceMergeTestSegmentsGB([]float64{1, 6, 15})
+
+		groups := adaptiveGroupSegments(segments, targetSize)
+
+		assert.Equal(t, [][]int64{{1, 2}, {3}}, forceMergeTestGroupIDs(groups))
+	})
+
+	t.Run("two target ceiling can win on fewer planned outputs", func(t *testing.T) {
+		targetSize := forceMergeSizeGB(10)
+		segments := newForceMergeTestSegmentsGB([]float64{3, 8, 8, 13})
+
+		groups := adaptiveGroupSegments(segments, targetSize)
+
+		assert.Equal(t, [][]int64{{1, 2, 3}, {4}}, forceMergeTestGroupIDs(groups))
+	})
+
+	t.Run("three target ceiling wins when it produces fewer planned outputs", func(t *testing.T) {
+		targetSize := forceMergeSizeGB(10)
+		segments := newForceMergeTestSegmentsGB([]float64{1, 11, 11})
+
+		groups := adaptiveGroupSegments(segments, targetSize)
+
+		assert.Equal(t, [][]int64{{1, 2, 3}}, forceMergeTestGroupIDs(groups))
+	})
+
+	t.Run("singleton larger than ceiling remains eligible", func(t *testing.T) {
+		targetSize := forceMergeSizeGB(10)
+		segments := newForceMergeTestSegmentsGB([]float64{35, 1, 6})
+
+		groups := adaptiveGroupSegments(segments, targetSize)
+
+		assert.Equal(t, [][]int64{{1}, {2, 3}}, forceMergeTestGroupIDs(groups))
+	})
+}
+
+func TestAdaptiveGroupSegments_DeterministicOrder(t *testing.T) {
+	targetSize := forceMergeSizeGB(10)
+	ordered := newForceMergeTestSegmentsGB([]float64{1, 6, 15})
+	shuffled := []*SegmentView{ordered[2], ordered[0], ordered[1]}
+
+	orderedGroups := adaptiveGroupSegments(ordered, targetSize)
+	shuffledGroups := adaptiveGroupSegments(shuffled, targetSize)
+
+	assert.Equal(t, [][]int64{{1, 2}, {3}}, forceMergeTestGroupIDs(orderedGroups))
+	assert.Equal(t, forceMergeTestGroupIDs(orderedGroups), forceMergeTestGroupIDs(shuffledGroups))
+}
+
+func TestForceMergeSegmentView_ForceTriggerAllUsesBoundedCut(t *testing.T) {
+	targetSize := forceMergeSizeGB(4)
+	segments := newForceMergeTestSegmentsGB([]float64{
+		2.40, 2.51, 2.62, 2.73, 2.84, 2.95,
+		2.36, 2.47, 2.58, 2.69, 2.80, 2.91,
+		2.22, 2.33, 2.44, 2.55, 2.66, 2.77,
+		2.88, 2.99, 2.91,
+	})
+	view := &ForceMergeSegmentView{
+		label: &CompactionGroupLabel{
+			CollectionID: 1,
+			PartitionID:  10,
+			Channel:      "ch1",
+		},
+		segments:           segments,
+		triggerID:          100,
+		configMaxSize:      forceMergeSizeGB(1),
+		expectedTargetSize: targetSize,
+		topology: &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{1: 64 * forceMergeTestGiB},
+			DataNodeMemory:  map[int64]uint64{1: 64 * forceMergeTestGiB},
+		},
+	}
+
+	views, reason := view.ForceTriggerAll()
+
+	assert.Equal(t, "force merge trigger", reason)
+	assert.Greater(t, len(views), 1)
+	for _, compactionView := range views {
+		forceMergeView := compactionView.(*ForceMergeSegmentView)
+		assert.Equal(t, targetSize, forceMergeView.GetTargetSegmentSize())
+		assert.Equal(t, estimateResultSegmentCount(forceMergeView.GetTotalSize(), targetSize), forceMergeView.GetTargetSegmentCount())
+		if len(forceMergeView.GetSegmentsView()) > 1 {
+			assert.LessOrEqual(t, forceMergeView.GetTotalSize(), 3*targetSize)
+		}
+	}
 }
 
 func TestLargerGroupingSegments(t *testing.T) {
