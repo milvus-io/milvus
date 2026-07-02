@@ -1231,7 +1231,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		})
 		return nil, err
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	req.ExprTemplateValues, err = generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	c.Set(ContextRequest, req)
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
@@ -1355,7 +1359,11 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	req.ExprTemplateValues, err = generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	c.Set(ContextRequest, req)
 	if req.Expr == "" {
 		body, _ := c.Get(gin.BodyBytesKey)
@@ -1814,7 +1822,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.SearchParams = searchParams
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	req.ExprTemplateValues, err = generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
@@ -1987,7 +1999,11 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			PartitionNames: httpReq.PartitionNames,
 			SearchParams:   searchParams,
 		}
-		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
+		searchReq.ExprTemplateValues, err = generateExpressionTemplate(subReq.ExprParams)
+		if err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
 		req.Requests = append(req.Requests, searchReq)
 	}
 
