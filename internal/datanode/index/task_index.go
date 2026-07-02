@@ -247,8 +247,9 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	case schemapb.DataType_ArrayOfVector:
 		fieldDataSize = getFieldDataSizeFromBinlogs(it.req.GetInsertLogs(), it.req.GetField().GetFieldID())
 	}
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize)); err != nil {
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) ||
+		vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexType) {
+		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize), it.req.GetField().GetDataType()); err != nil {
 			log.Warn(ctx, "failed to fill disk index params", mlog.Err(err))
 			return err
 		}

@@ -68,6 +68,7 @@ const (
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 	IndexHNSW            = "HNSW"
 	IndexSparseWand      = "SPARSE_WAND"
+	IndexDISKANN         = "DISKANN"
 
 	nlist               = 100
 	m                   = 4
@@ -85,8 +86,7 @@ const (
 	DefaultDim        = 128
 	defaultMetricType = metric.L2
 
-	dimKey = common.DimKey
-
+	dimKey              = common.DimKey
 	defaultLocalStorage = "/tmp/milvus_test/querynode"
 )
 

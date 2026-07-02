@@ -215,8 +215,8 @@ func isMvSupported(indexType string) bool {
 	return vecindexmgr.GetVecIndexMgrInstance().IsMvSupported(indexType)
 }
 
-func isDiskANNIndex(indexType string) bool {
-	return vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType)
+func isDiskIndex(indexType string) bool {
+	return vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) || vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexType)
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {
