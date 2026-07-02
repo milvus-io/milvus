@@ -591,6 +591,20 @@ type taskScheduler struct {
 
 	segmentTaskDelta *SegmentTaskDelta
 	channelTaskDelta *ChannelTaskDelta
+
+	// segmentLoadFailures remembers, per (replica, segment), how often loading
+	// failed and when it failed last, so preAdd can hold off recreating the
+	// same load task every checker round while the failure persists (e.g.
+	// object-storage throttling — observed in production as thousands of load
+	// tasks per minute for a handful of segments). Retries stay fast: the gap
+	// starts at one interval and doubles up to the max; a successful load
+	// drops the record.
+	segmentLoadFailures *ConcurrentMap[replicaSegmentIndex, *loadFailureRecord]
+}
+
+type loadFailureRecord struct {
+	failures    int
+	lastFailure time.Time
 }
 
 func NewScheduler(ctx context.Context,
@@ -625,7 +639,55 @@ func NewScheduler(ctx context.Context,
 		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
 		segmentTaskDelta: NewSegmentTaskDelta(),
 		channelTaskDelta: NewChannelTaskDelta(),
+
+		segmentLoadFailures: NewConcurrentMap[replicaSegmentIndex, *loadFailureRecord](),
 	}
+}
+
+// recordSegmentLoadFailure bumps the failure count for the segment and stamps
+// the failure time.
+func (scheduler *taskScheduler) recordSegmentLoadFailure(index replicaSegmentIndex) {
+	failures := 1
+	if old, ok := scheduler.segmentLoadFailures.Get(index); ok {
+		failures = old.failures + 1
+	}
+	scheduler.segmentLoadFailures.Insert(index, &loadFailureRecord{
+		failures:    failures,
+		lastFailure: time.Now(),
+	})
+}
+
+// segmentLoadBackoff returns how much longer a new load task for the segment
+// should wait after previous failures, or 0 when it may proceed. The wait is
+// interval * 2^(failures-1) since the last failure, capped at maxInterval, so
+// the first retry stays fast and only persistent failures slow down. Records
+// far past their window are dropped.
+func (scheduler *taskScheduler) segmentLoadBackoff(index replicaSegmentIndex) time.Duration {
+	record, ok := scheduler.segmentLoadFailures.Get(index)
+	if !ok {
+		return 0
+	}
+	interval := paramtable.Get().QueryCoordCfg.SegmentLoadRetryBackoffInterval.GetAsDuration(time.Second)
+	if interval <= 0 {
+		return 0
+	}
+	maxInterval := paramtable.Get().QueryCoordCfg.SegmentLoadRetryBackoffMaxInterval.GetAsDuration(time.Second)
+	if shift := record.failures - 1; shift < 30 {
+		interval <<= shift
+	} else {
+		interval = maxInterval
+	}
+	if maxInterval > 0 && interval > maxInterval {
+		interval = maxInterval
+	}
+	elapsed := time.Since(record.lastFailure)
+	if elapsed >= interval {
+		if maxInterval > 0 && elapsed > 2*maxInterval {
+			scheduler.segmentLoadFailures.Remove(index)
+		}
+		return 0
+	}
+	return interval - elapsed
 }
 
 func (scheduler *taskScheduler) Start() {}
@@ -791,6 +853,14 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 
 		taskType := GetTaskType(task)
+
+		if taskType == TaskTypeGrow {
+			// hold off recreating a load task that just failed; the checker
+			// will pick the segment up again once the wait elapses
+			if wait := scheduler.segmentLoadBackoff(index); wait > 0 {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("segment load failed recently, backing off for %v", wait))
+			}
+		}
 
 		if taskType == TaskTypeMove {
 			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
@@ -1326,6 +1396,19 @@ func (scheduler *taskScheduler) remove(task Task) {
 			task.Err() != nil &&
 			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {
 			scheduler.recordSegmentTaskError(task)
+		}
+		if GetTaskType(task) == TaskTypeGrow {
+			switch task.Status() {
+			case TaskStatusFailed:
+				// a segment that vanished from the target is not a load
+				// failure — the ErrSegmentNotFound branch above already
+				// forces a target update and the segment won't come back
+				if !errors.Is(task.Err(), merr.ErrSegmentNotFound) {
+					scheduler.recordSegmentLoadFailure(index)
+				}
+			case TaskStatusSucceeded:
+				scheduler.segmentLoadFailures.Remove(index)
+			}
 		}
 
 	case *ChannelTask:
