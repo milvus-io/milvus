@@ -19,6 +19,7 @@ use lindera_dictionary::viterbi::Lattice;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
 use crate::analyzer::filter::get_string_list;
+use crate::analyzer::options::{get_lindera_download_url, get_options, DEFAULT_DICT_PATH_KEY};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 /// Segmenter
@@ -119,8 +120,6 @@ pub struct LinderaTokenStream<'a> {
 }
 
 const DICTKINDKEY: &str = "dict_kind";
-const DICTBUILDDIRKEY: &str = "dict_build_dir";
-const DICTDOWNLOADURLKEY: &str = "download_urls";
 const FILTERKEY: &str = "filter";
 
 impl<'a> TokenStream for LinderaTokenStream<'a> {
@@ -175,8 +174,8 @@ impl LinderaTokenizer {
         let kind: DictionaryKind = fetch_lindera_kind(params)?;
 
         // for download dict online
-        let build_dir = fetch_dict_build_dir(params)?;
-        let download_urls = fetch_dict_download_urls(params)?;
+        let build_dir = fetch_dict_build_dir()?;
+        let download_urls = get_lindera_download_url(kind.as_str()).unwrap_or(vec![]);
 
         let dictionary = load_dictionary_from_kind(&kind, build_dir, download_urls)?;
 
@@ -278,21 +277,13 @@ fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<Diction
         .into_dict_kind()
 }
 
-fn fetch_dict_build_dir(params: &json::Map<String, json::Value>) -> Result<String> {
-    params
-        .get(DICTBUILDDIRKEY)
-        .map_or(Ok("/var/lib/milvus/dict/lindera".to_string()), |v| {
-            v.as_str()
-                .ok_or(TantivyBindingError::InvalidArgument(format!(
-                    "dict build dir must be string"
-                )))
-                .map(|s| s.to_string())
-        })
-}
-
-fn fetch_dict_download_urls(params: &json::Map<String, json::Value>) -> Result<Vec<String>> {
-    params.get(DICTDOWNLOADURLKEY).map_or(Ok(vec![]), |v| {
-        get_string_list(v, "lindera dict download urls")
+fn fetch_dict_build_dir() -> Result<String> {
+    get_options(DEFAULT_DICT_PATH_KEY).map_or(Ok("/var/lib/milvus/dict/lindera".to_string()), |v| {
+        v.as_str()
+            .ok_or(TantivyBindingError::InvalidArgument(format!(
+                "dict build dir must be string"
+            )))
+            .map(|s| format!("{}/{}", s, "lindera").to_string())
     })
 }
 

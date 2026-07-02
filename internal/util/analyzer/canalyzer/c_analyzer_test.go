@@ -173,70 +173,23 @@ func TestValidateAnalyzer(t *testing.T) {
 	}
 }
 
-func TestCheckAndFillParams(t *testing.T) {
-	paramtable.Init()
-	paramtable.Get().SaveGroup(map[string]string{"function.analyzer.lindera.download_urls.ipadic": "/test/url"})
+func TestBuildRuntimeOptions(t *testing.T) {
+	params := paramtable.Get()
+	localResourcePath := "/tmp/milvus-analyzer-test"
+	urlKey := "function.analyzer.lindera.download_urls.ipadic"
+	require.NoError(t, params.Save(params.FunctionCfg.LocalResourcePath.Key, localResourcePath))
+	require.NoError(t, params.SaveGroup(map[string]string{urlKey: "http://a.test/ipadic.tar.gz, http://b.test/ipadic.tar.gz"}))
+	defer params.Reset(params.FunctionCfg.LocalResourcePath.Key)
+	defer params.Reset(urlKey)
 
-	// normal case
-	{
-		m := "{\"tokenizer\": {\"type\":\"jieba\"}}"
-		_, err := CheckAndFillParams(m)
-		assert.NoError(t, err)
-	}
-
-	// fill lindera tokenizer download urls and dict local path
-	{
-		m := "{\"tokenizer\": {\"type\":\"lindera\", \"dict_kind\": \"ipadic\"}}"
-		_, err := CheckAndFillParams(m)
-		assert.NoError(t, err)
-	}
-
-	// error with wrong json
-	{
-		m := "{invalid json"
-		_, err := CheckAndFillParams(m)
-		assert.Error(t, err)
-	}
-
-	// skip if use default analyzer
-	{
-		m := "{}"
-		_, err := CheckAndFillParams(m)
-		assert.NoError(t, err)
-	}
-
-	// error tokenizer without type
-	{
-		m := "{\"tokenizer\": {\"dict_kind\": \"ipadic\"}}"
-		_, err := CheckAndFillParams(m)
-		assert.Error(t, err)
-	}
-
-	// error tokenizer type not string
-	{
-		m := "{\"tokenizer\": {\"type\": 1, \"dict_kind\": \"ipadic\"}}"
-		_, err := CheckAndFillParams(m)
-		assert.Error(t, err)
-	}
-
-	// error tokenizer params type
-	{
-		m := "{\"tokenizer\": 1}"
-		_, err := CheckAndFillParams(m)
-		assert.Error(t, err)
-	}
-
-	// error set dict_build_dir by user
-	{
-		m := "{\"tokenizer\": {\"type\": \"lindera\", \"dict_kind\": \"ipadic\", \"dict_build_dir\": \"/tmp/milvus\"}}"
-		_, err := CheckAndFillParams(m)
-		assert.Error(t, err)
-	}
-
-	// error lindera kind not set
-	{
-		m := "{\"tokenizer\": {\"type\": \"lindera\"}}"
-		_, err := CheckAndFillParams(m)
-		assert.Error(t, err)
-	}
+	options := BuildRuntimeOptions()
+	assert.Equal(t, localResourcePath, options[DefaultDictPathKey])
+	assert.Equal(t,
+		map[string][]string{"ipadic": {"http://a.test/ipadic.tar.gz", "http://b.test/ipadic.tar.gz"}},
+		options[LinderaDictURLKey],
+	)
+	assert.Equal(t,
+		map[string][]string{"ipadic": {"http://a.test/ipadic.tar.gz"}},
+		buildLinderaDownloadURLs(map[string]string{".ipadic": "http://a.test/ipadic.tar.gz"}),
+	)
 }

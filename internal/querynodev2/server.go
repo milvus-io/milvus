@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -333,6 +334,11 @@ func (node *QueryNode) Init() error {
 		}
 
 		node.factory.Init(paramtable.Get())
+		if err := analyzer.InitOptions(); err != nil {
+			log.Error("QueryNode init analyzer options failed", zap.Error(err))
+			initError = err
+			return
+		}
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 		localUsedSize, err := segcore.GetLocalUsedSize(localRootPath)
