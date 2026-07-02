@@ -1550,6 +1550,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::mutex reopen_mutex_;
 
     SchemaPtr schema_;
+    std::atomic<uint64_t> schema_version_;
     int64_t id_;
     // commit_ts_ is set for import segments to prevent rows with old historical
     // timestamps from being visible to queries before T_commit.
