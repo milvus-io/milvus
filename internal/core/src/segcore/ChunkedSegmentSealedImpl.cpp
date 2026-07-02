@@ -1852,7 +1852,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
                     return iter;
                 });
             auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells(nullptr, {0}));
+                SemiInlineGet(field_index_iter->second->PinCells(op_ctx, {0}));
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "
@@ -2421,8 +2421,10 @@ ChunkedSegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
 }
 
 void
-ChunkedSegmentSealedImpl::search_ids(BitsetType& bitset,
+ChunkedSegmentSealedImpl::search_ids(milvus::OpContext* op_ctx,
+                                     BitsetType& bitset,
                                      const IdArray& id_array) const {
+    (void)op_ctx;
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);

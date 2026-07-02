@@ -519,7 +519,9 @@ class SegmentInternalInterface : public SegmentInterface {
      * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
     virtual void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
+    search_ids(milvus::OpContext* op_ctx,
+               BitsetType& bitset,
+               const IdArray& id_array) const = 0;
 
     /**
      * Apply timestamp filtering on bitset, the query can't see an entity whose

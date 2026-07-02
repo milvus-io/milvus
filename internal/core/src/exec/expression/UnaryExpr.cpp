@@ -1720,12 +1720,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func = [expr_type, val](const SkipIndex& skip_index,
-                                            FieldId field_id,
-                                            int64_t chunk_id) {
-        return skip_index.CanSkipUnaryRange<T>(
-            field_id, chunk_id, expr_type, val);
-    };
+    auto skip_index_func =
+        [op_ctx = op_ctx_, expr_type, val](
+            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
+            return skip_index.CanSkipUnaryRange<T>(
+                op_ctx, field_id, chunk_id, expr_type, val);
+        };
 
     int64_t processed_size;
     if (has_offset_input_) {
