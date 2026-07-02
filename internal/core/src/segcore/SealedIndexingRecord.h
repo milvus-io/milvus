@@ -20,6 +20,8 @@
 
 #include "common/Types.h"
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
+#include "cachinglayer/Utils.h"
 #include "index/Index.h"
 #include "index/VectorIndex.h"
 
@@ -67,6 +69,23 @@ struct SealedIndexingRecord {
     is_ready(FieldId field_id) const {
         std::shared_lock lck(mutex_);
         return field_indexings_.count(field_id);
+    }
+
+    bool
+    prewarm(FieldId field_id, milvus::OpContext* op_ctx) const {
+        index::CacheIndexBasePtr indexing;
+        {
+            std::shared_lock lck(mutex_);
+            auto it = field_indexings_.find(field_id);
+            if (it == field_indexings_.end() || !it->second ||
+                !it->second->indexing_) {
+                return false;
+            }
+            indexing = it->second->indexing_;
+        }
+        auto ca = SemiInlineGet(indexing->PinCells(op_ctx, {0}));
+        (void)ca;
+        return true;
     }
 
     void
