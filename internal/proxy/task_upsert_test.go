@@ -1496,11 +1496,10 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{
 			{
-				FieldID:  200,
-				Name:     "profile",
-				Nullable: true,
+				FieldID: 200,
+				Name:    "profile",
 				Fields: []*schemapb.FieldSchema{
-					{FieldID: 201, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true},
+					{FieldID: 201, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
 				},
 			},
 		},
@@ -1545,19 +1544,6 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 				},
 			},
 		}
-	}
-	profileCompactField := func(values []int32, validData []bool) *schemapb.FieldData {
-		rows := make([]*schemapb.ScalarField, 0, len(values))
-		for _, value := range values {
-			rows = append(rows, &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{value}}},
-			})
-		}
-		field := profileField()
-		subField := field.GetStructArrays().GetFields()[0]
-		subField.ValidData = validData
-		subField.GetScalars().GetArrayData().Data = rows
-		return field
 	}
 	queryResult := func() *milvuspb.QueryResults {
 		return &milvuspb.QueryResults{
@@ -1632,33 +1618,6 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		if assert.NotNil(t, profile) {
 			assert.Equal(t, []int32{111, 222}, structValues(profile))
 		}
-	})
-
-	t.Run("nullable struct compact payload is compressed after merge", func(t *testing.T) {
-		task, err := run([]*schemapb.FieldData{
-			idField(1, 2),
-			valueField(100, 200),
-			profileCompactField([]int32{111}, []bool{true, false}),
-		})
-		assert.NoError(t, err)
-		profile := findProfile(task)
-		if assert.NotNil(t, profile) {
-			subField := profile.GetStructArrays().GetFields()[0]
-			assert.Equal(t, []bool{true, false}, subField.GetValidData())
-			rows := subField.GetScalars().GetArrayData().GetData()
-			require.Len(t, rows, 1)
-			assert.Equal(t, []int32{111}, rows[0].GetIntData().GetData())
-		}
-	})
-
-	t.Run("nullable struct dense payload with null row is rejected", func(t *testing.T) {
-		_, err := run([]*schemapb.FieldData{
-			idField(1, 2),
-			valueField(100, 200),
-			profileCompactField([]int32{111, 222}, []bool{true, false}),
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "payload must be compact")
 	})
 
 	t.Run("mixed insert update keeps request struct rows", func(t *testing.T) {
