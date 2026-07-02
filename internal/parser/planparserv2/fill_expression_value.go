@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"fmt"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -258,8 +259,9 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			lDataType = expr.GetColumnInfo().GetElementType()
 		}
 
-		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(),
-			rDataType, schemapb.DataType_None); err != nil {
+		leftField := arithField{dataType: expr.GetColumnInfo().GetDataType(), elementType: expr.GetColumnInfo().GetElementType(), name: fmt.Sprintf("field(id=%d)", expr.GetColumnInfo().GetFieldId())}
+		rightField := arithField{dataType: rDataType, elementType: schemapb.DataType_None, name: "right operand"}
+		if err = checkValidModArith(expr.GetArithOp(), leftField, rightField); err != nil {
 			return err
 		}
 

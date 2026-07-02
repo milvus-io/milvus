@@ -1380,6 +1380,28 @@ func TestExpr_BitwiseArith(t *testing.T) {
 	}
 }
 
+func TestExpr_TypeMismatchErrorMessages(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	t.Run("bitwise AND on Double field reports field name and type", func(t *testing.T) {
+		_, err := ParseExpr(helper, "(DoubleField & 4) == 4", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "DoubleField")
+		assert.Contains(t, err.Error(), "Double")
+		assert.Contains(t, err.Error(), "bitwise operators require an integer field")
+	})
+
+	t.Run("modulo on Float field reports field name and type", func(t *testing.T) {
+		_, err := ParseExpr(helper, "FloatField % 2 == 0", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "FloatField")
+		assert.Contains(t, err.Error(), "Float")
+		assert.Contains(t, err.Error(), "modulo requires an integer field")
+	})
+}
+
 func TestExpr_Value(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

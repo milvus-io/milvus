@@ -1177,7 +1177,10 @@ func Test_canArithmetic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := canArithmetic(tt.left, tt.leftElement, tt.right, tt.rightElement, tt.reverse)
+			err := canArithmetic(
+				arithField{dataType: tt.left, elementType: tt.leftElement, name: "left_field"},
+				arithField{dataType: tt.right, elementType: tt.rightElement, name: "right_field"},
+				tt.reverse)
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {
@@ -1192,31 +1195,36 @@ func Test_canArithmetic(t *testing.T) {
 func Test_checkValidModArith(t *testing.T) {
 	t.Run("mod with integers is valid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
-			schemapb.DataType_Int64, schemapb.DataType_None,
-			schemapb.DataType_Int64, schemapb.DataType_None)
+			arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "left_field"},
+			arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "right_field"})
 		assert.NoError(t, err)
 	})
 
 	t.Run("mod with float left is invalid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
-			schemapb.DataType_Float, schemapb.DataType_None,
-			schemapb.DataType_Int64, schemapb.DataType_None)
+			arithField{dataType: schemapb.DataType_Float, elementType: schemapb.DataType_None, name: "price"},
+			arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "right_field"})
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
+		assert.Contains(t, err.Error(), "modulo requires an integer field")
+		assert.Contains(t, err.Error(), "price")
+		assert.Contains(t, err.Error(), "Float")
 	})
 
 	t.Run("mod with float right is invalid", func(t *testing.T) {
 		err := checkValidModArith(planpb.ArithOpType_Mod,
-			schemapb.DataType_Int64, schemapb.DataType_None,
-			schemapb.DataType_Float, schemapb.DataType_None)
+			arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "left_field"},
+			arithField{dataType: schemapb.DataType_Float, elementType: schemapb.DataType_None, name: "price"})
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo requires an integer field")
+		assert.Contains(t, err.Error(), "price")
+		assert.Contains(t, err.Error(), "Float")
 	})
 
 	t.Run("add operation is always valid", func(t *testing.T) {
 		// Non-mod operations should not be validated by this function
 		err := checkValidModArith(planpb.ArithOpType_Add,
-			schemapb.DataType_Float, schemapb.DataType_None,
-			schemapb.DataType_Float, schemapb.DataType_None)
+			arithField{dataType: schemapb.DataType_Float, elementType: schemapb.DataType_None, name: "left_field"},
+			arithField{dataType: schemapb.DataType_Float, elementType: schemapb.DataType_None, name: "right_field"})
 		assert.NoError(t, err)
 	})
 }
@@ -1233,32 +1241,36 @@ func Test_checkValidBitwiseArith(t *testing.T) {
 		op := op
 		t.Run(op.String()+" with integers is valid", func(t *testing.T) {
 			err := checkValidModArith(op,
-				schemapb.DataType_Int64, schemapb.DataType_None,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "left_field"},
+				arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "right_field"})
 			assert.NoError(t, err)
 		})
 
 		t.Run(op.String()+" with integer array element is valid", func(t *testing.T) {
 			err := checkValidModArith(op,
-				schemapb.DataType_Array, schemapb.DataType_Int32,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				arithField{dataType: schemapb.DataType_Array, elementType: schemapb.DataType_Int32, name: "arr_field"},
+				arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "right_field"})
 			assert.NoError(t, err)
 		})
 
 		t.Run(op.String()+" with float left is invalid", func(t *testing.T) {
 			err := checkValidModArith(op,
-				schemapb.DataType_Float, schemapb.DataType_None,
-				schemapb.DataType_Int64, schemapb.DataType_None)
+				arithField{dataType: schemapb.DataType_Float, elementType: schemapb.DataType_None, name: "price"},
+				arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "right_field"})
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
+			assert.Contains(t, err.Error(), "bitwise operators require an integer field")
+			assert.Contains(t, err.Error(), "price")
+			assert.Contains(t, err.Error(), "Float")
 		})
 
 		t.Run(op.String()+" with double right is invalid", func(t *testing.T) {
 			err := checkValidModArith(op,
-				schemapb.DataType_Int64, schemapb.DataType_None,
-				schemapb.DataType_Double, schemapb.DataType_None)
+				arithField{dataType: schemapb.DataType_Int64, elementType: schemapb.DataType_None, name: "left_field"},
+				arithField{dataType: schemapb.DataType_Double, elementType: schemapb.DataType_None, name: "score"})
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
+			assert.Contains(t, err.Error(), "bitwise operators require an integer field")
+			assert.Contains(t, err.Error(), "score")
+			assert.Contains(t, err.Error(), "Double")
 		})
 	}
 }
