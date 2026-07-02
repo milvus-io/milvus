@@ -41,6 +41,11 @@ type SealedSegment interface {
 	DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error
 
 	Reopen(ctx context.Context, request *ReopenRequest) error
+
+	// UpdateIndexMeta replaces the segment's collection-level index meta if version
+	// is newer than the last applied one (monotonic). indexMetaBlob is a marshalled
+	// segcorepb.CollectionIndexMeta.
+	UpdateIndexMeta(indexMetaBlob []byte, version uint64) error
 }
 
 // basicSegmentMethodSet is the basic method set of a segment.

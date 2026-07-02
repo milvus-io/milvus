@@ -104,6 +104,20 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 		}
 	}
 
+	for _, iu := range nodeMsg.indexUpdates {
+		if iu.fieldIndex == nil {
+			continue
+		}
+		ctx := context.TODO()
+		if err := dNode.delegator.UpdateIndex(ctx, iu.fieldIndex, iu.barrierTs); err != nil {
+			mlog.Warn(ctx, "failed to update index in delete node",
+				mlog.Int64("collectionID", dNode.collectionID),
+				mlog.String("channel", dNode.channel),
+				mlog.Uint64("indexBarrierTs", iu.barrierTs),
+				mlog.Err(err))
+		}
+	}
+
 	// update tSafe
 	dNode.delegator.UpdateTSafe(nodeMsg.timeRange.timestampMax)
 	return nil

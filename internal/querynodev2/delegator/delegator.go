@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -83,6 +84,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	UpdateIndex(ctx context.Context, fieldIndex *indexpb.FieldIndex, indexBarrierTs uint64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -1203,6 +1205,63 @@ func (sd *shardDelegator) GetTSafe() uint64 {
 // CatchingUpStreamingData returns true if delegator is still catching up with streaming data.
 func (sd *shardDelegator) CatchingUpStreamingData() bool {
 	return sd.catchingUpStreamingData.Load()
+}
+
+// UpdateIndex fans a single-index add (from a CreateIndex WAL event) out to every
+// worker holding this shard's segments, so each node merges it into its collection
+// index meta and each segment's col_index_meta_ (see QueryNode.UpdateIndex). Purely
+// control-plane; monotonicity by index_barrier_ts is enforced per-node in
+// collectionManager.UpdateIndex.
+func (sd *shardDelegator) UpdateIndex(ctx context.Context, fieldIndex *indexpb.FieldIndex, indexBarrierTs uint64) error {
+	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	if fieldIndex.GetIndexInfo() == nil {
+		return nil
+	}
+	mlog.Info(ctx, "delegator received update index event",
+		mlog.Int64("fieldID", fieldIndex.GetIndexInfo().GetFieldID()),
+		mlog.Uint64("indexBarrierTs", indexBarrierTs),
+	)
+
+	req := &querypb.UpdateIndexRequest{
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+		CollectionID: sd.collectionID,
+		Action: &querypb.UpdateIndexRequest_Action{
+			Op: &querypb.UpdateIndexRequest_Action_AddIndexRequest{
+				AddIndexRequest: &querypb.UpdateIndexRequest_AddIndex{
+					IndexInfo: fieldIndex.GetIndexInfo(),
+				},
+			},
+		},
+		IndexBarrierTs: indexBarrierTs,
+	}
+
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
+	defer sd.distribution.Unpin(version)
+
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, false,
+		func(req *querypb.UpdateIndexRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateIndexRequest {
+			nodeReq := typeutil.Clone(req)
+			nodeReq.GetBase().TargetID = targetID
+			return nodeReq
+		})
+	if err != nil {
+		return err
+	}
+
+	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateIndexRequest, worker cluster.Worker) (*StatusWrapper, error) {
+		// Index-meta apply has no query-time self-heal, so retry transient worker
+		// errors a few times; a persistent failure falls back to the load-path
+		// (PutOrRef) reconcile when the segment next (re)loads.
+		ctx = retry.WithMaxAttemptsContext(ctx, 3)
+		status, err := worker.UpdateIndex(ctx, req)
+		return (*StatusWrapper)(status), err
+	}, "UpdateIndex", log)
+	return err
 }
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {

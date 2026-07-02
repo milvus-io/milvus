@@ -1049,6 +1049,10 @@ message UpdateIndexRequest {
         }
     }
     Action action = 3;
+    // index_barrier_ts is the WAL BeginTs of the CreateIndex message; it is a
+    // monotonic apply cursor so a stale (older-ts) index update is skipped after a
+    // newer one has been applied (mirrors UpdateSchemaRequest.schema_barrier_ts).
+    uint64 index_barrier_ts = 4;
 }
 
 message RunAnalyzerRequest{

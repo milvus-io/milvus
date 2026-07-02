@@ -249,6 +249,12 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info);
 
 CStatus
+UpdateSegmentIndexMeta(CSegmentInterface c_segment,
+                       const uint8_t* index_meta_blob,
+                       const int64_t blob_size,
+                       const uint64_t version);
+
+CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialied_load_json_key_index_info,
