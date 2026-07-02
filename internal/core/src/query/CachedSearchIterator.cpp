@@ -278,8 +278,18 @@ CachedSearchIterator::GetNextValidResult(
     const std::optional<float>& radius,
     const std::optional<float>& range_filter) {
     auto& iterator = iterators_[iterator_idx];
-    while (iterator->HasNext()) {
-        auto result = ConvertIteratorResult(iterator->Next());
+    while (true) {
+        auto has_next = iterator->HasNext();
+        AssertInfo(has_next.has_value(),
+                   "knowhere iterator HasNext failed: {}",
+                   has_next.what());
+        if (!has_next.value()) {
+            break;
+        }
+        auto next = iterator->Next();
+        AssertInfo(
+            next.has_value(), "knowhere iterator Next failed: {}", next.what());
+        auto result = ConvertIteratorResult(next.value());
         if (IsValid(result, last_bound, radius, range_filter)) {
             return result;
         }
@@ -342,8 +352,19 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
 
     if (num_chunks_ == 1) {
         auto& iterator = iterators_[query_idx];
-        while (iterator->HasNext() && rst.size() < batch_size_) {
-            auto result = ConvertIteratorResult(iterator->Next());
+        while (rst.size() < batch_size_) {
+            auto has_next = iterator->HasNext();
+            AssertInfo(has_next.has_value(),
+                       "knowhere iterator HasNext failed: {}",
+                       has_next.what());
+            if (!has_next.value()) {
+                break;
+            }
+            auto next = iterator->Next();
+            AssertInfo(next.has_value(),
+                       "knowhere iterator Next failed: {}",
+                       next.what());
+            auto result = ConvertIteratorResult(next.value());
             if (IsValid(result, last_bound, radius, range_filter)) {
                 rst.emplace_back(result);
             }
