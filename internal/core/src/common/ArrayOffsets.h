@@ -99,6 +99,21 @@ class IArrayOffsets {
     // path does.
     virtual const TargetBitmap*
     GetRowValidBitmap() const = 0;
+
+    // Word-wise ANY-semantics reduction of an element-level bitmap to row
+    // level. Bit j of elem_bitset corresponds to global element id
+    // (elem_offset + j). For each i in [0, row_result.size()), sets
+    // row_result[i] = true iff any element bit of row (row_start + i) is set.
+    // Bits in row_result are only ever set, never cleared. elem_bitset must
+    // cover the element ranges of all addressed rows.
+    // This is the hot path used to aggregate element-level index hits
+    // (nested array index) back to rows; it skips zero words instead of
+    // testing element bits one by one.
+    virtual void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -173,6 +188,12 @@ class ArrayOffsetsSealed : public IArrayOffsets {
         return has_row_valid_ ? &row_valid_ : nullptr;
     }
 
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
+
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
@@ -240,6 +261,12 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     GetRowValidBitmap() const override {
         return nullptr;
     }
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
 
  private:
     struct PendingRow {

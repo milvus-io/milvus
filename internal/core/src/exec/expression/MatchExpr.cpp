@@ -37,6 +37,12 @@ using MatchType = milvus::expr::MatchType;
 
 // Core matching logic for a single row's elements
 // Returns true if the row matches the condition
+//
+// Word-wise implementation: the row's element bits are consumed in 64-bit
+// chunks (bitmap word width) instead of bit by bit. Invalid elements are
+// masked out with the valid bitmap, which preserves the per-bit semantics:
+// only valid elements are counted, and MatchAll requires every *valid*
+// element to match (vacuously true when the row has no valid elements).
 template <MatchType match_type, bool all_valid>
 bool
 MatchSingleRow(int64_t bitset_start,
@@ -44,68 +50,62 @@ MatchSingleRow(int64_t bitset_start,
                const TargetBitmapView& match_bitset,
                const TargetBitmapView& valid_bitset,
                int64_t threshold) {
+    using word_t = TargetBitmapView::policy_type::data_type;
+    constexpr int64_t kWordBits = static_cast<int64_t>(8 * sizeof(word_t));
+
     int64_t hit_count = 0;
-    int64_t element_count = row_elem_count;
 
-    if constexpr (all_valid) {
-        for (int64_t j = 0; j < row_elem_count; ++j) {
-            bool matched = match_bitset[bitset_start + j];
-            if (matched) {
-                ++hit_count;
-            }
-
-            // Early exit conditions
-            if constexpr (match_type == MatchType::MatchAny) {
-                if (hit_count > 0)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchAll) {
-                if (!matched)
+    for (int64_t done = 0; done < row_elem_count; done += kWordBits) {
+        const size_t n =
+            static_cast<size_t>(std::min(kWordBits, row_elem_count - done));
+        const size_t pos = static_cast<size_t>(bitset_start + done);
+        word_t m = match_bitset.read(pos, n);
+        if constexpr (all_valid) {
+            if constexpr (match_type == MatchType::MatchAll) {
+                const word_t full = (n == static_cast<size_t>(kWordBits))
+                                        ? ~word_t(0)
+                                        : ((word_t(1) << n) - 1);
+                if (m != full) {
                     return false;
-            } else if constexpr (match_type == MatchType::MatchLeast) {
-                if (hit_count >= threshold)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchMost ||
-                                 match_type == MatchType::MatchExact) {
-                if (hit_count > threshold)
-                    return false;
-            }
-        }
-    } else {
-        element_count = 0;
-        for (int64_t j = 0; j < row_elem_count; ++j) {
-            if (!valid_bitset[bitset_start + j]) {
+                }
                 continue;
             }
-            ++element_count;
-            bool matched = match_bitset[bitset_start + j];
-            if (matched) {
-                ++hit_count;
+        } else {
+            const word_t v = valid_bitset.read(pos, n);
+            m &= v;
+            if constexpr (match_type == MatchType::MatchAll) {
+                // Some valid element unmatched?
+                if (m != v) {
+                    return false;
+                }
+                continue;
             }
-
-            // Early exit conditions
-            if constexpr (match_type == MatchType::MatchAny) {
-                if (hit_count > 0)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchAll) {
-                if (!matched)
-                    return false;
-            } else if constexpr (match_type == MatchType::MatchLeast) {
-                if (hit_count >= threshold)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchMost ||
-                                 match_type == MatchType::MatchExact) {
-                if (hit_count > threshold)
-                    return false;
+        }
+        if constexpr (match_type == MatchType::MatchAny) {
+            if (m != 0) {
+                return true;
+            }
+        } else if constexpr (match_type == MatchType::MatchLeast) {
+            hit_count += __builtin_popcountll(m);
+            if (hit_count >= threshold) {
+                return true;
+            }
+        } else if constexpr (match_type == MatchType::MatchMost ||
+                             match_type == MatchType::MatchExact) {
+            hit_count += __builtin_popcountll(m);
+            if (hit_count > threshold) {
+                return false;
             }
         }
     }
 
     // Final match decision
     if constexpr (match_type == MatchType::MatchAny) {
-        return hit_count > 0;
+        return false;
     } else if constexpr (match_type == MatchType::MatchAll) {
-        // Empty array returns true (vacuous truth)
-        return hit_count == element_count;
+        // Every (valid) element matched; empty array returns true
+        // (vacuous truth).
+        return true;
     } else if constexpr (match_type == MatchType::MatchLeast) {
         return hit_count >= threshold;
     } else if constexpr (match_type == MatchType::MatchMost) {
@@ -148,6 +148,16 @@ ProcessContiguousRows(int64_t row_count,
                       const TargetBitmapView& valid_bitset,
                       TargetBitmapView& result_bitset,
                       int64_t threshold) {
+    if constexpr (match_type == MatchType::MatchAny && all_valid) {
+        // Fast path: ANY-semantics reduction over contiguous rows. The match
+        // bitmap covers exactly the element ranges of
+        // [row_start, row_start + row_count) shifted by elem_start; jump
+        // between set bits word-wise instead of walking rows element by
+        // element.
+        array_offsets->ElementBitsetToRowBitsetAny(
+            match_bitset, elem_start, row_start, result_bitset);
+        return;
+    }
     for (int64_t i = 0; i < row_count; ++i) {
         auto [first_elem, last_elem] =
             array_offsets->ElementIDRangeOfRow(row_start + i);
