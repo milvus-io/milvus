@@ -58,4 +58,14 @@ struct Tokenizer {
     void* ptr_;
 };
 
+inline void
+set_tokenizer_options(std::string&& params) {
+    auto shared_params = std::make_shared<std::string>(params);
+    auto res =
+        RustResultWrapper(tantivy_set_analyzer_options(shared_params->c_str()));
+    AssertInfo(res.result_->success,
+               "Set analyzer option failed: {}",
+               res.result_->error);
+}
+
 }  // namespace milvus::tantivy

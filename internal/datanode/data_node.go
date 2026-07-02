@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -197,6 +198,12 @@ func (node *DataNode) Init() error {
 		err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
+			return
+		}
+		if err := analyzer.InitOptions(); err != nil {
+			log.Error("DataNode init analyzer options failed", zap.Error(err))
+			initError = err
+			return
 		}
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
