@@ -629,6 +629,9 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
+    std::pair<bool, std::string>
+    CollectionWarmupPolicy(bool is_vector, bool is_index) const;
+
     // True if the field carries FieldSchema::is_function_output.
     bool
     is_function_output(const FieldId& field_id) const {
