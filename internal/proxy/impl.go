@@ -3613,9 +3613,18 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
+	// reduceRetrieveResults always returns rows sorted by primary key ascending
+	// (see typeutil.SelectMinPK), but search needs the rows in the order the
+	// caller provided IDs — Nq position N must correspond to ids[N]. Reorder
+	// here before we project the placeholder group.
+	reorderedFields, err := funcutil.ReorderFieldDataByInputIDs(queryResult.GetFieldsData(), pkFieldData, ids)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract the field data from query result
 	// For BM25: extract text field; for vector search: extract vector field
-	fieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+	fieldData := lo.FindOrElse(reorderedFields, nil, func(f *schemapb.FieldData) bool {
 		return f.GetFieldName() == fieldToFetch || f.GetType() == schemapb.DataType_ArrayOfStruct
 	})
 
