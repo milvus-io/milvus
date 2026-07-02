@@ -1391,9 +1391,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
-    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
-        expr_->op_type_ == proto::plan::OpType::PhraseMatch ||
-        expr_->op_type_ == proto::plan::OpType::TextMatchFuzzy) {
+    if (IsTextIndexOpType(expr_->op_type_)) {
         if (has_offset_input_) {
             ThrowInfo(
                 OpTypeInvalid,
@@ -1884,9 +1882,7 @@ void
 PhyUnaryRangeFilterExpr::DetermineExecPath() {
     // TextMatch/PhraseMatch/TextMatchFuzzy use a separate text index path
     // (segment_->GetTextIndex()), not the pinned_index_ scalar index path.
-    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
-        expr_->op_type_ == proto::plan::OpType::PhraseMatch ||
-        expr_->op_type_ == proto::plan::OpType::TextMatchFuzzy) {
+    if (IsTextIndexOpType(expr_->op_type_)) {
         exec_path_ = ExprExecPath::TextIndex;
         return;
     }
