@@ -1053,6 +1053,7 @@ func (scheduler *taskScheduler) GetTasksJSON() string {
 // 3. execute the current action of task
 func (scheduler *taskScheduler) schedule(node int64) {
 	if scheduler.tasks.Len() == 0 {
+		scheduler.updateTaskMetrics()
 		return
 	}
 
