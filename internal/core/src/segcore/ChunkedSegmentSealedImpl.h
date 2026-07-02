@@ -711,7 +711,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // or nullptr on failure (logs a warning). Checks op_ctx for cancellation
     // before invoking reader_->take(), which can do remote reads.
     std::shared_ptr<arrow::Table>
-    ExecuteTake(const std::vector<int64_t>& unique_offsets,
+    ExecuteTake(const std::shared_ptr<const PublishedSegmentState>& snapshot,
+                const std::vector<int64_t>& unique_offsets,
                 const std::shared_ptr<std::vector<std::string>>& needed_columns,
                 const char* caller_tag,
                 double& elapsed_ms,
@@ -761,9 +762,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         size_t num_rows,
         const std::string& warmup_policy,
         RuntimeResourceState* runtime);
-
-    void
-    RefreshDeletedRecordTimestampAccessor();
 
     static TimestampIndex
     build_timestamp_index(const Timestamp* data, size_t num_rows);
@@ -1806,7 +1804,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     CreateTextIndexWithSchema(FieldId field_id,
                               const SchemaPtr& schema_snapshot,
                               milvus::OpContext* op_ctx = nullptr,
-                              bool publish_marker = true);
+                              bool publish_marker = true,
+                              RuntimeResourceState* runtime = nullptr);
 
     void
     RecordTextIndexCreated(SegmentLoadInfo& segment_load_info,
