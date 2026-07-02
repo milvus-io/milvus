@@ -1,8 +1,6 @@
 package util
 
 import (
-	"path"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -27,11 +25,7 @@ func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, storageConfig *in
 		filePaths := make([]string, 0)
 		columnGroupID := insertLog.GetFieldID()
 		for _, binlog := range insertLog.GetBinlogs() {
-			filePath := metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, columnGroupID, binlog.GetLogID())
-			if storageConfig.StorageType != "local" {
-				filePath = path.Join(storageConfig.GetBucketName(), filePath)
-			}
-			filePaths = append(filePaths, filePath)
+			filePaths = append(filePaths, getInsertLogPath(binlog, storageConfig, collectionID, partitionID, segmentID, columnGroupID))
 		}
 		insertLogs = append(insertLogs, &indexcgopb.FieldInsertFiles{
 			FilePaths: filePaths,
@@ -40,4 +34,12 @@ func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, storageConfig *in
 	return &indexcgopb.SegmentInsertFiles{
 		FieldInsertFiles: insertLogs,
 	}
+}
+
+func getInsertLogPath(binlog *datapb.Binlog, storageConfig *indexpb.StorageConfig, collectionID int64, partitionID int64, segmentID int64, columnGroupID int64) string {
+	filePath := binlog.GetLogPath()
+	if filePath != "" {
+		return filePath
+	}
+	return metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, columnGroupID, binlog.GetLogID())
 }
