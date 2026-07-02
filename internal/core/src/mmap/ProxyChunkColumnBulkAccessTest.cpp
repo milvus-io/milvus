@@ -22,11 +22,13 @@
 #include <arrow/array.h>
 #include <arrow/io/memory.h>
 #include <parquet/arrow/reader.h>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <random>
+#include <thread>
 #include <vector>
 
 #include "common/Chunk.h"
@@ -243,4 +245,61 @@ TEST(ProxyChunkColumnBulkAccess, BenchPrimitiveValueAtRandomOffsets) {
                   << " ns/row, total "
                   << (elapsed / 1e6) << " ms" << std::endl;
     }
+}
+
+// Production querynodes run many concurrent search tasks over the same
+// segment: per-row shared_ptr refcount bumps hit the same chunk control
+// blocks from every core. Single-threaded numbers hide that contention.
+TEST(ProxyChunkColumnBulkAccess, BenchPrimitiveValueAtConcurrent) {
+    const int kThreads = 8;
+    constexpr int64_t kCount = 10000;
+    constexpr int kIters = 50;  // per thread
+
+    auto setup = BuildInt64Group(
+        /*num_chunks=*/64, /*rows_per_chunk=*/65536, /*num_fields=*/8);
+    std::vector<std::vector<std::vector<int64_t>>> sets(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        sets[t].reserve(kIters);
+        for (int it = 0; it < kIters; ++it) {
+            sets[t].push_back(RandomOffsets(
+                kCount, setup.num_rows, /*seed=*/100000 + t * kIters + it));
+        }
+    }
+    // Warm the cache slot once so threads measure access, not load.
+    {
+        std::vector<int64_t> dst(kCount);
+        setup.target_column->BulkPrimitiveValueAt(
+            nullptr, dst.data(), sets[0][0].data(), kCount, false);
+    }
+
+    std::atomic<bool> go{false};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([&, t] {
+            std::vector<int64_t> dst(kCount);
+            while (!go.load(std::memory_order_acquire)) {
+            }
+            for (int it = 0; it < kIters; ++it) {
+                setup.target_column->BulkPrimitiveValueAt(
+                    nullptr, dst.data(), sets[t][it].data(), kCount, false);
+            }
+            volatile int64_t sink = dst[kCount / 2];
+            (void)sink;
+        });
+    }
+    auto start = std::chrono::steady_clock::now();
+    go.store(true, std::memory_order_release);
+    for (auto& th : threads) {
+        th.join();
+    }
+    auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       std::chrono::steady_clock::now() - start)
+                       .count();
+    double total_rows = static_cast<double>(kThreads) * kIters * kCount;
+    std::cout << "[bench] concurrent threads=" << kThreads
+              << " chunks=64 rows_per_chunk=65536 fields=8 count=" << kCount
+              << " iters=" << kIters << " -> "
+              << (elapsed / total_rows) << " ns/row aggregate, wall "
+              << (elapsed / 1e6) << " ms" << std::endl;
 }
