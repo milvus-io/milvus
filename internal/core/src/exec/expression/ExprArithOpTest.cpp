@@ -1019,8 +1019,8 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                  return (int64_t(val) & 1) != 0;
              }},
             // Bitwise over a non-numeric JSON value: at_numeric() errors, so the
-            // row is treated as non-matching -- EQ yields false, NE yields true
-            // for every row. json["string"] holds a JSON string, never a number.
+            // row is UNKNOWN and therefore does not match either comparison.
+            // json["string"] holds a JSON string, never a number.
             {R"((json["string"] & 1) == 0)",
              [](const milvus::Json&) {
                  // non-numeric -> non-match -> EQ is constant false
@@ -1028,8 +1028,8 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
              }},
             {R"((json["string"] & 1) != 0)",
              [](const milvus::Json&) {
-                 // non-numeric -> non-match -> NE is constant true
-                 return true;
+                 // non-numeric -> UNKNOWN -> false
+                 return false;
              }},
             // Test cases for BinaryArithOpEvalRangeExpr GT of various data types
             {R"(json["int"] + 1 > 2)",
