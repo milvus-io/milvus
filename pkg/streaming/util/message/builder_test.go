@@ -130,3 +130,67 @@ func TestReplicateBuilder(t *testing.T) {
 	assert.Equal(t, []string{"v11", "v12"}, replicateMsg.BroadcastHeader().VChannels)
 	assert.Equal(t, uint64(1), replicateMsg.BroadcastHeader().BroadcastID)
 }
+
+// newReplicateMessageForOverwriteTest builds a replicate message whose broadcast
+// header contains 3 vchannels ("v0", "v1", "v2"), suitable for exercising the
+// OverwriteReplicateVChannel length contract (shrink/equal/grow).
+func newReplicateMessageForOverwriteTest(t *testing.T) message.ReplicateMutableMessage {
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithHeader(&message.ManualFlushMessageHeader{}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		WithBroadcast([]string{"v0", "v1", "v2"}).
+		MustBuildBroadcast()
+
+	msgs := msg.WithBroadcastID(1).SplitIntoMutableMessage()
+
+	msgID := walimplstest.NewTestMessageID(1)
+	var immutableMsg message.ImmutableMessage
+	for _, m := range msgs {
+		if m.VChannel() == "v0" {
+			immutableMsg = m.WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+			break
+		}
+	}
+	require.NotNil(t, immutableMsg)
+
+	replicateMsg := message.MustNewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
+	require.NotNil(t, replicateMsg)
+	return replicateMsg
+}
+
+// TestOverwriteReplicateVChannel_BroadcastVChannelsLength validates the relaxed
+// contract of OverwriteReplicateVChannel: shrinking and equal-length overwrites
+// must succeed, while growing the broadcast vchannel set must panic.
+//
+// This guards the CDC topology-change path where an AlterReplicateConfig may
+// drop pchannels from the broadcast set (receiver filters out source pchannels
+// it doesn't have).
+func TestOverwriteReplicateVChannel_BroadcastVChannelsLength(t *testing.T) {
+	// Shrink: 3 -> 1.
+	t.Run("shrink", func(t *testing.T) {
+		replicateMsg := newReplicateMessageForOverwriteTest(t)
+		assert.NotPanics(t, func() {
+			replicateMsg.OverwriteReplicateVChannel("new-v0", []string{"new-v0"})
+		})
+		assert.Equal(t, "new-v0", replicateMsg.VChannel())
+		assert.Equal(t, []string{"new-v0"}, replicateMsg.BroadcastHeader().VChannels)
+	})
+
+	// Equal length: 3 -> 3.
+	t.Run("equal", func(t *testing.T) {
+		replicateMsg := newReplicateMessageForOverwriteTest(t)
+		assert.NotPanics(t, func() {
+			replicateMsg.OverwriteReplicateVChannel("new-v0", []string{"new-v0", "new-v1", "new-v2"})
+		})
+		assert.Equal(t, "new-v0", replicateMsg.VChannel())
+		assert.Equal(t, []string{"new-v0", "new-v1", "new-v2"}, replicateMsg.BroadcastHeader().VChannels)
+	})
+
+	// Grow: 3 -> 4. Must panic with the exact message.
+	t.Run("grow_panics", func(t *testing.T) {
+		replicateMsg := newReplicateMessageForOverwriteTest(t)
+		assert.PanicsWithValue(t, "broadcast vchannels length cannot grow", func() {
+			replicateMsg.OverwriteReplicateVChannel("new-v0", []string{"new-v0", "new-v1", "new-v2", "new-v3"})
+		})
+	})
+}

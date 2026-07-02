@@ -1146,4 +1146,33 @@ func TestReplicateConfigValidator_PChannelIncreasing(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, validator.IsPChannelIncreasing())
 	})
+
+	t.Run("success - secondary removed during pchannel increase (PR #49083 + receiver-side fix)", func(t *testing.T) {
+		// Source is primary "c1", secondary is "c2". Primary increases pchannels from
+		// 1 → 2 AND drops c2 from the topology. The validator must accept this; the
+		// receiver-side overwriteReplicateMessage in internal/distributed/streaming
+		// handles the cluster-removal-during-pchannel-increase scenario by falling
+		// through to overwriteAlterReplicateConfigMessage and converting the removed
+		// secondary into a standalone primary.
+		currentConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+			},
+		}
+		incomingConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
+				// c2 removed, no topology
+			},
+		}
+		// Validator runs on the primary side, so currentClusterID = "c1".
+		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
+		err := validator.Validate()
+		assert.NoError(t, err, "validator must permit cluster-removal + pchannel-increase (handled by receiver)")
+		assert.True(t, validator.IsPChannelIncreasing(), "IsPChannelIncreasing flag must still be set so receiver takes the right branch")
+	})
 }

@@ -3,6 +3,7 @@ package streaming
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -680,6 +681,121 @@ func TestReplicateService_AlterConfigPChannelIncreasing(t *testing.T) {
 			_, err := rs.Append(context.Background(), msg)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "source cluster primary not found in new replicate configuration")
+		}
+	})
+
+	t.Run("with_flag_current_cluster_removed_falls_through_to_standalone", func(t *testing.T) {
+		// Scenario: primary issues UpdateReplicateConfiguration that simultaneously
+		// (a) increases its own pchannel count (sets IsPchannelIncreasing=true) and
+		// (b) removes the secondary "by-dev" from the topology.
+		// The receiver (this secondary) must NOT fail; it should fall through to
+		// overwriteAlterReplicateConfigMessage and become standalone primary.
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+
+		h := mock_handler.NewMockHandlerClient(t)
+		p := mock_producer.NewMockProducer(t)
+		var captured []message.MutableMessage
+		var capturedMu sync.Mutex
+		p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			capturedMu.Lock()
+			captured = append(captured, mm)
+			capturedMu.Unlock()
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+			}, nil
+		}).Maybe()
+		p.EXPECT().IsAvailable().Return(true).Maybe()
+		p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+		h.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil).Maybe()
+
+		// Current config: primary + by-dev (secondary), both 2 pchannels, primary→by-dev
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev",
+			&commonpb.ReplicateConfiguration{
+				Clusters: []*commonpb.MilvusCluster{
+					{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+					{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+				},
+				CrossClusterTopology: []*commonpb.CrossClusterTopology{
+					{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+				},
+			},
+		), nil)
+		as.EXPECT().GetLatestAssignments(mock.Anything).Return(&types.VersionedStreamingNodeAssignments{
+			Assignments: map[int64]types.StreamingNodeAssignment{
+				1: {
+					Channels: map[string]types.PChannelInfo{
+						"by-dev-rootcoord-dml_0": {Name: "by-dev-rootcoord-dml_0", Term: 1, AccessMode: types.AccessModeRW},
+						"by-dev-rootcoord-dml_1": {Name: "by-dev-rootcoord-dml_1", Term: 1, AccessMode: types.AccessModeRW},
+						"by-dev-rootcoord-dml_2": {Name: "by-dev-rootcoord-dml_2", Term: 1, AccessMode: types.AccessModeRW},
+					},
+				},
+			},
+		}, nil).Maybe()
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		// New config: primary only, 3 pchannels (grew from 2 → 3), no topology.
+		// "by-dev" is removed entirely.
+		newConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1", "primary-rootcoord-dml_2"}},
+			},
+		}
+
+		// Broadcast covers all 3 of primary's pchannels (2 OLD + 1 NEW). IsPchannelIncreasing=true.
+		// SplitIntoMutableMessage produces one message per broadcast vchannel.
+		replicateMsgs := createReplicateAlterConfigMessages(newConfig,
+			[]string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1", "primary-rootcoord-dml_2"},
+			true)
+
+		for _, msg := range replicateMsgs {
+			// In production, only OLD-source-pchannel CDC replicators forward to the
+			// being-removed secondary. The newly-added source pchannel
+			// (primary-rootcoord-dml_2) has no replicator targeting "by-dev" because
+			// the new topology drops by-dev. Skip it here to mirror reality.
+			if msg.VChannel() == "primary-rootcoord-dml_2" {
+				continue
+			}
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err, "secondary being removed must not fail; should fall through to standalone conversion")
+		}
+
+		// Verify each appended message has the header rewritten to standalone primary
+		// (only the secondary's own cluster, no topology) AND broadcast vchannels filtered
+		// to drop the source's newly-added pchannel.
+		assert.NotEmpty(t, captured)
+		for _, mm := range captured {
+			alter := message.MustAsMutableAlterReplicateConfigMessageV2(mm)
+			cfg := alter.Header().GetReplicateConfiguration()
+			assert.Len(t, cfg.GetClusters(), 1, "rewritten config must contain only the current cluster")
+			assert.Equal(t, "by-dev", cfg.GetClusters()[0].GetClusterId())
+			assert.Equal(t,
+				[]string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+				cfg.GetClusters()[0].GetPchannels(),
+				"rewritten config must use the receiver's latest local pchannels")
+			assert.Empty(t, cfg.GetCrossClusterTopology(), "rewritten config must have no topology")
+
+			bh := mm.BroadcastHeader()
+			assert.NotNil(t, bh)
+			// 2 OLD source pchannels → mapped to by-dev's 2 pchannels.
+			// 1 NEW source pchannel (primary-rootcoord-dml_2) → filtered out (by-dev has no equivalent).
+			assert.Len(t, bh.VChannels, 2, "broadcast vchannels must drop unmappable (newly-added source) pchannels")
+			for _, vch := range bh.VChannels {
+				assert.True(t, strings.HasPrefix(vch, "by-dev-rootcoord-dml_"),
+					"broadcast vchannels must be remapped to by-dev cluster, got %s", vch)
+			}
 		}
 	})
 }

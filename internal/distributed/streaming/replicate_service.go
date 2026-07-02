@@ -2,9 +2,13 @@ package streaming
 
 import (
 	"context"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -135,21 +139,36 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	// message header to map ALL channels (including newly added ones).
 	// The current config only knows about old pchannels, so both the main vchannel and
 	// broadcast vchannels need the new config for mapping.
+	// Special case: if the new config no longer contains the current cluster, it means
+	// the AlterReplicateConfig is removing this cluster from the topology. Fall through
+	// with the OLD source mapping; overwriteAlterReplicateConfigMessage below will rewrite
+	// the header to standalone-primary, and any source pchannels that the current cluster
+	// doesn't know about will be filtered from the broadcast vchannels.
 	channelMappingSourceCluster := sourceCluster
+	currentClusterRemoved := false
 	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 		alterMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
 		if alterMsg.Header().GetIsPchannelIncreasing() {
 			newCfg, newCfgErr := replicateutil.NewConfigHelper(s.clusterID, alterMsg.Header().GetReplicateConfiguration())
-			if newCfgErr != nil {
+			switch {
+			case newCfgErr == nil:
+				channelMappingSourceCluster = newCfg.GetCluster(rh.ClusterID)
+				if channelMappingSourceCluster == nil {
+					return nil, status.NewReplicateViolation("source cluster %s not found in new replicate configuration", rh.ClusterID)
+				}
+			case errors.Is(newCfgErr, replicateutil.ErrCurrentClusterNotFound):
+				currentClusterRemoved = true
+			default:
 				return nil, status.NewReplicateViolation("failed to parse new replicate config from message header: %s", newCfgErr.Error())
-			}
-			channelMappingSourceCluster = newCfg.GetCluster(rh.ClusterID)
-			if channelMappingSourceCluster == nil {
-				return nil, status.NewReplicateViolation("source cluster %s not found in new replicate configuration", rh.ClusterID)
 			}
 		}
 	}
 
+	// Main vchannel mapping stays strict even when currentClusterRemoved is true.
+	// CDC only forwards messages from OLD source pchannels (those that already had a
+	// replicator targeting the current cluster before the topology change), so
+	// msg.VChannel() is always an OLD pchannel the current cluster knows about. A
+	// failure here would indicate a CDC topology-sync bug, not a config-rewrite case.
 	targetVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, msg.VChannel())
 	if err != nil {
 		return nil, err
@@ -161,6 +180,13 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		for _, vchannel := range bh.VChannels {
 			targetBroadcastVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, vchannel)
 			if err != nil {
+				if currentClusterRemoved {
+					// This broadcast vchannel maps to a source pchannel the current cluster
+					// doesn't know about (a source-side newly-added pchannel). Skip it — the
+					// current cluster is becoming standalone and only needs to write to
+					// pchannels it actually has.
+					continue
+				}
 				return nil, status.NewReplicateViolation("failed to get target channel, %s", err.Error())
 			}
 			targetBroadcastVChannels = append(targetBroadcastVChannels, targetBroadcastVChannel)
@@ -177,7 +203,7 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 			return nil, err
 		}
 	case message.MessageTypeAlterReplicateConfig:
-		if err := s.overwriteAlterReplicateConfigMessage(cfg, msg); err != nil {
+		if err := s.overwriteAlterReplicateConfigMessage(ctx, cfg, msg); err != nil {
 			return nil, err
 		}
 	case message.MessageTypeAlterLoadConfig:
@@ -223,7 +249,7 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 }
 
 // overwriteAlterReplicateConfigMessage overwrites the alter replicate configuration message.
-func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateConfig *replicateutil.ConfigHelper, msg message.ReplicateMutableMessage) error {
+func (s replicateService) overwriteAlterReplicateConfigMessage(ctx context.Context, currentReplicateConfig *replicateutil.ConfigHelper, msg message.ReplicateMutableMessage) error {
 	alterReplicateConfigMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
 	header := alterReplicateConfigMsg.Header()
 
@@ -245,13 +271,117 @@ func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateC
 	// Current cluster not found in the replicate configuration,
 	// it means that the current cluster is removed from the replicate topology and become a independent cluster.
 	// So we need to overwrite the replicate configuration to make current cluster to be a primary cluster without replicate topology.
-	cluster := currentReplicateConfig.GetCurrentCluster()
+	cluster := proto.Clone(currentReplicateConfig.GetCurrentCluster().MilvusCluster).(*commonpb.MilvusCluster)
+	if header.GetIsPchannelIncreasing() {
+		pchannels, err := s.getLatestLocalPChannels(ctx, cluster.GetPchannels(), expectedPChannelCount(cfg, len(cluster.GetPchannels())))
+		if err != nil {
+			return err
+		}
+		cluster.Pchannels = pchannels
+	}
 	alterReplicateConfigMsg.OverwriteHeader(&message.AlterReplicateConfigMessageHeader{
 		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{cluster.MilvusCluster},
+			Clusters: []*commonpb.MilvusCluster{cluster},
 		},
 	})
 	return nil
+}
+
+func expectedPChannelCount(config *commonpb.ReplicateConfiguration, fallback int) int {
+	for _, cluster := range config.GetClusters() {
+		if len(cluster.GetPchannels()) > 0 {
+			return len(cluster.GetPchannels())
+		}
+	}
+	return fallback
+}
+
+func (s replicateService) getLatestLocalPChannels(ctx context.Context, existingPChannels []string, expectedCount int) ([]string, error) {
+	if expectedCount < len(existingPChannels) {
+		expectedCount = len(existingPChannels)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		pchannels, err := s.tryGetLatestLocalPChannels(waitCtx, existingPChannels)
+		if err != nil {
+			return nil, err
+		}
+		if len(pchannels) >= expectedCount {
+			return pchannels, nil
+		}
+
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return nil, waitCtx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s replicateService) tryGetLatestLocalPChannels(ctx context.Context, existingPChannels []string) ([]string, error) {
+	assignments, err := s.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if assignments == nil {
+		return nil, status.NewReplicateViolation("latest assignments is nil")
+	}
+	localPChannelSet := make(map[string]struct{})
+	for _, assignment := range assignments.Assignments {
+		for channelName, pchannel := range assignment.Channels {
+			if pchannel.Name != "" {
+				channelName = pchannel.Name
+			}
+			if channelName == "" {
+				continue
+			}
+			localPChannelSet[channelName] = struct{}{}
+		}
+	}
+	if len(localPChannelSet) == 0 {
+		return nil, status.NewReplicateViolation("no local pchannels found in latest assignments")
+	}
+
+	pchannels := make([]string, 0, len(localPChannelSet))
+	for _, pchannel := range existingPChannels {
+		if _, ok := localPChannelSet[pchannel]; ok {
+			pchannels = append(pchannels, pchannel)
+			delete(localPChannelSet, pchannel)
+		}
+	}
+	extraPChannels := make([]string, 0, len(localPChannelSet))
+	for pchannel := range localPChannelSet {
+		extraPChannels = append(extraPChannels, pchannel)
+	}
+	sort.Slice(extraPChannels, func(i, j int) bool {
+		return pchannelLess(extraPChannels[i], extraPChannels[j])
+	})
+	pchannels = append(pchannels, extraPChannels...)
+	return pchannels, nil
+}
+
+func pchannelLess(left, right string) bool {
+	leftPrefix, leftIdx, leftOk := splitPChannelIndex(left)
+	rightPrefix, rightIdx, rightOk := splitPChannelIndex(right)
+	if leftOk && rightOk && leftPrefix == rightPrefix && leftIdx != rightIdx {
+		return leftIdx < rightIdx
+	}
+	return left < right
+}
+
+func splitPChannelIndex(pchannel string) (string, int, bool) {
+	underscoreIdx := strings.LastIndex(pchannel, "_")
+	if underscoreIdx < 0 || underscoreIdx == len(pchannel)-1 {
+		return "", 0, false
+	}
+	idx, err := strconv.Atoi(pchannel[underscoreIdx+1:])
+	if err != nil {
+		return "", 0, false
+	}
+	return pchannel[:underscoreIdx], idx, true
 }
 
 // overwriteAlterLoadConfigMessage sets use_local_replica_config flag on replicated AlterLoadConfig messages
