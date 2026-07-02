@@ -5782,12 +5782,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
     // reopen_mutex_ synchronizes this read with all schema_ writers.
-    SegmentLoadInfo mutable_copy(snapshot->GetProto(), schema_);
-    mutable_copy.SetFieldsFilledWithDefault(
-        snapshot->GetFieldsFilledWithDefault());
-    for (auto fid : snapshot->GetCreatedTextIndexes()) {
-        mutable_copy.SetTextIndexCreated(fid);
-    }
+    SegmentLoadInfo mutable_copy(*snapshot);
     auto diff = mutable_copy.GetLoadDiff();
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
 
