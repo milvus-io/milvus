@@ -328,12 +328,18 @@ typedef struct CFlushConfig {
  */
 typedef struct CFlushResult {
     char* manifest_path;  // path to the committed manifest (caller must free)
-    int64_t committed_version;  // committed version number
-    int64_t num_rows;           // number of rows flushed
-    int64_t* bm25_field_ids;    // field ids for serialized BM25 stats
-    uint8_t** bm25_stats;       // serialized BM25 stats per field
-    size_t* bm25_stats_sizes;   // serialized BM25 stats sizes
-    size_t num_bm25_stats;      // number of BM25 stats entries
+    int64_t committed_version;    // committed version number
+    int64_t num_rows;             // number of rows flushed
+    uint64_t timestamp_from;      // minimum row timestamp flushed
+    uint64_t timestamp_to;        // maximum row timestamp flushed
+    int64_t* field_ids;           // field ids for per-field flush summaries
+    int64_t* field_memory_sizes;  // uncompressed Arrow data size per field
+    int64_t* field_null_counts;   // null count per field
+    size_t num_field_stats;       // number of field summary entries
+    int64_t* bm25_field_ids;      // field ids for serialized BM25 stats
+    uint8_t** bm25_stats;         // serialized BM25 stats per field
+    size_t* bm25_stats_sizes;     // serialized BM25 stats sizes
+    size_t num_bm25_stats;        // number of BM25 stats entries
 } CFlushResult;
 
 /**

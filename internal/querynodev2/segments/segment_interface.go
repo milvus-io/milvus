@@ -192,14 +192,19 @@ type FlushConfig struct {
 }
 
 // FlushResult contains the result of flushing segment data.
-// All data is returned from C++ side via FFI.
-// In Storage V3 FFI mode, only manifest path is needed (all file info is in manifest).
+// All data is returned from C++ side via FFI. In Storage V3 FFI mode,
+// ManifestPath points to the physical files while the summary fields are used
+// to build DataCoord binlog metadata.
 type FlushResult struct {
 	// Manifest path (Storage V3 - contains all file information).
 	// The committed version is encoded in the path and can be extracted
 	// via packed.UnmarshalManifestPath when needed.
 	ManifestPath string
 	// Number of rows flushed
-	NumRows   int64
-	BM25Stats map[int64]*storage.BM25Stats
+	NumRows          int64
+	TimestampFrom    uint64
+	TimestampTo      uint64
+	FieldMemorySizes map[int64]int64
+	FieldNullCounts  map[int64]int64
+	BM25Stats        map[int64]*storage.BM25Stats
 }
