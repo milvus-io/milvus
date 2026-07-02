@@ -922,10 +922,11 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 		return
 	}
 
-	if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
+	if err := gc.meta.DropSegment(ctx, cloned); err != nil {
 		log.Warn(ctx, "GC segment meta failed to drop segment", mlog.Err(err))
 		return
 	}
+	gc.meta.PruneSegment(cloned.GetID())
 	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
 }
 

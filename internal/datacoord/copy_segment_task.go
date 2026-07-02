@@ -687,18 +687,33 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
 		// Update binlog information for all segments
 		for _, result := range resp.GetSegmentResults() {
+			binlogs := cloneAndClearBinlogPaths(result.GetBinlogs())
+			statslogs := cloneAndClearBinlogPaths(result.GetStatslogs())
+			deltalogs := cloneAndClearBinlogPaths(result.GetDeltalogs())
+			bm25Statslogs := cloneAndClearBinlogPaths(result.GetBm25Logs())
 			// Update binlog info and segment state to Flushed
 			// For StorageV3+ segments, also update manifest_path
 			var err error
-			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
-				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
-			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
-			op3 := UpdateIsImporting(result.GetSegmentId(), false)
-			operators := []UpdateOperator{op1, op2, op3}
-			if manifestPath := result.GetManifestPath(); manifestPath != "" {
-				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
+			mutations := map[int64][]SegmentOperator{
+				result.GetSegmentId(): {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+					seg.Binlogs = binlogs
+					seg.Statslogs = statslogs
+					seg.Deltalogs = deltalogs
+					seg.Bm25Statslogs = bm25Statslogs
+					seg.State = commonpb.SegmentState_Flushed
+					seg.IsImporting = false
+					if manifestPath := result.GetManifestPath(); manifestPath != "" {
+						seg.ManifestPath = manifestPath
+					}
+					return BinlogIncrement{
+						Binlogs:       seg.Binlogs,
+						Statslogs:     seg.Statslogs,
+						Deltalogs:     seg.Deltalogs,
+						Bm25Statslogs: seg.Bm25Statslogs,
+					}, true
+				}},
 			}
-			err = meta.UpdateSegmentsInfo(ctx, operators...)
+			err = meta.UpdateSegmentsInfo(ctx, mutations)
 			if err != nil {
 				// On error, mark task and job as failed
 				updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),

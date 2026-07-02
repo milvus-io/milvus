@@ -514,8 +514,13 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		for _, segID := range targetSegmentIDs {
 			segment := c.meta.GetSegment(c.ctx, segID)
 			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
-				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
-				if err := c.meta.UpdateSegmentsInfo(c.ctx, op); err != nil {
+				mutations := map[int64][]SegmentOperator{
+					segID: {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+						seg.State = commonpb.SegmentState_Flushed
+						return BinlogIncrement{}, true
+					}},
+				}
+				if err := c.meta.UpdateSegmentsInfo(c.ctx, mutations); err != nil {
 					log.Error(c.ctx, "failed to update segment state to Flushed",
 						mlog.FieldSegmentID(segID),
 						mlog.Err(err))
