@@ -2814,9 +2814,11 @@ type queryCoordConfig struct {
 	// channel task capacity fraction
 	ChannelTaskCapFraction ParamItem `refreshable:"true"`
 
-	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
-	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
-	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+	BalanceCheckCollectionMaxCount     ParamItem `refreshable:"true"`
+	ResourceExhaustionPenaltyDuration  ParamItem `refreshable:"true"`
+	ResourceExhaustionCleanupInterval  ParamItem `refreshable:"true"`
+	SegmentLoadRetryBackoffInterval    ParamItem `refreshable:"true"`
+	SegmentLoadRetryBackoffMaxInterval ParamItem `refreshable:"true"`
 
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
@@ -3499,6 +3501,26 @@ Set to 0 to disable the penalty period.`,
 		Export: true,
 	}
 	p.ResourceExhaustionPenaltyDuration.Init(base.mgr)
+
+	p.SegmentLoadRetryBackoffInterval = ParamItem{
+		Key:          "queryCoord.segmentLoadRetryBackoffInterval",
+		Version:      "2.6.18",
+		DefaultValue: "1",
+		Doc: "Initial wait in seconds before recreating a segment load task that failed; doubles on each consecutive failure " +
+			"up to queryCoord.segmentLoadRetryBackoffMaxInterval, and resets once the segment loads successfully. " +
+			"0 disables the backoff (legacy behavior: failed loads are recreated on every checker round).",
+		Export: true,
+	}
+	p.SegmentLoadRetryBackoffInterval.Init(base.mgr)
+
+	p.SegmentLoadRetryBackoffMaxInterval = ParamItem{
+		Key:          "queryCoord.segmentLoadRetryBackoffMaxInterval",
+		Version:      "2.6.18",
+		DefaultValue: "30",
+		Doc:          "Maximum wait in seconds between load retries of a segment that keeps failing to load.",
+		Export:       true,
+	}
+	p.SegmentLoadRetryBackoffMaxInterval.Init(base.mgr)
 
 	p.ResourceExhaustionCleanupInterval = ParamItem{
 		Key:          "queryCoord.resourceExhaustionCleanupInterval",

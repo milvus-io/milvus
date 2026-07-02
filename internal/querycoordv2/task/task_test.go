@@ -3211,3 +3211,82 @@ func (suite *TaskSuite) TestNodeTaskQueueRangeByNodePriority() {
 	})
 	suite.Equal([]Priority{TaskPriorityHigh, TaskPriorityNormal, TaskPriorityLow}, visited)
 }
+
+func (suite *TaskSuite) TestSegmentLoadFailureBackoff() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	channelName := "backoff-test-channel"
+	segmentID := int64(999)
+	scheduler := suite.newScheduler()
+
+	pt := paramtable.Get()
+	pt.Save(pt.QueryCoordCfg.SegmentLoadRetryBackoffInterval.Key, "1")
+	pt.Save(pt.QueryCoordCfg.SegmentLoadRetryBackoffMaxInterval.Key, "4")
+	defer pt.Reset(pt.QueryCoordCfg.SegmentLoadRetryBackoffInterval.Key)
+	defer pt.Reset(pt.QueryCoordCfg.SegmentLoadRetryBackoffMaxInterval.Key)
+
+	newGrowTask := func() *SegmentTask {
+		task, err := NewSegmentTask(
+			ctx,
+			timeout,
+			WrapIDSource(0),
+			suite.collection,
+			suite.replica,
+			commonpb.LoadPriority_LOW,
+			NewSegmentAction(targetNode, ActionTypeGrow, channelName, segmentID),
+		)
+		suite.NoError(err)
+		return task
+	}
+	index := NewReplicaSegmentIndex(newGrowTask())
+
+	// no failure record: a grow task is admitted
+	suite.NoError(scheduler.preAdd(newGrowTask()))
+
+	// a failed grow task records a failure on removal (Fail is the real
+	// failure path: it pins the Failed status against remove's Cancel)
+	failed := newGrowTask()
+	failed.Fail(errors.New("mock load failure"))
+	scheduler.remove(failed)
+	record, ok := scheduler.segmentLoadFailures.Get(index)
+	suite.Require().True(ok)
+	suite.Equal(1, record.failures)
+
+	// ...and a new load task for the same segment is rejected within the window
+	err := scheduler.preAdd(newGrowTask())
+	suite.Error(err)
+
+	// consecutive failures double the wait, capped at the configured max (4s)
+	scheduler.recordSegmentLoadFailure(index)
+	scheduler.recordSegmentLoadFailure(index)
+	scheduler.recordSegmentLoadFailure(index)
+	record, _ = scheduler.segmentLoadFailures.Get(index)
+	suite.Equal(4, record.failures)
+	wait := scheduler.segmentLoadBackoff(index)
+	suite.Greater(wait, 3*time.Second)
+	suite.LessOrEqual(wait, 4*time.Second)
+
+	// an expired record no longer delays anything
+	scheduler.segmentLoadFailures.Insert(index, &loadFailureRecord{
+		failures:    2,
+		lastFailure: time.Now().Add(-time.Minute),
+	})
+	suite.Zero(scheduler.segmentLoadBackoff(index))
+	suite.NoError(scheduler.preAdd(newGrowTask()))
+
+	// a successful load drops the record entirely
+	scheduler.recordSegmentLoadFailure(index)
+	succeeded := newGrowTask()
+	succeeded.SetStatus(TaskStatusSucceeded)
+	scheduler.remove(succeeded)
+	_, ok = scheduler.segmentLoadFailures.Get(index)
+	suite.False(ok)
+	suite.NoError(scheduler.preAdd(newGrowTask()))
+
+	// interval 0 disables the gate even with a fresh failure
+	pt.Save(pt.QueryCoordCfg.SegmentLoadRetryBackoffInterval.Key, "0")
+	scheduler.recordSegmentLoadFailure(index)
+	suite.Zero(scheduler.segmentLoadBackoff(index))
+	suite.NoError(scheduler.preAdd(newGrowTask()))
+}
