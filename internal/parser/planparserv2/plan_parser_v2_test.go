@@ -3819,6 +3819,108 @@ func TestExpr_ArrayContains(t *testing.T) {
 	}
 }
 
+// TestExpr_StructArrayContainsDesugar verifies that the array_contains /
+// array_contains_any / array_contains_all family on a struct-array sub-field
+// is parsed as pure sugar over the MATCH machinery: the produced plan must be
+// proto-identical to the hand-written MATCH_ANY equivalent.
+func TestExpr_StructArrayContainsDesugar(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	assertSamePlan := func(t *testing.T, sugar, match string, templateValues map[string]*schemapb.TemplateValue) {
+		t.Helper()
+		sugared, err := ParseExpr(helper, sugar, templateValues)
+		require.NoError(t, err, sugar)
+		handWritten, err := ParseExpr(helper, match, templateValues)
+		require.NoError(t, err, match)
+		assert.True(t, proto.Equal(handWritten, sugared),
+			"plan mismatch for %q\n  sugared:      %s\n  hand-written: %s", sugar, sugared.String(), handWritten.String())
+	}
+
+	t.Run("desugared plan equals hand-written MATCH_ANY", func(t *testing.T) {
+		cases := []struct {
+			sugar string
+			match string
+		}{
+			// array_contains(sa[f], x) => MATCH_ANY(sa, $[f] == x)
+			{`array_contains(struct_array[sub_int], 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{`ARRAY_CONTAINS(struct_array[sub_int], 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{`json_contains(struct_array[sub_int], 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{`array_contains(struct_array[sub_str], "abc")`, `MATCH_ANY(struct_array, $[sub_str] == "abc")`},
+			// parenthesized target is unwrapped
+			{`array_contains((struct_array[sub_int]), 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			// array_contains_any(sa[f], xs) => MATCH_ANY(sa, $[f] in xs)
+			{`array_contains_any(struct_array[sub_int], [1, 2, 3])`, `MATCH_ANY(struct_array, $[sub_int] in [1, 2, 3])`},
+			{`array_contains_any(struct_array[sub_str], ["a", "b"])`, `MATCH_ANY(struct_array, $[sub_str] in ["a", "b"])`},
+			// array_contains_all(sa[f], xs) => left-assoc AND of one MATCH_ANY per value
+			{`array_contains_all(struct_array[sub_int], [1])`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{
+				`array_contains_all(struct_array[sub_int], [1, 2])`,
+				`MATCH_ANY(struct_array, $[sub_int] == 1) and MATCH_ANY(struct_array, $[sub_int] == 2)`,
+			},
+			{
+				`array_contains_all(struct_array[sub_str], ["a", "b", "c"])`,
+				`MATCH_ANY(struct_array, $[sub_str] == "a") and MATCH_ANY(struct_array, $[sub_str] == "b") and MATCH_ANY(struct_array, $[sub_str] == "c")`,
+			},
+			// negation and logical composition desugar transparently
+			{`not array_contains(struct_array[sub_int], 1)`, `not MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{
+				`array_contains(struct_array[sub_int], 1) && Int64Field > 0`,
+				`MATCH_ANY(struct_array, $[sub_int] == 1) && Int64Field > 0`,
+			},
+		}
+		for _, c := range cases {
+			assertSamePlan(t, c.sugar, c.match, nil)
+		}
+	})
+
+	t.Run("template placeholders", func(t *testing.T) {
+		vals := map[string]*schemapb.TemplateValue{
+			"v":    generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+			"list": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2})),
+		}
+		assertSamePlan(t, `array_contains(struct_array[sub_int], {v})`, `MATCH_ANY(struct_array, $[sub_int] == {v})`, vals)
+		assertSamePlan(t, `array_contains_any(struct_array[sub_int], {list})`, `MATCH_ANY(struct_array, $[sub_int] in {list})`, vals)
+
+		// contains_all needs the concrete value list at parse time to expand into
+		// per-value MATCH_ANY conjuncts, so a placeholder list is rejected.
+		_, err := ParseExpr(helper, `array_contains_all(struct_array[sub_int], {list})`, vals)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		invalidExprs := []string{
+			// non-existent sub-field / container
+			`array_contains(struct_array[nonexist], 1)`,
+			`array_contains_any(struct_array[nonexist], [1, 2])`,
+			`array_contains_all(struct_array[nonexist], [1, 2])`,
+			`array_contains(nonexist_struct[sub_int], 1)`,
+			// [sub] on a scalar (non-struct) array field
+			`array_contains(ArrayField[sub_int], 1)`,
+			`array_contains_any(ArrayField[sub_int], [1, 2])`,
+			// value type mismatches
+			`array_contains(struct_array[sub_int], "abc")`,
+			`array_contains(struct_array[sub_str], 1)`,
+			`array_contains_any(struct_array[sub_int], ["a", "b"])`,
+			`array_contains_all(struct_array[sub_str], [1, 2])`,
+			`array_contains_any(struct_array[sub_int], [1, "a"])`,
+			// list ops need an explicit list
+			`array_contains_any(struct_array[sub_int], 1)`,
+			`array_contains_all(struct_array[sub_int], 1)`,
+			// empty list cannot be expanded into contains_all conjuncts
+			`array_contains_all(struct_array[sub_int], [])`,
+		}
+		for _, e := range invalidExprs {
+			assertInvalidExpr(t, helper, e)
+		}
+	})
+
+	t.Run("empty list contains_any matches empty in-list", func(t *testing.T) {
+		assertSamePlan(t, `array_contains_any(struct_array[sub_int], [])`, `MATCH_ANY(struct_array, $[sub_int] in [])`, nil)
+	})
+}
+
 func TestExpr_StructIndexField(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

@@ -1071,6 +1071,38 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		return merr.WrapErrParameterInvalidMsg("'term' can only be used on single field, but got: %s", ctx.Expr(0).GetText())
 	}
 
+	term := ctx.Expr(1).Accept(v)
+	if getError(term) != nil {
+		return term
+	}
+
+	expr, err := buildTermExpr(columnInfo, getValueExpr(term), ctx.Expr(1).GetText())
+	if err != nil {
+		return err
+	}
+	if ctx.GetOp() != nil {
+		expr = &planpb.Expr{
+			Expr: &planpb.Expr_UnaryExpr{
+				UnaryExpr: &planpb.UnaryExpr{
+					Op:    planpb.UnaryExpr_Not,
+					Child: expr,
+				},
+			},
+			IsTemplate: expr.GetIsTemplate(),
+		}
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+// buildTermExpr builds the `column in [...]` TermExpr from an already-resolved
+// column and an already-visited value-list expression. Factored out of
+// VisitTerm so that the struct-array array_contains_any desugar (see
+// desugarStructArrayContains) produces a plan identical to the hand-written
+// `MATCH_ANY(sa, $[f] in [...])` form.
+func buildTermExpr(columnInfo *planpb.ColumnInfo, valueExpr *planpb.ValueExpr, rhsText string) (*planpb.Expr, error) {
 	dataType := columnInfo.GetDataType()
 	// Use element type for IN operation in two cases:
 	// 1. Array with nested path (e.g., arr[0] IN [1, 2, 3])
@@ -1079,12 +1111,6 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		dataType = columnInfo.GetElementType()
 	}
 
-	term := ctx.Expr(1).Accept(v)
-	if getError(term) != nil {
-		return term
-	}
-
-	valueExpr := getValueExpr(term)
 	var placeholder string
 	var isTemplate bool
 	var values []*planpb.GenericValue
@@ -1095,18 +1121,18 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	} else {
 		elementValue := valueExpr.GetValue()
 		if elementValue == nil {
-			return merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be a non-const expression", ctx.Expr(1).GetText())
+			return nil, merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be a non-const expression", rhsText)
 		}
 
 		if !IsArray(elementValue) {
-			return merr.WrapErrParameterInvalidMsg("the right-hand side of 'in' must be a list, but got: %s", ctx.Expr(1).GetText())
+			return nil, merr.WrapErrParameterInvalidMsg("the right-hand side of 'in' must be a list, but got: %s", rhsText)
 		}
 		array := elementValue.GetArrayVal().GetArray()
 		values = make([]*planpb.GenericValue, len(array))
 		for i, e := range array {
 			castedValue, err := castValue(dataType, e)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be casted to %s", e.String(), dataType.String())
+				return nil, merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be casted to %s", e.String(), dataType.String())
 			}
 			values[i] = castedValue
 		}
@@ -1134,7 +1160,7 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		}
 	}
 
-	expr := &planpb.Expr{
+	return &planpb.Expr{
 		Expr: &planpb.Expr_TermExpr{
 			TermExpr: &planpb.TermExpr{
 				ColumnInfo:           columnInfo,
@@ -1143,22 +1169,7 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 			},
 		},
 		IsTemplate: isTemplate,
-	}
-	if ctx.GetOp() != nil {
-		expr = &planpb.Expr{
-			Expr: &planpb.Expr_UnaryExpr{
-				UnaryExpr: &planpb.UnaryExpr{
-					Op:    planpb.UnaryExpr_Not,
-					Child: expr,
-				},
-			},
-			IsTemplate: isTemplate,
-		}
-	}
-	return &ExprWithType{
-		expr:     expr,
-		dataType: schemapb.DataType_Bool,
-	}
+	}, nil
 }
 
 func isValidStructSubField(tokenText string) bool {
@@ -2298,6 +2309,13 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 }
 
 func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) interface{} {
+	// Struct-array sub-field target (array_contains(structArr[sub], x)):
+	// desugar to the equivalent MATCH_ANY expression. See
+	// desugarStructArrayContains for why and for the context guard.
+	if target := structArrayContainsTarget(ctx.Expr(0)); target != "" && !v.insideElementMatchContext() {
+		return v.desugarStructArrayContains(target, planpb.JSONContainsExpr_Contains, ctx.Expr(1), "array_contains")
+	}
+
 	field := ctx.Expr(0).Accept(v)
 	if err := getError(field); err != nil {
 		return err
@@ -2349,6 +2367,12 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 }
 
 func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext) interface{} {
+	// Struct-array sub-field target: desugar to an AND of per-value MATCH_ANY
+	// expressions. See desugarStructArrayContains.
+	if target := structArrayContainsTarget(ctx.Expr(0)); target != "" && !v.insideElementMatchContext() {
+		return v.desugarStructArrayContains(target, planpb.JSONContainsExpr_ContainsAll, ctx.Expr(1), "array_contains_all")
+	}
+
 	field := ctx.Expr(0).Accept(v)
 	if err := getError(field); err != nil {
 		return err
@@ -2402,6 +2426,12 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 }
 
 func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext) interface{} {
+	// Struct-array sub-field target: desugar to MATCH_ANY with an `in` predicate.
+	// See desugarStructArrayContains.
+	if target := structArrayContainsTarget(ctx.Expr(0)); target != "" && !v.insideElementMatchContext() {
+		return v.desugarStructArrayContains(target, planpb.JSONContainsExpr_ContainsAny, ctx.Expr(1), "array_contains_any")
+	}
+
 	field := ctx.Expr(0).Accept(v)
 	if err := getError(field); err != nil {
 		return err
@@ -2452,6 +2482,195 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 		expr:     expr,
 		dataType: schemapb.DataType_Bool,
 	}
+}
+
+// insideElementMatchContext reports whether the visitor is currently parsing
+// the element predicate of a MATCH_*/element_filter expression.
+func (v *ParserVisitor) insideElementMatchContext() bool {
+	return v.currentStructArrayField != "" || v.currentElementArrayField != nil || v.currentJSONMatchField != nil
+}
+
+// structArrayContainsTarget returns the raw StructFieldIdentifier text (e.g.
+// "structArr[subField]") when the expression is a direct struct-array
+// sub-field reference, optionally parenthesized; otherwise "".
+func structArrayContainsTarget(ctx parser.IExprContext) string {
+	for {
+		switch c := ctx.(type) {
+		case *parser.ParensContext:
+			ctx = c.Expr()
+		case *parser.StructFieldContext:
+			return c.StructFieldIdentifier().GetText()
+		default:
+			return ""
+		}
+	}
+}
+
+// buildStructArrayMatchAny wraps an element-level predicate into
+// MATCH_ANY(container, predicate), mirroring parseMatchExpr's struct-array
+// branch so the desugared plan is identical to the hand-written form.
+func (v *ParserVisitor) buildStructArrayMatchAny(container string, predicate *planpb.Expr) *ExprWithType {
+	column := &planpb.MatchColumnInfo{
+		FieldName: container,
+		DataType:  schemapb.DataType_ArrayOfStruct,
+	}
+	if structField := v.schema.GetStructArrayFieldFromName(container); structField != nil {
+		column.FieldId = structField.GetFieldID()
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_MatchExpr{
+				MatchExpr: &planpb.MatchExpr{
+					Column:    column,
+					Predicate: predicate,
+					MatchType: planpb.MatchType_MatchAny,
+					Count:     0,
+				},
+			},
+			// Propagate so FillExpressionValue recurses into the MatchExpr and
+			// substitutes template placeholders (same as parseMatchExpr).
+			IsTemplate: predicate.GetIsTemplate(),
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+// desugarStructArrayContains rewrites the array_contains family on a
+// struct-array sub-field into the equivalent MATCH expression. This is pure
+// parser-level sugar over MatchExpr: segcore has no JSONContainsExpr execution
+// path for struct arrays (and JSONContainsExpr requires an empty nested path),
+// while the MATCH machinery already evaluates element-level predicates on
+// struct arrays, including nested-index acceleration. The rewrites are:
+//
+//	array_contains(sa[f], x)         => MATCH_ANY(sa, $[f] == x)
+//	array_contains_any(sa[f], [xs])  => MATCH_ANY(sa, $[f] in [xs])
+//	array_contains_all(sa[f], [xs])  => MATCH_ANY(sa, $[f] == x1) and ... and MATCH_ANY(sa, $[f] == xn)
+//
+// contains_all means "every listed value appears in some struct element",
+// which is an AND of per-value MATCH_ANY — NOT a single MATCH_ALL (that would
+// require every element to match). Because the AND is expanded at parse time,
+// contains_all rejects template-placeholder lists and empty lists.
+//
+// Semantics on null / empty-array rows match JSONContainsExpr on scalar
+// arrays for positive filters: a row with a NULL or empty struct array never
+// matches. (Note: under negation, MATCH semantics treat a NULL struct-array
+// row as false-but-valid, so `not array_contains(sa[f], x)` includes it,
+// whereas a nullable scalar array keeps the row invalid/excluded.)
+//
+// The desugar only applies OUTSIDE MATCH_*/element_filter contexts (see the
+// insideElementMatchContext guards at the call sites); inside them, struct
+// sub-fields must be referenced as $[f] and the legacy path is preserved.
+func (v *ParserVisitor) desugarStructArrayContains(identifier string, op planpb.JSONContainsExpr_JSONOp, elementCtx parser.IExprContext, funcName string) interface{} {
+	idx := strings.Index(identifier, "[")
+	if idx <= 0 || !strings.HasSuffix(identifier, "]") {
+		return merr.WrapErrParameterInvalidMsg("invalid struct sub-field syntax: %s", identifier)
+	}
+	container := identifier[:idx]
+	subField := strings.TrimSuffix(identifier[idx+1:], "]")
+
+	// Struct sub-fields live in the schema under their concatenated name
+	// ("container[sub]"); a scalar field would never resolve here.
+	field, err := v.schema.GetFieldFromName(identifier)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
+	}
+	if field.GetDataType() != schemapb.DataType_Array {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s on a struct array sub-field requires a scalar array sub-field, but %q has type %s",
+			funcName, identifier, field.GetDataType().String())
+	}
+
+	// Parse the element operand BEFORE entering the struct element context so
+	// value expressions resolve exactly like in the scalar/JSON contains paths.
+	element := elementCtx.Accept(v)
+	if err := getError(element); err != nil {
+		return err
+	}
+	elementValue := getValueExpr(element)
+	if elementValue == nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s operation are only supported explicitly specified element, got: %s", funcName, elementCtx.GetText())
+	}
+
+	// Enter the same element context MATCH_ANY(container, ...) would establish,
+	// so the sub-field predicates below are built by exactly the same code path.
+	v.currentStructArrayField = container
+	defer func() { v.currentStructArrayField = "" }()
+
+	// buildEqPredicate builds `$[subField] == value`, the element predicate of
+	// the equivalent MATCH_ANY. A fresh sub-field expression is built per call
+	// to avoid aliasing one ColumnInfo across multiple predicates.
+	buildEqPredicate := func(value *ExprWithType) (*planpb.Expr, error) {
+		sub := v.buildStructSubFieldExpr(subField)
+		if err := getError(sub); err != nil {
+			return nil, err
+		}
+		return HandleCompare(parser.PlanParserEQ, getExpr(sub), value)
+	}
+
+	switch op {
+	case planpb.JSONContainsExpr_Contains:
+		predicate, err := buildEqPredicate(getExpr(element))
+		if err != nil {
+			return err
+		}
+		return v.buildStructArrayMatchAny(container, predicate)
+
+	case planpb.JSONContainsExpr_ContainsAny:
+		sub := v.buildStructSubFieldExpr(subField)
+		if err := getError(sub); err != nil {
+			return err
+		}
+		predicate, err := buildTermExpr(toColumnInfo(getExpr(sub)), elementValue, elementCtx.GetText())
+		if err != nil {
+			return err
+		}
+		return v.buildStructArrayMatchAny(container, predicate)
+
+	case planpb.JSONContainsExpr_ContainsAll:
+		if isTemplateExpr(elementValue) {
+			return merr.WrapErrParameterInvalidMsg(
+				"%s on a struct array sub-field does not support a template placeholder list, got: %s",
+				funcName, elementCtx.GetText())
+		}
+		arrayVal := elementValue.GetValue().GetArrayVal()
+		if arrayVal == nil {
+			return merr.WrapErrQueryPlanMsg("%s operation element must be an array", op.String())
+		}
+		values := arrayVal.GetArray()
+		if len(values) == 0 {
+			return merr.WrapErrParameterInvalidMsg(
+				"%s on a struct array sub-field requires a non-empty element list", funcName)
+		}
+		var combined *ExprWithType
+		for _, value := range values {
+			predicate, err := buildEqPredicate(toValueExpr(value))
+			if err != nil {
+				return err
+			}
+			matchOne := v.buildStructArrayMatchAny(container, predicate)
+			if combined == nil {
+				combined = matchOne
+				continue
+			}
+			// Left-associative AND, identical to the hand-written
+			// `MATCH_ANY(...) and MATCH_ANY(...) and ...` chain.
+			combined = &ExprWithType{
+				expr: &planpb.Expr{
+					Expr: &planpb.Expr_BinaryExpr{
+						BinaryExpr: &planpb.BinaryExpr{
+							Left:  combined.expr,
+							Right: matchOne.expr,
+							Op:    planpb.BinaryExpr_LogicalAnd,
+						},
+					},
+				},
+				dataType: schemapb.DataType_Bool,
+			}
+		}
+		return combined
+	}
+	return merr.WrapErrParameterInvalidMsg("unsupported contains operation on struct array sub-field: %s", op.String())
 }
 
 func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
@@ -3028,8 +3247,15 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 		return merr.WrapErrParameterInvalidMsg("invalid struct sub-field syntax: %s", tokenText)
 	}
 	// Remove "$[" prefix and "]" suffix
-	fieldName := tokenText[2 : len(tokenText)-1]
+	return v.buildStructSubFieldExpr(tokenText[2 : len(tokenText)-1])
+}
 
+// buildStructSubFieldExpr resolves a struct-array sub-field (by bare sub-field
+// name) against the current struct-array context (v.currentStructArrayField)
+// and returns its element-level column expression (*ExprWithType) or an error.
+// Shared by the `$[field]` syntax and the array_contains* desugar (see
+// desugarStructArrayContains) so that both produce identical plans.
+func (v *ParserVisitor) buildStructSubFieldExpr(fieldName string) interface{} {
 	// Check if we're inside an ElementFilter or MATCH_* context
 	if v.currentStructArrayField == "" {
 		if v.currentElementArrayField != nil {
