@@ -159,6 +159,11 @@ func (t *SearchTask) Execute() error {
 	}
 	defer searchReq.Delete()
 
+	preparedChains, err := prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), t.collection.Schema())
+	if err != nil {
+		return err
+	}
+
 	var (
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
@@ -277,8 +282,7 @@ func (t *SearchTask) Execute() error {
 	}
 
 	// Export per-segment results as Arrow DataFrames
-	// TODO: extract extra field IDs from L0 rerank scorer filters when rerank is configured
-	segDFs, err := t.exportSearchResultsAsArrow(results, searchReq.Plan(), nil)
+	segDFs, err := t.exportSearchResultsAsArrow(results, searchReq.Plan(), preparedChains.extraFieldIDs)
 	if err != nil {
 		return err
 	}
@@ -290,7 +294,7 @@ func (t *SearchTask) Execute() error {
 		}
 	}()
 
-	if err := t.applyBoostScores(segDFs, searchedSegments, searchReq); err != nil {
+	if err := t.applyL0Rerank(segDFs, preparedChains, searchedSegments, searchReq); err != nil {
 		return err
 	}
 

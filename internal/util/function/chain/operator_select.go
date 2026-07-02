@@ -56,11 +56,19 @@ func (o *SelectOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 	builder.SetChunkSizes(input.chunkSizes)
 
+	columns := append([]string(nil), o.inputs...)
+	selected := NewColumnSet(columns...)
+	for _, colName := range input.ColumnNames() {
+		if IsFunctionChainSystemName(colName) && !selected.Contains(colName) {
+			columns = append(columns, colName)
+		}
+	}
+
 	// Use ChunkCollector for selected chunks
-	collector := NewChunkCollector(o.inputs, input.NumChunks())
+	collector := NewChunkCollector(columns, input.NumChunks())
 	defer collector.Release()
 
-	for _, colName := range o.inputs {
+	for _, colName := range columns {
 		col := input.Column(colName)
 		if col == nil {
 			return nil, merr.WrapErrServiceInternalMsg("select_op: column %q not found", colName)
