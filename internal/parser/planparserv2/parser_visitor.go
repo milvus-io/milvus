@@ -3174,7 +3174,9 @@ func (v *ParserVisitor) parseMatchExpr(identNode, jsonIdentNode antlr.TerminalNo
 		}
 	}
 
-	// Build MatchExpr proto
+	// Build MatchExpr proto. IsTemplate must propagate from the predicate so
+	// that FillExpressionValue recurses into the MatchExpr and substitutes the
+	// template placeholders at ParseExpr time.
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_MatchExpr{
@@ -3185,6 +3187,7 @@ func (v *ParserVisitor) parseMatchExpr(identNode, jsonIdentNode antlr.TerminalNo
 					Count:     count,
 				},
 			},
+			IsTemplate: predicateExpr.expr.GetIsTemplate(),
 		},
 		dataType: schemapb.DataType_Bool,
 	}

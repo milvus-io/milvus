@@ -109,17 +109,18 @@ func TestGenericValueScalarType(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_VarChar, genericValueScalarType(NewString("x")))
 }
 
-// TestValidateJSONMatchElementType_TemplateRejected verifies that a predicate
-// flagged as a template is rejected for JSON MATCH_* (placeholders unsupported).
-func TestValidateJSONMatchElementType_TemplateRejected(t *testing.T) {
+// TestValidateJSONMatchElementType_TemplateDeferred verifies that a predicate
+// flagged as a template is not validated at visitor time: validation is
+// deferred until FillExpressionValue substitutes concrete template values
+// (see validateFilledJSONMatchExprs), so it must not error here.
+func TestValidateJSONMatchElementType_TemplateDeferred(t *testing.T) {
 	mctx := &jsonMatchContext{fieldID: 123, jsonPath: []string{"a"}}
 
 	// nil context -> no-op, never errors regardless of the predicate.
 	assert.NoError(t, validateJSONMatchElementType(&planpb.Expr{IsTemplate: true}, nil))
 
-	// template predicate under a real context -> error.
-	err := validateJSONMatchElementType(&planpb.Expr{IsTemplate: true}, mctx)
-	assert.Error(t, err)
+	// template predicate under a real context -> deferred, no error yet.
+	assert.NoError(t, validateJSONMatchElementType(&planpb.Expr{IsTemplate: true}, mctx))
 }
 
 // TestCollectJSONMatchLiteralTypes_AnchorsOnPath confirms that only literals

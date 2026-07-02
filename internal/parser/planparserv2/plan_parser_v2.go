@@ -210,6 +210,13 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 		return nil, err
 	}
 
+	// JSON MATCH_* predicates that carried template placeholders skipped
+	// element-type validation at visitor time (the literal types were unknown
+	// until the template values above were substituted); validate them now.
+	if err := validateFilledJSONMatchExprs(predicate.expr); err != nil {
+		return nil, err
+	}
+
 	predicate.expr = rewriter.RewriteExpr(predicate.expr)
 	return predicate.expr, nil
 }

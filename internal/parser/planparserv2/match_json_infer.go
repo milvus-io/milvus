@@ -174,16 +174,58 @@ func jsonMatchLiteralTypeError() error {
 // intentionally not written into the plan. C++ dispatch routes by rhs
 // val_case and the JsonInvertedIndex's own T; ElementType on the $ column
 // would be dead weight.
+//
+// If the predicate still carries template placeholders (IsTemplate), literal
+// types are unknown at visitor time, so validation is deferred: parseExprInner
+// always substitutes template values via FillExpressionValue before the plan
+// leaves the parser, and validateFilledJSONMatchExprs re-runs the check on the
+// concrete values. A placeholder with no provided value is rejected by
+// FillExpressionValue itself, so no unfilled predicate can slip through.
 func validateJSONMatchElementType(predicate *planpb.Expr, mctx *jsonMatchContext) error {
 	if mctx == nil {
 		return nil
 	}
 	if predicate.GetIsTemplate() {
-		return merr.WrapErrParameterInvalidMsg(
-			"MATCH_* on JSON does not support template placeholders in predicate")
+		// Deferred to validateFilledJSONMatchExprs after template substitution.
+		return nil
 	}
 	var types []schemapb.DataType
 	collectJSONMatchLiteralTypes(predicate, mctx, &types)
 	_, err := reduceJSONMatchElementType(types)
 	return err
+}
+
+// validateFilledJSONMatchExprs walks a plan expression after
+// FillExpressionValue has substituted template values and re-runs the JSON
+// MATCH_* element-type validation for predicates that carried placeholders at
+// parse time (their IsTemplate flag stays set after filling, but the values
+// are concrete now). Non-template predicates were already validated at
+// visitor time and are skipped.
+func validateFilledJSONMatchExprs(expr *planpb.Expr) error {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_BinaryExpr:
+		if err := validateFilledJSONMatchExprs(e.BinaryExpr.GetLeft()); err != nil {
+			return err
+		}
+		return validateFilledJSONMatchExprs(e.BinaryExpr.GetRight())
+	case *planpb.Expr_UnaryExpr:
+		return validateFilledJSONMatchExprs(e.UnaryExpr.GetChild())
+	case *planpb.Expr_RandomSampleExpr:
+		return validateFilledJSONMatchExprs(e.RandomSampleExpr.GetPredicate())
+	case *planpb.Expr_MatchExpr:
+		column := e.MatchExpr.GetColumn()
+		if column.GetDataType() != schemapb.DataType_JSON ||
+			!e.MatchExpr.GetPredicate().GetIsTemplate() {
+			return nil
+		}
+		var types []schemapb.DataType
+		collectJSONMatchLiteralTypes(e.MatchExpr.GetPredicate(),
+			&jsonMatchContext{fieldID: column.GetFieldId(), jsonPath: column.GetNestedPath()}, &types)
+		_, err := reduceJSONMatchElementType(types)
+		return err
+	}
+	return nil
 }
