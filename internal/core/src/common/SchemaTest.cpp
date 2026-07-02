@@ -557,6 +557,30 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaNullableDenseVectorUsesBinary) {
     EXPECT_EQ(dim_result.ValueOrDie(), "128");
 }
 
+TEST_F(SchemaTest, ConvertToLoonArrowSchemaTextLobAsBinary) {
+    auto text_id = schema_->AddDebugField("text_field", DataType::TEXT, true);
+    auto varchar_id =
+        schema_->AddDebugField("varchar_field", DataType::VARCHAR, true);
+
+    auto default_schema = schema_->ConvertToLoonArrowSchema();
+    auto default_text =
+        default_schema->GetFieldByName(std::to_string(text_id.get()));
+    ASSERT_NE(default_text, nullptr);
+    EXPECT_EQ(default_text->type()->id(), arrow::Type::STRING);
+
+    auto lob_schema =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    auto lob_text = lob_schema->GetFieldByName(std::to_string(text_id.get()));
+    auto lob_varchar =
+        lob_schema->GetFieldByName(std::to_string(varchar_id.get()));
+
+    ASSERT_NE(lob_text, nullptr);
+    ASSERT_NE(lob_varchar, nullptr);
+    EXPECT_EQ(lob_text->type()->id(), arrow::Type::BINARY);
+    EXPECT_TRUE(lob_text->nullable());
+    EXPECT_EQ(lob_varchar->type()->id(), arrow::Type::STRING);
+}
+
 TEST_F(SchemaTest,
        ExternalFunctionOutputUsesFieldFlagWithoutFunctionOutputIds) {
     milvus::proto::schema::CollectionSchema schema_proto;

@@ -4921,7 +4921,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
                 milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                     .GetProperties();
             auto column_groups = segment_load_info.GetColumnGroups();
-            auto arrow_schema = schema_->ConvertToLoonArrowSchema();
+            auto arrow_schema =
+                schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
             auto needed_columns = std::make_shared<std::vector<std::string>>();
             for (const auto& field_id : schema_->get_field_ids()) {
                 needed_columns->push_back(std::to_string(field_id.get()));
@@ -5259,7 +5260,8 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
     auto column_groups =
         std::atomic_load(&segment_load_info_)->GetColumnGroups();
 
-    auto arrow_schema = schema_->ConvertToArrowSchema();
+    auto arrow_schema =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 

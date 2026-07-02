@@ -23,8 +23,12 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -457,6 +461,118 @@ func TestProxy_RestoreSnapshot_WaitToFinishFailure(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.False(t, merr.Ok(result.GetStatus()))
 	assert.Contains(t, result.GetStatus().GetReason(), "task execution failed")
+}
+
+func TestExportSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
+	const (
+		externalSpec = `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`
+	)
+
+	proxy := &Proxy{
+		mixCoord: NewMixCoordMock(),
+	}
+	req := &milvuspb.ExportSnapshotRequest{
+		Name:           "test_snapshot",
+		DbName:         "default",
+		CollectionName: "test_collection",
+		TargetS3Path:   "s3://foreign-bucket/export-root",
+		ExternalSpec:   externalSpec,
+	}
+
+	oldMetaCache := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	defer func() { globalMetaCache = oldMetaCache }()
+
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	var gotReq *datapb.ExportSnapshotRequest
+	mockExportSnapshot := mockey.Mock((*MixCoordMock).ExportSnapshot).To(
+		func(ctx context.Context, req *datapb.ExportSnapshotRequest, opts ...grpc.CallOption) (*datapb.ExportSnapshotResponse, error) {
+			gotReq = req
+			return &datapb.ExportSnapshotResponse{
+				Status:              merr.Success(),
+				SnapshotMetadataUri: req.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+			}, nil
+		},
+	).Build()
+	defer mockExportSnapshot.UnPatch()
+
+	resp, err := proxy.ExportSnapshot(context.Background(), req)
+
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp.GetStatus()))
+	if assert.NotNil(t, gotReq) {
+		assert.Equal(t, externalSpec, gotReq.GetExternalSpec())
+	}
+}
+
+func TestRestoreExternalSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
+	const (
+		externalSpec = `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`
+	)
+
+	proxy := &Proxy{
+		mixCoord: NewMixCoordMock(),
+	}
+	req := &milvuspb.RestoreExternalSnapshotRequest{
+		DbName:               "default",
+		TargetCollectionName: "restored_collection",
+		SnapshotMetadataUri:  "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
+		ExternalSpec:         externalSpec,
+	}
+
+	var gotReq *datapb.RestoreSnapshotRequest
+	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).To(
+		func(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+			gotReq = req
+			return &datapb.RestoreSnapshotResponse{
+				Status: merr.Success(),
+				JobId:  1,
+			}, nil
+		},
+	).Build()
+	defer mockRestoreSnapshot.UnPatch()
+
+	resp, err := proxy.RestoreExternalSnapshot(context.Background(), req)
+
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(1), resp.GetJobId())
+	if assert.NotNil(t, gotReq) {
+		assert.True(t, gotReq.GetExternal())
+		assert.Equal(t, externalSpec, gotReq.GetExternalSpec())
+	}
+}
+
+func TestRestoreExternalSnapshotTask_Execute_RequiresMetadataURI(t *testing.T) {
+	proxy := &Proxy{
+		mixCoord: NewMixCoordMock(),
+	}
+	req := &milvuspb.RestoreExternalSnapshotRequest{
+		DbName:               "default",
+		TargetCollectionName: "restored_collection",
+	}
+
+	resp, err := proxy.RestoreExternalSnapshot(context.Background(), req)
+
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+}
+
+func TestSnapshotRequestOption_RBACGuardrails(t *testing.T) {
+	exportOpt, err := funcutil.GetPrivilegeExtObj(&milvuspb.ExportSnapshotRequest{})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ObjectType_Global, exportOpt.GetObjectType())
+	assert.Equal(t, "PrivilegeExportSnapshot", exportOpt.GetObjectPrivilege().String())
+	assert.Equal(t, int32(-1), exportOpt.GetObjectNameIndex())
+
+	restoreOpt, err := funcutil.GetPrivilegeExtObj(&milvuspb.RestoreExternalSnapshotRequest{})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ObjectType_Global, restoreOpt.GetObjectType())
+	assert.Equal(t, "PrivilegeRestoreExternalSnapshot", restoreOpt.GetObjectPrivilege().String())
+	assert.Equal(t, int32(-1), restoreOpt.GetObjectNameIndex())
 }
 
 // Test task creation and basic properties
