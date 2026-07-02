@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -186,6 +187,13 @@ func newSearchReduceOperator(t *searchTask, params map[string]any) (operator, er
 	if err != nil {
 		return nil, err
 	}
+	topK := t.GetTopk()
+	if len(t.orderByFields) > 0 && !t.GetIsAdvanced() {
+		// ORDER BY is applied after reduction in the proxy pipeline, so the reducer
+		// must preserve the requested window plus the offset to avoid pruning rows
+		// that would otherwise be excluded before sorting.
+		topK += t.GetOffset()
+	}
 	offset := t.GetOffset()
 	if v, ok := params[reduceOffsetParamKey].(int64); ok {
 		offset = v
@@ -194,7 +202,7 @@ func newSearchReduceOperator(t *searchTask, params map[string]any) (operator, er
 		traceCtx:            t.TraceCtx(),
 		primaryFieldSchema:  pkField,
 		nq:                  t.GetNq(),
-		topK:                t.GetTopk(),
+		topK:                topK,
 		offset:              offset,
 		collectionID:        t.GetCollectionID(),
 		partitionIDs:        t.GetPartitionIDs(),
@@ -1190,6 +1198,12 @@ func buildChainFromMeta(
 	switch m := meta.(type) {
 	case *funcScoreRerankMeta:
 		return chain.BuildRerankChain(collSchema, m.funcScore, metrics, searchParams, alloc)
+	case *functionChainRerankMeta:
+		buildCtx := chaintypes.FunctionBuildContext{}
+		if searchParams != nil {
+			buildCtx.ModelExtraInfo = searchParams.ModelExtraInfo
+		}
+		return chain.FuncChainFromReprWithContext(m.repr, alloc, buildCtx)
 	case *legacyRerankMeta:
 		return chain.BuildRerankChainWithLegacy(collSchema, m.legacyParams, metrics, searchParams, alloc)
 	default:
@@ -1294,8 +1308,17 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		return nil, err
 	}
 
-	// Execute chain
-	resultDF, err := fc.ExecuteWithContext(ctx, dataframes...)
+	// Execute chain. Column pruning is an execution optimization only;
+	// final response projection is still handled by the end operator.
+	resultDF, err := fc.ExecuteWithOptions(ctx, chain.ExecuteOptions{
+		EnableColumnPruning: true,
+		Downstream: chain.DownstreamSpec{
+			RequiredColumns: neededFields,
+		},
+		SystemColumnPolicy: chain.SystemColumnPolicy{
+			KeepAllSystemColumns: true,
+		},
+	}, dataframes...)
 	// Release input dataframes
 	for _, df := range dataframes {
 		df.Release()
@@ -1462,6 +1485,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
+		chMgr:          op.node.(*Proxy).chMgr,
 	}
 	queryResult, storageCost, err := op.node.(*Proxy).query(op.traceCtx, qt, span)
 	if err != nil {
