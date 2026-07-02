@@ -897,3 +897,155 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     // Clean up any remaining index files
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS filtering test");
 }
+
+// Equivalence test for the GIS coarse/refine split + same-column fusion on the
+// INDEXED path: with a geometry R-Tree index loaded, the Coarse node's
+// RunRTreeQuery is exercised. enableGISSplitFusion ON must match OFF.
+TEST_F(RTreeIndexTest, GIS_SplitFusion_Equivalence_Indexed) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_id);
+
+    const int N = 200;
+    auto full_ds = DataGen(schema, N);
+    auto sealed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    // Controlled geometry data (mirrors GIS_Index_Exact_Filtering).
+    std::vector<std::string> wkbs;
+    wkbs.reserve(N);
+    auto ctx = GEOS_init_r();
+    for (int i = 0; i < N; ++i) {
+        const char* wkt =
+            (i % 4 == 0)   ? "POINT(0 0)"
+            : (i % 4 == 1) ? "POLYGON((-1 -1,1 -1,1 1,-1 1,-1 -1))"
+            : (i % 4 == 2) ? "POLYGON((10 10,20 10,20 20,10 20,10 10))"
+                           : "LINESTRING(-1 0,1 0)";
+        wkbs.emplace_back(milvus::Geometry(ctx, wkt).to_wkb_string());
+    }
+    GEOS_finish_r(ctx);
+
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         false);
+    geo_field_data->FillFieldData(wkbs.data(), wkbs.size());
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+    sealed->LoadFieldData(load_info);
+
+    // Build + load the geometry R-Tree index. Use a distinct field/index id so
+    // the index build temp dir (derived from collection_partition_segment_field)
+    // does not collide with GIS_Index_Exact_Filtering, which reuses the fixture's
+    // field_meta_ {1,1,1,100} and leaves that temp dir non-empty.
+    milvus::storage::FieldDataMeta fusion_field_meta{1, 1, 1, 200};
+    fusion_field_meta.field_schema.set_data_type(
+        ::milvus::proto::schema::DataType::Geometry);
+    milvus::storage::IndexMeta fusion_index_meta{1, 200, 1, 1};
+    auto remote_file = (temp_path_.get() / "rtree_fusion.parquet").string();
+    WriteGeometryInsertFile(
+        chunk_manager_, fusion_field_meta, remote_file, wkbs);
+    milvus::storage::FileManagerContext fm_ctx(
+        fusion_field_meta, fusion_index_meta, chunk_manager_, fs_);
+    auto rtree_index =
+        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
+    nlohmann::json build_cfg;
+    build_cfg["insert_files"] = std::vector<std::string>{remote_file};
+    build_cfg["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    rtree_index->Build(build_cfg);
+    auto stats = rtree_index->UploadUnified({});
+
+    milvus::segcore::LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = 1;
+    info.field_id = geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema = proto::schema::FieldSchema();
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.index_params["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    nlohmann::json cfg_load;
+    cfg_load["index_files"] = stats->GetIndexFiles();
+    rtree_index->LoadUnified(cfg_load);
+    info.cache_index =
+        CreateTestCacheIndex("rtree_fusion_key", std::move(rtree_index));
+    sealed->LoadIndex(info);
+
+    ASSERT_TRUE(sealed->HasIndex(geo_id));
+
+    // Build conjunction filters that combine a scalar predicate with same-column
+    // geometry predicates (so SplitFuseGISConjunct fires and uses the index).
+    auto col_geo = milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY);
+    auto col_id = milvus::expr::ColumnInfo(pk_id, DataType::INT64);
+    proto::plan::GenericValue zero;
+    zero.set_int64_val(0);
+    milvus::expr::TypedExprPtr scalar =
+        std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+            col_id, proto::plan::OpType::GreaterEqual, zero);
+
+    auto gis = [&](proto::plan::GISFunctionFilterExpr_GISOp op,
+                   const std::string& wkt) -> milvus::expr::TypedExprPtr {
+        return std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            col_geo, op, wkt);
+    };
+    auto And = [](milvus::expr::TypedExprPtr a,
+                  milvus::expr::TypedExprPtr b) -> milvus::expr::TypedExprPtr {
+        return std::make_shared<milvus::expr::LogicalBinaryExpr>(
+            milvus::expr::LogicalBinaryExpr::OpType::And, a, b);
+    };
+    auto Or = [](milvus::expr::TypedExprPtr a,
+                 milvus::expr::TypedExprPtr b) -> milvus::expr::TypedExprPtr {
+        return std::make_shared<milvus::expr::LogicalBinaryExpr>(
+            milvus::expr::LogicalBinaryExpr::OpType::Or, a, b);
+    };
+    const auto kInter = proto::plan::GISFunctionFilterExpr_GISOp_Intersects;
+    const auto kWithin = proto::plan::GISFunctionFilterExpr_GISOp_Within;
+
+    std::vector<milvus::expr::TypedExprPtr> filters = {
+        // scalar AND single GIS (indexed)
+        And(scalar, gis(kInter, "POLYGON((-2 -2,2 -2,2 2,-2 2,-2 -2))")),
+        // scalar AND (GIS OR GIS) -- Shape B
+        And(scalar,
+            Or(gis(kInter, "POLYGON((-2 -2,2 -2,2 2,-2 2,-2 -2))"),
+               gis(kInter, "POLYGON((10 10,20 10,20 20,10 20,10 10))"))),
+        // same-field AND group (intersects + within)
+        And(gis(kInter, "POLYGON((-2 -2,2 -2,2 2,-2 2,-2 -2))"),
+            gis(kWithin,
+                "POLYGON((-100 -100,100 -100,100 100,-100 100,-100 -100))")),
+    };
+
+    auto run = [&](const milvus::expr::TypedExprPtr& f,
+                   bool enable) -> BitsetType {
+        SegcoreConfig::default_config().set_enable_gis_split_fusion(enable);
+        auto node =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, f);
+        auto bits = ExecuteQueryExpr(node, sealed.get(), N, MAX_TIMESTAMP);
+        SegcoreConfig::default_config().set_enable_gis_split_fusion(false);
+        return bits;
+    };
+
+    for (const auto& f : filters) {
+        BitsetType baseline = run(f, false);
+        BitsetType fused = run(f, true);
+        ASSERT_EQ(baseline.size(), fused.size());
+        ASSERT_EQ(baseline.size(), static_cast<size_t>(N));
+        for (int i = 0; i < N; ++i) {
+            ASSERT_EQ(bool(baseline[i]), bool(fused[i])) << "row " << i;
+        }
+    }
+
+    sealed.reset();
+    CleanupIndexFiles(stats->GetIndexFiles(), "GIS split-fusion equivalence");
+}
