@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -50,6 +52,18 @@ type statsTaskSuite struct {
 	segID    int64
 	taskID   int64
 	targetID int64
+}
+
+type mockeyDataCoordCatalog struct {
+	metastore.DataCoordCatalog
+}
+
+func (c *mockeyDataCoordCatalog) AlterSegments(
+	ctx context.Context,
+	newSegments []*datapb.SegmentInfo,
+	binlogs ...metastore.BinlogsIncrement,
+) error {
+	return nil
 }
 
 func Test_statsTaskSuite(t *testing.T) {
@@ -561,6 +575,142 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 
 	// Restore original segments
 	s.mt.segments = origSegments
+}
+
+func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
+	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
+	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
+	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+
+	statsLogs := map[int64]*datapb.JsonKeyStats{
+		500: {
+			FieldID:                500,
+			Version:                1,
+			BuildID:                s.taskID,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+		},
+	}
+
+	testCases := []struct {
+		name           string
+		current        string
+		base           string
+		result         string
+		logs           map[int64]*datapb.JsonKeyStats
+		expectManifest string
+		expectStats    bool
+		expectCatalog  bool
+	}{
+		{
+			name:           "stale_result",
+			current:        currentManifest,
+			base:           oldManifest,
+			result:         resultManifest,
+			logs:           statsLogs,
+			expectManifest: currentManifest,
+		},
+		{
+			name:           "fresh_result",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         resultManifest,
+			logs:           statsLogs,
+			expectManifest: resultManifest,
+			expectStats:    true,
+			expectCatalog:  true,
+		},
+		{
+			name:           "empty_stats_noop",
+			current:        currentManifest,
+			base:           currentManifest,
+			result:         currentManifest,
+			logs:           map[int64]*datapb.JsonKeyStats{},
+			expectManifest: currentManifest,
+		},
+	}
+
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			restore := s.installJSONStatsSegment(testCase.current)
+			defer restore()
+
+			alterSegmentsCount := 0
+			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).To(
+				func(
+					_ *mockeyDataCoordCatalog,
+					_ context.Context,
+					_ []*datapb.SegmentInfo,
+					_ ...metastore.BinlogsIncrement,
+				) error {
+					alterSegmentsCount++
+					return nil
+				}).Build()
+			defer mockAlterSegments.UnPatch()
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+
+			err := s.newJSONStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
+				TaskID:           s.taskID,
+				CollectionID:     s.collID,
+				PartitionID:      s.partID,
+				SegmentID:        s.segID,
+				Channel:          "ch1",
+				BaseManifest:     testCase.base,
+				Manifest:         testCase.result,
+				JsonKeyStatsLogs: testCase.logs,
+			})
+			s.NoError(err)
+
+			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
+			s.Require().NotNil(segment)
+			s.Equal(testCase.expectManifest, segment.GetManifestPath())
+			if testCase.expectStats {
+				s.Require().Contains(segment.GetJsonKeyStats(), int64(500))
+				s.Equal(s.taskID, segment.GetJsonKeyStats()[500].GetBuildID())
+			} else {
+				s.Empty(segment.GetJsonKeyStats())
+			}
+			if testCase.expectCatalog {
+				s.Equal(1, alterSegmentsCount)
+			} else {
+				s.Equal(0, alterSegmentsCount)
+			}
+		})
+	}
+}
+
+func (s *statsTaskSuite) installJSONStatsSegment(manifest string) func() {
+	origSegment := s.mt.segments.segments[s.segID]
+	origCatalog := s.mt.catalog
+	s.mt.segments.segments[s.segID] = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             s.segID,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			InsertChannel:  "ch1",
+			NumOfRows:      1024,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L1,
+			ManifestPath:   manifest,
+			StorageVersion: 3,
+		},
+	}
+	return func() {
+		s.mt.segments.segments[s.segID] = origSegment
+		s.mt.catalog = origCatalog
+	}
+}
+
+func (s *statsTaskSuite) newJSONStatsTask() *statsTask {
+	return newStatsTask(&indexpb.StatsTask{
+		CollectionID:    s.collID,
+		PartitionID:     s.partID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.segID,
+		InsertChannel:   "ch1",
+		TaskID:          s.taskID,
+		SubJobType:      indexpb.StatsSubJob_JsonKeyIndexJob,
+		State:           indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 }
 
 // TestPrepareJobRequest tests edge cases of prepareJobRequest

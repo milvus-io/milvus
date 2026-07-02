@@ -714,6 +714,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		mu                sync.Mutex
 		jsonKeyIndexStats = make(map[int64]*datapb.JsonKeyStats)
 	)
+	baseManifest := st.req.GetManifestPath()
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
@@ -821,6 +822,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		jsonKeyIndexStats,
+		baseManifest,
 		st.manifestPath)
 
 	metrics.DataNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())

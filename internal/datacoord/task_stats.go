@@ -27,6 +27,7 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -365,7 +366,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 			break
 		}
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
-		err = st.meta.UpdateSegment(st.GetSegmentID(), SetJSONKeyIndexLogs(result.GetJsonKeyStatsLogs()))
+		err = st.meta.UpdateSegmentsInfo(ctx, updateJSONStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
 		if err != nil {
 			mlog.Warn(ctx, "save json key index stats result failed", mlog.Int64("taskId", st.GetTaskID()),
 				mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
@@ -405,7 +406,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	}
 
 	// Update segment manifest version so subsequent stats tasks use the latest version.
-	if manifest := result.GetManifest(); manifest != "" {
+	if manifest := result.GetManifest(); manifest != "" && st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob {
 		segID := st.GetSegmentID()
 		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
 			segID = st.GetTargetSegmentID()
@@ -425,4 +426,50 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		mlog.Int64("oldSegmentID", st.GetSegmentID()), mlog.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		mlog.String("subJobType", st.GetSubJobType().String()), mlog.String("state", st.GetState().String()))
 	return nil
+}
+
+func updateJSONStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		current := modPack.meta.segments.GetSegment(segmentID)
+		if current == nil || !isSegmentHealthy(current) {
+			mlog.Warn(ctx, "skip json stats result for missing or unhealthy segment",
+				mlog.FieldTaskID(taskID),
+				mlog.FieldSegmentID(segmentID),
+				mlog.Bool("segmentMissing", current == nil))
+			return false
+		}
+		if result.GetBaseManifest() != "" && current.GetManifestPath() != result.GetBaseManifest() {
+			mlog.Info(ctx, "skip stale json stats result",
+				mlog.FieldTaskID(taskID),
+				mlog.FieldSegmentID(segmentID),
+				mlog.String("baseManifest", result.GetBaseManifest()),
+				mlog.String("currentManifest", current.GetManifestPath()),
+				mlog.String("resultManifest", result.GetManifest()))
+			return false
+		}
+
+		hasStats := len(result.GetJsonKeyStatsLogs()) > 0
+		manifestChanged := result.GetManifest() != "" && current.GetManifestPath() != result.GetManifest()
+		if !hasStats && !manifestChanged {
+			return false
+		}
+
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			return false
+		}
+
+		if hasStats {
+			if segment.JsonKeyStats == nil {
+				segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
+			for fieldID, logs := range result.GetJsonKeyStatsLogs() {
+				segment.JsonKeyStats[fieldID] = logs
+			}
+		}
+		if result.GetManifest() != "" && segment.GetManifestPath() != result.GetManifest() {
+			segment.ManifestPath = result.GetManifest()
+		}
+		return true
+	}
 }
