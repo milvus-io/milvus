@@ -112,6 +112,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
+    FillPrimaryKeys(const query::Plan* plan,
+                    SearchResult& results) const override;
+
+    void
     AddFieldDataInfoForSealed(
         const LoadFieldDataInfo& field_data_info) override;
 

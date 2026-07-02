@@ -21,6 +21,7 @@
 #include <arrow/type_fwd.h>
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -48,14 +49,16 @@
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -161,9 +164,23 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     void
     SetUp() override {
         bool pk_is_string = GetParam();
-        auto schema = segcore::GenChunkedSegmentTestSchema(pk_is_string);
+        auto* test_info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        auto test_name = test_info == nullptr ? std::string()
+                                              : std::string(test_info->name());
+        if (test_name.find("ReduceStringPkWithSimulatedAnnResult") !=
+            std::string::npos) {
+            if (!pk_is_string) {
+                GTEST_SKIP() << "VARCHAR primary key fast path only";
+            }
+            chunk_num = 10;
+            test_data_count = 100000;
+            fixed_string_width = 32;
+        }
+
+        schema_ = segcore::GenChunkedSegmentTestSchema(pk_is_string);
         segment = segcore::CreateSealedSegment(
-            schema,
+            schema_,
             nullptr,
             -1,
             segcore::SegcoreConfig::default_config(),
@@ -185,6 +202,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             EXPECT_TRUE(status.ok())
                 << "Failed to create directory: " << dir_path;
         }
+        test_data_created = true;
 
         std::vector<std::vector<int>> column_groups = {
             {0, 1, 4}, {2}, {3}};  // narrow columns and wide columns
@@ -195,7 +213,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         auto result = milvus_storage::PackedRecordBatchWriter::Make(
             fs,
             paths,
-            schema->ConvertToArrowSchema(),
+            schema_->ConvertToArrowSchema(),
             storage_config,
             column_groups,
             writer_memory,
@@ -207,19 +225,20 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         int64_t row_count = 0;
         int start_id = 0;
 
-        std::vector<std::string> str_data;
-        for (int i = 0; i < test_data_count * chunk_num; i++) {
-            str_data.push_back("test" + std::to_string(i));
+        string_data.clear();
+        string_data.reserve(RowCount());
+        for (int64_t i = 0; i < RowCount(); i++) {
+            string_data.push_back(MakeStringValue(i));
         }
-        std::sort(str_data.begin(), str_data.end());
+        std::sort(string_data.begin(), string_data.end());
 
-        fields = {{"int64", schema->get_field_id(FieldName("int64"))},
-                  {"pk", schema->get_field_id(FieldName("pk"))},
+        fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
+                  {"pk", schema_->get_field_id(FieldName("pk"))},
                   {"ts", TimestampFieldID},
-                  {"string1", schema->get_field_id(FieldName("string1"))},
-                  {"string2", schema->get_field_id(FieldName("string2"))}};
+                  {"string1", schema_->get_field_id(FieldName("string1"))},
+                  {"string2", schema_->get_field_id(FieldName("string2"))}};
 
-        auto arrow_schema = schema->ConvertToArrowSchema();
+        auto arrow_schema = schema_->ConvertToArrowSchema();
         for (int chunk_id = 0; chunk_id < chunk_num;
              chunk_id++, start_id += test_data_count) {
             std::vector<int64_t> test_data(test_data_count);
@@ -241,8 +260,9 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 } else {
                     arrow::StringBuilder builder;
                     std::vector<std::string> str_values;
+                    str_values.reserve(test_data_count);
                     for (int j = 0; j < test_data_count; j++) {
-                        str_values.push_back(str_data[start_id + j]);
+                        str_values.push_back(string_data[start_id + j]);
                     }
                     auto status = builder.AppendValues(str_values);
                     EXPECT_TRUE(status.ok());
@@ -255,7 +275,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 
             // Create record batch
             auto record_batch = arrow::RecordBatch::Make(
-                schema->ConvertToArrowSchema(), test_data_count, arrays);
+                schema_->ConvertToArrowSchema(), test_data_count, arrays);
             row_count += test_data_count;
             EXPECT_TRUE(writer->Write(record_batch).ok());
         }
@@ -304,6 +324,9 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 
     void
     TearDown() override {
+        if (!test_data_created) {
+            return;
+        }
         // Clean up test data directory
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
@@ -314,6 +337,21 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     int64_t
     RowCount() const {
         return chunk_num * test_data_count;
+    }
+
+    std::string
+    MakeStringValue(int64_t row_id) const {
+        if (fixed_string_width == 0) {
+            return "test" + std::to_string(row_id);
+        }
+
+        auto suffix = std::to_string(row_id);
+        AssertInfo(suffix.size() + 2 <= fixed_string_width,
+                   "row id is too large for fixed string width");
+        std::string value = "pk";
+        value.append(fixed_string_width - value.size() - suffix.size(), '0');
+        value.append(suffix);
+        return value;
     }
 
     void
@@ -384,14 +422,154 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     }
 
     segcore::SegmentSealedUPtr segment;
+    SchemaPtr schema_;
     int chunk_num = 2;
     int test_data_count = 10000;
+    size_t fixed_string_width = 0;
+    bool test_data_created = false;
     std::unordered_map<std::string, FieldId> fields;
+    std::vector<std::string> string_data;
 };
 
 INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
                          TestChunkSegmentStorageV2,
                          testing::Bool());
+
+TEST_P(TestChunkSegmentStorageV2, ReduceStringPkWithSimulatedAnnResult) {
+    constexpr int64_t nq = 4;
+    constexpr int64_t candidate_topk = 500;
+    constexpr int64_t final_topk = 32;
+    constexpr int64_t pk_lookup_count = nq * candidate_topk;
+    static_assert(pk_lookup_count == 2000);
+    ASSERT_EQ(RowCount(), 1000000);
+    ASSERT_EQ(fixed_string_width, 32);
+
+    milvus::query::Plan plan(schema_);
+    plan.plan_node_ = std::make_unique<milvus::query::VectorPlanNode>();
+    plan.plan_node_->search_info_.topk_ = final_topk;
+    plan.plan_node_->search_info_.metric_type_ = knowhere::metric::L2;
+    plan.target_entries_.push_back(fields.at("string1"));
+
+    auto offset_at = [this, candidate_topk](int64_t qi, int64_t rank) {
+        auto lookup_index = qi * candidate_topk + rank;
+        return (lookup_index * 499979 + qi * 9973) % RowCount();
+    };
+
+    auto make_result = [&]() {
+        SearchResult result;
+        result.total_nq_ = nq;
+        result.unity_topK_ = candidate_topk;
+        result.total_data_cnt_ = RowCount();
+        result.segment_ = segment.get();
+        result.seg_offsets_.resize(nq * candidate_topk);
+        result.distances_.resize(nq * candidate_topk);
+        for (int64_t qi = 0; qi < nq; ++qi) {
+            for (int64_t rank = 0; rank < candidate_topk; ++rank) {
+                auto loc = qi * candidate_topk + rank;
+                result.seg_offsets_[loc] = offset_at(qi, rank);
+                result.distances_[loc] = static_cast<float>(rank);
+            }
+        }
+        return result;
+    };
+
+    auto fast_pk_result = make_result();
+    auto generic_pk_result = make_result();
+    auto start = std::chrono::steady_clock::now();
+    segment->FillPrimaryKeys(&plan, fast_pk_result);
+    auto fast_fill_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count();
+    start = std::chrono::steady_clock::now();
+    static_cast<SegmentInternalInterface*>(segment.get())
+        ->SegmentInternalInterface::FillPrimaryKeys(&plan, generic_pk_result);
+    auto generic_fill_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start)
+            .count();
+    RecordProperty("fast_pk_fill_us", fast_fill_us);
+    RecordProperty("generic_pk_fill_us", generic_fill_us);
+    RecordProperty("row_count", std::to_string(RowCount()));
+    RecordProperty("varchar_pk_len", std::to_string(fixed_string_width));
+    RecordProperty("pk_lookup_count", std::to_string(pk_lookup_count));
+
+    ASSERT_EQ(fast_pk_result.pk_type_, DataType::VARCHAR);
+    ASSERT_EQ(generic_pk_result.pk_type_, DataType::VARCHAR);
+    ASSERT_EQ(fast_pk_result.primary_keys_.size(),
+              generic_pk_result.primary_keys_.size());
+    for (size_t i = 0; i < fast_pk_result.primary_keys_.size(); ++i) {
+        ASSERT_EQ(std::get<std::string>(fast_pk_result.primary_keys_[i]),
+                  std::get<std::string>(generic_pk_result.primary_keys_[i]));
+    }
+
+    auto reduce_result = make_result();
+    std::vector<SearchResult*> search_results{&reduce_result};
+    std::vector<int64_t> slice_nqs{nq};
+    std::vector<int64_t> slice_topks{final_topk};
+    ReduceHelper helper(search_results,
+                        &plan,
+                        slice_nqs.data(),
+                        slice_topks.data(),
+                        slice_nqs.size(),
+                        nullptr);
+    helper.Reduce();
+
+    ASSERT_EQ(reduce_result.primary_keys_.size(), nq * final_topk);
+    ASSERT_EQ(reduce_result.seg_offsets_.size(), nq * final_topk);
+    ASSERT_EQ(reduce_result.topk_per_nq_prefix_sum_.size(), nq + 1);
+    ASSERT_EQ(reduce_result.topk_per_nq_prefix_sum_.back(), nq * final_topk);
+    ASSERT_EQ(reduce_result.output_fields_data_.size(), 1);
+
+    auto output_it =
+        reduce_result.output_fields_data_.find(fields.at("string1"));
+    ASSERT_NE(output_it, reduce_result.output_fields_data_.end());
+    const auto& string_output =
+        output_it->second->scalars().string_data().data();
+    ASSERT_EQ(string_output.size(), nq * final_topk);
+
+    for (int64_t qi = 0; qi < nq; ++qi) {
+        for (int64_t rank = 0; rank < final_topk; ++rank) {
+            auto loc = qi * final_topk + rank;
+            auto expected_offset = offset_at(qi, rank);
+            auto expected_string = string_data[expected_offset];
+            ASSERT_EQ(reduce_result.seg_offsets_[loc], expected_offset);
+            ASSERT_EQ(std::get<std::string>(reduce_result.primary_keys_[loc]),
+                      expected_string);
+            ASSERT_EQ(string_output.Get(loc), expected_string);
+            ASSERT_FLOAT_EQ(reduce_result.distances_[loc],
+                            static_cast<float>(rank));
+        }
+    }
+
+    helper.Marshal();
+    std::unique_ptr<SearchResultDataBlobs> blobs(
+        static_cast<SearchResultDataBlobs*>(helper.GetSearchResultDataBlobs()));
+
+    ASSERT_EQ(blobs->blobs.size(), 1);
+    milvus::proto::schema::SearchResultData search_result_data;
+    ASSERT_TRUE(search_result_data.ParseFromArray(blobs->blobs[0].data(),
+                                                  blobs->blobs[0].size()));
+    ASSERT_EQ(search_result_data.topks_size(), nq);
+    ASSERT_EQ(search_result_data.ids().str_id().data_size(), nq * final_topk);
+    ASSERT_EQ(search_result_data.fields_data_size(), 1);
+    const auto& marshaled_string_output =
+        search_result_data.fields_data(0).scalars().string_data().data();
+    ASSERT_EQ(marshaled_string_output.size(), nq * final_topk);
+
+    for (int64_t qi = 0; qi < nq; ++qi) {
+        ASSERT_EQ(search_result_data.topks(qi), final_topk);
+        for (int64_t rank = 0; rank < final_topk; ++rank) {
+            auto loc = qi * final_topk + rank;
+            auto expected_offset = offset_at(qi, rank);
+            auto expected_string = string_data[expected_offset];
+            ASSERT_EQ(search_result_data.ids().str_id().data(loc),
+                      expected_string);
+            ASSERT_EQ(marshaled_string_output.Get(loc), expected_string);
+            ASSERT_FLOAT_EQ(search_result_data.scores(loc),
+                            static_cast<float>(rank));
+        }
+    }
+}
 
 TEST_P(TestChunkSegmentStorageV2, TestTermExpr) {
     bool pk_is_string = GetParam();
