@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/CGoCatch.h"
 #include "storage/storage_c.h"
 
 #include <exception>
@@ -201,18 +202,27 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
 
 void
 CleanRemoteChunkManagerSingleton() {
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+    try {
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+    }
+    CGO_CATCH_AND_LOG("CleanRemoteChunkManagerSingleton")
 }
 
 void
 ResizeTheadPool(int64_t priority, float ratio) {
-    milvus::ThreadPools::ResizeThreadPool(
-        static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+    try {
+        milvus::ThreadPools::ResizeThreadPool(
+            static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+    }
+    CGO_CATCH_AND_LOG("ResizeTheadPool")
 }
 
 void
 CleanPluginLoader() {
-    milvus::storage::PluginLoader::GetInstance().unloadAll();
+    try {
+        milvus::storage::PluginLoader::GetInstance().unloadAll();
+    }
+    CGO_CATCH_AND_LOG("CleanPluginLoader")
 }
 
 CStatus
@@ -227,27 +237,33 @@ InitPluginLoader(const char* plugin_path) {
 
 CStatus
 PutOrRefPluginContext(CPluginContext c_plugin_context) {
-    auto cipherPluginPtr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "cipher plugin not loaded");
+    try {
+        auto cipherPluginPtr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (!cipherPluginPtr) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "cipher plugin not loaded");
+        }
+        cipherPluginPtr->Update(c_plugin_context.ez_id,
+                                c_plugin_context.collection_id,
+                                std::string(c_plugin_context.key));
+        return milvus::SuccessCStatus();
     }
-    cipherPluginPtr->Update(c_plugin_context.ez_id,
-                            c_plugin_context.collection_id,
-                            std::string(c_plugin_context.key));
-    return milvus::SuccessCStatus();
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
 UnRefPluginContext(CPluginContext c_plugin_context) {
-    auto cipherPluginPtr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "cipher plugin not loaded");
+    try {
+        auto cipherPluginPtr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (!cipherPluginPtr) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "cipher plugin not loaded");
+        }
+        cipherPluginPtr->Update(
+            c_plugin_context.ez_id, c_plugin_context.collection_id, "");
+        return milvus::SuccessCStatus();
     }
-    cipherPluginPtr->Update(
-        c_plugin_context.ez_id, c_plugin_context.collection_id, "");
-    return milvus::SuccessCStatus();
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

@@ -14,18 +14,28 @@
 #include <memory>
 #include <string>
 
-#include "common/EasyAssert.h"
+#include "common/CGoCatch.h"
 #include "common/FastMem.h"
 #include "knowhere/prometheus_client.h"
 #include "segcore/metrics_c.h"
 
 char*
 GetKnowhereMetrics() {
-    auto str = knowhere::prometheusClient->GetMetrics();
-    auto len = str.length();
-    char* res = (char*)malloc(len + 1);
-    AssertInfo(res != nullptr, "memmory allocation for res failed!");
-    milvus::fastmem::FastMemcpy(res, str.data(), len);
-    res[len] = '\0';
-    return res;
+    // Returns NULL on failure. The Go caller converts with C.GoString, which
+    // maps NULL to "" — metrics gathering degrades gracefully instead of an
+    // exception crossing the C boundary (AssertInfo here would throw straight
+    // through cgo and terminate the process).
+    try {
+        auto str = knowhere::prometheusClient->GetMetrics();
+        auto len = str.length();
+        char* res = (char*)malloc(len + 1);
+        if (res == nullptr) {
+            return nullptr;
+        }
+        milvus::fastmem::FastMemcpy(res, str.data(), len);
+        res[len] = '\0';
+        return res;
+    }
+    CGO_CATCH_AND_LOG("GetKnowhereMetrics")
+    return nullptr;
 }

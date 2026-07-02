@@ -19,6 +19,7 @@
 #include <exception>
 
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 
 // Shared catch tail for every extern "C" entry point that returns a CStatus.
 //
@@ -36,4 +37,20 @@
     catch (...) {                                              \
         return milvus::FailureCStatus(milvus::UnexpectedError, \
                                       "unknown exception");    \
+    }
+
+// Catch tail for extern "C" entry points that CANNOT return a CStatus (void /
+// bool / pointer returns). An escaping exception would cross the C ABI and
+// terminate the process, so it must be swallowed here; log loudly so the
+// failure is observable, and let the macro user follow with a safe fallback
+// return value. `entry_name` identifies the boundary function in the log.
+#define CGO_CATCH_AND_LOG(entry_name)                               \
+    catch (const std::exception& e) {                               \
+        LOG_ERROR("exception swallowed at cgo boundary {}: {}",     \
+                  entry_name,                                       \
+                  e.what());                                        \
+    }                                                               \
+    catch (...) {                                                   \
+        LOG_ERROR("unknown exception swallowed at cgo boundary {}", \
+                  entry_name);                                      \
     }
