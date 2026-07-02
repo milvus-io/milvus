@@ -5288,12 +5288,14 @@ type dataCoordConfig struct {
 	GCLOBSafetyWindow  ParamItem `refreshable:"true"`
 	GCLOBCheckInterval ParamItem `refreshable:"true"`
 
-	BindIndexNodeMode    ParamItem `refreshable:"false"`
-	IndexNodeAddress     ParamItem `refreshable:"false"`
-	WithCredential       ParamItem `refreshable:"false"`
-	IndexNodeID          ParamItem `refreshable:"false"`
-	TaskScheduleInterval ParamItem `refreshable:"false"`
-	TaskSlowThreshold    ParamItem `refreshable:"true"`
+	BindIndexNodeMode           ParamItem `refreshable:"false"`
+	IndexNodeAddress            ParamItem `refreshable:"false"`
+	WithCredential              ParamItem `refreshable:"false"`
+	IndexNodeID                 ParamItem `refreshable:"false"`
+	TaskScheduleInterval        ParamItem `refreshable:"false"`
+	TaskRetryBackoffInterval    ParamItem `refreshable:"true"`
+	TaskRetryBackoffMaxInterval ParamItem `refreshable:"true"`
+	TaskSlowThreshold           ParamItem `refreshable:"true"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
@@ -6322,6 +6324,25 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "100",
 	}
 	p.TaskScheduleInterval.Init(base.mgr)
+
+	p.TaskRetryBackoffInterval = ParamItem{
+		Key:          "dataCoord.taskRetryBackoffInterval",
+		Version:      "2.6.18",
+		DefaultValue: "1",
+		Doc: "Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; " +
+			"doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).",
+		Export: true,
+	}
+	p.TaskRetryBackoffInterval.Init(base.mgr)
+
+	p.TaskRetryBackoffMaxInterval = ParamItem{
+		Key:          "dataCoord.taskRetryBackoffMaxInterval",
+		Version:      "2.6.18",
+		DefaultValue: "60",
+		Doc:          "Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.",
+		Export:       true,
+	}
+	p.TaskRetryBackoffMaxInterval.Init(base.mgr)
 
 	p.TaskSlowThreshold = ParamItem{
 		Key:          "datacoord.scheduler.taskSlowThreshold",
