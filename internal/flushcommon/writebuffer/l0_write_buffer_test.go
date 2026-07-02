@@ -60,7 +60,14 @@ func (s fakeGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffse
 	if s.flushFunc != nil {
 		return s.flushFunc(ctx, startOffset, endOffset, config)
 	}
-	return &syncmgr.GrowingFlushResult{ManifestPath: "manifest", NumRows: 10}, nil
+	return &syncmgr.GrowingFlushResult{
+		ManifestPath:           "manifest",
+		NumRows:                10,
+		TimestampFrom:          100,
+		TimestampTo:            200,
+		ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+		FieldNullCounts:        map[int64]int64{},
+	}, nil
 }
 
 func (s fakeGrowingFlushSource) Release() {
@@ -72,6 +79,17 @@ func (s fakeGrowingFlushSource) Release() {
 type fakeGrowingSourceProvider struct {
 	source syncmgr.GrowingFlushSource
 	state  syncmgr.GrowingSourceState
+}
+
+func fakeColumnGroupMemorySizes(config *syncmgr.GrowingFlushConfig, size int64) map[int64]int64 {
+	if config == nil || len(config.ColumnGroups) == 0 {
+		return nil
+	}
+	result := make(map[int64]int64, len(config.ColumnGroups))
+	for _, columnGroup := range config.ColumnGroups {
+		result[columnGroup.GroupID] = size
+	}
+	return result
 }
 
 func (p fakeGrowingSourceProvider) GetGrowingFlushSource(int64, int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
@@ -758,11 +776,15 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		flushCalls := 0
 		source := fakeGrowingFlushSource{
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, _ *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				flushCalls++
 				s.EqualValues(0, startOffset)
 				s.EqualValues(10, endOffset)
-				return &syncmgr.GrowingFlushResult{ManifestPath: "manifest-0-10", NumRows: 10}, nil
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           "manifest-0-10",
+					NumRows:                10,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
@@ -831,12 +853,16 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		flushCalls := 0
 		source := fakeGrowingFlushSource{
-			flushFunc: func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, _, _ int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				flushCalls++
 				if flushCalls == 1 {
 					return nil, fmt.Errorf("mock growing source flush error")
 				}
-				return &syncmgr.GrowingFlushResult{ManifestPath: "manifest-retry", NumRows: 10}, nil
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           "manifest-retry",
+					NumRows:                10,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
 		var errorHandlerCalls atomic.Int32
@@ -979,8 +1005,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		textSchema := s.textSchema()
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
-			flushFunc: func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
-				return &syncmgr.GrowingFlushResult{ManifestPath: "manifest-mismatch", NumRows: 9}, nil
+			flushFunc: func(_ context.Context, _, _ int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           "manifest-mismatch",
+					NumRows:                9,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
@@ -1045,7 +1075,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			currentOffset: 15,
 			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				ranges = append(ranges, [2]int64{startOffset, endOffset})
-				return &syncmgr.GrowingFlushResult{ManifestPath: packed.MarshalManifestPath(config.SegmentBasePath, endOffset), NumRows: endOffset - startOffset}, nil
+				return &syncmgr.GrowingFlushResult{
+					ManifestPath:           packed.MarshalManifestPath(config.SegmentBasePath, endOffset),
+					NumRows:                endOffset - startOffset,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
+				}, nil
 			},
 		}
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
@@ -1109,10 +1143,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
 			currentOffset: 10,
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, _ *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				return &syncmgr.GrowingFlushResult{
-					ManifestPath: fmt.Sprintf("manifest-%d-%d", startOffset, endOffset),
-					NumRows:      endOffset - startOffset,
+					ManifestPath:           fmt.Sprintf("manifest-%d-%d", startOffset, endOffset),
+					NumRows:                endOffset - startOffset,
+					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
 				}, nil
 			},
 		}

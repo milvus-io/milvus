@@ -1718,6 +1718,41 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		cConfig.allowed_field_ids = cAllowedFieldIDs
 		cConfig.num_allowed_fields = C.size_t(numAllowedFields)
 	}
+	numColumnGroups := len(config.ColumnGroups)
+	if numColumnGroups > 0 {
+		totalFieldCount := 0
+		for _, columnGroup := range config.ColumnGroups {
+			totalFieldCount += len(columnGroup.Fields)
+		}
+		cColumnGroupIDs := (*C.int64_t)(C.malloc(C.size_t(numColumnGroups) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cColumnGroupIDs))
+		cColumnGroupFieldCounts := (*C.size_t)(C.malloc(C.size_t(numColumnGroups) * C.size_t(unsafe.Sizeof(C.size_t(0)))))
+		defer C.free(unsafe.Pointer(cColumnGroupFieldCounts))
+		var cColumnGroupFieldIDs *C.int64_t
+		if totalFieldCount > 0 {
+			cColumnGroupFieldIDs = (*C.int64_t)(C.malloc(C.size_t(totalFieldCount) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+			defer C.free(unsafe.Pointer(cColumnGroupFieldIDs))
+		}
+		groupIDSlice := unsafe.Slice(cColumnGroupIDs, numColumnGroups)
+		fieldCountSlice := unsafe.Slice(cColumnGroupFieldCounts, numColumnGroups)
+		var fieldIDSlice []C.int64_t
+		if totalFieldCount > 0 {
+			fieldIDSlice = unsafe.Slice(cColumnGroupFieldIDs, totalFieldCount)
+		}
+		fieldOffset := 0
+		for i, columnGroup := range config.ColumnGroups {
+			groupIDSlice[i] = C.int64_t(columnGroup.GroupID)
+			fieldCountSlice[i] = C.size_t(len(columnGroup.Fields))
+			for _, fieldID := range columnGroup.Fields {
+				fieldIDSlice[fieldOffset] = C.int64_t(fieldID)
+				fieldOffset++
+			}
+		}
+		cConfig.column_group_ids = cColumnGroupIDs
+		cConfig.column_group_field_ids = cColumnGroupFieldIDs
+		cConfig.column_group_field_counts = cColumnGroupFieldCounts
+		cConfig.num_column_groups = C.size_t(numColumnGroups)
+	}
 
 	// populate TEXT column configs
 	// All arrays must be C-allocated to avoid "Go pointer to unpinned Go pointer" panic
@@ -1808,6 +1843,23 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		basePath = rawPath[:idx]
 	}
 	manifestPath := packed.MarshalManifestPath(basePath, committedVersion)
+	fieldNullCounts := make(map[int64]int64, int(cResult.num_field_stats))
+	if cResult.num_field_stats > 0 {
+		fieldIDs := unsafe.Slice(cResult.field_ids, int(cResult.num_field_stats))
+		nullCounts := unsafe.Slice(cResult.field_null_counts, int(cResult.num_field_stats))
+		for i := 0; i < int(cResult.num_field_stats); i++ {
+			fieldID := int64(fieldIDs[i])
+			fieldNullCounts[fieldID] = int64(nullCounts[i])
+		}
+	}
+	columnGroupMemorySizes := make(map[int64]int64, int(cResult.num_column_groups))
+	if cResult.num_column_groups > 0 {
+		columnGroupIDs := unsafe.Slice(cResult.column_group_ids, int(cResult.num_column_groups))
+		memorySizes := unsafe.Slice(cResult.column_group_memory_sizes, int(cResult.num_column_groups))
+		for i := 0; i < int(cResult.num_column_groups); i++ {
+			columnGroupMemorySizes[int64(columnGroupIDs[i])] = int64(memorySizes[i])
+		}
+	}
 	bm25Stats := make(map[int64]*storage.BM25Stats, int(cResult.num_bm25_stats))
 	if cResult.num_bm25_stats > 0 {
 		fieldIDs := unsafe.Slice(cResult.bm25_field_ids, int(cResult.num_bm25_stats))
@@ -1824,8 +1876,12 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	}
 
 	return &FlushResult{
-		ManifestPath: manifestPath,
-		NumRows:      int64(cResult.num_rows),
-		BM25Stats:    bm25Stats,
+		ManifestPath:           manifestPath,
+		NumRows:                int64(cResult.num_rows),
+		TimestampFrom:          uint64(cResult.timestamp_from),
+		TimestampTo:            uint64(cResult.timestamp_to),
+		ColumnGroupMemorySizes: columnGroupMemorySizes,
+		FieldNullCounts:        fieldNullCounts,
+		BM25Stats:              bm25Stats,
 	}, nil
 }
