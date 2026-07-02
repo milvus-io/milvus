@@ -62,6 +62,7 @@
 #include "knowhere/version.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
 #include "query/Plan.h"
 #include "query/PlanImpl.h"
 #include "query/Utils.h"
@@ -73,6 +74,7 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/segment_c.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
@@ -4228,4 +4230,46 @@ TEST(SealedSegmentCowState, ExternalWrapperSynthesizeRequiresRuntime) {
     sealed->SetLoadInfo(published_proto);
 
     EXPECT_ANY_THROW(sealed->TestSynthesizeExternalSystemFields(nullptr));
+}
+
+TEST(Sealed, UpdateIndexMeta) {
+    // UpdateIndexMeta only swaps the collection index-meta pointer, so a bare
+    // sealed segment (no field data) is enough to exercise every branch.
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto segment = CreateSealedSegment(schema);
+
+    // Direct C++ setter (ChunkedSegmentSealedImpl::UpdateIndexMeta):
+    // nil meta is a no-op; a newer version applies; stale/equal versions skip.
+    segment->UpdateIndexMeta(nullptr, 100);
+    segment->UpdateIndexMeta(empty_index_meta, 100);
+    segment->UpdateIndexMeta(empty_index_meta, 50);
+    segment->UpdateIndexMeta(empty_index_meta, 100);
+
+    // cgo entry point (UpdateSegmentIndexMeta in segment_c.cpp) on the same segment.
+    auto c_segment = reinterpret_cast<CSegmentInterface>(
+        static_cast<milvus::segcore::SegmentInterface*>(segment.get()));
+
+    // A null blob trips the AssertInfo, which is caught and returned as a failure
+    // status (covers the catch branch). error_msg is not freed here: a success
+    // status carries a static "" (not malloc'd), so freeing CStatus.error_msg is
+    // unsafe; the tiny strdup on the failure path is a harmless test-scope leak.
+    auto null_status = UpdateSegmentIndexMeta(c_segment, nullptr, 0, 200);
+    ASSERT_NE(null_status.error_code, Success);
+
+    // A valid marshaled CollectionIndexMeta round-trips through parse +
+    // make_shared + the setter and returns success.
+    milvus::proto::segcore::CollectionIndexMeta index_meta_proto;
+    std::string blob;
+    ASSERT_TRUE(index_meta_proto.SerializeToString(&blob));
+    auto status =
+        UpdateSegmentIndexMeta(c_segment,
+                               reinterpret_cast<const uint8_t*>(blob.data()),
+                               static_cast<int64_t>(blob.size()),
+                               300);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
 }

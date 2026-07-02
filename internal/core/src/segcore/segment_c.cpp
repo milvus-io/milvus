@@ -750,6 +750,32 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
 }
 
 CStatus
+UpdateSegmentIndexMeta(CSegmentInterface c_segment,
+                       const uint8_t* index_meta_blob,
+                       const int64_t blob_size,
+                       const uint64_t version) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(index_meta_blob != nullptr, "index meta blob is null");
+        // Parse the CollectionIndexMeta proto into a C++ IndexMeta, mirroring
+        // Collection::parseIndexMeta so the segment and Collection object build
+        // identical meta from the same payload.
+        milvus::proto::segcore::CollectionIndexMeta index_meta_proto;
+        auto suc = index_meta_proto.ParseFromArray(index_meta_blob, blob_size);
+        AssertInfo(suc, "unmarshal segment index meta failed");
+        auto index_meta =
+            std::make_shared<milvus::CollectionIndexMeta>(index_meta_proto);
+        segment->UpdateIndexMeta(index_meta, version);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialized_load_json_key_index_info,

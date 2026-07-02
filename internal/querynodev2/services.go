@@ -1788,10 +1788,43 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 
 func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
-	// UpdateIndex is currently a placeholder implementation
-	// The actual logic should handle AddIndex and DropIndex actions
-	// For now, return success to satisfy the interface
-	return merr.Success(), nil
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	log := mlog.With(
+		mlog.Int64("collectionID", req.GetCollectionID()),
+		mlog.Uint64("indexBarrierTs", req.GetIndexBarrierTs()),
+	)
+
+	// Merge the index delta into the collection index meta (monotonic). If it
+	// changed, fan the new full meta out to every loaded segment's col_index_meta_
+	// so a backfilled field's brute-force GetFieldIndexMeta stops throwing.
+	newMeta, version, err := node.manager.Collection.UpdateIndex(req.GetCollectionID(), req)
+	if err != nil {
+		log.Warn(ctx, "failed to update collection index meta", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	if newMeta == nil {
+		return merr.Success(), nil
+	}
+	var firstErr error
+	for _, segment := range node.manager.Segment.GetBy(segments.SegmentFilterFunc(func(s segments.Segment) bool {
+		return s.Collection() == req.GetCollectionID()
+	})) {
+		if err := segment.UpdateIndexMeta(newMeta, version); err != nil {
+			log.Warn(ctx, "failed to update segment index meta",
+				mlog.Int64("segmentID", segment.ID()), mlog.Err(err))
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	// Return the error so the delegator retries the worker RPC; the re-fan is
+	// idempotent (per-segment monotonic guard), so only failed segments reapply.
+	return merr.Status(firstErr), nil
 }
 
 func (node *QueryNode) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) (*querypb.GetHighlightResponse, error) {

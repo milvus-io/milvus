@@ -649,6 +649,35 @@ func (s *RemoteWorkerSuite) TestBasic() {
 	s.mockClient.AssertCalled(s.T(), "Close")
 }
 
+func (s *RemoteWorkerSuite) TestUpdateIndex() {
+	s.Run("normal_run", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		s.mockClient.EXPECT().UpdateIndex(mock.Anything, mock.AnythingOfType("*querypb.UpdateIndexRequest")).
+			Return(merr.Success(), nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		status, err := s.worker.UpdateIndex(ctx, &querypb.UpdateIndexRequest{})
+
+		s.NoError(err)
+		s.NoError(merr.Error(status))
+	})
+
+	s.Run("client_return_error", func() {
+		defer func() { s.mockClient.ExpectedCalls = nil }()
+
+		s.mockClient.EXPECT().UpdateIndex(mock.Anything, mock.AnythingOfType("*querypb.UpdateIndexRequest")).
+			Return(nil, errors.New("mocked error"))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, err := s.worker.UpdateIndex(ctx, &querypb.UpdateIndexRequest{})
+
+		s.Error(err)
+	})
+}
+
 func TestRemoteWorker(t *testing.T) {
 	suite.Run(t, new(RemoteWorkerSuite))
 }

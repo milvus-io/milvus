@@ -39,6 +39,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -321,6 +322,14 @@ class SegmentInterface {
     Reopen(milvus::OpContext* op_ctx,
            const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
            SchemaPtr new_schema) = 0;
+
+    // Replace this segment's collection-level index meta (the params source for
+    // brute-force / interim search) if `version` is newer than the last applied
+    // one. Default no-op: segment types without a stale per-segment index-meta
+    // snapshot (e.g. growing, born with the current meta) need not react.
+    virtual void
+    UpdateIndexMeta(IndexMetaPtr index_meta, uint64_t version) {
+    }
 
     virtual void
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) = 0;

@@ -2806,8 +2806,11 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         std::map<std::string, std::string> index_info;
         if (search_info.metric_type_ == knowhere::metric::BM25 ||
             search_info.metric_type_ == knowhere::metric::MHJACCARD) {
+            // atomic_load: col_index_meta_ may be concurrently swapped by
+            // UpdateIndexMeta (control-plane index-meta sync).
+            auto col_index_meta = std::atomic_load(&col_index_meta_);
             index_info =
-                col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
+                col_index_meta->GetFieldIndexMeta(field_id).GetIndexParams();
         }
 
         query::SearchOnSealedColumn(*snapshot->schema,
@@ -5607,12 +5610,15 @@ ChunkedSegmentSealedImpl::generate_interim_index(
     int64_t num_rows,
     const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
     milvus::OpContext* op_ctx) {
-    if (col_index_meta_ == nullptr || !col_index_meta_->HasField(field_id)) {
+    // atomic_load: col_index_meta_ may be concurrently swapped by UpdateIndexMeta.
+    // The local keeps the pointee alive for the field_index_meta reference below.
+    auto col_index_meta = std::atomic_load(&col_index_meta_);
+    if (col_index_meta == nullptr || !col_index_meta->HasField(field_id)) {
         return false;
     }
     auto schema_snapshot = CaptureSchemaSnapshot();
     auto& field_meta = schema_snapshot->operator[](field_id);
-    auto& field_index_meta = col_index_meta_->GetFieldIndexMeta(field_id);
+    auto& field_index_meta = col_index_meta->GetFieldIndexMeta(field_id);
     auto& index_params = field_index_meta.GetIndexParams();
 
     bool is_sparse =
@@ -5939,6 +5945,28 @@ ChunkedSegmentSealedImpl::PrepareSchemaForReopen(const SchemaPtr& sch) {
     }
 
     ResizeStateBitsetsLocked(sch);
+}
+
+void
+ChunkedSegmentSealedImpl::UpdateIndexMeta(IndexMetaPtr index_meta,
+                                          uint64_t version) {
+    if (!index_meta) {
+        return;
+    }
+    // reopen_mutex_ serializes this against Reopen and against other
+    // UpdateIndexMeta calls, so the monotonic version check + store are atomic
+    // together. col_index_meta_ itself is published via std::atomic_store so the
+    // unlocked search-path readers (vector_search / generate_interim_index) never
+    // race on the shared_ptr. No mutex_/bitset: the field set is unchanged; only
+    // the index-params meta pointer is swapped.
+    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+    // Monotonic: skip a stale (older-or-equal version) index-meta update.
+    if (version <= col_index_meta_version_) {
+        return;
+    }
+    std::atomic_store(&col_index_meta_, index_meta);
+    col_index_meta_version_ = version;
+    LOG_INFO("segment {} updated col_index_meta to version {}", id_, version);
 }
 
 void

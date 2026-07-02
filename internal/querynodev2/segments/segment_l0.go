@@ -196,6 +196,11 @@ func (s *L0Segment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoad
 	return merr.WrapErrServiceInternal("unexpected reopen on l0 segment")
 }
 
+func (s *L0Segment) UpdateIndexMeta(indexMeta *segcorepb.CollectionIndexMeta, version uint64) error {
+	// L0 segments carry no field index meta; nothing to update.
+	return nil
+}
+
 func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()

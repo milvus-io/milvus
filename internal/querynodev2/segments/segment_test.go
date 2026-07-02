@@ -161,6 +161,34 @@ func (suite *SegmentSuite) TestLoadInfo() {
 	suite.NotNil(suite.growing.LoadInfo())
 }
 
+func (suite *SegmentSuite) TestUpdateIndexMeta() {
+	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.collection.Schema())
+
+	// nil meta is a no-op on both segment types.
+	suite.NoError(suite.sealed.UpdateIndexMeta(nil, 100))
+	suite.NoError(suite.growing.UpdateIndexMeta(nil, 100))
+
+	// A newer version pushes the marshaled meta through cgo into the segment's
+	// col_index_meta_ (real C++ UpdateSegmentIndexMeta path for sealed; base no-op
+	// for growing) — both return success.
+	suite.NoError(suite.sealed.UpdateIndexMeta(indexMeta, 100))
+	suite.NoError(suite.growing.UpdateIndexMeta(indexMeta, 100))
+
+	// A stale (older-or-equal) version is silently skipped by the segment's
+	// monotonic guard — still no error.
+	suite.NoError(suite.sealed.UpdateIndexMeta(indexMeta, 50))
+	suite.NoError(suite.sealed.UpdateIndexMeta(indexMeta, 100))
+}
+
+func TestL0SegmentUpdateIndexMeta(t *testing.T) {
+	// L0 segments carry no field index meta; UpdateIndexMeta is always a no-op.
+	l0 := &L0Segment{}
+	assert.NoError(t, l0.UpdateIndexMeta(nil, 0))
+	assert.NoError(t, l0.UpdateIndexMeta(
+		mock_segcore.GenTestIndexMeta(1, mock_segcore.GenTestCollectionSchema("l0", schemapb.DataType_Int64, false)),
+		100))
+}
+
 func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)

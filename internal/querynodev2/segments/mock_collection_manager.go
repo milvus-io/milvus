@@ -307,6 +307,72 @@ func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32)
 	return _c
 }
 
+// UpdateIndex provides a mock function with given fields: collectionID, req
+func (_m *MockCollectionManager) UpdateIndex(collectionID int64, req *querypb.UpdateIndexRequest) (*segcorepb.CollectionIndexMeta, uint64, error) {
+	ret := _m.Called(collectionID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndex")
+	}
+
+	var r0 *segcorepb.CollectionIndexMeta
+	var r1 uint64
+	var r2 error
+	if rf, ok := ret.Get(0).(func(int64, *querypb.UpdateIndexRequest) (*segcorepb.CollectionIndexMeta, uint64, error)); ok {
+		return rf(collectionID, req)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *querypb.UpdateIndexRequest) *segcorepb.CollectionIndexMeta); ok {
+		r0 = rf(collectionID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*segcorepb.CollectionIndexMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, *querypb.UpdateIndexRequest) uint64); ok {
+		r1 = rf(collectionID, req)
+	} else {
+		r1 = ret.Get(1).(uint64)
+	}
+
+	if rf, ok := ret.Get(2).(func(int64, *querypb.UpdateIndexRequest) error); ok {
+		r2 = rf(collectionID, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockCollectionManager_UpdateIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndex'
+type MockCollectionManager_UpdateIndex_Call struct {
+	*mock.Call
+}
+
+// UpdateIndex is a helper method to define mock.On call
+//   - collectionID int64
+//   - req *querypb.UpdateIndexRequest
+func (_e *MockCollectionManager_Expecter) UpdateIndex(collectionID interface{}, req interface{}) *MockCollectionManager_UpdateIndex_Call {
+	return &MockCollectionManager_UpdateIndex_Call{Call: _e.mock.On("UpdateIndex", collectionID, req)}
+}
+
+func (_c *MockCollectionManager_UpdateIndex_Call) Run(run func(collectionID int64, req *querypb.UpdateIndexRequest)) *MockCollectionManager_UpdateIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*querypb.UpdateIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndex_Call) Return(_a0 *segcorepb.CollectionIndexMeta, _a1 uint64, _a2 error) *MockCollectionManager_UpdateIndex_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndex_Call) RunAndReturn(run func(int64, *querypb.UpdateIndexRequest) (*segcorepb.CollectionIndexMeta, uint64, error)) *MockCollectionManager_UpdateIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateSchema provides a mock function with given fields: collectionID, schema, schemaBarrierTs
 func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	ret := _m.Called(collectionID, schema, schemaBarrierTs)

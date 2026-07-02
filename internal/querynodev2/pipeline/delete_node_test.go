@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -143,6 +145,36 @@ func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
 	suite.delegator.EXPECT().UpdateTSafe(uint64(30)).Return()
 
 	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	out := node.Operate(in)
+	suite.Nil(out)
+}
+
+func (suite *DeleteNodeSuite) TestUpdateIndex() {
+	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
+	suite.manager = &segments.Manager{
+		Collection: mockCollectionManager,
+		Segment:    mockSegmentManager,
+	}
+	suite.delegator = delegator.NewMockShardDelegator(suite.T())
+
+	fieldIndex := &indexpb.FieldIndex{IndexInfo: &indexpb.IndexInfo{FieldID: 101}}
+	fieldIndexErr := &indexpb.FieldIndex{IndexInfo: &indexpb.IndexInfo{FieldID: 102}}
+	// A valid update fans out; a delegator error is logged and swallowed; a nil
+	// fieldIndex entry is skipped entirely.
+	suite.delegator.EXPECT().UpdateIndex(mock.Anything, fieldIndex, uint64(100)).Return(nil).Once()
+	suite.delegator.EXPECT().UpdateIndex(mock.Anything, fieldIndexErr, uint64(150)).Return(merr.WrapErrServiceInternal("mocked")).Once()
+	suite.delegator.EXPECT().UpdateTSafe(suite.timeRange.timestampMax).Return()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	in := &deleteNodeMsg{
+		timeRange: suite.timeRange,
+		indexUpdates: []indexUpdate{
+			{fieldIndex: fieldIndex, barrierTs: 100},
+			{fieldIndex: nil, barrierTs: 200},
+			{fieldIndex: fieldIndexErr, barrierTs: 150},
+		},
+	}
 	out := node.Operate(in)
 	suite.Nil(out)
 }

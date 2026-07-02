@@ -646,6 +646,53 @@ func (_c *MockCSegment_Reopen_Call) RunAndReturn(run func(context.Context, *segc
 	return _c
 }
 
+// UpdateIndexMeta provides a mock function with given fields: indexMetaBlob, version
+func (_m *MockCSegment) UpdateIndexMeta(indexMetaBlob []byte, version uint64) error {
+	ret := _m.Called(indexMetaBlob, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndexMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]byte, uint64) error); ok {
+		r0 = rf(indexMetaBlob, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCSegment_UpdateIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndexMeta'
+type MockCSegment_UpdateIndexMeta_Call struct {
+	*mock.Call
+}
+
+// UpdateIndexMeta is a helper method to define mock.On call
+//   - indexMetaBlob []byte
+//   - version uint64
+func (_e *MockCSegment_Expecter) UpdateIndexMeta(indexMetaBlob interface{}, version interface{}) *MockCSegment_UpdateIndexMeta_Call {
+	return &MockCSegment_UpdateIndexMeta_Call{Call: _e.mock.On("UpdateIndexMeta", indexMetaBlob, version)}
+}
+
+func (_c *MockCSegment_UpdateIndexMeta_Call) Run(run func(indexMetaBlob []byte, version uint64)) *MockCSegment_UpdateIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]byte), args[1].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_UpdateIndexMeta_Call) Return(_a0 error) *MockCSegment_UpdateIndexMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCSegment_UpdateIndexMeta_Call) RunAndReturn(run func([]byte, uint64) error) *MockCSegment_UpdateIndexMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Retrieve provides a mock function with given fields: ctx, plan
 func (_m *MockCSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcore.RetrieveResult, error) {
 	ret := _m.Called(ctx, plan)

@@ -463,3 +463,45 @@ func TestConvertToSegcoreSegmentLoadInfo_IndexStorePathVersion(t *testing.T) {
 	assert.Len(t, result.GetIndexInfos(), 1)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, result.GetIndexInfos()[0].GetIndexStorePathVersion())
 }
+
+func TestCSegmentUpdateIndexMeta(t *testing.T) {
+	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
+	assert.NoError(t, initcore.InitMmapManager(paramtable.Get(), 1))
+	initcore.InitTieredStorage(paramtable.Get())
+
+	collectionID := int64(100)
+	segmentID := int64(101)
+	schema := mock_segcore.GenTestCollectionSchema("test-update-index-meta", schemapb.DataType_Int64, true)
+	indexMeta := mock_segcore.GenTestIndexMeta(collectionID, schema)
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: collectionID,
+		Schema:       schema,
+		IndexMeta:    indexMeta,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, collection)
+	defer collection.Release()
+
+	segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+		Collection:  collection,
+		SegmentID:   segmentID,
+		SegmentType: segcore.SegmentTypeGrowing,
+		IsSorted:    false,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, segment)
+	defer segment.Release()
+
+	// An empty blob is a no-op (short-circuits before entering cgo).
+	assert.NoError(t, segment.UpdateIndexMeta(nil, 100))
+	assert.NoError(t, segment.UpdateIndexMeta([]byte{}, 100))
+
+	// A marshaled meta round-trips through cgo; growing segments use the base
+	// no-op UpdateIndexMeta override, so it succeeds without error.
+	blob, err := proto.Marshal(indexMeta)
+	assert.NoError(t, err)
+	assert.NoError(t, segment.UpdateIndexMeta(blob, 100))
+}

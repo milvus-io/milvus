@@ -331,6 +331,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     Reopen(SchemaPtr sch) override;
 
     void
+    UpdateIndexMeta(IndexMetaPtr index_meta, uint64_t version) override;
+
+    void
     Reopen(
         milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
@@ -2026,8 +2029,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::unordered_set<FieldId> pending_text_index_fields_;
     std::unordered_set<FieldId> mmap_field_ids_;
 
-    // only useful in binlog
+    // only useful in binlog. Published via std::atomic_store/load: UpdateIndexMeta
+    // holds reopen_mutex_ and atomic_stores; unlocked search-path readers
+    // (vector_search / generate_interim_index) MUST std::atomic_load.
     IndexMetaPtr col_index_meta_;
+    // monotonic apply cursor for col_index_meta_ (UpdateIndexMeta): a stale
+    // (older-or-equal version) update is skipped. Guarded by reopen_mutex_.
+    uint64_t col_index_meta_version_{0};
     SegcoreConfig segcore_config_;
     std::unordered_map<FieldId, std::unique_ptr<VecIndexConfig>>
         vec_binlog_config_;
