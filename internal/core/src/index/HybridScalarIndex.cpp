@@ -61,8 +61,8 @@ HybridScalarIndex<T>::HybridScalarIndex(
       tantivy_index_version_(tantivy_index_version),
       bitmap_index_cardinality_limit_(
           DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT),
-      low_cardinality_index_type_(ScalarIndexType::BITMAP),
-      high_cardinality_index_type_(ScalarIndexType::STLSORT),
+          low_cardinality_index_type(ScalarIndexType::BITMAP),
+          high_cardinality_index_type(ScalarIndexType::STLSORT),
       file_manager_context_(file_manager_context) {
     if (file_manager_context.Valid()) {
         this->file_manager_ =
@@ -74,27 +74,36 @@ HybridScalarIndex<T>::HybridScalarIndex(
     internal_index_type_ = ScalarIndexType::NONE;
 }
 
-template <typename T>
+template<typename T>
 ScalarIndexType
-HybridScalarIndex<T>::SelectIndexTypeByCardinality(size_t cardinality) {
-    if (cardinality >= bitmap_index_cardinality_limit_) {
-        if (high_cardinality_index_type_ == ScalarIndexType::NONE) {
-            // Legacy mode: use type-dependent selection
-            if constexpr (std::is_same_v<T, std::string>) {
-                internal_index_type_ = ScalarIndexType::INVERTED;
-            } else if constexpr (std::is_integral_v<T>) {
-                internal_index_type_ = ScalarIndexType::STLSORT;
-            } else {
-                internal_index_type_ = ScalarIndexType::INVERTED;
-            }
-        } else {
-            internal_index_type_ = high_cardinality_index_type_;
+HybridScalarIndex<T>::SelectIndexTypeByCardinality(size_t cardinality)
+if(cardinality >= bitmap_index_cardinality_limit_)
+{
+    if(high_cardinality_index_type  == ScalarIndexType::NONE)
+    {
+        if constexpr(std::is_same_v<T,std::string>)
+        {
+            internal_index_type =ScalarIndexType::INVERTED;
         }
-    } else {
-        internal_index_type_ = low_cardinality_index_type_;
+        else if constexpr(std::is_integral_v<T>){
+            internal_index_type = ScalarIndexType::STLSORT;
+        }
+        else {
+            internal_index_type=ScalarIndexType::INVERTED;
+        }
     }
-    return internal_index_type_;
+    else
+    {
+        internal_index_type=high_cardinality_index_type_;
+    }
+else
+{
+internal_index_type = low_cardinality_index_type_;
 }
+
+return internal_index_type;
+}
+
 
 template <typename T>
 ScalarIndexType
@@ -106,7 +115,8 @@ HybridScalarIndex<T>::SelectIndexBuildType(size_t n, const T* values) {
             break;
         }
     }
-    return SelectIndexTypeByCardinality(distinct_vals.size());
+
+   return SelectIndexTypeByCardnality(distinct_vals.size());
 }
 
 template <typename T>
@@ -124,8 +134,10 @@ HybridScalarIndex<T>::SelectBuildTypeForPrimitiveType(
             }
         }
     }
+
+  
     return SelectIndexTypeByCardinality(distinct_vals.size());
-}
+
 
 template <typename T>
 ScalarIndexType
@@ -148,9 +160,9 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
             }
         }
     }
-    // For array types, always use BITMAP for low cardinality and INVERTED for high cardinality.
-    // These are hardcoded because STL_SORT doesn't support arrays, and BITMAP is the only
-    // suitable choice for low cardinality arrays. Config parameters don't apply to arrays.
+
+
+    // Decide whether to select bitmap index or inverted index
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
         internal_index_type_ = ScalarIndexType::INVERTED;
     } else {
@@ -214,8 +226,13 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
             std::make_shared<StringIndexSort>(this->file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
-            tantivy_index_version_, this->file_manager_context_);
-    } else {
+            tantivy_index_version_, file_manager_context_);
+
+    } else if(internal_index_type_ == ScalarIndexType::STLSORT){
+        internal_index_ =
+            std::make_shared<StringIndexSort>(file_manager_context_);
+    }
+    else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
     }
@@ -239,8 +256,7 @@ HybridScalarIndex<T>::Build(const Config& config) {
 
     bitmap_index_cardinality_limit_ =
         GetBitmapCardinalityLimitFromConfig(config);
-
-    // Check scalar index version for compatibility
+  // Check scalar index version for compatibility
     auto scalar_index_version =
         GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
             .value_or(kLastVersionWithoutHybridIndexConfig);

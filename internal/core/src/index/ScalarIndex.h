@@ -73,24 +73,33 @@ ToString(ScalarIndexType type) {
 }
 
 inline ScalarIndexType
-FromString(const std::string& type) {
-    if (type == "BITMAP") {
+FromString(const std::String type){
+
+    std::transform(type.begin(), type.end(), type.begin(),  [](unsigned char c) { return std::toupper(c); });
+    if(type=="BITMAP"){
         return ScalarIndexType::BITMAP;
-    } else if (type == "STLSORT" || type == "STL_SORT") {
+}
+else if(type=="STLSORT"||type=="STL_SORT"){
         return ScalarIndexType::STLSORT;
-    } else if (type == "MARISA" || type == "Trie" || type == "TRIE") {
+}
+else if(type=="MARISA"||type=="TRIE"){
         return ScalarIndexType::MARISA;
-    } else if (type == "INVERTED") {
+}
+else if(type=="INVERTED"){
         return ScalarIndexType::INVERTED;
-    } else if (type == "HYBRID") {
+}
+else if(type=="HYBRID"){
         return ScalarIndexType::HYBRID;
-    } else if (type == "RTREE") {
+}
+else if(type=="RTREE"){
         return ScalarIndexType::RTREE;
-    } else if (type == "NGRAM") {
+}
+else if(type=="NGRAM"){
         return ScalarIndexType::NGRAM;
-    } else {
-        return ScalarIndexType::NONE;
-    }
+}
+else{
+    return ScalarIndexType::NONE;
+}
 }
 
 template <typename T>
