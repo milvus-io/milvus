@@ -1734,12 +1734,23 @@ func (req *deleteRequestStringer) String() string {
 	switch {
 	case req.GetPrimaryKeys().GetIntId() != nil:
 		ids := req.GetPrimaryKeys().GetIntId().GetData()
-		pkInfo = fmt.Sprintf("Pks range[%d-%d], len: %d", ids[0], ids[len(ids)-1], len(ids))
+		if len(ids) > 0 {
+			pkInfo = fmt.Sprintf("Pks range[%d-%d], len: %d", ids[0], ids[len(ids)-1], len(ids))
+		} else {
+			pkInfo = "Pks range[empty], len: 0"
+		}
 	case req.GetPrimaryKeys().GetStrId() != nil:
 		ids := req.GetPrimaryKeys().GetStrId().GetData()
-		pkInfo = fmt.Sprintf("Pks range[%s-%s], len: %d", ids[0], ids[len(ids)-1], len(ids))
+		if len(ids) > 0 {
+			pkInfo = fmt.Sprintf("Pks range[%s-%s], len: %d", ids[0], ids[len(ids)-1], len(ids))
+		} else {
+			pkInfo = "Pks range[empty], len: 0"
+		}
 	}
 	tss := req.GetTimestamps()
+	if len(tss) == 0 {
+		return fmt.Sprintf("%s, timestamp range: [empty]", pkInfo)
+	}
 	return fmt.Sprintf("%s, timestamp range: [%d-%d]", pkInfo, tss[0], tss[len(tss)-1])
 }
 
