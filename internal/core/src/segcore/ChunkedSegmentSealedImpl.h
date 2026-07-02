@@ -136,6 +136,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     HasJsonIndex(FieldId field_id) const override;
     bool
     HasFieldData(FieldId field_id) const override;
+    // Checks the loaded external manifest for a storage column.
+    bool
+    HasColumnInLoadedManifest(const std::string& column_name) const override;
 
     std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
     GetFieldDataIfExist(FieldId field_id) const;
@@ -333,9 +336,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx) override;
-
-    void
-    LoadManifest(const std::string& manifest_path);
 
  public:
     size_t
@@ -1300,9 +1300,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
-    // Load column groups from a manifest file path (for external collections)
+    // Load column groups from the supplied load-info snapshot (for external
+    // collections).
     void
-    LoadColumnGroups(const std::string& manifest_path,
+    LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
                      milvus::OpContext* op_ctx = nullptr);
 
     /**

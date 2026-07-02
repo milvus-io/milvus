@@ -16,10 +16,10 @@
 #include <folly/ExceptionWrapper.h>
 #include <folly/Try.h>
 #include <folly/futures/Promise.h>
+#include <algorithm>
 #include <cstring>
 #include <cstdint>
 #include <exception>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -367,6 +367,50 @@ GetSearchResultValidCount(CSearchResult search_result) {
     return res->valid_count_;
 }
 
+// Verifies the plan's external field references against the loaded manifest,
+// after LazyCheckSchema refreshed the segment schema and manifest view.
+// Optionally ignores fields that the current execution path will not access.
+void
+CheckExternalFieldsInLoadedManifest(
+    const milvus::SchemaPtr& schema,
+    milvus::segcore::SegmentInternalInterface* segment,
+    const std::vector<milvus::FieldId>& fields,
+    const std::vector<milvus::FieldId>& skipped_fields = {}) {
+    if (!schema || !schema->is_external_collection()) {
+        return;
+    }
+
+    for (auto field_id : fields) {
+        if (std::find(skipped_fields.begin(), skipped_fields.end(), field_id) !=
+            skipped_fields.end()) {
+            continue;
+        }
+        if (!schema->has_field(field_id)) {
+            continue;
+        }
+
+        if (!schema->IsExternalManifestStoredField(field_id)) {
+            continue;
+        }
+        const auto& field_meta = schema->operator[](field_id);
+        auto column_name = schema->GetPhysicalColumnName(field_id);
+        // External output may be served through take(), so "ready" here means
+        // the loaded manifest contains the storage column. It intentionally
+        // does not require field data or index accessibility.
+        if (!segment->HasColumnInLoadedManifest(column_name)) {
+            throw milvus::SegcoreError(
+                milvus::FieldNotLoaded,
+                fmt::format(
+                    "external field \"{}\" (storage column \"{}\") is not "
+                    "available in the current loaded external collection "
+                    "manifest; run RefreshExternalCollection and reload the "
+                    "collection before accessing this field",
+                    field_meta.get_name().get(),
+                    column_name));
+        }
+    }
+}
+
 //////////////////////////////    public C API wrappers    //////////////////////////////
 
 CFuture*  // Future<milvus::SearchResult*>
@@ -416,6 +460,17 @@ AsyncSearch(CTraceContext c_trace,
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
+            std::vector<milvus::FieldId> skipped_manifest_fields;
+            if (filter_only) {
+                skipped_manifest_fields.push_back(target_vector_field_id);
+                for (auto field_id : plan->target_entries_) {
+                    skipped_manifest_fields.push_back(field_id);
+                }
+            }
+            CheckExternalFieldsInLoadedManifest(plan->schema_,
+                                                internal_segment,
+                                                plan->access_entries_,
+                                                skipped_manifest_fields);
             std::unique_ptr<milvus::SearchResult> search_result;
             if (!filter_only &&
                 !internal_segment->FieldAccessible(target_vector_field_id)) {
@@ -508,6 +563,11 @@ AsyncRetrieve(CTraceContext c_trace,
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto internal_segment =
+                static_cast<milvus::segcore::SegmentInternalInterface*>(
+                    segment);
+            CheckExternalFieldsInLoadedManifest(
+                plan->schema_, internal_segment, plan->access_entries_);
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx,
