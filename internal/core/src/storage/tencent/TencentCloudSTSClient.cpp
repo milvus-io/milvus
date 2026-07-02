@@ -125,7 +125,15 @@ TencentCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
         return result;
     }
 
-    auto json = Utils::Json::JsonView(credentialsStr);
+    Aws::Utils::Json::JsonValue jsonValue(credentialsStr);
+    if (!jsonValue.WasParseSuccessful()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Failed to parse credential result json: "
+                               << jsonValue.GetErrorMessage());
+        return result;
+    }
+
+    auto json = jsonValue.View();
     auto rootNode = json.GetObject("Response");
     if (rootNode.IsNull()) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
