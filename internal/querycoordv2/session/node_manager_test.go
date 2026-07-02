@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 type NodeManagerSuite struct {
@@ -175,6 +176,27 @@ func (s *NodeManagerSuite) TestNodeInfo() {
 	node.UpdateStats(WithChannelCnt(5))
 	s.Equal(5, node.ChannelCnt())
 	s.Equal(5, node.SegmentCnt())
+
+	cacheStats := []*querypb.CacheShardDiskUsageStats{
+		{
+			DataType:  "scalar_field",
+			Shard:     "channel-1",
+			DiskBytes: 1024,
+		},
+	}
+	node.UpdateStats(WithCacheShardDiskUsageStats(cacheStats))
+	cacheStats[0].DiskBytes = 2048
+	s.Equal([]*querypb.CacheShardDiskUsageStats{
+		{
+			DataType:  "scalar_field",
+			Shard:     "channel-1",
+			DiskBytes: 1024,
+		},
+	}, node.CacheShardDiskUsageStats())
+
+	returnedCacheStats := node.CacheShardDiskUsageStats()
+	returnedCacheStats[0].DiskBytes = 4096
+	s.Equal(float64(1024), node.CacheShardDiskUsageStats()[0].GetDiskBytes())
 
 	node.SetLastHeartbeat(time.Now())
 	s.NotNil(node.LastHeartbeat())
