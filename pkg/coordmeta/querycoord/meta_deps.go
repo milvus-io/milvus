@@ -14,14 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package meta
+package querycoord
 
-// CollectionOperator is a function that can be used to modify a collection
-type CollectionOperator func(collection *Collection) (changed bool)
+import (
+	"context"
 
-func SetNotifierCollectionOp(notifier chan struct{}) CollectionOperator {
-	return func(collection *Collection) (changed bool) {
-		collection.setRefreshNotifier(notifier)
-		return true
-	}
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+)
+
+// Broker abstracts the single coordinator call CollectionManager needs during
+// recovery (filling load fields from the collection schema). The full broker
+// implementation lives in internal/querycoordv2/meta (CoordinatorBroker, which
+// depends on internal-only RPC plumbing); declaring this minimal interface here
+// keeps the moved CollectionManager free of internal imports so it can live in
+// the shared pkg/v3 module. The production *CoordinatorBroker satisfies it
+// structurally.
+type Broker interface {
+	DescribeCollection(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
 }
