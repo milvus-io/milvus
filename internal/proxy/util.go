@@ -1343,9 +1343,9 @@ func validateName(entity string, nameType string) error {
 }
 
 func validateNameWithCustomChars(entity string, nameType string, allowedChars string) error {
-	entity = strings.TrimSpace(entity)
-
-	if entity == "" {
+	// Whitespace-only names are reported as empty; names with leading/trailing
+	// whitespace are rejected below by the character checks on the raw value.
+	if strings.TrimSpace(entity) == "" {
 		return merr.WrapErrParameterInvalid("not empty", entity, nameType+" should be not empty")
 	}
 

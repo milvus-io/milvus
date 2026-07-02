@@ -966,6 +966,11 @@ func TestValidateName(t *testing.T) {
 		"",
 		string(longName),
 		"中文",
+		" abc",
+		"abc ",
+		" abc ",
+		"\tabc",
+		"abc\n",
 	}
 
 	for _, name := range invalidNames {

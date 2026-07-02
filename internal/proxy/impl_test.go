@@ -3400,3 +3400,51 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 	assert.NotContains(t, redactedSpec, "AKIAEXAMPLE")
 	assert.NotContains(t, redactedSpec, "SUPERSECRET")
 }
+
+func TestProxy_CreateRole_WhitespaceRoleName(t *testing.T) {
+	paramtable.Init()
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := context.Background()
+
+	// Role names with leading/trailing whitespace must be rejected before
+	// the request is forwarded, otherwise the raw name is persisted as the
+	// role identity.
+	for _, name := range []string{" role", "role ", " role ", "\trole", "role\n"} {
+		resp, err := node.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+			Entity: &milvuspb.RoleEntity{Name: name},
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp), "role name %q should be rejected", name)
+	}
+
+	mixc := mocks.NewMockMixCoordClient(t)
+	mixc.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+	node.mixCoord = mixc
+	resp, err := node.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: "role"},
+	})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+}
+
+func TestProxy_DropRole_WhitespaceRoleName(t *testing.T) {
+	paramtable.Init()
+	// DropRole skips role name validation so that legacy roles persisted
+	// with leading/trailing whitespace can still be cleaned up.
+	var forwardedName string
+	mixc := mocks.NewMockMixCoordClient(t)
+	mixc.EXPECT().DropRole(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, req *milvuspb.DropRoleRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+			forwardedName = req.GetRoleName()
+			return merr.Success(), nil
+		}).Once()
+
+	node := &Proxy{mixCoord: mixc}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.DropRole(context.Background(), &milvuspb.DropRoleRequest{RoleName: " legacy_role"})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+	assert.Equal(t, " legacy_role", forwardedName)
+}
