@@ -21,11 +21,20 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+// indexUpdate is one CreateIndex WAL event: the added index definition plus the
+// message BeginTs used as its monotonic apply barrier. A single MsgPack may carry
+// several CreateIndex messages, so they are accumulated (never overwritten).
+type indexUpdate struct {
+	fieldIndex *indexpb.FieldIndex
+	barrierTs  uint64
+}
 
 type insertNodeMsg struct {
 	insertMsgs      []*InsertMsg
@@ -33,6 +42,7 @@ type insertNodeMsg struct {
 	timeRange       TimeRange
 	schema          *schemapb.CollectionSchema
 	schemaBarrierTs uint64
+	indexUpdates    []indexUpdate
 }
 
 type deleteNodeMsg struct {
@@ -40,6 +50,7 @@ type deleteNodeMsg struct {
 	timeRange       TimeRange
 	schema          *schemapb.CollectionSchema
 	schemaBarrierTs uint64
+	indexUpdates    []indexUpdate
 }
 
 func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
@@ -68,6 +79,16 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			msg.schema = body.GetUpdates().GetSchema()
 			msg.schemaBarrierTs = taskMsg.BeginTs()
 		}
+	case commonpb.MsgType_CreateIndex:
+		createIndexMsg := taskMsg.(*adaptor.CreateIndexMessageBody)
+		body, err := createIndexMsg.CreateIndexMessage.Body()
+		if err != nil {
+			return err
+		}
+		msg.indexUpdates = append(msg.indexUpdates, indexUpdate{
+			fieldIndex: body.GetFieldIndex(),
+			barrierTs:  taskMsg.BeginTs(),
+		})
 	case commonpb.MsgType_ManualFlush:
 		// ManualFlush is consumed in filterNode.filtrate(); no insert/delete payload here.
 	default:

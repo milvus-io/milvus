@@ -146,6 +146,13 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}
 		return nil
+	case commonpb.MsgType_CreateIndex:
+		createIndexMsg := msg.(*adaptor.CreateIndexMessageBody)
+		header := createIndexMsg.CreateIndexMessage.Header()
+		if header.GetCollectionId() != fNode.collectionID {
+			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+		}
+		return nil
 	case commonpb.MsgType_ManualFlush:
 		// ManualFlush is handled by StreamingNode WAL flusher (fence + persist).
 		// QueryNode only consumes the barrier so the pipeline advances.
