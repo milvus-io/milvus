@@ -1808,6 +1808,18 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		basePath = rawPath[:idx]
 	}
 	manifestPath := packed.MarshalManifestPath(basePath, committedVersion)
+	fieldMemorySizes := make(map[int64]int64, int(cResult.num_field_stats))
+	fieldNullCounts := make(map[int64]int64, int(cResult.num_field_stats))
+	if cResult.num_field_stats > 0 {
+		fieldIDs := unsafe.Slice(cResult.field_ids, int(cResult.num_field_stats))
+		memorySizes := unsafe.Slice(cResult.field_memory_sizes, int(cResult.num_field_stats))
+		nullCounts := unsafe.Slice(cResult.field_null_counts, int(cResult.num_field_stats))
+		for i := 0; i < int(cResult.num_field_stats); i++ {
+			fieldID := int64(fieldIDs[i])
+			fieldMemorySizes[fieldID] = int64(memorySizes[i])
+			fieldNullCounts[fieldID] = int64(nullCounts[i])
+		}
+	}
 	bm25Stats := make(map[int64]*storage.BM25Stats, int(cResult.num_bm25_stats))
 	if cResult.num_bm25_stats > 0 {
 		fieldIDs := unsafe.Slice(cResult.bm25_field_ids, int(cResult.num_bm25_stats))
@@ -1824,8 +1836,12 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	}
 
 	return &FlushResult{
-		ManifestPath: manifestPath,
-		NumRows:      int64(cResult.num_rows),
-		BM25Stats:    bm25Stats,
+		ManifestPath:     manifestPath,
+		NumRows:          int64(cResult.num_rows),
+		TimestampFrom:    uint64(cResult.timestamp_from),
+		TimestampTo:      uint64(cResult.timestamp_to),
+		FieldMemorySizes: fieldMemorySizes,
+		FieldNullCounts:  fieldNullCounts,
+		BM25Stats:        bm25Stats,
 	}, nil
 }

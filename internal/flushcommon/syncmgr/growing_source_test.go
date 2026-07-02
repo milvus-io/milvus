@@ -54,7 +54,20 @@ func (s *fakeCommitGrowingFlushSource) CurrentOffset() int64 {
 }
 
 func (s *fakeCommitGrowingFlushSource) FlushGrowingData(context.Context, int64, int64, *GrowingFlushConfig) (*GrowingFlushResult, error) {
-	return &GrowingFlushResult{ManifestPath: "manifest", NumRows: 10}, nil
+	return &GrowingFlushResult{
+		ManifestPath:  "manifest",
+		NumRows:       10,
+		TimestampFrom: 101,
+		TimestampTo:   200,
+		FieldMemorySizes: map[int64]int64{
+			100: 80,
+			101: 120,
+			102: 160,
+		},
+		FieldNullCounts: map[int64]int64{
+			101: 2,
+		},
+	}, nil
 }
 
 func (s *fakeCommitGrowingFlushSource) Release() {
@@ -386,8 +399,14 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 	metaWriter.EXPECT().UpdateGrowingSourceSync(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, task *GrowingSourceSyncTask) error {
 			require.Len(t, task.insertBinlogs, 3)
-			require.Empty(t, task.insertBinlogs[0].GetBinlogs())
 			require.Equal(t, []int64{100}, task.insertBinlogs[0].GetChildFields())
+			require.Len(t, task.insertBinlogs[0].GetBinlogs(), 1)
+			require.EqualValues(t, 10, task.insertBinlogs[0].GetBinlogs()[0].GetEntriesNum())
+			require.EqualValues(t, 101, task.insertBinlogs[0].GetBinlogs()[0].GetTimestampFrom())
+			require.EqualValues(t, 200, task.insertBinlogs[0].GetBinlogs()[0].GetTimestampTo())
+			require.EqualValues(t, 80, task.insertBinlogs[0].GetBinlogs()[0].GetMemorySize())
+			require.EqualValues(t, 500, task.insertBinlogs[0].GetBinlogs()[0].GetLogID())
+			require.EqualValues(t, 2, task.insertBinlogs[101].GetBinlogs()[0].GetFieldNullCounts()[101])
 			return nil
 		})
 
@@ -404,6 +423,7 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 		WithMetaWriter(metaWriter).
 		WithSchema(schema).
 		WithChunkManager(cm).
+		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(&fakeCommitGrowingFlushSource{})
 
 	require.NoError(t, task.Run(context.Background()))

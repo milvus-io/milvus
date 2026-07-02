@@ -16,8 +16,10 @@
 #include <folly/ExceptionWrapper.h>
 #include <folly/Try.h>
 #include <folly/futures/Promise.h>
+#include <algorithm>
 #include <cstring>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -87,12 +89,14 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/properties.h"
 
 // Arrow headers for FlushGrowingSegmentData
 #include <arrow/array.h>
 #include <arrow/buffer.h>
 #include <arrow/builder.h>
+#include <arrow/extension_type.h>
 #include <arrow/record_batch.h>
 #include <arrow/type.h>
 
@@ -961,6 +965,296 @@ struct FieldInfo {
     milvus::segcore::TextLobSpillover* text_lob_spillover = nullptr;
 };
 
+uint64_t
+BytesForBits(int64_t bits) {
+    if (bits <= 0) {
+        return 0;
+    }
+    return static_cast<uint64_t>((bits + 7) / 8);
+}
+
+uint64_t
+ActualSizeInBytes(const std::shared_ptr<arrow::ArrayData>& data) {
+    if (!data) {
+        return 0;
+    }
+
+    auto length = data->length;
+    auto offset = data->offset;
+    const auto& buffers = data->buffers;
+    auto buffer_size = [&](size_t index) -> uint64_t {
+        if (index >= buffers.size() || !buffers[index]) {
+            return 0;
+        }
+        return static_cast<uint64_t>(buffers[index]->size());
+    };
+    auto has_buffer = [&](size_t index) -> bool {
+        return index < buffers.size() && buffers[index] != nullptr;
+    };
+    auto children_size = [&]() -> uint64_t {
+        uint64_t size = 0;
+        for (const auto& child : data->child_data) {
+            size += ActualSizeInBytes(child);
+        }
+        return size;
+    };
+
+    switch (data->type->id()) {
+        case arrow::Type::NA:
+            return 0;
+        case arrow::Type::BOOL: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += BytesForBits(length);
+            }
+            return size;
+        }
+        case arrow::Type::UINT8:
+        case arrow::Type::INT8: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length);
+            }
+            return size;
+        }
+        case arrow::Type::UINT16:
+        case arrow::Type::INT16:
+        case arrow::Type::HALF_FLOAT: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 2);
+            }
+            return size;
+        }
+        case arrow::Type::UINT32:
+        case arrow::Type::INT32:
+        case arrow::Type::FLOAT:
+        case arrow::Type::DATE32:
+        case arrow::Type::TIME32:
+        case arrow::Type::INTERVAL_MONTHS: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 4);
+            }
+            return size;
+        }
+        case arrow::Type::UINT64:
+        case arrow::Type::INT64:
+        case arrow::Type::DOUBLE:
+        case arrow::Type::DATE64:
+        case arrow::Type::TIME64:
+        case arrow::Type::TIMESTAMP:
+        case arrow::Type::DURATION:
+        case arrow::Type::INTERVAL_DAY_TIME: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 8);
+            }
+            return size;
+        }
+        case arrow::Type::INTERVAL_MONTH_DAY_NANO:
+        case arrow::Type::DECIMAL128: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 16);
+            }
+            return size;
+        }
+        case arrow::Type::DECIMAL256: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 32);
+            }
+            return size;
+        }
+        case arrow::Type::FIXED_SIZE_BINARY: {
+            auto type = std::static_pointer_cast<arrow::FixedSizeBinaryType>(
+                data->type);
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * type->byte_width());
+            }
+            return size;
+        }
+        case arrow::Type::STRING:
+        case arrow::Type::BINARY: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1) && has_buffer(2)) {
+                size += static_cast<uint64_t>((length + 1) * 4);
+                auto offsets =
+                    reinterpret_cast<const int32_t*>(buffers[1]->data());
+                auto offset_count = buffers[1]->size() / sizeof(int32_t);
+                if (offset + length < offset_count) {
+                    size += static_cast<uint64_t>(offsets[offset + length] -
+                                                  offsets[offset]);
+                }
+            }
+            return size;
+        }
+        case arrow::Type::LARGE_STRING:
+        case arrow::Type::LARGE_BINARY: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1) && has_buffer(2)) {
+                size += static_cast<uint64_t>((length + 1) * 8);
+                auto offsets =
+                    reinterpret_cast<const int64_t*>(buffers[1]->data());
+                auto offset_count = buffers[1]->size() / sizeof(int64_t);
+                if (offset + length < offset_count) {
+                    size += static_cast<uint64_t>(offsets[offset + length] -
+                                                  offsets[offset]);
+                }
+            }
+            return size;
+        }
+        case arrow::Type::STRING_VIEW:
+        case arrow::Type::BINARY_VIEW: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 16);
+            }
+            for (size_t i = 2; i < buffers.size(); i++) {
+                size += buffer_size(i);
+            }
+            return size;
+        }
+        case arrow::Type::LIST:
+        case arrow::Type::MAP: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>((length + 1) * 4);
+            }
+            return size + children_size();
+        }
+        case arrow::Type::LARGE_LIST: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>((length + 1) * 8);
+            }
+            return size + children_size();
+        }
+        case arrow::Type::LIST_VIEW: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 4);
+            }
+            if (has_buffer(2)) {
+                size += static_cast<uint64_t>(length * 4);
+            }
+            return size + children_size();
+        }
+        case arrow::Type::LARGE_LIST_VIEW: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 8);
+            }
+            if (has_buffer(2)) {
+                size += static_cast<uint64_t>(length * 8);
+            }
+            return size + children_size();
+        }
+        case arrow::Type::FIXED_SIZE_LIST:
+        case arrow::Type::STRUCT: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += BytesForBits(length);
+            }
+            return size + children_size();
+        }
+        case arrow::Type::SPARSE_UNION: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += static_cast<uint64_t>(length);
+            }
+            return size + children_size();
+        }
+        case arrow::Type::DENSE_UNION: {
+            uint64_t size = 0;
+            if (has_buffer(0)) {
+                size += static_cast<uint64_t>(length);
+            }
+            if (has_buffer(1)) {
+                size += static_cast<uint64_t>(length * 4);
+            }
+            return size + children_size();
+        }
+        case arrow::Type::DICTIONARY: {
+            uint64_t size = 0;
+            for (size_t i = 0; i < buffers.size(); i++) {
+                size += buffer_size(i);
+            }
+            size += ActualSizeInBytes(data->dictionary);
+            return size;
+        }
+        case arrow::Type::RUN_END_ENCODED:
+            return children_size();
+        case arrow::Type::EXTENSION: {
+            auto extension_type =
+                std::static_pointer_cast<arrow::ExtensionType>(data->type);
+            auto storage_data =
+                arrow::ArrayData::Make(extension_type->storage_type(),
+                                       length,
+                                       buffers,
+                                       data->child_data,
+                                       data->dictionary,
+                                       data->null_count,
+                                       offset);
+            return ActualSizeInBytes(storage_data);
+        }
+        default: {
+            uint64_t size = 0;
+            for (size_t i = 0; i < buffers.size(); i++) {
+                size += buffer_size(i);
+            }
+            return size + children_size();
+        }
+    }
+}
+
 struct BM25StatsAccumulator {
     std::unordered_map<uint32_t, int32_t> rows_with_token;
     int64_t num_row = 0;
@@ -1802,6 +2096,12 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         result->manifest_path = nullptr;
         result->committed_version = 0;
         result->num_rows = 0;
+        result->timestamp_from = 0;
+        result->timestamp_to = 0;
+        result->field_ids = nullptr;
+        result->field_memory_sizes = nullptr;
+        result->field_null_counts = nullptr;
+        result->num_field_stats = 0;
         result->bm25_field_ids = nullptr;
         result->bm25_stats = nullptr;
         result->bm25_stats_sizes = nullptr;
@@ -2101,6 +2401,11 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         int64_t size_per_chunk = field_infos[0].vec_base->get_size_per_chunk();
         int64_t current_offset = start_offset;
         int64_t rows_written = 0;
+        std::unordered_map<int64_t, int64_t> field_memory_sizes;
+        std::unordered_map<int64_t, int64_t> field_null_counts;
+        uint64_t timestamp_from = std::numeric_limits<uint64_t>::max();
+        uint64_t timestamp_to = 0;
+        bool has_timestamp = false;
 
         while (current_offset < end_offset) {
             int64_t chunk_id = current_offset / size_per_chunk;
@@ -2132,7 +2437,30 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                         milvus::UnexpectedError,
                         arr_result.status().ToString());
                 }
-                arrays.push_back(arr_result.ValueOrDie());
+                auto arr = arr_result.ValueOrDie();
+                auto field_id = field_info.field_id.get();
+                field_memory_sizes[field_id] +=
+                    static_cast<int64_t>(ActualSizeInBytes(arr->data()));
+                field_null_counts[field_id] += arr->null_count();
+                if (field_info.field_id == TimestampFieldID) {
+                    auto ts_array =
+                        std::dynamic_pointer_cast<arrow::Int64Array>(arr);
+                    if (!ts_array) {
+                        return milvus::FailureCStatus(
+                            milvus::UnexpectedError,
+                            "timestamp field is not int64 array");
+                    }
+                    for (int64_t i = 0; i < ts_array->length(); i++) {
+                        if (ts_array->IsNull(i)) {
+                            continue;
+                        }
+                        auto ts = static_cast<uint64_t>(ts_array->Value(i));
+                        timestamp_from = std::min(timestamp_from, ts);
+                        timestamp_to = std::max(timestamp_to, ts);
+                        has_timestamp = true;
+                    }
+                }
+                arrays.push_back(arr);
 
                 auto stats_iter = bm25_stats.find(field_info.field_id.get());
                 if (stats_iter != bm25_stats.end()) {
@@ -2167,6 +2495,34 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                           close_result.status().ToString());
         }
         auto output = std::move(close_result).ValueOrDie();
+        if (rows_written > 0 && !has_timestamp) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "timestamp field was not flushed");
+        }
+        result->timestamp_from = has_timestamp ? timestamp_from : 0;
+        result->timestamp_to = has_timestamp ? timestamp_to : 0;
+        if (!field_infos.empty()) {
+            auto num_field_stats = field_infos.size();
+            result->field_ids = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * num_field_stats));
+            result->field_memory_sizes = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * num_field_stats));
+            result->field_null_counts = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * num_field_stats));
+            if (!result->field_ids || !result->field_memory_sizes ||
+                !result->field_null_counts) {
+                return milvus::FailureCStatus(
+                    milvus::UnexpectedError,
+                    "failed to allocate growing flush field stats");
+            }
+            result->num_field_stats = num_field_stats;
+            for (size_t i = 0; i < num_field_stats; i++) {
+                auto field_id = field_infos[i].field_id.get();
+                result->field_ids[i] = field_id;
+                result->field_memory_sizes[i] = field_memory_sizes[field_id];
+                result->field_null_counts[i] = field_null_counts[field_id];
+            }
+        }
 
         // commit via Transaction externally
         auto transaction_result =
@@ -2321,6 +2677,18 @@ FreeFlushResult(CFlushResult* result) {
         free(result->manifest_path);
         result->manifest_path = nullptr;
     }
+    if (result && result->field_ids) {
+        free(result->field_ids);
+        result->field_ids = nullptr;
+    }
+    if (result && result->field_memory_sizes) {
+        free(result->field_memory_sizes);
+        result->field_memory_sizes = nullptr;
+    }
+    if (result && result->field_null_counts) {
+        free(result->field_null_counts);
+        result->field_null_counts = nullptr;
+    }
     if (result && result->bm25_stats) {
         for (size_t i = 0; i < result->num_bm25_stats; i++) {
             free(result->bm25_stats[i]);
@@ -2337,6 +2705,7 @@ FreeFlushResult(CFlushResult* result) {
         result->bm25_stats_sizes = nullptr;
     }
     if (result) {
+        result->num_field_stats = 0;
         result->num_bm25_stats = 0;
     }
 }

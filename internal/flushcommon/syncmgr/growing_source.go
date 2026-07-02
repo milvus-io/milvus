@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -69,9 +70,13 @@ type GrowingFlushConfig struct {
 }
 
 type GrowingFlushResult struct {
-	ManifestPath string
-	NumRows      int64
-	BM25Stats    map[int64]*storage.BM25Stats
+	ManifestPath     string
+	NumRows          int64
+	TimestampFrom    uint64
+	TimestampTo      uint64
+	FieldMemorySizes map[int64]int64
+	FieldNullCounts  map[int64]int64
+	BM25Stats        map[int64]*storage.BM25Stats
 }
 
 type GrowingFlushSource interface {
@@ -338,8 +343,9 @@ type GrowingSourceSyncTask struct {
 	insertBinlogs map[int64]*datapb.FieldBinlog
 	bm25Stats     map[int64]*storage.BM25Stats
 
-	committedManifestPath string
-	committedBM25Stats    map[int64]*storage.BM25Stats
+	committedManifestPath  string
+	committedBM25Stats     map[int64]*storage.BM25Stats
+	committedInsertBinlogs map[int64]*datapb.FieldBinlog
 
 	writeRetryOpts  []retry.Option
 	failureCallback func(error)
@@ -425,9 +431,12 @@ func (t *GrowingSourceSyncTask) WithSource(source GrowingFlushSource) *GrowingSo
 	return t
 }
 
-func (t *GrowingSourceSyncTask) WithCommittedFlush(manifestPath string, bm25Stats map[int64]*storage.BM25Stats) *GrowingSourceSyncTask {
+func (t *GrowingSourceSyncTask) WithCommittedFlush(manifestPath string, bm25Stats map[int64]*storage.BM25Stats, insertBinlogs ...map[int64]*datapb.FieldBinlog) *GrowingSourceSyncTask {
 	t.committedManifestPath = manifestPath
 	t.committedBM25Stats = bm25Stats
+	if len(insertBinlogs) > 0 {
+		t.committedInsertBinlogs = cloneFieldBinlogMap(insertBinlogs[0])
+	}
 	return t
 }
 
@@ -497,6 +506,13 @@ func (t *GrowingSourceSyncTask) CommittedBM25Stats() map[int64]*storage.BM25Stat
 	return t.bm25Stats
 }
 
+func (t *GrowingSourceSyncTask) CommittedInsertBinlogs() map[int64]*datapb.FieldBinlog {
+	if len(t.committedInsertBinlogs) > 0 {
+		return cloneFieldBinlogMap(t.committedInsertBinlogs)
+	}
+	return cloneFieldBinlogMap(t.insertBinlogs)
+}
+
 func (t *GrowingSourceSyncTask) BatchRows() int64 {
 	return t.batchRows
 }
@@ -560,6 +576,7 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	if t.committedManifestPath != "" {
 		t.manifestPath = t.committedManifestPath
 		t.bm25Stats = t.committedBM25Stats
+		t.insertBinlogs = cloneFieldBinlogMap(t.committedInsertBinlogs)
 	} else if expectedRows == 0 {
 		t.manifestPath = segment.ManifestPath()
 	} else {
@@ -572,6 +589,13 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		config, err := t.buildFlushConfig(segment, columnGroups)
 		if err != nil {
 			return err
+		}
+		var insertSummaryLogIDs []int64
+		if t.metaWriter != nil && len(columnGroups) > 0 {
+			insertSummaryLogIDs, err = t.allocLogIDs(len(columnGroups), "growing source insert summary")
+			if err != nil {
+				return err
+			}
 		}
 		result, err := t.source.FlushGrowingData(ctx, segment.FlushedRows(), t.targetOffset, config)
 		if err != nil {
@@ -588,10 +612,17 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if len(result.BM25Stats) > 0 {
 			t.bm25Stats = result.BM25Stats
 		}
+		if t.metaWriter != nil && len(columnGroups) > 0 {
+			t.insertBinlogs, err = buildGrowingSourceInsertBinlogs(columnGroups, result, insertSummaryLogIDs)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	t.flushedSize = expectedRows
-	if expectedRows > 0 && len(columnGroups) > 0 {
-		t.insertBinlogs = buildV3ColumnGroupFieldBinlogs(columnGroups, 0, 0, 0, nil, nil, nil, nil, nil)
+	if t.metaWriter != nil && expectedRows > 0 && len(columnGroups) > 0 && len(t.insertBinlogs) == 0 {
+		return merr.WrapErrDataIntegrityMsg("growing source committed flush missing insert binlog summary, segmentID=%d targetOffset=%d",
+			t.segmentID, t.targetOffset)
 	}
 
 	if t.metaWriter != nil {
@@ -793,6 +824,65 @@ func (t *GrowingSourceSyncTask) allocLogIDs(count int, purpose string) ([]int64,
 		ids[i] = id
 	}
 	return ids, nil
+}
+
+func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, result *GrowingFlushResult, logIDs []int64) (map[int64]*datapb.FieldBinlog, error) {
+	if result == nil || result.NumRows <= 0 || len(columnGroups) == 0 {
+		return nil, nil
+	}
+	if len(logIDs) != len(columnGroups) {
+		return nil, merr.WrapErrDataIntegrityMsg("growing source insert summary log id count mismatch, logIDs=%d columnGroups=%d",
+			len(logIDs), len(columnGroups))
+	}
+	logIDByGroup := make(map[int64]int64, len(columnGroups))
+	for i, columnGroup := range columnGroups {
+		logIDByGroup[columnGroup.GroupID] = logIDs[i]
+	}
+	memorySize := func(columnGroupID int64) int64 {
+		for _, columnGroup := range columnGroups {
+			if columnGroup.GroupID != columnGroupID {
+				continue
+			}
+			var size int64
+			for _, fieldID := range columnGroup.Fields {
+				size += result.FieldMemorySizes[fieldID]
+			}
+			return size
+		}
+		return 0
+	}
+	fieldNullCounts := func(columnGroup storagecommon.ColumnGroup) map[int64]int64 {
+		counts := make(map[int64]int64, len(columnGroup.Fields))
+		for _, fieldID := range columnGroup.Fields {
+			counts[fieldID] = result.FieldNullCounts[fieldID]
+		}
+		return counts
+	}
+	return buildV3ColumnGroupFieldBinlogs(
+		columnGroups,
+		result.NumRows,
+		result.TimestampFrom,
+		result.TimestampTo,
+		func(columnGroupID int64) int64 { return 0 },
+		memorySize,
+		func(columnGroupID int64) int64 { return logIDByGroup[columnGroupID] },
+		nil,
+		fieldNullCounts,
+	), nil
+}
+
+func cloneFieldBinlogMap(binlogs map[int64]*datapb.FieldBinlog) map[int64]*datapb.FieldBinlog {
+	if len(binlogs) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]*datapb.FieldBinlog, len(binlogs))
+	for fieldID, binlog := range binlogs {
+		if binlog == nil {
+			continue
+		}
+		cloned[fieldID] = proto.Clone(binlog).(*datapb.FieldBinlog)
+	}
+	return cloned
 }
 
 func manifestVersion(manifestPath string) int64 {

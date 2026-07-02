@@ -60,7 +60,19 @@ func (s fakeGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffse
 	if s.flushFunc != nil {
 		return s.flushFunc(ctx, startOffset, endOffset, config)
 	}
-	return &syncmgr.GrowingFlushResult{ManifestPath: "manifest", NumRows: 10}, nil
+	return &syncmgr.GrowingFlushResult{
+		ManifestPath:  "manifest",
+		NumRows:       10,
+		TimestampFrom: 100,
+		TimestampTo:   200,
+		FieldMemorySizes: map[int64]int64{
+			0:   80,
+			1:   80,
+			100: 80,
+			101: 160,
+		},
+		FieldNullCounts: map[int64]int64{},
+	}, nil
 }
 
 func (s fakeGrowingFlushSource) Release() {

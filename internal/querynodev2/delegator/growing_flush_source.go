@@ -568,9 +568,13 @@ func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, star
 		return nil, err
 	}
 	return &syncmgr.GrowingFlushResult{
-		ManifestPath: result.ManifestPath,
-		NumRows:      result.NumRows,
-		BM25Stats:    result.BM25Stats,
+		ManifestPath:     result.ManifestPath,
+		NumRows:          result.NumRows,
+		TimestampFrom:    result.TimestampFrom,
+		TimestampTo:      result.TimestampTo,
+		FieldMemorySizes: result.FieldMemorySizes,
+		FieldNullCounts:  result.FieldNullCounts,
+		BM25Stats:        result.BM25Stats,
 	}, nil
 }
 

@@ -302,6 +302,24 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
     ASSERT_NE(result.manifest_path, nullptr);
     ASSERT_EQ(result.num_rows, N);
     ASSERT_GT(result.committed_version, 0);
+    auto [expected_ts_from, expected_ts_to] = std::minmax_element(
+        dataset.timestamps_.begin(), dataset.timestamps_.end());
+    ASSERT_NE(expected_ts_from, dataset.timestamps_.end());
+    EXPECT_EQ(result.timestamp_from, *expected_ts_from);
+    EXPECT_EQ(result.timestamp_to, *expected_ts_to);
+    ASSERT_GT(result.num_field_stats, 0);
+    std::unordered_map<int64_t, int64_t> field_memory_sizes;
+    std::unordered_map<int64_t, int64_t> field_null_counts;
+    for (size_t i = 0; i < result.num_field_stats; i++) {
+        field_memory_sizes[result.field_ids[i]] = result.field_memory_sizes[i];
+        field_null_counts[result.field_ids[i]] = result.field_null_counts[i];
+    }
+    EXPECT_GT(field_memory_sizes[RowFieldID.get()], 0);
+    EXPECT_GT(field_memory_sizes[TimestampFieldID.get()], 0);
+    EXPECT_GT(field_memory_sizes[pk_fid.get()], 0);
+    EXPECT_GT(field_memory_sizes[i32_fid.get()], 0);
+    EXPECT_GT(field_memory_sizes[f32_fid.get()], 0);
+    EXPECT_EQ(field_null_counts[pk_fid.get()], 0);
     AssertManifestHasColumn(segment_path, result.committed_version, RowFieldID);
 
     // Note: manifest path may be relative to ArrowFileSystem root path
