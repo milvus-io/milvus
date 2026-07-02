@@ -11,12 +11,11 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "cachinglayer/Translator.h"
-#include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
 #include "common/type_c.h"
 #include "mmap/Types.h"
