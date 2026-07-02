@@ -2690,13 +2690,14 @@ type queryCoordConfig struct {
 	StoppingBalanceAssignPolicy    ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
-	CollectionObserverInterval         ParamItem `refreshable:"false"`
-	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
-	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
-	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
-	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
-	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
-	ClusterLevelLoadWaitRGReadyTimeout ParamItem `refreshable:"true"`
+	CollectionObserverInterval                   ParamItem `refreshable:"false"`
+	CollectionBalanceSegmentBatchSize            ParamItem `refreshable:"true"`
+	CollectionBalanceChannelBatchSize            ParamItem `refreshable:"true"`
+	UpdateCollectionLoadStatusInterval           ParamItem `refreshable:"false"`
+	ClusterLevelLoadReplicaNumber                ParamItem `refreshable:"true"`
+	ClusterLevelLoadResourceGroups               ParamItem `refreshable:"true"`
+	ClusterLevelLoadForceOverrideUserReplicaMode ParamItem `refreshable:"true"`
+	ClusterLevelLoadWaitRGReadyTimeout           ParamItem `refreshable:"true"`
 
 	// balance batch size in one trigger
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
@@ -3304,6 +3305,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.ClusterLevelLoadForceOverrideUserReplicaMode = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadForceOverrideUserReplicaMode",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "when true, cluster-level load config overrides collections loaded with user-specified replica number. This is a one-way takeover: once a collection is updated, it is converted to cluster-level managed mode and turning this back off will not restore the previous user-specified replica mode.",
+		Export:       false,
+	}
+	p.ClusterLevelLoadForceOverrideUserReplicaMode.Init(base.mgr)
 
 	p.ClusterLevelLoadWaitRGReadyTimeout = ParamItem{
 		Key:          "queryCoord.clusterLevelLoadWaitRGReadyTimeout",
