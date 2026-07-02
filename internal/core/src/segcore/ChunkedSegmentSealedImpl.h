@@ -973,6 +973,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                            int64_t num_rows,
                            milvus::OpContext* op_ctx);
 
+    std::string
+    resolve_field_data_warmup_policy(
+        FieldId field_id, const std::string& explicit_warmup_policy = "");
+
     void
     fill_empty_field(const FieldMeta& field_meta);
 
