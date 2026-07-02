@@ -468,6 +468,14 @@ func applyExternalCollectionSegmentUpdate(
 		return patchErr
 	}
 
+	if len(normalizedUpdatedSegments) > 0 {
+		updatedSegmentIDs := make([]UniqueID, 0, len(normalizedUpdatedSegments))
+		for _, segment := range normalizedUpdatedSegments {
+			updatedSegmentIDs = append(updatedSegmentIDs, segment.GetID())
+		}
+		notifySegmentIndexBuild(updatedSegmentIDs...)
+	}
+
 	mlog.Info(context.TODO(), "external collection segments updated successfully",
 		mlog.Int("updatedSegments", len(updatedSegments)),
 		mlog.Int("keptSegments", len(keptSegmentIDs)))
