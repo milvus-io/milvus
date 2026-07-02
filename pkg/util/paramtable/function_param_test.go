@@ -59,6 +59,9 @@ func TestFunctionConfig(t *testing.T) {
 		"vertexai.url",
 		"vertexai.credential",
 		"vertexai.enable",
+		"huggingface.credential",
+		"huggingface.url",
+		"huggingface.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
@@ -79,6 +82,9 @@ func TestFunctionConfig(t *testing.T) {
 		"siliconflow.url",
 		"siliconflow.credential",
 		"siliconflow.enable",
+		"huggingface.credential",
+		"huggingface.url",
+		"huggingface.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.RerankModelProviders.GetDoc(key) != "")

@@ -103,6 +103,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your Gemini embedding url, Default is the official embedding url"
 			case "gemini.enable":
 				return "Whether to enable Gemini model service"
+			case "huggingface.credential":
+				return "The name in the credential configuration item"
+			case "huggingface.url":
+				return "Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co"
+			case "huggingface.enable":
+				return "Whether to enable Hugging Face text embedding service"
 			default:
 				return ""
 			}
@@ -142,6 +148,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your cohere rerank url, Default is the official rerank url"
 			case "cohere.enable":
 				return "Whether to enable cohere model service"
+			case "huggingface.credential":
+				return "The name in the credential configuration item"
+			case "huggingface.url":
+				return "Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co"
+			case "huggingface.enable":
+				return "Whether to enable Hugging Face rerank service"
 			default:
 				return ""
 			}
