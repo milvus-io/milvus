@@ -32,7 +32,7 @@ void
 SetIndexSliceSize(const int64_t);
 
 void
-SetStreamBudgetRatio(const double);
+SetLoadTransientBudgetBytes(int64_t bytes);
 
 void
 SetHighPriorityThreadCoreCoefficient(const float);

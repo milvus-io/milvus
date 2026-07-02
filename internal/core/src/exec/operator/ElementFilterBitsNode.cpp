@@ -177,6 +177,7 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
     if (doc_hit_ratio < DOC_HIT_RATIO_THRESHOLD_LOW) {
         offset_mode = true;
     } else if (doc_hit_ratio < DOC_HIT_RATIO_THRESHOLD_HIGH) {
+        element_exprs_->WaitPrefetch();
         offset_mode = !std::all_of(
             element_exprs_->exprs().begin(),
             element_exprs_->exprs().end(),

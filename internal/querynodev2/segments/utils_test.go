@@ -448,6 +448,29 @@ func TestIsExternalField(t *testing.T) {
 	})
 }
 
+func TestHasExternalPrimaryKey(t *testing.T) {
+	assert.False(t, HasExternalPrimaryKey(nil))
+
+	assert.True(t, HasExternalPrimaryKey(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", IsPrimaryKey: true, ExternalField: "source_id"},
+		},
+	}))
+
+	assert.False(t, HasExternalPrimaryKey(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: common.VirtualPKFieldName, IsPrimaryKey: true},
+			{Name: "id", ExternalField: "source_id"},
+		},
+	}))
+
+	assert.False(t, HasExternalPrimaryKey(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", ExternalField: "source_id"},
+		},
+	}))
+}
+
 func TestGetVirtualPK(t *testing.T) {
 	t.Run("BasicGeneration", func(t *testing.T) {
 		segmentID := int64(12345)
@@ -630,6 +653,38 @@ func TestIsExternalCollectionLazyLoad(t *testing.T) {
 					Name:          "ext_field",
 					ExternalField: "source_col",
 					TypeParams:    []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupSync}},
+				},
+			},
+		}
+		assert.False(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("milvus_table_fields_without_external_field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			ExternalSpec: `{"format":"milvus-table"}`,
+			Fields: []*schemapb.FieldSchema{
+				{Name: common.VirtualPKFieldName},
+				{
+					Name:       "vec",
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+				},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("milvus_table_real_pk_forces_eager_load", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			ExternalSpec: `{"format":"milvus-table"}`,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					IsPrimaryKey: true,
+					TypeParams:   []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+				},
+				{
+					Name:       "vec",
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
 				},
 			},
 		}

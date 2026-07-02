@@ -124,7 +124,7 @@ struct BinaryRangeElementFunc {
         if constexpr (std::is_same_v<GetType, int64_t>) {              \
             auto x = src[offset].at_numeric(pointer);                  \
             if (x.error()) {                                           \
-                res[i] = false;                                        \
+                res[i] = valid_res[i] = false;                         \
                 break;                                                 \
             }                                                          \
             auto n = x.value();                                        \
@@ -140,7 +140,7 @@ struct BinaryRangeElementFunc {
         } else {                                                       \
             auto x = src[offset].template at<GetType>(pointer);        \
             if (x.error()) {                                           \
-                res[i] = false;                                        \
+                res[i] = valid_res[i] = false;                         \
                 break;                                                 \
             }                                                          \
             auto value = x.value();                                    \
@@ -300,7 +300,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -368,6 +368,13 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     template <typename T>
     VectorPtr
     ExecRangeVisitorImplForPk(EvalCtx& context);
+
+    void
+    PrefetchRawData() override;
+
+    template <typename T>
+    void
+    PrefetchRawData();
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;

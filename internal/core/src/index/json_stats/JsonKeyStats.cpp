@@ -78,7 +78,8 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
                            double json_stats_shredding_ratio_threshold,
                            int64_t json_stats_write_batch_size,
                            uint32_t tantivy_index_version)
-    : ScalarIndex<std::string>(JSON_KEY_STATS_INDEX_TYPE) {
+    : ScalarIndex<std::string>(JSON_KEY_STATS_INDEX_TYPE),
+      file_manager_context_(ctx) {
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     segment_id_ = ctx.fieldDataMeta.segment_id;
@@ -779,7 +780,10 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
         ParquetWriterFactory::CreateContext(key_types_, remote_prefix);
     parquet_writer_->Init(std::move(writer_context));
     BuildKeyStats(field_datas, nullable);
-    parquet_writer_->Close();
+    auto close_status = parquet_writer_->Close();
+    AssertInfo(close_status.ok(),
+               "failed to close json stats parquet writer: {}",
+               close_status.ToString());
     bson_inverted_index_->BuildIndex();
 
     // write meta file with layout type map and other metadata
@@ -1015,8 +1019,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                segment_id_);
 
     auto enable_mmap = !mmap_filepath_.empty();
-    auto column_group_info =
-        FieldDataInfo(column_group_id, field_id_, num_rows, mmap_filepath_);
+    auto column_group_info = FieldDataInfo(
+        column_group_id, field_id_, num_rows, mmap_filepath_, false, shard_);
     LOG_INFO(
         "loads column group {} with num_rows {} for segment "
         "{}",
@@ -1122,10 +1126,11 @@ JsonKeyStats::LoadSharedKeyIndex(
     load_info.index_size = index_size;
     load_info.load_priority = load_priority_;
     load_info.warmup_policy = warmup_policy;
+    load_info.shard = shard_;
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
         translator = std::make_unique<
             segcore::storagev1translator::BsonInvertedIndexTranslator>(
-            load_info, disk_file_manager_);
+            load_info, file_manager_context_);
 
     bson_index_cache_slot_ =
         cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -1156,6 +1161,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_INFO("load json stats for segment {} with load priority: {}",
              segment_id_,
              static_cast<int>(load_priority_));
+    shard_ = GetValueFromConfig<std::string>(config, JSON_STATS_CACHE_SHARD_KEY)
+                 .value_or("");
 
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");

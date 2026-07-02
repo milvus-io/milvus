@@ -150,6 +150,14 @@
 namespace milvus::segcore {
 using namespace milvus::cachinglayer;
 
+static void
+CheckVectorOutputCellsLoaded(int64_t segment_id,
+                             FieldId field_id,
+                             const FieldMeta& field_meta,
+                             const ChunkedColumnInterface* column,
+                             const int64_t* offsets,
+                             int64_t count);
+
 static inline void
 set_bit(BitsetType& bitset, FieldId field_id, bool flag = true) {
     auto pos = field_id.get() - START_USER_FIELDID;
@@ -751,6 +759,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
         for (const auto& field_id : all_fields) {
             const auto& field_meta = (*schema_)[field_id];
             bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+            const auto pk_field_id = schema_->get_primary_field_id();
+            if (pk_field_id.has_value() &&
+                pk_field_id.value().get() == field_id.get() &&
+                schema_->IsExternalDataField(field_id)) {
+                eager_fields.push_back(field_id);
+                continue;
+            }
             auto [has_warmup, warmup_str] = schema_->WarmupPolicy(
                 field_id, field_is_vector, /*is_index=*/false);
             // Resolve effective warmup using global config as fallback
@@ -835,24 +850,44 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
         return;
     }
 
-    // 1. VirtualPKChunkedColumn for the synthetic primary key
-    //    This is lazy — data is only materialized if DataOfChunk/Span is called.
     auto pk_field_id = schema_->get_primary_field_id().value();
-    auto virtual_pk = std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
-    fields_.wlock()->emplace(pk_field_id, virtual_pk);
-    set_bit(field_data_ready_bitset_, pk_field_id, true);
+    if (!schema_->IsExternalDataField(pk_field_id)) {
+        // 1. VirtualPKChunkedColumn for the synthetic primary key.
+        //    This is lazy; data is only materialized if DataOfChunk/Span is called.
+        auto virtual_pk =
+            std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
+        fields_.wlock()->emplace(pk_field_id, virtual_pk);
+        set_bit(field_data_ready_bitset_, pk_field_id, true);
 
-    // 2. PK→offset index using VirtualPKOffsetMap (zero storage).
-    //    Virtual PK = (seg_id << 32) | offset, so pk→offset is a simple
-    //    bit-extract. This replaces the OffsetOrderedArray that would
-    //    otherwise store num_rows (pk, offset) pairs (~17 GB for 1B rows).
-    insert_record_.set_virtual_pk_offset_map(id_, num_rows);
+        // 2. PK to offset index using VirtualPKOffsetMap (zero storage).
+        //    Virtual PK = (seg_id << 32) | offset, so pk to offset is a simple
+        //    bit-extract. This replaces the OffsetOrderedArray that would
+        //    otherwise store num_rows (pk, offset) pairs (~17 GB for 1B rows).
+        insert_record_.set_virtual_pk_offset_map(id_, num_rows);
+    } else {
+        AssertInfo(
+            get_column(pk_field_id) != nullptr,
+            "external primary key column {} is not loaded for segment {}",
+            pk_field_id.get(),
+            id_);
+    }
 
-    // 3. Synthetic timestamps: constant mode (all 0 — rows always visible).
-    //    No data is materialized, saving ~8 GB for 1B-row external tables.
-    insert_record_.init_timestamps_constant(num_rows, 0);
+    if (schema_->RequiresSourceInsertTimestamps()) {
+        // Real-PK milvus-table segments load source deltalogs. Those deltas use
+        // source delete timestamps, so the insert side must keep source row
+        // timestamps too; otherwise a delete-before-reinsert sequence would
+        // incorrectly hide the reinserted row.
+        AssertInfo(
+            get_column(TimestampFieldID) != nullptr,
+            "source timestamp column is not loaded for milvus-table segment {}",
+            id_);
+    } else {
+        // Synthetic timestamps: constant mode (all 0; rows always visible).
+        // No data is materialized, saving ~8 GB for 1B-row external tables.
+        insert_record_.init_timestamps_constant(num_rows, 0);
+    }
 
-    // 4. Row count + readiness
+    // Row count + readiness
     {
         std::unique_lock lck(mutex_);
         update_row_count(num_rows);
@@ -1039,7 +1074,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         auto column_group_info = FieldDataInfo(column_group_id.get(),
                                                num_rows,
                                                mmap_dir_path,
-                                               merged_in_load_list);
+                                               merged_in_load_list,
+                                               load_info.shard);
         LOG_INFO(
             "[StorageV2] segment {} loads column group {} with field ids "
             "{} "
@@ -1150,11 +1186,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
                 .GetChunkManager()
                 ->GetRootPath();
-        auto field_data_info =
-            FieldDataInfo(field_id.get(),
-                          num_rows,
-                          mmap_dir_path,
-                          schema_->ShouldLoadField(field_id));
+        auto field_data_info = FieldDataInfo(field_id.get(),
+                                             num_rows,
+                                             mmap_dir_path,
+                                             schema_->ShouldLoadField(field_id),
+                                             load_info.shard);
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -1363,10 +1399,22 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     FieldId field_id,
     const std::vector<int64_t>& chunk_ids) const {
     std::shared_lock lck(mutex_);
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+    // AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+    //            "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
         column->PrefetchChunks(op_ctx, chunk_ids);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
+                                          FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    if (auto column = get_column(field_id)) {
+        auto num_chunks = column->num_chunks();
+        std::vector<int64_t> ids(num_chunks);
+        std::iota(ids.begin(), ids.end(), 0);
+        column->PrefetchChunks(op_ctx, ids);
     }
 }
 
@@ -1781,6 +1829,8 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
             if (!vec_index->HasValidData()) {
                 auto column = get_column(field_id);
                 if (column != nullptr) {
+                    CheckVectorOutputCellsLoaded(
+                        id_, field_id, field_meta, column.get(), ids, count);
                     return get_raw_data(
                         op_ctx, field_id, field_meta, ids, count);
                 }
@@ -1848,6 +1898,12 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
         if (!vec_index->HasValidData()) {
             auto column = get_column(field_id);
             if (column != nullptr) {
+                CheckVectorOutputCellsLoaded(id_,
+                                             field_id,
+                                             field_meta,
+                                             column.get(),
+                                             seg_offsets,
+                                             count);
                 return get_raw_data(
                     op_ctx, field_id, field_meta, seg_offsets, count);
             }
@@ -3392,7 +3448,8 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
         info_proto->index_size(),
-        info_proto->warmup_policy()};
+        info_proto->warmup_policy(),
+        std::atomic_load(&segment_load_info_)->GetInsertChannel()};
 
     std::unique_ptr<
         milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
@@ -3475,6 +3532,8 @@ ChunkedSegmentSealedImpl::LoadJsonKeyIndex(
     if (!info_proto->base_path().empty()) {
         config[STATS_BASE_PATH_KEY] = info_proto->base_path();
     }
+    config[JSON_STATS_CACHE_SHARD_KEY] =
+        std::atomic_load(&segment_load_info_)->GetInsertChannel();
 
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
@@ -3539,7 +3598,6 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     AssertInfo(column != nullptr,
                "field {} must exist when getting raw data",
                field_id.get());
-
     int64_t valid_count = count;
     const bool* valid_data = nullptr;
     const int64_t* valid_offsets = seg_offsets;
@@ -3915,6 +3973,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             vector = get_vector(op_ctx, field_id, seg_offsets, count);
         }
     } else {
+        // retrieve data from column data instead of index
+        // we could reject remote vector output if the vector is not loaded in local cache
+        // for performance needs
+        if (SegcoreConfig::default_config().get_reject_remote_vector_output()) {
+            auto column = get_column(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting raw data",
+                       field_id.get());
+            CheckVectorOutputCellsLoaded(
+                id_, field_id, field_meta, column.get(), seg_offsets, count);
+        }
         vector = get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
@@ -4852,7 +4921,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
                 milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                     .GetProperties();
             auto column_groups = segment_load_info.GetColumnGroups();
-            auto arrow_schema = schema_->ConvertToLoonArrowSchema();
+            auto arrow_schema =
+                schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
             auto needed_columns = std::make_shared<std::vector<std::string>>();
             for (const auto& field_id : schema_->get_field_ids()) {
                 needed_columns->push_back(std::to_string(field_id.get()));
@@ -5021,7 +5091,12 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
             ->GetRootPath();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
+    auto field_data_info = FieldDataInfo(
+        field_id.get(),
+        size,
+        mmap_dir_path,
+        false,
+        std::atomic_load(&segment_load_info_)->GetInsertChannel());
 
     auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
         field_id, IsVectorDataType(data_type), /*is_index=*/false);
@@ -5058,9 +5133,7 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
 
     auto it = struct_to_array_offsets_.find(*struct_name);
     if (it == struct_to_array_offsets_.end()) {
-        std::vector<int32_t> row_to_element_start(row_count + 1, 0);
-        auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
-            std::move(row_to_element_start));
+        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(row_count);
         it =
             struct_to_array_offsets_.emplace(*struct_name, array_offsets).first;
     }
@@ -5187,7 +5260,8 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
     auto column_groups =
         std::atomic_load(&segment_load_info_)->GetColumnGroups();
 
-    auto arrow_schema = schema_->ConvertToArrowSchema();
+    auto arrow_schema =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
@@ -5362,7 +5436,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
     for (const auto& fid : milvus_field_ids) {
-        needed_columns->push_back(schema_->get_storage_column_name(fid));
+        needed_columns->push_back(schema_->GetPhysicalColumnName(fid));
     }
     auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
     AssertInfo(chunk_reader_result.ok(),
@@ -5411,7 +5485,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             eager_load,
             warmup_policy,
             cache_key_suffix,
-            load_info->GetEstimatedBytesPerRow());
+            load_info->GetEstimatedBytesPerRow(),
+            load_info->GetInsertChannel());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -5561,6 +5636,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             load_info_snapshot->GetStorageVersion();
+        load_field_data_info.shard = load_info_snapshot->GetInsertChannel();
         auto fields_to_load = field_ids;
         AssertInfo(!fields_to_load.empty(),
                    "load field data with empty field list");
@@ -5807,6 +5883,32 @@ ShouldProjectInternalTakeDynamicField(
     }
     auto dynamic_field_id = schema.get_dynamic_field_id();
     return dynamic_field_id.has_value() && dynamic_field_id.value() == field_id;
+}
+
+static void
+CheckVectorOutputCellsLoaded(int64_t segment_id,
+                             FieldId field_id,
+                             const FieldMeta& field_meta,
+                             const ChunkedColumnInterface* column,
+                             const int64_t* offsets,
+                             int64_t count) {
+    if (!SegcoreConfig::default_config().get_reject_remote_vector_output() ||
+        !IsVectorDataType(field_meta.get_data_type()) || count == 0) {
+        return;
+    }
+    if (column == nullptr || !column->CellsLoaded(offsets, count)) {
+        ThrowInfo(
+            RetrieveError,
+            "vector field '{}' is not loaded in local cache for "
+            "output, segment id={}, please notice that vector field is by "
+            "default resident in remote storage starting from milvus 3.0 to "
+            "reduce local storage overhead, but performance will be degraded, "
+            "you could manually set vector field warmup policy to 'sync' to "
+            "load the vector data, please refer to "
+            "https://milvus.io/docs/warm-up.md for more details",
+            field_meta.get_name().get(),
+            segment_id);
+    }
 }
 
 ChunkedSegmentSealedImpl::TakeContext
@@ -6259,12 +6361,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         return pk_field_id.has_value() && pk_field_id.value() == fid;
     };
 
-    // Collect needed columns and their field IDs. External collections use
-    // user-provided external column names; internal storage v2 uses field-id
-    // strings in the Loon Arrow schema.
+    // Collect manifest-backed columns and their field IDs. Internal storage v2
+    // uses field-id strings; external collections may use mapped source column
+    // names, while milvus-table source fields use field-id strings.
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<std::string> take_column_names;
+    bool has_vector_output = false;
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             continue;
@@ -6273,11 +6376,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             continue;
         }
         auto& field_meta = schema_->operator[](field_id);
-        if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id) && is_external_collection) {
+        if (is_external_collection &&
+            !schema_->IsExternalManifestStoredField(field_id)) {
             continue;
         }
-        auto column_name = schema_->get_storage_column_name(field_id);
+        has_vector_output =
+            has_vector_output || IsVectorDataType(field_meta.get_data_type());
+        auto column_name = schema_->GetPhysicalColumnName(field_id);
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_column_names.push_back(std::move(column_name));
@@ -6287,6 +6392,16 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     }
 
     auto ctx = BuildTakeContext(offsets, size);
+    if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
+        has_vector_output) {
+        LogTakeFallback("retrieve",
+                        id_,
+                        size,
+                        ctx.unique_offsets.size(),
+                        take_field_ids.size(),
+                        "reject remote vector output enabled");
+        return false;
+    }
 
     double take_elapsed_ms = 0;
     auto table = ExecuteTake(ctx.unique_offsets,
@@ -6386,9 +6501,9 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 
         auto& field_meta = schema_->operator[](field_id);
 
-        // External virtual PK field (not external, not function-output).
-        if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id) && is_external_collection) {
+        // External virtual PK field (not manifest-stored, computed on the fly).
+        if (is_external_collection &&
+            !schema_->IsExternalManifestStoredField(field_id)) {
             if (is_pk_field(field_id) &&
                 field_meta.get_data_type() == DataType::INT64) {
                 auto data_array = std::make_unique<DataArray>();
@@ -6527,19 +6642,23 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     }
     const bool is_external_collection = schema_->is_external_collection();
 
-    // Collect needed columns. External collections use external field names;
-    // internal storage v2 uses field-id strings.
+    // Collect manifest-backed columns. Internal storage v2 uses field-id
+    // strings; external collections may use mapped source column names, while
+    // milvus-table source fields use field-id strings.
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<const FieldMeta*> take_field_metas;
     std::vector<std::string> take_column_names;
+    bool has_vector_output = false;
     for (auto field_id : plan->target_entries_) {
         auto& field_meta = schema_->operator[](field_id);
-        if (!field_meta.is_external_field() &&
-            !schema_->is_function_output(field_id) && is_external_collection) {
+        if (is_external_collection &&
+            !schema_->IsExternalManifestStoredField(field_id)) {
             continue;
         }
-        auto column_name = schema_->get_storage_column_name(field_id);
+        has_vector_output =
+            has_vector_output || IsVectorDataType(field_meta.get_data_type());
+        auto column_name = schema_->GetPhysicalColumnName(field_id);
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
@@ -6550,6 +6669,16 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     }
 
     auto ctx = BuildTakeContext(seg_offsets, size);
+    if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
+        has_vector_output) {
+        LogTakeFallback("search",
+                        id_,
+                        size,
+                        ctx.unique_offsets.size(),
+                        take_field_ids.size(),
+                        "reject remote vector output enabled");
+        return false;
+    }
 
     double take_elapsed_ms = 0;
     auto table = ExecuteTake(
@@ -6675,4 +6804,17 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     return true;
 }
 
+void
+ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
+                                          FieldId field_id) const {
+    auto is_ready = this->vector_indexings_.is_ready(field_id);
+    if (is_ready) {
+        auto field_indexing =
+            this->vector_indexings_.get_field_indexing(field_id);
+        auto cache_index = field_indexing->indexing_;
+        SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+    } else {
+        this->prefetch_chunks(op_ctx, field_id);
+    }
+}
 }  // namespace milvus::segcore

@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1439,6 +1440,25 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
+// GetCurDBNameFromRequestOrContext returns the database a request actually
+// operates on. It prefers the DbName carried in the request body (which is
+// what downstream handlers execute against, after DatabaseInterceptor has
+// normalized it) and only falls back to the connection-context db / cluster
+// default when the request carries none.
+//
+// Privilege checks MUST use this rather than GetCurDBNameFromContextOrDefault:
+// authorizing against the connection-context db while the operation runs
+// against the request's DbName both falsely denies legitimate access and
+// allows cross-database privilege escalation (see milvus-io/milvus#50678).
+func GetCurDBNameFromRequestOrContext(ctx context.Context, req interface{}) string {
+	if getter, ok := req.(requestutil.DBNameGetter); ok {
+		if dbName := getter.GetDbName(); dbName != "" {
+			return dbName
+		}
+	}
+	return GetCurDBNameFromContextOrDefault(ctx)
+}
+
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
 	dbKey := strings.ToLower(util.HeaderDBName)
 	if dbName != "" {
@@ -2594,12 +2614,16 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	return partitionNames, nil
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
-	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
+func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
+	if err != nil {
+		return nil, err
+	}
+	insertMsg.HashValues = hashValues
 
 	numChannels := len(channelNames)
 	if numChannels == 0 {
-		return nil
+		return nil, nil
 	}
 
 	numRows := len(insertMsg.HashValues)
@@ -2621,7 +2645,7 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
 	}
 
-	return channel2RowOffsets
+	return channel2RowOffsets, nil
 }
 
 func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
@@ -2721,12 +2745,66 @@ func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, in
 	return doCheckDynamicFieldData(schema, insertMsg, true)
 }
 
+func namespacePartitionModeEnabled(schema *schemapb.CollectionSchema) bool {
+	return schema.GetEnableNamespace() && common.IsNamespaceModePartition(schema.GetProperties()...)
+}
+
+func resolveNamespacePartitionName(schema *schemapb.CollectionSchema, namespace *string, partitionName string) (string, bool, error) {
+	if err := common.CheckNamespace(schema, namespace); err != nil {
+		return "", false, err
+	}
+	if !namespacePartitionModeEnabled(schema) {
+		return partitionName, false, nil
+	}
+
+	namespacePartitionName := *namespace
+	if err := validatePartitionTag(namespacePartitionName, true); err != nil {
+		return "", true, err
+	}
+	if partitionName != "" && partitionName != namespacePartitionName {
+		return "", true, merr.WrapErrParameterInvalidMsg("partition name %q mismatches namespace %q", partitionName, namespacePartitionName)
+	}
+	return namespacePartitionName, true, nil
+}
+
+func resolveNamespacePartitionNames(schema *schemapb.CollectionSchema, namespace *string, partitionNames []string) ([]string, bool, error) {
+	if err := common.CheckNamespace(schema, namespace); err != nil {
+		return nil, false, err
+	}
+	if !namespacePartitionModeEnabled(schema) {
+		return partitionNames, false, nil
+	}
+
+	namespacePartitionName := *namespace
+	if err := validatePartitionTag(namespacePartitionName, true); err != nil {
+		return nil, true, err
+	}
+	if len(partitionNames) == 0 {
+		return []string{namespacePartitionName}, true, nil
+	}
+	if len(partitionNames) == 1 && partitionNames[0] == namespacePartitionName {
+		return partitionNames, true, nil
+	}
+	return nil, true, merr.WrapErrParameterInvalidMsg("partition names %v mismatch namespace %q", partitionNames, namespacePartitionName)
+}
+
+func namespaceForPlan(schema *schemapb.CollectionSchema, namespace *string) *string {
+	if namespacePartitionModeEnabled(schema) {
+		return nil
+	}
+	return namespace
+}
+
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	err := common.CheckNamespace(schema, insertMsg.Namespace)
+	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(schema, insertMsg.Namespace, insertMsg.GetPartitionName())
 	if err != nil {
 		return err
 	}
 	if !schema.GetEnableNamespace() {
+		return nil
+	}
+	if namespaceAsPartition {
+		insertMsg.PartitionName = partitionName
 		return nil
 	}
 
@@ -2902,6 +2980,13 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err
+	case *milvuspb.HybridSearchRequest:
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		nq := 0
+		for _, subReq := range r.GetRequests() {
+			nq += int(subReq.GetNq())
+		}
+		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, nq, err
 	case *milvuspb.QueryRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1
@@ -2909,6 +2994,11 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
+		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.RestoreExternalSnapshotRequest:
+		return getDatabaseID(r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.ExportSnapshotRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
@@ -2954,8 +3044,10 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		}
 		return db.dbID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
-		dbName := GetCurDBNameFromContextOrDefault(ctx)
-		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
+		// Use the db the request actually targets (normalized by
+		// DatabaseInterceptor), consistent with the sibling cases, so quota is
+		// accounted against the correct database. See milvus-io/milvus#50678.
+		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
 		if err != nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
@@ -3004,6 +3096,14 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.CreateDatabaseRequest, *milvuspb.DropDatabaseRequest,
 		*milvuspb.AlterDatabaseRequest:
 		return merr.Status(err)
+	case *milvuspb.RestoreExternalSnapshotRequest:
+		return &milvuspb.RestoreExternalSnapshotResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.ExportSnapshotRequest:
+		return &milvuspb.ExportSnapshotResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.FlushRequest:
 		return &milvuspb.FlushResponse{
 			Status: merr.Status(err),

@@ -63,6 +63,8 @@ func WithoutJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 
 type UpdateJobAction func(job ImportJob)
 
+const importJobReasonAbortedByUser = "aborted by user"
+
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
 		job.(*importJob).State = state

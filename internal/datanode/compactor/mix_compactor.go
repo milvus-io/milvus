@@ -170,6 +170,7 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 	writerOpts := []storage.RwOption{
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
@@ -188,6 +189,9 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 				mlog.Int("rewriteFieldCount", len(textColumnConfigs)),
 			)
 		}
+	}
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
 	}
 
 	return writerOpts
@@ -722,7 +726,6 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	}
 	if !hasLobFiles {
 		mlog.Info(context.TODO(), "no LOB files found in source segments")
-		return nil
 	}
 
 	// create LOB compaction context and compute strategies

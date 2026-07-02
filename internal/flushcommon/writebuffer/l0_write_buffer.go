@@ -60,7 +60,6 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
 	wb.mut.Lock()
-	defer wb.mut.Unlock()
 
 	for _, inData := range insertData {
 		if wb.useGrowingSourceFlush {
@@ -74,6 +73,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 
 		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
 		if err != nil {
+			wb.mut.Unlock()
 			return err
 		}
 	}
@@ -93,6 +93,12 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			delete(wb.l0partition, segment)
 			delete(wb.l0Segments, partition)
 		}
+	}
+	syncTasks := wb.getSyncTasksLocked(context.Background(), segmentsSync)
+	wb.mut.Unlock()
+
+	if len(syncTasks) > 0 {
+		wb.submitSyncTasks(context.Background(), syncTasks)
 	}
 
 	return nil

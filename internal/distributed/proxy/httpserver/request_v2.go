@@ -25,6 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -260,6 +262,47 @@ type ImportReq struct {
 	Options        map[string]string `json:"options"`
 }
 
+const (
+	autoCommitTrue  = "true"
+	autoCommitFalse = "false"
+)
+
+func (req *ImportReq) UnmarshalJSON(data []byte) error {
+	type importReqAlias struct {
+		DbName         string             `json:"dbName"`
+		CollectionName string             `json:"collectionName" binding:"required"`
+		PartitionName  string             `json:"partitionName"`
+		Files          [][]string         `json:"files" binding:"required"`
+		Options        map[string]*string `json:"options"`
+	}
+	var decoded importReqAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	options := make(map[string]string, len(decoded.Options))
+	for key, value := range decoded.Options {
+		if value == nil {
+			if key == importutilv2.AutoCommitKey {
+				return merr.WrapErrParameterInvalidMsg("options.%s must be one of %q or %q", importutilv2.AutoCommitKey, autoCommitTrue, autoCommitFalse)
+			}
+			options[key] = ""
+			continue
+		}
+		if key == importutilv2.AutoCommitKey && strings.ToLower(*value) != autoCommitTrue && strings.ToLower(*value) != autoCommitFalse {
+			return merr.WrapErrParameterInvalidMsg("options.%s must be one of %q or %q", importutilv2.AutoCommitKey, autoCommitTrue, autoCommitFalse)
+		}
+		options[key] = *value
+	}
+
+	req.DbName = decoded.DbName
+	req.CollectionName = decoded.CollectionName
+	req.PartitionName = decoded.PartitionName
+	req.Files = decoded.Files
+	req.Options = options
+	return nil
+}
+
 func (req *ImportReq) GetDbName() string {
 	return req.DbName
 }
@@ -285,6 +328,25 @@ type JobIDReq struct {
 }
 
 func (req *JobIDReq) GetJobID() string { return req.JobID }
+
+type RestoreExternalSnapshotReq struct {
+	DbName               string `json:"dbName"`
+	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
+	SnapshotMetadataURI  string `json:"snapshotMetadataURI" binding:"required"`
+	ExternalSpec         string `json:"externalSpec"`
+}
+
+func (req *RestoreExternalSnapshotReq) GetDbName() string { return req.DbName }
+
+type ExportSnapshotReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	Name           string `json:"snapshotName" binding:"required"`
+	TargetS3Path   string `json:"targetS3Path" binding:"required"`
+	ExternalSpec   string `json:"externalSpec"`
+}
+
+func (req *ExportSnapshotReq) GetDbName() string { return req.DbName }
 
 type QueryReqV2 struct {
 	DbName           string                 `json:"dbName"`
@@ -393,6 +455,7 @@ type SearchReqV2 struct {
 	ConsistencyLevel  string                 `json:"consistencyLevel"`
 	ExprParams        map[string]interface{} `json:"exprParams"`
 	FunctionScore     FunctionScore          `json:"functionScore"`
+	FunctionChains    []FunctionChainReq     `json:"functionChains"`
 	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
@@ -463,6 +526,7 @@ type HybridSearchReq struct {
 	OutputFields      []string              `json:"outputFields"`
 	ConsistencyLevel  string                `json:"consistencyLevel"`
 	FunctionScore     FunctionScore         `json:"functionScore"`
+	FunctionChains    []FunctionChainReq    `json:"functionChains"`
 	SearchAggregation *SearchAggregationReq `json:"searchAggregation"`
 }
 
@@ -824,6 +888,31 @@ type FunctionScore struct {
 	Params    map[string]interface{} `json:"params"`
 }
 
+type FunctionChainReq struct {
+	Name  string               `json:"name"`
+	Stage string               `json:"stage"`
+	Ops   []FunctionChainOpReq `json:"ops"`
+}
+
+type FunctionChainOpReq struct {
+	Op      string                 `json:"op"`
+	Expr    *FunctionChainExprReq  `json:"expr"`
+	Inputs  []string               `json:"inputs"`
+	Outputs []string               `json:"outputs"`
+	Params  map[string]interface{} `json:"params"`
+}
+
+type FunctionChainExprReq struct {
+	Name   string                    `json:"name"`
+	Args   []FunctionChainExprArgReq `json:"args"`
+	Params map[string]interface{}    `json:"params"`
+}
+
+type FunctionChainExprArgReq struct {
+	Column  *string     `json:"column"`
+	Literal interface{} `json:"literal"`
+}
+
 type FunctionSchema struct {
 	FunctionName     string                 `json:"name" binding:"required"`
 	Description      string                 `json:"description"`
@@ -855,6 +944,7 @@ type CollectionReq struct {
 	Schema           CollectionSchema       `json:"schema"`
 	IndexParams      []IndexParam           `json:"indexParams"`
 	Params           map[string]interface{} `json:"params"`
+	Properties       map[string]interface{} `json:"properties"`
 	Description      string                 `json:"description"`
 	// Top-level external config is accepted only for explicit rejection.
 	// Create external collection must use schema.externalSource/schema.externalSpec.

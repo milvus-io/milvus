@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -49,6 +51,42 @@ import (
 func TestMixCompactionTaskSuite(t *testing.T) {
 	t.Skip("v1 format shall not be written anymore")
 	suite.Run(t, new(MixCompactionTaskStorageV1Suite))
+}
+
+func TestMixInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	textFieldIDs := []int64{101, 102}
+	task := &mixCompactionTask{
+		plan: &datapb.CompactionPlan{
+			Type: datapb.CompactionType_MixCompaction,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: textFieldIDs[0], Name: "text_1", DataType: schemapb.DataType_Text},
+				{FieldID: textFieldIDs[1], Name: "text_2", DataType: schemapb.DataType_Text},
+			}},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, Manifest: "manifest-1"},
+				{SegmentID: 2, Manifest: "manifest-2"},
+			},
+		},
+		compactionParams:            compaction.GenParams(),
+		estimatedOutputSegmentCount: 1,
+	}
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(map[int64][]packed.LobFileInfo{
+		1: {},
+		2: {},
+	}, nil).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	assert.NoError(t, err)
+	if assert.NotNil(t, task.lobContext) {
+		assert.True(t, task.lobContext.HasReuseAllFields())
+		assert.False(t, task.lobContext.ShouldRewriteAnyField())
+		assert.Len(t, task.lobContext.Decisions, len(textFieldIDs))
+		for _, fieldID := range textFieldIDs {
+			assert.Equal(t, compaction.LOBStrategyReuseAll, task.lobContext.Decisions[fieldID].Strategy)
+		}
+	}
 }
 
 func newMixCompactionStorageV1SuiteForDirectTest(t *testing.T) *MixCompactionTaskStorageV1Suite {

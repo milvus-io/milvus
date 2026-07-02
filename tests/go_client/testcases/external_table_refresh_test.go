@@ -21,6 +21,7 @@ import (
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -3720,6 +3721,299 @@ func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClien
 			}
 		}
 	}
+}
+
+func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
+	ctx := hp.CreateContext(t, 5*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const rowCount = 5000
+	const deletedCount = 500
+	sourceName := common.GenRandomString("mt_src", 6)
+	sourceSchema := entity.NewSchema().
+		WithName(sourceName).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName))
+	})
+
+	ids := make([]int64, rowCount)
+	vectors := make([][]float32, rowCount)
+	for i := 0; i < rowCount; i++ {
+		ids[i] = int64(i)
+		vectors[i] = []float32{float32(i), float32(i) + 1, float32(i) + 2, float32(i) + 3}
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnFloatVector("embedding", testVecDim, vectors)))
+	require.NoError(t, err)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	deletedIDs := make([]int64, deletedCount)
+	for i := 0; i < deletedCount; i++ {
+		deletedIDs[i] = int64(i)
+	}
+	delRes, err := mc.Delete(ctx, client.NewDeleteOption(sourceName).WithInt64IDs("id", deletedIDs))
+	require.NoError(t, err)
+	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
+
+	// Wait for the standalone flush rate limiter to reset before flushing
+	// the delete log. The local default is 0.1 flush requests per second.
+	time.Sleep(10 * time.Second)
+
+	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	sourceDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+
+	snapshotName := common.GenRandomString("mt_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName).
+		WithDescription("milvus-table external snapshot e2e")))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, sourceName))
+	})
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	minioCfg := getMinIOConfig()
+	externalSource := extTestURI(minioCfg, snapshotInfo.GetS3Location())
+	externalSpec := extTestSpec(minioCfg, "milvus-table")
+
+	externalName := common.GenRandomString("mt_ext", 6)
+	externalSchema := entity.NewSchema().
+		WithName(externalName).
+		WithExternalSource(externalSource).
+		WithExternalSpec(externalSpec).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true).
+			WithExternalField("id")).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).
+			WithExternalField("embedding"))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(externalName, externalSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(externalName))
+	})
+
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+
+	idxTask, err := mc.CreateIndex(ctx,
+		client.NewCreateIndexOption(externalName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idxTask.Await(ctx))
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName))
+	require.NoError(t, err)
+	require.NoError(t, loadTask.Await(ctx))
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(rowCount-deletedCount), count)
+
+	searchRes, err := mc.Search(ctx,
+		client.NewSearchOption(externalName, 5, []entity.Vector{entity.FloatVector(vectors[deletedCount])}).
+			WithOutputFields("id"))
+	require.NoError(t, err)
+	require.NotEmpty(t, searchRes)
+	require.Equal(t, 5, searchRes[0].ResultCount)
+	idCol := searchRes[0].GetColumn("id")
+	require.NotNil(t, idCol)
+	require.Equal(t, searchRes[0].ResultCount, idCol.Len())
+	for i := 0; i < idCol.Len(); i++ {
+		id, err := idCol.GetAsInt64(i)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, id, int64(deletedCount))
+	}
+	nearestID, err := idCol.GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(deletedCount), nearestID)
+
+	t.Logf("milvus-table snapshot e2e passed: sourceCollectionID=%d snapshot=%s externalSource=%s",
+		sourceDesc.ID, snapshotName, externalSource)
+}
+
+func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {
+	ctx := hp.CreateContext(t, 5*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const rowCount = 5000
+	const deletedCount = 500
+	const targetRow = 1234
+	sourceName := common.GenRandomString("mt_vpk_src", 6)
+	sourceSchema := entity.NewSchema().
+		WithName(sourceName).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName))
+	})
+
+	ids := make([]int64, rowCount)
+	vectors := make([][]float32, rowCount)
+	for i := 0; i < rowCount; i++ {
+		ids[i] = int64(i)
+		vectors[i] = []float32{float32(i), float32(i) + 1, float32(i) + 2, float32(i) + 3}
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnFloatVector("embedding", testVecDim, vectors)))
+	require.NoError(t, err)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	deletedIDs := make([]int64, deletedCount)
+	for i := 0; i < deletedCount; i++ {
+		deletedIDs[i] = int64(i)
+	}
+	delRes, err := mc.Delete(ctx, client.NewDeleteOption(sourceName).WithInt64IDs("id", deletedIDs))
+	require.NoError(t, err)
+	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
+
+	// Wait for the standalone flush rate limiter to reset before flushing
+	// the delete log. The local default is 0.1 flush requests per second.
+	time.Sleep(10 * time.Second)
+
+	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	sourceDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+
+	snapshotName := common.GenRandomString("mt_vpk_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName).
+		WithDescription("milvus-table external snapshot virtual pk e2e")))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, sourceName))
+	})
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	minioCfg := getMinIOConfig()
+	externalSource := extTestURI(minioCfg, snapshotInfo.GetS3Location())
+	externalSpec := extTestSpec(minioCfg, "milvus-table")
+
+	externalName := common.GenRandomString("mt_vpk_ext", 6)
+	externalSchema := entity.NewSchema().
+		WithName(externalName).
+		WithExternalSource(externalSource).
+		WithExternalSpec(externalSpec).
+		WithField(entity.NewField().
+			WithName("source_id").
+			WithDataType(entity.FieldTypeInt64).
+			WithExternalField("id")).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).
+			WithExternalField("embedding"))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(externalName, externalSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(externalName))
+	})
+
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+
+	idxTask, err := mc.CreateIndex(ctx,
+		client.NewCreateIndexOption(externalName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idxTask.Await(ctx))
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName))
+	require.NoError(t, err)
+	require.NoError(t, loadTask.Await(ctx))
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(rowCount-deletedCount), count)
+
+	deletedQueryRes, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithFilter("source_id in [0,1,499]").
+		WithOutputFields("source_id").
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Zero(t, deletedQueryRes.ResultCount)
+	deletedQuerySourceIDCol := deletedQueryRes.GetColumn("source_id")
+	require.NotNil(t, deletedQuerySourceIDCol)
+	require.Zero(t, deletedQuerySourceIDCol.Len())
+
+	deletedSearchRes, err := mc.Search(ctx,
+		client.NewSearchOption(externalName, 5, []entity.Vector{entity.FloatVector(vectors[0])}).
+			WithOutputFields("source_id"))
+	require.NoError(t, err)
+	require.Len(t, deletedSearchRes, 1)
+	require.Equal(t, 5, deletedSearchRes[0].ResultCount)
+	deletedSearchSourceIDCol := deletedSearchRes[0].GetColumn("source_id")
+	require.NotNil(t, deletedSearchSourceIDCol)
+	for i := 0; i < deletedSearchSourceIDCol.Len(); i++ {
+		sourceID, err := deletedSearchSourceIDCol.GetAsInt64(i)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, sourceID, int64(deletedCount))
+	}
+
+	searchRes, err := mc.Search(ctx,
+		client.NewSearchOption(externalName, 1, []entity.Vector{entity.FloatVector(vectors[targetRow])}).
+			WithOutputFields("source_id"))
+	require.NoError(t, err)
+	require.Len(t, searchRes, 1)
+	require.Equal(t, 1, searchRes[0].ResultCount)
+	require.NotNil(t, searchRes[0].IDs)
+	virtualID, err := searchRes[0].IDs.GetAsInt64(0)
+	require.NoError(t, err)
+	sourceID, err := searchRes[0].GetColumn("source_id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(targetRow), sourceID)
+	require.NotEqual(t, sourceID, virtualID,
+		"search IDs should be synthesized virtual PKs, not source real PKs")
+
+	t.Logf("milvus-table virtual pk snapshot e2e passed: sourceCollectionID=%d snapshot=%s externalSource=%s",
+		sourceDesc.ID, snapshotName, externalSource)
 }
 
 // Regression for the explore-manifest index-drift bug: the source

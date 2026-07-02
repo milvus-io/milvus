@@ -191,10 +191,12 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     // calculate total_num_rows_
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (data->is_valid(i)) {
-                total_num_rows_ += array_column[i].length();
+                // RawValue maps logical->physical so compact nullable array
+                // FieldData is read correctly (Data()[i] would overrun).
+                total_num_rows_ +=
+                    reinterpret_cast<const Array*>(data->RawValue(i))->length();
             }
         }
     }
@@ -209,15 +211,15 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     int64_t offset = 0;
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (!data->is_valid(i)) {
                 continue;
             }
-            auto length = array_column[i].length();
+            auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
+            auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                data_.emplace_back(IndexStructure(
-                    array_column[i].template get_data<T>(j), offset));
+                data_.emplace_back(
+                    IndexStructure(array->get_data<T>(j), offset));
                 offset++;
             }
         }
@@ -232,6 +234,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     is_built_ = true;
 
     setup_data_pointers();
+    ComputeByteSize();
 }
 
 template <typename T>

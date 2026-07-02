@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -168,6 +170,30 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.RestoreExternalSnapshotRequest{
+			DbName:               "db1",
+			TargetCollectionName: "restored",
+			SnapshotMetadataUri:  "s3://bucket/export-root/snapshots/100/metadata/1.json",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, size)
+		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
+		assert.Equal(t, database, int64(100))
+		assert.Empty(t, col2part)
+
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ExportSnapshotRequest{
+			DbName:         "db1",
+			CollectionName: "foo",
+			Name:           "snapshot",
+			TargetS3Path:   "s3://bucket/export-root",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, size)
+		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
+
 		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
@@ -264,6 +290,77 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("namespace partition mode request info", func(t *testing.T) {
+		namespace := "tenant_partition"
+		schema := &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		}
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID:             100,
+			createdTimestamp: 1,
+		}, nil).Times(4)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Times(4)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schema), nil).Times(4)
+		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, namespace).Return(&partitionInfo{
+			name:                namespace,
+			partitionID:         20,
+			createdTimestamp:    10001,
+			createdUtcTimestamp: 10002,
+		}, nil).Times(4)
+		globalMetaCache = mockCache
+
+		database, col2part, rt, _, err := GetRequestInfo(context.Background(), &milvuspb.InsertRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Namespace:      &namespace,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
+		assert.Equal(t, []int64{20}, col2part[1])
+
+		database, col2part, rt, _, err = GetRequestInfo(context.Background(), &milvuspb.DeleteRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Namespace:      &namespace,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DMLDelete, rt)
+		assert.Equal(t, []int64{20}, col2part[1])
+
+		database, col2part, rt, size, err := GetRequestInfo(context.Background(), &milvuspb.SearchRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Nq:             5,
+			Namespace:      &namespace,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DQLSearch, rt)
+		assert.Equal(t, 5, size)
+		assert.Equal(t, []int64{20}, col2part[1])
+
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.HybridSearchRequest{
+			CollectionName: "foo",
+			DbName:         "db1",
+			Namespace:      &namespace,
+			Requests: []*milvuspb.SearchRequest{
+				{Nq: 2},
+				{Nq: 3},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), database)
+		assert.Equal(t, internalpb.RateType_DQLSearch, rt)
+		assert.Equal(t, 5, size)
+		assert.Equal(t, []int64{20}, col2part[1])
+	})
+
 	t.Run("test GetFailedResponse", func(t *testing.T) {
 		testGetFailedResponse := func(req interface{}, rt internalpb.RateType, err error, fullMethod string) {
 			rsp := GetFailedResponse(req, err)
@@ -276,6 +373,8 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.SearchRequest{}, internalpb.RateType_DQLSearch, merr.ErrServiceDiskLimitExceeded, "search")
 		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, merr.ErrServiceQuotaExceeded, "query")
 		testGetFailedResponse(&milvuspb.CreateCollectionRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "createCollection")
+		testGetFailedResponse(&milvuspb.RestoreExternalSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "restoreExternalSnapshot")
+		testGetFailedResponse(&milvuspb.ExportSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "exportSnapshot")
 		testGetFailedResponse(&milvuspb.FlushRequest{}, internalpb.RateType_DDLFlush, merr.ErrServiceRateLimit, "flush")
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
 

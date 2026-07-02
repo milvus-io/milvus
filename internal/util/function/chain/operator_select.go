@@ -87,28 +87,13 @@ func (o *SelectOp) String() string {
 
 // NewSelectOpFromRepr creates a SelectOp from an OperatorRepr.
 func NewSelectOpFromRepr(repr *OperatorRepr) (Operator, error) {
-	columnsInterface, ok := repr.Params["columns"]
-	if !ok {
-		return nil, merr.WrapErrParameterMissingMsg("select_op: columns is required")
-	}
-	columns, ok := columnsInterface.([]interface{})
-	if !ok {
-		// Try []string
-		if colsStr, ok := columnsInterface.([]string); ok {
-			return NewSelectOp(colsStr), nil
-		}
-		return nil, merr.WrapErrParameterInvalidMsg("select_op: columns must be a list")
+	reader := types.NewParamReader("select_op", repr.Params)
+	columns, err := reader.StringSlice("columns", false)
+	if err != nil {
+		return nil, err
 	}
 	if len(columns) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("select_op: columns is required")
 	}
-	colsStr := make([]string, len(columns))
-	for i, col := range columns {
-		if colStr, ok := col.(string); ok {
-			colsStr[i] = colStr
-		} else {
-			return nil, merr.WrapErrParameterInvalidMsg("select_op: column[%d] must be a string", i)
-		}
-	}
-	return NewSelectOp(colsStr), nil
+	return NewSelectOp(columns), nil
 }

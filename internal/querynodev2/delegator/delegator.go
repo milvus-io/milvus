@@ -87,6 +87,7 @@ type ShardDelegator interface {
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
+	ProcessDeleteBatches(batches []DeleteBatch)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
@@ -1241,9 +1242,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	oldSet := newBM25FunctionSet(sd.collection.Schema())
 	newSet := newBM25FunctionSet(schema)
 	idfOracle := sd.getIDFOracle()
-	if idfOracle != nil && !newSet.IsSupersetOf(oldSet) {
+	if idfOracle != nil && newSet.HasIncompatibleCommonFunction(oldSet) {
 		newFunctionState.Close()
-		return merr.WrapErrServiceInternal("unsupported non-additive BM25 function schema change on loaded collection")
+		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
 	}
 
 	// Keep the load barrier monotonic. A higher logical schema version can be
@@ -1608,16 +1609,9 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 			return analyzeErr
 		}
 
-		analyzerNames := req.GetAnalyzerNames()
-		if len(analyzerNames) == 0 {
-			return merr.WrapErrParameterMissingMsg("analyzer names must be set for multi analyzer")
-		}
-
-		if len(analyzerNames) == 1 && len(texts) > 1 {
-			analyzerNames = make([]string, len(texts))
-			for i := range analyzerNames {
-				analyzerNames[i] = req.AnalyzerNames[0]
-			}
+		analyzerNames, err := normalizeAnalyzerNames(req.GetAnalyzerNames(), len(texts))
+		if err != nil {
+			return err
 		}
 		result, analyzeErr = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts, analyzerNames)
 		return analyzeErr

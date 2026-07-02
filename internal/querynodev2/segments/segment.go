@@ -882,7 +882,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 
 	var result *segcore.InsertResult
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	GetMutatePool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -937,7 +937,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	// been applied to this segment, and skipping them causes silent data loss.
 
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	GetMutatePool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -1001,6 +1001,8 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+		LoadPriority:   s.LoadInfo().GetPriority(),
+		Shard:          s.LoadInfo().GetInsertChannel(),
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -1072,7 +1074,10 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
 	*/
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	// Delta-log replay during segment load runs on the load pool, not the
+	// online-write mutate pool, so a large post-compaction replay cannot starve
+	// online insert/delete (and thus tSafe advancement).
+	GetLoadPool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -1177,6 +1182,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		mlog.Warn(ctx, "fail to append load index info", mlog.Err(err))
 		return err
 	}
+	loadIndexInfo.setShard(loadInfo.GetInsertChannel())
 	return f(loadIndexInfo)
 }
 
@@ -1656,12 +1662,30 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	if startOffset == endOffset {
 		return nil, nil
 	}
+	if config == nil {
+		return nil, merr.WrapErrServiceInternalMsg("flush config is nil")
+	}
+	if config.Schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("flush schema is nil")
+	}
+
+	schemaBlob, err := proto.Marshal(config.Schema)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalMsg("marshal flush schema failed: %s", err.Error())
+	}
+	if len(schemaBlob) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("marshal flush schema returned empty blob")
+	}
 
 	// build C flush config
 	var cConfig C.CFlushConfig
 	cSegmentPath := C.CString(config.SegmentBasePath)
 	defer C.free(unsafe.Pointer(cSegmentPath))
 	cConfig.segment_path = cSegmentPath
+	cSchemaBlob := C.CBytes(schemaBlob)
+	defer C.free(cSchemaBlob)
+	cConfig.schema_blob = cSchemaBlob
+	cConfig.schema_length = C.int64_t(len(schemaBlob))
 
 	cConfig.read_version = C.int64_t(config.ReadVersion)
 	cConfig.retry_limit = C.uint32_t(3)
@@ -1670,6 +1694,29 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		cWriterFormat := C.CString(writerFormat)
 		defer C.free(unsafe.Pointer(cWriterFormat))
 		cConfig.writer_format = cWriterFormat
+	}
+	schemaBasedPattern := config.SchemaBasedPattern
+	if schemaBasedPattern != "" {
+		cSchemaBasedPattern := C.CString(schemaBasedPattern)
+		defer C.free(unsafe.Pointer(cSchemaBasedPattern))
+		cConfig.schema_based_pattern = cSchemaBasedPattern
+	}
+	schemaBasedFormats := config.SchemaBasedFormats
+	if schemaBasedFormats != "" {
+		cSchemaBasedFormats := C.CString(schemaBasedFormats)
+		defer C.free(unsafe.Pointer(cSchemaBasedFormats))
+		cConfig.schema_based_formats = cSchemaBasedFormats
+	}
+	numAllowedFields := len(config.AllowedFieldIDs)
+	if numAllowedFields > 0 {
+		cAllowedFieldIDs := (*C.int64_t)(C.malloc(C.size_t(numAllowedFields) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cAllowedFieldIDs))
+		allowedFieldIDSlice := unsafe.Slice(cAllowedFieldIDs, numAllowedFields)
+		for i, fieldID := range config.AllowedFieldIDs {
+			allowedFieldIDSlice[i] = C.int64_t(fieldID)
+		}
+		cConfig.allowed_field_ids = cAllowedFieldIDs
+		cConfig.num_allowed_fields = C.size_t(numAllowedFields)
 	}
 
 	// populate TEXT column configs
@@ -1693,6 +1740,9 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 		cConfig.text_field_ids = cFieldIDs
 		cConfig.text_lob_paths = cLobPathPtrs
+		cConfig.text_inline_threshold = C.int64_t(config.TextInlineThreshold)
+		cConfig.text_max_lob_file_bytes = C.int64_t(config.TextMaxLobFileBytes)
+		cConfig.text_flush_threshold_bytes = C.int64_t(config.TextFlushThresholdBytes)
 		cConfig.num_text_columns = C.size_t(numTextCols)
 	} else {
 		cConfig.text_field_ids = nil

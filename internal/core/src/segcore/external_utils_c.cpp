@@ -20,22 +20,110 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <numeric>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "arrow/array.h"
 #include "arrow/table.h"
+#include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/Schema.h"
+#include "common/VirtualPK.h"
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "milvus-storage/column_groups.h"
-#include "milvus-storage/manifest.h"
+#include "milvus-storage/ffi_internal/bridge.h"
+#include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
+#include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
-#include "storage/loon_ffi/util.h"
+
+namespace {
+
+void
+ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
+    if (loon_ffi_is_success(&result) != 0) {
+        loon_ffi_free_result(&result);
+        return;
+    }
+
+    const char* msg = loon_ffi_get_errmsg(&result);
+    std::string detail = msg != nullptr ? msg : "unknown error";
+    loon_ffi_free_result(&result);
+    throw std::runtime_error(context + ": " + detail);
+}
+
+struct TransactionGuard {
+    LoonTransactionHandle handle = 0;
+
+    ~TransactionGuard() {
+        if (handle != 0) {
+            loon_transaction_destroy(handle);
+        }
+    }
+
+    TransactionGuard() = default;
+    TransactionGuard(const TransactionGuard&) = delete;
+    TransactionGuard&
+    operator=(const TransactionGuard&) = delete;
+};
+
+struct ManifestGuard {
+    LoonManifest* manifest = nullptr;
+
+    ~ManifestGuard() {
+        if (manifest != nullptr) {
+            loon_manifest_destroy(manifest);
+        }
+    }
+
+    ManifestGuard() = default;
+    ManifestGuard(const ManifestGuard&) = delete;
+    ManifestGuard&
+    operator=(const ManifestGuard&) = delete;
+};
+
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+ReadManifestColumnGroupsWithFFI(const char* manifest_path,
+                                const LoonProperties* properties) {
+    auto j = nlohmann::json::parse(manifest_path);
+    auto base_path = j.at("base_path").get<std::string>();
+    auto version = j.at("ver").get<int64_t>();
+
+    TransactionGuard transaction;
+    ThrowIfFFIError(loon_transaction_begin(base_path.c_str(),
+                                           properties,
+                                           version,
+                                           LOON_TRANSACTION_RESOLVE_FAIL,
+                                           1,
+                                           &transaction.handle),
+                    "open external segment manifest transaction");
+
+    ManifestGuard manifest;
+    ThrowIfFFIError(
+        loon_transaction_get_manifest(transaction.handle, &manifest.manifest),
+        "get external segment manifest");
+    if (manifest.manifest == nullptr) {
+        throw std::runtime_error("external segment manifest is nil");
+    }
+
+    auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto status = milvus_storage::column_groups_import(
+        &manifest.manifest->column_groups, cgs.get());
+    if (!status.ok()) {
+        throw std::runtime_error("import external segment column groups: " +
+                                 status.ToString());
+    }
+    return cgs;
+}
+
+}  // namespace
 
 static CStatus
 MakeCStatusError(const char* msg) {
@@ -73,10 +161,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         }
 
         // 2. Read manifest → ColumnGroups
-        auto loon_manifest =
-            GetLoonManifest(std::string(manifest_path), properties);
-        auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>(
-            loon_manifest->columnGroups());
+        auto cgs = ReadManifestColumnGroupsWithFFI(manifest_path, c_properties);
 
         // 3. Determine total rows from column group files
         int64_t total_rows = 0;
@@ -109,7 +194,11 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             return MakeCStatusError("sample returned 0 rows");
         }
 
-        std::vector<milvus::FieldMeta> external_fields;
+        struct SampleField {
+            milvus::FieldMeta field_meta;
+            std::string column_name;
+        };
+        std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
             collection_schema.proto_size > 0) {
             milvus::proto::schema::CollectionSchema schema;
@@ -118,13 +207,41 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             if (!ok) {
                 return MakeCStatusError("failed to parse collection schema");
             }
+            bool is_milvus_table =
+                milvus::IsMilvusTableExternalSpec(schema.external_spec());
             external_fields.reserve(schema.fields_size());
+            bool uses_external_primary_key = false;
             for (const auto& field_schema : schema.fields()) {
-                if (field_schema.external_field().empty()) {
+                bool is_milvus_table_data_field =
+                    is_milvus_table &&
+                    field_schema.fieldid() >= START_USER_FIELDID &&
+                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME;
+                if (is_milvus_table_data_field &&
+                    field_schema.is_primary_key()) {
+                    uses_external_primary_key = true;
+                }
+                if (field_schema.external_field().empty() &&
+                    !is_milvus_table_data_field) {
                     continue;
                 }
-                external_fields.emplace_back(
-                    milvus::FieldMeta::ParseFrom(field_schema));
+                auto field_meta = milvus::FieldMeta::ParseFrom(field_schema);
+                auto column_name = is_milvus_table_data_field
+                                       ? std::to_string(field_schema.fieldid())
+                                       : field_meta.get_external_field();
+                external_fields.push_back(
+                    {std::move(field_meta), std::move(column_name)});
+            }
+            if (is_milvus_table && uses_external_primary_key) {
+                // Real-PK milvus-table loading also keeps source insert
+                // timestamps so source deltas can honor delete/reinsert order.
+                // Account for that eager column in the fake binlog memory size.
+                external_fields.push_back(
+                    {milvus::FieldMeta(milvus::FieldName("Timestamp"),
+                                       TimestampFieldID,
+                                       milvus::DataType::INT64,
+                                       false,
+                                       std::nullopt),
+                     std::to_string(TimestampFieldID.get())});
             }
         }
 
@@ -157,8 +274,9 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         std::vector<std::pair<std::string, int64_t>> sampled_sizes;
         if (!external_fields.empty()) {
             sampled_sizes.reserve(external_fields.size());
-            for (const auto& field_meta : external_fields) {
-                const auto& column_name = field_meta.get_external_field();
+            for (const auto& sample_field : external_fields) {
+                const auto& field_meta = sample_field.field_meta;
+                const auto& column_name = sample_field.column_name;
                 auto chunked = table->GetColumnByName(column_name);
                 if (chunked == nullptr) {
                     return MakeCStatusError(

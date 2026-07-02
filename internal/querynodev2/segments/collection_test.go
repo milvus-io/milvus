@@ -254,6 +254,20 @@ func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 	s.Equal("collection_1000", schema.GetName())
 }
 
+func (s *CollectionManagerSuite) TestNewMilvusTableCollectionKeepsUserSchema() {
+	schema := milvusTableCollectionSchema(false)
+	collection, err := NewCollection(10, schema, nil, &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection,
+	})
+	s.Require().NoError(err)
+	defer DeleteCollection(collection)
+
+	s.Equal("id", collection.Schema().GetFields()[0].GetExternalField())
+	s.Equal("embedding", collection.Schema().GetFields()[1].GetExternalField())
+	s.Equal("id", collection.GetCCollection().Schema().GetFields()[0].GetExternalField())
+	s.Equal("embedding", collection.GetCCollection().Schema().GetFields()[1].GetExternalField())
+}
+
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	// Verify initial collection has IndexMeta set from SetupTest.
 	coll := s.cm.Get(1)
@@ -473,6 +487,41 @@ func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
 		defer DeleteCollection(collection)
 		s.False(collection.IsGpuIndex())
 	})
+}
+
+func milvusTableCollectionSchema(withVirtualPK bool) *schemapb.CollectionSchema {
+	fields := []*schemapb.FieldSchema{
+		{
+			FieldID:       100,
+			Name:          "target_id",
+			DataType:      schemapb.DataType_Int64,
+			IsPrimaryKey:  !withVirtualPK,
+			ExternalField: "id",
+		},
+		{
+			FieldID:       101,
+			Name:          "target_vector",
+			DataType:      schemapb.DataType_FloatVector,
+			ExternalField: "embedding",
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "4"},
+			},
+		},
+	}
+	if withVirtualPK {
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID:      102,
+			Name:         common.VirtualPKFieldName,
+			DataType:     schemapb.DataType_Int64,
+			IsPrimaryKey: true,
+			AutoID:       true,
+		})
+	}
+	return &schemapb.CollectionSchema{
+		Name:         "milvus_table_collection",
+		ExternalSpec: `{"format":"milvus-table"}`,
+		Fields:       fields,
+	}
 }
 
 func (s *CollectionManagerSuite) TestRef() {

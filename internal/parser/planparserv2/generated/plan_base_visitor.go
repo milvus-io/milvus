@@ -107,6 +107,10 @@ func (v *BasePlanVisitor) VisitRandomSample(ctx *RandomSampleContext) interface{
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitRawString(ctx *RawStringContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitSpatialBinary(ctx *SpatialBinaryContext) interface{} {
 	return v.VisitChildren(ctx)
 }

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "common/OpContext.h"
 #include "fmt/core.h"
 #include "index/IndexStats.h"
 #include "index/Meta.h"
@@ -211,7 +212,7 @@ ScalarIndex<T>::UploadUnified(const Config& config) {
 
 template <typename T>
 void
-ScalarIndex<T>::LoadUnified(const Config& config) {
+ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
     AssertInfo(
         file_manager_ != nullptr,
         "file_manager_ is null, LoadUnified requires a valid file manager");
@@ -241,8 +242,18 @@ ScalarIndex<T>::LoadUnified(const Config& config) {
     auto collection_id =
         GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
 
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto cancellation_token =
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
     auto reader =
-        storage::IndexEntryReader::Open(input, file_size, collection_id);
+        storage::IndexEntryReader::Open(input,
+                                        file_size,
+                                        collection_id,
+                                        milvus::PriorityForLoad(load_priority),
+                                        cancellation_token);
     AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
 
     LoadEntries(*reader, config);

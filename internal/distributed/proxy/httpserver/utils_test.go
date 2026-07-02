@@ -3495,6 +3495,95 @@ func TestGenFunctionScore(t *testing.T) {
 	}
 }
 
+func TestGenFunctionChains(t *testing.T) {
+	column := "$score"
+	chains, err := genFunctionChains([]FunctionChainReq{
+		{
+			Name:  "l2",
+			Stage: "FunctionChainStageL2Rerank",
+			Ops: []FunctionChainOpReq{
+				{
+					Op:      "map",
+					Outputs: []string{"new_score"},
+					Expr: &FunctionChainExprReq{
+						Name: "num_combine",
+						Args: []FunctionChainExprArgReq{
+							{Column: &column},
+							{Literal: 2.5},
+						},
+						Params: map[string]interface{}{
+							"mode":    "weighted",
+							"weights": []interface{}{1.0, 2.0},
+							"nested":  map[string]interface{}{"flag": true, "count": 3.0},
+						},
+					},
+				},
+				{
+					Op:     "sort",
+					Inputs: []string{"new_score"},
+					Params: map[string]interface{}{"column": "new_score", "desc": true},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, chains, 1)
+	chainPB := chains[0]
+	assert.Equal(t, "l2", chainPB.GetName())
+	assert.Equal(t, schemapb.FunctionChainStage_FunctionChainStageL2Rerank, chainPB.GetStage())
+	require.Len(t, chainPB.GetOps(), 2)
+
+	mapOp := chainPB.GetOps()[0]
+	assert.Equal(t, "map", mapOp.GetOp())
+	assert.Equal(t, []string{"new_score"}, mapOp.GetOutputs())
+	require.NotNil(t, mapOp.GetExpr())
+	assert.Equal(t, "num_combine", mapOp.GetExpr().GetName())
+	assert.Equal(t, "$score", mapOp.GetExpr().GetArgs()[0].GetColumn().GetName())
+	assert.Equal(t, 2.5, mapOp.GetExpr().GetArgs()[1].GetLiteral().GetDoubleValue())
+	assert.Equal(t, "weighted", mapOp.GetExpr().GetParams()["mode"].GetStringValue())
+	assert.Equal(t, int64(1), mapOp.GetExpr().GetParams()["weights"].GetArrayValue().GetValues()[0].GetInt64Value())
+	assert.Equal(t, int64(3), mapOp.GetExpr().GetParams()["nested"].GetObjectValue().GetFields()["count"].GetInt64Value())
+
+	sortOp := chainPB.GetOps()[1]
+	assert.Equal(t, "sort", sortOp.GetOp())
+	assert.True(t, sortOp.GetParams()["desc"].GetBoolValue())
+	assert.Equal(t, "new_score", sortOp.GetParams()["column"].GetStringValue())
+}
+
+func TestGenFunctionChainsInvalid(t *testing.T) {
+	column := "field"
+	emptyColumn := " "
+	_, err := genFunctionChains([]FunctionChainReq{{Stage: "BadStage"}})
+	assert.ErrorContains(t, err, "unsupported function chain stage")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageUnspecified"}})
+	assert.ErrorContains(t, err, "unsupported function chain stage")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: " "}}}})
+	assert.ErrorContains(t, err, "op name is empty")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: "map", Expr: &FunctionChainExprReq{Name: " "}}}}})
+	assert.ErrorContains(t, err, "expr name is empty")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: "map", Expr: &FunctionChainExprReq{Name: "expr", Args: []FunctionChainExprArgReq{{Column: &column, Literal: 1}}}}}}})
+	assert.ErrorContains(t, err, "exactly one of column or literal is required")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: "map", Expr: &FunctionChainExprReq{Name: "expr", Args: []FunctionChainExprArgReq{{}}}}}}})
+	assert.ErrorContains(t, err, "exactly one of column or literal is required")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: "map", Expr: &FunctionChainExprReq{Name: "expr", Args: []FunctionChainExprArgReq{{Column: &emptyColumn}}}}}}})
+	assert.ErrorContains(t, err, "column name is empty")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: "map", Params: map[string]interface{}{"bad": nil}}}}})
+	assert.ErrorContains(t, err, "function param value is nil")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: "map", Params: map[string]interface{}{" ": 1.0}}}}})
+	assert.ErrorContains(t, err, "param name is empty")
+
+	_, err = genFunctionChains([]FunctionChainReq{{Stage: "FunctionChainStageL2Rerank", Ops: []FunctionChainOpReq{{Op: "map", Params: map[string]interface{}{"object": map[string]interface{}{" ": 1.0}}}}}})
+	assert.ErrorContains(t, err, "object field name is empty")
+}
+
 func TestParseUsernamePassword(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

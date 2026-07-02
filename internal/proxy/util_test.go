@@ -189,6 +189,111 @@ func TestValidateResourceGroupName(t *testing.T) {
 	}
 }
 
+func TestNamespacePartitionRoutingHelpers(t *testing.T) {
+	namespace := "tenant_partition"
+	partitionModeSchema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+	}
+	partitionKeyModeSchema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+		},
+	}
+
+	t.Run("single partition name", func(t *testing.T) {
+		partitionName, usedNamespacePartition, err := resolveNamespacePartitionName(partitionModeSchema, &namespace, "")
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, namespace, partitionName)
+
+		partitionName, usedNamespacePartition, err = resolveNamespacePartitionName(partitionModeSchema, &namespace, namespace)
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, namespace, partitionName)
+
+		_, _, err = resolveNamespacePartitionName(partitionModeSchema, &namespace, "other_partition")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		emptyNamespace := ""
+		_, _, err = resolveNamespacePartitionName(partitionModeSchema, &emptyNamespace, "")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("partition name list", func(t *testing.T) {
+		partitionNames, usedNamespacePartition, err := resolveNamespacePartitionNames(partitionModeSchema, &namespace, nil)
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, []string{namespace}, partitionNames)
+
+		partitionNames, usedNamespacePartition, err = resolveNamespacePartitionNames(partitionModeSchema, &namespace, []string{namespace})
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, []string{namespace}, partitionNames)
+
+		_, _, err = resolveNamespacePartitionNames(partitionModeSchema, &namespace, []string{"other_partition"})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		_, _, err = resolveNamespacePartitionNames(partitionModeSchema, &namespace, []string{namespace, "other_partition"})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("default mode keeps namespace as plan filter", func(t *testing.T) {
+		partitionName, usedNamespacePartition, err := resolveNamespacePartitionName(partitionKeyModeSchema, &namespace, "")
+		require.NoError(t, err)
+		assert.False(t, usedNamespacePartition)
+		assert.Empty(t, partitionName)
+
+		partitionNames, usedNamespacePartition, err := resolveNamespacePartitionNames(partitionKeyModeSchema, &namespace, nil)
+		require.NoError(t, err)
+		assert.False(t, usedNamespacePartition)
+		assert.Empty(t, partitionNames)
+
+		assert.Same(t, &namespace, namespaceForPlan(partitionKeyModeSchema, &namespace))
+		assert.Nil(t, namespaceForPlan(partitionModeSchema, &namespace))
+	})
+}
+
+func TestAddNamespaceDataPartitionMode(t *testing.T) {
+	namespace := "tenant_partition"
+	schema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+	}
+	insertMsg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			Namespace: &namespace,
+			NumRows:   3,
+		},
+	}
+
+	err := addNamespaceData(schema, insertMsg)
+	require.NoError(t, err)
+	assert.Equal(t, namespace, insertMsg.GetPartitionName())
+	assert.Empty(t, insertMsg.GetFieldsData())
+}
+
+func TestConvertHybridSearchToSearchCopiesNamespace(t *testing.T) {
+	namespace := "tenant_partition"
+	req := &milvuspb.HybridSearchRequest{
+		DbName:         "default",
+		CollectionName: "coll",
+		Namespace:      &namespace,
+		Requests: []*milvuspb.SearchRequest{
+			{Dsl: "pk > 0"},
+		},
+	}
+
+	searchReq := convertHybridSearchToSearch(req)
+	require.NotNil(t, searchReq.Namespace)
+	assert.Equal(t, namespace, searchReq.GetNamespace())
+}
+
 func TestValidateDatabaseName(t *testing.T) {
 	assert.Nil(t, ValidateDatabaseName("dbname"))
 	assert.Nil(t, ValidateDatabaseName("_123abc"))

@@ -65,6 +65,29 @@ func testCollectionGetter(mt *meta) func(ctx context.Context, collectionID int64
 	}
 }
 
+func testMilvusTableRefreshSchema(externalSource bool) *schemapb.CollectionSchema {
+	field := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_Int64,
+	}
+	if externalSource {
+		field.ExternalField = "pk"
+	}
+	return &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		Fields: []*schemapb.FieldSchema{field},
+	}
+}
+
+func testMilvusTableTargetRefreshSchema() *schemapb.CollectionSchema {
+	schema := testMilvusTableRefreshSchema(true)
+	schema.ExternalSource = "s3://bucket/snapshots/1/metadata/10.json"
+	schema.ExternalSpec = `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`
+	return schema
+}
+
 func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
@@ -366,6 +389,85 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 	assert.Equal(t, 0, updateCalls)
 }
 
+func TestValidateMilvusTableRefreshSchemaErrorClass(t *testing.T) {
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:          1,
+		CollectionId:   100,
+		ExternalSource: "s3://bucket/snapshots/1/metadata/10.json",
+		ExternalSpec:   testMilvusTableTargetRefreshSchema().GetExternalSpec(),
+	}
+
+	t.Run("metadata_read_error_is_retryable", func(t *testing.T) {
+		readErr := errors.New("temporary metadata read failure")
+		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+			Return(nil, readErr).Build()
+		defer mockRead.UnPatch()
+
+		err := validateMilvusTableRefreshSchema(job, testMilvusTableTargetRefreshSchema())
+		assert.Error(t, err)
+		assert.False(t, errors.Is(err, errMilvusTableRefreshSchemaInvalid))
+		assert.ErrorIs(t, err, readErr)
+	})
+
+	t.Run("missing_source_schema_is_non_retriable", func(t *testing.T) {
+		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+			Return(&datapb.SnapshotMetadata{
+				Collection: &datapb.CollectionDescription{},
+			}, nil).Build()
+		defer mockRead.UnPatch()
+
+		err := validateMilvusTableRefreshSchema(job, testMilvusTableTargetRefreshSchema())
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+		assert.Contains(t, err.Error(), "missing collection schema")
+	})
+
+	t.Run("external_source_schema_is_non_retriable", func(t *testing.T) {
+		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+			Return(&datapb.SnapshotMetadata{
+				Collection: &datapb.CollectionDescription{
+					Schema: testMilvusTableRefreshSchema(true),
+				},
+			}, nil).Build()
+		defer mockRead.UnPatch()
+
+		err := validateMilvusTableRefreshSchema(job, testMilvusTableTargetRefreshSchema())
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+		assert.Contains(t, err.Error(), "source snapshot is an external collection")
+	})
+
+	t.Run("schema_mismatch_is_non_retriable", func(t *testing.T) {
+		sourceSchema := testMilvusTableRefreshSchema(false)
+		sourceSchema.Fields[0].FieldID = 101
+		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+			Return(&datapb.SnapshotMetadata{
+				Collection: &datapb.CollectionDescription{
+					Schema: sourceSchema,
+				},
+			}, nil).Build()
+		defer mockRead.UnPatch()
+
+		err := validateMilvusTableRefreshSchema(job, testMilvusTableTargetRefreshSchema())
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+		assert.Contains(t, err.Error(), "source schema does not match target collection schema")
+	})
+
+	t.Run("matching_schema_passes", func(t *testing.T) {
+		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+			Return(&datapb.SnapshotMetadata{
+				Collection: &datapb.CollectionDescription{
+					Schema: testMilvusTableRefreshSchema(false),
+				},
+			}, nil).Build()
+		defer mockRead.UnPatch()
+
+		err := validateMilvusTableRefreshSchema(job, testMilvusTableTargetRefreshSchema())
+		assert.NoError(t, err)
+	})
+}
+
 // ==================== Test Functions ====================
 
 func TestExternalCollectionRefreshManager_NewManager(t *testing.T) {
@@ -602,6 +704,39 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.Contains(t, job.GetFailReason(), "explore external files failed")
 		assert.Contains(t, job.GetFailReason(), "NO_SUCH_BUCKET",
 			"underlying error must be surfaced to operators")
+	})
+
+	t.Run("milvus_table_schema_error_marks_job_failed_non_retriable", func(t *testing.T) {
+		refreshMeta := createTestRefreshMeta(t)
+		alloc := &stubAllocator{nextID: 1000}
+		scheduler := newStubScheduler()
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID:     100,
+			Schema: testMilvusTableTargetRefreshSchema(),
+		})
+		mt := &meta{collections: collections}
+
+		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+			Return(&datapb.SnapshotMetadata{
+				Collection: &datapb.CollectionDescription{},
+			}, nil).Build()
+		defer mockRead.UnPatch()
+
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+
+		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		assert.NoError(t, err)
+
+		manager.Stop()
+
+		job := refreshMeta.GetJob(1)
+		assert.NotNil(t, job)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState(),
+			"schema validation failure must transition job to Failed, not loop in Init")
+		assert.Contains(t, job.GetFailReason(), "explore external files failed")
+		assert.Contains(t, job.GetFailReason(), "milvus-table refresh schema invalid")
 	})
 
 	t.Run("reject_when_active_job_exists", func(t *testing.T) {

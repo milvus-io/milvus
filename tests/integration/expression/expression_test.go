@@ -229,6 +229,37 @@ func (s *ExpressionSuite) searchWithExpression() {
 	}
 }
 
+// searchWithBitwiseExpression verifies bitwise filter operators end-to-end with
+// EXACT result counts. The JSON dynamic fields satisfy E['F'] == i and
+// B == rowNum-i for every row i in [0, rowNum), so each filter's match count is
+// computable. topK is set to rowNum so the returned count equals the number of
+// rows passing the filter (rather than being capped by a small topK).
+func (s *ExpressionSuite) searchWithBitwiseExpression() {
+	testcases := []testCase{
+		{"(E['F'] & 1) == 0", s.rowNum, 50}, // i even
+		{"(E['F'] & 1) == 1", s.rowNum, 50}, // i odd
+		{"(E['F'] & 4) == 4", s.rowNum, 48}, // bit 2 set: i%8 in {4,5,6,7}
+		{"(E['F'] | 1) == 1", s.rowNum, 2},  // i in {0,1}
+		{"(E['F'] ^ 1) == 0", s.rowNum, 1},  // i == 1
+		{"(E['F'] ^ 1) != 0", s.rowNum, 99}, // i != 1
+		{"(B & 1) == 0", s.rowNum, 50},      // B = rowNum-i even <=> i even
+	}
+	for _, c := range testcases {
+		params := integration.GetSearchParams(integration.IndexFaissIDMap, metric.IP)
+		searchReq := integration.ConstructSearchRequest(s.dbName, s.collectionName, c.expr,
+			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, 1, s.dim, c.topK, -1)
+
+		searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
+		s.NoError(err)
+		err = merr.Error(searchResult.GetStatus())
+		s.NoError(err)
+		s.Equal(c.resNum, len(searchResult.GetResults().GetScores()),
+			fmt.Sprintf("unexpected match count for bitwise expr: %s", c.expr))
+		mlog.Info(context.TODO(),
+			fmt.Sprintf("=========================Bitwise search done with expr:%s =========================", c.expr))
+	}
+}
+
 func (s *ExpressionSuite) TestDivisionByZeroError() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -297,6 +328,7 @@ func (s *ExpressionSuite) TestExpression() {
 	s.setParams()
 	s.setupData()
 	s.searchWithExpression()
+	s.searchWithBitwiseExpression()
 	s.TestDivisionByZeroError()
 }
 

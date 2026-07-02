@@ -1131,7 +1131,7 @@ func (s *MergeHelperTestSuite) TestSingleInputWeightedScoreNotFloat32() {
 }
 
 // =============================================================================
-// mergeScoreCombine Tests (max/sum/avg with actual DataFrames)
+// mergeNumCombine Tests (max/sum/avg with actual DataFrames)
 // =============================================================================
 
 func (s *MergeHelperTestSuite) TestMergeMaxStrategy() {
@@ -1214,7 +1214,7 @@ func (s *MergeHelperTestSuite) TestMergeAvgStrategy() {
 	s.InDelta(0.9, float64(idScoreMap[3]), 1e-6)
 }
 
-func (s *MergeHelperTestSuite) TestMergeScoreCombineMissingIDColumn() {
+func (s *MergeHelperTestSuite) TestMergeNumCombineMissingIDColumn() {
 	// Create DF without ID column
 	builder := NewDataFrameBuilder()
 	builder.SetChunkSizes([]int64{1})
@@ -1238,7 +1238,7 @@ func (s *MergeHelperTestSuite) TestMergeScoreCombineMissingIDColumn() {
 	s.Contains(err.Error(), "missing ID or score column")
 }
 
-func (s *MergeHelperTestSuite) TestMergeScoreCombineMissingScoreColumn() {
+func (s *MergeHelperTestSuite) TestMergeNumCombineMissingScoreColumn() {
 	// Create DF without score column
 	builder := NewDataFrameBuilder()
 	builder.SetChunkSizes([]int64{1})
@@ -1262,7 +1262,7 @@ func (s *MergeHelperTestSuite) TestMergeScoreCombineMissingScoreColumn() {
 	s.Contains(err.Error(), "missing ID or score column")
 }
 
-func (s *MergeHelperTestSuite) TestMergeScoreCombineScoreNotFloat32() {
+func (s *MergeHelperTestSuite) TestMergeNumCombineScoreNotFloat32() {
 	// Create DF with int64 score column
 	builder := NewDataFrameBuilder()
 	builder.SetChunkSizes([]int64{1})
@@ -1292,7 +1292,7 @@ func (s *MergeHelperTestSuite) TestMergeScoreCombineScoreNotFloat32() {
 	s.Contains(err.Error(), "not Float32")
 }
 
-func (s *MergeHelperTestSuite) TestMergeScoreCombineWithNormalization() {
+func (s *MergeHelperTestSuite) TestMergeNumCombineWithNormalization() {
 	df1 := s.createDF([]int64{1, 2}, []float32{0.5, 0.8}, []int64{2})
 	df2 := s.createDF([]int64{1, 3}, []float32{0.3, 0.9}, []int64{2})
 	defer df1.Release()
@@ -1308,7 +1308,7 @@ func (s *MergeHelperTestSuite) TestMergeScoreCombineWithNormalization() {
 	s.Equal(int64(3), result.NumRows())
 }
 
-func (s *MergeHelperTestSuite) TestMergeScoreCombineWithMixedMetricsNoNormalize() {
+func (s *MergeHelperTestSuite) TestMergeNumCombineWithMixedMetricsNoNormalize() {
 	df1 := s.createDF([]int64{1, 2}, []float32{0.5, 0.8}, []int64{2})
 	df2 := s.createDF([]int64{1, 3}, []float32{0.3, 0.9}, []int64{2})
 	defer df1.Release()

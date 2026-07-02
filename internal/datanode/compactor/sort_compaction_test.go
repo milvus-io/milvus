@@ -22,16 +22,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -42,6 +45,38 @@ import (
 
 func TestSortCompactionTaskSuite(t *testing.T) {
 	suite.Run(t, new(SortCompactionTaskSuite))
+}
+
+func TestSortInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	textFieldIDs := []int64{101, 102}
+	task := &sortCompactionTask{
+		segmentID: 100,
+		manifest:  "manifest-100",
+		plan: &datapb.CompactionPlan{
+			Type: datapb.CompactionType_SortCompaction,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: textFieldIDs[0], Name: "text_1", DataType: schemapb.DataType_Text},
+				{FieldID: textFieldIDs[1], Name: "text_2", DataType: schemapb.DataType_Text},
+			}},
+		},
+		compactionParams: compaction.GenParams(),
+	}
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(map[int64][]packed.LobFileInfo{
+		100: {},
+	}, nil).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	assert.NoError(t, err)
+	if assert.NotNil(t, task.lobContext) {
+		assert.True(t, task.lobContext.HasReuseAllFields())
+		assert.False(t, task.lobContext.ShouldRewriteAnyField())
+		assert.Len(t, task.lobContext.Decisions, len(textFieldIDs))
+		for _, fieldID := range textFieldIDs {
+			assert.Equal(t, compaction.LOBStrategyReuseAll, task.lobContext.Decisions[fieldID].Strategy)
+		}
+	}
 }
 
 type SortCompactionTaskSuite struct {

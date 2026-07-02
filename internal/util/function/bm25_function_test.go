@@ -137,6 +137,31 @@ func (s *singleTokenStream) DetailedToken() *milvuspb.AnalyzerToken {
 
 func (s *singleTokenStream) Destroy() {}
 
+type trackingTokenStream struct {
+	singleTokenStream
+	active    *atomic.Int32
+	maxActive *atomic.Int32
+}
+
+func newTrackingTokenStream(token string, active *atomic.Int32, maxActive *atomic.Int32) *trackingTokenStream {
+	current := active.Add(1)
+	for {
+		max := maxActive.Load()
+		if current <= max || maxActive.CompareAndSwap(max, current) {
+			break
+		}
+	}
+	return &trackingTokenStream{
+		singleTokenStream: singleTokenStream{token: token},
+		active:            active,
+		maxActive:         maxActive,
+	}
+}
+
+func (s *trackingTokenStream) Destroy() {
+	s.active.Add(-1)
+}
+
 func (s *BM25FunctionRunnerSuite) newCloneCountingAnalyzer(cloneCount *atomic.Int32) *interfaces.MockAnalyzer {
 	tokenizer := interfaces.NewMockAnalyzer(s.T())
 	tokenizer.EXPECT().Clone().RunAndReturn(func() (interfaces.Analyzer, error) {
@@ -148,6 +173,40 @@ func (s *BM25FunctionRunnerSuite) newCloneCountingAnalyzer(cloneCount *atomic.In
 	})
 	tokenizer.EXPECT().Destroy().Return()
 	return tokenizer
+}
+
+func (s *BM25FunctionRunnerSuite) newTrackingAnalyzer(active *atomic.Int32, maxActive *atomic.Int32) *interfaces.MockAnalyzer {
+	tokenizer := interfaces.NewMockAnalyzer(s.T())
+	tokenizer.EXPECT().Clone().Return(tokenizer, nil)
+	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) interfaces.TokenStream {
+		return newTrackingTokenStream(text, active, maxActive)
+	})
+	tokenizer.EXPECT().Destroy().Return()
+	return tokenizer
+}
+
+func (s *BM25FunctionRunnerSuite) TestRunReleasesTokenStreamsPerInput() {
+	var active, maxActive atomic.Int32
+	runner := &BM25FunctionRunner{tokenizer: s.newTrackingAnalyzer(&active, &maxActive)}
+	dst := make([]map[uint32]float32, 3)
+
+	err := runner.run([]string{"a", "b", "c"}, dst)
+
+	s.NoError(err)
+	s.Equal(int32(0), active.Load())
+	s.Equal(int32(1), maxActive.Load())
+}
+
+func (s *BM25FunctionRunnerSuite) TestAnalyzeReleasesTokenStreamsPerInput() {
+	var active, maxActive atomic.Int32
+	runner := &BM25FunctionRunner{tokenizer: s.newTrackingAnalyzer(&active, &maxActive)}
+	dst := make([][]*milvuspb.AnalyzerToken, 3)
+
+	err := runner.analyze([]string{"a", "b", "c"}, dst, false, false)
+
+	s.NoError(err)
+	s.Equal(int32(0), active.Load())
+	s.Equal(int32(1), maxActive.Load())
 }
 
 func (s *BM25FunctionRunnerSuite) TestAnalyzerRunnerConcurrencyConfigDynamic() {

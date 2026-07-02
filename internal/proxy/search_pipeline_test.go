@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -76,6 +78,15 @@ func (s *SearchPipelineSuite) SetupTest() {
 
 func (s *SearchPipelineSuite) TearDownTest() {
 	s.span.End()
+}
+
+func (s *SearchPipelineSuite) TestBuildChainFromFunctionChainRerankMeta() {
+	repr, err := chain.ProtoChainToRepr(l2LimitFunctionChain(10))
+	s.Require().NoError(err)
+
+	fc, err := buildChainFromMeta(&functionChainRerankMeta{repr: repr}, nil, nil, nil, memory.NewGoAllocator())
+	s.Require().NoError(err)
+	s.NotNil(fc)
 }
 
 func (s *SearchPipelineSuite) TestSerializeBucketKeyPreservesRequestedOrder() {
@@ -258,6 +269,57 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 
 	_, err = op.run(context.Background(), s.span, reduced[0], []string{"IP"})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
+		},
+	}
+	nq := int64(2)
+	topk := int64(10)
+	limit := int64(3)
+
+	reduceOp := searchReduceOperator{
+		context.Background(),
+		schema.Fields[0],
+		nq,
+		topk,
+		0,
+		1,
+		[]int64{1},
+		[]*planpb.QueryInfo{{}},
+		nil,
+		false,
+	}
+
+	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "ts", 101, false)
+	reduced, err := reduceOp.run(context.Background(), s.span, []*internalpb.SearchResults{data})
+	s.Require().NoError(err)
+
+	repr, err := chain.ProtoChainToRepr(l2LimitFunctionChain(limit))
+	s.Require().NoError(err)
+
+	op := rerankOperator{
+		nq:           nq,
+		topK:         topk,
+		roundDecimal: -1,
+		collSchema:   schema,
+		rerankMeta:   &functionChainRerankMeta{repr: repr},
+	}
+
+	outputs, err := op.run(context.Background(), s.span, reduced[0], []string{"IP"})
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{limit, limit}, result.GetTopks())
+	s.Equal(limit, result.GetTopK())
+	s.Len(result.GetScores(), int(nq*limit))
+	s.Len(result.GetIds().GetIntId().GetData(), int(nq*limit))
 }
 
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_CollapsesElementLevelResultsByRowID() {
@@ -3228,6 +3290,30 @@ func (s *SearchPipelineSuite) TestIsSameGroupByValue() {
 	s.False(isSameGroupByValue(boolField, 1, 2)) // true != false
 }
 
+func (s *SearchPipelineSuite) TestNewSearchReduceOperatorUsesPipelineOffsetParam() {
+	task := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:           1,
+			Topk:         3,
+			Offset:       2,
+			CollectionID: 100,
+			PartitionIDs: []int64{10},
+		},
+		schema: newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		}),
+		queryInfos: []*planpb.QueryInfo{{}},
+	}
+
+	op, err := newSearchReduceOperator(task, map[string]any{reduceOffsetParamKey: int64(0)})
+
+	s.NoError(err)
+	s.Equal(int64(0), op.(*searchReduceOperator).offset)
+}
+
 func (s *SearchPipelineSuite) TestNewOrderByOperatorUsesPluralGroupByFieldIDs() {
 	task := &searchTask{
 		orderByFields: []OrderByField{{FieldName: "price", Ascending: true}},
@@ -3294,6 +3380,172 @@ func (s *SearchPipelineSuite) TestOrderByOperator() {
 	expectedPrices := []int64{10, 20, 30, 40}
 	actualPrices := sortedResult.Results.FieldsData[0].GetScalars().GetLongData().Data
 	s.Equal(expectedPrices, actualPrices)
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesOffsetAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+				},
+			},
+			Scores:         []float32{0.9, 0.8, 0.7, 0.6},
+			Distances:      []float32{9, 8, 7, 6},
+			Recalls:        []float32{90, 80, 70, 60},
+			ElementIndices: &schemapb.LongArray{Data: []int64{10, 20, 30, 40}},
+			TopK:           4,
+			Topks:          []int64{4},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 10, 20, 40}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{3, 1}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.7, 0.9}, sliced.GetScores())
+	s.Equal([]float32{7, 9}, sliced.GetDistances())
+	s.Equal([]float32{70, 90}, sliced.GetRecalls())
+	s.Equal([]int64{30, 10}, sliced.GetElementIndices().GetData())
+	s.Equal([]int64{20, 30}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]int64{2}, sliced.GetTopks())
+	s.Equal(int64(2), sliced.GetTopK())
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorSlicesStringIDsAndNonNullableVectorAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{"a", "b", "c", "d"}},
+				},
+			},
+			Scores: []float32{0.9, 0.8, 0.7, 0.6},
+			TopK:   4,
+			Topks:  []int64{4},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 10, 20, 40}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "vec",
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6, 7, 8}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]string{"c", "a"}, sliced.GetIds().GetStrId().GetData())
+	s.Equal([]float32{0.7, 0.9}, sliced.GetScores())
+	s.Equal([]int64{20, 30}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]float32{5, 6, 1, 2}, sliced.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
+	s.Equal([]int64{2}, sliced.GetTopks())
+	s.Equal(int64(2), sliced.GetTopK())
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesGroupOffsetAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6}},
+				},
+			},
+			Scores: []float32{0.9, 0.85, 0.8, 0.75, 0.7, 0.65},
+			TopK:   6,
+			Topks:  []int64{6},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 25, 10, 20, 15, 18}},
+							},
+						},
+					},
+				},
+			},
+			GroupByFieldValues: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{"A", "A", "B", "C", "C", "C"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 100,
+		groupSize:      3,
+		limit:          1,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{4, 5, 6}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.75, 0.7, 0.65}, sliced.GetScores())
+	s.Equal([]int64{20, 15, 18}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]string{"C", "C", "C"}, sliced.GetGroupByFieldValues()[0].GetScalars().GetStringData().GetData())
+	s.Nil(sliced.GetGroupByFieldValue())
+	s.Equal([]int64{3}, sliced.GetTopks())
+	s.Equal(int64(3), sliced.GetTopK())
 }
 
 func (s *SearchPipelineSuite) TestOrderByOperatorReordersNullableVectorCompactOutput() {
@@ -3494,6 +3746,374 @@ func (s *SearchPipelineSuite) TestOrderByOperatorMultipleQueriesWithGroupBy() {
 	expectedPrices := []int64{10, 15, 20, 25, 30, 35, 50, 55}
 	actualPrices := sortedResult.Results.FieldsData[0].GetScalars().GetLongData().Data
 	s.Equal(expectedPrices, actualPrices)
+}
+
+// Per liliu-z review (search_pipeline.go:1855): the per-query offset/limit loop was only
+// exercised with nq=1. Assert offset/limit apply PER QUERY, not globally over the flattened
+// result, so a regression that slices the offset window globally returns misaligned rows for nq>1.
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesOffsetPerQueryForMultipleQueries() {
+	// nq=2, topk=4 each.
+	// q1 ids[1,2,3,4] price[40,10,30,20] -> sort asc [2,4,3,1] -> offset1/limit2 -> [4,3]
+	// q2 ids[5,6,7,8] price[80,50,70,60] -> sort asc [6,8,7,5] -> offset1/limit2 -> [8,7]
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7, 8}}}},
+			Scores: []float32{0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2},
+			TopK:   4,
+			Topks:  []int64{4, 4},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "price",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{40, 10, 30, 20, 80, 50, 70, 60}}},
+				}},
+			}},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+
+	// per-query pages: q1 -> [4,3], q2 -> [8,7]; a global slice would drop q2's page entirely.
+	s.Equal([]int64{4, 3, 8, 7}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]int64{20, 30, 60, 70}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]float32{0.6, 0.7, 0.2, 0.3}, sliced.GetScores())
+	s.Equal([]int64{2, 2}, sliced.GetTopks()) // each query keeps its own page size
+}
+
+// Same per-query invariant as above, combined with group-by: the group offset/limit must
+// paginate groups PER QUERY, not across the flattened multi-query result.
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesGroupOffsetPerQueryForMultipleQueries() {
+	// nq=2, topk=4 each, 2 groups (size 2) per query.
+	// q1 A(ids1,2 p20,25) B(ids3,4 p10,15) -> groups asc by first price [B,A] -> off1/lim1 group -> A=[1,2]
+	// q2 C(ids5,6 p50,55) D(ids7,8 p30,35) -> groups asc by first price [D,C] -> off1/lim1 group -> C=[5,6]
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7, 8}}}},
+			Scores: []float32{0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55},
+			TopK:   4,
+			Topks:  []int64{4, 4},
+			GroupByFieldValues: []*schemapb.FieldData{{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{100, 100, 200, 200, 300, 300, 400, 400}}},
+				}},
+			}},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "price",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20, 25, 10, 15, 50, 55, 30, 35}}},
+				}},
+			}},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 1,
+		groupSize:      2,
+		limit:          1,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+
+	s.Equal([]int64{1, 2, 5, 6}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]int64{20, 25, 50, 55}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]int64{2, 2}, sliced.GetTopks())
+}
+
+// paginateSortedRows: offset at/beyond the row count clamps to an empty page.
+func (s *SearchPipelineSuite) TestPaginateSortedRowsOffsetBeyondLength() {
+	indices := []int{0, 1, 2}
+	s.Empty(paginateSortedRows(indices, 5, 2))                 // offset > len -> empty
+	s.Empty(paginateSortedRows(indices, 3, 0))                 // offset == len -> empty
+	s.Equal([]int{1, 2}, paginateSortedRows(indices, 1, 10))   // limit beyond end -> offset..end
+	s.Equal([]int{0, 1, 2}, paginateSortedRows(indices, 0, 0)) // no limit -> all
+}
+
+// getOrderByGroupByFieldValue: nil input, plural-preferred, legacy fallback.
+func (s *SearchPipelineSuite) TestGetOrderByGroupByFieldValueNilAndSelection() {
+	s.Nil(getOrderByGroupByFieldValue(nil))
+
+	plural := &schemapb.SearchResultData{
+		GroupByFieldValues: []*schemapb.FieldData{{FieldName: "g"}},
+	}
+	s.Equal("g", getOrderByGroupByFieldValue(plural).GetFieldName())
+
+	legacy := &schemapb.SearchResultData{
+		GroupByFieldValue: &schemapb.FieldData{FieldName: "l"},
+	}
+	s.Equal("l", getOrderByGroupByFieldValue(legacy).GetFieldName())
+}
+
+// sortQueryResults returns early on empty indices (op.run guards with topk>0, so cover directly).
+func (s *SearchPipelineSuite) TestSortQueryResultsEmptyIndices() {
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+	}
+	out, err := op.sortQueryResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{}}, []int{})
+	s.NoError(err)
+	s.Empty(out)
+}
+
+// sortGroupsByOrderByFields returns early on empty indices.
+func (s *SearchPipelineSuite) TestSortGroupsByOrderByFieldsEmptyIndices() {
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 0,
+		groupSize:      1,
+	}
+	out, err := op.sortGroupsByOrderByFields(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{}}, []int{})
+	s.NoError(err)
+	s.Empty(out)
+}
+
+// reorderFieldData: vector payload length not divisible by per-vector width -> error (defensive guard).
+func (s *SearchPipelineSuite) TestReorderFieldDataDimNotDivisibleErrors() {
+	indices := []int{0}
+	cases := []struct {
+		name  string
+		field *schemapb.FieldData
+	}{
+		{"float_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector, FieldName: "fv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3}}},
+			}},
+		}},
+		{"binary_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BinaryVector, FieldName: "bv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  16,
+				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02, 0x03}},
+			}},
+		}},
+		{"float16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Float16Vector, FieldName: "f16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}},
+			}},
+		}},
+		{"bfloat16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BFloat16Vector, FieldName: "bf16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}},
+			}},
+		}},
+		{"int8_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Int8Vector, FieldName: "i8",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  4,
+				Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}},
+			}},
+		}},
+	}
+	for _, c := range cases {
+		s.Error(reorderFieldData(c.field, indices), c.name)
+	}
+}
+
+// reorderFieldData: index out of range for the vector payload -> validateReorderIndex error (defensive guard).
+func (s *SearchPipelineSuite) TestReorderFieldDataIndexOutOfBoundsErrors() {
+	oob := []int{5} // every field below holds 2 vectors; index 5 is out of range
+	cases := []struct {
+		name  string
+		field *schemapb.FieldData
+	}{
+		{"float_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector, FieldName: "fv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+			}},
+		}},
+		{"binary_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BinaryVector, FieldName: "bv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  16,
+				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02, 0x03, 0x04}},
+			}},
+		}},
+		{"float16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Float16Vector, FieldName: "f16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}},
+			}},
+		}},
+		{"bfloat16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BFloat16Vector, FieldName: "bf16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}},
+			}},
+		}},
+		{"sparse_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_SparseFloatVector, FieldName: "sv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 100,
+				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+					Contents: [][]byte{{0x01, 0x02}, {0x03, 0x04}},
+				}},
+			}},
+		}},
+		{"int8_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Int8Vector, FieldName: "i8",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  4,
+				Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}},
+			}},
+		}},
+	}
+	for _, c := range cases {
+		s.Error(reorderFieldData(c.field, oob), c.name)
+	}
+}
+
+// reorderResults: out-of-range index for each result column -> internal error (defensive guard).
+func (s *SearchPipelineSuite) TestReorderResultsIndexOutOfBounds() {
+	op := &orderByOperator{}
+	oob := []int{5}
+	longIDs := func() *schemapb.IDs {
+		return &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}}}}
+	}
+
+	// int IDs
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+	}}, oob), "int_ids")
+
+	// string IDs
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a"}}}},
+	}}, oob), "str_ids")
+
+	// distances (IDs long enough so the distances check is the one that trips)
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: longIDs(), Distances: []float32{0.1},
+	}}, oob), "distances")
+
+	// recalls
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: longIDs(), Recalls: []float32{0.1},
+	}}, oob), "recalls")
+
+	// element indices
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: longIDs(), ElementIndices: &schemapb.LongArray{Data: []int64{10}},
+	}}, oob), "element_indices")
+}
+
+// op.run propagates a sort error: the order_by field has fewer values than rows, so
+// compareFieldDataAt hits an out-of-bounds index during the per-query sort.
+func (s *SearchPipelineSuite) TestOrderByRunReturnsSortError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+		Scores: []float32{0.9, 0.8, 0.7},
+		Topks:  []int64{3},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64, FieldName: "price",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}}, // 1 value for 3 rows
+			}},
+		}},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+	}
+	_, err := op.run(context.Background(), s.span, result)
+	s.Error(err)
+}
+
+// op.run propagates a reorder error: the sort succeeds but a malformed vector field fails reorderResults.
+func (s *SearchPipelineSuite) TestOrderByRunReturnsReorderError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		Scores: []float32{0.9, 0.8},
+		Topks:  []int64{2},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_Int64, FieldName: "price",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20, 10}}},
+				}},
+			},
+			{
+				Type: schemapb.DataType_FloatVector, FieldName: "vec",
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3}}}, // 3 not divisible by dim 2
+				}},
+			},
+		},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+	}
+	_, err := op.run(context.Background(), s.span, result)
+	s.Error(err)
+}
+
+// sortGroupsByOrderByFields propagates a sort error during group ordering (group value present).
+func (s *SearchPipelineSuite) TestSortGroupsByOrderByFieldsReturnsSortError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}}},
+		GroupByFieldValues: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{100, 100, 200, 200}}},
+			}},
+		}},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64, FieldName: "price",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}}, // 1 value for 4 rows
+			}},
+		}},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 1,
+		groupSize:      2,
+	}
+	_, err := op.sortGroupsByOrderByFields(result, []int{0, 1, 2, 3})
+	s.Error(err)
+}
+
+// sortGroupsByOrderByFields with no group value falls back to row sort and propagates its error.
+func (s *SearchPipelineSuite) TestSortGroupsByOrderByFieldsNilGroupValueReturnsSortError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64, FieldName: "price",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
+			}},
+		}},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 1,
+		groupSize:      2,
+	}
+	_, err := op.sortGroupsByOrderByFields(result, []int{0, 1, 2})
+	s.Error(err)
 }
 
 // Test orderByOperator with descending sort

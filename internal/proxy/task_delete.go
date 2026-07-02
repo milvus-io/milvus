@@ -153,7 +153,10 @@ func repackDeleteMsgByHash(
 	dbName string,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
 	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	hashValues := typeutil.HashPK2Channels(primaryKeys, vChannels)
+	hashValues, err := typeutil.HashPK2Channels(primaryKeys, vChannels)
+	if err != nil {
+		return nil, 0, err
+	}
 	// repack delete msg by dmChannel
 	result := make(map[uint32][]*msgstream.DeleteMsg)
 	lastMessageSize := map[uint32]int{}
@@ -290,6 +293,13 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	}
 	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
+	}
+	if namespacePartitionModeEnabled(dr.schema.CollectionSchema) {
+		partitionName, _, err := resolveNamespacePartitionName(dr.schema.CollectionSchema, dr.req.Namespace, dr.req.GetPartitionName())
+		if err != nil {
+			return err
+		}
+		dr.req.PartitionName = partitionName
 	}
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)

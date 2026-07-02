@@ -21,11 +21,13 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
@@ -50,6 +52,7 @@
 #include "segcore/memory_planner.h"
 #include "storage/ThreadPools.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/Util.h"
 
 #include <atomic>
@@ -73,7 +76,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     bool eager_load,
     const std::string& warmup_policy,
     const std::string& cache_key_suffix,
-    int64_t fallback_bytes_per_row)
+    int64_t fallback_bytes_per_row,
+    std::string shard)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -115,9 +119,16 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 }(),
                 /* is_index */ false,
                 /* in_load_list*/ eager_load),
-            /* support_eviction */ true),
+            /* support_eviction */ true,
+            std::move(shard)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
+      has_array_field_(std::any_of(field_metas_.begin(),
+                                   field_metas_.end(),
+                                   [](const auto& field) {
+                                       return field.second.get_data_type() ==
+                                              DataType::ARRAY;
+                                   })),
       load_priority_(load_priority) {
     auto chunk_size_result = chunk_reader_->get_chunk_size();
     if (!chunk_size_result.ok()) {
@@ -205,29 +216,17 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         num_cells,
         cell_target_size_bytes);
 
-    // Set loading overhead config to cap total overhead reservation.
+    // Set loading overhead config to cap total transient memory reservation.
     if (!meta_.chunk_memory_size_.empty()) {
-        // Use THREAD_POOL_MAX_THREADS_SIZE as the upper bound for pool size.
-        // This is the global cap applied to all priority pools.
-        int pool_size = milvus::THREAD_POOL_MAX_THREADS_SIZE.load();
-        if (pool_size <= 0) {
-            pool_size = static_cast<int>(std::round(
-                milvus::CPU_NUM *
-                milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
-        }
-        auto max_inflight = static_cast<int64_t>(
-            pool_size * (1.0 + kChannelCapacityMultiplier) + 1);
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
-        auto ub = static_cast<int64_t>(max_inflight * max_cell_sz *
-                                       kLoadingOverheadInflationRatio);
-        auto upper_bound = use_mmap_
-                               ? milvus::cachinglayer::ResourceUsage{ub, ub}
-                               : milvus::cachinglayer::ResourceUsage{ub, 0};
-        // Group by CellDataType name so all CacheSlots of the same type
-        // share one overhead upper bound via LoadingOverheadTracker.
-        auto group = fmt::format("ManifestGroupTranslator_{}",
-                                 static_cast<int>(meta_.cell_data_type));
+        auto max_overhead_size = loading_overhead_bytes(max_cell_sz);
+        auto upper_bound = milvus::segcore::FieldDataLoadingOverheadUpperBound(
+            max_overhead_size,
+            use_mmap_ ? std::optional<int64_t>{max_cell_sz} : std::nullopt);
+        // Keep MCL reservation aligned with the process-wide transient load
+        // budget rather than multiplying it by translator type.
+        auto group = milvus::segcore::kLoadTransientOverheadGroup;
         meta_.loading_overhead =
             milvus::cachinglayer::LoadingOverheadConfig{upper_bound, group};
     }
@@ -249,14 +248,12 @@ ManifestGroupTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     assert(cid < meta_.chunk_memory_size_.size());
     auto cell_sz = meta_.chunk_memory_size_[cid];
+    auto overhead_sz = loading_overhead_bytes(cell_sz);
 
     if (use_mmap_) {
-        // why double the disk size for loading?
-        // during file writing, the temporary size could be larger than the final size
-        // so we need to reserve more space for the disk size.
-        return {{0, cell_sz}, {2 * cell_sz, 2 * cell_sz}};
+        return {{0, cell_sz}, {overhead_sz, cell_sz}};
     } else {
-        return {{cell_sz, 0}, {2 * cell_sz, 0}};
+        return {{cell_sz, 0}, {overhead_sz, 0}};
     }
 }
 
@@ -293,11 +290,13 @@ ManifestGroupTranslator::get_cells(
     cell_specs.reserve(cids.size());
     for (auto cid : cids) {
         auto [start, end] = meta_.get_row_group_range(cid);
-        cell_specs.push_back({cid,
-                              /*file_idx=*/0,
-                              static_cast<int64_t>(start),
-                              static_cast<int64_t>(end - start),
-                              meta_.chunk_memory_size_[cid]});
+        cell_specs.push_back(
+            {cid,
+             /*file_idx=*/0,
+             static_cast<int64_t>(start),
+             static_cast<int64_t>(end - start),
+             meta_.chunk_memory_size_[cid],
+             loading_overhead_bytes(meta_.chunk_memory_size_[cid])});
     }
 
     // Create factory using ChunkReader — reads a batch of row groups at once
@@ -310,13 +309,18 @@ ManifestGroupTranslator::get_cells(
         static_cast<size_t>(pool.GetMaxThreadNum() *
                             milvus::segcore::kChannelCapacityMultiplier));
 
-    auto load_futures =
-        milvus::segcore::LoadCellBatchAsync(ctx,
-                                            std::move(cell_specs),
-                                            std::move(factory),
-                                            channel,
-                                            DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                            load_priority_);
+    auto load_futures = milvus::segcore::LoadCellBatchAsync(
+        ctx,
+        std::move(cell_specs),
+        std::move(factory),
+        channel,
+        FieldDataLoadBatchSplitTargetBytes(),
+        load_priority_,
+        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+               int64_t cid) {
+            return load_group_chunk(
+                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+        });
 
     LOG_INFO(
         "[StorageV2] translator {} submits {} batch tasks for manifest "
@@ -325,7 +329,7 @@ ManifestGroupTranslator::get_cells(
         load_futures.size(),
         column_group_index_);
 
-    // Pop loop — convert each cell immediately, no ArrowTable accumulation
+    // Pop loop — batch tasks finalize cells before pushing.
     std::unordered_map<milvus::cachinglayer::cid_t,
                        std::unique_ptr<milvus::GroupChunk>>
         completed_cells;
@@ -334,10 +338,20 @@ ManifestGroupTranslator::get_cells(
     try {
         std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
         while (channel->pop(cell_data)) {
-            CheckCancellation(
-                ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
-            completed_cells[cell_data->cid] =
-                load_group_chunk(cell_data->tables, cell_data->cid);
+            try {
+                CheckCancellation(
+                    ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
+                AssertInfo(cell_data->chunk != nullptr,
+                           "[StorageV2] translator {} cell {} is not "
+                           "finalized by batch task",
+                           key_,
+                           cell_data->cid);
+                completed_cells[cell_data->cid] = std::move(cell_data->chunk);
+                milvus::segcore::ReleaseCellLoadResultBudget(cell_data);
+            } catch (...) {
+                milvus::segcore::ReleaseCellLoadResultBudget(cell_data);
+                throw;
+            }
         }
     } catch (...) {
         // Drain the channel to unblock producers that may be stuck on push()
@@ -346,6 +360,7 @@ ManifestGroupTranslator::get_cells(
         std::shared_ptr<milvus::segcore::CellLoadResult> discard;
         try {
             while (channel->pop(discard)) {
+                milvus::segcore::ReleaseCellLoadResultBudget(discard);
             }
         } catch (...) {
             LOG_WARN("drain channel exception swallowed");
@@ -397,11 +412,8 @@ ManifestGroupTranslator::load_group_chunk(
     array_vecs.reserve(schema->num_fields());
 
     // Iterate through fields to get field_id and create chunk.
-    // Normal collections store field IDs as column names (numeric strings).
-    // External collections use original column names, so we fall back to
-    // matching against external field names when stoll fails. Function output
-    // columns are Milvus-generated and use numeric field ids like normal
-    // internal columns.
+    // Normal collections and Milvus-generated columns store field IDs as
+    // column names. Other external columns use external_field names.
     for (int i = 0; i < schema->num_fields(); ++i) {
         auto column_name = schema->field(i)->name();
         int64_t field_id = -1;
@@ -420,13 +432,14 @@ ManifestGroupTranslator::load_group_chunk(
                     break;
                 }
             }
+        }
+        if (field_id < 0) {
             AssertInfo(
-                field_id >= 0,
-                fmt::format(
-                    "[StorageV2] translator {} field {} not a numeric field ID "
-                    "and not found as external field",
-                    key_,
-                    column_name));
+                false,
+                "[StorageV2] translator {} field {} not a numeric field ID "
+                "and not found as external field",
+                key_,
+                column_name);
         }
 
         auto fid = milvus::FieldId(field_id);
@@ -511,6 +524,17 @@ ManifestGroupTranslator::load_group_chunk(
     }
 
     return std::make_unique<milvus::GroupChunk>(chunks);
+}
+
+int64_t
+ManifestGroupTranslator::loading_overhead_bytes(int64_t cell_size) const {
+    if (!has_array_field_) {
+        return cell_size;
+    }
+    if (cell_size > std::numeric_limits<int64_t>::max() / 2) {
+        return std::numeric_limits<int64_t>::max();
+    }
+    return cell_size * 2;
 }
 
 }  // namespace milvus::segcore::storagev2translator

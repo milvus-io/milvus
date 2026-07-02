@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -414,6 +415,53 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 
 		s.Equal(1, len(dr.partitionIDs))
 		s.EqualValues(1000, dr.partitionIDs[0])
+	})
+
+	s.Run("namespace partition mode routes to namespace partition", func() {
+		mockChMgr := NewMockChannelsMgr(s.T())
+		namespace := "tenant_partition"
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: s.collectionName,
+				Namespace:      &namespace,
+				Expr:           "pk == 1",
+			},
+			chMgr: mockChMgr,
+		}
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
+		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+		schema := &schemapb.CollectionSchema{
+			Name:            s.collectionName,
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      common.StartOfUserFieldID,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  common.StartOfUserFieldID + 1,
+					Name:     "non_pk",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		schemaInfo := newSchemaInfo(schema)
+		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Once()
+		s.mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, namespace).Return(int64(1000), nil)
+		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+
+		globalMetaCache = s.mockCache
+		s.NoError(dr.Init(context.Background()))
+
+		s.Equal(namespace, dr.req.GetPartitionName())
+		s.Equal([]UniqueID{1000}, dr.partitionIDs)
+		s.Nil(dr.plan.Namespace)
 	})
 }
 

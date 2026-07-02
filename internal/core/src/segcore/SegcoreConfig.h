@@ -196,6 +196,16 @@ class SegcoreConfig {
         return prefer_field_data_when_index_has_raw_data_;
     }
 
+    void
+    set_reject_remote_vector_output(bool value) {
+        reject_remote_vector_output_ = value;
+    }
+
+    bool
+    get_reject_remote_vector_output() const {
+        return reject_remote_vector_output_;
+    }
+
     static constexpr int64_t kDefaultMaxGroupByGroups = 100000;
 
     int64_t
@@ -241,6 +251,7 @@ class SegcoreConfig {
     inline static bool enable_geometry_cache_ = false;
     inline static bool visibility_filter_enabled_ = true;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
+    inline static bool reject_remote_vector_output_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };
