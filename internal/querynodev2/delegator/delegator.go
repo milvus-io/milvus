@@ -237,6 +237,24 @@ func (sd *shardDelegator) Stopped() bool {
 func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
 	var avgdl float64
 	isBM25 := false
+	// The collection schema snapshot can advance without the delegator's
+	// UpdateSchema side effects running (segment load PutOrRef bumps the version
+	// first, turning the later UpdateSchema event into a guarded no-op). Realign
+	// the function runtime state with the snapshot here, otherwise a search
+	// against a freshly added function output field skips text-to-vector
+	// conversion and the raw VARCHAR placeholder fails segcore's type check.
+	if sd.collection != nil {
+		schema := sd.collection.Schema()
+		if sd.functionState.isStale(schema) {
+			// Register function runners before publishing the refreshed map, so a
+			// search that observes the new map can materialize its runner. The
+			// skipped UpdateSchema event would have done this registration too.
+			sd.updateFunctionRunners(schema)
+		}
+		if err := sd.functionState.ensureFuncState(schema); err != nil {
+			return 0, false, err
+		}
+	}
 	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType) error {
 		switch functionType {
 		case schemapb.FunctionType_BM25:
