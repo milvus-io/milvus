@@ -144,11 +144,11 @@ service RootCoord {
     rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
     rpc ShowPartitionsInternal(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
 
-    rpc CreateNamespace(milvus.CreateNamespaceRequest) returns (CreateNamespaceResponse) {}
-    rpc DescribeNamespace(milvus.DescribeNamespaceRequest) returns (milvus.DescribeNamespaceResponse) {}
-    rpc ListNamespaces(milvus.ListNamespacesRequest) returns (milvus.ListNamespacesResponse) {}
-    rpc DropNamespace(milvus.DropNamespaceRequest) returns (milvus.DropNamespaceResponse) {}
-    rpc HasNamespace(milvus.HasNamespaceRequest) returns (milvus.HasNamespaceResponse) {}
+    rpc CreateNamespace(.milvus.proto.milvus.CreateNamespaceRequest) returns (CreateNamespaceResponse) {}
+    rpc DescribeNamespace(.milvus.proto.milvus.DescribeNamespaceRequest) returns (.milvus.proto.milvus.DescribeNamespaceResponse) {}
+    rpc ListNamespaces(.milvus.proto.milvus.ListNamespacesRequest) returns (.milvus.proto.milvus.ListNamespacesResponse) {}
+    rpc DropNamespace(.milvus.proto.milvus.DropNamespaceRequest) returns (.milvus.proto.milvus.DropNamespaceResponse) {}
+    rpc HasNamespace(.milvus.proto.milvus.HasNamespaceRequest) returns (.milvus.proto.milvus.HasNamespaceResponse) {}
 
     rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
     rpc GetPChannelInfo(GetPChannelInfoRequest) returns (GetPChannelInfoResponse) {}
@@ -342,6 +342,6 @@ message CreatePartitionResponse {
 
 message CreateNamespaceResponse {
   common.Status status = 1;
-  milvus.NamespaceInfo namespace = 2;
+  .milvus.proto.milvus.NamespaceInfo namespace = 2;
   int64 partitionID = 3;
 }
