@@ -766,8 +766,13 @@ def generate_expressions_for_field(
         str_values = [v for v in non_none if isinstance(v, str)]
         exprs.extend(_gen_like_expressions(field_name, str_values))
 
-    # Arithmetic expressions for numeric types
-    if dtype in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE):
+    # Arithmetic expressions for numeric types.
+    # INT64 is excluded: its filter arithmetic wraps at INT64_MIN/MAX (known bug
+    # #48440) and the dataset's boundary rows always trip it. Covered instead by
+    # the strict-xfail test_int64_arithmetic_boundary_expressions; re-include
+    # INT64 here when that test XPASSes. INT8/16/32 are unaffected (promoted to
+    # int64 before evaluation).
+    if dtype in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.FLOAT, DataType.DOUBLE):
         if non_none:
             v = non_none[0]
             if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
@@ -959,7 +964,13 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_nothing,
             )[0]
             if hasattr(res, "message") and res.message:
-                return ("skip", f"SKIP: {expr} -> {res.message}")
+                msg = str(res.message)
+                if "cannot parse" in msg or "unsupported" in msg.lower() or "not supported" in msg.lower():
+                    return ("skip", f"SKIP: {expr} -> {msg}")
+                # Any other server-side error is a hard failure: treating it as a
+                # skip lets infra breakage (e.g. a dropped collection) silently
+                # skip every expression and turn the test into a false green.
+                return ("fail", f"ERROR: {expr} -> {msg}")
             milvus_ids = sorted([r[default_pk] for r in res])
         except Exception as e:
             if "cannot parse" in str(e) or "unsupported" in str(e).lower():
@@ -1021,6 +1032,13 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
         if skip_pct > 50:
             log.warning(f"HIGH SKIP RATE for {fname}: {skip_pct:.0f}% — most expressions not verified!")
 
+        # False-green guard: if nothing was actually verified, the environment is
+        # broken (e.g. shared collection lost) — never report that as a pass.
+        assert passed > 0, (
+            f"Field {fname}: 0/{total} expressions verified ({len(skipped)} skipped) — "
+            f"environment/collection is broken, refusing to pass on zero coverage"
+        )
+
         assert not failures, (
             f"Seed={DEFAULT_SEED}, field={fname}, {len(failures)}/{total} failed, "
             f"{len(skipped)} skipped:\n" + "\n".join(failures)
@@ -1033,6 +1051,26 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
     def test_single_field_expressions_l1(self, field_idx):
         """L1: Core scalar + array type expression correctness."""
         self._do_single_field_test(field_idx)
+
+    # INT64 arithmetic is split out of the generic templates: the shared dataset
+    # always contains INT64_MIN/MAX boundary rows, and Milvus wraps int64 filter
+    # arithmetic (#48440), so these expressions mismatch the exact-math oracle
+    # deterministically. strict xfail keeps them executing: once #48440 is fixed
+    # this test XPASSes (turns red) — then delete it and re-include INT64 in
+    # generate_expressions_for_field's arithmetic block.
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="Known bug #48440: INT64 filter arithmetic wraps at the int64 boundary", strict=True)
+    def test_int64_arithmetic_boundary_expressions(self):
+        """INT64 arithmetic expressions vs the exact-math oracle (#48440)."""
+        client = self._client(alias=self.shared_alias)
+        failures = []
+        for expr in ["int64_val + 1 > 0", "int64_val - 1 < 0", "int64_val * 2 >= 0"]:
+            status, msg = self._run_expression_check(client, expr, self.test_data, self.field_names)
+            # A parser/executor rejection is also #48440 misbehavior — count it
+            # as failing so only a genuinely correct result can XPASS.
+            if status != "pass":
+                failures.append(msg)
+        assert not failures, f"Seed={DEFAULT_SEED}:\n" + "\n".join(str(f) for f in failures)
 
     # L2: extended types (FLOAT, DOUBLE, BOOL) + all remaining array types
     # Indices: 4=FLOAT, 5=DOUBLE, 6=BOOL, 8=arr_int8, 9=arr_int16, 12=arr_float, 13=arr_double, 14=arr_bool, 15=arr_varchar
@@ -1082,6 +1120,10 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
         total = len(expressions)
         log.info(f"Compound: {passed} passed, {len(failures)} failed, {len(skipped)} skipped out of {total}")
 
+        assert passed > 0, (
+            f"Compound: 0/{total} expressions verified ({len(skipped)} skipped) — "
+            f"environment/collection is broken, refusing to pass on zero coverage"
+        )
         assert not failures, (
             f"Seed={DEFAULT_SEED}, {len(failures)}/{total} compound failed, {len(skipped)} skipped:\n"
             + "\n".join(failures)
@@ -1568,18 +1610,19 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="Known bug #48440: INT64 arithmetic overflow wrapping")
+    @pytest.mark.xfail(reason="Known bug #48440: INT64 arithmetic overflow wrapping", strict=True)
     def test_int64_overflow_addition(self):
-        """Regression #48440: c8 + 33 overflows for INT64_MAX-1, should not match <= 19974."""
+        """Regression #48440: exact math — (INT64_MAX-1) + 33 > 19974 must not match;
+        wrapping instead lands it below the bound and wrongly includes it."""
         client = self._client(alias=self.shared_alias)
         res = self.query(client, self.collection_name, filter="c8 + 33 <= 19974", output_fields=[default_pk])[0]
         ids = sorted([r[default_pk] for r in res])
-        assert 0 not in ids, f"id=0 (INT64_MAX-1) + 33 overflows, should not match. Got {ids}"
-        assert 2 not in ids, f"id=2 (INT64_MIN) + 33 underflows context, should not match. Got {ids}"
+        assert 0 not in ids, f"id=0 ((INT64_MAX-1) + 33 > 19974 exactly) should not match. Got {ids}"
+        assert 2 in ids, f"id=2 (INT64_MIN + 33 <= 19974 exactly) should match. Got {ids}"
         assert 1 in ids, f"id=1 (100+33=133<=19974) should match. Got {ids}"
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="Known bug #48440: INT64 arithmetic overflow wrapping")
+    @pytest.mark.xfail(reason="Known bug #48440: INT64 arithmetic overflow wrapping", strict=True)
     def test_int64_overflow_subtraction(self):
         """Regression #48440: INT64_MIN - 1 should underflow, not wrap to MAX."""
         client = self._client(alias=self.shared_alias)
@@ -1602,8 +1645,11 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 0 in ids, f"id=0 (INT64_MAX-1 - 1) should be >= 0. Got {ids}"
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="Known bug #48440: INT64 arithmetic overflow wrapping", strict=True)
     def test_int64_overflow_multiplication(self):
-        """Regression #48440: (INT64_MAX-1) * 2 overflows, should not be > 0."""
+        """Regression #48440: exact math — (INT64_MAX-1) * 2 > 0 must match; the
+        previous expectation (id=0 excluded) encoded the wrapping behavior itself
+        and contradicted the exact-math oracle used by the generic tests."""
         client = self._client(alias=self.shared_alias)
         res = self.query(
             client,
@@ -1618,7 +1664,8 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
                 f"parser should handle gracefully: {res.message}"
             )
         ids = sorted([r[default_pk] for r in res])
-        assert 0 not in ids, f"id=0 (INT64_MAX-1)*2 overflows. Got {ids}"
+        assert 0 in ids, f"id=0 ((INT64_MAX-1)*2 > 0 exactly) should match. Got {ids}"
+        assert 2 not in ids, f"id=2 (INT64_MIN*2 < 0 exactly) should not match. Got {ids}"
         assert 1 in ids, f"id=1 (200>0) should match. Got {ids}"
 
     @pytest.mark.tags(CaseLabel.L0)
