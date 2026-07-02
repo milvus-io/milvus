@@ -3255,6 +3255,19 @@ func (c *Core) getDefaultAndCustomPrivilegeGroups(ctx context.Context) ([]*milvu
 	return allGroups, nil
 }
 
+// logGetCurUserFailed logs a failure to resolve the current user from ctx.
+// Intra-cluster calls (e.g. datacoord/querycoord invoking ListDatabases or
+// ShowCollections) carry no user identity by design and deliberately fall back
+// to full visibility, so they are logged at debug level; a missing identity on
+// any other request is genuinely anomalous and keeps the warning.
+func logGetCurUserFailed(ctx context.Context, err error) {
+	if contextutil.IsIntraClusterRequest(ctx) {
+		mlog.Debug(ctx, "intra-cluster request without user identity, fall back to full visibility", mlog.Err(err))
+		return
+	}
+	mlog.Warn(ctx, "get current user from context failed", mlog.Err(err))
+}
+
 func (c *Core) getCurrentUserVisibleDatabases(ctx context.Context) (typeutil.Set[string], error) {
 	enableAuth := Params.CommonCfg.AuthorizationEnabled.GetAsBool()
 	privilegeDatabases := typeutil.NewSet[string]()
@@ -3266,7 +3279,7 @@ func (c *Core) getCurrentUserVisibleDatabases(ctx context.Context) (typeutil.Set
 	// it will fail if the inner node server use the list database API
 	if err != nil || (curUser == util.UserRoot && !Params.CommonCfg.RootShouldBindRole.GetAsBool()) {
 		if err != nil {
-			mlog.Warn(ctx, "get current user from context failed", mlog.Err(err))
+			logGetCurUserFailed(ctx, err)
 		}
 		privilegeDatabases.Insert(util.AnyWord)
 		return privilegeDatabases, nil
@@ -3332,7 +3345,7 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 	curUser, err := contextutil.GetCurUserFromContext(ctx)
 	if err != nil || (curUser == util.UserRoot && !Params.CommonCfg.RootShouldBindRole.GetAsBool()) {
 		if err != nil {
-			mlog.Warn(ctx, "get current user from context failed", mlog.Err(err))
+			logGetCurUserFailed(ctx, err)
 		}
 		privilegeColls.Insert(util.AnyWord)
 		return privilegeColls, nil

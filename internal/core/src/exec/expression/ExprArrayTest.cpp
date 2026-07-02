@@ -41,6 +41,7 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/BitmapIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -548,6 +549,98 @@ TEST(Expr, TestArrayNullExpr) {
             auto ref = ref_func(valid);
             ASSERT_EQ(ans, ref);
         }
+    }
+}
+
+TEST(Expr, TestArrayNullExprWithBitmapIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid = schema->AddDebugField(
+        "long_array", DataType::ARRAY, DataType::INT64, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 128;
+    auto raw_data = DataGen(schema, N, 44, 0, 1, 3);
+    auto valid_data = raw_data.get_col_valid(long_array_fid);
+    auto long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    FixedVector<Array> arrays;
+    arrays.reserve(N);
+    std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+    for (int i = 0; i < N; ++i) {
+        arrays.emplace_back(long_array_col[i]);
+        if (valid_data[i]) {
+            valid_bitmap[i >> 3] |= 1 << (i & 0x07);
+        }
+    }
+
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
+    field_data->FillFieldData(arrays.data(), valid_bitmap.data(), N, 0);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("long_array");
+    field_schema.set_fieldid(long_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int64);
+    field_schema.set_nullable(true);
+    storage::FileManagerContext ctx;
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        long_array_fid.get(),
+        field_schema,
+    };
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, long_array_fid.get(), 4000, 4000};
+
+    auto bitmap_index =
+        std::make_unique<index::BitmapIndex<int64_t>>(ctx, false);
+    bitmap_index->BuildWithFieldData({field_data});
+    ASSERT_FALSE(bitmap_index->IsNestedIndex());
+    ASSERT_EQ(bitmap_index->Count(), N);
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = long_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::INT64;
+    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("array_bitmap", std::move(bitmap_index));
+    segment->LoadIndex(load_index_info);
+
+    auto null_expr = std::make_shared<expr::NullExpr>(
+        expr::ColumnInfo(
+            long_array_fid, DataType::ARRAY, DataType::INT64, {}, true),
+        proto::plan::NullExpr_NullOp_IsNull);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, null_expr);
+
+    auto final = ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    for (int i = 0; i < N; ++i) {
+        ASSERT_EQ(final[i], !valid_data[i]) << "row " << i;
+    }
+
+    milvus::exec::OffsetVector offsets;
+    offsets.reserve(N / 2);
+    for (int i = 0; i < N; ++i) {
+        if (i % 2 == 0) {
+            offsets.emplace_back(i);
+        }
+    }
+    auto col_vec = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    ASSERT_EQ(view.size(), offsets.size());
+    for (int i = 0; i < offsets.size(); ++i) {
+        ASSERT_EQ(view[i], !valid_data[offsets[i]])
+            << "offset row " << offsets[i];
     }
 }
 

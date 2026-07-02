@@ -624,10 +624,11 @@ func TestBuildCurrentSegmentFragments_PassesColumns(t *testing.T) {
 	}
 	expected := []Fragment{{FragmentID: 7, FilePath: "/data/file.parquet", RowCount: 500}}
 
-	var gotColumns []string
+	called := false
 	mockRead := mockey.Mock(ReadFragmentsFromManifest).
 		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, columns []string) ([]Fragment, error) {
-			gotColumns = columns
+			assert.Equal(t, []string{"text_col"}, append([]string(nil), columns...))
+			called = true
 			return expected, nil
 		}).Build()
 	defer mockRead.UnPatch()
@@ -635,7 +636,7 @@ func TestBuildCurrentSegmentFragments_PassesColumns(t *testing.T) {
 	result, err := BuildCurrentSegmentFragments(segments, storageConfig, []string{"text_col"})
 	require.NoError(t, err)
 	assert.Equal(t, expected, result[1])
-	assert.Equal(t, []string{"text_col"}, gotColumns)
+	assert.True(t, called)
 }
 
 func TestBuildCurrentSegmentFragments_ManifestErrorsAndEmptyResult(t *testing.T) {

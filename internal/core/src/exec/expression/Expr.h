@@ -2226,11 +2226,7 @@ class SegmentExpr : public Expr {
     bool
     CanUseNestedIndex() const override {
         EnsureExecPathDetermined();
-        if (exec_path_ != ExprExecPath::ScalarIndex || pinned_index_.empty()) {
-            return false;
-        }
-        auto* index_ptr = pinned_index_[0].get();
-        return index_ptr != nullptr && index_ptr->IsNestedIndex();
+        return PinnedIndexIsNested();
     }
 
     template <typename T>
@@ -2456,6 +2452,18 @@ class SegmentExpr : public Expr {
     }
 
  protected:
+    // Non-reentrant nested-index check for callers already inside
+    // DetermineExecPath(). Do not call CanUseNestedIndex() from there because
+    // it re-enters EnsureExecPathDetermined()'s std::call_once.
+    bool
+    PinnedIndexIsNested() const {
+        if (exec_path_ != ExprExecPath::ScalarIndex || pinned_index_.empty()) {
+            return false;
+        }
+        auto* index_ptr = pinned_index_[0].get();
+        return index_ptr != nullptr && index_ptr->IsNestedIndex();
+    }
+
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
     bool is_pk_field_{false};
