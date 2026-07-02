@@ -513,10 +513,11 @@ func checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface
 	if !ok || username.(string) == "" {
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		return authErr
 	}
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 
@@ -3518,6 +3519,7 @@ func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
 		return nil, err
 	}
+	ctx = c.Request.Context()
 	req := &datapb.CommitImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
 		JobId: jobID,
@@ -3564,6 +3566,7 @@ func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq 
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
 		return nil, err
 	}
+	ctx = c.Request.Context()
 	req := &datapb.AbortImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
 		JobId: jobID,
