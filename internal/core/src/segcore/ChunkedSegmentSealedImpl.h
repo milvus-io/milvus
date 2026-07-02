@@ -1331,15 +1331,24 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     search_ids(BitsetType& bitset, const IdArray& id_array) const override;
 
     void
-    LoadVecIndex(LoadIndexInfo& info, bool is_replace = false);
+    LoadVecIndex(LoadIndexInfo& info,
+                 const SchemaPtr& schema_snapshot,
+                 bool is_replace = false);
 
     void
     LoadScalarIndex(LoadIndexInfo& info,
+                    const SchemaPtr& schema_snapshot,
                     bool is_replace = false,
                     RuntimeResourceState* runtime = nullptr);
 
     void
     LoadIndex(LoadIndexInfo& info, bool is_replace);
+
+    void
+    LoadIndex(LoadIndexInfo& info,
+              const SchemaPtr& schema_snapshot,
+              bool is_replace,
+              RuntimeResourceState* runtime);
 
     void
     LoadIndex(LoadIndexInfo& info,

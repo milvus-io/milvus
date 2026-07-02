@@ -575,32 +575,40 @@ ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info) {
 
 void
 ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info, bool is_replace) {
-    LoadIndex(info, is_replace, nullptr);
+    LoadIndex(info, CaptureSchemaSnapshot(), is_replace, nullptr);
+}
+
+void
+ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info,
+                                    const SchemaPtr& schema_snapshot,
+                                    bool is_replace,
+                                    RuntimeResourceState* runtime) {
+    // print(info);
+    // NOTE: lock only when data is ready to avoid starvation
+    auto field_id = FieldId(info.field_id);
+    auto& field_meta = schema_snapshot->operator[](field_id);
+
+    if (field_meta.is_vector()) {
+        LoadVecIndex(info, schema_snapshot, is_replace);
+    } else {
+        LoadScalarIndex(info, schema_snapshot, is_replace, runtime);
+    }
 }
 
 void
 ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info,
                                     bool is_replace,
                                     RuntimeResourceState* runtime) {
-    // print(info);
-    // NOTE: lock only when data is ready to avoid starvation
-    auto field_id = FieldId(info.field_id);
-    auto schema_snapshot = CaptureSchemaSnapshot();
-    auto& field_meta = schema_snapshot->operator[](field_id);
-
-    if (field_meta.is_vector()) {
-        LoadVecIndex(info, is_replace);
-    } else {
-        LoadScalarIndex(info, is_replace, runtime);
-    }
+    LoadIndex(info, CaptureSchemaSnapshot(), is_replace, runtime);
 }
 
 void
-ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
+ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
+                                       const SchemaPtr& schema_snapshot,
+                                       bool is_replace) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto snapshot = CapturePublishedState();
-    auto schema_snapshot = snapshot->schema;
 
     AssertInfo(info.index_params.count("metric_type"),
                "Can't get metric_type in index_params");
@@ -662,12 +670,12 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
 
 void
 ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
+                                          const SchemaPtr& schema_snapshot,
                                           bool is_replace,
                                           RuntimeResourceState* runtime) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto snapshot = CapturePublishedState();
-    auto schema_snapshot = snapshot->schema;
     auto& field_meta = schema_snapshot->operator[](field_id);
 
     auto is_pk = field_id ==
@@ -6312,10 +6320,10 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
 
     std::vector<FieldId> filled_fields;
     for (const auto& field_id : field_ids) {
-        if (get_bit(snapshot->field_data_ready_bitset, field_id)) {
+        if (get_bit_if_present(snapshot->field_data_ready_bitset, field_id)) {
             continue;
         }
-        if (get_bit(snapshot->index_ready_bitset, field_id) &&
+        if (get_bit_if_present(snapshot->index_ready_bitset, field_id) &&
             HasIndexRawDataFromState(*snapshot, field_id)) {
             continue;
         }
@@ -6922,7 +6930,8 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                          field_id.get(),
                          load_index_info.index_files.size());
                 LoadIndexData(trace_ctx, &load_index_info, op_ctx);
-                LoadIndex(load_index_info, is_replace, runtime);
+                LoadIndex(
+                    load_index_info, schema_snapshot, is_replace, runtime);
             }
         }
         return;
@@ -6944,6 +6953,7 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                                        trace_ctx,
                                        field_id,
                                        load_index_info_ptr,
+                                       schema_snapshot,
                                        op_ctx,
                                        is_replace]() mutable -> void {
                 // Early exit if cancelled while queued
@@ -6958,7 +6968,8 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                 LoadIndexData(trace_ctx, load_index_info_ptr, op_ctx);
 
                 // Load index into segment
-                LoadIndex(*load_index_info_ptr, is_replace, nullptr);
+                LoadIndex(
+                    *load_index_info_ptr, schema_snapshot, is_replace, nullptr);
             });
 
             load_index_futures.push_back(std::move(future));
