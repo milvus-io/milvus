@@ -89,6 +89,7 @@ cpu_support_avx2() {
 #endif
 
 #if defined(__aarch64__) || defined(_M_ARM64)
+#ifndef __APPLE__
 bool
 cpu_support_sve() {
 #ifdef _MSC_VER
@@ -102,6 +103,7 @@ cpu_support_sve() {
     return (hwcap & HWCAP_SVE) != 0;
 #endif
 }
+#endif
 
 bool
 cpu_support_neon() {

@@ -756,7 +756,6 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                                        ValueType>;
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer("term_json_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;

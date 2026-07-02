@@ -44,8 +44,6 @@ constexpr size_t kHeaderSize = sizeof(uint32_t) * 2;
 // Density thresholds for auto-selection
 constexpr double kRoaringDensityMax = 0.03;     // <= 3%  → Roaring
 constexpr double kRoaringInvDensityMin = 0.97;  // >= 97% → invert + Roaring
-constexpr double kRawDensityMin = 0.30;         // 30%-70% → Raw
-constexpr double kRawDensityMax = 0.70;
 
 // ---- Roaring V2 zero-copy encode ----
 
