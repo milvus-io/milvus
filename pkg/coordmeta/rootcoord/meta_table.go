@@ -27,12 +27,9 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
-	"github.com/milvus-io/milvus/internal/tso"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -44,21 +41,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
-	errIgnoredAlterAlias       = errors.New("ignored alter alias")       // alias already created on current collection, so it can be ignored.
-	errIgnoredAlterCollection  = errors.New("ignored alter collection")  // collection already created, so it can be ignored.
-	errIgnoredAlterDatabase    = errors.New("ignored alter database")    // database already created, so it can be ignored.
-	errIgnoredCreateCollection = errors.New("ignored create collection") // create collection with same schema, so it can be ignored.
-	errIgnoerdCreatePartition  = errors.New("ignored create partition")  // partition is already exist, so it can be ignored.
-	errIgnoredDropCollection   = errors.New("ignored drop collection")   // drop collection or database not found, so it can be ignored.
-	errIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
+	ErrIgnoredAlterAlias       = errors.New("ignored alter alias")       // alias already created on current collection, so it can be ignored.
+	ErrIgnoredAlterCollection  = errors.New("ignored alter collection")  // collection already created, so it can be ignored.
+	ErrIgnoredAlterDatabase    = errors.New("ignored alter database")    // database already created, so it can be ignored.
+	ErrIgnoredCreateCollection = errors.New("ignored create collection") // create collection with same schema, so it can be ignored.
+	ErrIgnoerdCreatePartition  = errors.New("ignored create partition")  // partition is already exist, so it can be ignored.
+	ErrIgnoredDropCollection   = errors.New("ignored drop collection")   // drop collection or database not found, so it can be ignored.
+	ErrIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
 
-	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
+	ErrAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
 )
 
 type MetaTableChecker interface {
@@ -164,7 +162,12 @@ type MetaTable struct {
 	ctx     context.Context
 	catalog metastore.RootCoordCatalog
 
-	tsoAllocator tso.Allocator
+	tsoAllocator TSOAllocator
+
+	// cipherHelper and channelStats are injected so MetaTable has no internal-only
+	// dependencies (hookutil / streamingcoord), enabling its move to the pkg module.
+	cipherHelper DatabaseCipherHelper
+	channelStats PChannelStatsManager
 
 	dbName2Meta map[string]*model.Database              // database name ->  db meta
 	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
@@ -188,11 +191,13 @@ type MetaTable struct {
 }
 
 // NewMetaTable creates a new MetaTable with specified catalog and allocator.
-func NewMetaTable(ctx context.Context, catalog metastore.RootCoordCatalog, tsoAllocator tso.Allocator) (*MetaTable, error) {
+func NewMetaTable(ctx context.Context, catalog metastore.RootCoordCatalog, tsoAllocator TSOAllocator, cipherHelper DatabaseCipherHelper, channelStats PChannelStatsManager) (*MetaTable, error) {
 	mt := &MetaTable{
-		ctx:          contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue()),
+		ctx:          contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue()),
 		catalog:      catalog,
 		tsoAllocator: tsoAllocator,
+		cipherHelper: cipherHelper,
+		channelStats: channelStats,
 	}
 	if err := mt.reload(); err != nil {
 		return nil, err
@@ -316,7 +321,7 @@ func (mt *MetaTable) reload() error {
 			vchannels = append(vchannels, coll.VirtualChannelNames...)
 		}
 	}
-	channel.RecoverPChannelStatsManager(vchannels)
+	mt.chStats().Recover(vchannels)
 
 	// reload file resources
 	resources, version, err := mt.catalog.ListFileResource(mt.ctx)
@@ -384,7 +389,7 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
-	s := Params.RootCoordCfg.DefaultDBProperties.GetValue()
+	s := paramtable.Get().RootCoordCfg.DefaultDBProperties.GetValue()
 	defaultProperties, err := funcutil.String2KeyValuePair(s)
 	if err != nil {
 		return err
@@ -392,13 +397,13 @@ func (mt *MetaTable) createDefaultDb() error {
 
 	// Apply same encryption logic as regular database creation
 	// This respects the defaultKey setting
-	defaultProperties, err = hookutil.TidyDBCipherProperties(int64(ts-1), defaultProperties)
+	defaultProperties, err = mt.cipher().TidyDBCipherProperties(int64(ts-1), defaultProperties)
 	if err != nil {
 		return err
 	}
 
 	// Create EZ if encryption is enabled
-	if err := hookutil.CreateEZByDBProperties(defaultProperties); err != nil {
+	if err := mt.cipher().CreateEZByDBProperties(defaultProperties); err != nil {
 		return err
 	}
 
@@ -416,7 +421,7 @@ func (mt *MetaTable) CheckIfDatabaseCreatable(ctx context.Context, req *milvuspb
 		return merr.WrapErrParameterInvalidMsg("database already exist: %s", dbName)
 	}
 
-	cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
+	cfgMaxDatabaseNum := paramtable.Get().RootCoordCfg.MaxDatabaseNum.GetAsInt()
 	if len(mt.dbName2Meta) > cfgMaxDatabaseNum { // not include default database so use > instead of >= here.
 		return merr.WrapErrDatabaseNumLimitExceeded(cfgMaxDatabaseNum)
 	}
@@ -452,7 +457,7 @@ func (mt *MetaTable) AlterDatabase(ctx context.Context, newDB *model.Database, t
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
 		return err
 	}
@@ -568,7 +573,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		return nil
 	}
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.CreateCollection(ctx1, coll, coll.CreateTime); err != nil {
 		return err
 	}
@@ -588,7 +593,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	metrics.RootCoordNumOfCollections.WithLabelValues(coll.DBName).Inc()
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
 
-	channel.StaticPChannelStatsManager.MustGet().AddVChannel(coll.VirtualChannelNames...)
+	mt.chStats().AddVChannel(coll.VirtualChannelNames...)
 	mlog.Info(ctx, "add collection to meta table",
 		mlog.Int64("dbID", coll.DBID),
 		mlog.String("collection", coll.Name),
@@ -614,7 +619,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	clone.State = pb.CollectionState_CollectionDropping
 	clone.UpdateTimestamp = ts
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
 		return err
 	}
@@ -641,7 +646,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	pn := coll.GetPartitionNum(true)
 
 	mt.generalCnt -= pn * int(coll.ShardsNum)
-	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
+	mt.chStats().RemoveVChannel(coll.VirtualChannelNames...)
 	metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 
@@ -720,7 +725,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		return merr.WrapErrServiceInternalMsg("remove collection which state is not dropping, collectionID: %d, state: %s", collectionID, coll.State.String())
 	}
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	aliases := mt.listAliasesByID(collectionID)
 	newColl := &model.Collection{
 		CollectionID:      collectionID,
@@ -808,7 +813,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 	// the last schema modification, fixing time-travel semantics for all schema-altering DDLs.
 	if !ok || coll == nil || !coll.Available() || coll.UpdateTimestamp > ts {
 		// travel meta information from catalog.
-		ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+		ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 		db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
 		if err != nil {
 			return nil, err
@@ -899,7 +904,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	}
 
 	// travel meta information from catalog. No need to check time travel logic again, since catalog already did.
-	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx = contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	coll, err := mt.catalog.GetCollectionByName(ctx, db.ID, db.Name, collectionName, ts)
 	if err != nil {
 		return nil, err
@@ -989,7 +994,7 @@ func (mt *MetaTable) ListCollections(ctx context.Context, dbName string, ts Time
 	}
 
 	// list collections should always be loaded from catalog.
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	colls, err := mt.catalog.ListCollections(ctx1, db.ID, ts)
 	if err != nil {
 		return nil, err
@@ -1055,7 +1060,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	coll, ok := mt.collID2Meta[header.CollectionId]
 	if !ok {
 		// collection not exists, return directly.
-		return errAlterCollectionNotFound
+		return ErrAlterCollectionNotFound
 	}
 	oldColl := coll.Clone()
 	newColl := coll.Clone()
@@ -1072,7 +1077,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	}
 	newColl.UpdateTimestamp = result.GetMaxTimeTick()
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if !dbChanged {
 		if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, fieldModify); err != nil {
 			return err
@@ -1115,7 +1120,7 @@ func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID U
 
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
-		return errAlterCollectionNotFound
+		return ErrAlterCollectionNotFound
 	}
 
 	// Apply the properties to override the existing properties.
@@ -1129,7 +1134,7 @@ func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID U
 	newColl := coll.Clone()
 	newColl.Properties = common.NewKeyValuePairs(newProperties)
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
 		return err
 	}
@@ -1147,7 +1152,7 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 	collectionID := result.Message.Header().CollectionId
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
-		return errAlterCollectionNotFound
+		return ErrAlterCollectionNotFound
 	}
 
 	oldColl := coll.Clone()
@@ -1160,7 +1165,7 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 	for vchannel := range newColl.ShardInfos {
 		newColl.ShardInfos[vchannel].LastTruncateTimeTick = result.Results[vchannel].TimeTick
 	}
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
 		return err
 	}
@@ -1175,7 +1180,7 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx = contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 
 	// DB name already filled in rename collection task prepare
 	// get target db
@@ -1344,7 +1349,7 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 			}
 			clone := part.Clone()
 			clone.State = pb.PartitionState_PartitionDropping
-			ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+			ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 			if err := mt.catalog.AlterPartition(ctx1, coll.DBID, part, clone, metastore.MODIFY, ts); err != nil {
 				return err
 			}
@@ -1398,7 +1403,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID,
 		return merr.WrapErrServiceInternalMsg("remove partition which state is not dropping, collection: %d, partition: %d, state: %s", collectionID, partitionID, partition.State.String())
 	}
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.DropPartition(ctx1, coll.DBID, collectionID, partitionID, ts); err != nil {
 		return err
 	}
@@ -1455,7 +1460,7 @@ func (mt *MetaTable) CheckIfAliasCreatable(ctx context.Context, dbName string, a
 	aliasedCollectionID, ok := mt.aliases.get(dbName, alias)
 	if ok && aliasedCollectionID == collectionID {
 		mlog.Warn(ctx, "add duplicate alias", mlog.String("alias", alias), mlog.String("collection", collectionName))
-		return errIgnoredAlterAlias
+		return ErrIgnoredAlterAlias
 	} else if ok {
 		// TODO: better to check if aliasedCollectionID exist or is available, though not very possible.
 		aliasedColl := mt.collID2Meta[aliasedCollectionID]
@@ -1488,7 +1493,7 @@ func (mt *MetaTable) DropAlias(ctx context.Context, result message.BroadcastResu
 
 	header := result.Message.Header()
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	ctx1 := contextutil.WithTenantID(ctx, paramtable.Get().CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.DropAlias(ctx1, header.DbId, header.Alias, result.GetControlChannelResult().TimeTick); err != nil {
 		return err
 	}
@@ -1572,7 +1577,7 @@ func (mt *MetaTable) CheckIfAliasAlterable(ctx context.Context, dbName string, a
 		return merr.WrapErrAliasNotFound(dbName, alias)
 	}
 	if existAliasCollectionID == collectionID {
-		return errIgnoredAlterAlias
+		return ErrIgnoredAlterAlias
 	}
 	return nil
 }
@@ -1687,7 +1692,7 @@ func (mt *MetaTable) InitCredential(ctx context.Context) error {
 	if credInfo != nil {
 		return nil
 	}
-	encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+	encryptedRootPassword, err := crypto.PasswordEncrypt(paramtable.Get().CommonCfg.DefaultRootPassword.GetValue())
 	if err != nil {
 		mlog.Warn(ctx, "RootCoord init user root failed", mlog.Err(err))
 		return err
@@ -1718,12 +1723,12 @@ func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *interna
 	// check if the username already exists.
 	for _, username := range usernames {
 		if username == credInfo.GetUsername() {
-			return errUserAlreadyExists
+			return ErrUserAlreadyExists
 		}
 	}
 
 	// check if the number of users has reached the limit.
-	maxUserNum := Params.ProxyCfg.MaxUserNum.GetAsInt()
+	maxUserNum := paramtable.Get().ProxyCfg.MaxUserNum.GetAsInt()
 	if len(usernames) >= maxUserNum {
 		errMsg := "unable to add user because the number of users has reached the limit"
 		mlog.Error(ctx, errMsg, mlog.Int("maxUserNum", maxUserNum))
@@ -1750,7 +1755,7 @@ func (mt *MetaTable) CheckIfUpdateCredential(ctx context.Context, credInfo *inte
 	// check if the number of credential exists.
 	if _, err := mt.catalog.GetCredential(ctx, credInfo.GetUsername()); err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return errUserNotFound
+			return ErrUserNotFound
 		}
 		return err
 	}
@@ -1815,7 +1820,7 @@ func (mt *MetaTable) CheckIfDeleteCredential(ctx context.Context, req *milvuspb.
 	// check if the number of credential exists.
 	if _, err := mt.catalog.GetCredential(ctx, req.GetUsername()); err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return errUserNotFound
+			return ErrUserNotFound
 		}
 		return err
 	}
@@ -1874,12 +1879,12 @@ func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateR
 	for _, result := range results {
 		if result.GetRole().GetName() == in.GetEntity().GetName() {
 			mlog.Info(ctx, "role already exists", mlog.String("role", in.GetEntity().GetName()))
-			return errRoleAlreadyExists
+			return ErrRoleAlreadyExists
 		}
 	}
-	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
+	if len(results) >= paramtable.Get().ProxyCfg.MaxRoleNum.GetAsInt() {
 		errMsg := "unable to create role because the number of roles has reached the limit"
-		mlog.Warn(ctx, errMsg, mlog.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
+		mlog.Warn(ctx, errMsg, mlog.Int("max_role_num", paramtable.Get().ProxyCfg.MaxRoleNum.GetAsInt()))
 		return merr.WrapErrServiceQuotaExceeded(errMsg)
 	}
 	return nil
@@ -1908,7 +1913,7 @@ func (mt *MetaTable) CheckIfAlterRole(ctx context.Context, in *milvuspb.AlterRol
 
 	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.GetRoleName()}, false); err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return errRoleNotExists
+			return ErrRoleNotExists
 		}
 		return err
 	}
@@ -1927,7 +1932,7 @@ func (mt *MetaTable) AlterRole(ctx context.Context, tenant string, entity *milvu
 
 	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.GetName()}, false); err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return errRoleNotExists
+			return ErrRoleNotExists
 		}
 		return err
 	}
@@ -1946,7 +1951,7 @@ func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleR
 
 	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.GetRoleName()}, false); err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return errRoleNotExists
+			return ErrRoleNotExists
 		}
 		return err
 	}
@@ -1969,7 +1974,7 @@ func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleR
 }
 
 func validateRoleDescription(description string) error {
-	return rbacutil.ValidateRoleDescription(description, Params.ProxyCfg.MaxRoleDescriptionLength.GetAsInt())
+	return rbacutil.ValidateRoleDescription(description, paramtable.Get().ProxyCfg.MaxRoleDescriptionLength.GetAsInt())
 }
 
 // DropRole drop role info
@@ -1992,7 +1997,7 @@ func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.O
 
 	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: req.RoleName}, false); err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return errRoleNotExists
+			return ErrRoleNotExists
 		}
 		return err
 	}
@@ -2124,7 +2129,7 @@ func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.R
 func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error {
 	meta := req.GetRBACMeta()
 	if len(meta.GetRoles()) == 0 && len(meta.GetPrivilegeGroups()) == 0 && len(meta.GetGrants()) == 0 && len(meta.GetUsers()) == 0 {
-		return errEmptyRBACMeta
+		return ErrEmptyRBACMeta
 	}
 
 	mt.permissionLock.RLock()
@@ -2257,7 +2262,7 @@ func (mt *MetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *mil
 		return err
 	}
 	if !definedByUsers {
-		return errNotCustomPrivilegeGroup
+		return ErrNotCustomPrivilegeGroup
 	}
 
 	// check if the group is used by any role
