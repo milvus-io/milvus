@@ -85,9 +85,17 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
         return;
     }
 
-    // Get bounding box
-    double minX, minY, maxX, maxY;
-    get_bounding_box(geom, ctx, minX, minY, maxX, maxY);
+    // Get bounding box. On failure (e.g. empty geometry) keep a deterministic
+    // placeholder MBR and still index the row: the R-tree is only a coarse
+    // filter, the exact predicate refines it out, and dropping the row here
+    // would desynchronize the index row count from the segment row count.
+    double minX = 0, minY = 0, maxX = 0, maxY = 0;
+    if (!get_bounding_box(geom, ctx, minX, minY, maxX, maxY)) {
+        LOG_WARN(
+            "geometry at row {} has no computable envelope (empty?); indexing "
+            "with a placeholder MBR, exact refinement will filter it",
+            row_offset);
+    }
 
     // Create Boost box and insert
     Box box(Point(minX, minY), Point(maxX, maxY));
@@ -150,8 +158,16 @@ RTreeIndexWrapper::bulk_load_from_field_data(
                 continue;
             }
 
-            double minX, minY, maxX, maxY;
-            get_bounding_box(geom, ctx, minX, minY, maxX, maxY);
+            // See add_geometry(): keep a deterministic placeholder MBR for a
+            // geometry without a computable envelope so the row stays indexed
+            // and the row count remains consistent.
+            double minX = 0, minY = 0, maxX = 0, maxY = 0;
+            if (!get_bounding_box(geom, ctx, minX, minY, maxX, maxY)) {
+                LOG_WARN(
+                    "geometry at row {} has no computable envelope (empty?); "
+                    "indexing with a placeholder MBR",
+                    absolute_offset);
+            }
             GEOSGeom_destroy_r(ctx, geom);
 
             Box box(Point(minX, minY), Point(maxX, maxY));
@@ -256,9 +272,12 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
                                     std::vector<int64_t>& candidate_offsets) {
     candidate_offsets.clear();
 
-    // Get bounding box of query geometry
+    // Get bounding box of query geometry. An empty/degenerate query geometry
+    // has no envelope and intersects nothing, so there are no candidates.
     double minX, minY, maxX, maxY;
-    get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY);
+    if (!get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY)) {
+        return;
+    }
 
     // Create query box
     Box query_box(Point(minX, minY), Point(maxX, maxY));
@@ -280,7 +299,7 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
               static_cast<int>(op));
 }
 
-void
+bool
 RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
                                     GEOSContextHandle_t ctx,
                                     double& minX,
@@ -290,19 +309,30 @@ RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
     AssertInfo(geom != nullptr, "Geometry is null");
     AssertInfo(ctx != nullptr, "GEOS context is null");
 
-    GEOSGeom_getXMin_r(ctx, geom, &minX);
-    GEOSGeom_getXMax_r(ctx, geom, &maxX);
-    GEOSGeom_getYMin_r(ctx, geom, &minY);
-    GEOSGeom_getYMax_r(ctx, geom, &maxY);
+    // GEOSGeom_get{X,Y}{Min,Max}_r return 0 on failure (e.g. empty geometry)
+    // and leave the output untouched; using such uninitialized coordinates
+    // would insert a garbage MBR into the R-tree. Report failure instead.
+    if (GEOSGeom_getXMin_r(ctx, geom, &minX) == 0 ||
+        GEOSGeom_getXMax_r(ctx, geom, &maxX) == 0 ||
+        GEOSGeom_getYMin_r(ctx, geom, &minY) == 0 ||
+        GEOSGeom_getYMax_r(ctx, geom, &maxY) == 0) {
+        return false;
+    }
+    return true;
 }
 
 int64_t
 RTreeIndexWrapper::count() const {
+    // rtree_ is mutated by add_geometry()/bulk_load_from_field_data() under a
+    // write lock; reading its size concurrently must take the shared lock too,
+    // otherwise a growing-segment search races with incremental inserts.
+    std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
     return static_cast<int64_t>(rtree_.size());
 }
 
 int64_t
 RTreeIndexWrapper::ByteSize() const {
+    std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
     int64_t total = 0;
 
     // values_: vector<Value> where Value = std::pair<Box, int64_t>

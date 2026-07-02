@@ -5169,7 +5169,7 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
     FieldId field_id, const std::shared_ptr<ChunkedColumnInterface>& column) {
     try {
         // Get geometry cache for this segment+field
-        auto& geometry_cache =
+        auto geometry_cache =
             milvus::exec::SimpleGeometryCacheManager::Instance()
                 .GetOrCreateCache(get_segment_id(), field_id);
 
@@ -5185,11 +5185,11 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
                 if (valid_data.empty() || valid_data[i]) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
-                    geometry_cache.AppendData(
-                        ctx_, wkb_data.data(), wkb_data.size());
+                    geometry_cache->AppendData(wkb_data.data(),
+                                               wkb_data.size());
                 } else {
                     // Null/invalid geometry
-                    geometry_cache.AppendData(ctx_, nullptr, 0);
+                    geometry_cache->AppendData(nullptr, 0);
                 }
             }
         }
@@ -5200,7 +5200,7 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
             "{} geometries",
             get_segment_id(),
             field_id.get(),
-            geometry_cache.Size());
+            geometry_cache->Size());
 
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,

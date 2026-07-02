@@ -16,7 +16,9 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -80,12 +82,20 @@ class RTreeIndex : public ScalarIndex<T> {
 
     int64_t
     Count() override {
-        if (is_built_) {
-            return total_num_rows_;
+        // On a growing segment AddGeometry() mutates null_offset_ and publishes
+        // wrapper_ under mutex_, concurrently with searches calling Count(); take
+        // the shared lock and snapshot wrapper_ before dereferencing it.
+        std::shared_ptr<RTreeIndexWrapper> wrapper;
+        int64_t null_count = 0;
+        {
+            std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+            if (is_built_) {
+                return total_num_rows_;
+            }
+            wrapper = wrapper_;
+            null_count = static_cast<int64_t>(null_offset_.size());
         }
-        return wrapper_ ? wrapper_->count() +
-                              static_cast<int64_t>(null_offset_.size())
-                        : 0;
+        return wrapper ? wrapper->count() + null_count : 0;
     }
 
     // BuildWithRawDataForUT should be only used in ut. Only string is supported.
@@ -162,12 +172,17 @@ class RTreeIndex : public ScalarIndex<T> {
         ScalarIndex<T>::ComputeByteSize();
         int64_t total = this->cached_byte_size_;
 
-        // null_offset_ vector
-        total += null_offset_.capacity() * sizeof(size_t);
+        std::shared_ptr<RTreeIndexWrapper> wrapper;
+        {
+            std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+            // null_offset_ vector
+            total += null_offset_.capacity() * sizeof(size_t);
+            wrapper = wrapper_;
+        }
 
         // wrapper_ (RTreeIndexWrapper)
-        if (wrapper_) {
-            total += wrapper_->ByteSize();
+        if (wrapper) {
+            total += wrapper->ByteSize();
         }
 
         this->cached_byte_size_ = total;
