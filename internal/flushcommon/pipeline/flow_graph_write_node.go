@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -24,16 +25,27 @@ import (
 type writeNode struct {
 	BaseNode
 
-	channelName string
-	wbManager   writebuffer.BufferManager
-	updater     util.StatsUpdater
-	metacache   metacache.MetaCache
-	pkField     *schemapb.FieldSchema
+	channelName  string
+	collectionID int64
+	wbManager    writebuffer.BufferManager
+	updater      util.StatsUpdater
+	metacache    metacache.MetaCache
+	pkField      *schemapb.FieldSchema
+
+	functionStore *function.FunctionRunnerLocalStore
 }
 
 // Name returns node name, implementing flowgraph.Node
 func (wNode *writeNode) Name() string {
 	return fmt.Sprintf("writeNode-%s", wNode.channelName)
+}
+
+func (wNode *writeNode) Free() {
+	wNode.releaseFunctionRunners()
+}
+
+func (wNode *writeNode) releaseFunctionRunners() {
+	wNode.functionStore.Close()
 }
 
 func (wNode *writeNode) Operate(in []Msg) []Msg {
@@ -80,20 +92,34 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}()
 
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
+	currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
+	functionOutputFieldIDs, err := wNode.functionStore.OutputFieldIDs(currentSchema)
+	if err != nil {
+		log.Error("failed to get embedding output fields", zap.Error(err))
+		panic(err)
+	}
 
-	if fgMsg.InsertData == nil {
-		insertData := make([]*writebuffer.InsertData, 0)
-		if len(fgMsg.InsertMessages) > 0 {
-			var err error
-			if insertData, err = writebuffer.PrepareInsert(wNode.metacache.GetSchema(fgMsg.TimeTick()), wNode.pkField, fgMsg.InsertMessages); err != nil {
-				log.Error("failed to prepare data", zap.Error(err))
+	insertData := make([]*writebuffer.InsertData, 0)
+	if len(fgMsg.InsertMessages) > 0 {
+		for _, msg := range fgMsg.InsertMessages {
+			if len(functionOutputFieldIDs) == 0 || function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
+				continue
+			}
+			if err := wNode.functionStore.FillEmbeddingData(wNode.collectionID, currentSchema, msg.InsertRequest); err != nil {
+				log.Error("failed to fill embedding data", zap.Error(err))
 				panic(err)
 			}
 		}
-		fgMsg.InsertData = insertData
+		preparedInsertData, err := writebuffer.PrepareInsert(currentSchema, wNode.pkField, fgMsg.InsertMessages)
+		if err != nil {
+			log.Error("failed to prepare data", zap.Error(err))
+			panic(err)
+		}
+		insertData = preparedInsertData
 	}
+	fgMsg.InsertData = insertData
 
-	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end)
+	err = wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end)
 	if err != nil {
 		log.Error("failed to buffer data", zap.Error(err))
 		panic(err)
@@ -155,12 +181,19 @@ func newWriteNode(
 		return nil, err
 	}
 
-	return &writeNode{
-		BaseNode:    baseNode,
-		channelName: config.vChannelName,
-		wbManager:   writeBufferManager,
-		updater:     updater,
-		metacache:   config.metacache,
-		pkField:     pkField,
-	}, nil
+	wNode := &writeNode{
+		BaseNode:     baseNode,
+		channelName:  config.vChannelName,
+		collectionID: config.collectionID,
+		wbManager:    writeBufferManager,
+		updater:      updater,
+		metacache:    config.metacache,
+		pkField:      pkField,
+
+		functionStore: function.NewFunctionRunnerLocalStore(),
+	}
+	if _, err := wNode.functionStore.OutputFieldIDs(collSchema); err != nil {
+		return nil, err
+	}
+	return wNode, nil
 }

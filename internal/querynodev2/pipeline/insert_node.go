@@ -24,9 +24,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -41,6 +43,8 @@ type insertNode struct {
 	channel      string
 	manager      *DataManager
 	delegator    delegator.ShardDelegator
+
+	functionStore *function.FunctionRunnerLocalStore
 }
 
 func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
@@ -70,6 +74,11 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
+	if err := iNode.appendBM25Stats(iData, msg, collection.Schema()); err != nil {
+		log.Error("failed to append BM25 stats from insert message", zap.String("channel", iNode.channel), zap.Error(err))
+		panic(err)
+	}
+
 	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
 	if err != nil {
 		log.Error("failed to get primary keys from insert message", zap.Error(err))
@@ -87,6 +96,11 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		zap.Uint64("timestampMax", msg.EndTimestamp))
 }
 
+func (iNode *insertNode) Close() {
+	iNode.functionStore.Close()
+	iNode.BaseNode.Close()
+}
+
 // Insert task
 func (iNode *insertNode) Operate(in Msg) Msg {
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Dec()
@@ -97,22 +111,30 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 			return nodeMsg.insertMsgs[i].BeginTs() < nodeMsg.insertMsgs[j].BeginTs()
 		})
 
-		// build insert data if no embedding node
-		if nodeMsg.insertDatas == nil {
-			collection := iNode.manager.Collection.Get(iNode.collectionID)
-			if collection == nil {
-				log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
-				panic("insertNode with collection not exist")
-			}
-
-			nodeMsg.insertDatas = make(map[UniqueID]*delegator.InsertData)
-			// get InsertData and merge datas of same segment
-			for _, msg := range nodeMsg.insertMsgs {
-				iNode.addInsertData(nodeMsg.insertDatas, msg, collection)
-			}
+		collection := iNode.manager.Collection.Get(iNode.collectionID)
+		if collection == nil {
+			log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
+			panic("insertNode with collection not exist")
+		}
+		schema := collection.Schema()
+		functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
+		if err != nil {
+			log.Error("failed to get embedding output fields", zap.String("channel", iNode.channel), zap.Error(err))
+			panic(err)
 		}
 
-		iNode.delegator.ProcessInsert(nodeMsg.insertDatas)
+		insertDatas := make(map[UniqueID]*delegator.InsertData)
+		for _, msg := range nodeMsg.insertMsgs {
+			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
+				if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
+					log.Error("failed to fill embedding data for insert message", zap.String("channel", iNode.channel), zap.Error(err))
+					panic(err)
+				}
+			}
+			iNode.addInsertData(insertDatas, msg, collection)
+		}
+
+		iNode.delegator.ProcessInsert(insertDatas)
 	}
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Inc()
 
@@ -129,13 +151,81 @@ func newInsertNode(
 	channel string,
 	manager *DataManager,
 	delegator delegator.ShardDelegator,
+	schema *schemapb.CollectionSchema,
 	maxQueueLength int32,
-) *insertNode {
-	return &insertNode{
-		BaseNode:     base.NewBaseNode(fmt.Sprintf("InsertNode-%s", channel), maxQueueLength),
-		collectionID: collectionID,
-		channel:      channel,
-		manager:      manager,
-		delegator:    delegator,
+) (*insertNode, error) {
+	iNode := &insertNode{
+		BaseNode:      base.NewBaseNode(fmt.Sprintf("InsertNode-%s", channel), maxQueueLength),
+		collectionID:  collectionID,
+		channel:       channel,
+		manager:       manager,
+		delegator:     delegator,
+		functionStore: function.NewFunctionRunnerLocalStore(),
 	}
+	if _, err := iNode.functionStore.OutputFieldIDs(schema); err != nil {
+		return nil, err
+	}
+	return iNode, nil
+}
+
+func (iNode *insertNode) appendBM25Stats(iData *delegator.InsertData, msg *InsertMsg, schema *schemapb.CollectionSchema) error {
+	outputFieldIDs, err := getBM25OutputFieldIDs(schema)
+	if err != nil {
+		return err
+	}
+	if len(outputFieldIDs) == 0 {
+		return nil
+	}
+	if iData.BM25Stats == nil {
+		iData.BM25Stats = make(map[int64]*storage.BM25Stats)
+	}
+
+	for _, outputFieldID := range outputFieldIDs {
+		outputData := getFieldData(msg.FieldsData, outputFieldID)
+		if outputData == nil {
+			return merr.WrapErrServiceInternalMsg("BM25 output field %d not found in insert message", outputFieldID)
+		}
+		if err := appendBM25StatsFromFieldData(iData.BM25Stats, outputFieldID, outputData); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getBM25OutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
+	outputFieldIDs := make([]int64, 0)
+	for _, fn := range schema.GetFunctions() {
+		if fn.GetType() != schemapb.FunctionType_BM25 {
+			continue
+		}
+
+		outputField := typeutil.GetFunctionOutputField(schema, fn)
+		if outputField == nil {
+			return nil, merr.WrapErrServiceInternalMsg("function %s output field not found", fn.GetName())
+		}
+
+		outputFieldIDs = append(outputFieldIDs, outputField.GetFieldID())
+	}
+	return outputFieldIDs, nil
+}
+
+func appendBM25StatsFromFieldData(stats map[int64]*storage.BM25Stats, outputFieldID int64, fieldData *schemapb.FieldData) error {
+	sparseArray := fieldData.GetVectors().GetSparseFloatVector()
+	if sparseArray == nil {
+		return merr.WrapErrServiceInternalMsg("BM25 output field %d is not sparse float vector data", outputFieldID)
+	}
+	if _, ok := stats[outputFieldID]; !ok {
+		stats[outputFieldID] = storage.NewBM25Stats()
+	}
+	stats[outputFieldID].AppendBytes(sparseArray.GetContents()...)
+	return nil
+}
+
+func getFieldData(datas []*schemapb.FieldData, fieldID int64) *schemapb.FieldData {
+	for _, data := range datas {
+		if data.GetFieldId() == fieldID {
+			return data
+		}
+	}
+	return nil
 }
