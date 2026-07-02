@@ -107,6 +107,8 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrPartitionNotFound("test_partition", "failed to get partition"), ErrPartitionNotFound)
 	s.ErrorIs(WrapErrPartitionNotLoaded("test_partition", "failed to query"), ErrPartitionNotLoaded)
 	s.ErrorIs(WrapErrPartitionNotFullyLoaded("test_partition", "failed to query"), ErrPartitionNotFullyLoaded)
+	s.ErrorIs(WrapErrNamespaceNotFound("test_namespace", "failed to get namespace"), ErrNamespaceNotFound)
+	s.ErrorIs(WrapErrNamespaceAlreadyExists("test_namespace", "failed to create namespace"), ErrNamespaceAlreadyExists)
 
 	// ResourceGroup related
 	s.ErrorIs(WrapErrResourceGroupNotFound("test_ResourceGroup", "failed to get ResourceGroup"), ErrResourceGroupNotFound)

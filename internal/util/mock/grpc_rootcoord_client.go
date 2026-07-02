@@ -202,6 +202,26 @@ func (m *GrpcRootCoordClient) ShowPartitionsInternal(ctx context.Context, in *mi
 	return &milvuspb.ShowPartitionsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) CreateNamespace(ctx context.Context, in *milvuspb.CreateNamespaceRequest, opts ...grpc.CallOption) (*rootcoordpb.CreateNamespaceResponse, error) {
+	return &rootcoordpb.CreateNamespaceResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DescribeNamespace(ctx context.Context, in *milvuspb.DescribeNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error) {
+	return &milvuspb.DescribeNamespaceResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ListNamespaces(ctx context.Context, in *milvuspb.ListNamespacesRequest, opts ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error) {
+	return &milvuspb.ListNamespacesResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DropNamespace(ctx context.Context, in *milvuspb.DropNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error) {
+	return &milvuspb.DropNamespaceResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) HasNamespace(ctx context.Context, in *milvuspb.HasNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error) {
+	return &milvuspb.HasNamespaceResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest, opts ...grpc.CallOption) (*milvuspb.DescribeSegmentResponse, error) {
 	return &milvuspb.DescribeSegmentResponse{}, m.Err
 }

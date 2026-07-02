@@ -426,6 +426,26 @@ func (m *mockMixCoord) ShowPartitionsInternal(ctx context.Context, req *milvuspb
 	return m.ShowPartitions(ctx, req)
 }
 
+func (m *mockMixCoord) CreateNamespace(ctx context.Context, req *milvuspb.CreateNamespaceRequest) (*rootcoordpb.CreateNamespaceResponse, error) {
+	return &rootcoordpb.CreateNamespaceResponse{Status: merr.Success()}, nil
+}
+
+func (m *mockMixCoord) DescribeNamespace(ctx context.Context, req *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	return &milvuspb.DescribeNamespaceResponse{Status: merr.Success()}, nil
+}
+
+func (m *mockMixCoord) ListNamespaces(ctx context.Context, req *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	return &milvuspb.ListNamespacesResponse{Status: merr.Success()}, nil
+}
+
+func (m *mockMixCoord) DropNamespace(ctx context.Context, req *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	return &milvuspb.DropNamespaceResponse{Status: merr.Success()}, nil
+}
+
+func (m *mockMixCoord) HasNamespace(ctx context.Context, req *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	return &milvuspb.HasNamespaceResponse{Status: merr.Success()}, nil
+}
+
 // global timestamp allocator
 func (m *mockMixCoord) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	if m.state != commonpb.StateCode_Healthy {

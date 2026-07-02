@@ -161,7 +161,7 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
 			i.enqueueUnindexedTaskSegments(ctx, WithCollection(collectionID))
 		case <-getBuildIndexOverflowChSingleton():
-			log.Warn("build index notify channel overflow, reconcile all unindexed segments")
+			mlog.Warn(ctx, "build index notify channel overflow, reconcile all unindexed segments")
 			i.enqueueUnindexedTaskSegments(ctx)
 		case segID := <-getBuildIndexChSingleton():
 			mlog.Info(ctx, "receive new flushed segment", mlog.FieldSegmentID(segID))
