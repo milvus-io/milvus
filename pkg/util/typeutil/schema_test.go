@@ -6332,6 +6332,108 @@ func TestAppendFieldDataByColumn(t *testing.T) {
 		assert.EqualValues(t, 1, got.GetDim())
 		assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
 	})
+
+	t.Run("struct array appends dense nullable sub-field rows", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			FieldName: "profile",
+			FieldId:   200,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "age",
+							FieldId:   201,
+							Type:      schemapb.DataType_Array,
+							ValidData: []bool{true, false, true},
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_ArrayData{
+										ArrayData: &schemapb.ArrayArray{
+											ElementType: schemapb.DataType_Int32,
+											Data: []*schemapb.ScalarField{
+												{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10}}}},
+												{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{}}},
+												{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{30}}}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		dst := PrepareResultFieldData([]*schemapb.FieldData{src}, 3)[0]
+
+		AppendFieldDataByColumn(dst, src, []int64{0, 1, 2})
+
+		require.NotNil(t, dst.GetStructArrays())
+		require.Len(t, dst.GetStructArrays().GetFields(), 1)
+		subField := dst.GetStructArrays().GetFields()[0]
+		assert.Equal(t, []bool{true, false, true}, subField.GetValidData())
+		got := subField.GetScalars().GetArrayData().GetData()
+		require.Len(t, got, 3)
+		assert.Equal(t, []int32{10}, got[0].GetIntData().GetData())
+		assert.Empty(t, got[1].GetIntData().GetData())
+		assert.Equal(t, []int32{30}, got[2].GetIntData().GetData())
+	})
+
+	t.Run("struct array matches sub-fields by id", func(t *testing.T) {
+		dst := &schemapb.FieldData{
+			FieldName: "profile",
+			FieldId:   200,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "profile[age]",
+							FieldId:   201,
+							Type:      schemapb.DataType_Array,
+							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Int32,
+								Data:        []*schemapb.ScalarField{},
+							}}}},
+						},
+					},
+				},
+			},
+		}
+		src := &schemapb.FieldData{
+			FieldName: "profile",
+			FieldId:   200,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "age",
+							FieldId:   201,
+							Type:      schemapb.DataType_Array,
+							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Int32,
+								Data: []*schemapb.ScalarField{
+									{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{42}}}},
+								},
+							}}}},
+						},
+					},
+				},
+			},
+		}
+
+		AppendFieldDataByColumn(dst, src, []int64{0})
+
+		require.NotNil(t, dst.GetStructArrays())
+		require.Len(t, dst.GetStructArrays().GetFields(), 1)
+		subField := dst.GetStructArrays().GetFields()[0]
+		assert.Equal(t, "profile[age]", subField.GetFieldName())
+		got := subField.GetScalars().GetArrayData().GetData()
+		require.Len(t, got, 1)
+		assert.Equal(t, []int32{42}, got[0].GetIntData().GetData())
+	})
 }
 
 func TestUpdateFieldDataByColumn(t *testing.T) {
