@@ -76,7 +76,7 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 	nodes = nodesCopy
 
 	// Sort nodes by current segment load (ascending)
-	// Consider: segment count + growing rows + scheduler task delta
+	// Consider: segment count only.
 	sort.Slice(nodes, func(i, j int) bool {
 		load1 := p.calculateSegmentLoad(nodes[i])
 		load2 := p.calculateSegmentLoad(nodes[j])
@@ -165,7 +165,7 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 }
 
 // calculateSegmentLoad calculates the total segment load for a node
-// Load = segment count + scheduler task delta
+// Load = segment count
 func (p *RoundRobinAssignPolicy) calculateSegmentLoad(nodeID int64) int {
 	load := 0
 
@@ -173,9 +173,6 @@ func (p *RoundRobinAssignPolicy) calculateSegmentLoad(nodeID int64) int {
 	if nodeInfo != nil {
 		load += nodeInfo.SegmentCnt()
 	}
-
-	// Add scheduler task delta (pending segment tasks)
-	load += p.scheduler.GetSegmentTaskDelta(nodeID, -1)
 
 	return load
 }

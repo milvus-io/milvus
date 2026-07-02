@@ -61,7 +61,7 @@ func (suite *BalanceTestSuite) SetupTest() {
 
 	suite.roundRobinBalancer = NewRoundRobinBalancer(suite.mockScheduler, suite.nodeManager, suite.dist, nil, suite.targetMgr)
 
-	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 }
 
@@ -76,7 +76,6 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 		nodeIDs     []int64
 		segmentCnts []int
 		states      []session.State
-		deltaCnts   []int
 		assignments []*meta.Segment
 		expectPlans []assign.SegmentAssignPlan
 	}{
@@ -85,16 +84,15 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 			nodeIDs:     []int64{1, 2, 3},
 			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateStopping},
 			segmentCnts: []int{100, 200, 0},
-			deltaCnts:   []int{0, -200, 0},
 			assignments: []*meta.Segment{
 				{SegmentInfo: &datapb.SegmentInfo{ID: 1}},
 				{SegmentInfo: &datapb.SegmentInfo{ID: 2}},
 				{SegmentInfo: &datapb.SegmentInfo{ID: 3}},
 			},
 			expectPlans: []assign.SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1}}, From: -1, To: 2},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2}}, From: -1, To: 1},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3}}, From: -1, To: 2},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1}}, From: -1, To: 1},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2}}, From: -1, To: 2},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3}}, From: -1, To: 1},
 			},
 		},
 		{
@@ -102,7 +100,6 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 			nodeIDs:     []int64{},
 			segmentCnts: []int{},
 			states:      []session.State{},
-			deltaCnts:   []int{},
 			assignments: []*meta.Segment{
 				{SegmentInfo: &datapb.SegmentInfo{ID: 1}},
 				{SegmentInfo: &datapb.SegmentInfo{ID: 2}},
@@ -117,12 +114,6 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 			suite.SetupTest()
 			suite.mockScheduler.ExpectedCalls = nil
 
-			// Setup mock scheduler to return the correct delta for each node
-			for i := range c.nodeIDs {
-				nodeID := c.nodeIDs[i]
-				delta := c.deltaCnts[i]
-				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(nodeID, int64(-1)).Return(delta).Maybe()
-			}
 			suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 			for i := range c.nodeIDs {
@@ -196,7 +187,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 				delta := c.deltaCnts[i]
 				suite.mockScheduler.EXPECT().GetChannelTaskDelta(nodeID, int64(-1)).Return(delta).Maybe()
 			}
-			suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+			suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 
 			for i := range c.nodeIDs {
 				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
