@@ -267,7 +267,7 @@ TEST(Indexing, BinaryBruteForce) {
     sr.seg_offsets_ = std::move(sub_result.mutable_offsets());
     sr.distances_ = std::move(sub_result.mutable_distances());
 
-    auto json = SearchResultToJson(sr);
+    auto json = SearchResultToJson(sr, round_decimal);
     std::cout << json.dump(2);
 #ifdef __linux__
     auto ref = nlohmann::json::parse(R"(
