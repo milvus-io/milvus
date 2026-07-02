@@ -21,6 +21,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "parquet/arrow/writer.h"
+#include "parquet/exception.h"
 #include "parquet/properties.h"
 #include "storage/PayloadStream.h"
 #include "storage/PayloadWriter.h"
@@ -128,15 +129,24 @@ PayloadWriter::finish() {
         arrow_properties = arrow_props_builder.build();
     }
 
-    ast = parquet::arrow::WriteTable(*table,
-                                     mem_pool,
-                                     output_,
-                                     1024 * 1024 * 1024,
-                                     parquet::WriterProperties::Builder()
-                                         .compression(arrow::Compression::ZSTD)
-                                         ->compression_level(3)
-                                         ->build(),
-                                     arrow_properties);
+    try {
+        ast = parquet::arrow::WriteTable(
+            *table,
+            mem_pool,
+            output_,
+            1024 * 1024 * 1024,
+            parquet::WriterProperties::Builder()
+                .compression(arrow::Compression::ZSTD)
+                ->compression_level(3)
+                ->build(),
+            arrow_properties);
+    } catch (const parquet::ParquetException& e) {
+        // parquet can throw directly (not only return a status); a narrow
+        // catch keeps the write failure typed instead of collapsing to 2001
+        // at the cgo boundary.
+        ThrowInfo(
+            ErrorCode::FileWriteFailed, "parquet write failed: {}", e.what());
+    }
     if (!ast.ok()) {
         ThrowInfo(ArrowStatusToErrorCode(ast), "{}", ast.ToString());
     }
