@@ -775,11 +775,14 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 	})
 }
 
-func (s *WriteBufferSuite) TestGrowingSourceLayoutMismatch() {
-	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column count mismatch at index 0: existing has 21 columns, but appended has 44 columns: segcore error[segcoreCode=2001]")))
-	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")))
-	s.False(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: mock transient error")))
-	s.False(isGrowingSourceLayoutMismatch(nil))
+func (s *WriteBufferSuite) TestGrowingSourceNonRetryableError() {
+	s.True(isGrowingSourceNonRetryableError(errors.Wrap(
+		merr.SegcoreError(2024, "Column count mismatch"),
+		"flush growing source data",
+	)))
+	s.False(isGrowingSourceNonRetryableError(errors.New("flush growing source data: Invalid: Column count mismatch at index 0")))
+	s.False(isGrowingSourceNonRetryableError(merr.SegcoreError(2001, "mock transient error")))
+	s.False(isGrowingSourceNonRetryableError(nil))
 }
 
 func (s *WriteBufferSuite) TestGrowingSourceProgressSyncableSkipsNonRetryableFailure() {

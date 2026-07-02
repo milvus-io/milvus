@@ -534,9 +534,6 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if commitSource && shouldCommit && (t.IsFlush() || t.IsDrop()) {
 			committer.CommitGrowingFlush(t.targetOffset)
 		}
-		if err != nil {
-			t.HandleError(err)
-		}
 	}()
 
 	segment, ok := t.metacache.GetSegmentByID(t.segmentID)

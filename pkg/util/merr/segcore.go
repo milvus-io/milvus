@@ -139,7 +139,7 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2010: {sentinel: ErrSegcore},                   // PathAlreadyExist (storage)
 	2011: {sentinel: ErrSegcore},                   // PathNotExist (storage)
 	2019: {sentinel: ErrSegcore},                   // RetrieveError: generic retrieve failure
-	2024: {sentinel: ErrSegcore},                   // DataFormatBroken: data corruption (permanent)
+	2024: {sentinel: ErrDataIntegrity},             // DataFormatBroken: stored data / manifest layout mismatch (permanent)
 	2030: {sentinel: ErrSegcore},                   // UnistdError: syscall failure
 	2035: {sentinel: ErrSegcore},                   // MemAllocateSizeNotMatch: size logic bug (not OOM)
 	2041: {sentinel: ErrSegcore},                   // TextIndexNotFound

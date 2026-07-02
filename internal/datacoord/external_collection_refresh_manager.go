@@ -55,6 +55,18 @@ func newNonRetriableJobError(format string, args ...interface{}) error {
 
 var errMilvusTableRefreshSchemaInvalid = errors.New("milvus-table refresh schema invalid")
 
+func isNonRetriableExternalExploreError(err error) bool {
+	if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
+		packed.IsMilvusTableStorageV2ManifestListMissing(err) {
+		return true
+	}
+
+	// ErrLoonFFI identifies failures reported by loon_exttable_explore.
+	// ErrLoonTransient is the retryable subset, so only non-transient FFI
+	// explore failures should push the refresh job to a terminal Failed state.
+	return errors.Is(err, packed.ErrLoonFFI) && !errors.Is(err, packed.ErrLoonTransient)
+}
+
 // exploreTempDirForJob returns the per-job explore temp directory path used
 // both when datacoord writes the explore manifest and when cleanupExploreTempForJob
 // reclaims it after the job reaches a terminal state. Keep the two call sites in
@@ -712,9 +724,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		// and can re-issue refresh after fixing the source. Pure
 		// in-process errors (ctx cancel, etcd unavailable, etc.) keep the
 		// existing transient path so a real outage still gets retried.
-		if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
-			errors.Is(err, packed.ErrLoonTransient) ||
-			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
+		if isNonRetriableExternalExploreError(err) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")

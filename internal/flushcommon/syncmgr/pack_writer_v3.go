@@ -198,12 +198,6 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 
 // classifyLoonErr maps loon FFI failures to retryable errors and everything
 // else to retry.Unrecoverable so the outer retry loop terminates immediately.
-//
-// NOTE: today milvus-storage does not expose structured error codes, so
-// packed.ErrLoonTransient covers ALL loon errors, including non-recoverable
-// IO failures. The bounded retry budget keeps the worst case finite. Once
-// milvus-storage adds explicit error codes, narrow the retryable set here so
-// only the concurrent-transaction case retries.
 func classifyLoonErr(err error) error {
 	if err == nil {
 		return nil

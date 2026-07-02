@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -863,9 +864,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 					}()
 					err := textTask.Run(ctx)
 					for _, callback := range callbacks {
-						if cbErr := callback(err); cbErr != nil {
-							return struct{}{}, cbErr
-						}
+						err = callback(err)
+					}
+					if err != nil {
+						textTask.HandleError(err)
+						return struct{}{}, err
 					}
 					return struct{}{}, nil
 				}), nil
@@ -912,7 +915,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
 			flushFunc: func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
-				return nil, fmt.Errorf("Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")
+				return nil, merr.SegcoreError(2024, "Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups")
 			},
 		}
 		var errorHandlerCalls atomic.Int32
@@ -937,9 +940,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 					defer close(done)
 					err := textTask.Run(ctx)
 					for _, callback := range callbacks {
-						if cbErr := callback(err); cbErr != nil {
-							return struct{}{}, cbErr
-						}
+						err = callback(err)
+					}
+					if err != nil {
+						textTask.HandleError(err)
+						return struct{}{}, err
 					}
 					return struct{}{}, err
 				}), nil
@@ -975,7 +980,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.EqualValues(10, segment.BufferRows())
 	})
 
-	s.Run("source_task_row_count_mismatch_retries_without_meta_update", func() {
+	s.Run("source_task_row_count_mismatch_is_non_retryable_without_meta_update", func() {
 		textSchema := s.textSchema()
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
@@ -1007,9 +1012,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 					defer close(done)
 					err := textTask.Run(ctx)
 					for _, callback := range callbacks {
-						if cbErr := callback(err); cbErr != nil {
-							return struct{}{}, cbErr
-						}
+						err = callback(err)
+					}
+					if err != nil {
+						textTask.HandleError(err)
+						return struct{}{}, err
 					}
 					return struct{}{}, nil
 				}), nil
@@ -1031,6 +1038,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
 		s.Contains(progress.lastFailure, "row count mismatch")
+		s.True(progress.nonRetryableFailure)
+		s.False(l0wb.growingSourceRetryScheduled)
 		segment, ok := metacache.GetSegmentByID(1011)
 		s.True(ok)
 		s.EqualValues(0, segment.FlushedRows())

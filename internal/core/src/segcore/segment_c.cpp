@@ -87,6 +87,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/properties.h"
 
 // Arrow headers for FlushGrowingSegmentData
@@ -960,6 +961,40 @@ struct FieldInfo {
     // For TEXT fields with spillover: reader for temp LOB file
     milvus::segcore::TextLobSpillover* text_lob_spillover = nullptr;
 };
+
+milvus::ErrorCode
+ClassifyMilvusStorageCommitStatus(const arrow::Status& status) {
+    auto detail = milvus_storage::ExtendStatusDetail::UnwrapStatus(status);
+    if (detail) {
+        switch (detail->code()) {
+            case milvus_storage::ExtendStatusCode::TxnExhaustedRetry:
+            case milvus_storage::ExtendStatusCode::TxnResolutionFailed:
+                // TODO(storage-v3): add a dedicated retriable segcore code for
+                // storage transaction conflicts. FileWriteFailed is reused here
+                // only because it is already classified as retriable on the Go
+                // side; it mixes manifest transaction conflicts with generic
+                // file/object-store write failures.
+                return milvus::FileWriteFailed;
+            default:
+                break;
+        }
+    }
+
+    if (status.IsInvalid()) {
+        // This helper is used for manifest commit failures. On that path,
+        // milvus-storage reports permanent append/layout incompatibilities as
+        // Invalid, for example column count or column group mismatch. Retrying
+        // the same append will not make it compatible. Do not treat every
+        // Arrow Invalid from other storage APIs as DataFormatBroken without
+        // checking that call site's semantics.
+        return milvus::DataFormatBroken;
+    }
+
+    if (status.IsIOError()) {
+        return milvus::FileWriteFailed;
+    }
+    return milvus::UnexpectedError;
+}
 
 struct BM25StatsAccumulator {
     std::unordered_map<uint32_t, int32_t> rows_with_token;
@@ -2276,8 +2311,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // commit
         auto commit_result = transaction->Commit();
         if (!commit_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          commit_result.status().ToString());
+            auto status = commit_result.status();
+            return milvus::FailureCStatus(
+                ClassifyMilvusStorageCommitStatus(status), status.ToString());
         }
         auto committed_version = commit_result.ValueOrDie();
 

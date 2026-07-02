@@ -43,6 +43,14 @@ func TestClassifyLoonErr(t *testing.T) {
 		assert.False(t, retry.IsRecoverable(out),
 			"non-transient error must be wrapped Unrecoverable so retry stops")
 	})
+	t.Run("non-transient loon error becomes unrecoverable", func(t *testing.T) {
+		out := classifyLoonErr(packed.ErrLoonFFI)
+		require.Error(t, out)
+		assert.ErrorIs(t, out, packed.ErrLoonFFI)
+		assert.NotErrorIs(t, out, packed.ErrLoonTransient)
+		assert.False(t, retry.IsRecoverable(out),
+			"logical loon error must stop the outer retry loop")
+	})
 }
 
 func TestBuildTextColumnConfigs(t *testing.T) {
