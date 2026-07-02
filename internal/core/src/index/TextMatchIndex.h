@@ -98,6 +98,9 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     FuzzyMatchQuery(const std::string& query, uint32_t max_edit_distance);
 
  private:
+    TargetBitmap
+    PrepareBitset();
+
     bool
     shouldTriggerCommit();
 

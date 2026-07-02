@@ -14,21 +14,30 @@ use crate::{
 };
 
 impl IndexReaderWrapper {
-    // split the query string into multiple tokens using index's default tokenizer,
-    // and then execute the disconjunction of term query.
-    pub(crate) fn match_query(&self, q: &str, bitset: *mut c_void) -> Result<()> {
-        // clone the tokenizer to make `match_query` thread-safe.
+    // Tokenize `q` with the field's analyzer (falling back to the standard one)
+    // and return each token's position and term. A cloned tokenizer keeps the
+    // text-match queries thread-safe; this is the one place that tokenizes.
+    fn tokenize_terms(&self, q: &str) -> Vec<(usize, Term)> {
         let mut tokenizer = self
             .index
             .tokenizer_for_field(self.field)
-            .unwrap_or(standard_analyzer(vec![]))
-            .clone();
+            .unwrap_or_else(|_| standard_analyzer(vec![]));
         let mut token_stream = tokenizer.token_stream(q);
-        let mut terms: Vec<Term> = Vec::new();
+        let mut terms = Vec::new();
         while token_stream.advance() {
             let token = token_stream.token();
-            terms.push(Term::from_field_text(self.field, &token.text));
+            terms.push((
+                token.position,
+                Term::from_field_text(self.field, &token.text),
+            ));
         }
+        terms
+    }
+
+    // split the query string into multiple tokens using index's default tokenizer,
+    // and then execute the disconjunction of term query.
+    pub(crate) fn match_query(&self, q: &str, bitset: *mut c_void) -> Result<()> {
+        let terms: Vec<Term> = self.tokenize_terms(q).into_iter().map(|(_, t)| t).collect();
         let collector = DirectBitsetCollector {
             bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
             terms: terms.clone(),
@@ -46,21 +55,10 @@ impl IndexReaderWrapper {
         min_should_match: usize,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let mut tokenizer = self
-            .index
-            .tokenizer_for_field(self.field)
-            .unwrap_or(standard_analyzer(vec![]))
-            .clone();
-        let mut token_stream = tokenizer.token_stream(q);
-        let mut terms: Vec<Term> = Vec::new();
-        while token_stream.advance() {
-            let token = token_stream.token();
-            terms.push(Term::from_field_text(self.field, &token.text));
-        }
         use tantivy::query::{Occur, TermQuery};
         use tantivy::schema::IndexRecordOption;
         let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
-        for term in terms.into_iter() {
+        for (_, term) in self.tokenize_terms(q) {
             subqueries.push((
                 Occur::Should,
                 Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
@@ -87,19 +85,10 @@ impl IndexReaderWrapper {
                 max_edit_distance
             )));
         }
-        // clone the tokenizer to keep fuzzy_match_query thread-safe.
-        let mut tokenizer = self
-            .index
-            .tokenizer_for_field(self.field)
-            .unwrap_or(standard_analyzer(vec![]))
-            .clone();
-        let mut token_stream = tokenizer.token_stream(q);
         use tantivy::query::{FuzzyTermQuery, Occur};
         let distance = max_edit_distance as u8;
         let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
-        while token_stream.advance() {
-            let token = token_stream.token();
-            let term = Term::from_field_text(self.field, &token.text);
+        for (_, term) in self.tokenize_terms(q) {
             subqueries.push((
                 Occur::Should,
                 Box::new(FuzzyTermQuery::new(term, distance, true)),
@@ -113,28 +102,14 @@ impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
     pub(crate) fn phrase_match_query(&self, q: &str, slop: u32, bitset: *mut c_void) -> Result<()> {
-        // clone the tokenizer to make `match_query` thread-safe.
-        let mut tokenizer = self
-            .index
-            .tokenizer_for_field(self.field)
-            .unwrap_or(standard_analyzer(vec![]))
-            .clone();
-        let mut token_stream = tokenizer.token_stream(q);
-        let mut terms: Vec<Term> = Vec::new();
-
-        let mut positions = vec![];
-        while token_stream.advance() {
-            let token = token_stream.token();
-            positions.push(token.position);
-            terms.push(Term::from_field_text(self.field, &token.text));
-        }
-        if terms.len() <= 1 {
+        let terms_with_offset = self.tokenize_terms(q);
+        if terms_with_offset.len() <= 1 {
             // tantivy will panic when terms.len() <= 1, so we forward to text match instead.
+            let terms: Vec<Term> = terms_with_offset.into_iter().map(|(_, t)| t).collect();
             let query = BooleanQuery::new_multiterms_query(terms);
             return self.search(&query, bitset);
         }
 
-        let terms_with_offset: Vec<_> = positions.into_iter().zip(terms.into_iter()).collect();
         let phrase_query = PhraseQuery::new_with_offset_and_slop(terms_with_offset, slop);
         self.search(&phrase_query, bitset)
     }
