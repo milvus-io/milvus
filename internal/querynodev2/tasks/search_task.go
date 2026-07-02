@@ -153,7 +153,7 @@ func (t *SearchTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	searchReq, err := segcore.NewSearchRequest(t.collection.GetCCollection(), req, t.placeholderGroup)
+	searchReq, err := t.collection.NewSearchRequest(req, t.placeholderGroup)
 	if err != nil {
 		return err
 	}
