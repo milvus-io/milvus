@@ -137,6 +137,101 @@ func TestExpr_Term(t *testing.T) {
 	}
 }
 
+// assertNullLiteralRejected checks that the expression is rejected specifically
+// because of the bare-NULL reserved-word guard, i.e. it returns the actionable
+// message rather than the misleading "field NULL not exist" (issue #50882).
+func assertNullLiteralRejected(t *testing.T, helper *typeutil.SchemaHelper, exprStr string) {
+	_, err := ParseExpr(helper, exprStr, nil)
+	if assert.Error(t, err, exprStr) {
+		assert.Contains(t, err.Error(), "NULL literal is not supported in expressions", exprStr)
+	}
+}
+
+func TestExpr_NullLiteral(t *testing.T) {
+	// NULL is not a value literal. It is lexed as a bare identifier, so it must be
+	// rejected wherever it appears in column/value position (issue #50882). The
+	// behavior must be identical whether or not a dynamic field is present: without
+	// one a bare NULL fails a field lookup; with one it would otherwise be silently
+	// mistaken for a dynamic JSON key named "NULL". Use `<field> is null` /
+	// `is not null` to compare against null instead.
+	rejected := []string{
+		// inside an `in [...]` value list (the exact shape from the issue)
+		`Int64Field in [6560, NULL, 6722, -7856, -6757]`,
+		`Int64Field in [null]`,
+		`Int64Field in [NULL]`,
+		`Int64Field not in [1, Null]`,
+		`VarCharField in ["a", null, "b"]`,
+		`(not (not ((Int64Field is not null) and (Int64Field in [1, NULL, 2]))))`,
+		// NULL as the tested column on the left of `in`
+		`NULL in [1, 2]`,
+		// binary comparison, either side
+		`Int64Field == NULL`,
+		`NULL == Int64Field`,
+		`NULL > 5`,
+		`Int64Field != NULL`,
+		// range comparison
+		`1 < NULL < 5`,
+		`Int64Field < NULL`,
+		// logical / unary operands
+		`NULL and Int64Field > 0`,
+		`Int64Field > 0 or NULL`,
+		`not NULL`,
+		// function arguments
+		`array_length(NULL) > 0`,
+		`array_contains(NULL, 1)`,
+		// `is null` / `is not null` with NULL as the target (nonsensical)
+		`NULL is null`,
+		`NULL is not null`,
+		// NULL as a JSON / array subscript base — a separate lookup path
+		// (getColumnInfoFromJSONIdentifier) that bypasses translateIdentifier
+		`NULL["x"] == 1`,
+		`NULL[0] > 1`,
+		// case-insensitive: any casing of the reserved word is rejected
+		`Int64Field == Null`,
+		`Int64Field == nUlL`,
+		`Int64Field == NuLL`,
+	}
+
+	// Valid expressions that must NOT be affected by the guard.
+	validBoth := []string{
+		// the real "is null" predicates the guard points users to
+		`Int64Field is null`,
+		`Int64Field is not null`,
+		`JSONField["a"] is null`,
+		// a JSON key literally named "null" stays reachable via quoting: the base
+		// identifier is the field name, not "null"
+		`JSONField["null"] == 1`,
+		`JSONField['null'] == 1`,
+		// the string literal "null" is a value, not an identifier
+		`VarCharField == "null"`,
+		`VarCharField in ["null", "NULL"]`,
+	}
+	// Only valid when the dynamic field exists.
+	validDynamicOnly := []string{
+		`$meta["null"] == 1`,
+		`A == 1`, // sanity: an arbitrary dynamic key still resolves
+	}
+
+	for _, dynamic := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dynamic=%v", dynamic), func(t *testing.T) {
+			helper, err := typeutil.CreateSchemaHelper(newTestSchema(dynamic))
+			assert.NoError(t, err)
+
+			for _, exprStr := range rejected {
+				assertNullLiteralRejected(t, helper, exprStr)
+			}
+			for _, exprStr := range validBoth {
+				assertValidExpr(t, helper, exprStr)
+			}
+			if dynamic {
+				for _, exprStr := range validDynamicOnly {
+					assertValidExpr(t, helper, exprStr)
+				}
+			}
+		})
+	}
+}
+
 func TestExpr_Call(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

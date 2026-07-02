@@ -56,12 +56,30 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 	return ctx.Expr().Accept(v)
 }
 
+// errNullLiteral rejects a bare `null`/`NULL` used as an identifier. `NULL` is
+// lexed as an ordinary identifier (it is not a grammar token), so a literal NULL
+// where a column is expected — inside an `in [...]` list, a comparison/range
+// operand, a function argument (`array_length(NULL)`), an `is null` target, a
+// JSON/array subscript base (`NULL["x"]`), etc. — reaches a field lookup. Without
+// a dynamic field it fails an opaque "field NULL not exist"; with a dynamic field
+// it is silently mistaken for a JSON key named NULL. Treat bare `null`/`NULL` as a
+// reserved word (issue #50882). A field or JSON key literally named "null" stays
+// reachable via quoting, e.g. `field["null"]` / `$meta["null"]`, whose base
+// identifier is the field name, not "null".
+func errNullLiteral() error {
+	return merr.WrapErrParameterInvalidMsg(
+		"NULL literal is not supported in expressions; use '<field> is null' or '<field> is not null' instead")
+}
+
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
 	return v.translateIdentifierWithText(identifier, false)
 }
 
 func (v *ParserVisitor) translateIdentifierWithText(identifier string, allowText bool) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
+	if strings.EqualFold(identifier, "null") {
+		return nil, errNullLiteral()
+	}
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
@@ -1911,6 +1929,11 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	// the field name and normal (non-raw) keys individually below instead.
 	rawFieldName := strings.Split(identifier, "[")[0]
 	fieldName := decodeUnicode(rawFieldName)
+	// Reject a bare `null`/`NULL` base (e.g. `NULL["x"]`, `NULL[0]`) here too —
+	// this lookup bypasses translateIdentifierWithText. See errNullLiteral.
+	if strings.EqualFold(fieldName, "null") {
+		return nil, errNullLiteral()
+	}
 	nestedPath := make([]string, 0)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
 	if err != nil {
