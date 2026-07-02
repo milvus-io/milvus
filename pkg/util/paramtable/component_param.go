@@ -1738,6 +1738,10 @@ type logConfig struct {
 	Format                      ParamItem `refreshable:"false"`
 	Stdout                      ParamItem `refreshable:"false"`
 	GrpcLogLevel                ParamItem `refreshable:"false"`
+	GrpcServerLogLevel          ParamItem `refreshable:"true"`
+	GrpcClientLogLevel          ParamItem `refreshable:"true"`
+	GrpcServerLogMethods        ParamItem `refreshable:"true"`
+	GrpcClientLogMethods        ParamItem `refreshable:"true"`
 	AsyncWriteEnable            ParamItem `refreshable:"false"`
 	AsyncWriteFlushInterval     ParamItem `refreshable:"false"`
 	AsyncWriteDroppedTimeout    ParamItem `refreshable:"false"`
@@ -1822,6 +1826,42 @@ Set this parameter as the path that you have permission to write.`,
 		Export:       true,
 	}
 	l.GrpcLogLevel.Init(base.mgr)
+
+	l.GrpcServerLogLevel = ParamItem{
+		Key:          "grpc.log.server.level",
+		DefaultValue: "info",
+		Version:      "3.0.0",
+		Doc:          "Log level for the gRPC server logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcServerLogLevel.Init(base.mgr)
+
+	l.GrpcClientLogLevel = ParamItem{
+		Key:          "grpc.log.client.level",
+		DefaultValue: "info",
+		Version:      "3.0.0",
+		Doc:          "Log level for the gRPC client logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcClientLogLevel.Init(base.mgr)
+
+	l.GrpcServerLogMethods = ParamItem{
+		Key:          "grpc.log.server.methods",
+		DefaultValue: "",
+		Version:      "3.0.0",
+		Doc:          "Comma-separated full-method allowlist logged on server side (e.g. /milvus.proto.milvus.MilvusService/Search). Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcServerLogMethods.Init(base.mgr)
+
+	l.GrpcClientLogMethods = ParamItem{
+		Key:          "grpc.log.client.methods",
+		DefaultValue: "",
+		Version:      "3.0.0",
+		Doc:          "Comma-separated full-method allowlist logged on client side. Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcClientLogMethods.Init(base.mgr)
 
 	l.AsyncWriteEnable = ParamItem{
 		Key:          "log.asyncWrite.enable",

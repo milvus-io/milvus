@@ -296,11 +296,12 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
 			proxy.DatabaseInterceptor(),
 			UnaryRequestStatsInterceptor,
+			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
+			interceptor.NewObservabilityServerUnaryInterceptor(),
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerHookInterceptor(),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
-			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
@@ -416,6 +417,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
+			interceptor.NewObservabilityServerUnaryInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -426,6 +428,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			mlog.StreamServerInterceptor(typeutil.ProxyRole),
+			interceptor.NewObservabilityServerStreamInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
