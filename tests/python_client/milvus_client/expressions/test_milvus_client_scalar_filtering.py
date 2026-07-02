@@ -1355,6 +1355,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
         failures = []
         for tmpl in templates:
             results = {}
+            errors = []
             for fname, idx_type in group:
                 expr = tmpl.replace("{f}", fname)
                 try:
@@ -1365,13 +1366,28 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
                         output_fields=[default_pk],
                         check_task=CheckTasks.check_nothing,
                     )[0]
-                    if hasattr(res, "message"):
+                    if hasattr(res, "message") and res.message:
+                        errors.append(f"{expr} ({idx_type}) -> {res.message}")
                         continue
                     results[fname] = sorted([r[default_pk] for r in res])
-                except Exception:
-                    continue
+                except Exception as e:
+                    errors.append(f"{expr} ({idx_type}) -> {e}")
 
             if len(results) < 2:
+                # Fewer than two fields answered — nothing was cross-checked. A
+                # template every index rejects as unsupported is a legitimate
+                # skip, but anything else (e.g. dropped collection) must fail:
+                # silently continuing here turns total breakage into a false green.
+                benign = bool(errors) and all(
+                    "cannot parse" in e or "unsupported" in e.lower() or "not supported" in e.lower() for e in errors
+                )
+                if benign:
+                    log.warning(f"SKIP (unsupported on all indexes): {tmpl}: " + "; ".join(errors))
+                else:
+                    failures.append(
+                        f"NO COMPARISON: {tmpl}: only {len(results)}/{len(group)} fields answered; "
+                        f"errors: " + ("; ".join(errors) if errors else "none")
+                    )
                 continue
 
             # Cross-index consistency check
@@ -1394,7 +1410,6 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
                         break
                 if no_idx_field:
                     expr = tmpl.replace("{f}", no_idx_field)
-                    [fname for fname, _ in group]
                     expected_idx = eval_filter(expr, test_data)
                     expected_ids = sorted([test_data[i][default_pk] for i in expected_idx])
                     actual_ids = results[no_idx_field]
@@ -1905,6 +1920,7 @@ class TestJsonExpressions(TestMilvusClientV2Base):
         ]
 
         failures = []
+        compared = 0
         for expr in expressions:
             try:
                 res1 = self.query(
@@ -1914,8 +1930,12 @@ class TestJsonExpressions(TestMilvusClientV2Base):
                     output_fields=[default_pk],
                     check_task=CheckTasks.check_nothing,
                 )[0]
-                if hasattr(res1, "message"):
-                    log.warning(f"Skipping unsupported: {expr}")
+                if hasattr(res1, "message") and res1.message:
+                    msg = str(res1.message)
+                    if "cannot parse" in msg or "unsupported" in msg.lower() or "not supported" in msg.lower():
+                        log.warning(f"Skipping unsupported: {expr} -> {msg}")
+                    else:
+                        failures.append(f"ERROR: {expr} -> {msg}")
                     continue
 
                 expr_inv = expr.replace("jf_none", "jf_inv")
@@ -1926,7 +1946,10 @@ class TestJsonExpressions(TestMilvusClientV2Base):
                     output_fields=[default_pk],
                     check_task=CheckTasks.check_nothing,
                 )[0]
-                if hasattr(res2, "message"):
+                if hasattr(res2, "message") and res2.message:
+                    # The plain field answered but the indexed one errored — that
+                    # is an index-path defect, not an unsupported expression.
+                    failures.append(f"INDEX ERROR: {expr_inv} -> {res2.message}")
                     continue
 
                 ids1 = sorted([r[default_pk] for r in res1])
@@ -1934,11 +1957,16 @@ class TestJsonExpressions(TestMilvusClientV2Base):
                 if ids1 != ids2:
                     failures.append(f"INDEX MISMATCH: {expr} no_index={len(ids1)} vs inverted={len(ids2)}")
                 else:
+                    compared += 1
                     log.info(f"PASS: {expr} -> {len(ids1)} rows")
             except Exception as e:
                 if "cannot parse" not in str(e):
                     failures.append(f"EXCEPTION: {expr} -> {e}")
 
+        assert compared > 0 or failures, (
+            f"0/{len(expressions)} JSON expressions verified — environment/collection is broken, "
+            f"refusing to pass on zero coverage"
+        )
         assert not failures, f"{len(failures)} JSON expression failures:\n" + "\n".join(failures)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1954,6 +1982,7 @@ class TestJsonExpressions(TestMilvusClientV2Base):
             f'json_contains_any({jf}["arr_key"], [5, 10, 15])',
         ]
 
+        executed = 0
         for expr in expressions:
             try:
                 res = self.query(
@@ -1963,12 +1992,21 @@ class TestJsonExpressions(TestMilvusClientV2Base):
                     output_fields=[default_pk],
                     check_task=CheckTasks.check_nothing,
                 )[0]
-                if hasattr(res, "message"):
-                    log.warning(f"Skipping: {expr} -> {res}")
-                    continue
+                if hasattr(res, "message") and res.message:
+                    msg = str(res.message)
+                    if "cannot parse" in msg or "unsupported" in msg.lower() or "not supported" in msg.lower():
+                        log.warning(f"Skipping unsupported: {expr} -> {msg}")
+                        continue
+                    pytest.fail(f"Unexpected error: {expr} -> {msg}")
+                executed += 1
                 log.info(f"PASS: {expr} -> {len(res)} rows")
             except Exception as e:
                 if "cannot parse" in str(e):
                     log.warning(f"Not supported: {expr}")
                 else:
                     pytest.fail(f"Unexpected error: {expr} -> {e}")
+
+        assert executed > 0, (
+            f"0/{len(expressions)} json_contains expressions executed — environment/collection is broken, "
+            f"refusing to pass on zero coverage"
+        )
