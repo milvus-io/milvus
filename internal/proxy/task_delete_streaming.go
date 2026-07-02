@@ -6,15 +6,96 @@ import (
 
 	"go.opentelemetry.io/otel"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// appendPredicateDeleteMessages appends one predicate-delete WAL message to each target vchannel.
+// It does not reuse the PK-delete repack path because predicate delete has no primary-key hash.
+func appendPredicateDeleteMessages(
+	ctx context.Context,
+	collectionID int64,
+	collectionName string,
+	partitionID int64,
+	partitionName string,
+	dbName string,
+	vChannels []string,
+	idAllocator allocator.Interface,
+	deleteTs uint64,
+	serializedPlan []byte,
+) (uint64, error) {
+	startMsgID, _, err := idAllocator.Alloc(uint32(len(vChannels)))
+	if err != nil {
+		return 0, err
+	}
+
+	var ez *message.CipherConfig
+	if hookutil.IsClusterEncryptionEnabled() {
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, collectionName)
+		if err != nil {
+			mlog.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", collectionName), mlog.Err(err))
+			return 0, merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		}
+
+		ez = hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID).AsMessageConfig()
+	}
+
+	msgs := make([]message.MutableMessage, 0, len(vChannels))
+	for idx, vchannel := range vChannels {
+		deleteReq := &msgpb.DeleteRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+				commonpbutil.WithMsgID(startMsgID+int64(idx)),
+				commonpbutil.WithTimeStamp(deleteTs),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ShardName:      vchannel,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			// A predicate delete has no primary keys. It carries the single MVCC delete
+			// timestamp in Timestamps[0] (consumers read it via GetTimestamps and it also
+			// drives the message Begin/EndTimestamp) and the predicate in SerializedExprPlan.
+			// DeleteMsg.CheckAligned() special-cases this shape (expr plan set, 1 ts, 0 pks).
+			Timestamps:         []uint64{deleteTs},
+			SerializedExprPlan: serializedPlan,
+		}
+
+		msg, err := message.NewDeleteMessageBuilderV1().
+			WithHeader(&message.DeleteMessageHeader{
+				CollectionId: collectionID,
+				Rows:         0,
+			}).
+			WithBody(deleteReq).
+			WithVChannel(vchannel).
+			WithCipher(ez).
+			BuildMutable()
+		if err != nil {
+			return 0, err
+		}
+		msgs = append(msgs, msg)
+	}
+
+	resp := streaming.WAL().AppendMessages(ctx, msgs...)
+	if err := resp.UnwrapFirstError(); err != nil {
+		mlog.Warn(ctx, "append predicate delete messages to wal failed", mlog.Err(err))
+		return 0, err
+	}
+	return resp.MaxTimeTick(), nil
+}
 
 // Execute is a function to delete task by streaming service
 // we only overwrite the Execute function

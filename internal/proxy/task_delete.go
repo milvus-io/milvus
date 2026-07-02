@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -412,20 +413,10 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
-		err := dr.simpleDelete(ctx, pk, numRow)
-		if err != nil {
-			return err
-		}
-	} else {
-		// if get complex delete expr
-		// need query from querynode before delete
-		err := dr.complexDelete(ctx, dr.plan)
-		if err != nil {
-			mlog.Warn(ctx, "complex delete failed,but delete some data", mlog.Int64("count", dr.result.DeleteCnt), mlog.String("expr", dr.req.GetExpr()))
-			return err
-		}
+		return dr.simpleDelete(ctx, pk, numRow)
 	}
-	return nil
+
+	return dr.nonSimpleDelete(ctx, dr.plan)
 }
 
 func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*deleteTask, error) {
@@ -585,16 +576,195 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 	}
 }
 
-func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode) error {
-	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
-	var err error
+// canUsePredicateDelete is a local conservative allowlist for predicate-delete producer safety.
+// Existing Milvus expression validators cover the broader query engine, while predicate delete storage apply supports a narrower subset.
+func canUsePredicateDelete(plan *planpb.PlanNode, schema *schemapb.CollectionSchema) bool {
+	if plan == nil || plan.GetQuery() == nil {
+		return false
+	}
+	return canUsePredicateDeleteExpr(plan.GetQuery().GetPredicates(), schema)
+}
 
-	dr.msgID, err = dr.idAllocator.AllocOne()
+func canUsePredicateDeleteExpr(expr *planpb.Expr, schema *schemapb.CollectionSchema) bool {
+	if expr == nil || expr.GetIsTemplate() {
+		return false
+	}
+
+	switch expr := expr.GetExpr().(type) {
+	case *planpb.Expr_BinaryExpr:
+		binaryExpr := expr.BinaryExpr
+		switch binaryExpr.GetOp() {
+		case planpb.BinaryExpr_LogicalAnd, planpb.BinaryExpr_LogicalOr:
+			return canUsePredicateDeleteExpr(binaryExpr.GetLeft(), schema) && canUsePredicateDeleteExpr(binaryExpr.GetRight(), schema)
+		default:
+			return false
+		}
+	case *planpb.Expr_UnaryExpr:
+		unaryExpr := expr.UnaryExpr
+		if unaryExpr.GetOp() != planpb.UnaryExpr_Not {
+			return false
+		}
+		return canUsePredicateDeleteExpr(unaryExpr.GetChild(), schema)
+	case *planpb.Expr_UnaryRangeExpr:
+		unaryRangeExpr := expr.UnaryRangeExpr
+		return isPredicateDeleteColumnSupported(schema, unaryRangeExpr.GetColumnInfo()) &&
+			isPredicateDeleteCompareOp(unaryRangeExpr.GetOp()) &&
+			unaryRangeExpr.GetTemplateVariableName() == "" &&
+			len(unaryRangeExpr.GetExtraValues()) == 0 &&
+			isPredicateDeleteLiteralSupported(unaryRangeExpr.GetValue())
+	case *planpb.Expr_TermExpr:
+		termExpr := expr.TermExpr
+		// Plain field IN literal-list uses ColumnInfo + Values; IsInField is for container membership.
+		if termExpr.GetIsInField() || termExpr.GetTemplateVariableName() != "" || len(termExpr.GetValues()) == 0 {
+			return false
+		}
+		if !isPredicateDeleteColumnSupported(schema, termExpr.GetColumnInfo()) {
+			return false
+		}
+		for _, value := range termExpr.GetValues() {
+			if !isPredicateDeleteLiteralSupported(value) {
+				return false
+			}
+		}
+		return true
+	case *planpb.Expr_NullExpr:
+		nullExpr := expr.NullExpr
+		return nullExpr.GetOp() == planpb.NullExpr_IsNull && isPredicateDeleteColumnSupported(schema, nullExpr.GetColumnInfo())
+	default:
+		return false
+	}
+}
+
+func isPredicateDeleteCompareOp(op planpb.OpType) bool {
+	switch op {
+	case planpb.OpType_Equal,
+		planpb.OpType_NotEqual,
+		planpb.OpType_LessThan,
+		planpb.OpType_LessEqual,
+		planpb.OpType_GreaterThan,
+		planpb.OpType_GreaterEqual:
+		return true
+	default:
+		return false
+	}
+}
+
+func isPredicateDeleteColumnSupported(schema *schemapb.CollectionSchema, columnInfo *planpb.ColumnInfo) bool {
+	if schema == nil || columnInfo == nil {
+		return false
+	}
+	if len(columnInfo.GetNestedPath()) > 0 || columnInfo.GetIsElementLevel() {
+		return false
+	}
+	if !isPredicateDeleteScalarType(columnInfo.GetDataType()) {
+		return false
+	}
+
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() != columnInfo.GetFieldId() {
+			continue
+		}
+		if field.GetIsDynamic() || field.GetDataType() != columnInfo.GetDataType() {
+			return false
+		}
+		return isPredicateDeleteScalarType(field.GetDataType())
+	}
+	return false
+}
+
+func isPredicateDeleteScalarType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_String,
+		schemapb.DataType_VarChar:
+		return true
+	default:
+		return false
+	}
+}
+
+func isPredicateDeleteLiteralSupported(value *planpb.GenericValue) bool {
+	if value == nil {
+		return false
+	}
+	switch value.GetVal().(type) {
+	case *planpb.GenericValue_BoolVal,
+		*planpb.GenericValue_Int64Val,
+		*planpb.GenericValue_FloatVal,
+		*planpb.GenericValue_StringVal:
+		return true
+	default:
+		return false
+	}
+}
+
+// nonSimpleDelete uses predicate delete only when it is enabled, supported, and the matched row count is above the threshold.
+// Otherwise it keeps the existing PK-delete path for non-simple expressions.
+func (dr *deleteRunner) nonSimpleDelete(ctx context.Context, plan *planpb.PlanNode) error {
+	// Allocate a single MVCC delete timestamp for the whole non-simple delete so the
+	// count probe and the chosen path (complexDelete or predicateDelete) all use the
+	// same ts ("count at T, delete at T").
+	deleteTs, err := dr.tsoAllocatorIns.AllocOne(ctx)
 	if err != nil {
 		return err
 	}
+	// Predicate delete is only applied under the StorageV3 format (common.storage.useLoonFFI)
+	// and behind the feature flag; fall back to the PK-delete path when either is off.
+	if !paramtable.Get().CommonCfg.EnablePredicateDelete.GetAsBool() ||
+		!paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+		if err = dr.complexDelete(ctx, plan, deleteTs); err != nil {
+			mlog.Warn(ctx, "complex delete failed,but delete some data", mlog.Int64("count", dr.result.DeleteCnt), mlog.String("expr", dr.req.GetExpr()))
+			return err
+		}
+		return nil
+	}
+	if !canUsePredicateDelete(plan, dr.schema.CollectionSchema) {
+		mlog.Info(ctx, "predicate delete falls back to pk delete for unsupported expression", mlog.String("expr", dr.req.GetExpr()))
+		if err = dr.complexDelete(ctx, plan, deleteTs); err != nil {
+			mlog.Warn(ctx, "complex delete failed,but delete some data", mlog.Int64("count", dr.result.DeleteCnt), mlog.String("expr", dr.req.GetExpr()))
+			return err
+		}
+		return nil
+	}
 
-	dr.ts, err = dr.tsoAllocatorIns.AllocOne(ctx)
+	matchedCount, err := dr.countPredicateDeleteHits(ctx, plan, deleteTs)
+	if err != nil {
+		mlog.Warn(ctx, "predicate delete count failed", mlog.String("expr", dr.req.GetExpr()), mlog.Err(err))
+		return err
+	}
+	threshold := paramtable.Get().CommonCfg.PredicateDeleteHitCountThreshold.GetAsInt64()
+	if matchedCount <= threshold {
+		mlog.Info(ctx, "predicate delete falls back to pk delete",
+			mlog.Int64("matchedCount", matchedCount),
+			mlog.Int64("threshold", threshold),
+			mlog.String("expr", dr.req.GetExpr()))
+		if err = dr.complexDelete(ctx, plan, deleteTs); err != nil {
+			mlog.Warn(ctx, "complex delete failed,but delete some data", mlog.Int64("count", dr.result.DeleteCnt), mlog.String("expr", dr.req.GetExpr()))
+			return err
+		}
+		return nil
+	}
+
+	if err = dr.predicateDelete(ctx, plan, matchedCount, deleteTs); err != nil {
+		mlog.Warn(ctx, "predicate delete failed", mlog.String("expr", dr.req.GetExpr()), mlog.Err(err))
+		return err
+	}
+	return nil
+}
+
+func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode, ts uint64) error {
+	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
+	var err error
+
+	dr.ts = ts
+
+	dr.msgID, err = dr.idAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
@@ -632,6 +802,118 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	}
 	mlog.Info(ctx, "complex delete finished", mlog.Int64("deleteCnt", dr.result.GetDeleteCnt()), mlog.Duration("interval", rc.ElapseSpan()))
 	return nil
+}
+
+// predicateDelete appends predicate-delete WAL messages. deleteTs is the shared MVCC delete
+// timestamp allocated by nonSimpleDelete (same ts used by the count probe). matchedCount is the
+// probe-time hit count and is reported as the affected-rows estimate; the physical delete is
+// applied asynchronously by the consumer side.
+func (dr *deleteRunner) predicateDelete(ctx context.Context, plan *planpb.PlanNode, matchedCount int64, deleteTs uint64) error {
+	serializedPlan, err := proto.Marshal(plan)
+	if err != nil {
+		return err
+	}
+
+	dr.ts = deleteTs
+
+	partitionID := common.AllPartitionsID
+	if len(dr.partitionIDs) == 1 {
+		partitionID = dr.partitionIDs[0]
+	}
+
+	sessionTS, err := appendPredicateDeleteMessages(
+		ctx,
+		dr.collectionID,
+		dr.req.GetCollectionName(),
+		partitionID,
+		dr.req.GetPartitionName(),
+		dr.req.GetDbName(),
+		dr.vChannels,
+		dr.idAllocator,
+		dr.ts,
+		serializedPlan,
+	)
+	if err != nil {
+		return err
+	}
+
+	dr.result.DeleteCnt = matchedCount
+	dr.result.Timestamp = sessionTS
+	return nil
+}
+
+func (dr *deleteRunner) countPredicateDeleteHits(ctx context.Context, plan *planpb.PlanNode, queryTs uint64) (int64, error) {
+	countPlan, ok := proto.Clone(plan).(*planpb.PlanNode)
+	if !ok {
+		return 0, merr.WrapErrServiceInternalMsg("failed to clone delete plan for predicate delete count")
+	}
+	queryPlan := countPlan.GetQuery()
+	if queryPlan == nil {
+		return 0, merr.WrapErrServiceInternalMsg("predicate delete count requires a query plan")
+	}
+	queryPlan.IsCount = false
+	queryPlan.Aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 0}}
+	countPlan.OutputFieldIds = nil
+
+	serializedPlan, err := proto.Marshal(countPlan)
+	if err != nil {
+		return 0, merr.WrapErrServiceInternalErr(err, "failed to serialize predicate delete count plan")
+	}
+
+	msgID, err := dr.idAllocator.AllocOne()
+	if err != nil {
+		return 0, err
+	}
+
+	var matchedCount atomic.Int64
+	err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             dr.req.GetDbName(),
+		CollectionName: dr.req.GetCollectionName(),
+		CollectionID:   dr.collectionID,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+			result, err := qn.Query(ctx, &querypb.QueryRequest{
+				Req: &internalpb.RetrieveRequest{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+						commonpbutil.WithMsgID(msgID),
+						commonpbutil.WithSourceID(paramtable.GetNodeID()),
+						commonpbutil.WithTargetID(nodeID),
+					),
+					MvccTimestamp:      queryTs,
+					ReqID:              paramtable.GetNodeID(),
+					DbID:               0, // TODO
+					CollectionID:       dr.collectionID,
+					PartitionIDs:       dr.partitionIDs,
+					SerializedExprPlan: serializedPlan,
+					GuaranteeTimestamp: parseGuaranteeTsFromConsistency(queryTs, queryTs, dr.req.GetConsistencyLevel()),
+					QueryLabel:         metrics.DeleteQueryLabel,
+					Aggregates:         queryPlan.GetAggregates(),
+				},
+				DmlChannels: []string{channel},
+				Scope:       querypb.DataScope_All,
+			})
+			if err != nil {
+				return err
+			}
+			if result == nil {
+				return merr.WrapErrServiceInternalMsg("predicate delete count query returned nil result")
+			}
+			if err := merr.Error(result.GetStatus()); err != nil {
+				return err
+			}
+			count, err := funcutil.CntOfInternalResult(result)
+			if err != nil {
+				return merr.Wrap(err, "failed to parse predicate delete count result")
+			}
+			matchedCount.Add(count)
+			return nil
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return matchedCount.Load(), nil
 }
 
 func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {
