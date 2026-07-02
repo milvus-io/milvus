@@ -87,6 +87,8 @@ var (
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
 	ErrPartitionNotFullyLoaded = newMilvusError("partition not fully loaded", 202, true)
+	ErrNamespaceNotFound       = newMilvusError("namespace not found", 203, false, WithErrorType(InputError))
+	ErrNamespaceAlreadyExists  = newMilvusError("namespace already exists", 204, false, WithErrorType(InputError))
 
 	// General capacity related
 	ErrGeneralCapacityExceeded = newMilvusError("general capacity exceeded", 250, false)

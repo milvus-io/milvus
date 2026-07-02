@@ -689,6 +689,41 @@ func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
 	return GetNamespaceMode(kvs...) == NamespaceModePartition
 }
 
+func ValidatePartitionName(partitionName string, maxNameLength int, maxNameLengthValue string, strictCheck bool) error {
+	partitionName = strings.TrimSpace(partitionName)
+
+	invalidMsg := "Invalid partition name: " + partitionName + ". "
+	if partitionName == "" {
+		return merr.WrapErrParameterInvalidMsg("%s", invalidMsg+"Partition name should not be empty.")
+	}
+	if len(partitionName) > maxNameLength {
+		return merr.WrapErrParameterInvalidMsg("%s", invalidMsg+"The length of a partition name must be less than "+maxNameLengthValue+" characters.")
+	}
+	if !strictCheck {
+		return nil
+	}
+
+	firstChar := partitionName[0]
+	if firstChar != '_' && !isPartitionNameAlpha(firstChar) && !isPartitionNameNumber(firstChar) {
+		return merr.WrapErrParameterInvalidMsg("%s", invalidMsg+"The first character of a partition name must be an underscore or letter.")
+	}
+	for i := 1; i < len(partitionName); i++ {
+		c := partitionName[i]
+		if c != '_' && !isPartitionNameAlpha(c) && !isPartitionNameNumber(c) && c != '-' {
+			return merr.WrapErrParameterInvalidMsg("%s", invalidMsg+"Partition name can only contain numbers, letters and underscores.")
+		}
+	}
+	return nil
+}
+
+func isPartitionNameAlpha(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isPartitionNameNumber(c byte) bool {
+	return c >= '0' && c <= '9'
+}
+
 func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
 	for _, kv := range kvs {
 		if kv.GetKey() == NamespaceModeKey {

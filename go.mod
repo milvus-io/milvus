@@ -321,3 +321,5 @@ replace (
 	github.com/milvus-io/milvus/pkg/v3 => ./pkg
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
+
+replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260701064602-f3ac444e4dc0

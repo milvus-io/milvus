@@ -1940,6 +1940,198 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	return spt.result, nil
 }
 
+func (node *Proxy) CreateNamespace(ctx context.Context, request *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.CreateNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "create namespace"); err != nil {
+		return &milvuspb.CreateNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateNamespace")
+	defer sp.End()
+	method := "CreateNamespace"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &createNamespaceTask{
+		ctx:                    ctx,
+		Condition:              NewTaskCondition(ctx),
+		CreateNamespaceRequest: request,
+		mixCoord:               node.mixCoord,
+	}
+
+	mlog.Info(ctx, rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
+		return &milvuspb.CreateNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	if err := task.WaitToFinish(); err != nil {
+		mlog.Warn(ctx, rpcFailedToWaitToFinish(method), mlog.Err(err))
+		return &milvuspb.CreateNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Info(ctx, rpcDone(method))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+func (node *Proxy) DescribeNamespace(ctx context.Context, request *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DescribeNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeNamespace")
+	defer sp.End()
+	method := "DescribeNamespace"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &describeNamespaceTask{
+		ctx:                      ctx,
+		Condition:                NewTaskCondition(ctx),
+		DescribeNamespaceRequest: request,
+		mixCoord:                 node.mixCoord,
+	}
+
+	mlog.Debug(ctx, rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
+		return &milvuspb.DescribeNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	if err := task.WaitToFinish(); err != nil {
+		mlog.Warn(ctx, rpcFailedToWaitToFinish(method), mlog.Err(err))
+		return &milvuspb.DescribeNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Debug(ctx, rpcDone(method))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+func (node *Proxy) ListNamespaces(ctx context.Context, request *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ListNamespacesResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListNamespaces")
+	defer sp.End()
+	method := "ListNamespaces"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &listNamespacesTask{
+		ctx:                   ctx,
+		Condition:             NewTaskCondition(ctx),
+		ListNamespacesRequest: request,
+		mixCoord:              node.mixCoord,
+	}
+
+	mlog.Debug(ctx, rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
+		return &milvuspb.ListNamespacesResponse{Status: merr.Status(err)}, nil
+	}
+	if err := task.WaitToFinish(); err != nil {
+		mlog.Warn(ctx, rpcFailedToWaitToFinish(method), mlog.Err(err))
+		return &milvuspb.ListNamespacesResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Debug(ctx, rpcDone(method))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+func (node *Proxy) DropNamespace(ctx context.Context, request *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DropNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "drop namespace"); err != nil {
+		return &milvuspb.DropNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropNamespace")
+	defer sp.End()
+	method := "DropNamespace"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &dropNamespaceTask{
+		ctx:                  ctx,
+		Condition:            NewTaskCondition(ctx),
+		DropNamespaceRequest: request,
+		mixCoord:             node.mixCoord,
+	}
+
+	mlog.Info(ctx, rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
+		return &milvuspb.DropNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	if err := task.WaitToFinish(); err != nil {
+		mlog.Warn(ctx, rpcFailedToWaitToFinish(method), mlog.Err(err))
+		return &milvuspb.DropNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Info(ctx, rpcDone(method))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+func (node *Proxy) HasNamespace(ctx context.Context, request *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.HasNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HasNamespace")
+	defer sp.End()
+	method := "HasNamespace"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &hasNamespaceTask{
+		ctx:                 ctx,
+		Condition:           NewTaskCondition(ctx),
+		HasNamespaceRequest: request,
+		mixCoord:            node.mixCoord,
+	}
+
+	mlog.Debug(ctx, rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
+		return &milvuspb.HasNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	if err := task.WaitToFinish(); err != nil {
+		mlog.Warn(ctx, rpcFailedToWaitToFinish(method), mlog.Err(err))
+		return &milvuspb.HasNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Debug(ctx, rpcDone(method))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+func (node *Proxy) GetNamespaceStats(ctx context.Context, request *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetNamespaceStatsResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetNamespaceStats")
+	defer sp.End()
+	method := "GetNamespaceStats"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &getNamespaceStatsTask{
+		ctx:                      ctx,
+		Condition:                NewTaskCondition(ctx),
+		GetNamespaceStatsRequest: request,
+		mixCoord:                 node.mixCoord,
+	}
+
+	mlog.Debug(ctx, rpcReceived(method))
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
+		return &milvuspb.GetNamespaceStatsResponse{Status: merr.Status(err)}, nil
+	}
+	if err := task.WaitToFinish(); err != nil {
+		mlog.Warn(ctx, rpcFailedToWaitToFinish(method), mlog.Err(err))
+		return &milvuspb.GetNamespaceStatsResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Debug(ctx, rpcDone(method))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
 func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.GetLoadingProgressResponse{Status: merr.Status(err)}, nil
