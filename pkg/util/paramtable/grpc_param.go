@@ -239,6 +239,7 @@ type GrpcClientConfig struct {
 	grpcConfig
 
 	CompressionEnabled ParamItem `refreshable:"false"`
+	ConnectionPoolSize ParamItem `refreshable:"false"`
 
 	ClientMaxSendSize ParamItem `refreshable:"false"`
 	ClientMaxRecvSize ParamItem `refreshable:"false"`
@@ -519,6 +520,15 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.MaxCancelError.Init(base.mgr)
+
+	p.ConnectionPoolSize = ParamItem{
+		Key:          "grpc.client.connectionPoolSize",
+		DefaultValue: "4",
+		Version:      "2.6.0",
+		Doc:          "number of grpc connections kept per target, used round-robin to bypass a single HTTP/2 connection's max-concurrent-streams limit; 1 keeps the original single-connection behavior",
+		Export:       true,
+	}
+	p.ConnectionPoolSize.Init(base.mgr)
 }
 
 // GetDialOptionsFromConfig returns grpc dial options from config.

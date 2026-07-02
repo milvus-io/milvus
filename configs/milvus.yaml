@@ -994,6 +994,7 @@ grpc:
   gracefulStopTimeout: 3 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
+    connectionPoolSize: 4 # number of grpc connections kept per target, used round-robin to bypass a single HTTP/2 connection's max-concurrent-streams limit; 1 keeps the original single-connection behavior
     dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000
