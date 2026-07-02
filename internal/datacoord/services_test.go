@@ -3141,6 +3141,26 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
+	t.Run("external_restore_not_implemented", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			External:             true,
+			SnapshotS3Location:   "s3://bucket/export-root/snapshots/100/metadata/1.json",
+			TargetDbName:         "default",
+			TargetCollectionName: "new_collection",
+		})
+
+		assert.NoError(t, err)
+		statusErr := merr.Error(resp.GetStatus())
+		assert.Error(t, statusErr)
+		assert.True(t, errors.Is(statusErr, merr.ErrServiceUnimplemented))
+		assert.False(t, merr.IsRetryableErr(statusErr))
+	})
+
 	t.Run("missing_snapshot_name", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -3210,6 +3230,25 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
+}
+
+func TestServer_ExportSnapshot(t *testing.T) {
+	ctx := context.Background()
+
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.ExportSnapshot(ctx, &datapb.ExportSnapshotRequest{
+		Name:         "test_snapshot",
+		CollectionId: 100,
+		TargetS3Path: "s3://bucket/export-root",
+	})
+
+	assert.NoError(t, err)
+	statusErr := merr.Error(resp.GetStatus())
+	assert.Error(t, statusErr)
+	assert.True(t, errors.Is(statusErr, merr.ErrServiceUnimplemented))
+	assert.False(t, merr.IsRetryableErr(statusErr))
 }
 
 // --- Test CreateSnapshot additional cases ---

@@ -170,6 +170,30 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.RestoreExternalSnapshotRequest{
+			DbName:               "db1",
+			TargetCollectionName: "restored",
+			SnapshotMetadataUri:  "s3://bucket/export-root/snapshots/100/metadata/1.json",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, size)
+		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
+		assert.Equal(t, database, int64(100))
+		assert.Empty(t, col2part)
+
+		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.ExportSnapshotRequest{
+			DbName:         "db1",
+			CollectionName: "foo",
+			Name:           "snapshot",
+			TargetS3Path:   "s3://bucket/export-root",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, size)
+		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
+
 		database, col2part, rt, size, err = GetRequestInfo(context.Background(), &milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
@@ -349,6 +373,8 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.SearchRequest{}, internalpb.RateType_DQLSearch, merr.ErrServiceDiskLimitExceeded, "search")
 		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, merr.ErrServiceQuotaExceeded, "query")
 		testGetFailedResponse(&milvuspb.CreateCollectionRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "createCollection")
+		testGetFailedResponse(&milvuspb.RestoreExternalSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "restoreExternalSnapshot")
+		testGetFailedResponse(&milvuspb.ExportSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "exportSnapshot")
 		testGetFailedResponse(&milvuspb.FlushRequest{}, internalpb.RateType_DDLFlush, merr.ErrServiceRateLimit, "flush")
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
 

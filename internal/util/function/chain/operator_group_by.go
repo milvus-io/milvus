@@ -455,40 +455,45 @@ func (o *GroupByOp) computeGroupScore(g *group) {
 
 // NewGroupByOpFromRepr creates a GroupByOp from an OperatorRepr.
 func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
-	field, ok := repr.Params["field"].(string)
-	if !ok || field == "" {
+	reader := types.NewParamReader("group_by_op", repr.Params)
+	field, err := reader.String("field", true)
+	if err != nil {
+		return nil, err
+	}
+	if field == "" {
 		return nil, merr.WrapErrParameterMissingMsg("group_by_op: field is required")
 	}
 
-	groupSize, err := getInt64Param(repr.Params, "group_size")
+	groupSize, err := reader.Int64("group_size", true, 0)
 	if err != nil {
-		return nil, merr.Wrap(err, "group_by_op")
+		return nil, err
 	}
 	if groupSize <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: group_size must be positive")
 	}
 
-	limit, err := getInt64Param(repr.Params, "limit")
+	limit, err := reader.Int64("limit", true, 0)
 	if err != nil {
-		return nil, merr.Wrap(err, "group_by_op")
+		return nil, err
 	}
 	if limit <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: limit must be positive")
 	}
 
-	offset := int64(0)
-	if _, ok := repr.Params["offset"]; ok {
-		offset, err = getInt64Param(repr.Params, "offset")
-		if err != nil {
-			return nil, merr.Wrap(err, "group_by_op")
-		}
-		if offset < 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("group_by_op: offset must be non-negative")
-		}
+	offset, err := reader.Int64("offset", false, 0)
+	if err != nil {
+		return nil, err
+	}
+	if offset < 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("group_by_op: offset must be non-negative")
 	}
 
 	scorer := GroupScorerMax
-	if scorerStr, ok := repr.Params["scorer"].(string); ok {
+	scorerStr, err := reader.String("scorer", false)
+	if err != nil {
+		return nil, err
+	}
+	if scorerStr != "" {
 		scorer = GroupScorer(scorerStr)
 		if err := ValidateGroupScorer(scorer); err != nil {
 			return nil, merr.Wrap(err, "group_by_op")
@@ -496,24 +501,6 @@ func NewGroupByOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	}
 
 	return NewGroupByOpWithScorer(field, groupSize, limit, offset, scorer), nil
-}
-
-// getInt64Param extracts an int64 parameter from a map.
-func getInt64Param(params map[string]interface{}, key string) (int64, error) {
-	val, ok := params[key]
-	if !ok {
-		return 0, merr.WrapErrParameterMissingMsg("%s is required", key)
-	}
-	switch v := val.(type) {
-	case int64:
-		return v, nil
-	case int:
-		return int64(v), nil
-	case float64:
-		return int64(v), nil
-	default:
-		return 0, merr.WrapErrParameterInvalidMsg("%s must be a number", key)
-	}
 }
 
 // compareValues compares two values for tiebreaking.

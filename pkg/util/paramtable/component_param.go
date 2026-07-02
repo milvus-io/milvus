@@ -49,7 +49,6 @@ const (
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
-	DefaultBM25LoadThreadCoreCoefficient       = 1
 	DefaultThreadPoolMaxThreadsSize            = 16
 
 	DefaultSessionTTL        = 15 // s
@@ -236,7 +235,6 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
-	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
@@ -718,16 +716,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
-
-	p.BM25LoadThreadCoreCoefficient = ParamItem{
-		Key:          "common.threadCoreCoefficient.bm25Load",
-		Version:      "2.6.8",
-		DefaultValue: strconv.Itoa(DefaultBM25LoadThreadCoreCoefficient),
-		Doc: "This parameter specify how many times the number of threads " +
-			"is the number of cores in BM25 load pool",
-		Export: true,
-	}
-	p.BM25LoadThreadCoreCoefficient.Init(base.mgr)
 
 	p.ThreadPoolMaxThreadsSize = ParamItem{
 		Key:          "common.threadCoreCoefficient.maxThreadsSize",
@@ -3668,6 +3656,19 @@ type queryNodeConfig struct {
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"true"`
 
+	// MutatePoolSizeFactor controls the size of the online-write CGO pool
+	// (segment Insert/Delete) as CPUNum * factor. The mutate pool is isolated
+	// from load/management work so segment loading cannot starve online writes.
+	MutatePoolSizeFactor ParamItem `refreshable:"true"`
+
+	// DynamicPoolSizeFactor controls the size of the dynamic CGO pool
+	// (segment create/release/statistics/index-info) as CPUNum * factor.
+	DynamicPoolSizeFactor ParamItem `refreshable:"true"`
+
+	// DeletePoolSizeFactor controls the size of the DeleteBatch dispatch pool
+	// as CPUNum * factor.
+	DeletePoolSizeFactor ParamItem `refreshable:"true"`
+
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
 	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
@@ -4849,6 +4850,33 @@ user-task-polling:
 		Doc:          "cgo pool size ratio to max read concurrency",
 	}
 	p.CGOPoolSizeRatio.Init(base.mgr)
+
+	p.MutatePoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.mutatePoolSizeFactor",
+		Version:      "3.0.0",
+		DefaultValue: "2",
+		Doc:          "size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes",
+		Export:       true,
+	}
+	p.MutatePoolSizeFactor.Init(base.mgr)
+
+	p.DynamicPoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.dynamicPoolSizeFactor",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Doc:          "size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info",
+		Export:       true,
+	}
+	p.DynamicPoolSizeFactor.Init(base.mgr)
+
+	p.DeletePoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.deletePoolSizeFactor",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Doc:          "size factor (CPUNum * factor) of the DeleteBatch dispatch pool",
+		Export:       true,
+	}
+	p.DeletePoolSizeFactor.Init(base.mgr)
 
 	p.StorageV2CellTargetSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.storageV2.cellTargetSizeBytes",

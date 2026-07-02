@@ -82,6 +82,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#RandomSample.
 	VisitRandomSample(ctx *RandomSampleContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#RawString.
+	VisitRawString(ctx *RawStringContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#SpatialBinary.
 	VisitSpatialBinary(ctx *SpatialBinaryContext) interface{}
 

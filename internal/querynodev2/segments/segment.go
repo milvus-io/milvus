@@ -882,7 +882,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 
 	var result *segcore.InsertResult
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	GetMutatePool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -937,7 +937,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	// been applied to this segment, and skipping them causes silent data loss.
 
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	GetMutatePool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -1001,6 +1001,8 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+		LoadPriority:   s.LoadInfo().GetPriority(),
+		Shard:          s.LoadInfo().GetInsertChannel(),
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -1072,7 +1074,10 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
 	*/
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	// Delta-log replay during segment load runs on the load pool, not the
+	// online-write mutate pool, so a large post-compaction replay cannot starve
+	// online insert/delete (and thus tSafe advancement).
+	GetLoadPool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -1177,6 +1182,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		mlog.Warn(ctx, "fail to append load index info", mlog.Err(err))
 		return err
 	}
+	loadIndexInfo.setShard(loadInfo.GetInsertChannel())
 	return f(loadIndexInfo)
 }
 

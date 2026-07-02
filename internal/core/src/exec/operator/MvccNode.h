@@ -16,8 +16,11 @@
 
 #pragma once
 
+#include <folly/futures/Future.h>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include "exec/Driver.h"
 #include "exec/expression/Expr.h"
@@ -66,6 +69,28 @@ class PhyMvccNode : public Operator {
         return "PhyMvccNode";
     }
 
+    void
+    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
+                      prefetch_pool) override {
+        auto self = std::static_pointer_cast<PhyMvccNode>(shared_from_this());
+        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
+            self->segment_->prefetch_chunks(
+                self->operator_context_->get_exec_context()
+                    ->get_query_context()
+                    ->get_op_context(),
+                TimestampFieldID);
+        }));
+    }
+
+    void
+    WaitPrefetch() override {
+        if (prefetch_future_.has_value()) {
+            auto future = std::move(*prefetch_future_);
+            prefetch_future_.reset();
+            std::move(future).get();
+        }
+    }
+
  private:
     const segcore::SegmentInternalInterface* segment_;
     milvus::Timestamp query_timestamp_;
@@ -73,6 +98,7 @@ class PhyMvccNode : public Operator {
     bool is_finished_{false};
     bool is_source_node_{false};
     milvus::Timestamp collection_ttl_timestamp_;
+    std::optional<folly::Future<folly::Unit>> prefetch_future_;
 };
 
 }  // namespace exec

@@ -257,6 +257,15 @@ func (node *DataNode) Start() error {
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		// Eagerly construct the goroutine pools up front so the first Prometheus
+		// scrape reads them without triggering pool creation / warmup as a side effect.
+		initPools()
+		metrics.SetDataNodePoolCollectFn(
+			fmt.Sprint(node.GetNodeID()),
+			collectPoolStats,
+		)
+
 		mlog.Info(node.ctx, "datanode start successfully")
 	})
 	return startErr

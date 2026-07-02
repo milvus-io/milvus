@@ -26,35 +26,37 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // =============================================================================
 // Test Suite
 // =============================================================================
 
-type ScoreCombineExprTestSuite struct {
+type NumCombineExprTestSuite struct {
 	suite.Suite
 	pool *memory.CheckedAllocator
 }
 
-func (s *ScoreCombineExprTestSuite) SetupTest() {
+func (s *NumCombineExprTestSuite) SetupTest() {
 	s.pool = memory.NewCheckedAllocator(memory.NewGoAllocator())
 }
 
-func (s *ScoreCombineExprTestSuite) TearDownTest() {
+func (s *NumCombineExprTestSuite) TearDownTest() {
 	s.pool.AssertSize(s.T(), 0)
 }
 
-func TestScoreCombineExprTestSuite(t *testing.T) {
-	suite.Run(t, new(ScoreCombineExprTestSuite))
+func TestNumCombineExprTestSuite(t *testing.T) {
+	suite.Run(t, new(NumCombineExprTestSuite))
 }
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
-func (s *ScoreCombineExprTestSuite) createFloat32ChunkedArray(values []float32) *arrow.Chunked {
+func (s *NumCombineExprTestSuite) createFloat32ChunkedArray(values []float32) *arrow.Chunked {
 	builder := array.NewFloat32Builder(s.pool)
 	defer builder.Release()
 
@@ -69,7 +71,7 @@ func (s *ScoreCombineExprTestSuite) createFloat32ChunkedArray(values []float32) 
 	return chunked
 }
 
-func (s *ScoreCombineExprTestSuite) createNullableFloat32ChunkedArray(values []float32, valid []bool) *arrow.Chunked {
+func (s *NumCombineExprTestSuite) createNullableFloat32ChunkedArray(values []float32, valid []bool) *arrow.Chunked {
 	builder := array.NewFloat32Builder(s.pool)
 	defer builder.Release()
 
@@ -88,7 +90,7 @@ func (s *ScoreCombineExprTestSuite) createNullableFloat32ChunkedArray(values []f
 	return chunked
 }
 
-func (s *ScoreCombineExprTestSuite) createMultiChunkFloat32Array(chunk1, chunk2 []float32) *arrow.Chunked {
+func (s *NumCombineExprTestSuite) createMultiChunkFloat32Array(chunk1, chunk2 []float32) *arrow.Chunked {
 	builder1 := array.NewFloat32Builder(s.pool)
 	defer builder1.Release()
 	for _, v := range chunk1 {
@@ -114,41 +116,41 @@ func (s *ScoreCombineExprTestSuite) createMultiChunkFloat32Array(chunk1, chunk2 
 // Constructor Tests
 // =============================================================================
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExpr_Valid() {
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil)
+func (s *NumCombineExprTestSuite) TestNewNumCombineExpr_Valid() {
+	expr, err := NewNumCombineExpr(ModeMultiply, nil)
 	s.Require().NoError(err)
 	s.NotNil(expr)
-	s.Equal("score_combine", expr.Name())
+	s.Equal(NumCombineFuncName, expr.Name())
 	s.Equal(ModeMultiply, expr.mode)
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExpr_AllModes() {
+func (s *NumCombineExprTestSuite) TestNewNumCombineExpr_AllModes() {
 	modes := []string{ModeMultiply, ModeSum, ModeMax, ModeMin, ModeAvg}
 
 	for _, mode := range modes {
-		expr, err := NewScoreCombineExpr(mode, nil)
+		expr, err := NewNumCombineExpr(mode, nil)
 		s.Require().NoError(err, "mode: %s", mode)
 		s.NotNil(expr)
 		s.Equal(mode, expr.mode)
 	}
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExpr_WeightedMode() {
+func (s *NumCombineExprTestSuite) TestNewNumCombineExpr_WeightedMode() {
 	weights := []float64{0.5, 0.3, 0.2}
-	expr, err := NewScoreCombineExpr(ModeWeighted, weights)
+	expr, err := NewNumCombineExpr(ModeWeighted, weights)
 	s.Require().NoError(err)
 	s.NotNil(expr)
 	s.Equal(weights, expr.weights)
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExpr_InvalidMode() {
-	_, err := NewScoreCombineExpr("invalid_mode", nil)
+func (s *NumCombineExprTestSuite) TestNewNumCombineExpr_InvalidMode() {
+	_, err := NewNumCombineExpr("invalid_mode", nil)
 	s.Error(err)
 	s.Contains(err.Error(), "invalid mode")
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExpr_WeightedModeNoWeights() {
-	_, err := NewScoreCombineExpr(ModeWeighted, nil)
+func (s *NumCombineExprTestSuite) TestNewNumCombineExpr_WeightedModeNoWeights() {
+	_, err := NewNumCombineExpr(ModeWeighted, nil)
 	s.Error(err)
 	s.Contains(err.Error(), "weighted mode requires weights")
 }
@@ -157,47 +159,44 @@ func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExpr_WeightedModeNoWeight
 // Factory Tests
 // =============================================================================
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExprFromParams_Valid() {
-	params := map[string]interface{}{
-		"mode": "multiply",
+func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_Valid() {
+	params := map[string]*schemapb.FunctionParamValue{
+		"mode": stringParam("multiply"),
 	}
 
-	expr, err := NewScoreCombineExprFromParams(params)
+	expr, err := NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
 	s.Require().NoError(err)
 	s.NotNil(expr)
-	s.Equal("score_combine", expr.Name())
+	s.Equal(NumCombineFuncName, expr.Name())
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExprFromParams_WithWeights() {
-	params := map[string]interface{}{
-		"mode":    "weighted",
-		"weights": []float64{0.6, 0.4},
+func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_WithWeights() {
+	params := map[string]*schemapb.FunctionParamValue{
+		"mode":    stringParam("weighted"),
+		"weights": arrayParam(doubleParam(0.6), doubleParam(0.4)),
 	}
 
-	expr, err := NewScoreCombineExprFromParams(params)
+	expr, err := NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
 	s.Require().NoError(err)
-	combineExpr := expr.(*ScoreCombineExpr)
+	combineExpr := expr.(*NumCombineExpr)
 	s.Equal([]float64{0.6, 0.4}, combineExpr.weights)
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExprFromParams_WeightsAsInterface() {
-	// Test with []interface{} for weights
-	params := map[string]interface{}{
-		"mode":    "weighted",
-		"weights": []interface{}{0.6, 0.4},
+func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_WeightsAsInts() {
+	params := map[string]*schemapb.FunctionParamValue{
+		"mode":    stringParam("weighted"),
+		"weights": arrayParam(intParam(1), intParam(2)),
 	}
 
-	expr, err := NewScoreCombineExprFromParams(params)
+	expr, err := NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
 	s.Require().NoError(err)
 	s.NotNil(expr)
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExprFromParams_DefaultMode() {
-	params := map[string]interface{}{}
-
-	expr, err := NewScoreCombineExprFromParams(params)
+func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_DefaultMode() {
+	expr, err := NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{}})
 	s.Require().NoError(err)
-	combineExpr := expr.(*ScoreCombineExpr)
+	combineExpr := expr.(*NumCombineExpr)
 	s.Equal(ModeMultiply, combineExpr.mode)
 }
 
@@ -205,13 +204,13 @@ func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExprFromParams_DefaultMod
 // Execute Tests
 // =============================================================================
 
-func (s *ScoreCombineExprTestSuite) TestExecute_Multiply() {
+func (s *NumCombineExprTestSuite) TestExecute_Multiply() {
 	col1 := s.createFloat32ChunkedArray([]float32{2.0, 3.0, 4.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{0.5, 0.5, 0.5})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil)
+	expr, err := NewNumCombineExpr(ModeMultiply, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -227,13 +226,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_Multiply() {
 	s.InDelta(2.0, result.Value(2), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_Sum() {
+func (s *NumCombineExprTestSuite) TestExecute_Sum() {
 	col1 := s.createFloat32ChunkedArray([]float32{1.0, 2.0, 3.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{0.5, 0.5, 0.5})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeSum, nil)
+	expr, err := NewNumCombineExpr(ModeSum, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -248,13 +247,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_Sum() {
 	s.InDelta(3.5, result.Value(2), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_Max() {
+func (s *NumCombineExprTestSuite) TestExecute_Max() {
 	col1 := s.createFloat32ChunkedArray([]float32{1.0, 5.0, 3.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{2.0, 2.0, 4.0})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeMax, nil)
+	expr, err := NewNumCombineExpr(ModeMax, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -269,13 +268,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_Max() {
 	s.InDelta(4.0, result.Value(2), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_Min() {
+func (s *NumCombineExprTestSuite) TestExecute_Min() {
 	col1 := s.createFloat32ChunkedArray([]float32{1.0, 5.0, 3.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{2.0, 2.0, 4.0})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeMin, nil)
+	expr, err := NewNumCombineExpr(ModeMin, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -290,13 +289,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_Min() {
 	s.InDelta(3.0, result.Value(2), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_Avg() {
+func (s *NumCombineExprTestSuite) TestExecute_Avg() {
 	col1 := s.createFloat32ChunkedArray([]float32{2.0, 4.0, 6.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{4.0, 6.0, 8.0})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeAvg, nil)
+	expr, err := NewNumCombineExpr(ModeAvg, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -311,14 +310,14 @@ func (s *ScoreCombineExprTestSuite) TestExecute_Avg() {
 	s.InDelta(7.0, result.Value(2), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_Weighted() {
+func (s *NumCombineExprTestSuite) TestExecute_Weighted() {
 	col1 := s.createFloat32ChunkedArray([]float32{10.0, 20.0, 30.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{1.0, 2.0, 3.0})
 	defer col2.Release()
 
 	// weights: 0.8 for col1, 0.2 for col2
-	expr, err := NewScoreCombineExpr(ModeWeighted, []float64{0.8, 0.2})
+	expr, err := NewNumCombineExpr(ModeWeighted, []float64{0.8, 0.2})
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -333,13 +332,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_Weighted() {
 	s.InDelta(24.6, result.Value(2), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_PropagatesNullInputsByDefault() {
+func (s *NumCombineExprTestSuite) TestExecute_PropagatesNullInputsByDefault() {
 	col1 := s.createNullableFloat32ChunkedArray([]float32{2.0, 0.0, 0.0}, []bool{true, false, false})
 	defer col1.Release()
 	col2 := s.createNullableFloat32ChunkedArray([]float32{3.0, 4.0, 0.0}, []bool{true, true, false})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeSum, nil)
+	expr, err := NewNumCombineExpr(ModeSum, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -354,7 +353,7 @@ func (s *ScoreCombineExprTestSuite) TestExecute_PropagatesNullInputsByDefault() 
 	s.True(result.IsNull(2))
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_TreatsNullInputsAsZero() {
+func (s *NumCombineExprTestSuite) TestExecute_TreatsNullInputsAsZero() {
 	col1 := s.createNullableFloat32ChunkedArray([]float32{2.0, 0.0, 0.0}, []bool{true, false, false})
 	defer col1.Release()
 	col2 := s.createNullableFloat32ChunkedArray([]float32{3.0, 4.0, 0.0}, []bool{true, true, false})
@@ -362,7 +361,7 @@ func (s *ScoreCombineExprTestSuite) TestExecute_TreatsNullInputsAsZero() {
 	col3 := s.createNullableFloat32ChunkedArray([]float32{0.0, 5.0, 0.0}, []bool{false, true, false})
 	defer col3.Release()
 
-	expr, err := NewScoreCombineExpr(ModeSum, nil, WithNullPolicy(ScoreCombineNullAsZero))
+	expr, err := NewNumCombineExpr(ModeSum, nil, WithNullPolicy(NumCombineNullAsZero))
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -379,13 +378,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_TreatsNullInputsAsZero() {
 	s.InDelta(0.0, result.Value(2), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_TreatsNullInputsAsZeroWeighted() {
+func (s *NumCombineExprTestSuite) TestExecute_TreatsNullInputsAsZeroWeighted() {
 	col1 := s.createNullableFloat32ChunkedArray([]float32{10.0, 0.0}, []bool{true, false})
 	defer col1.Release()
 	col2 := s.createNullableFloat32ChunkedArray([]float32{0.0, 20.0}, []bool{false, true})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeWeighted, []float64{0.8, 0.2}, WithNullPolicy(ScoreCombineNullAsZero))
+	expr, err := NewNumCombineExpr(ModeWeighted, []float64{0.8, 0.2}, WithNullPolicy(NumCombineNullAsZero))
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -398,7 +397,7 @@ func (s *ScoreCombineExprTestSuite) TestExecute_TreatsNullInputsAsZeroWeighted()
 	s.InDelta(4.0, result.Value(1), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_SkipsNullInputs() {
+func (s *NumCombineExprTestSuite) TestExecute_SkipsNullInputs() {
 	col1 := s.createNullableFloat32ChunkedArray([]float32{2.0, 0.0, 0.0}, []bool{true, false, false})
 	defer col1.Release()
 	col2 := s.createNullableFloat32ChunkedArray([]float32{3.0, 4.0, 0.0}, []bool{true, true, false})
@@ -406,7 +405,7 @@ func (s *ScoreCombineExprTestSuite) TestExecute_SkipsNullInputs() {
 	col3 := s.createNullableFloat32ChunkedArray([]float32{0.0, 5.0, 0.0}, []bool{false, true, false})
 	defer col3.Release()
 
-	expr, err := NewScoreCombineExpr(ModeSum, nil, WithNullPolicy(ScoreCombineNullSkip))
+	expr, err := NewNumCombineExpr(ModeSum, nil, WithNullPolicy(NumCombineNullSkip))
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -422,13 +421,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_SkipsNullInputs() {
 	s.True(result.IsNull(2))
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_SkipsNullInputsMultiply() {
+func (s *NumCombineExprTestSuite) TestExecute_SkipsNullInputsMultiply() {
 	col1 := s.createNullableFloat32ChunkedArray([]float32{2.0, 0.0}, []bool{true, false})
 	defer col1.Release()
 	col2 := s.createNullableFloat32ChunkedArray([]float32{3.0, 3.0}, []bool{true, true})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil, WithNullPolicy(ScoreCombineNullSkip))
+	expr, err := NewNumCombineExpr(ModeMultiply, nil, WithNullPolicy(NumCombineNullSkip))
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -441,13 +440,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_SkipsNullInputsMultiply() {
 	s.InDelta(3.0, result.Value(1), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_TreatsNullInputsAsZeroMultiply() {
+func (s *NumCombineExprTestSuite) TestExecute_TreatsNullInputsAsZeroMultiply() {
 	col1 := s.createNullableFloat32ChunkedArray([]float32{2.0, 0.0}, []bool{true, false})
 	defer col1.Release()
 	col2 := s.createNullableFloat32ChunkedArray([]float32{3.0, 3.0}, []bool{true, true})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil, WithNullPolicy(ScoreCombineNullAsZero))
+	expr, err := NewNumCombineExpr(ModeMultiply, nil, WithNullPolicy(NumCombineNullAsZero))
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -460,13 +459,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_TreatsNullInputsAsZeroMultiply()
 	s.InDelta(0.0, result.Value(1), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_MultipleChunks() {
+func (s *NumCombineExprTestSuite) TestExecute_MultipleChunks() {
 	col1 := s.createMultiChunkFloat32Array([]float32{1.0, 2.0}, []float32{3.0, 4.0})
 	defer col1.Release()
 	col2 := s.createMultiChunkFloat32Array([]float32{2.0, 2.0}, []float32{2.0, 2.0})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil)
+	expr, err := NewNumCombineExpr(ModeMultiply, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -488,7 +487,7 @@ func (s *ScoreCombineExprTestSuite) TestExecute_MultipleChunks() {
 	s.InDelta(8.0, chunk1.Value(1), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_ThreeInputColumns() {
+func (s *NumCombineExprTestSuite) TestExecute_ThreeInputColumns() {
 	col1 := s.createFloat32ChunkedArray([]float32{2.0, 3.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{3.0, 4.0})
@@ -496,7 +495,7 @@ func (s *ScoreCombineExprTestSuite) TestExecute_ThreeInputColumns() {
 	col3 := s.createFloat32ChunkedArray([]float32{1.0, 1.0})
 	defer col3.Release()
 
-	expr, err := NewScoreCombineExpr(ModeSum, nil)
+	expr, err := NewNumCombineExpr(ModeSum, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -510,21 +509,22 @@ func (s *ScoreCombineExprTestSuite) TestExecute_ThreeInputColumns() {
 	s.InDelta(8.0, result.Value(1), 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_TooFewInputs() {
+func (s *NumCombineExprTestSuite) TestExecute_TooFewInputs() {
 	col1 := s.createFloat32ChunkedArray([]float32{1.0, 2.0})
 	defer col1.Release()
 
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil)
+	expr, err := NewNumCombineExpr(ModeMultiply, nil)
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
 	// Execute with only 1 input
 	_, err = expr.Execute(ctx, []*arrow.Chunked{col1})
 	s.Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
 	s.Contains(err.Error(), "at least 2 input columns")
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_WeightedModeWrongWeightsCount() {
+func (s *NumCombineExprTestSuite) TestExecute_WeightedModeWrongWeightsCount() {
 	col1 := s.createFloat32ChunkedArray([]float32{1.0, 2.0})
 	defer col1.Release()
 	col2 := s.createFloat32ChunkedArray([]float32{3.0, 4.0})
@@ -533,12 +533,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_WeightedModeWrongWeightsCount() 
 	defer col3.Release()
 
 	// Create with 2 weights, but execute with 3 inputs
-	expr, err := NewScoreCombineExpr(ModeWeighted, []float64{0.5, 0.5})
+	expr, err := NewNumCombineExpr(ModeWeighted, []float64{0.5, 0.5})
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
 	_, err = expr.Execute(ctx, []*arrow.Chunked{col1, col2, col3})
 	s.Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
 	s.Contains(err.Error(), "weighted mode requires 3 weights, got 2")
 }
 
@@ -546,8 +547,8 @@ func (s *ScoreCombineExprTestSuite) TestExecute_WeightedModeWrongWeightsCount() 
 // Interface Method Tests
 // =============================================================================
 
-func (s *ScoreCombineExprTestSuite) TestOutputDataTypes() {
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil)
+func (s *NumCombineExprTestSuite) TestOutputDataTypes() {
+	expr, err := NewNumCombineExpr(ModeMultiply, nil)
 	s.Require().NoError(err)
 
 	outputTypes := expr.OutputDataTypes()
@@ -555,11 +556,11 @@ func (s *ScoreCombineExprTestSuite) TestOutputDataTypes() {
 	s.Equal(arrow.PrimitiveTypes.Float32, outputTypes[0])
 }
 
-func (s *ScoreCombineExprTestSuite) TestIsRunnable() {
-	expr, err := NewScoreCombineExpr(ModeMultiply, nil)
+func (s *NumCombineExprTestSuite) TestIsRunnable() {
+	expr, err := NewNumCombineExpr(ModeMultiply, nil)
 	s.Require().NoError(err)
 
-	// score_combine can run in all stages
+	// num_combine can run in all stages
 	s.True(expr.IsRunnable("L0_rerank"))
 	s.True(expr.IsRunnable("L1_rerank"))
 	s.True(expr.IsRunnable("L2_rerank"))
@@ -571,12 +572,12 @@ func (s *ScoreCombineExprTestSuite) TestIsRunnable() {
 // Memory Leak Tests
 // =============================================================================
 
-func (s *ScoreCombineExprTestSuite) TestMemoryLeak_ScoreCombineExecution() {
+func (s *NumCombineExprTestSuite) TestMemoryLeak_NumCombineExecution() {
 	for range 10 {
 		col1 := s.createFloat32ChunkedArray([]float32{1.0, 2.0, 3.0})
 		col2 := s.createFloat32ChunkedArray([]float32{0.5, 0.5, 0.5})
 
-		expr, err := NewScoreCombineExpr(ModeMultiply, nil)
+		expr, err := NewNumCombineExpr(ModeMultiply, nil)
 		s.Require().NoError(err)
 
 		ctx := types.NewFuncContext(s.pool)
@@ -594,98 +595,47 @@ func (s *ScoreCombineExprTestSuite) TestMemoryLeak_ScoreCombineExecution() {
 // Combine Function Unit Tests
 // =============================================================================
 
-func (s *ScoreCombineExprTestSuite) TestCombine_Multiply() {
-	expr := &ScoreCombineExpr{mode: ModeMultiply}
+func (s *NumCombineExprTestSuite) TestCombine_Multiply() {
+	expr := &NumCombineExpr{mode: ModeMultiply}
 	result := expr.combine([]float64{2.0, 3.0, 4.0}, nil)
 	s.InDelta(24.0, result, 0.001) // 2*3*4 = 24
 }
 
-func (s *ScoreCombineExprTestSuite) TestCombine_Sum() {
-	expr := &ScoreCombineExpr{mode: ModeSum}
+func (s *NumCombineExprTestSuite) TestCombine_Sum() {
+	expr := &NumCombineExpr{mode: ModeSum}
 	result := expr.combine([]float64{1.0, 2.0, 3.0}, nil)
 	s.InDelta(6.0, result, 0.001) // 1+2+3 = 6
 }
 
-func (s *ScoreCombineExprTestSuite) TestCombine_Max() {
-	expr := &ScoreCombineExpr{mode: ModeMax}
+func (s *NumCombineExprTestSuite) TestCombine_Max() {
+	expr := &NumCombineExpr{mode: ModeMax}
 	result := expr.combine([]float64{1.0, 5.0, 3.0}, nil)
 	s.InDelta(5.0, result, 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestCombine_Min() {
-	expr := &ScoreCombineExpr{mode: ModeMin}
+func (s *NumCombineExprTestSuite) TestCombine_Min() {
+	expr := &NumCombineExpr{mode: ModeMin}
 	result := expr.combine([]float64{1.0, 5.0, 3.0}, nil)
 	s.InDelta(1.0, result, 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestCombine_Avg() {
-	expr := &ScoreCombineExpr{mode: ModeAvg}
+func (s *NumCombineExprTestSuite) TestCombine_Avg() {
+	expr := &NumCombineExpr{mode: ModeAvg}
 	result := expr.combine([]float64{2.0, 4.0, 6.0}, nil)
 	s.InDelta(4.0, result, 0.001) // (2+4+6)/3 = 4
 }
 
-func (s *ScoreCombineExprTestSuite) TestCombine_Weighted() {
-	expr := &ScoreCombineExpr{mode: ModeWeighted}
+func (s *NumCombineExprTestSuite) TestCombine_Weighted() {
+	expr := &NumCombineExpr{
+		mode:    ModeWeighted,
+		weights: []float64{0.5, 0.3, 0.2},
+	}
 	result := expr.combine([]float64{10.0, 20.0, 30.0}, []float64{0.5, 0.3, 0.2})
 	// 10*0.5 + 20*0.3 + 30*0.2 = 5 + 6 + 6 = 17
 	s.InDelta(17.0, result, 0.001)
 }
 
-// =============================================================================
-// Helper Function Tests (base_expr utilities)
-// =============================================================================
-
-func (s *ScoreCombineExprTestSuite) TestParseStringSliceParam() {
-	const funcName = "test"
-
-	// Test with []string
-	params := map[string]interface{}{
-		"cols": []string{"a", "b", "c"},
-	}
-	result, err := ParseStringSliceParam(params, funcName, "cols")
-	s.Require().NoError(err)
-	s.Equal([]string{"a", "b", "c"}, result)
-
-	// Test with []interface{}
-	params = map[string]interface{}{
-		"cols": []interface{}{"a", "b", "c"},
-	}
-	result, err = ParseStringSliceParam(params, funcName, "cols")
-	s.Require().NoError(err)
-	s.Equal([]string{"a", "b", "c"}, result)
-
-	// Test missing key
-	_, err = ParseStringSliceParam(map[string]interface{}{}, funcName, "cols")
-	s.Error(err)
-	s.Contains(err.Error(), "missing required parameter")
-}
-
-func (s *ScoreCombineExprTestSuite) TestParseFloat64SliceParam() {
-	const funcName = "test"
-
-	// Test with []float64
-	params := map[string]interface{}{
-		"weights": []float64{0.5, 0.3, 0.2},
-	}
-	result, err := ParseFloat64SliceParam(params, funcName, "weights")
-	s.Require().NoError(err)
-	s.Equal([]float64{0.5, 0.3, 0.2}, result)
-
-	// Test with []interface{}
-	params = map[string]interface{}{
-		"weights": []interface{}{0.5, 0.3, 0.2},
-	}
-	result, err = ParseFloat64SliceParam(params, funcName, "weights")
-	s.Require().NoError(err)
-	s.Equal([]float64{0.5, 0.3, 0.2}, result)
-
-	// Test missing key (should return nil, not error)
-	result, err = ParseFloat64SliceParam(map[string]interface{}{}, funcName, "weights")
-	s.NoError(err)
-	s.Nil(result)
-}
-
-func (s *ScoreCombineExprTestSuite) TestGetNumericValue() {
+func (s *NumCombineExprTestSuite) TestGetNumericValue() {
 	// Test Float32
 	builder32 := array.NewFloat32Builder(s.pool)
 	builder32.Append(1.5)
@@ -720,28 +670,28 @@ func (s *ScoreCombineExprTestSuite) TestGetNumericValue() {
 	s.InDelta(100.0, val, 0.001)
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewScoreCombineExprFromParams_Invalid() {
-	_, err := NewScoreCombineExprFromParams(map[string]interface{}{
-		"mode": "bad-mode",
-	})
+func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_Invalid() {
+	_, err := NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"mode": stringParam("bad-mode"),
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "invalid mode")
 
-	_, err = NewScoreCombineExprFromParams(map[string]interface{}{
-		"mode":    "weighted",
-		"weights": []interface{}{"bad"},
-	})
+	_, err = NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{
+		"mode":    stringParam("weighted"),
+		"weights": arrayParam(stringParam("bad")),
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "weights")
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_SkipsNullInputsWeighted() {
+func (s *NumCombineExprTestSuite) TestExecute_SkipsNullInputsWeighted() {
 	col1 := s.createNullableFloat32ChunkedArray([]float32{10.0, 0.0, 0.0}, []bool{true, false, false})
 	defer col1.Release()
 	col2 := s.createNullableFloat32ChunkedArray([]float32{20.0, 20.0, 0.0}, []bool{true, true, false})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeWeighted, []float64{0.8, 0.2}, WithNullPolicy(ScoreCombineNullSkip))
+	expr, err := NewNumCombineExpr(ModeWeighted, []float64{0.8, 0.2}, WithNullPolicy(NumCombineNullSkip))
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContext(s.pool)
@@ -755,13 +705,13 @@ func (s *ScoreCombineExprTestSuite) TestExecute_SkipsNullInputsWeighted() {
 	s.True(result.IsNull(2))
 }
 
-func (s *ScoreCombineExprTestSuite) TestExecute_RejectsMismatchedChunksAndUnsupportedTypes() {
+func (s *NumCombineExprTestSuite) TestExecute_RejectsMismatchedChunksAndUnsupportedTypes() {
 	col1 := s.createFloat32ChunkedArray([]float32{1.0, 2.0})
 	defer col1.Release()
 	col2 := s.createMultiChunkFloat32Array([]float32{1.0}, []float32{2.0})
 	defer col2.Release()
 
-	expr, err := NewScoreCombineExpr(ModeSum, nil)
+	expr, err := NewNumCombineExpr(ModeSum, nil)
 	s.Require().NoError(err)
 	ctx := types.NewFuncContext(s.pool)
 
@@ -788,7 +738,7 @@ func (s *ScoreCombineExprTestSuite) TestExecute_RejectsMismatchedChunksAndUnsupp
 	s.Contains(err.Error(), "unsupported input column type")
 }
 
-func (s *ScoreCombineExprTestSuite) TestNewNumericReaderAllSupportedTypes() {
+func (s *NumCombineExprTestSuite) TestNewNumericReaderAllSupportedTypes() {
 	cases := []struct {
 		name string
 		arr  arrow.Array

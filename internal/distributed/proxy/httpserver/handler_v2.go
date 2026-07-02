@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -164,6 +165,10 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/jobs/import/describe":              "GetImportProgress",
 	"/v2/vectordb/jobs/import/commit":                "CommitImport",
 	"/v2/vectordb/jobs/import/abort":                 "AbortImport",
+	"/v2/vectordb/jobs/snapshot/restore_external":    "RestoreExternalSnapshot",
+	"/v2/vectordb/jobs/snapshot/export":              "ExportSnapshot",
+	"/v2/vectordb/jobs/snapshot/describe":            "GetRestoreSnapshotState",
+	"/v2/vectordb/jobs/snapshot/list":                "ListRestoreSnapshotJobs",
 	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
 	"/v2/vectordb/jobs/external_collection/describe": "GetRefreshExternalCollectionProgress",
 	"/v2/vectordb/jobs/external_collection/list":     "ListRefreshExternalCollectionJobs",
@@ -319,6 +324,10 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
 	router.POST(ImportJobCategory+CommitAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.commitImportJob))))
 	router.POST(ImportJobCategory+AbortAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.abortImportJob))))
+	router.POST(SnapshotJobCategory+RestoreExternalAction, timeoutMiddleware(wrapperPost(func() any { return &RestoreExternalSnapshotReq{} }, wrapperTraceLog(h.restoreExternalSnapshot))))
+	router.POST(SnapshotJobCategory+ExportAction, timeoutMiddleware(wrapperPost(func() any { return &ExportSnapshotReq{} }, wrapperTraceLog(h.exportSnapshot))))
+	router.POST(SnapshotJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getRestoreSnapshotState))))
+	router.POST(SnapshotJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRestoreSnapshotJobs))))
 	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
 	router.POST(ExternalCollectionJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionProgressReq{} }, wrapperTraceLog(h.getRefreshExternalCollectionProgress))))
 	router.POST(ExternalCollectionJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRefreshExternalCollectionJobs))))
@@ -453,6 +462,27 @@ func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.Ha
 	}
 }
 
+func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
+	switch request := req.(type) {
+	case *RestoreExternalSnapshotReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(request.ExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *ExportSnapshotReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(request.ExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	default:
+		return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+	}
+}
+
 func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	return func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
 		switch proxy.Params.CommonCfg.TraceLogMode.GetAsInt() {
@@ -465,13 +495,13 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
 				FullMethod: c.Request.URL.Path,
 			}, true)
-			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
+			fields = append(fields, getTraceLogRequestFieldWithoutSensitiveInfo(req))
 			mlog.Info(ctx, "trace info: detail", fields...)
 		case 3: // detail info with request and response
 			fields := proxy.GetRequestBaseInfo(ctx, req, &grpc.UnaryServerInfo{
 				FullMethod: c.Request.URL.Path,
 			}, true)
-			fields = append(fields, proxy.GetRequestFieldWithoutSensitiveInfo(req))
+			fields = append(fields, getTraceLogRequestFieldWithoutSensitiveInfo(req))
 			mlog.Info(ctx, "trace info: all request", fields...)
 		}
 		resp, err := v2(ctx, c, req, dbName)
@@ -1728,6 +1758,12 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			return nil, err
 		}
 	}
+	if len(httpReq.FunctionChains) != 0 {
+		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
 
 	if hasIDs {
 		// Search by primary keys
@@ -1894,6 +1930,11 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 
 	if httpReq.SearchAggregation != nil {
 		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	if len(httpReq.FunctionChains) != 0 {
+		err := merr.WrapErrParameterInvalidMsg("functionChains is not supported for hybrid search yet")
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
@@ -3480,6 +3521,118 @@ func (h *HandlersV2) checkImportJobAuth(ctx context.Context, c *gin.Context, dbN
 		return err
 	}
 	return h.checkImportPrivilege(ctx, c, dbName, response.GetCollectionName())
+}
+
+func (h *HandlersV2) restoreExternalSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RestoreExternalSnapshotReq)
+	req := &milvuspb.RestoreExternalSnapshotRequest{
+		DbName:               dbName,
+		TargetCollectionName: httpReq.TargetCollectionName,
+		SnapshotMetadataUri:  httpReq.SnapshotMetadataURI,
+		ExternalSpec:         httpReq.ExternalSpec,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RestoreExternalSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.RestoreExternalSnapshot(reqCtx, req.(*milvuspb.RestoreExternalSnapshotRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"jobId": resp.(*milvuspb.RestoreExternalSnapshotResponse).GetJobId()},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) exportSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*ExportSnapshotReq)
+	req := &milvuspb.ExportSnapshotRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Name:           httpReq.Name,
+		TargetS3Path:   httpReq.TargetS3Path,
+		ExternalSpec:   httpReq.ExternalSpec,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ExportSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ExportSnapshot(reqCtx, req.(*milvuspb.ExportSnapshotRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"snapshotMetadataURI": resp.(*milvuspb.ExportSnapshotResponse).GetSnapshotMetadataUri()},
+		})
+	}
+	return resp, err
+}
+
+func restoreSnapshotJobToREST(info *milvuspb.RestoreSnapshotInfo) gin.H {
+	if info == nil {
+		return gin.H{}
+	}
+	return gin.H{
+		"jobId":          info.GetJobId(),
+		"snapshotName":   info.GetSnapshotName(),
+		"dbName":         info.GetDbName(),
+		"collectionName": info.GetCollectionName(),
+		"state":          info.GetState().String(),
+		"progress":       info.GetProgress(),
+		"reason":         info.GetReason(),
+		"startTime":      info.GetStartTime(),
+		"timeCost":       info.GetTimeCost(),
+	}
+}
+
+func (h *HandlersV2) getRestoreSnapshotState(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*JobIDReq)
+	jobID, err := strconv.ParseInt(httpReq.GetJobID(), 10, 64)
+	if err != nil {
+		paramErr := merr.WrapErrParameterInvalid("int64 jobId", httpReq.GetJobID(), err.Error())
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		return nil, paramErr
+	}
+	req := &milvuspb.GetRestoreSnapshotStateRequest{
+		Base:  commonpbutil.NewMsgBase(),
+		JobId: jobID,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetRestoreSnapshotState", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetRestoreSnapshotState(reqCtx, req.(*milvuspb.GetRestoreSnapshotStateRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: restoreSnapshotJobToREST(resp.(*milvuspb.GetRestoreSnapshotStateResponse).GetInfo()),
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) listRestoreSnapshotJobs(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*OptionalCollectionNameReq)
+	req := &milvuspb.ListRestoreSnapshotJobsRequest{
+		Base:           commonpbutil.NewMsgBase(),
+		DbName:         dbName,
+		CollectionName: httpReq.GetCollectionName(),
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListRestoreSnapshotJobs", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListRestoreSnapshotJobs(reqCtx, req.(*milvuspb.ListRestoreSnapshotJobsRequest))
+	})
+	if err == nil {
+		jobs := resp.(*milvuspb.ListRestoreSnapshotJobsResponse).GetJobs()
+		records := make([]gin.H, 0, len(jobs))
+		for _, info := range jobs {
+			records = append(records, restoreSnapshotJobToREST(info))
+		}
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"records": records},
+		})
+	}
+	return resp, err
 }
 
 func (h *HandlersV2) refreshExternalCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

@@ -380,7 +380,7 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChain() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(ScoreCombine) -> SortOp -> LimitOp -> SelectOp
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> SortOp -> LimitOp -> SelectOp
 	s.Equal(6, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())
@@ -1213,7 +1213,7 @@ func (s *RerankBuilderTestSuite) TestBuildDecayChainWithGrouping() {
 	s.Require().NoError(err)
 	s.NotNil(fc)
 
-	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(ScoreCombine) -> GroupByOp -> SelectOp
+	// Verify chain structure: MergeOp -> MapOp(Decay) -> MapOp(NumCombine) -> GroupByOp -> SelectOp
 	s.Equal(5, len(fc.operators))
 	s.Equal("Merge", fc.operators[0].Name())
 	s.Equal("Map", fc.operators[1].Name())

@@ -45,23 +45,19 @@ type SortOp struct {
 	tieBreakCol string // optional: column name for tie-breaking (ascending)
 }
 
-// NewSortOp creates a new SortOp with the given column and sort direction.
-func NewSortOp(column string, desc bool) *SortOp {
+func newSortOp(column string, desc bool, tieBreakCol string) *SortOp {
+	inputs := []string{column}
+	if tieBreakCol != "" && tieBreakCol != column {
+		inputs = append(inputs, tieBreakCol)
+	}
 	return &SortOp{
 		BaseOp: BaseOp{
-			inputs:  []string{column},
+			inputs:  inputs,
 			outputs: []string{}, // Sort doesn't produce new columns
 		},
-		desc: desc,
+		desc:        desc,
+		tieBreakCol: tieBreakCol,
 	}
-}
-
-// NewSortOpWithTieBreak creates a new SortOp that breaks ties using
-// the given column in ascending order.
-func NewSortOpWithTieBreak(column string, desc bool, tieBreakCol string) *SortOp {
-	op := NewSortOp(column, desc)
-	op.tieBreakCol = tieBreakCol
-	return op
 }
 
 // Column returns the sort column name.
@@ -288,22 +284,23 @@ func reorderArray(pool memory.Allocator, data arrow.Array, indices []int) (arrow
 
 // NewSortOpFromRepr creates a SortOp from an OperatorRepr.
 func NewSortOpFromRepr(repr *OperatorRepr) (Operator, error) {
-	column, ok := repr.Params["column"].(string)
-	if !ok || column == "" {
+	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("sort_op: column is required")
 	}
-	desc := false
-	if descVal, ok := repr.Params["desc"]; ok {
-		if descBool, ok := descVal.(bool); ok {
-			desc = descBool
-		}
+	if len(repr.Inputs) > 2 {
+		return nil, merr.WrapErrParameterInvalidMsg("sort_op: expects at most 2 input columns, got %d", len(repr.Inputs))
 	}
-	tieBreakCol := ""
-	if tbVal, ok := repr.Params["tie_break_col"].(string); ok {
-		tieBreakCol = tbVal
+
+	reader := types.NewParamReader("sort_op", repr.Params)
+	desc, err := reader.Bool("desc", false, false)
+	if err != nil {
+		return nil, err
 	}
-	if tieBreakCol != "" {
-		return NewSortOpWithTieBreak(column, desc, tieBreakCol), nil
+
+	column := repr.Inputs[0]
+	tieBreakCol := types.IDFieldName
+	if len(repr.Inputs) > 1 {
+		tieBreakCol = repr.Inputs[1]
 	}
-	return NewSortOp(column, desc), nil
+	return newSortOp(column, desc, tieBreakCol), nil
 }

@@ -2996,6 +2996,11 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 	case *milvuspb.RefreshExternalCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.RestoreExternalSnapshotRequest:
+		return getDatabaseID(r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.ExportSnapshotRequest:
+		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
@@ -3091,6 +3096,14 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.CreateDatabaseRequest, *milvuspb.DropDatabaseRequest,
 		*milvuspb.AlterDatabaseRequest:
 		return merr.Status(err)
+	case *milvuspb.RestoreExternalSnapshotRequest:
+		return &milvuspb.RestoreExternalSnapshotResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.ExportSnapshotRequest:
+		return &milvuspb.ExportSnapshotResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.FlushRequest:
 		return &milvuspb.FlushResponse{
 			Status: merr.Status(err),

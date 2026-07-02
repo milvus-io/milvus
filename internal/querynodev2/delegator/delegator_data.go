@@ -500,7 +500,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 		return nil
 	}
 
-	pool := segments.GetBM25LoadPool()
+	pool := segments.GetLoadPool()
 
 	cm := sd.loader.GetChunkManager()
 	futures := make([]*conc.Future[any], 0, len(infos))
@@ -556,7 +556,7 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
 	}
 
-	pool := segments.GetBM25LoadPool()
+	pool := segments.GetLoadPool()
 	cm := sd.loader.GetChunkManager()
 	futures := make([]*conc.Future[any], 0, len(infos))
 	for _, info := range infos {

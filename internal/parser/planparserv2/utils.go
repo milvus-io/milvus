@@ -705,6 +705,10 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
 			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
 		}
+	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor:
+		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
+			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
+		}
 	default:
 	}
 	return nil
@@ -825,11 +829,38 @@ func convertHanToASCII(s string) string {
 	var builder strings.Builder
 	builder.Grow(len(s) * 6)
 	skipCur := false
+	// Raw-string context. A raw string (r"..." / R'...') is taken verbatim by the
+	// parser (no Unquote / decodeUnicode pass downstream), so its CJK content must
+	// NOT be rewritten to \uXXXX here — otherwise the escape leaks all the way to
+	// the matcher and `LIKE r"中%"` / `=~ r"中"` silently fail (issue #43864).
+	// Normal strings and bare identifiers keep the Han->\uXXXX rewrite, which the
+	// parser reverses via Unquote (strings) or decodeUnicode (identifiers/keys).
+	var quote rune        // current string delimiter; 0 when outside any string
+	rawString := false    // whether the current string literal is a raw string
+	rawSkip := false      // a backslash inside a raw string escapes the next byte
+	var prev1, prev2 rune // previous two input runes, for raw-prefix detection
 	n := len(s)
 	for i, r := range s {
+		// Inside a raw string: copy verbatim, no Han rewrite, no escape bail.
+		if rawString {
+			builder.WriteRune(r)
+			switch {
+			case rawSkip:
+				rawSkip = false
+			case r == '\\':
+				rawSkip = true // backslash prevents the next byte from closing
+			case r == quote:
+				rawString = false
+				quote = 0
+			}
+			prev2, prev1 = prev1, r
+			continue
+		}
+
 		if skipCur {
 			builder.WriteRune(r)
 			skipCur = false
+			prev2, prev1 = prev1, r
 			continue
 		}
 		if r == '\\' {
@@ -838,6 +869,20 @@ func convertHanToASCII(s string) string {
 			}
 			skipCur = true
 			builder.WriteRune(r)
+			prev2, prev1 = prev1, r
+			continue
+		}
+		if r == '"' || r == '\'' {
+			if quote == 0 {
+				// Opening a string. It is raw iff preceded by an r/R prefix that is
+				// itself at a token boundary (not the tail of an identifier).
+				quote = r
+				rawString = (prev1 == 'r' || prev1 == 'R') && !isIdentContinue(prev2)
+			} else if r == quote {
+				quote = 0 // closing a normal string
+			}
+			builder.WriteRune(r)
+			prev2, prev1 = prev1, r
 			continue
 		}
 
@@ -846,9 +891,20 @@ func convertHanToASCII(s string) string {
 		} else {
 			builder.WriteRune(r)
 		}
+		prev2, prev1 = prev1, r
 	}
 
 	return builder.String()
+}
+
+// isIdentContinue reports whether r can appear inside an identifier token
+// (Identifier: [a-zA-Z_][a-zA-Z0-9_]*). Used to tell an r/R raw-string prefix
+// apart from an r/R that is merely the tail of an identifier (e.g. `myr"x"`).
+func isIdentContinue(r rune) bool {
+	return r == '_' ||
+		(r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9')
 }
 
 func decodeUnicode(input string) string {

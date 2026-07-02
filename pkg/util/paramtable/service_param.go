@@ -105,6 +105,7 @@ type EtcdConfig struct {
 	EtcdTLSCACert        ParamItem          `refreshable:"false"`
 	EtcdTLSMinVersion    ParamItem          `refreshable:"false"`
 	RequestTimeout       ParamItem          `refreshable:"false"`
+	DialTimeout          ParamItem          `refreshable:"false"`
 	DialKeepAliveTime    ParamItem          `refreshable:"false"`
 	DialKeepAliveTimeout ParamItem          `refreshable:"false"`
 
@@ -289,6 +290,15 @@ We recommend using version 1.2 and above.`,
 	}
 	p.RequestTimeout.Init(base.mgr)
 
+	p.DialTimeout = ParamItem{
+		Key:          "etcd.dialTimeout",
+		DefaultValue: "5000",
+		Version:      "2.6.12",
+		Doc:          `Timeout in milliseconds for establishing the initial connection to etcd endpoints. Increase it for environments where transient network delays are expected during node scale-out.`,
+		Export:       true,
+	}
+	p.DialTimeout.Init(base.mgr)
+
 	p.DialKeepAliveTime = ParamItem{
 		Key:          "etcd.dialKeepAliveTime",
 		DefaultValue: "3000",
@@ -358,6 +368,7 @@ func (p *EtcdConfig) GetAll() map[string]string {
 		"etcd.ssl.tlsCACert":        p.EtcdTLSCACert.GetValue(),
 		"etcd.ssl.tlsMinVersion":    p.EtcdTLSMinVersion.GetValue(),
 		"etcd.requestTimeout":       p.RequestTimeout.GetValue(),
+		"etcd.dialTimeout":          p.DialTimeout.GetValue(),
 		"etcd.dialKeepAliveTime":    p.DialKeepAliveTime.GetValue(),
 		"etcd.dialKeepAliveTimeout": p.DialKeepAliveTimeout.GetValue(),
 		"etcd.auth.enabled":         p.EtcdEnableAuth.GetValue(),
@@ -367,15 +378,18 @@ func (p *EtcdConfig) GetAll() map[string]string {
 }
 
 func (p *EtcdConfig) ClientOptions() []etcd.ClientOption {
+	dialTimeout := p.DialTimeout.GetAsDuration(time.Millisecond)
 	dialKeepAliveTime := p.DialKeepAliveTime.GetAsDuration(time.Millisecond)
 	dialKeepAliveTimeout := p.DialKeepAliveTimeout.GetAsDuration(time.Millisecond)
 
-	if dialKeepAliveTime <= 0 && dialKeepAliveTimeout <= 0 {
-		return nil
+	var options []etcd.ClientOption
+	if dialTimeout > 0 {
+		options = append(options, etcd.WithDialTimeout(dialTimeout))
 	}
-	return []etcd.ClientOption{
-		etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout),
+	if dialKeepAliveTime > 0 || dialKeepAliveTimeout > 0 {
+		options = append(options, etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout))
 	}
+	return options
 }
 
 // /////////////////////////////////////////////////////////////////////////////

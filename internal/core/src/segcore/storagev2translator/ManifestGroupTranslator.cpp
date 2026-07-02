@@ -27,6 +27,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
@@ -75,7 +76,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     bool eager_load,
     const std::string& warmup_policy,
     const std::string& cache_key_suffix,
-    int64_t fallback_bytes_per_row)
+    int64_t fallback_bytes_per_row,
+    std::string shard)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -117,7 +119,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 }(),
                 /* is_index */ false,
                 /* in_load_list*/ eager_load),
-            /* support_eviction */ true),
+            /* support_eviction */ true,
+            std::move(shard)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
       has_array_field_(std::any_of(field_metas_.begin(),
