@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1484,6 +1485,197 @@ func TestUpsertTask_queryPreExecute_ArrayPartialOpSkipsGenericReplace(t *testing
 	assert.NotNil(t, noteField)
 	assert.Equal(t, []bool{true, false}, noteField.ValidData)
 	assert.Equal(t, []string{"new1"}, noteField.GetScalars().GetStringData().GetData())
+}
+
+func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_struct_partial_update",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 200,
+				Name:    "profile",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 201, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				},
+			},
+		},
+	})
+
+	idField := func(ids ...int64) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}},
+		}
+	}
+	valueField := func(values ...int32) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}}},
+		}
+	}
+	profileField := func(values ...int32) *schemapb.FieldData {
+		rows := make([]*schemapb.ScalarField, 0, len(values))
+		for _, value := range values {
+			rows = append(rows, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{value}}},
+			})
+		}
+		return &schemapb.FieldData{
+			FieldName: "profile",
+			FieldId:   200,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "age",
+							FieldId:   201,
+							Type:      schemapb.DataType_Array,
+							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Int32,
+								Data:        rows,
+							}}}},
+						},
+					},
+				},
+			},
+		}
+	}
+	queryResult := func() *milvuspb.QueryResults {
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				idField(1, 2),
+				valueField(10, 20),
+				profileField(11, 22),
+			},
+		}
+	}
+	run := func(fields []*schemapb.FieldData) (*upsertTask, error) {
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: schema,
+			req: &milvuspb.UpsertRequest{
+				FieldsData:     fields,
+				NumRows:        2,
+				PartialUpdate:  true,
+				CollectionName: "test_struct_partial_update",
+			},
+			upsertMsg: &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: fields,
+					NumRows:    2,
+					Version:    msgpb.InsertDataVersion_ColumnBased,
+				},
+			}},
+			node: &Proxy{},
+		}
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(queryResult(), segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+		return task, task.queryPreExecute(context.Background())
+	}
+	structValues := func(field *schemapb.FieldData) []int32 {
+		rows := field.GetStructArrays().GetFields()[0].GetScalars().GetArrayData().GetData()
+		values := make([]int32, 0, len(rows))
+		for _, row := range rows {
+			values = append(values, row.GetIntData().GetData()[0])
+		}
+		return values
+	}
+	findProfile := func(task *upsertTask) *schemapb.FieldData {
+		for _, field := range task.insertFieldData {
+			if field.GetFieldName() == "profile" {
+				return field
+			}
+		}
+		return nil
+	}
+
+	t.Run("omitted struct preserves old value", func(t *testing.T) {
+		task, err := run([]*schemapb.FieldData{
+			idField(1, 2),
+			valueField(100, 200),
+		})
+		assert.NoError(t, err)
+		profile := findProfile(task)
+		if assert.NotNil(t, profile) {
+			assert.Equal(t, []int32{11, 22}, structValues(profile))
+		}
+	})
+
+	t.Run("provided top-level struct replaces whole struct", func(t *testing.T) {
+		task, err := run([]*schemapb.FieldData{
+			idField(1, 2),
+			valueField(100, 200),
+			profileField(111, 222),
+		})
+		assert.NoError(t, err)
+		profile := findProfile(task)
+		if assert.NotNil(t, profile) {
+			assert.Equal(t, []int32{111, 222}, structValues(profile))
+		}
+	})
+
+	t.Run("mixed insert update keeps request struct rows", func(t *testing.T) {
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: schema,
+			req: &milvuspb.UpsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					idField(1, 3),
+					valueField(100, 300),
+					profileField(111, 333),
+				},
+				NumRows:        2,
+				PartialUpdate:  true,
+				CollectionName: "test_struct_partial_update",
+			},
+			upsertMsg: &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: []*schemapb.FieldData{
+						idField(1, 3),
+						valueField(100, 300),
+						profileField(111, 333),
+					},
+					NumRows: 2,
+					Version: msgpb.InsertDataVersion_ColumnBased,
+				},
+			}},
+			node: &Proxy{},
+		}
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				idField(1),
+				valueField(10),
+				profileField(11),
+			},
+		}, segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+
+		err := task.queryPreExecute(context.Background())
+		assert.NoError(t, err)
+		profile := findProfile(task)
+		if assert.NotNil(t, profile) {
+			assert.Equal(t, []int32{111, 333}, structValues(profile))
+		}
+	})
+
+	t.Run("direct struct sub-field update is rejected", func(t *testing.T) {
+		subField := profileField(111, 222).GetStructArrays().GetFields()[0]
+		subField.FieldName = "profile[age]"
+		_, err := run([]*schemapb.FieldData{
+			idField(1, 2),
+			valueField(100, 200),
+			subField,
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "partial struct update is not supported")
+	})
 }
 
 func TestCheckDynamicFieldDataForPartialUpdate(t *testing.T) {
