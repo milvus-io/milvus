@@ -53,6 +53,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
 #include "parquet/arrow/reader.h"
+#include "parquet/exception.h"
 #include "pb/schema.pb.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/SegmentInterface.h"
@@ -63,6 +64,7 @@
 #include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPool.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -1331,21 +1333,37 @@ LoadArrowReaderForJsonStatsFromRemote(
                 auto buffer_reader =
                     std::make_shared<arrow::io::BufferReader>(arrow_buf);
 
-                std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-                auto status = parquet::arrow::OpenFile(
-                    buffer_reader, arrow::default_memory_pool(), &arrow_reader);
-                AssertInfo(status.ok(),
-                           "failed to open parquet file: {}",
-                           status.message());
+                try {
+                    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+                    auto status =
+                        parquet::arrow::OpenFile(buffer_reader,
+                                                 arrow::default_memory_pool(),
+                                                 &arrow_reader);
+                    if (!status.ok()) {
+                        ThrowInfo(
+                            milvus::storage::ArrowStatusToErrorCode(status),
+                            "failed to open parquet file: {}",
+                            status.message());
+                    }
 
-                std::shared_ptr<arrow::RecordBatchReader> batch_reader;
-                status = arrow_reader->GetRecordBatchReader(&batch_reader);
-                AssertInfo(status.ok(),
-                           "failed to get record batch reader: {}",
-                           status.message());
+                    std::shared_ptr<arrow::RecordBatchReader> batch_reader;
+                    status = arrow_reader->GetRecordBatchReader(&batch_reader);
+                    if (!status.ok()) {
+                        ThrowInfo(
+                            milvus::storage::ArrowStatusToErrorCode(status),
+                            "failed to get record batch reader: {}",
+                            status.message());
+                    }
 
-                return std::make_shared<ArrowDataWrapper>(
-                    std::move(batch_reader), std::move(arrow_reader), buf);
+                    return std::make_shared<ArrowDataWrapper>(
+                        std::move(batch_reader), std::move(arrow_reader), buf);
+                } catch (const parquet::ParquetException& e) {
+                    // parquet throws directly on malformed files; keep the
+                    // failure typed as permanent data corruption.
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "parquet parse failed: {}",
+                              e.what());
+                }
             });
             futures.emplace_back(std::move(future));
         }
