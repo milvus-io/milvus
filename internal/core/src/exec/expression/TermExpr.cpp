@@ -118,23 +118,42 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             span.GetSpan()->SetAttribute("json_filter_expr_type", "term");
+            // Element-level JSON array ($ in [...] inside
+            // MATCH_*/element_filter): test membership per array element rather
+            // than reading one scalar per row.
+            const bool element_level = expr_->column_.element_level_;
             if (expr_->vals_.size() == 0) {
-                result = ExecVisitorImplTemplateJson<bool>(context);
+                result = element_level
+                             ? ExecTermJsonElement<bool>(context)
+                             : ExecVisitorImplTemplateJson<bool>(context);
                 break;
             }
             auto type = expr_->vals_[0].val_case();
             switch (type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
-                    result = ExecVisitorImplTemplateJson<bool>(context);
+                    result = element_level
+                                 ? ExecTermJsonElement<bool>(context)
+                                 : ExecVisitorImplTemplateJson<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    result = ExecVisitorImplTemplateJson<int64_t>(context);
+                    // Element-level reads numeric JSON elements as double (an
+                    // array may hold ints and floats); the double SetElement
+                    // still matches integer literals exactly.
+                    result =
+                        element_level
+                            ? ExecTermJsonElement<double>(context)
+                            : ExecVisitorImplTemplateJson<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    result = ExecVisitorImplTemplateJson<double>(context);
+                    result = element_level
+                                 ? ExecTermJsonElement<double>(context)
+                                 : ExecVisitorImplTemplateJson<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
-                    result = ExecVisitorImplTemplateJson<std::string>(context);
+                    result =
+                        element_level
+                            ? ExecTermJsonElement<std::string>(context)
+                            : ExecVisitorImplTemplateJson<std::string>(context);
                     break;
                 default:
                     ThrowInfo(DataTypeInvalid, "unknown data type: {}", type);
@@ -889,6 +908,58 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyTermFilterExpr::ExecTermJsonElement(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    AssertInfo(input != nullptr,
+               "JSON element-level term filtering requires row offsets");
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    if (!arg_inited_) {
+        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        arg_inited_ = true;
+    }
+    const bool empty_set = arg_set_->Empty();
+
+    TargetBitmap json_res;
+    TargetBitmap json_valid_res;
+    FixedVector<ValueType> element_values;
+    FixedVector<bool> element_valid;
+    int64_t processed_size = 0;
+
+    VisitJsonRowsByOffsets(
+        input, [&](const milvus::Json& json, bool row_valid) {
+            auto elem_count = ExtractJsonElementValues<ValueType>(
+                json, row_valid, pointer, element_values, element_valid);
+            if (elem_count == 0) {
+                return;
+            }
+            auto old_size = json_res.size();
+            json_res.resize(old_size + elem_count, false);
+            json_valid_res.resize(old_size + elem_count, true);
+            TargetBitmapView res_view(json_res);
+            TargetBitmapView valid_res_view(json_valid_res);
+            for (int64_t k = 0; k < elem_count; ++k) {
+                if (!element_valid[k]) {
+                    res_view[old_size + k] = false;
+                    valid_res_view[old_size + k] = false;
+                    continue;
+                }
+                res_view[old_size + k] =
+                    !empty_set && arg_set_->In(element_values[k]);
+            }
+            processed_size += elem_count;
+        });
+
+    AssertInfo(
+        processed_size == static_cast<int64_t>(json_res.size()),
+        "internal error: JSON element term processed {} != result size {}",
+        processed_size,
+        json_res.size());
+    return std::make_shared<ColumnVector>(std::move(json_res),
+                                          std::move(json_valid_res));
 }
 
 template <typename T>

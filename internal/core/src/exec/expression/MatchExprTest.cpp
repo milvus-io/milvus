@@ -2613,33 +2613,33 @@ TEST_P(JsonArrayMatchExprTest, IntArrayAtPath) {
     auto seg = MakeSegment(schema, std::move(insert));
 
     // MATCH_ANY(json["arr"], $ > 90): row0(95) & row2(100) -> {0,2}.
-    EXPECT_EQ(RetrieveMatchedRows(
-                  seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 90))"),
-              (std::set<int64_t>{0, 2}));
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 90))"),
+        (std::set<int64_t>{0, 2}));
 
     // MATCH_ALL(json["arr"], $ >= 60): row0(95,80) & row2(100s) true;
     // row1(40) false; row3 [] vacuously true -> {0,2,3}.
-    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
-                                  *schema,
-                                  schema,
-                                  R"(MATCH_ALL(json["arr"], $ >= 60))"),
-              (std::set<int64_t>{0, 2, 3}));
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ >= 60))"),
+        (std::set<int64_t>{0, 2, 3}));
 
     // MATCH_LEAST(json["arr"], $ == 100, threshold=2): only row2 has >=2 -> {2}.
-    EXPECT_EQ(
-        RetrieveMatchedRows(seg.get(),
-                            *schema,
-                            schema,
-                            R"(MATCH_LEAST(json["arr"], $ == 100, threshold=2))"),
-        (std::set<int64_t>{2}));
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_LEAST(json["arr"], $ == 100, threshold=2))"),
+              (std::set<int64_t>{2}));
 
     // MATCH_EXACT(json["arr"], $ == 100, threshold=3): only row2 has exactly 3.
-    EXPECT_EQ(
-        RetrieveMatchedRows(seg.get(),
-                            *schema,
-                            schema,
-                            R"(MATCH_EXACT(json["arr"], $ == 100, threshold=3))"),
-        (std::set<int64_t>{2}));
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_EXACT(json["arr"], $ == 100, threshold=3))"),
+              (std::set<int64_t>{2}));
 
     // MATCH_MOST(json["arr"], $ > 90, threshold=0): rows with 0 matches.
     // row0->1, row1->0, row2->3, row3->0 -> {1,3}.
@@ -2652,20 +2652,43 @@ TEST_P(JsonArrayMatchExprTest, IntArrayAtPath) {
 
     // Compound element predicate with two `$` references: element in (60,90).
     // row0(80) matches; row1/row2/row3 none -> {0}.
-    EXPECT_EQ(RetrieveMatchedRows(
-                  seg.get(),
-                  *schema,
-                  schema,
-                  R"(MATCH_ANY(json["arr"], $ > 60 && $ < 90))"),
-              (std::set<int64_t>{0}));
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_ANY(json["arr"], $ > 60 && $ < 90))"),
+        (std::set<int64_t>{0}));
 
     // Range form lowers to a BinaryRangeExpr over the element -> same as above.
-    EXPECT_EQ(RetrieveMatchedRows(
-                  seg.get(),
-                  *schema,
-                  schema,
-                  R"(MATCH_ANY(json["arr"], 60 < $ < 90))"),
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], 60 < $ < 90))"),
               (std::set<int64_t>{0}));
+
+    // Term form ($ in [...]) lowers to a TermExpr over the element.
+    // row0(80) & row2(100) each contain a listed value -> {0,2}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ in [80, 100]))"),
+              (std::set<int64_t>{0, 2}));
+
+    // Arithmetic form ($ % 2 == 0) lowers to a BinaryArithOpEvalRangeExpr.
+    // row0(80), row1(40), row2(100) each have an even element -> {0,1,2}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ % 2 == 0))"),
+              (std::set<int64_t>{0, 1, 2}));
+
+    // MATCH_ALL arithmetic: every element even. row1(40) all even;
+    // row2(100,100,100) all even; row3 [] vacuously true; row0(95 odd) fails.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ALL(json["arr"], $ % 2 == 0))"),
+              (std::set<int64_t>{1, 2, 3}));
 
     // Empty-array (row3) vacuous-truth edge case made explicit:
     //   - MATCH_ALL includes the empty row (no element violates the predicate).
@@ -2697,14 +2720,16 @@ TEST_P(JsonArrayMatchExprTest, VarCharArrayAtPath) {
     auto seg = MakeSegment(schema, std::move(insert));
 
     // MATCH_ANY(json["arr"], $ == "x") -> {0,3}.
-    EXPECT_EQ(RetrieveMatchedRows(
-                  seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ == "x"))"),
-              (std::set<int64_t>{0, 3}));
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ == "x"))"),
+        (std::set<int64_t>{0, 3}));
 
     // MATCH_ALL(json["arr"], $ != ""): every element non-empty; row2 [] vacuous.
-    EXPECT_EQ(RetrieveMatchedRows(
-                  seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ != ""))"),
-              (std::set<int64_t>{0, 1, 2, 3}));
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ != ""))"),
+        (std::set<int64_t>{0, 1, 2, 3}));
 
     // Compound string predicate with two `$` references.
     EXPECT_EQ(
@@ -2767,25 +2792,25 @@ TEST_P(JsonArrayMatchExprTest, NullableJsonArrayAtPath) {
 
     // MATCH_ANY(json["arr"], $ > 90): row0(95) & row2(100) -> {0,2}.
     // NULL(1)/empty(3)/row4(40) excluded.
-    EXPECT_EQ(RetrieveMatchedRows(
-                  seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 90))"),
-              (std::set<int64_t>{0, 2}));
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 90))"),
+        (std::set<int64_t>{0, 2}));
 
     // MATCH_ALL(json["arr"], $ >= 60): row0 & row2 true; NULL(1) and empty(3)
     // vacuously true; row4(40) false -> {0,1,2,3}.
-    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
-                                  *schema,
-                                  schema,
-                                  R"(MATCH_ALL(json["arr"], $ >= 60))"),
-              (std::set<int64_t>{0, 1, 2, 3}));
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ >= 60))"),
+        (std::set<int64_t>{0, 1, 2, 3}));
 
     // MATCH_LEAST(json["arr"], $ == 100, threshold=2): only row2 -> {2}.
-    EXPECT_EQ(
-        RetrieveMatchedRows(seg.get(),
-                            *schema,
-                            schema,
-                            R"(MATCH_LEAST(json["arr"], $ == 100, threshold=2))"),
-        (std::set<int64_t>{2}));
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_LEAST(json["arr"], $ == 100, threshold=2))"),
+              (std::set<int64_t>{2}));
 
     // MATCH_MOST(json["arr"], $ > 90, threshold=0): rows with 0 matches:
     // NULL(1), empty(3), row4(40) -> {1,3,4}.
@@ -2798,12 +2823,284 @@ TEST_P(JsonArrayMatchExprTest, NullableJsonArrayAtPath) {
 
     // MATCH_EXACT(json["arr"], $ == 100, threshold=0): rows with exactly 0
     // matches of (==100): row0, NULL(1), empty(3), row4 -> {0,1,3,4}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_EXACT(json["arr"], $ == 100, threshold=0))"),
+              (std::set<int64_t>{0, 1, 3, 4}));
+}
+
+TEST_P(JsonArrayMatchExprTest, BoolArrayAtPath) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // row0: [true,false]  row1: [false]  row2: [true,true]  row3: []
+    std::vector<std::string> rows = {
+        R"({"arr":[true,false]})",
+        R"({"arr":[false]})",
+        R"({"arr":[true,true]})",
+        R"({"arr":[]})",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY($ == true): row0 & row2 -> {0,2}.
     EXPECT_EQ(
-        RetrieveMatchedRows(seg.get(),
-                            *schema,
-                            schema,
-                            R"(MATCH_EXACT(json["arr"], $ == 100, threshold=0))"),
-        (std::set<int64_t>{0, 1, 3, 4}));
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ == true))"),
+        (std::set<int64_t>{0, 2}));
+    // MATCH_ALL($ == true): row2 all-true; row3 [] vacuous -> {2,3}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ == true))"),
+        (std::set<int64_t>{2, 3}));
+    // MATCH_ANY($ == false): row0 & row1 -> {0,1}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ == false))"),
+              (std::set<int64_t>{0, 1}));
+}
+
+TEST_P(JsonArrayMatchExprTest, DoubleArrayAtPath) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // row0: [1.5,2.5]  row1: [0.5]  row2: [3.5,3.5]  row3: []
+    std::vector<std::string> rows = {
+        R"({"arr":[1.5,2.5]})",
+        R"({"arr":[0.5]})",
+        R"({"arr":[3.5,3.5]})",
+        R"({"arr":[]})",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // UnaryRange over float elements: row0(2.5) & row2(3.5) > 2.0 -> {0,2}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 2.0))"),
+        (std::set<int64_t>{0, 2}));
+    // BinaryRange over float elements: row0(1.5,2.5 both in (1,3)) -> {0}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], 1.0 < $ < 3.0))"),
+              (std::set<int64_t>{0}));
+    // Term over float elements: row0(2.5) & row2(3.5) listed -> {0,2}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ in [2.5, 3.5]))"),
+              (std::set<int64_t>{0, 2}));
+    // Integer-operand arithmetic over float elements ($ * 2 yields an integer
+    // arith type, so the compare value stays integer): row2(3.5*2=7 > 5) -> {2}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ * 2 > 5))"),
+        (std::set<int64_t>{2}));
+    // Float-operand arithmetic ($ * 2.0 > 5.0): row2(3.5*2.0=7.0) -> {2}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ * 2.0 > 5.0))"),
+              (std::set<int64_t>{2}));
+    // Modulo uses std::fmod, not int truncation. All elements here are
+    // fractional (1.5/2.5/0.5/3.5), so $ % 2 is never 0 -> {} (empty). With the
+    // old int-truncation Mod, 2.5 would truncate to 2 and 2%2==0 would falsely
+    // match row0.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ % 2 == 0))"),
+              (std::set<int64_t>{}));
+    // MATCH_ALL over float: every element > 1.0. row0 yes; row1(0.5) no;
+    // row2 yes; row3 [] vacuous -> {0,2,3}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ > 1.0))"),
+        (std::set<int64_t>{0, 2, 3}));
+}
+
+TEST_P(JsonArrayMatchExprTest, RangeMatchVariants) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // row0:[95,80] row1:[40] row2:[100,100,100] row3:[]
+    std::vector<std::string> rows = {
+        R"({"arr":[95,80]})",
+        R"({"arr":[40]})",
+        R"({"arr":[100,100,100]})",
+        R"({"arr":[]})",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ALL(0 < $ < 200): all elements in range; row3 [] vacuous -> {0,1,2,3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ALL(json["arr"], 0 < $ < 200))"),
+              (std::set<int64_t>{0, 1, 2, 3}));
+    // MATCH_LEAST(90 < $ < 110, threshold=2): only row2 (3 in range) -> {2}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_LEAST(json["arr"], 90 < $ < 110, threshold=2))"),
+              (std::set<int64_t>{2}));
+    // MATCH_EXACT(90 < $ < 110, threshold=1): row0 has exactly 1 (95) -> {0}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_EXACT(json["arr"], 90 < $ < 110, threshold=1))"),
+              (std::set<int64_t>{0}));
+    // MATCH_MOST(90 < $ < 110, threshold=0): rows with 0 in-range:
+    // row1(40) & row3([]) -> {1,3}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_MOST(json["arr"], 90 < $ < 110, threshold=0))"),
+              (std::set<int64_t>{1, 3}));
+}
+
+TEST_P(JsonArrayMatchExprTest, TermAndArithVariants) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // row0:["x","y"] row1:["z"] row2:[] row3:["x"]
+    std::vector<std::string> srows = {
+        R"({"arr":["x","y"]})",
+        R"({"arr":["z"]})",
+        R"({"arr":[]})",
+        R"({"arr":["x"]})",
+    };
+    auto sinsert = BuildJsonInsert(*schema, pk_fid, json_fid, srows, {});
+    auto sseg = MakeSegment(schema, std::move(sinsert));
+    // String Term MATCH_ANY: row0(x),row1(z),row3(x) each list-member -> {0,1,3}.
+    EXPECT_EQ(RetrieveMatchedRows(sseg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ in ["x", "z"]))"),
+              (std::set<int64_t>{0, 1, 3}));
+    // String Term MATCH_ALL: row0(x,y) both in; row2 [] vacuous; row3(x) ->
+    // {0,2,3}; row1(z) not in -> excluded.
+    EXPECT_EQ(RetrieveMatchedRows(sseg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ALL(json["arr"], $ in ["x", "y"]))"),
+              (std::set<int64_t>{0, 2, 3}));
+
+    // Integer arithmetic op coverage (Add/Sub/Mul/Div) on a fresh segment.
+    std::vector<std::string> irows = {
+        R"({"arr":[95,80]})",
+        R"({"arr":[40]})",
+        R"({"arr":[100,100,100]})",
+        R"({"arr":[]})",
+    };
+    auto iinsert = BuildJsonInsert(*schema, pk_fid, json_fid, irows, {});
+    auto iseg = MakeSegment(schema, std::move(iinsert));
+    // Add: $ + 10 >= 105 -> 95+10=105(row0), 100+10=110(row2) -> {0,2}.
+    EXPECT_EQ(RetrieveMatchedRows(iseg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ + 10 >= 105))"),
+              (std::set<int64_t>{0, 2}));
+    // Sub: $ - 5 == 35 -> 40-5=35(row1) -> {1}.
+    EXPECT_EQ(RetrieveMatchedRows(iseg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ - 5 == 35))"),
+              (std::set<int64_t>{1}));
+    // Mul: $ * 2 == 200 -> 100*2=200(row2) -> {2}.
+    EXPECT_EQ(RetrieveMatchedRows(iseg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ * 2 == 200))"),
+              (std::set<int64_t>{2}));
+    // Div (integer): $ / 40 == 1 -> only 40/40=1(row1) -> {1}.
+    EXPECT_EQ(RetrieveMatchedRows(iseg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(json["arr"], $ / 40 == 1))"),
+              (std::set<int64_t>{1}));
+}
+
+TEST_P(JsonArrayMatchExprTest, MultiLevelPath) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // Nested array at json["a"]["b"].
+    std::vector<std::string> rows = {
+        R"({"a":{"b":[1,2,3]}})",
+        R"({"a":{"b":[10,20]}})",
+        R"({"a":{"b":[]}})",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(json["a"]["b"], $ > 5): row1(10,20) -> {1}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["a"]["b"], $ > 5))"),
+        (std::set<int64_t>{1}));
+    // MATCH_ALL(json["a"]["b"], $ < 100): all in; row2 [] vacuous -> {0,1,2}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ALL(json["a"]["b"], $ < 100))"),
+              (std::set<int64_t>{0, 1, 2}));
+}
+
+TEST_P(JsonArrayMatchExprTest, MixedTypeAndNullElements) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // Arrays mixing ints with type-mismatched / null elements. Invalid elements
+    // (wrong type or JSON null) are skipped by MatchSingleRow's valid bitmap.
+    std::vector<std::string> rows = {
+        R"({"arr":[95,"x",80]})",
+        R"({"arr":[95,null,80]})",
+        R"({"arr":["a","b"]})",
+        R"({"arr":[null,null]})",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY($ > 90): valid element 95 matches in row0 & row1; rows 2/3 have
+    // no valid numeric element -> {0,1}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 90))"),
+        (std::set<int64_t>{0, 1}));
+    // MATCH_ALL($ >= 90): only valid elements counted. row0/row1 have 80 (<90)
+    // -> fail. rows 2/3 have 0 valid numeric elements -> vacuously true -> {2,3}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ >= 90))"),
+        (std::set<int64_t>{2, 3}));
+    // MATCH_LEAST($ >= 80, threshold=2): row0/row1 have 2 valid (95,80) -> {0,1}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_LEAST(json["arr"], $ >= 80, threshold=2))"),
+              (std::set<int64_t>{0, 1}));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -3039,8 +3336,11 @@ TEST(ScalarArrayMatchNullableIngest, BinlogLoadAndInsertAgree) {
             }
             valid[i] = row_valid[i];
         }
-        auto scores_array = CreateDataArrayFrom(
-            scores.data(), valid.data(), N, ins_schema->operator[](ins_scores_fid));
+        auto scores_array =
+            CreateDataArrayFrom(scores.data(),
+                                valid.data(),
+                                N,
+                                ins_schema->operator[](ins_scores_fid));
         insert->mutable_fields_data()->AddAllocated(scores_array.release());
         insert->set_num_rows(N);
 
@@ -3074,8 +3374,7 @@ TEST(ScalarArrayMatchNullableIngest, BinlogLoadAndInsertAgree) {
             retrieve_rows(inserted.get(), *ins_schema, ins_schema, expr);
         EXPECT_EQ(loaded_rows, expected)
             << "binlog-load path wrong for: " << expr;
-        EXPECT_EQ(inserted_rows, expected)
-            << "insert path wrong for: " << expr;
+        EXPECT_EQ(inserted_rows, expected) << "insert path wrong for: " << expr;
         // The two ingestion paths must agree on a nullable array.
         EXPECT_EQ(loaded_rows, inserted_rows)
             << "load vs insert divergence for: " << expr;

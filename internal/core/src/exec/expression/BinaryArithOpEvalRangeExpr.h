@@ -734,6 +734,13 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForJson(OffsetVector* input = nullptr);
 
+    // Element-level JSON array arithmetic predicate (the `$` accessor inside
+    // MATCH_*/element_filter over a JSON array). Applies arith_op + compare per
+    // array element at the JSON path, emitting a per-element bitmap.
+    template <typename ValueType>
+    VectorPtr
+    ExecRangeVisitorImplForJsonElement(EvalCtx& context);
+
     template <typename ValueType>
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);

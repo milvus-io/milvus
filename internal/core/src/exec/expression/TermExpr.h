@@ -147,6 +147,13 @@ class PhyTermFilterExpr : public SegmentExpr {
     VectorPtr
     ExecTermJsonFieldInVariable(EvalCtx& context);
 
+    // Element-level JSON array term predicate (the `$` accessor inside
+    // MATCH_*/element_filter over a JSON array). Iterates each array element at
+    // the JSON path and tests set membership, emitting a per-element bitmap.
+    template <typename ValueType>
+    VectorPtr
+    ExecTermJsonElement(EvalCtx& context);
+
     template <typename ValueType>
     VectorPtr
     ExecVisitorImplTemplateArray(EvalCtx& context);

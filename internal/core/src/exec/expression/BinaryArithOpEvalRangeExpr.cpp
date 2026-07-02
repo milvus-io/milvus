@@ -82,6 +82,9 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
+            // Element-level JSON array ($ % k <op> v inside MATCH_*/
+            // element_filter): apply the arithmetic per array element.
+            const bool element_level = expr_->column_.element_level_;
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal: {
@@ -89,11 +92,20 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForJson<int64_t>(input);
+                    // Element-level reads numeric JSON elements as double so a
+                    // float element (e.g. 3.5) is not silently dropped; integer
+                    // arithmetic (Mod/Div) casts back to int64 per element.
+                    result = element_level
+                                 ? ExecRangeVisitorImplForJsonElement<double>(
+                                       context)
+                                 : ExecRangeVisitorImplForJson<int64_t>(input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForJson<double>(input);
+                    result = element_level
+                                 ? ExecRangeVisitorImplForJsonElement<double>(
+                                       context)
+                                 : ExecRangeVisitorImplForJson<double>(input);
                     break;
                 }
                 default: {
@@ -652,6 +664,123 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJsonElement(
+    EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    AssertInfo(input != nullptr,
+               "JSON element-level arithmetic filtering requires row offsets");
+    if (!arg_inited_) {
+        value_arg_.SetValue<ValueType>(expr_->value_);
+        if (expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength) {
+            right_operand_arg_.SetValue(ValueType());
+        } else {
+            right_operand_arg_.SetValue<ValueType>(expr_->right_operand_);
+        }
+        arg_inited_ = true;
+    }
+
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto op_type = expr_->op_type_;
+    auto arith_type = expr_->arith_op_type_;
+    ValueType value = value_arg_.GetValue<ValueType>();
+    ValueType right_operand = right_operand_arg_.GetValue<ValueType>();
+
+    if ((arith_type == proto::plan::ArithOpType::Div ||
+         arith_type == proto::plan::ArithOpType::Mod) &&
+        right_operand == 0) {
+        ThrowInfo(
+            ErrorCode::ExprInvalid,
+            "division or modulus by zero in JSON field arithmetic expression");
+    }
+
+    auto arith_cmp = [&](ValueType v) -> bool {
+        ValueType lhs{};
+        switch (arith_type) {
+            case proto::plan::ArithOpType::Add:
+                lhs = v + right_operand;
+                break;
+            case proto::plan::ArithOpType::Sub:
+                lhs = v - right_operand;
+                break;
+            case proto::plan::ArithOpType::Mul:
+                lhs = v * right_operand;
+                break;
+            case proto::plan::ArithOpType::Div:
+                lhs = v / right_operand;
+                break;
+            case proto::plan::ArithOpType::Mod:
+                // Use safe_mod (std::fmod for floating point) to match the
+                // non-element JSON arith path and avoid UB from casting
+                // NaN/Inf/out-of-range doubles to int64.
+                lhs = static_cast<ValueType>(safe_mod(v, right_operand));
+                break;
+            default:
+                ThrowInfo(
+                    OpTypeInvalid,
+                    "unsupported arith type {} for JSON element predicate",
+                    arith_type);
+        }
+        switch (op_type) {
+            case proto::plan::OpType::Equal:
+                return lhs == value;
+            case proto::plan::OpType::NotEqual:
+                return lhs != value;
+            case proto::plan::OpType::GreaterThan:
+                return lhs > value;
+            case proto::plan::OpType::GreaterEqual:
+                return lhs >= value;
+            case proto::plan::OpType::LessThan:
+                return lhs < value;
+            case proto::plan::OpType::LessEqual:
+                return lhs <= value;
+            default:
+                ThrowInfo(OpTypeInvalid,
+                          "unsupported compare type {} for JSON element "
+                          "arithmetic predicate",
+                          op_type);
+        }
+    };
+
+    TargetBitmap json_res;
+    TargetBitmap json_valid_res;
+    FixedVector<ValueType> element_values;
+    FixedVector<bool> element_valid;
+    int64_t processed_size = 0;
+
+    VisitJsonRowsByOffsets(
+        input, [&](const milvus::Json& json, bool row_valid) {
+            auto elem_count = ExtractJsonElementValues<ValueType>(
+                json, row_valid, pointer, element_values, element_valid);
+            if (elem_count == 0) {
+                return;
+            }
+            auto old_size = json_res.size();
+            json_res.resize(old_size + elem_count, false);
+            json_valid_res.resize(old_size + elem_count, true);
+            TargetBitmapView res_view(json_res);
+            TargetBitmapView valid_res_view(json_valid_res);
+            for (int64_t k = 0; k < elem_count; ++k) {
+                if (!element_valid[k]) {
+                    res_view[old_size + k] = false;
+                    valid_res_view[old_size + k] = false;
+                    continue;
+                }
+                res_view[old_size + k] = arith_cmp(element_values[k]);
+            }
+            processed_size += elem_count;
+        });
+
+    AssertInfo(processed_size == static_cast<int64_t>(json_res.size()),
+               "internal error: JSON element arith processed {} != result "
+               "size {}",
+               processed_size,
+               json_res.size());
+    return std::make_shared<ColumnVector>(std::move(json_res),
+                                          std::move(json_valid_res));
 }
 
 template <typename ValueType>

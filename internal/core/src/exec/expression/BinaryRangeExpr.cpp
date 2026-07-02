@@ -108,6 +108,22 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::JSON: {
             span.GetSpan()->SetAttribute("json_filter_expr_type",
                                          "binary_range");
+            // Element-level JSON array ($ inside MATCH_*/element_filter):
+            // evaluate the range per array element. Numeric bounds use double
+            // (consistent with the JSON element read in UnaryExpr and the
+            // index/stats paths); string bounds use std::string.
+            if (expr_->column_.element_level_) {
+                auto lower_type = expr_->lower_val_.val_case();
+                if (lower_type ==
+                    proto::plan::GenericValue::ValCase::kStringVal) {
+                    result = ExecRangeVisitorImplForJsonElement<std::string>(
+                        context);
+                } else {
+                    result =
+                        ExecRangeVisitorImplForJsonElement<double>(context);
+                }
+                break;
+            }
             auto lower_type = expr_->lower_val_.val_case();
             auto upper_type = expr_->upper_val_.val_case();
             // For numeric types, if either bound is float, use double for both.
@@ -637,6 +653,84 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonElement(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    AssertInfo(input != nullptr,
+               "JSON element-level range filtering requires row offsets");
+
+    bool lower_inclusive = expr_->lower_inclusive_;
+    bool upper_inclusive = expr_->upper_inclusive_;
+    if (!arg_inited_) {
+        lower_arg_.SetValue<ValueType>(expr_->lower_val_);
+        upper_arg_.SetValue<ValueType>(expr_->upper_val_);
+        arg_inited_ = true;
+    }
+    ValueType val1 = lower_arg_.GetValue<ValueType>();
+    ValueType val2 = upper_arg_.GetValue<ValueType>();
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+
+    TargetBitmap json_res;
+    TargetBitmap json_valid_res;
+    TargetBitmap empty_bitmap;
+    FixedVector<ValueType> element_values;
+    FixedVector<bool> element_valid;
+    int64_t processed_size = 0;
+
+    VisitJsonRowsByOffsets(
+        input, [&](const milvus::Json& json, bool row_valid) {
+            auto elem_count = ExtractJsonElementValues<ValueType>(
+                json, row_valid, pointer, element_values, element_valid);
+            if (elem_count == 0) {
+                return;
+            }
+            auto old_size = json_res.size();
+            json_res.resize(old_size + elem_count, false);
+            json_valid_res.resize(old_size + elem_count, true);
+            TargetBitmapView res_view(json_res);
+            TargetBitmapView valid_res_view(json_valid_res);
+
+            auto run = [&]<bool li, bool ui>() {
+                BinaryRangeElementFunc<ValueType,
+                                       li,
+                                       ui,
+                                       FilterType::sequential>
+                    func;
+                func(val1,
+                     val2,
+                     element_values.data(),
+                     static_cast<size_t>(elem_count),
+                     res_view + old_size,
+                     empty_bitmap,
+                     0,
+                     nullptr);
+            };
+            if (lower_inclusive && upper_inclusive) {
+                run.template operator()<true, true>();
+            } else if (lower_inclusive && !upper_inclusive) {
+                run.template operator()<true, false>();
+            } else if (!lower_inclusive && upper_inclusive) {
+                run.template operator()<false, true>();
+            } else {
+                run.template operator()<false, false>();
+            }
+            ApplyValidMask(element_valid.data(),
+                           res_view + old_size,
+                           valid_res_view + old_size,
+                           static_cast<int>(elem_count));
+            processed_size += elem_count;
+        });
+
+    AssertInfo(
+        processed_size == static_cast<int64_t>(json_res.size()),
+        "internal error: JSON element range processed {} != result size {}",
+        processed_size,
+        json_res.size());
+    return std::make_shared<ColumnVector>(std::move(json_res),
+                                          std::move(json_valid_res));
 }
 
 template <typename ValueType>

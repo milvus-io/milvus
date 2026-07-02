@@ -899,6 +899,25 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     return retrieve_plan;
 }
 
+namespace {
+// Validate an element-level column reference (the `$` element accessor used
+// inside MATCH_*/element_filter). Scalar/struct ARRAY targets cross-check the
+// declared element type against the field's static element type. JSON array
+// targets carry an *inferred* element type in column_info (a JSON field has no
+// static element type), so only the JSON data type is required for them.
+inline void
+AssertElementLevelColumn(DataType data_type,
+                         const FieldMeta& field,
+                         const proto::plan::ColumnInfo& column_info) {
+    if (data_type == DataType::JSON) {
+        return;
+    }
+    Assert(data_type == DataType::ARRAY);
+    Assert(field.get_element_type() ==
+           static_cast<DataType>(column_info.element_type()));
+}
+}  // namespace
+
 expr::TypedExprPtr
 ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     auto& column_info = expr_pb.column_info();
@@ -907,9 +926,7 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     auto data_type = field.get_data_type();
 
     if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
+        AssertElementLevelColumn(data_type, field, column_info);
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -933,9 +950,7 @@ ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
     auto data_type = field.get_data_type();
 
     if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
+        AssertElementLevelColumn(data_type, field, column_info);
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -952,8 +967,7 @@ ProtoParser::ParseBinaryRangeExprs(
     auto data_type = field.get_data_type();
 
     if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+        AssertElementLevelColumn(data_type, field, columnInfo);
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -974,8 +988,7 @@ ProtoParser::ParseTimestamptzArithCompareExprs(
     auto data_type = field.get_data_type();
 
     if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+        AssertElementLevelColumn(data_type, field, columnInfo);
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -1049,9 +1062,7 @@ ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     auto left_data_type = left_field.get_data_type();
 
     if (left_column_info.is_element_level()) {
-        Assert(left_data_type == DataType::ARRAY);
-        Assert(left_field.get_element_type() ==
-               static_cast<DataType>(left_column_info.element_type()));
+        AssertElementLevelColumn(left_data_type, left_field, left_column_info);
     } else {
         Assert(left_data_type ==
                static_cast<DataType>(left_column_info.data_type()));
@@ -1063,9 +1074,8 @@ ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     auto right_data_type = right_field.get_data_type();
 
     if (right_column_info.is_element_level()) {
-        Assert(right_data_type == DataType::ARRAY);
-        Assert(right_field.get_element_type() ==
-               static_cast<DataType>(right_column_info.element_type()));
+        AssertElementLevelColumn(
+            right_data_type, right_field, right_column_info);
     } else {
         Assert(right_data_type ==
                static_cast<DataType>(right_column_info.data_type()));
@@ -1086,8 +1096,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
     auto data_type = field.get_data_type();
 
     if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+        AssertElementLevelColumn(data_type, field, columnInfo);
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -1125,9 +1134,7 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
     auto data_type = field.get_data_type();
 
     if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
+        AssertElementLevelColumn(data_type, field, column_info);
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -1147,9 +1154,7 @@ ProtoParser::ParseExistExprs(const proto::plan::ExistsExpr& expr_pb) {
     auto data_type = field.get_data_type();
 
     if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
+        AssertElementLevelColumn(data_type, field, column_info);
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -1165,8 +1170,7 @@ ProtoParser::ParseJsonContainsExprs(
     auto data_type = field.get_data_type();
 
     if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+        AssertElementLevelColumn(data_type, field, columnInfo);
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -1201,8 +1205,7 @@ ProtoParser::ParseGISFunctionFilterExprs(
     auto data_type = field.get_data_type();
 
     if (columnInfo.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+        AssertElementLevelColumn(data_type, field, columnInfo);
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }

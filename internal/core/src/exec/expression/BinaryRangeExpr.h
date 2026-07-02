@@ -357,6 +357,14 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForJson(EvalCtx& context);
 
+    // Element-level JSON array range predicate (the `$` accessor used inside
+    // MATCH_*/element_filter over a JSON array). Iterates each array element at
+    // the JSON path and emits a per-element bitmap, unlike
+    // ExecRangeVisitorImplForJson which reads a single scalar per row.
+    template <typename ValueType>
+    VectorPtr
+    ExecRangeVisitorImplForJsonElement(EvalCtx& context);
+
     template <typename ValueType>
     VectorPtr
     ExecRangeVisitorImplForJsonStats();
