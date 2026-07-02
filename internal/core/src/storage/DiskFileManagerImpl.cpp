@@ -967,63 +967,127 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     auto manifest =
         index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
     auto manifest_path_str = manifest.value_or("");
-    if (manifest_path_str != "") {
-        AssertInfo(
-            loon_ffi_properties_ != nullptr,
-            "loon ffi properties is null when build index with manifest");
-        field_datas = GetFieldDatasFromManifest(
-            manifest_path_str,
-            loon_ffi_properties_,
-            field_meta_,
-            data_type,
-            dim,
-            element_type,
-            GetStorageColumnMapping(field_meta_.field_id));
-    } else {
-        field_datas = GetFieldDatasFromStorageV2(all_remote_files,
-                                                 GetFieldDataMeta().field_id,
-                                                 data_type.value(),
-                                                 element_type.value(),
-                                                 dim,
-                                                 fs_);
-    }
-
+    bool cached_already = false;
     bool nullable = false;
     uint64_t total_num_rows = 0;
-    if (valid_data_path.has_value()) {
-        for (auto& field_data : field_datas) {
-            if (field_data->IsNullable()) {
-                nullable = true;
-            }
-            total_num_rows += field_data->get_num_rows();
-        }
-    }
-
     std::vector<uint8_t> valid_bitmap;
-    if (nullable) {
-        valid_bitmap.resize((total_num_rows + 7) / 8, 0);
-    }
+    int64_t part_chunk_offset = 0;
 
-    int64_t chunk_offset = 0;
-    for (auto& field_data : field_datas) {
-        num_rows += uint32_t(field_data->get_valid_rows());
-        if (nullable) {
-            auto rows = field_data->get_num_rows();
-            for (int64_t i = 0; i < rows; ++i) {
-                if (field_data->is_valid(i)) {
-                    set_bit(valid_bitmap, chunk_offset + i);
+    for (auto& remote_files_group : all_remote_files) {
+        if (dim > 0 &&
+            manifest_path_str ==
+                "") {  //for vector indices try to use limited RAM when loading
+            cached_already = true;
+            //TOFO add bit set handling if nullable
+            for (auto& remote_file : remote_files_group) {
+                std::vector<std::vector<std::string>> current_files;
+                std::vector<std::string> vector_file;
+                vector_file.push_back(remote_file);
+                current_files.push_back(vector_file);
+                size_t max_rows = 1000000, offset = 0;
+                while (true) {
+                    // limit download to 1000000 rows to avoid high memory consumption
+                    auto part_field_datas =
+                        GetFieldDatasFromStorageV2(current_files,
+                                                   GetFieldDataMeta().field_id,
+                                                   data_type.value(),
+                                                   element_type.value(),
+                                                   dim,
+                                                   fs_,
+                                                   max_rows,
+                                                   offset);
+                    if (part_field_datas.empty()) {
+                        break;
+                    }
+                    for (auto& field_data : part_field_datas) {
+                        if (field_data->IsNullable()) {
+                            nullable = true;
+                        }
+
+                        uint32_t current_num_rows =
+                            uint32_t(field_data->get_num_rows());
+                        num_rows += current_num_rows;
+                        total_num_rows = num_rows;
+                        if (nullable) {
+                            valid_bitmap.resize((total_num_rows + 7) / 8, 0);
+                            auto rows = field_data->get_num_rows();
+                            for (int64_t i = 0; i < rows; ++i) {
+                                if (field_data->is_valid(i)) {
+                                    set_bit(valid_bitmap,
+                                            part_chunk_offset + i);
+                                }
+                            }
+                            part_chunk_offset += rows;
+                        }
+
+                        cache_raw_data_to_disk_common<T>(field_data,
+                                                         local_chunk_manager,
+                                                         local_data_path,
+                                                         file_created,
+                                                         var_dim,
+                                                         write_offset);
+                        offset += current_num_rows;
+                    }
                 }
             }
-            chunk_offset += rows;
+        } else {
+            if (manifest_path_str != "") {
+                AssertInfo(loon_ffi_properties_ != nullptr,
+                           "loon ffi properties is null when build index with "
+                           "manifest");
+                field_datas = GetFieldDatasFromManifest(manifest_path_str,
+                                                        loon_ffi_properties_,
+                                                        field_meta_,
+                                                        data_type,
+                                                        dim,
+                                                        element_type);
+            } else {
+                field_datas =
+                    GetFieldDatasFromStorageV2(all_remote_files,
+                                               GetFieldDataMeta().field_id,
+                                               data_type.value(),
+                                               element_type.value(),
+                                               dim,
+                                               fs_);
+            }
+        }
+    }
+
+    if (!cached_already) {
+        if (valid_data_path.has_value()) {
+            for (auto& field_data : field_datas) {
+                if (field_data->IsNullable()) {
+                    nullable = true;
+                }
+                total_num_rows += field_data->get_num_rows();
+            }
+        }
+        if (nullable) {
+            valid_bitmap.resize((total_num_rows + 7) / 8, 0);
         }
 
-        cache_raw_data_to_disk_common<T>(field_data,
-                                         local_chunk_manager,
-                                         local_data_path,
-                                         file_created,
-                                         var_dim,
-                                         write_offset,
-                                         is_vector_array ? &offsets : nullptr);
+        int64_t chunk_offset = 0;
+        for (auto& field_data : field_datas) {
+            num_rows += uint32_t(field_data->get_valid_rows());
+            if (nullable) {
+                auto rows = field_data->get_num_rows();
+                for (int64_t i = 0; i < rows; ++i) {
+                    if (field_data->is_valid(i)) {
+                        set_bit(valid_bitmap, chunk_offset + i);
+                    }
+                }
+                chunk_offset += rows;
+            }
+
+            cache_raw_data_to_disk_common<T>(
+                field_data,
+                local_chunk_manager,
+                local_data_path,
+                file_created,
+                var_dim,
+                write_offset,
+                is_vector_array ? &offsets : nullptr);
+        }
     }
 
     // For vector arrays, num_rows should be the total flattened vector count,
