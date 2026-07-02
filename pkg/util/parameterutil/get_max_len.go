@@ -45,7 +45,7 @@ func GetMaxCapacity(field *schemapb.FieldSchema) (int64, error) {
 	maxCapacity, err := strconv.Atoi(maxCapacityStr)
 	if err != nil {
 		msg := fmt.Sprintf("invalid max capacity: %s", maxCapacityStr)
-		return 0, merr.WrapErrParameterInvalid("value of max length should be of int", maxCapacityStr, msg)
+		return 0, merr.WrapErrParameterInvalid("value of max capacity should be of int", maxCapacityStr, msg)
 	}
 	return int64(maxCapacity), nil
 }
