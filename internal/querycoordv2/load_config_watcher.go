@@ -54,8 +54,9 @@ type LoadConfigWatcher struct {
 	notifier  *syncutil.AsyncTaskNotifier[struct{}]
 	s         *Server
 
-	previousReplicaNum int32
-	previousRGs        []string
+	previousReplicaNum                   int32
+	previousRGs                          []string
+	previousForceOverrideUserReplicaMode bool
 }
 
 // Trigger triggers a load config change.
@@ -117,6 +118,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 
 	newReplicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
 	newRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	forceOverrideUserReplicaMode := paramtable.Get().QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool()
 
 	if newReplicaNum == 0 && len(newRGs) == 0 {
 		// default cluster level load config, nothing to do for it.
@@ -139,7 +141,8 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 
 	left, right := lo.Difference(w.previousRGs, newRGs)
 	rgChanged := len(left) > 0 || len(right) > 0
-	if w.previousReplicaNum == newReplicaNum && !rgChanged {
+	forceOverrideChanged := w.previousForceOverrideUserReplicaMode != forceOverrideUserReplicaMode
+	if w.previousReplicaNum == newReplicaNum && !rgChanged && !forceOverrideChanged {
 		w.Logger().Info(context.TODO(),
 
 			"no need to update load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
@@ -150,7 +153,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	collectionIDs := w.s.meta.GetAll(w.notifier.Context())
 	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
 		collection := w.s.meta.GetCollection(w.notifier.Context(), collectionID)
-		if collection.UserSpecifiedReplicaMode {
+		if collection.UserSpecifiedReplicaMode && !forceOverrideUserReplicaMode {
 			w.Logger().Info(context.TODO(),
 
 				"collection is user specified replica mode, skip update load config", mlog.FieldCollectionID(collectionID))
@@ -182,6 +185,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		mlog.Strings("resourceGroups", newRGs))
 	w.previousReplicaNum = newReplicaNum
 	w.previousRGs = newRGs
+	w.previousForceOverrideUserReplicaMode = forceOverrideUserReplicaMode
 	return nil
 }
 
