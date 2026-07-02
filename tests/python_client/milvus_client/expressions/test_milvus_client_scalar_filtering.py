@@ -909,7 +909,7 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
                 schema.add_field(fname, dtype, nullable=nullable)
             field_names.append(fname)
 
-        self.create_collection(client, self.collection_name, schema=schema)
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
 
         # Generate deterministic data
         # Convert tuple FIELD_DEFS to dict format for generate_deterministic_rows
@@ -1255,7 +1255,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
                 group.append((fname, idx_type))
             array_field_groups[elem_dtype] = group
 
-        self.create_collection(client, self.collection_name, schema=schema)
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
 
         rng = random.Random(DEFAULT_SEED)
         vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
@@ -1779,7 +1779,7 @@ class TestJsonExpressions(TestMilvusClientV2Base):
         schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field("jf_none", DataType.JSON, nullable=True)
         schema.add_field("jf_inv", DataType.JSON, nullable=True)
-        self.create_collection(client, self.collection_name, schema=schema)
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
 
         rng = random.Random(DEFAULT_SEED)
         vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
