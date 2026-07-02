@@ -875,27 +875,38 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 	}
 }
 
-func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	identifier := ctx.Identifier().GetText()
+// parseTextMatchOperand runs the shared prologue of the text_match /
+// text_match_fuzzy / phrase_match visitors: resolve the field, require a
+// text-match-enabled string column, and parse the query literal or template.
+func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parser.IExprContext, opName string, argName string) (*planpb.ColumnInfo, *planpb.GenericValue, string, bool, error) {
 	column, err := v.translateIdentifierWithText(identifier, true)
 	if err != nil {
-		return err
+		return nil, nil, "", false, err
 	}
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
-		return merr.WrapErrQueryPlanMsg("text match operation on non-string is unsupported")
+		return nil, nil, "", false, merr.WrapErrQueryPlanMsg("%s operation on non-string is unsupported", opName)
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
+		return nil, nil, "", false, merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
 	}
-
-	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(), "text_match query")
+	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(queryExpr, argName)
 	if err != nil {
-		return err
+		return nil, nil, "", false, err
 	}
 	var value *planpb.GenericValue
 	if !isTemplate {
 		value = NewString(queryText)
+	}
+	return columnInfo, value, placeholder, isTemplate, nil
+}
+
+func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
+	identifier := ctx.Identifier().GetText()
+	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
+		identifier, ctx.Expr(), "text match", "text_match query")
+	if err != nil {
+		return err
 	}
 
 	// Handle optional min_should_match parameter
@@ -931,25 +942,10 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 
 func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) interface{} {
 	identifier := ctx.Identifier().GetText()
-	column, err := v.translateIdentifierWithText(identifier, true)
+	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
+		identifier, ctx.Expr(), "text match fuzzy", "text_match_fuzzy query")
 	if err != nil {
 		return err
-	}
-	columnInfo := toColumnInfo(column)
-	if !typeutil.IsStringType(column.dataType) {
-		return merr.WrapErrQueryPlanMsg("text match operation on non-string is unsupported")
-	}
-	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
-	}
-
-	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(), "text_match_fuzzy query")
-	if err != nil {
-		return err
-	}
-	var value *planpb.GenericValue
-	if !isTemplate {
-		value = NewString(queryText)
 	}
 
 	// tantivy's fuzzy automaton only supports an edit distance of 0, 1 or 2.
@@ -1001,26 +997,10 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
 	identifier := ctx.Identifier().GetText()
-	column, err := v.translateIdentifierWithText(identifier, true)
+	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
+		identifier, ctx.Expr(0), "phrase match", "phrase_match query")
 	if err != nil {
 		return err
-	}
-
-	columnInfo := toColumnInfo(column)
-	if !typeutil.IsStringType(column.dataType) {
-		return merr.WrapErrQueryPlanMsg("phrase match operation on non-string is unsupported")
-	}
-	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
-	}
-
-	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(0), "phrase_match query")
-	if err != nil {
-		return err
-	}
-	var value *planpb.GenericValue
-	if !isTemplate {
-		value = NewString(queryText)
 	}
 	var slop int64 = 0
 	if ctx.Expr(1) != nil {
@@ -1043,7 +1023,7 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo:           toColumnInfo(column),
+					ColumnInfo:           columnInfo,
 					Op:                   planpb.OpType_PhraseMatch,
 					Value:                value,
 					TemplateVariableName: placeholder,
