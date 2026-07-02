@@ -1452,6 +1452,32 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
     auto& src = *vec;
+    // Fast path for in-memory (non-mmap) string columns: operator[] / view_element
+    // takes a shared_lock on the chunk vector for EVERY row (get_chunk_data), so a
+    // top-K * VarChar bulk fetch on a growing segment acquires the lock N times.
+    // Group the offsets by chunk and take the lock once per chunk via
+    // get_chunk_data, then copy outside the lock. Safe because: the mutex only
+    // guards vec_ resize (chunk objects are moved, their heap buffers stay put);
+    // chunks are fixed-size (no intra-chunk realloc); inserts only append to new
+    // offsets, never mutate an already-committed row a search result references.
+    if constexpr (std::is_same_v<S, std::string>) {
+        if (!src.is_mmap()) {
+            const int64_t size_per_chunk = src.get_size_per_chunk();
+            std::unordered_map<int64_t, std::vector<int64_t>> rows_by_chunk;
+            for (int64_t i = 0; i < count; ++i) {
+                rows_by_chunk[seg_offsets[i] / size_per_chunk].push_back(i);
+            }
+            for (auto& [chunk_id, rows] : rows_by_chunk) {
+                auto* base = static_cast<const std::string*>(
+                    src.get_chunk_data(chunk_id));
+                for (int64_t i : rows) {
+                    const auto& s = base[seg_offsets[i] % size_per_chunk];
+                    dst->at(i).assign(s.data(), s.size());
+                }
+            }
+            return;
+        }
+    }
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (IsVariableTypeSupportInChunk<S> && src.is_mmap()) {
