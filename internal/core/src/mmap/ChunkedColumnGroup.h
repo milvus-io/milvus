@@ -784,6 +784,15 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         cid_t last_cid = 0;
         Chunk* chunk = nullptr;
         auto num_chunks = static_cast<int64_t>(group_->num_chunks());
+        if (num_chunks == 1) {
+            // Single-chunk column (small segment): resolve the chunk once
+            // and skip all grouping bookkeeping.
+            chunk = ca->get_cell_of(0)->GetChunk(field_id_).get();
+            for (int64_t i = 0; i < count; ++i) {
+                fn(chunk, offsets_in_chunk[i], static_cast<size_t>(i));
+            }
+            return;
+        }
         if (num_chunks > count) {
             // Degenerate case (tiny batch over a heavily chunked column):
             // counting buckets would cost O(num_chunks); visit in caller

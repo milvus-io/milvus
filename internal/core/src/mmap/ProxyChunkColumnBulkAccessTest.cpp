@@ -164,45 +164,36 @@ TEST(ProxyChunkColumnBulkAccess, PrimitiveValueAtMatchesOffsets) {
         nullptr, dst.data(), offsets.data(), 0, false);
 }
 
-TEST(ProxyChunkColumnBulkAccess, IsValidNonNullableInvokedOncePerRow) {
-    auto setup = BuildInt64Group(/*num_chunks=*/3, /*rows_per_chunk=*/10, 1);
-    auto offsets = RandomOffsets(64, setup.num_rows, /*seed=*/7);
-    std::vector<int> hit(offsets.size(), 0);
-    setup.target_column->BulkIsValid(
-        nullptr,
-        [&](bool valid, size_t row) {
-            EXPECT_TRUE(valid);
-            ASSERT_LT(row, hit.size());
-            hit[row]++;
-        },
-        offsets.data(),
-        offsets.size());
-    for (size_t i = 0; i < hit.size(); ++i) {
-        EXPECT_EQ(hit[i], 1) << "row " << i;
-    }
-}
-
-TEST(ProxyChunkColumnBulkAccess, BenchPrimitiveValueAtRandomOffsets) {
+// Benchmarks are excluded from regular UT runs; execute manually with:
+//   all_tests --gtest_also_run_disabled_tests --gtest_filter='*DISABLED_Bench*'
+TEST(ProxyChunkColumnBulkAccess, DISABLED_BenchPrimitiveValueAtRandomOffsets) {
     struct Config {
         int64_t num_chunks;
         int64_t rows_per_chunk;
         int num_fields;
+        int64_t count;
+        int iters;
     };
     // Chunk counts mirror fragmented vs compacted segments; field counts
-    // mirror narrow vs wide column groups. The last config exceeds LLC so
-    // per-row access pays real cache misses like a production segment.
+    // mirror narrow vs wide column groups; counts mirror small top-k
+    // retrieves up to reduce-sized batches. The 64x65536 config exceeds
+    // LLC so per-row access pays real cache misses like production.
     std::vector<Config> configs = {
-        {4, 65536, 4},
-        {32, 8192, 4},
-        {32, 8192, 16},
-        {128, 2048, 4},
-        {64, 65536, 8},
+        {4, 65536, 4, 1, 100000},
+        {4, 65536, 4, 10, 20000},
+        {4, 65536, 4, 100, 5000},
+        {1, 262144, 4, 10000, 100},
+        {4, 65536, 4, 10000, 100},
+        {32, 8192, 4, 10000, 100},
+        {32, 8192, 16, 10000, 100},
+        {128, 2048, 4, 10000, 100},
+        {64, 65536, 8, 10000, 100},
     };
-    constexpr int64_t kCount = 10000;  // ~nq(100) x topk(100) candidates
     constexpr int kWarmup = 5;
-    constexpr int kIters = 100;
 
     for (const auto& cfg : configs) {
+        const int64_t kCount = cfg.count;
+        const int kIters = cfg.iters;
         auto setup = BuildInt64Group(
             cfg.num_chunks, cfg.rows_per_chunk, cfg.num_fields);
         // Fresh offsets per iteration, as in production reduce — reusing
@@ -250,7 +241,7 @@ TEST(ProxyChunkColumnBulkAccess, BenchPrimitiveValueAtRandomOffsets) {
 // Production querynodes run many concurrent search tasks over the same
 // segment: per-row shared_ptr refcount bumps hit the same chunk control
 // blocks from every core. Single-threaded numbers hide that contention.
-TEST(ProxyChunkColumnBulkAccess, BenchPrimitiveValueAtConcurrent) {
+TEST(ProxyChunkColumnBulkAccess, DISABLED_BenchPrimitiveValueAtConcurrent) {
     const int kThreads = 8;
     constexpr int64_t kCount = 10000;
     constexpr int kIters = 50;  // per thread

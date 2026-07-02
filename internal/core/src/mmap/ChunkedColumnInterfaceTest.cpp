@@ -432,6 +432,45 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
     EXPECT_TRUE(fx.fetched->empty());
 }
 
+TYPED_TEST(ChunkedColumnInterfaceTest, BulkIsValidNonNullableInvokesOncePerRow) {
+    ColumnSpec spec{{5, 3, 4}, {}, /*nullable=*/false};
+    auto fx = TypeParam::Create(spec);
+
+    // Explicit offsets: exactly one callback per row, and the non-nullable
+    // path must answer without fetching any cell.
+    std::vector<int64_t> offsets = {0, 7, 3, 11, 7};
+    std::vector<int> hits(offsets.size(), 0);
+    fx.column->BulkIsValid(
+        nullptr,
+        [&](bool valid, size_t i) {
+            EXPECT_TRUE(valid);
+            ASSERT_LT(i, hits.size());
+            ++hits[i];
+        },
+        offsets.data(),
+        offsets.size());
+    for (size_t i = 0; i < hits.size(); ++i) {
+        EXPECT_EQ(hits[i], 1) << "row " << i;
+    }
+    EXPECT_TRUE(fx.fetched->empty());
+
+    // Null offsets: one callback per row of the whole column.
+    std::vector<int> all_hits(12, 0);
+    fx.column->BulkIsValid(
+        nullptr,
+        [&](bool valid, size_t i) {
+            EXPECT_TRUE(valid);
+            ASSERT_LT(i, all_hits.size());
+            ++all_hits[i];
+        },
+        nullptr,
+        0);
+    for (size_t i = 0; i < all_hits.size(); ++i) {
+        EXPECT_EQ(all_hits[i], 1) << "row " << i;
+    }
+    EXPECT_TRUE(fx.fetched->empty());
+}
+
 TYPED_TEST(ChunkedColumnInterfaceTest,
            BulkVectorValueAtDefaultsToLogicalOffsetsForNullableColumn) {
     ColumnSpec spec{{5, 3, 4},
