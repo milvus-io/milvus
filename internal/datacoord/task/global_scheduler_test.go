@@ -296,7 +296,7 @@ func TestGlobalScheduler_RecordTaskFailureBackoff(t *testing.T) {
 	scheduler.recordTaskFailure(task)
 	bo, _ = scheduler.backoffs.Get(7)
 	assert.Equal(t, 4, bo.failures)
-	assert.InDelta(t, 4.0, bo.notBefore.Sub(time.Now()).Seconds(), 0.5)
+	assert.InDelta(t, 4.0, time.Until(bo.notBefore).Seconds(), 0.5)
 
 	// clearing the entry ends the backoff
 	scheduler.backoffs.Remove(7)
