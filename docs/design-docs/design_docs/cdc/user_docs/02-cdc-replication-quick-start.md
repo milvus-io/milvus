@@ -281,6 +281,8 @@ The target cluster is a standby cluster in this topology. Do not run manual DDL 
 
 The exact verification code depends on your collection schema. For a basic Milvus collection workflow, see the Milvus quick start documentation.
 
+To load bulk data into this topology, see [Bulk Import in CDC Replication Mode](./05-cdc-2pc-import.md).
+
 ## CDC Lag
 
 CDC lag is the data window between the primary and standby clusters. You should monitor it continuously after replication is configured.
