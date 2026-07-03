@@ -330,6 +330,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) == val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) == val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) == val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -384,6 +394,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     case proto::plan::ArithOpType::BitXor: {
                         BinaryArithRangeJSONCompareNotEqual(
                             (int64_t(json_v) ^ int64_t(right_operand)) != val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompareNotEqual(
+                            (int64_t(json_v) << int64_t(right_operand)) != val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompareNotEqual(
+                            (int64_t(json_v) >> int64_t(right_operand)) != val);
                         break;
                     }
                     default:
@@ -442,6 +462,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) > val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) > val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) > val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -496,6 +526,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     case proto::plan::ArithOpType::BitXor: {
                         BinaryArithRangeJSONCompare(
                             (int64_t(json_v) ^ int64_t(right_operand)) >= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) >= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) >= val);
                         break;
                     }
                     default:
@@ -554,6 +594,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                             (int64_t(json_v) ^ int64_t(right_operand)) < val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) < val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) < val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -608,6 +658,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     case proto::plan::ArithOpType::BitXor: {
                         BinaryArithRangeJSONCompare(
                             (int64_t(json_v) ^ int64_t(right_operand)) <= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) << int64_t(right_operand)) <= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeJSONCompare(
+                            (int64_t(json_v) >> int64_t(right_operand)) <= val);
                         break;
                     }
                     default:
@@ -802,6 +862,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) == val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) == val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) == val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -856,6 +926,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     case proto::plan::ArithOpType::BitXor: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) ^ int64_t(right_operand)) != val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) != val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) != val);
                         break;
                     }
                     default:
@@ -914,6 +994,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) > val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) > val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) > val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -968,6 +1058,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     case proto::plan::ArithOpType::BitXor: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) ^ int64_t(right_operand)) >= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) >= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) >= val);
                         break;
                     }
                     default:
@@ -1026,6 +1126,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                             (int64_t(value) ^ int64_t(right_operand)) < val);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) < val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) < val);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -1080,6 +1190,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     case proto::plan::ArithOpType::BitXor: {
                         BinaryArithRangeArrayCompare(
                             (int64_t(value) ^ int64_t(right_operand)) <= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) << int64_t(right_operand)) <= val);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        BinaryArithRangeArrayCompare(
+                            (int64_t(value) >> int64_t(right_operand)) <= val);
                         break;
                     }
                     default:
@@ -1373,6 +1493,32 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::Equal,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::Equal,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -1479,6 +1625,32 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                         ArithOpIndexFunc<T,
                                          proto::plan::OpType::NotEqual,
                                          proto::plan::ArithOpType::BitXor,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::NotEqual,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::NotEqual,
+                                         proto::plan::ArithOpType::Shr,
                                          filter_type>
                             func;
                         res = std::move(func(index_ptr,
@@ -1603,6 +1775,32 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterThan,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterThan,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -1709,6 +1907,32 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                         ArithOpIndexFunc<T,
                                          proto::plan::OpType::GreaterEqual,
                                          proto::plan::ArithOpType::BitXor,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterEqual,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::GreaterEqual,
+                                         proto::plan::ArithOpType::Shr,
                                          filter_type>
                             func;
                         res = std::move(func(index_ptr,
@@ -1833,6 +2057,32 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                              offsets));
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessThan,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessThan,
+                                         proto::plan::ArithOpType::Shr,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -1939,6 +2189,32 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                         ArithOpIndexFunc<T,
                                          proto::plan::OpType::LessEqual,
                                          proto::plan::ArithOpType::BitXor,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessEqual,
+                                         proto::plan::ArithOpType::Shl,
+                                         filter_type>
+                            func;
+                        res = std::move(func(index_ptr,
+                                             sub_batch_size,
+                                             value,
+                                             right_operand,
+                                             offsets));
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpIndexFunc<T,
+                                         proto::plan::OpType::LessEqual,
+                                         proto::plan::ArithOpType::Shr,
                                          filter_type>
                             func;
                         res = std::move(func(index_ptr,
@@ -2111,6 +2387,24 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::Equal,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::Equal,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -2189,6 +2483,24 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         ArithOpElementFunc<T,
                                            proto::plan::OpType::NotEqual,
                                            proto::plan::ArithOpType::BitXor,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::NotEqual,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::NotEqual,
+                                           proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
                         func(data, size, value, right_operand, res, offsets);
@@ -2277,6 +2589,24 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterThan,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterThan,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -2355,6 +2685,24 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         ArithOpElementFunc<T,
                                            proto::plan::OpType::GreaterEqual,
                                            proto::plan::ArithOpType::BitXor,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterEqual,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::GreaterEqual,
+                                           proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
                         func(data, size, value, right_operand, res, offsets);
@@ -2443,6 +2791,24 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         func(data, size, value, right_operand, res, offsets);
                         break;
                     }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessThan,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessThan,
+                                           proto::plan::ArithOpType::Shr,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -2521,6 +2887,24 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                         ArithOpElementFunc<T,
                                            proto::plan::OpType::LessEqual,
                                            proto::plan::ArithOpType::BitXor,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shl: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessEqual,
+                                           proto::plan::ArithOpType::Shl,
+                                           filter_type>
+                            func;
+                        func(data, size, value, right_operand, res, offsets);
+                        break;
+                    }
+                    case proto::plan::ArithOpType::Shr: {
+                        ArithOpElementFunc<T,
+                                           proto::plan::OpType::LessEqual,
+                                           proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
                         func(data, size, value, right_operand, res, offsets);

@@ -410,6 +410,14 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			{`(Int64Field & 4) == {target}`, map[string]*schemapb.TemplateValue{
 				"target": generateTemplateValue(schemapb.DataType_Int64, int64(4)),
 			}},
+			// shift operators with placeholder operand / value
+			{`(Int64Field << {shift}) == {target}`, map[string]*schemapb.TemplateValue{
+				"shift":  generateTemplateValue(schemapb.DataType_Int64, int64(2)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(8)),
+			}},
+			{`(Int64Field >> {shift}) >= 1`, map[string]*schemapb.TemplateValue{
+				"shift": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -470,6 +478,11 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			// behind a placeholder (the integer-only check still applies).
 			{`(FloatField & {mask}) == {target}`, map[string]*schemapb.TemplateValue{
 				"mask":   generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			}},
+			// the same holds for shifts on a float field
+			{`(FloatField << {shift}) == {target}`, map[string]*schemapb.TemplateValue{
+				"shift":  generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 				"target": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
 			}},
 		}

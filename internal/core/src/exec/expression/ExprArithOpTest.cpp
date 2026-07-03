@@ -222,6 +222,28 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
         {R"((age32 ^ 1023) < 1000)",
          [](int32_t v) { return (v ^ 1023) < 1000; },
          DataType::INT32},
+        // Shift (<<, >>) and bitwise NOT (~, rewritten to ^ -1) test cases.
+        // Shift amounts are in [0, 64); the executor widens to int64 before
+        // shifting, so the reference computes on int64_t too. Thresholds keep
+        // each clause's result mixed for DataGen's value ranges.
+        {R"((age16 << 1) >= 1000)",
+         [](int16_t v) { return (int64_t(v) << 1) >= 1000; },
+         DataType::INT16},
+        {R"((age16 >> 1) < 500)",
+         [](int16_t v) { return (int64_t(v) >> 1) < 500; },
+         DataType::INT16},
+        {R"((age32 << 2) > 400)",
+         [](int32_t v) { return (int64_t(v) << 2) > 400; },
+         DataType::INT32},
+        {R"((age32 >> 2) <= 250)",
+         [](int32_t v) { return (int64_t(v) >> 2) <= 250; },
+         DataType::INT32},
+        {R"(~age8 != 0)",
+         [](int8_t v) { return (~int64_t(v)) != 0; },
+         DataType::INT8},
+        {R"(~age32 < -1000)",
+         [](int32_t v) { return (~int64_t(v)) < -1000; },
+         DataType::INT32},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -707,6 +729,23 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeNullable) {
                  return (v & 8) == 8;
              },
              DataType::INT64},
+            // Shift / bitwise-NOT on nullable fields: null rows must NOT match.
+            {R"((age16 >> 1) < 500)",
+             [](int16_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (int64_t(v) >> 1) < 500;
+             },
+             DataType::INT16},
+            {R"(~age8 != 0)",
+             [](int8_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (~int64_t(v)) != 0;
+             },
+             DataType::INT8},
         };
 
     auto schema = std::make_shared<Schema>();
@@ -1030,6 +1069,26 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
              [](const milvus::Json&) {
                  // non-numeric -> non-match -> NE is constant true
                  return true;
+             }},
+            // Shift / bitwise-NOT over a JSON integer field. ~ is rewritten to
+            // (x ^ -1), so it exercises the same BitXor JSON path.
+            {R"((json["int"] >> 1) < 1000000000)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) >> 1) < 1000000000;
+             }},
+            {R"((json["int"] >> 2) >= 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (int64_t(val) >> 2) >= 0;
+             }},
+            {R"(~json["int"] < 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (~int64_t(val)) < 0;
              }},
             // Test cases for BinaryArithOpEvalRangeExpr GT of various data types
             {R"(json["int"] + 1 > 2)",
@@ -2169,6 +2228,16 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
             {"(age64 & 8) == 8",
              [](int64_t v) { return (v & 8) == 8; },
              DataType::INT64},
+            // Shift / bitwise-NOT on the scalar-sort index path.
+            {"(age16 >> 1) < 500",
+             [](int16_t v) { return (int64_t(v) >> 1) < 500; },
+             DataType::INT16},
+            {"(age32 << 1) >= 1000",
+             [](int32_t v) { return (int64_t(v) << 1) >= 1000; },
+             DataType::INT32},
+            {"~age8 != 0",
+             [](int8_t v) { return (~int64_t(v)) != 0; },
+             DataType::INT8},
         };
 
     auto schema = std::make_shared<Schema>();

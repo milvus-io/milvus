@@ -260,6 +260,36 @@ func (s *ExpressionSuite) searchWithBitwiseExpression() {
 	}
 }
 
+// searchWithShiftNotExpression verifies shift (<<, >>) and bitwise NOT (~)
+// filter operators end-to-end with EXACT result counts. As above, E['F'] == i
+// and B == rowNum-i for every row i in [0, rowNum). ~ is rewritten to (x ^ -1)
+// at plan time, so this also exercises that rewrite end-to-end.
+func (s *ExpressionSuite) searchWithShiftNotExpression() {
+	testcases := []testCase{
+		{"(E['F'] << 1) == 4", s.rowNum, 1},  // 2*i == 4 -> i == 2
+		{"(E['F'] >> 1) == 0", s.rowNum, 2},  // i>>1 == 0 -> i in {0,1}
+		{"(E['F'] >> 2) == 1", s.rowNum, 4},  // i>>2 == 1 -> i in {4,5,6,7}
+		{"(E['F'] >> 3) == 0", s.rowNum, 8},  // i>>3 == 0 -> i in {0..7}
+		{"(B >> 1) == 0", s.rowNum, 1},       // B = 100-i in {0,1} -> i == 99
+		{"~E['F'] == -1", s.rowNum, 1},       // ~i == -1 -> i == 0
+		{"~E['F'] < -50", s.rowNum, 50},      // ~i = -i-1 < -50 -> i > 49 -> i in {50..99}
+	}
+	for _, c := range testcases {
+		params := integration.GetSearchParams(integration.IndexFaissIDMap, metric.IP)
+		searchReq := integration.ConstructSearchRequest(s.dbName, s.collectionName, c.expr,
+			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, 1, s.dim, c.topK, -1)
+
+		searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
+		s.NoError(err)
+		err = merr.Error(searchResult.GetStatus())
+		s.NoError(err)
+		s.Equal(c.resNum, len(searchResult.GetResults().GetScores()),
+			fmt.Sprintf("unexpected match count for shift/not expr: %s", c.expr))
+		mlog.Info(context.TODO(),
+			fmt.Sprintf("=========================Shift/Not search done with expr:%s =========================", c.expr))
+	}
+}
+
 func (s *ExpressionSuite) TestDivisionByZeroError() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -329,6 +359,7 @@ func (s *ExpressionSuite) TestExpression() {
 	s.setupData()
 	s.searchWithExpression()
 	s.searchWithBitwiseExpression()
+	s.searchWithShiftNotExpression()
 	s.TestDivisionByZeroError()
 }
 
