@@ -232,6 +232,53 @@ func TestExpr_NullLiteral(t *testing.T) {
 	}
 }
 
+// TestExpr_NullLiteral_LegacyNullField locks the schema-aware side of the
+// bare-NULL guard: "null" only became a create-time keyword together with this
+// guard, so a legacy collection may own a field literally named "null", and the
+// bare identifier is the ONLY syntax that can reference a top-level scalar
+// field (quoting like field["null"] reaches JSON sub-keys only). Such a field
+// must stay queryable; the strict GetFieldFromName check makes it resolve while
+// everything else keeps the reserved-word rejection (see errNullLiteral).
+func TestExpr_NullLiteral_LegacyNullField(t *testing.T) {
+	withNullField := func(dataType schemapb.DataType) *typeutil.SchemaHelper {
+		schema := newTestSchema(true)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 199, Name: "null", Description: "legacy field literally named null", DataType: dataType,
+		})
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		return helper
+	}
+
+	t.Run("scalar field named null", func(t *testing.T) {
+		helper := withNullField(schemapb.DataType_Int64)
+
+		// The bare identifier resolves to the declared field, as before the guard.
+		assertValidExpr(t, helper, `null > 5`)
+		assertValidExpr(t, helper, `null in [1, 2]`)
+		assertValidExpr(t, helper, `Int64Field == null`)
+		// The guard previously rejected these outright; schema-aware turns them
+		// into valid "is the null-named field NULL?" predicates.
+		assertValidExpr(t, helper, `null is null`)
+		assertValidExpr(t, helper, `null is not null`)
+		// Strict lookup is exact-case: a differently-cased NULL does not match the
+		// declared field and keeps the reserved-word rejection (pre-guard it would
+		// have been misparsed as the dynamic JSON key $meta["NULL"]).
+		assertNullLiteralRejected(t, helper, `NULL > 5`)
+		assertNullLiteralRejected(t, helper, `Int64Field == Null`)
+	})
+
+	t.Run("json field named null", func(t *testing.T) {
+		helper := withNullField(schemapb.DataType_JSON)
+
+		// The subscript base resolves via the same schema-aware guard in
+		// getColumnInfoFromJSONIdentifier.
+		assertValidExpr(t, helper, `null["x"] == 1`)
+		assertValidExpr(t, helper, `null["x"] is null`)
+		assertNullLiteralRejected(t, helper, `NULL["x"] == 1`)
+	})
+}
+
 func TestExpr_Call(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
