@@ -2222,6 +2222,12 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 		}
 	}
+	for _, structSchema := range schema.GetStructArrayFields() {
+		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
+			log.Info("no corresponding struct fieldData pass in", zap.String("structFieldSchema", structSchema.GetName()))
+			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
+		}
+	}
 
 	return nil
 }
@@ -2560,7 +2566,6 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			}
 		}
 	}
-
 	return nil
 }
 
