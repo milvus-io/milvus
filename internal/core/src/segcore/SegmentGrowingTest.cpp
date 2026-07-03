@@ -10,7 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-
+#include <nlohmann/json.hpp>
+#include <stddef.h>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <filesystem>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <optional>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -26,12 +37,43 @@
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
 
 using namespace milvus::segcore;
 using namespace milvus;
 namespace pb = milvus::proto;
+
+namespace {
+
+void
+AddStorageV3SystemFields(const SchemaPtr& schema) {
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+}
+
+bool
+ManifestHasField(const milvus::test::V3SegmentTestData& test_data,
+                 FieldId field_id) {
+    auto field_column = std::to_string(field_id.get());
+    auto column_groups = test_data.GetColumnGroups();
+    for (size_t i = 0; i < column_groups->size(); ++i) {
+        const auto& columns = column_groups->get_column_group(i)->columns;
+        if (std::find(columns.begin(), columns.end(), field_column) !=
+            columns.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
 
 TEST(Growing, DeleteCount) {
     auto schema = std::make_shared<Schema>();
@@ -103,6 +145,113 @@ TEST(Growing, RealCount) {
     status = segment->Delete(c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(0, segment->get_real_count());
+}
+
+TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
+    auto schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(schema);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    constexpr int64_t dim = 4;
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+
+    std::map<std::string, std::string> analyzer_params;
+    auto text = schema->AddDebugVarcharField(FieldName("text"),
+                                             DataType::VARCHAR,
+                                             65535,
+                                             false,
+                                             true,
+                                             true,
+                                             analyzer_params,
+                                             std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      "growing_recovery_checkpoint_row_cap")
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema, 2, 3, dim, TestLocalPath, base_path);
+    ASSERT_EQ(test_data.NumColumnGroups(), 2);
+    ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
+    ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
+
+    constexpr int64_t checkpoint_rows = 4;
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(3);
+    load_info.set_storageversion(STORAGE_V2);
+    load_info.set_num_of_rows(checkpoint_rows);
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    segment->Load(trace_ctx, nullptr);
+    ASSERT_EQ(segment->get_row_count(), checkpoint_rows);
+    EXPECT_EQ(segment->get_real_count(), checkpoint_rows);
+
+    std::vector<int64_t> row_ids = {checkpoint_rows};
+    std::vector<Timestamp> timestamps = {100};
+    std::vector<int64_t> pks = {100000};
+    std::vector<std::string> texts = {"text after recovery checkpoint"};
+    std::vector<float> vectors(dim, 1.0F);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(1);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, 1, (*schema)[pk]).release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(texts.data(), nullptr, 1, (*schema)[text])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(vectors.data(), nullptr, 1, (*schema)[vec])
+            .release());
+
+    auto offset = segment->PreInsert(1);
+    ASSERT_EQ(offset, checkpoint_rows);
+    ASSERT_NO_THROW(segment->Insert(
+        offset, 1, row_ids.data(), timestamps.data(), insert_data.get()));
+    EXPECT_EQ(segment->get_row_count(), checkpoint_rows + 1);
+
+    std::filesystem::remove_all(base_path);
+}
+
+TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
+    auto schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(schema);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      "growing_recovery_short_required_rows")
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema, 1, 2, 1, TestLocalPath, base_path);
+    ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
+    ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(4);
+    load_info.set_storageversion(STORAGE_V2);
+    load_info.set_num_of_rows(test_data.TotalRows() + 1);
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_ANY_THROW(segment->Load(trace_ctx, nullptr));
+    EXPECT_EQ(segment->get_row_count(), 0);
+
+    std::filesystem::remove_all(base_path);
 }
 
 class GrowingTest
