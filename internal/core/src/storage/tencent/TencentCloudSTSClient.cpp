@@ -176,11 +176,18 @@ TencentCloudSTSCredentialsClient::parseSTSResponse(
         return result;
     }
 
-    result.credentials.SetAWSAccessKeyId(
-        credentialsNode.GetString("TmpSecretId"));
-    result.credentials.SetAWSSecretKey(
-        credentialsNode.GetString("TmpSecretKey"));
-    result.credentials.SetSessionToken(credentialsNode.GetString("Token"));
+    auto accessKeyId = credentialsNode.GetString("TmpSecretId");
+    auto secretKey = credentialsNode.GetString("TmpSecretKey");
+    auto sessionToken = credentialsNode.GetString("Token");
+    if (accessKeyId.empty() || secretKey.empty() || sessionToken.empty()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Get credential fields from Response failed");
+        return result;
+    }
+
+    result.credentials.SetAWSAccessKeyId(accessKeyId);
+    result.credentials.SetAWSSecretKey(secretKey);
+    result.credentials.SetSessionToken(sessionToken);
     result.credentials.SetExpiration(parsedExpiration);
     result.success = true;
     return result;

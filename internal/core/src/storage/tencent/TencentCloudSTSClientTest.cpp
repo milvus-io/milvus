@@ -139,6 +139,54 @@ TEST_F(TencentCloudSTSClientTest, RejectsInvalidExpirationFormat) {
     EXPECT_TRUE(result.credentials.IsEmpty());
 }
 
+TEST_F(TencentCloudSTSClientTest, RejectsMissingAccessKeyId) {
+    const std::string body = R"({
+        "Response": {
+            "Credentials": {
+                "TmpSecretKey": "SECRET_TEST",
+                "Token": "SESSION_TOKEN"
+            },
+            "Expiration": "2026-07-03T12:34:56Z"
+        }
+    })";
+    auto result = Helper::parseSTSResponse(body);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.credentials.IsEmpty());
+}
+
+TEST_F(TencentCloudSTSClientTest, RejectsMissingSecretKey) {
+    const std::string body = R"({
+        "Response": {
+            "Credentials": {
+                "TmpSecretId": "AKID_TEST",
+                "Token": "SESSION_TOKEN"
+            },
+            "Expiration": "2026-07-03T12:34:56Z"
+        }
+    })";
+    auto result = Helper::parseSTSResponse(body);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.credentials.IsEmpty());
+}
+
+TEST_F(TencentCloudSTSClientTest, RejectsMissingSessionToken) {
+    const std::string body = R"({
+        "Response": {
+            "Credentials": {
+                "TmpSecretId": "AKID_TEST",
+                "TmpSecretKey": "SECRET_TEST"
+            },
+            "Expiration": "2026-07-03T12:34:56Z"
+        }
+    })";
+    auto result = Helper::parseSTSResponse(body);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.credentials.IsEmpty());
+}
+
 TEST_F(TencentCloudSTSClientTest,
        AcceptsValidResponseAndReturnsNonEmptyCredentials) {
     const std::string body = R"({
