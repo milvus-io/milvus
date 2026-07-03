@@ -917,6 +917,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				}
 			}
 			fd.Field = vectors
+		case *schemapb.FieldData_StructArrays:
+			fd.Field = &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: PrepareResultFieldData(fieldData.GetStructArrays().GetFields(), topK),
+				},
+			}
 		}
 		result = append(result, fd)
 	}
@@ -1535,6 +1541,36 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 				dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
 			}
 		}
+	case *schemapb.FieldData_StructArrays:
+		appendStructFieldDataByColumn(dst, srcField.StructArrays, dataIndices, rowIndices...)
+	}
+}
+
+func appendStructFieldDataByColumn(dst *schemapb.FieldData, src *schemapb.StructArrayField, dataIndices []int64, rowIndices ...[]int64) {
+	if src == nil {
+		return
+	}
+	if dst.GetStructArrays() == nil {
+		dst.Field = &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: PrepareResultFieldData(src.GetFields(), int64(len(dataIndices))),
+			},
+		}
+	}
+	dstStruct := dst.GetStructArrays()
+	dstSubFields := make(map[int64]*schemapb.FieldData, len(dstStruct.GetFields()))
+	for _, dstSubField := range dstStruct.GetFields() {
+		dstSubFields[dstSubField.GetFieldId()] = dstSubField
+	}
+	for _, srcSubField := range src.GetFields() {
+		dstSubField := dstSubFields[srcSubField.GetFieldId()]
+		if dstSubField == nil {
+			newFields := PrepareResultFieldData([]*schemapb.FieldData{srcSubField}, int64(len(dataIndices)))
+			dstSubField = newFields[0]
+			dstStruct.Fields = append(dstStruct.Fields, dstSubField)
+			dstSubFields[dstSubField.GetFieldId()] = dstSubField
+		}
+		AppendFieldDataByColumn(dstSubField, srcSubField, dataIndices, rowIndices...)
 	}
 }
 
