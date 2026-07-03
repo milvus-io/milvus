@@ -307,3 +307,27 @@ func (c *ColumnString) Slice(start, end int) Column {
 		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
 }
+
+/* UUID */
+
+var _ (Column) = (*ColumnUUID)(nil)
+
+type ColumnUUID struct {
+	*genericColumnBase[string]
+}
+
+func NewColumnUUID(name string, values []string) *ColumnUUID {
+	return &ColumnUUID{
+		genericColumnBase: &genericColumnBase[string]{
+			name:      name,
+			fieldType: entity.FieldTypeUUID,
+			values:    values,
+		},
+	}
+}
+
+func (c *ColumnUUID) Slice(start, end int) Column {
+	return &ColumnUUID{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}

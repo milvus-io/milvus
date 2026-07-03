@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -79,6 +80,16 @@ func IDColumns(schema *entity.Schema, ids *schemapb.IDs, begin, end int) (Column
 			idColumn = NewColumnVarChar(pkField.Name, data[begin:end])
 		} else {
 			idColumn = NewColumnVarChar(pkField.Name, data[begin:])
+		}
+	case entity.FieldTypeUUID:
+		data := ids.GetStrId().GetData()
+		if data == nil {
+			return NewColumnUUID(pkField.Name, nil), nil
+		}
+		if end >= 0 {
+			idColumn = NewColumnUUID(pkField.Name, data[begin:end])
+		} else {
+			idColumn = NewColumnUUID(pkField.Name, data[begin:])
 		}
 	default:
 		return nil, fmt.Errorf("unsupported id type %v", pkField.DataType)
@@ -348,6 +359,18 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 
 	case schemapb.DataType_VarChar:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnVarChar, NewNullableColumnVarChar)
+
+	case schemapb.DataType_UUID:
+		bytesData := fd.GetScalars().GetBytesData().GetData()
+		strings := make([]string, len(bytesData))
+		for i, b := range bytesData {
+			u, err := uuid.FromBytes(b)
+			if err != nil {
+				return nil, fmt.Errorf("invalid UUID bytes at index %d: %s", i, err)
+			}
+			strings[i] = u.String()
+		}
+		return parseScalarData(fd.GetFieldName(), strings, begin, end, validData, NewColumnUUID, NewNullableColumnUUID)
 
 	case schemapb.DataType_Array:
 		// handle struct array field (legacy server may use DataType_Array as top-level)

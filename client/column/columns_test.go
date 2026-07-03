@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -97,6 +98,40 @@ func TestIDColumns(t *testing.T) {
 		assert.NotNil(t, column)
 		assert.Equal(t, dataLen, column.Len())
 	})
+}
+
+func TestFieldDataColumn_UUID(t *testing.T) {
+	u1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	u2 := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	b1, _ := u1.MarshalBinary()
+	b2, _ := u2.MarshalBinary()
+
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_UUID,
+		FieldName: "uuid_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: [][]byte{b1, b2},
+					},
+				},
+			},
+		},
+	}
+	column, err := FieldDataColumn(fd, 0, -1)
+	assert.NoError(t, err)
+	assert.NotNil(t, column)
+	assert.Equal(t, "uuid_field", column.Name())
+	assert.Equal(t, entity.FieldTypeUUID, column.Type())
+	assert.Equal(t, 2, column.Len())
+	uuidCol, ok := column.(*ColumnUUID)
+	if assert.True(t, ok) {
+		assert.Equal(t, []string{
+			"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			"550e8400-e29b-41d4-a716-446655440000",
+		}, uuidCol.Data())
+	}
 }
 
 func TestGetIntData(t *testing.T) {
