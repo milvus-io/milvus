@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <atomic>
 #include <memory>
+#include <stdexcept>
 
 #include "arrow/status.h"
 #include "common/EasyAssert.h"
@@ -94,4 +96,28 @@ TEST(StorageErrorCode, PermanentS3ExtendCodesAreNotRetriable) {
         EXPECT_EQ(ec, milvus::ErrorCode::StorageError);
         EXPECT_NE(ec, milvus::ErrorCode::StorageTransientError);
     }
+}
+
+// The cgo boundary fires the untyped-exception observer exactly when a
+// non-SegcoreError reaches FailureCStatus (its typed code is lost). A typed
+// SegcoreError must NOT fire it.
+TEST(StorageErrorCode, UntypedCgoExceptionObserverFires) {
+    static std::atomic<int> hits{0};
+    hits = 0;
+    milvus::RegisterUntypedCgoExceptionObserver(
+        [](const char*) { hits.fetch_add(1); });
+
+    std::runtime_error plain("boom");
+    auto status = milvus::FailureCStatus(&plain);
+    EXPECT_EQ(status.error_code, milvus::UnexpectedError);
+    EXPECT_EQ(hits.load(), 1);
+    free(const_cast<char*>(status.error_msg));
+
+    milvus::SegcoreError typed(milvus::ErrorCode::MemAllocateFailed, "oom");
+    auto typed_status = milvus::FailureCStatus(&typed);
+    EXPECT_EQ(typed_status.error_code, milvus::MemAllocateFailed);
+    EXPECT_EQ(hits.load(), 1);  // unchanged: typed code survived
+    free(const_cast<char*>(typed_status.error_msg));
+
+    milvus::RegisterUntypedCgoExceptionObserver(nullptr);
 }
