@@ -85,6 +85,8 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
+    MOL = 27,          // Molecular data type (reserved in proto)
+    UUID = 28,
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -195,6 +197,8 @@ ToProtoDataType(DataType data_type) {
             return proto::schema::DataType::Text;
         case DataType::TIMESTAMPTZ:
             return proto::schema::DataType::Timestamptz;
+        case DataType::UUID:
+            return proto::schema::DataType::UUID;
 
         case DataType::VECTOR_BINARY:
             return proto::schema::DataType::BinaryVector;
