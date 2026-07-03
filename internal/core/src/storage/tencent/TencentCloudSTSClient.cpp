@@ -146,20 +146,25 @@ TencentCloudSTSCredentialsClient::parseSTSResponse(
     }
 
     auto json = jsonValue.View();
-    auto rootNode = json.GetObject("Response");
-    if (rootNode.IsNull()) {
+    if (!json.ValueExists("Response")) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Get Response from credential result failed");
         return result;
     }
+    auto rootNode = json.GetObject("Response");
 
-    auto credentialsNode = rootNode.GetObject("Credentials");
-    if (credentialsNode.IsNull()) {
+    if (!rootNode.ValueExists("Credentials")) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Get Credentials from Response failed");
         return result;
     }
+    auto credentialsNode = rootNode.GetObject("Credentials");
 
+    if (!rootNode.ValueExists("Expiration")) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Get Expiration from Response failed");
+        return result;
+    }
     auto expiration =
         Aws::Utils::StringUtils::Trim(rootNode.GetString("Expiration").c_str());
     if (expiration.empty()) {
@@ -168,11 +173,11 @@ TencentCloudSTSCredentialsClient::parseSTSResponse(
         return result;
     }
 
-    auto parsedExpiration = Aws::Utils::DateTime(
-        expiration.c_str(), Aws::Utils::DateFormat::ISO_8601);
-    if (!parsedExpiration.WasParseSuccessful()) {
+    if (!credentialsNode.ValueExists("TmpSecretId") ||
+        !credentialsNode.ValueExists("TmpSecretKey") ||
+        !credentialsNode.ValueExists("Token")) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Failed to parse Expiration from Response");
+                           "Get credential fields from Response failed");
         return result;
     }
 
@@ -182,6 +187,14 @@ TencentCloudSTSCredentialsClient::parseSTSResponse(
     if (accessKeyId.empty() || secretKey.empty() || sessionToken.empty()) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Get credential fields from Response failed");
+        return result;
+    }
+
+    auto parsedExpiration = Aws::Utils::DateTime(
+        expiration.c_str(), Aws::Utils::DateFormat::ISO_8601);
+    if (!parsedExpiration.WasParseSuccessful()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Failed to parse Expiration from Response");
         return result;
     }
 
