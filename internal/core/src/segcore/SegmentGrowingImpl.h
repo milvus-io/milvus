@@ -828,7 +828,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index);
+        int64_t index,
+        int64_t row_limit);
 
     void
     InitializeArrayOffsets();
