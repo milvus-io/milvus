@@ -119,13 +119,26 @@ TencentCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
 
     // Parse credentials
     STSAssumeRoleWithWebIdentityResult result;
-    if (credentialsStr.empty()) {
+    auto parseResult = parseSTSResponse(credentialsStr);
+    if (!parseResult.success) {
+        return result;
+    }
+
+    result.creds = parseResult.credentials;
+    return result;
+}
+
+TencentCloudSTSCredentialsClient::STSParseResult
+TencentCloudSTSCredentialsClient::parseSTSResponse(
+    const Aws::String& responseBody) {
+    STSParseResult result;
+    if (responseBody.empty()) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Get an empty credential from sts");
         return result;
     }
 
-    Aws::Utils::Json::JsonValue jsonValue(credentialsStr);
+    Aws::Utils::Json::JsonValue jsonValue(responseBody);
     if (!jsonValue.WasParseSuccessful()) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Failed to parse credential result json");
@@ -146,14 +159,30 @@ TencentCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
                            "Get Credentials from Response failed");
         return result;
     }
-    result.creds.SetAWSAccessKeyId(credentialsNode.GetString("TmpSecretId"));
-    result.creds.SetAWSSecretKey(credentialsNode.GetString("TmpSecretKey"));
-    result.creds.SetSessionToken(credentialsNode.GetString("Token"));
-    result.creds.SetExpiration(Aws::Utils::DateTime(
-        Aws::Utils::StringUtils::Trim(rootNode.GetString("Expiration").c_str())
-            .c_str(),
-        Aws::Utils::DateFormat::ISO_8601));
 
+    auto expiration =
+        Aws::Utils::StringUtils::Trim(rootNode.GetString("Expiration").c_str());
+    if (expiration.empty()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Get Expiration from Response failed");
+        return result;
+    }
+
+    auto parsedExpiration = Aws::Utils::DateTime(
+        expiration.c_str(), Aws::Utils::DateFormat::ISO_8601);
+    if (!parsedExpiration.WasParseSuccessful()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Failed to parse Expiration from Response");
+        return result;
+    }
+
+    result.credentials.SetAWSAccessKeyId(
+        credentialsNode.GetString("TmpSecretId"));
+    result.credentials.SetAWSSecretKey(
+        credentialsNode.GetString("TmpSecretKey"));
+    result.credentials.SetSessionToken(credentialsNode.GetString("Token"));
+    result.credentials.SetExpiration(parsedExpiration);
+    result.success = true;
     return result;
 }
 }  // namespace Internal
