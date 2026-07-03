@@ -94,6 +94,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	method := "ProcessInsert"
 	tr := timerecord.NewTimeRecorder(method)
 	log := sd.getLogger(context.Background())
+	growingSegmentAdded := false
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		newGrowingSegment := false
@@ -171,6 +172,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					TargetVersion: initialTargetVersion,
 					Candidate:     growing, // growing segment itself is the Candidate
 				})
+				growingSegmentAdded = true
 			}
 
 			sd.growingSegmentLock.Unlock()
@@ -183,6 +185,9 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			zap.Int("rowCount", len(insertData.RowIDs)),
 			zap.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
 		)
+	}
+	if growingSegmentAdded {
+		sd.notifyLeaderViewUpdated()
 	}
 	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))

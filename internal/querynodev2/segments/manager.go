@@ -53,6 +53,8 @@ var channelMapper = metautil.NewDynChannelMapper()
 
 type SegmentAction func(segment Segment) bool
 
+type SegmentVisitor func(segment Segment) bool
+
 func IncreaseVersion(version int64) SegmentAction {
 	return func(segment Segment) bool {
 		log := log.Ctx(context.Background()).With(
@@ -177,6 +179,8 @@ type SegmentManager interface {
 	// dup segments will not increase the ref count
 	Put(ctx context.Context, segmentType SegmentType, segments ...Segment)
 	UpdateBy(action SegmentAction, filters ...SegmentFilter) int
+	RangeBy(visitor SegmentVisitor, filters ...SegmentFilter)
+	CountBy(filters ...SegmentFilter) int
 	Get(segmentID typeutil.UniqueID) Segment
 	GetWithType(segmentID typeutil.UniqueID, typ SegmentType) Segment
 	GetBy(filters ...SegmentFilter) []Segment
@@ -521,6 +525,21 @@ func (mgr *segmentManager) UpdateBy(action SegmentAction, filters ...SegmentFilt
 		return true
 	}, filters...)
 	return updated
+}
+
+func (mgr *segmentManager) RangeBy(visitor SegmentVisitor, filters ...SegmentFilter) {
+	mgr.rangeWithFilter(func(_ int64, _ SegmentType, segment Segment) bool {
+		return visitor(segment)
+	}, filters...)
+}
+
+func (mgr *segmentManager) CountBy(filters ...SegmentFilter) int {
+	count := 0
+	mgr.rangeWithFilter(func(_ int64, _ SegmentType, _ Segment) bool {
+		count++
+		return true
+	}, filters...)
+	return count
 }
 
 // Deprecated:

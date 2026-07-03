@@ -166,6 +166,28 @@ func (s *ManagerSuite) TestUpdateBy() {
 	}
 }
 
+func (s *ManagerSuite) TestRangeBy() {
+	var segmentIDs []int64
+	s.mgr.RangeBy(func(segment Segment) bool {
+		segmentIDs = append(segmentIDs, segment.ID())
+		return true
+	}, WithType(SegmentTypeSealed))
+	s.ElementsMatch([]int64{1, 3, 4}, segmentIDs)
+
+	segmentIDs = nil
+	s.mgr.RangeBy(func(segment Segment) bool {
+		segmentIDs = append(segmentIDs, segment.ID())
+		return false
+	}, WithType(SegmentTypeSealed))
+	s.Len(segmentIDs, 1)
+}
+
+func (s *ManagerSuite) TestCountBy() {
+	s.Equal(3, s.mgr.CountBy(WithType(SegmentTypeSealed)))
+	s.Equal(1, s.mgr.CountBy(WithType(SegmentTypeGrowing)))
+	s.Equal(0, s.mgr.CountBy(WithID(1000)))
+}
+
 func (s *ManagerSuite) TestIncreaseVersion() {
 	action := IncreaseVersion(1)
 
