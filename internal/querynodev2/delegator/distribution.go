@@ -133,6 +133,8 @@ type distribution struct {
 	// distribution info
 	channelName string
 	queryView   *channelQueryView
+
+	leaderViewUpdatedCallback func(channel string)
 }
 
 // SegmentEntry stores the segment meta information.
@@ -348,6 +350,7 @@ func (d *distribution) Serviceable() bool {
 // for now, delegator become serviceable only when watchDmChannel is done
 // so we regard all needed growing is loaded and we compute loadRatio based on sealed segments
 func (d *distribution) updateServiceable(triggerAction string) {
+	oldServiceable := d.queryView.Serviceable()
 	loadedSealedSegments := int64(0)
 	totalSealedRowCount := int64(0)
 	unloadedSealedSegments := make([]SegmentEntry, 0)
@@ -372,20 +375,22 @@ func (d *distribution) updateServiceable(triggerAction string) {
 		loadedRatio = float64(loadedSealedSegments) / float64(totalSealedRowCount)
 	}
 
-	serviceable := loadedRatio >= 1.0
-	if serviceable != d.queryView.Serviceable() {
+	d.queryView.loadedRatio.Store(loadedRatio)
+	newServiceable := d.queryView.Serviceable()
+	if newServiceable != oldServiceable {
 		mlog.Info(context.TODO(), "channel distribution serviceable changed",
 			mlog.String("channel", d.channelName),
-			mlog.Bool("serviceable", serviceable),
+			mlog.Bool("serviceable", newServiceable),
 			mlog.Float64("loadedRatio", loadedRatio),
 			mlog.Int64("loadedSealedRowCount", loadedSealedSegments),
 			mlog.Int64("totalSealedRowCount", totalSealedRowCount),
 			mlog.Int("unloadedSealedSegmentNum", len(unloadedSealedSegments)),
 			mlog.Int("totalSealedSegmentNum", len(d.queryView.sealedSegmentRowCount)),
 			mlog.String("action", triggerAction))
+		if d.leaderViewUpdatedCallback != nil {
+			d.leaderViewUpdatedCallback(d.channelName)
+		}
 	}
-
-	d.queryView.loadedRatio.Store(loadedRatio)
 }
 
 // AddDistributions add multiple segment entries.
