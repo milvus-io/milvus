@@ -381,16 +381,15 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNa
 	coll := s.cm.Get(1)
 	s.Require().NotNil(coll)
 
-	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
-	schema.Version = 2
-	indexMeta := mock_segcore.GenTestIndexMeta(1, schema)
+	schema := proto.Clone(coll.Schema()).(*schemapb.CollectionSchema)
+	indexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	indexMeta.MaxIndexRowCount++
 
 	coll.mu.Lock()
 	done := make(chan error, 1)
 	go func() {
 		done <- s.cm.PutOrRef(1, schema, indexMeta, &querypb.LoadMetaInfo{
-			LoadType:        querypb.LoadType_LoadCollection,
-			SchemaBarrierTs: 100,
+			LoadType: querypb.LoadType_LoadCollection,
 		})
 	}()
 
