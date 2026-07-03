@@ -156,6 +156,8 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
 			res += 8
+		case schemapb.DataType_UUID:
+			res += 16
 		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 			maxLengthPerRow, err := getVarFieldLength(fs, policy)
 			if err != nil {
@@ -261,7 +263,7 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		res += len(column.GetScalars().GetDoubleData().GetData()) * 8
 	case schemapb.DataType_Timestamptz:
 		res += len(column.GetScalars().GetTimestamptzData().GetData()) * 8
-	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 		for _, str := range column.GetScalars().GetStringData().GetData() {
 			res += len(str)
 		}
@@ -325,7 +327,7 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
 			res += 8
-		case schemapb.DataType_VarChar, schemapb.DataType_Text:
+		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
@@ -730,6 +732,10 @@ func IsGeometryType(dataType schemapb.DataType) bool {
 
 func IsTimestamptzType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Timestamptz
+}
+
+func IsUUIDType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_UUID
 }
 
 func IsArrayType(dataType schemapb.DataType) bool {
@@ -3448,12 +3454,14 @@ func GetPKSize(fieldData *schemapb.FieldData) int {
 		return len(fieldData.GetScalars().GetLongData().GetData())
 	case schemapb.DataType_VarChar:
 		return len(fieldData.GetScalars().GetStringData().GetData())
+	case schemapb.DataType_UUID:
+		return len(fieldData.GetScalars().GetBytesData().GetData())
 	}
 	return 0
 }
 
 func IsPrimaryFieldType(dataType schemapb.DataType) bool {
-	if dataType == schemapb.DataType_Int64 || dataType == schemapb.DataType_VarChar {
+	if dataType == schemapb.DataType_Int64 || dataType == schemapb.DataType_VarChar || dataType == schemapb.DataType_UUID {
 		return true
 	}
 
@@ -3535,7 +3543,7 @@ func getScalarDataLen(field *schemapb.FieldData) int {
 		return len(field.GetScalars().GetDoubleData().GetData())
 	case schemapb.DataType_Timestamptz:
 		return len(field.GetScalars().GetTimestamptzData().GetData())
-	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 		return len(field.GetScalars().GetStringData().GetData())
 	}
 	return -1
@@ -3555,7 +3563,7 @@ func getData(field *schemapb.FieldData, idx int) any {
 		return field.GetScalars().GetDoubleData().GetData()[idx]
 	case schemapb.DataType_Timestamptz:
 		return field.GetScalars().GetTimestamptzData().GetData()[idx]
-	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 		return field.GetScalars().GetStringData().GetData()[idx]
 	case schemapb.DataType_FloatVector:
 		dim := int(field.GetVectors().GetDim())

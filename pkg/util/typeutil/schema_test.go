@@ -1679,6 +1679,41 @@ func TestComparePk(t *testing.T) {
 	assert.False(t, less)
 }
 
+func TestIsUUIDType(t *testing.T) {
+	assert.True(t, IsUUIDType(schemapb.DataType_UUID))
+	assert.False(t, IsUUIDType(schemapb.DataType_Int64))
+	assert.False(t, IsUUIDType(schemapb.DataType_VarChar))
+	assert.False(t, IsUUIDType(schemapb.DataType_String))
+	assert.False(t, IsUUIDType(schemapb.DataType_Float))
+}
+
+func TestIsPrimaryFieldType_WithUUID(t *testing.T) {
+	assert.True(t, IsPrimaryFieldType(schemapb.DataType_UUID))
+	assert.True(t, IsPrimaryFieldType(schemapb.DataType_Int64))
+	assert.True(t, IsPrimaryFieldType(schemapb.DataType_VarChar))
+	assert.False(t, IsPrimaryFieldType(schemapb.DataType_Float))
+	assert.False(t, IsPrimaryFieldType(schemapb.DataType_String))
+}
+
+func TestGetPKSize_UUID(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type: schemapb.DataType_UUID,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{
+					BytesData: &schemapb.BytesArray{
+						Data: [][]byte{
+							[]byte("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
+							[]byte("550e8400-e29b-41d4-a716-446655440000"),
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.Equal(t, 2, GetPKSize(fieldData))
+}
+
 func TestCalcColumnSize(t *testing.T) {
 	fieldValues := map[int64]any{
 		100: []int8{0, 1},

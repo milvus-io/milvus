@@ -59,7 +59,7 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 			}
 		}
 		return locatePartitionNamesByRoutingTable(int64Keys, partitionNames, int64PartitionKeyHasher{})
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		stringKeys := make([]string, 0, len(keys))
 		for _, key := range keys {
 			if stringVal, ok := key.GetVal().(*planpb.GenericValue_StringVal); ok {
@@ -70,7 +70,7 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 		}
 		return locatePartitionNamesByRoutingTable(stringKeys, partitionNames, stringPartitionKeyHasher{})
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as partition keys")
+		return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64, VarChar, or UUID as partition keys")
 	}
 }
 

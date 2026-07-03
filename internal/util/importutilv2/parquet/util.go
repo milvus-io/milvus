@@ -335,9 +335,10 @@ func isFixedSizeListImportTarget(field *schemapb.FieldSchema) bool {
 			schemapb.DataType_Int64,
 			schemapb.DataType_Float,
 			schemapb.DataType_Double,
-			schemapb.DataType_VarChar,
-			schemapb.DataType_String:
-			return true
+		schemapb.DataType_VarChar,
+		schemapb.DataType_String,
+		schemapb.DataType_UUID:
+		return true
 		default:
 			return false
 		}
@@ -427,7 +428,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return &arrow.Float32Type{}, nil
 	case schemapb.DataType_Double:
 		return &arrow.Float64Type{}, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text, schemapb.DataType_Timestamptz, schemapb.DataType_UUID:
 		return &arrow.StringType{}, nil
 	case schemapb.DataType_JSON:
 		return &arrow.StringType{}, nil
