@@ -128,8 +128,7 @@ TencentCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
     Aws::Utils::Json::JsonValue jsonValue(credentialsStr);
     if (!jsonValue.WasParseSuccessful()) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Failed to parse credential result json: "
-                               << jsonValue.GetErrorMessage());
+                           "Failed to parse credential result json");
         return result;
     }
 
