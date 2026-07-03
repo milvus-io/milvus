@@ -19,6 +19,8 @@ package storage
 import (
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -89,6 +91,39 @@ func (s *PrimaryKeysSuite) TestAppend() {
 			strPks.MustAppend(NewInt64PrimaryKey(1))
 		})
 	})
+
+	s.Run("UUIDAppend", func() {
+		uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		uuidPks := NewUUIDPrimaryKeys()
+		s.Equal(schemapb.DataType_UUID, uuidPks.Type())
+		s.EqualValues(0, uuidPks.Len())
+		s.EqualValues(0, uuidPks.Size())
+
+		err := uuidPks.Append(&UUIDPrimaryKey{Value: uuid1})
+		s.NoError(err)
+		s.EqualValues(1, uuidPks.Len())
+		s.EqualValues(1, uuidPks.Size())
+
+		val := uuidPks.Get(0)
+		pk, ok := val.(*UUIDPrimaryKey)
+		s.Require().True(ok)
+		s.Equal(uuid1, pk.Value)
+
+		err = uuidPks.Append(NewInt64PrimaryKey(1))
+		s.Error(err)
+	})
+
+	s.Run("UUIDMustAppend", func() {
+		uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		uuidPks := NewUUIDPrimaryKeys()
+
+		s.NotPanics(func() {
+			uuidPks.MustAppend(&UUIDPrimaryKey{Value: uuid1})
+		})
+		s.Panics(func() {
+			uuidPks.MustAppend(NewInt64PrimaryKey(1))
+		})
+	})
 }
 
 func (s *PrimaryKeysSuite) TestMustMerge() {
@@ -130,6 +165,62 @@ func (s *PrimaryKeysSuite) TestMustMerge() {
 			strPks.MustMerge(intPks)
 		})
 	})
+
+	s.Run("UUIDPksMustMerge", func() {
+		uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		uuid2 := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+
+		uuidPks := NewUUIDPrimaryKeys()
+		uuidPks.MustAppend(&UUIDPrimaryKey{Value: uuid1})
+		uuidPks.MustAppend(&UUIDPrimaryKey{Value: uuid2})
+
+		anotherPks := NewUUIDPrimaryKeys()
+		anotherPks.MustAppend(&UUIDPrimaryKey{Value: uuid2})
+
+		intPks := NewInt64PrimaryKeys(10)
+		intPks.AppendRaw(1, 2, 3)
+
+		s.NotPanics(func() {
+			uuidPks.MustMerge(anotherPks)
+			s.Equal(3, uuidPks.Len())
+		})
+
+		s.Panics(func() {
+			uuidPks.MustMerge(intPks)
+		})
+	})
+}
+
+func TestUUIDPrimaryKeysGet(t *testing.T) {
+	uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	uuid2 := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	pks := NewUUIDPrimaryKeys()
+	pks.MustAppend(&UUIDPrimaryKey{Value: uuid1})
+	pks.MustAppend(&UUIDPrimaryKey{Value: uuid2})
+
+	assert.Equal(t, schemapb.DataType_UUID, pks.Type())
+	assert.Equal(t, 2, pks.Len())
+
+	pk0 := pks.Get(0)
+	assert.Equal(t, uuid1, pk0.(*UUIDPrimaryKey).Value)
+
+	pk1 := pks.Get(1)
+	assert.Equal(t, uuid2, pk1.(*UUIDPrimaryKey).Value)
+
+	// Out of range
+	assert.Nil(t, pks.Get(-1))
+	assert.Nil(t, pks.Get(2))
+}
+
+func TestUUIDPrimaryKeysReset(t *testing.T) {
+	uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	pks := NewUUIDPrimaryKeys()
+	pks.MustAppend(&UUIDPrimaryKey{Value: uuid1})
+	assert.Equal(t, 1, pks.Len())
+
+	pks.Reset()
+	assert.Equal(t, 0, pks.Len())
+	assert.Equal(t, 0, int(pks.Size()))
 }
 
 func TestPrimaryKeys(t *testing.T) {

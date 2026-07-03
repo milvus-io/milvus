@@ -202,6 +202,25 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 			isValid = validData[0]
 		}
 		return w.AddOneStringToPayload(val, isValid)
+	case schemapb.DataType_UUID:
+		val, ok := data.([]byte)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("incorrect data type")
+		}
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		return w.AddOneUUIDToPayload(val, isValid)
 	case schemapb.DataType_Array:
 		val, ok := data.(*schemapb.ScalarField)
 		if !ok {
@@ -628,6 +647,33 @@ func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) err
 	builder, ok := w.builder.(*array.BinaryBuilder)
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("failed to cast JsonBuilder")
+	}
+
+	if !isValid {
+		builder.AppendNull()
+	} else {
+		builder.Append(data)
+	}
+
+	return nil
+}
+
+func (w *NativePayloadWriter) AddOneUUIDToPayload(data []byte, isValid bool) error {
+	if w.finished {
+		return merr.WrapErrServiceInternalMsg("can't append data to finished uuid payload")
+	}
+
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
+	}
+
+	if len(data) != 16 {
+		return merr.WrapErrParameterInvalidMsg("uuid must be exactly 16 bytes, got %d", len(data))
+	}
+
+	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("failed to cast FixedSizeBinaryBuilder")
 	}
 
 	if !isValid {
@@ -1136,6 +1182,8 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 		return &arrow.Float64Type{}
 	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		return &arrow.StringType{}
+	case schemapb.DataType_UUID:
+		return &arrow.FixedSizeBinaryType{ByteWidth: 16}
 	case schemapb.DataType_Array:
 		return &arrow.BinaryType{}
 	case schemapb.DataType_JSON:

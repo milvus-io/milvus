@@ -19,6 +19,7 @@ package storage
 import (
 	"encoding/binary"
 
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -392,6 +393,16 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			data.ValidData = make([]bool, 0, cap)
 		}
 		return data, nil
+	case schemapb.DataType_UUID:
+		data := &UUIDFieldData{
+			Data:     make([][]byte, 0, cap),
+			DataType: dataType,
+			Nullable: fieldSchema.GetNullable(),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 	case schemapb.DataType_ArrayOfVector:
 		dim, err := GetDimFromParams(typeParams)
 		if err != nil {
@@ -449,6 +460,13 @@ type DoubleFieldData struct {
 }
 type StringFieldData struct {
 	Data      []string
+	DataType  schemapb.DataType
+	ValidData []bool
+	Nullable  bool
+}
+
+type UUIDFieldData struct {
+	Data      [][]byte // each element is exactly 16 bytes
 	DataType  schemapb.DataType
 	ValidData []bool
 	Nullable  bool
@@ -630,6 +648,7 @@ func (data *FloatFieldData) RowNum() int       { return len(data.Data) }
 func (data *DoubleFieldData) RowNum() int      { return len(data.Data) }
 func (data *TimestamptzFieldData) RowNum() int { return len(data.Data) }
 func (data *StringFieldData) RowNum() int      { return len(data.Data) }
+func (data *UUIDFieldData) RowNum() int        { return len(data.Data) }
 func (data *ArrayFieldData) RowNum() int       { return len(data.Data) }
 func (data *JSONFieldData) RowNum() int        { return len(data.Data) }
 func (data *GeometryFieldData) RowNum() int    { return len(data.Data) }
@@ -743,6 +762,13 @@ func (data *StringFieldData) GetRow(i int) any {
 	return data.Data[i]
 }
 
+func (data *UUIDFieldData) GetRow(i int) any {
+	if data.GetNullable() && !data.ValidData[i] {
+		return nil
+	}
+	return data.Data[i]
+}
+
 func (data *ArrayFieldData) GetRow(i int) any {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
@@ -846,6 +872,7 @@ func (data *FloatFieldData) GetDataRows() any             { return data.Data }
 func (data *DoubleFieldData) GetDataRows() any            { return data.Data }
 func (data *TimestamptzFieldData) GetDataRows() any       { return data.Data }
 func (data *StringFieldData) GetDataRows() any            { return data.Data }
+func (data *UUIDFieldData) GetDataRows() any              { return data.Data }
 func (data *ArrayFieldData) GetDataRows() any             { return data.Data }
 func (data *JSONFieldData) GetDataRows() any              { return data.Data }
 func (data *GeometryFieldData) GetDataRows() any          { return data.Data }
@@ -1008,6 +1035,37 @@ func (data *StringFieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, true)
 	}
 	data.Data = append(data.Data, v)
+	return nil
+}
+
+func (data *UUIDFieldData) AppendRow(row interface{}) error {
+	if data.GetNullable() && row == nil {
+		data.Data = append(data.Data, make([][]byte, 1)...)
+		data.ValidData = append(data.ValidData, false)
+		return nil
+	}
+	switch v := row.(type) {
+	case []byte:
+		if len(v) != 16 {
+			return merr.WrapErrParameterInvalid("16-byte UUID", row, "Wrong row type")
+		}
+		if data.GetNullable() {
+			data.ValidData = append(data.ValidData, true)
+		}
+		data.Data = append(data.Data, v)
+	case string:
+		u, err := uuid.Parse(v)
+		if err != nil {
+			return merr.WrapErrParameterInvalid("valid UUID string", row, "Wrong row type")
+		}
+		bytes, _ := u.MarshalBinary()
+		if data.GetNullable() {
+			data.ValidData = append(data.ValidData, true)
+		}
+		data.Data = append(data.Data, bytes)
+	default:
+		return merr.WrapErrParameterInvalid("[]byte or string", row, "Wrong row type")
+	}
 	return nil
 }
 
@@ -1269,6 +1327,14 @@ func (data *StringFieldData) AppendRows(dataRows interface{}, validDataRows inte
 	return data.AppendValidDataRows(validDataRows)
 }
 
+func (data *UUIDFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
+	err := data.AppendDataRows(dataRows)
+	if err != nil {
+		return err
+	}
+	return data.AppendValidDataRows(validDataRows)
+}
+
 func (data *ArrayFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
 	err := data.AppendDataRows(dataRows)
 	if err != nil {
@@ -1507,6 +1573,21 @@ func (data *StringFieldData) AppendDataRows(rows interface{}) error {
 	return nil
 }
 
+func (data *UUIDFieldData) AppendDataRows(rows interface{}) error {
+	v, ok := rows.([][]byte)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[][]byte", rows, "Wrong rows type")
+	}
+	// Verify each UUID is 16 bytes
+	for _, uuidBytes := range v {
+		if len(uuidBytes) != 16 {
+			return merr.WrapErrParameterInvalid("16-byte UUID", len(uuidBytes), "Wrong row size")
+		}
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
 func (data *ArrayFieldData) AppendDataRows(rows interface{}) error {
 	v, ok := rows.([]*schemapb.ScalarField)
 	if !ok {
@@ -1721,6 +1802,18 @@ func (data *TimestamptzFieldData) AppendValidDataRows(rows interface{}) error {
 }
 
 func (data *StringFieldData) AppendValidDataRows(rows interface{}) error {
+	if rows == nil {
+		return nil
+	}
+	v, ok := rows.([]bool)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	data.ValidData = append(data.ValidData, v...)
+	return nil
+}
+
+func (data *UUIDFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows == nil {
 		return nil
 	}
@@ -1982,6 +2075,7 @@ func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Timestamptz
 }
 func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
+func (data *UUIDFieldData) GetDataType() schemapb.DataType   { return data.DataType }
 func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
 func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
 func (data *GeometryFieldData) GetDataType() schemapb.DataType {
@@ -2024,6 +2118,14 @@ func (data *StringFieldData) GetMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += len(val) + 16
+	}
+	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
+}
+
+func (data *UUIDFieldData) GetMemorySize() int {
+	var size int
+	for range data.Data {
+		size += 16 // Fixed 16 bytes per UUID
 	}
 	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
@@ -2113,6 +2215,7 @@ func (data *Int8VectorFieldData) GetRowSize(i int) int {
 	return data.Dim
 }
 func (data *StringFieldData) GetRowSize(i int) int   { return len(data.Data[i]) + 16 }
+func (data *UUIDFieldData) GetRowSize(i int) int     { return 16 }
 func (data *JSONFieldData) GetRowSize(i int) int     { return len(data.Data[i]) + 16 }
 func (data *GeometryFieldData) GetRowSize(i int) int { return len(data.Data[i]) + 16 }
 func (data *ArrayFieldData) GetRowSize(i int) int {
@@ -2209,6 +2312,10 @@ func (data *StringFieldData) GetNullable() bool {
 	return data.Nullable
 }
 
+func (data *UUIDFieldData) GetNullable() bool {
+	return data.Nullable
+}
+
 func (data *ArrayFieldData) GetNullable() bool {
 	return data.Nullable
 }
@@ -2234,6 +2341,7 @@ func (data *FloatFieldData) GetValidData() []bool             { return data.Vali
 func (data *DoubleFieldData) GetValidData() []bool            { return data.ValidData }
 func (data *TimestamptzFieldData) GetValidData() []bool       { return data.ValidData }
 func (data *StringFieldData) GetValidData() []bool            { return data.ValidData }
+func (data *UUIDFieldData) GetValidData() []bool              { return data.ValidData }
 func (data *ArrayFieldData) GetValidData() []bool             { return data.ValidData }
 func (data *JSONFieldData) GetValidData() []bool              { return data.ValidData }
 func (data *GeometryFieldData) GetValidData() []bool          { return data.ValidData }

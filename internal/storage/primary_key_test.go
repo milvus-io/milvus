@@ -3,6 +3,7 @@ package storage
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -163,6 +164,111 @@ func TestParseFieldData2PrimaryKeys(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.ElementsMatch(t, pks, testPks)
+	})
+}
+
+func TestUUIDPrimaryKey(t *testing.T) {
+	uuid1 := uuid.MustParse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	uuid2 := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	uuid3 := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+	t.Run("comparisons", func(t *testing.T) {
+		pk1 := &UUIDPrimaryKey{Value: uuid1}
+		pk2 := &UUIDPrimaryKey{Value: uuid2}
+		pk3 := &UUIDPrimaryKey{Value: uuid3}
+
+		// Byte-order: uuid2 (0x55) < uuid3 (0x6b) < uuid1 (0xa0)
+
+		// EQ
+		assert.True(t, pk1.EQ(pk1))
+		assert.True(t, pk2.EQ(pk2))
+		assert.False(t, pk1.EQ(pk2))
+
+		// GT
+		assert.True(t, pk1.GT(pk3))
+		assert.True(t, pk3.GT(pk2))
+		assert.False(t, pk2.GT(pk3))
+		assert.False(t, pk1.GT(pk1))
+
+		// GE
+		assert.True(t, pk1.GE(pk3))
+		assert.True(t, pk1.GE(pk1))
+		assert.False(t, pk2.GE(pk1))
+
+		// LT
+		assert.True(t, pk2.LT(pk3))
+		assert.True(t, pk3.LT(pk1))
+		assert.False(t, pk1.LT(pk3))
+		assert.False(t, pk2.LT(pk2))
+
+		// LE
+		assert.True(t, pk2.LE(pk3))
+		assert.True(t, pk2.LE(pk2))
+		assert.False(t, pk1.LE(pk2))
+	})
+
+	t.Run("marshalJSON", func(t *testing.T) {
+		pk := &UUIDPrimaryKey{Value: uuid1}
+		blob, err := json.Marshal(pk)
+		assert.NoError(t, err)
+
+		unmarshalled := &UUIDPrimaryKey{}
+		err = json.Unmarshal(blob, unmarshalled)
+		assert.NoError(t, err)
+		assert.Equal(t, pk.Value, unmarshalled.Value)
+	})
+
+	t.Run("setValue", func(t *testing.T) {
+		// From string
+		pk := &UUIDPrimaryKey{}
+		err := pk.SetValue("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+		assert.NoError(t, err)
+		assert.Equal(t, uuid1, pk.Value)
+
+		// From uuid.UUID
+		pk2 := &UUIDPrimaryKey{}
+		err = pk2.SetValue(uuid1)
+		assert.NoError(t, err)
+		assert.Equal(t, uuid1, pk2.Value)
+
+		// From []byte
+		pk3 := &UUIDPrimaryKey{}
+		bin, _ := uuid1.MarshalBinary()
+		err = pk3.SetValue(bin)
+		assert.NoError(t, err)
+		assert.Equal(t, uuid1, pk3.Value)
+
+		// Invalid type
+		pk4 := &UUIDPrimaryKey{}
+		err = pk4.SetValue(123)
+		assert.Error(t, err)
+	})
+
+	t.Run("type", func(t *testing.T) {
+		pk := &UUIDPrimaryKey{Value: uuid1}
+		assert.Equal(t, schemapb.DataType_UUID, pk.Type())
+	})
+
+	t.Run("size", func(t *testing.T) {
+		pk := &UUIDPrimaryKey{Value: uuid1}
+		assert.EqualValues(t, 16, pk.Size())
+	})
+
+	t.Run("genByRawData", func(t *testing.T) {
+		// From string
+		pk, err := GenPrimaryKeyByRawData("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", schemapb.DataType_UUID)
+		assert.NoError(t, err)
+		assert.Equal(t, uuid1, pk.(*UUIDPrimaryKey).Value)
+
+		// From []byte
+		bin, _ := uuid1.MarshalBinary()
+		pk2, err := GenPrimaryKeyByRawData(bin, schemapb.DataType_UUID)
+		assert.NoError(t, err)
+		assert.Equal(t, uuid1, pk2.(*UUIDPrimaryKey).Value)
+
+		// Invalid raw data type
+		_, err = GenPrimaryKeyByRawData(123, schemapb.DataType_UUID)
+		assert.Error(t, err)
 	})
 }
 

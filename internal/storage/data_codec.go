@@ -416,6 +416,17 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 				return err
 			}
 		}
+	case schemapb.DataType_UUID:
+		uuidData := singleData.(*UUIDFieldData)
+		for i, uuidBytes := range uuidData.Data {
+			isValid := true
+			if len(uuidData.ValidData) != 0 {
+				isValid = uuidData.ValidData[i]
+			}
+			if err = eventWriter.AddOneUUIDToPayload(uuidBytes, isValid); err != nil {
+				return err
+			}
+		}
 	case schemapb.DataType_Array:
 		for i, singleArray := range singleData.(*ArrayFieldData).Data {
 			isValid := true
@@ -699,6 +710,19 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		stringFieldData.ValidData = append(stringFieldData.ValidData, validData...)
 		stringFieldData.DataType = dataType
 		insertData.Data[fieldID] = stringFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_UUID:
+		singleData := data.([][]byte)
+		if fieldData == nil {
+			fieldData = &UUIDFieldData{Data: make([][]byte, 0, rowNum)}
+		}
+		uuidFieldData := fieldData.(*UUIDFieldData)
+
+		uuidFieldData.Data = append(uuidFieldData.Data, singleData...)
+		uuidFieldData.ValidData = append(uuidFieldData.ValidData, validData...)
+		uuidFieldData.DataType = dataType
+		insertData.Data[fieldID] = uuidFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_Array:
