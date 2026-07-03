@@ -1130,6 +1130,11 @@ void
 ChunkedSegmentSealedImpl::SetIndexRawDataInState(PublishedSegmentState& state,
                                                  FieldId field_id,
                                                  bool has_raw_data) {
+    if (has_raw_data && state.schema &&
+        field_exists_in_schema(state.schema, field_id) &&
+        state.schema->operator[](field_id).get_data_type() == DataType::ARRAY) {
+        has_raw_data = false;
+    }
     state.index_has_raw_data[field_id] = has_raw_data;
 }
 
@@ -1143,6 +1148,11 @@ ChunkedSegmentSealedImpl::HasPublishedIndexRawDataFromState(
 void
 ChunkedSegmentSealedImpl::SetPublishedIndexRawDataInState(
     PublishedSegmentState& state, FieldId field_id, bool has_raw_data) {
+    if (has_raw_data && state.schema &&
+        field_exists_in_schema(state.schema, field_id) &&
+        state.schema->operator[](field_id).get_data_type() == DataType::ARRAY) {
+        has_raw_data = false;
+    }
     state.published_index_has_raw_data[field_id] = has_raw_data;
 }
 

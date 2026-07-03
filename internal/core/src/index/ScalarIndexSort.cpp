@@ -71,6 +71,7 @@ ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context,
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
+      schema_(file_manager_context.fieldDataMeta.field_schema),
       is_nested_index_(is_nested_index),
       is_built_(false),
       data_() {

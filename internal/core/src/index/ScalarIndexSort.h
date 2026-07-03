@@ -35,6 +35,7 @@
 #include "index/IndexStats.h"
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
+#include "pb/schema.pb.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
@@ -166,6 +167,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
+        if (schema_.data_type() == proto::schema::DataType::Array) {
+            return false;
+        }
         return true;
     }
 
@@ -252,6 +256,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     int64_t field_id_ = 0;
 
+    proto::schema::FieldSchema schema_;
     bool is_nested_index_ = false;
     bool is_built_ = false;
     Config config_;

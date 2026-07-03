@@ -144,6 +144,9 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
 
 bool
 SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
+    if (load_index_info.field_type == DataType::ARRAY) {
+        return false;
+    }
     if (load_index_info.load_resource_request.has_value()) {
         return load_index_info.load_resource_request->has_raw_data;
     } else {

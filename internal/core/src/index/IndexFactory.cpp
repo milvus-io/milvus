@@ -656,6 +656,9 @@ IndexFactory::ScalarIndexLoadResource(
             index_type);
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
+    if (field_type == DataType::ARRAY) {
+        request.has_raw_data = false;
+    }
     return request;
 }
 

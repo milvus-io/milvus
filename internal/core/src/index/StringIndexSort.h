@@ -63,6 +63,9 @@ class StringIndexSort : public StringIndex {
 
     const bool
     HasRawData() const override {
+        if (schema_.data_type() == proto::schema::DataType::Array) {
+            return false;
+        }
         return true;
     }
 
@@ -159,6 +162,7 @@ class StringIndexSort : public StringIndex {
 
     // Common fields
     int64_t field_id_ = 0;
+    proto::schema::FieldSchema schema_;
     bool is_built_ = false;
     Config config_;
     size_t total_num_rows_{0};
