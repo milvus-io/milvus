@@ -85,7 +85,6 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
-    MOL = 27,          // Molecular data type (reserved in proto)
     UUID = 28,
 
     // Some special Data type, start from after 50
