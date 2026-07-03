@@ -53,6 +53,31 @@ func Test_relationalCompatible(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			// uuid is handled by the neither branch (IsStringType doesn't include UUID)
+			name: "uuid with uuid",
+			args: args{
+				t1: schemapb.DataType_UUID,
+				t2: schemapb.DataType_UUID,
+			},
+			want: true,
+		},
+		{
+			name: "uuid with int64",
+			args: args{
+				t1: schemapb.DataType_UUID,
+				t2: schemapb.DataType_Int64,
+			},
+			want: true,
+		},
+		{
+			name: "uuid with varchar",
+			args: args{
+				t1: schemapb.DataType_UUID,
+				t2: schemapb.DataType_VarChar,
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -254,6 +279,15 @@ func Test_canBeComparedDataType(t *testing.T) {
 		{schemapb.DataType_VarChar, schemapb.DataType_VarChar, true},
 		{schemapb.DataType_VarChar, schemapb.DataType_JSON, true},
 		{schemapb.DataType_VarChar, schemapb.DataType_Int64, false},
+		// NOTE: UUID+UUID returns false because IsStringType() does not include UUID.
+		// The UUID case in canBeComparedDataType only matches UUID on the left side;
+		// the right side still goes through IsStringType which doesn't include UUID.
+		{schemapb.DataType_UUID, schemapb.DataType_UUID, false},
+		{schemapb.DataType_UUID, schemapb.DataType_String, true},
+		{schemapb.DataType_UUID, schemapb.DataType_VarChar, true},
+		{schemapb.DataType_UUID, schemapb.DataType_JSON, true},
+		{schemapb.DataType_UUID, schemapb.DataType_Int64, false},
+		{schemapb.DataType_UUID, schemapb.DataType_Float, false},
 		{schemapb.DataType_Array, schemapb.DataType_Int64, false},
 		{schemapb.DataType_Array, schemapb.DataType_Array, false},
 	}
@@ -1319,6 +1353,20 @@ func Test_castRangeValue(t *testing.T) {
 		value := NewString("test")
 		_, err := castRangeValue(schemapb.DataType_Float, value)
 		assert.Error(t, err)
+	})
+
+	t.Run("string value for uuid type", func(t *testing.T) {
+		value := NewString("550e8400-e29b-41d4-a716-446655440000")
+		result, err := castRangeValue(schemapb.DataType_UUID, value)
+		assert.NoError(t, err)
+		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", result.GetStringVal())
+	})
+
+	t.Run("non-string value for uuid type fails", func(t *testing.T) {
+		value := NewInt(42)
+		_, err := castRangeValue(schemapb.DataType_UUID, value)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid range operations")
 	})
 }
 

@@ -8551,3 +8551,57 @@ func Test_fillVectorArrayNullValueImpl(t *testing.T) {
 		assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
 	})
 }
+
+func Test_validateUtil_checkUUIDFieldData(t *testing.T) {
+	t.Run("type mismatch", func(t *testing.T) {
+		v := newValidateUtil()
+		err := v.checkUUIDFieldData(&schemapb.FieldData{}, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("valid UUID string", func(t *testing.T) {
+		v := newValidateUtil()
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{
+								"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+								"550e8400-e29b-41d4-a716-446655440000",
+							},
+						},
+					},
+				},
+			},
+		}
+		fs := &schemapb.FieldSchema{
+			Name:     "uuid_field",
+			DataType: schemapb.DataType_UUID,
+		}
+		err := v.checkUUIDFieldData(f, fs)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid UUID string", func(t *testing.T) {
+		v := newValidateUtil()
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"not-a-uuid"},
+						},
+					},
+				},
+			},
+		}
+		fs := &schemapb.FieldSchema{
+			Name:     "uuid_field",
+			DataType: schemapb.DataType_UUID,
+		}
+		err := v.checkUUIDFieldData(f, fs)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid UUID format")
+	})
+}

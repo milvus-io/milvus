@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -146,6 +147,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			}
 		case schemapb.DataType_Text:
 			if err := v.checkTextFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_UUID:
+			if err := v.checkUUIDFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		case schemapb.DataType_Geometry:
@@ -928,6 +933,23 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 				fieldSchema.GetName(), i, len(strArr[i]), maxLength)
 		}
 		return nil
+	}
+
+	return nil
+}
+
+func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	strArr := field.GetScalars().GetStringData().GetData()
+	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+		msg := fmt.Sprintf("uuid field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
+	}
+
+	// Validate each UUID string format
+	for i, s := range strArr {
+		if _, err := uuid.Parse(s); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid UUID format for field %s at row %d: %s", fieldSchema.GetName(), i, s)
+		}
 	}
 
 	return nil

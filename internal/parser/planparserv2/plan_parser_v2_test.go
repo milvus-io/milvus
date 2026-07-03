@@ -49,6 +49,11 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		ElementType: schemapb.DataType_VarChar,
 	})
 
+	fields = append(fields, &schemapb.FieldSchema{
+		FieldID: 135, Name: "UUIDField", IsPrimaryKey: false, Description: "uuid field",
+		DataType: schemapb.DataType_UUID,
+	})
+
 	structArrayField := &schemapb.StructArrayFieldSchema{
 		FieldID: 132, Name: "struct_array", Fields: []*schemapb.FieldSchema{
 			{
@@ -119,6 +124,7 @@ func TestExpr_Term(t *testing.T) {
 		`DoubleField in [11.0, 12.0]`,
 		`StringField in ["str13", "str14"]`,
 		`VarCharField in ["str15", "str16"]`,
+		`UUIDField in ["uuid-1", "uuid-2"]`,
 		`FloatField in [1373, 115]`,
 		`Int64Field in [17]`,
 		`Int64Field in []`,

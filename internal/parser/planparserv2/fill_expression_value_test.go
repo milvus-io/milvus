@@ -71,6 +71,10 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
+			{`UUIDField in {list}`, map[string]*schemapb.TemplateValue{
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_UUID, []string{"uuid-1", "uuid-2", "uuid-3"})),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -100,6 +104,10 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 						generateJSONData("abc"),
 						generateJSONData(3.2),
 					})),
+			}},
+			{`UUIDField in {list}`, map[string]*schemapb.TemplateValue{
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2)})),
 			}},
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"not_list": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
@@ -143,6 +151,10 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 			}},
 			{`{target} > Int64Field`, map[string]*schemapb.TemplateValue{
 				"target": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
+			}},
+			{`UUIDField == "550e8400-e29b-41d4-a716-446655440000"`, nil},
+			{`UUIDField != {uuid}`, map[string]*schemapb.TemplateValue{
+				"uuid": generateTemplateValue(schemapb.DataType_String, "550e8400-e29b-41d4-a716-446655440000"),
 			}},
 		}
 
@@ -360,6 +372,9 @@ func (s *FillExpressionValueSuite) TestBinaryRange() {
 			}},
 			{`{$meta} > Int64Field`, map[string]*schemapb.TemplateValue{
 				"$meta": generateTemplateValue(schemapb.DataType_Int64, int64(22)),
+			}},
+			{`UUIDField == {int}`, map[string]*schemapb.TemplateValue{
+				"int": generateTemplateValue(schemapb.DataType_Int64, int64(123)),
 			}},
 		}
 
