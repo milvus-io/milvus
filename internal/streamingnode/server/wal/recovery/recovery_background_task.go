@@ -36,18 +36,12 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
 		ticker.Stop()
-		rs.Logger().Info(context.TODO(),
-
-			"recovery storage background task, perform a graceful exit...")
+		rs.Logger().Info(context.TODO(), "recovery storage background task, perform a graceful exit...")
 		if err := rs.persistDritySnapshotWhenClosing(); err != nil {
-			rs.Logger().Warn(context.TODO(),
-
-				"failed to persist dirty snapshot when closing", mlog.Err(err))
+			rs.Logger().Warn(context.TODO(), "failed to persist dirty snapshot when closing", mlog.Err(err))
 		}
 		rs.backgroundTaskNotifier.Finish(struct{}{})
-		rs.Logger().Info(context.TODO(),
-
-			"recovery storage background task exit")
+		rs.Logger().Info(context.TODO(), "recovery storage background task exit")
 	}()
 
 	for {

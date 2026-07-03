@@ -19,9 +19,7 @@ import (
 // asyncAllocSegment allocates a new growing segment asynchronously.
 func (m *partitionManager) asyncAllocSegment(schemaVersion int32, useGrowingSourceFlush bool) {
 	if m.onAllocating != nil {
-		m.Logger().Debug(context.TODO(),
-
-			"segment alloc worker is already on allocating")
+		m.Logger().Debug(context.TODO(), "segment alloc worker is already on allocating")
 		// manager is already on allocating.
 		return
 	}
@@ -73,26 +71,18 @@ func (w *segmentAllocWorker) do() {
 			return
 		}
 		if e := status.AsStreamingError(err); e.IsUnrecoverable() {
-			w.Logger().Warn(w.ctx,
-
-				"allocate new growing segement with unrecoverable error, stop retrying", mlog.Err(err))
+			w.Logger().Warn(w.ctx, "allocate new growing segement with unrecoverable error, stop retrying", mlog.Err(err))
 			return
 		}
 		nextInterval := backoff.NextBackOff()
-		w.Logger().Info(w.ctx,
-
-			"failed to allocate new growing segment, retrying", mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
+		w.Logger().Info(w.ctx, "failed to allocate new growing segment, retrying", mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
 		select {
 		case <-w.ctx.Done():
-			w.Logger().Info(w.ctx,
-
-				"segment allocation canceled", mlog.Err(w.ctx.Err()))
+			w.Logger().Info(w.ctx, "segment allocation canceled", mlog.Err(w.ctx.Err()))
 			return
 		case <-w.wal.Available():
 			// wal is unavailable, stop the worker.
-			w.Logger().Warn(w.ctx,
-
-				"wal is unavailable, stop alloc new segment")
+			w.Logger().Warn(w.ctx, "wal is unavailable, stop alloc new segment")
 			return
 		case <-time.After(backoff.NextBackOff()):
 		}
@@ -131,13 +121,10 @@ func (w *segmentAllocWorker) doOnce() error {
 
 	result, err := w.wal.Append(w.ctx, msg)
 	if err != nil {
-		w.Logger().Warn(w.ctx,
-
-			"failed to append create segment message", mlog.FieldMessage(msg), mlog.Err(err))
+		w.Logger().Warn(w.ctx, "failed to append create segment message", mlog.FieldMessage(msg), mlog.Err(err))
 		return err
 	}
 	w.Logger().Info(w.ctx,
-
 		"append create segment message", mlog.FieldMessage(msg), mlog.String("messageID", result.MessageID.String()), mlog.Uint64("timetick", result.TimeTick))
 	return nil
 }
@@ -153,9 +140,7 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	// Allocate new segment id.
 	segmentID, err := resource.Resource().IDAllocator().Allocate(w.ctx)
 	if err != nil {
-		w.Logger().Warn(w.ctx,
-
-			"failed to allocate segment id", mlog.Err(err))
+		w.Logger().Warn(w.ctx, "failed to allocate segment id", mlog.Err(err))
 		return err
 	}
 	w.segmentID = segmentID
