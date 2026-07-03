@@ -2862,6 +2862,30 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		assert.False(t, sd.CatchingUpStreamingData())
 	})
 
+	t.Run("notifies when state changes to caught up", func(t *testing.T) {
+		mockParam := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsDurationByParse")).Return(5 * time.Second).Build()
+		defer mockParam.UnPatch()
+
+		var notifiedChannels []string
+		sd := &shardDelegator{
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+			leaderViewUpdatedCallback: func(channel string) {
+				notifiedChannels = append(notifiedChannels, channel)
+			},
+		}
+
+		recentTs := tsoutil.ComposeTSByTime(time.Now())
+		sd.UpdateTSafe(recentTs)
+		sd.UpdateTSafe(recentTs + 1)
+
+		assert.False(t, sd.CatchingUpStreamingData())
+		assert.Equal(t, []string{"test-channel"}, notifiedChannels)
+	})
+
 	t.Run("state remains catching up when lag is large", func(t *testing.T) {
 		// Mock the config to return 5 seconds threshold
 		mockParam := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsDurationByParse")).Return(5 * time.Second).Build()

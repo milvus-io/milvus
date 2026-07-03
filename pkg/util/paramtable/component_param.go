@@ -2777,8 +2777,9 @@ type queryCoordConfig struct {
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 
-	DistributionRequestTimeout ParamItem `refreshable:"true"`
-	HeartBeatWarningLag        ParamItem `refreshable:"true"`
+	DistributionRequestTimeout  ParamItem `refreshable:"true"`
+	HeartBeatWarningLag         ParamItem `refreshable:"true"`
+	EnableDataDistributionDelta ParamItem `refreshable:"true"`
 
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
@@ -3344,6 +3345,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.HeartBeatWarningLag.Init(base.mgr)
+
+	p.EnableDataDistributionDelta = ParamItem{
+		Key:          "queryCoord.enableDataDistributionDelta",
+		Version:      "2.6.19",
+		DefaultValue: "true",
+		Doc:          "whether querycoord requests delta data distribution reports from querynodes",
+		Export:       true,
+	}
+	p.EnableDataDistributionDelta.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryCoord.gracefulStopTimeout",
