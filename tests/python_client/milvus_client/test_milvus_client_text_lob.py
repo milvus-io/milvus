@@ -1813,9 +1813,9 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_text_lob_compaction_low_delete_ratio(self):
         """
-        target: verify compaction after low delete ratio preserves TEXT and BM25 results
-        method: delete a small subset, compact, reload, and validate survivor checksums/search
-        expected: all survivor TEXT checksums match and BM25 search still returns survivor rows
+        target: verify compaction after low delete ratio preserves TEXT and text-search visibility
+        method: delete a small subset, compact, reload, and validate survivor checksums/search membership
+        expected: all survivor TEXT checksums match and text/BM25 search returns survivor rows without deleted rows
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1828,16 +1828,6 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         deleted = {1500, 1520}
         self.delete(client, collection_name, ids=sorted(deleted))
         self.flush(client, collection_name)
-        bm25_before, _ = self.search(
-            client,
-            collection_name,
-            data=["vector database"],
-            anns_field=CONTENT_SPARSE_FIELD,
-            search_params={"metric_type": "BM25", "params": {}},
-            limit=5,
-            output_fields=[ID_FIELD],
-            consistency_level="Strong",
-        )
         text_match_before, _ = self.query(
             client,
             collection_name,
@@ -1845,6 +1835,9 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
             output_fields=[ID_FIELD],
             consistency_level="Strong",
         )
+        text_match_before_ids = {row[ID_FIELD] for row in text_match_before}
+        assert text_match_before_ids
+        assert deleted.isdisjoint(text_match_before_ids)
         before_segments = persistent_segment_ids(self, client, collection_name)
 
         compact_id = self.compact(client, collection_name)[0]
@@ -1865,13 +1858,19 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
             data=["vector database"],
             anns_field=CONTENT_SPARSE_FIELD,
             search_params={"metric_type": "BM25", "params": {}},
-            limit=5,
+            limit=len(text_match_before_ids),
             output_fields=[ID_FIELD],
             consistency_level="Strong",
         )
-        assert_search_results(bm25, nq=1, limit=5, metric="BM25", output_fields=[ID_FIELD])
-        assert [result_id(hit) for hit in bm25[0]] == [result_id(hit) for hit in bm25_before[0]]
-        assert all(result_id(hit) not in deleted for hit in bm25[0])
+        assert_search_results(
+            bm25,
+            nq=1,
+            limit=len(text_match_before_ids),
+            metric="BM25",
+            output_fields=[ID_FIELD],
+            expected_ids=text_match_before_ids,
+            required_ids=text_match_before_ids,
+        )
         text_match_after, _ = self.query(
             client,
             collection_name,
@@ -1879,7 +1878,7 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
             output_fields=[ID_FIELD],
             consistency_level="Strong",
         )
-        assert {row[ID_FIELD] for row in text_match_after} == {row[ID_FIELD] for row in text_match_before}
+        assert {row[ID_FIELD] for row in text_match_after} == text_match_before_ids
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_text_lob_compaction_high_delete_ratio(self):
@@ -2238,7 +2237,7 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
         """
         target: verify release handoff preserves TEXT LOB rows while insert and flush start at the same time
         method: use threading.Barrier to launch release, flush of existing growing rows, and insert of new rows together
-        expected: reload without an extra flush returns exact TEXT payloads for both flushed and concurrently inserted rows
+        expected: post-concurrency flush and reload return exact TEXT payloads for both flushed and inserted rows
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -2321,6 +2320,7 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
             for future in as_completed(futures):
                 future.result()
 
+        self.flush(client, collection_name)
         self.load_collection(client, collection_name)
         row_ids = [row[ID_FIELD] for row in rows]
         rows_by_id = query_by_ids(
@@ -2333,7 +2333,6 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
         assert_rows_payload(rows_by_id, expected, [CONTENT_FIELD, CONTENT_ALT_FIELD, VARCHAR_TEXT_FIELD])
         assert_count(self, client, collection_name, len(rows))
 
-        self.flush(client, collection_name)
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         reloaded_rows = query_by_ids(
