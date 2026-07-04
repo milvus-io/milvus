@@ -242,6 +242,23 @@ class FlushGrowingSegmentTest : public ::testing::Test {
     std::string
     SerializeSchemaBlob(const SchemaPtr& schema) {
         auto schema_proto = schema->ToProto();
+        auto add_system_field = [&](FieldId field_id, const char* name) {
+            auto has_field =
+                std::any_of(schema_proto.fields().begin(),
+                            schema_proto.fields().end(),
+                            [&](const auto& field) {
+                                return field.fieldid() == field_id.get();
+                            });
+            if (has_field) {
+                return;
+            }
+            auto* field = schema_proto.add_fields();
+            field->set_fieldid(field_id.get());
+            field->set_name(name);
+            field->set_data_type(proto::schema::DataType::Int64);
+        };
+        add_system_field(RowFieldID, "RowID");
+        add_system_field(TimestampFieldID, "Timestamp");
         std::string blob;
         EXPECT_TRUE(schema_proto.SerializeToString(&blob));
         EXPECT_FALSE(blob.empty());
@@ -292,6 +309,17 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
     config.text_field_ids = nullptr;
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
+    int64_t column_group_ids[] = {10};
+    int64_t column_group_field_ids[] = {pk_fid.get(),
+                                        i32_fid.get(),
+                                        f32_fid.get(),
+                                        RowFieldID.get(),
+                                        TimestampFieldID.get()};
+    size_t column_group_field_counts[] = {5};
+    config.column_group_ids = column_group_ids;
+    config.column_group_field_ids = column_group_field_ids;
+    config.column_group_field_counts = column_group_field_counts;
+    config.num_column_groups = 1;
 
     // flush data
     CFlushResult result{};
@@ -302,6 +330,20 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
     ASSERT_NE(result.manifest_path, nullptr);
     ASSERT_EQ(result.num_rows, N);
     ASSERT_GT(result.committed_version, 0);
+    auto [expected_ts_from, expected_ts_to] = std::minmax_element(
+        dataset.timestamps_.begin(), dataset.timestamps_.end());
+    ASSERT_NE(expected_ts_from, dataset.timestamps_.end());
+    EXPECT_EQ(result.timestamp_from, *expected_ts_from);
+    EXPECT_EQ(result.timestamp_to, *expected_ts_to);
+    ASSERT_GT(result.num_field_stats, 0);
+    std::unordered_map<int64_t, int64_t> field_null_counts;
+    for (size_t i = 0; i < result.num_field_stats; i++) {
+        field_null_counts[result.field_ids[i]] = result.field_null_counts[i];
+    }
+    EXPECT_EQ(field_null_counts[pk_fid.get()], 0);
+    ASSERT_EQ(result.num_column_groups, 1);
+    EXPECT_EQ(result.column_group_ids[0], 10);
+    EXPECT_GT(result.column_group_memory_sizes[0], 0);
     AssertManifestHasColumn(segment_path, result.committed_version, RowFieldID);
 
     // Note: manifest path may be relative to ArrowFileSystem root path

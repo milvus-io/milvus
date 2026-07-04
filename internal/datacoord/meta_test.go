@@ -3635,11 +3635,12 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		// Create a V3 segment with no binlogs (V3 storage uses ManifestPath instead)
 		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           1,
-			State:        commonpb.SegmentState_Growing,
-			Binlogs:      []*datapb.FieldBinlog{},
-			Statslogs:    []*datapb.FieldBinlog{},
-			ManifestPath: "files/binlogs/1/2/1000/manifest_0",
+			ID:             1,
+			State:          commonpb.SegmentState_Growing,
+			Binlogs:        []*datapb.FieldBinlog{},
+			Statslogs:      []*datapb.FieldBinlog{},
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "files/binlogs/1/2/1000/manifest_0",
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
@@ -3660,6 +3661,35 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		updated := meta.GetHealthySegment(context.TODO(), 1)
 		// NumOfRows should be set from checkpoint, not left at 0
 		assert.EqualValues(t, 100, updated.NumOfRows)
+	})
+
+	t.Run("non-v3 storage segment with empty binlogs ignores checkpoint NumOfRows", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1,
+			State:          commonpb.SegmentState_Growing,
+			Binlogs:        []*datapb.FieldBinlog{},
+			Statslogs:      []*datapb.FieldBinlog{},
+			StorageVersion: storage.StorageV2,
+		})
+		err = meta.AddSegment(context.TODO(), segment1)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, segment1.NumOfRows)
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{
+				SegmentID: 1,
+				NumOfRows: 100,
+				Position:  &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100},
+			}}, true),
+		)
+		assert.NoError(t, err)
+
+		updated := meta.GetHealthySegment(context.TODO(), 1)
+		assert.EqualValues(t, 0, updated.NumOfRows)
 	})
 
 	t.Run("update compacted segment", func(t *testing.T) {

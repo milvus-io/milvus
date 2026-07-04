@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -189,17 +190,23 @@ type FlushConfig struct {
 	// AllowedFieldIDs limits growing flush output to fields compatible with
 	// the target segment layout.
 	AllowedFieldIDs []int64
+	ColumnGroups    []storagecommon.ColumnGroup
 }
 
 // FlushResult contains the result of flushing segment data.
-// All data is returned from C++ side via FFI.
-// In Storage V3 FFI mode, only manifest path is needed (all file info is in manifest).
+// All data is returned from C++ side via FFI. In Storage V3 FFI mode,
+// ManifestPath points to the physical files while the summary fields are used
+// to build DataCoord binlog metadata.
 type FlushResult struct {
 	// Manifest path (Storage V3 - contains all file information).
 	// The committed version is encoded in the path and can be extracted
 	// via packed.UnmarshalManifestPath when needed.
 	ManifestPath string
 	// Number of rows flushed
-	NumRows   int64
-	BM25Stats map[int64]*storage.BM25Stats
+	NumRows                int64
+	TimestampFrom          uint64
+	TimestampTo            uint64
+	ColumnGroupMemorySizes map[int64]int64
+	FieldNullCounts        map[int64]int64
+	BM25Stats              map[int64]*storage.BM25Stats
 }
