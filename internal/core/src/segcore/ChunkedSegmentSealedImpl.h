@@ -1819,10 +1819,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      public:
         ScopedTextIndexBuildGuard(ChunkedSegmentSealedImpl& segment,
                                   FieldId field_id,
-                                  bool publish_marker)
+                                  bool publish_marker,
+                                  bool holds_reopen_mutex = false)
             : segment_(segment),
               field_id_(field_id),
-              publish_marker_(publish_marker) {
+              publish_marker_(publish_marker),
+              holds_reopen_mutex_(holds_reopen_mutex) {
         }
 
         void
@@ -1837,6 +1839,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         ChunkedSegmentSealedImpl& segment_;
         FieldId field_id_;
         bool publish_marker_;
+        bool holds_reopen_mutex_;
         bool registered_{false};
         bool committed_{false};
     };

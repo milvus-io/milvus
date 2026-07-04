@@ -4309,7 +4309,6 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 
 void
 ChunkedSegmentSealedImpl::ScopedTextIndexBuildGuard::Register() {
-    std::lock_guard<std::mutex> reopen_guard(segment_.reopen_mutex_);
     std::unique_lock lck(segment_.mutex_);
 
     AssertInfo(segment_.pending_text_index_fields_.count(field_id_) == 0,
@@ -4327,7 +4326,6 @@ ChunkedSegmentSealedImpl::ScopedTextIndexBuildGuard::Register() {
 void
 ChunkedSegmentSealedImpl::ScopedTextIndexBuildGuard::Commit(
     TextIndexVariant index) {
-    std::lock_guard<std::mutex> reopen_guard(segment_.reopen_mutex_);
     std::unique_lock lck(segment_.mutex_);
 
     AssertInfo(segment_.pending_text_index_fields_.count(field_id_) == 1,
@@ -4352,7 +4350,6 @@ ChunkedSegmentSealedImpl::ScopedTextIndexBuildGuard::
     if (!registered_ || committed_) {
         return;
     }
-    std::lock_guard<std::mutex> reopen_guard(segment_.reopen_mutex_);
     std::unique_lock lck(segment_.mutex_);
     segment_.pending_text_index_fields_.erase(field_id_);
 }
@@ -4369,7 +4366,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                       field_id.get(),
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
 
-    ScopedTextIndexBuildGuard build_guard(*this, field_id, publish_marker);
+    ScopedTextIndexBuildGuard build_guard(
+        *this, field_id, publish_marker, runtime != nullptr);
     build_guard.Register();
 
     const auto& field_meta = schema_snapshot->operator[](field_id);
