@@ -61,6 +61,18 @@ func (m *replicateMetrics) UpdateLastReplicatedTimeTick(ts uint64) {
 	).Set(tsoutil.PhysicalTimeSeconds(ts))
 }
 
+// InitLastReplicatedTimeTick seeds the last replicated time tick gauge from the
+// resume checkpoint when a replicator starts. The checkpoint is the
+// target-confirmed position, so a restarted CDC pod reports the real backlog
+// immediately instead of leaving the series absent (which reads as 0 in the lag
+// query) until the first message flows.
+func InitLastReplicatedTimeTick(info *streamingpb.ReplicatePChannelMeta, ts uint64) {
+	metrics.CDCLastReplicatedTimeTick.WithLabelValues(
+		info.GetSourceChannelName(),
+		info.GetTargetChannelName(),
+	).Set(tsoutil.PhysicalTimeSeconds(ts))
+}
+
 func (m *replicateMetrics) StartReplicate(msg message.ImmutableMessage) {
 	msgID := msg.MessageID().String()
 	m.msgsMetrics.Insert(msgID, msgMetrics{
@@ -134,8 +146,17 @@ func (m *replicateMetrics) OnConnect() {
 	).Inc()
 }
 
+// OnClose is invoked only when the replication is genuinely torn down
+// (etcd DELETE / AlterReplicateConfig removal / CDC shutdown), not on the
+// internal idle-timeout reconnect. It deletes this replication's last
+// replicated time tick series so a removed/switched replication does not leave
+// a frozen gauge that pollutes the cross-series aggregation of the lag query.
 func (m *replicateMetrics) OnClose() {
 	metrics.CDCStreamRPCConnections.DeletePartialMatch(prometheus.Labels{
 		metrics.CDCLabelTargetCluster: m.replicateInfo.GetTargetCluster().GetClusterId(),
 	})
+	metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(
+		m.replicateInfo.GetSourceChannelName(),
+		m.replicateInfo.GetTargetChannelName(),
+	)
 }

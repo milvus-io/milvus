@@ -139,6 +139,11 @@ func (r *channelReplicator) init() error {
 		})
 		r.msgScanner = scanner
 		r.msgChan = ch
+		// Seed the last replicated time tick from the resume checkpoint so that
+		// after a CDC pod restart the lag metric reports the real backlog
+		// immediately, instead of the series being absent (which reads as 0)
+		// until the first message is replicated.
+		replicatestream.InitLastReplicatedTimeTick(r.channel.Value, cp.TimeTick)
 		logger.Info("scanner initialized", zap.Any("checkpoint", cp))
 	}
 	// init replicate stream client
