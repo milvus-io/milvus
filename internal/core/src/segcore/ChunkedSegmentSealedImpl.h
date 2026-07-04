@@ -2025,6 +2025,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ApplySchemaForReopen(SchemaPtr sch);
 
     void
+    CompactRuntimeLoadInfoForManifest();
+
+    void
     load_field_data_common(
         FieldId field_id,
         const std::shared_ptr<ChunkedColumnInterface>& column,
