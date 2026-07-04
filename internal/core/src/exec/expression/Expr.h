@@ -693,8 +693,10 @@ class SegmentExpr : public Expr {
         }
         auto result = std::move(func.template operator()<FilterType::random>(
             index_ptr, values..., input->data()));
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_res));
+        return std::make_shared<ColumnVector>(
+            std::move(result),
+            std::move(valid_res),
+            cached_index_all_valid_ ? std::optional<size_t>{0} : std::nullopt);
     }
 
     // when we have scalar index and index contains raw data, could go with index chunk by offsets
@@ -1853,7 +1855,9 @@ class SegmentExpr : public Expr {
             current_index_chunk_pos_ += cached_index_chunk_res_->size();
             return std::make_shared<ColumnVector>(
                 std::move(*cached_index_chunk_res_),
-                std::move(*cached_index_chunk_valid_res_));
+                std::move(*cached_index_chunk_valid_res_),
+                cached_index_all_valid_ ? std::optional<size_t>{0}
+                                        : std::nullopt);
         } else {
             // Normal index or row-level result: batch by rows directly
             auto data_pos = current_index_chunk_pos_;
@@ -1867,8 +1871,10 @@ class SegmentExpr : public Expr {
             current_index_chunk_pos_ = data_pos + size;
         }
 
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_result));
+        return std::make_shared<ColumnVector>(
+            std::move(result),
+            std::move(valid_result),
+            cached_index_all_valid_ ? std::optional<size_t>{0} : std::nullopt);
     }
 
     template <typename T>
@@ -2405,12 +2411,14 @@ class SegmentExpr : public Expr {
         if (execute_all_at_once_) {
             auto valid = TargetBitmap(cached_res.size(), true);
             return std::make_shared<ColumnVector>(std::move(cached_res),
-                                                  std::move(valid));
+                                                  std::move(valid),
+                                                  std::optional<size_t>{0});
         }
         TargetBitmap result;
         result.append(cached_res, pos, size);
         return std::make_shared<ColumnVector>(std::move(result),
-                                              TargetBitmap(size, true));
+                                              TargetBitmap(size, true),
+                                              std::optional<size_t>{0});
     }
 
     void

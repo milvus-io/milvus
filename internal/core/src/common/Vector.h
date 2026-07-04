@@ -132,10 +132,20 @@ class ColumnVector final : public SimpleVector {
 
     // the size is the number of bits
     // TODO: separate the usage of bitmap from scalar field data
-    ColumnVector(TargetBitmap&& bitmap, TargetBitmap&& valid_bitmap)
-        : SimpleVector(DataType::INT8, bitmap.size()),
+    ColumnVector(TargetBitmap&& bitmap,
+                 TargetBitmap&& valid_bitmap,
+                 std::optional<size_t> null_count = std::nullopt)
+        : SimpleVector(DataType::INT8, bitmap.size(), null_count),
           is_bitmap_(true),
           valid_values_(std::move(valid_bitmap)) {
+        AssertInfo(valid_values_.size() == length_,
+                   "ColumnVector valid bitmap size {} must match length {}",
+                   valid_values_.size(),
+                   length_);
+        AssertInfo(!null_count.has_value() || null_count.value() <= length_,
+                   "ColumnVector null count {} must not exceed length {}",
+                   null_count.value_or(0),
+                   length_);
         values_ = std::make_shared<FieldBitsetImpl<uint8_t>>(DataType::INT8,
                                                              std::move(bitmap));
     }
@@ -320,6 +330,30 @@ class ColumnVector final : public SimpleVector {
         size_t total_nulls = null_count_.value_or(0) + other_nulls;
         null_count_ = (total_nulls > 0) ? std::optional<size_t>{total_nulls}
                                         : std::nullopt;
+    }
+
+    bool
+    NullCountKnown() const {
+        return null_count_.has_value();
+    }
+
+    bool
+    AllValidKnown() const {
+        return null_count_.has_value() && null_count_.value() == 0;
+    }
+
+    void
+    SetNullCount(std::optional<size_t> null_count) {
+        AssertInfo(!null_count.has_value() || null_count.value() <= length_,
+                   "ColumnVector null count {} must not exceed length {}",
+                   null_count.value_or(0),
+                   length_);
+        null_count_ = null_count;
+    }
+
+    void
+    MarkAllValid() {
+        null_count_ = 0;
     }
 
     VectorPtr

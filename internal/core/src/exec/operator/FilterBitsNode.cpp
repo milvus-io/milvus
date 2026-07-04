@@ -53,21 +53,28 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
     return key;
 }
 
-void
+}  // namespace
+
+bool
 ConvertPredicateToFilteredBitset(TargetBitmapView data,
                                  TargetBitmapView valid,
-                                 const size_t size) {
+                                 const size_t size,
+                                 const bool valid_all_true) {
     // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
     // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
     // excluded together with FALSE.
+    if (valid_all_true || valid.all()) {
+        data.flip();
+        return true;
+    }
+
     data.flip();
     TargetBitmap invalid(valid);
     invalid.flip();
     data.inplace_or(invalid, size);
     valid.set();
+    return false;
 }
-
-}  // namespace
 
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
@@ -137,11 +144,16 @@ PhyFilterBitsNode::GetOutput() {
             cached.result != nullptr &&
             cached.result->size() == need_process_rows_) {
             num_processed_rows_ = need_process_rows_;
+            std::optional<size_t> null_count = std::optional<size_t>{0};
+            if (cached.valid_result != nullptr && !cached.valid_result->all()) {
+                null_count = std::nullopt;
+            }
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(
                 cached.result->clone(),
                 cached.valid_result ? cached.valid_result->clone()
-                                    : TargetBitmap(need_process_rows_, true)));
+                                    : TargetBitmap(need_process_rows_, true),
+                null_count));
             return std::make_shared<RowVector>(col_res);
         }
     }
@@ -177,7 +189,9 @@ PhyFilterBitsNode::GetOutput() {
         auto col_vec_size = col_vec->size();
         TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
         TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec_size);
-        ConvertPredicateToFilteredBitset(view, valid_view, col_vec_size);
+        ConvertPredicateToFilteredBitset(
+            view, valid_view, col_vec_size, col_vec->AllValidKnown());
+        col_vec->MarkAllValid();
         num_processed_rows_ = col_vec_size;
 
         AssertInfo(col_vec_size == need_process_rows_,
@@ -209,6 +223,7 @@ PhyFilterBitsNode::GetOutput() {
         return std::make_shared<RowVector>(col_res);
     }
 
+    bool valid_bitset_all_valid_known = true;
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -225,6 +240,8 @@ PhyFilterBitsNode::GetOutput() {
                 TargetBitmapView valid_view(col_vec->GetValidRawData(),
                                             col_vec_size);
                 valid_bitset.append(valid_view);
+                valid_bitset_all_valid_known =
+                    valid_bitset_all_valid_known && col_vec->AllValidKnown();
                 num_processed_rows_ += col_vec_size;
             } else {
                 ThrowInfo(ExprInvalid,
@@ -237,8 +254,10 @@ PhyFilterBitsNode::GetOutput() {
     }
     TargetBitmapView bitset_view(bitset);
     TargetBitmapView valid_bitset_view(valid_bitset);
-    ConvertPredicateToFilteredBitset(
-        bitset_view, valid_bitset_view, bitset.size());
+    ConvertPredicateToFilteredBitset(bitset_view,
+                                     valid_bitset_view,
+                                     bitset.size(),
+                                     valid_bitset_all_valid_known);
 
     AssertInfo(bitset.size() == need_process_rows_,
                "bitset size: {}, need_process_rows_: {}",
@@ -261,8 +280,8 @@ PhyFilterBitsNode::GetOutput() {
 
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;
-    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
-                                                     std::move(valid_bitset)));
+    col_res.push_back(std::make_shared<ColumnVector>(
+        std::move(bitset), std::move(valid_bitset), std::optional<size_t>{0}));
     std::chrono::high_resolution_clock::time_point scalar_end =
         std::chrono::high_resolution_clock::now();
     double scalar_cost =
