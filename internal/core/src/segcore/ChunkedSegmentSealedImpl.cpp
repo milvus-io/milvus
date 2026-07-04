@@ -6851,13 +6851,8 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     }
 
     SegmentLoadInfo current_mutable(*current->load_info);
-    SegmentLoadInfo new_local(current->load_info->GetProto(), sch);
-    new_local.InheritCachedColumnGroupsFrom(*current->load_info);
-    for (auto fid : current->load_info->GetCreatedTextIndexes()) {
-        if (field_exists_in_schema(sch, fid)) {
-            new_local.SetTextIndexCreated(fid);
-        }
-    }
+    SegmentLoadInfo new_local(*current->load_info);
+    new_local.ReplaceSchemaForReopen(sch);
 
     auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
@@ -8228,6 +8223,17 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
+
+    auto current = std::atomic_load(&segment_load_info_);
+    std::shared_ptr<const SegmentLoadInfo> published;
+    do {
+        auto compacted = std::make_shared<SegmentLoadInfo>(*current);
+        compacted->CompactRuntimeInfoForManifest();
+        published = std::const_pointer_cast<const SegmentLoadInfo>(compacted);
+    } while (!std::atomic_compare_exchange_weak(
+        &segment_load_info_, &current, published));
+    use_take_for_output_.store(published->GetUseTakeForOutput(),
+                               std::memory_order_relaxed);
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
