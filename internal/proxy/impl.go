@@ -7034,7 +7034,121 @@ func shouldDumpMessage(msgType message.MessageType) bool {
 	return true
 }
 
+// sendDumpMessage sends one immutable WAL message as a DumpMessages response.
+func sendDumpMessage(stream milvuspb.MilvusService_DumpMessagesServer, msg message.ImmutableMessage) error {
+	return stream.Send(&milvuspb.DumpMessagesResponse{
+		Response: &milvuspb.DumpMessagesResponse_Message{
+			Message: msg.IntoImmutableMessageProto(),
+		},
+	})
+}
+
+// dumpTxnMessage expands a scanner-assembled transaction into separate
+// begin/data/commit DumpMessages responses.
+func dumpTxnMessage(
+	ctx context.Context,
+	stream milvuspb.MilvusService_DumpMessagesServer,
+	txnMsg message.ImmutableTxnMessage,
+	logger *mlog.Logger,
+) (int, error) {
+	msgCount := 0
+	begin := txnMsg.Begin()
+	if shouldDumpMessage(begin.MessageType()) {
+		if err := sendDumpMessage(stream, begin); err != nil {
+			logger.Warn(ctx, "DumpMessages send txn begin failed", mlog.Err(err))
+			return msgCount, err
+		}
+		msgCount++
+	}
+
+	if err := txnMsg.RangeOver(func(im message.ImmutableMessage) error {
+		if !shouldDumpMessage(im.MessageType()) {
+			return nil
+		}
+		if err := sendDumpMessage(stream, im); err != nil {
+			logger.Warn(ctx, "DumpMessages send txn body failed", mlog.Err(err))
+			return err
+		}
+		msgCount++
+		return nil
+	}); err != nil {
+		return msgCount, err
+	}
+
+	commit := txnMsg.Commit()
+	if shouldDumpMessage(commit.MessageType()) {
+		if err := sendDumpMessage(stream, commit); err != nil {
+			logger.Warn(ctx, "DumpMessages send txn commit failed", mlog.Err(err))
+			return msgCount, err
+		}
+		msgCount++
+	}
+	return msgCount, nil
+}
+
+// dumpOneMessage writes one scanner output message to the response stream.
+// A transaction scanner output may produce multiple DumpMessages responses.
+func dumpOneMessage(
+	ctx context.Context,
+	stream milvuspb.MilvusService_DumpMessagesServer,
+	msg message.ImmutableMessage,
+	logger *mlog.Logger,
+) (int, error) {
+	if txnMsg, ok := msg.(message.ImmutableTxnMessage); ok {
+		return dumpTxnMessage(ctx, stream, txnMsg, logger)
+	}
+
+	if !shouldDumpMessage(msg.MessageType()) {
+		return 0, nil
+	}
+
+	if err := sendDumpMessage(stream, msg); err != nil {
+		logger.Warn(ctx, "DumpMessages send failed", mlog.Err(err))
+		return 0, err
+	}
+	return 1, nil
+}
+
 // DumpMessages streams messages from a WAL range for data salvage.
+// It returns dump-visible messages only; self-controlled internal messages and
+// rollback transaction messages are filtered. A transaction message is returned
+// as separate begin/data/commit responses when the scanner can assemble it.
+// The expanded transaction body order follows the scanner output; it is not a
+// complete replay recipe for write SDKs. Consumers that restore through write
+// APIs should apply delete messages before insert messages in a transaction,
+// especially for the same primary key. Blindly replaying expanded transaction
+// messages in scanner order can change upsert semantics.
+// A transaction is treated as one atomic dump unit for timetick filtering. The
+// start/end timetick window is evaluated before transaction expansion, using
+// the assembled transaction's commit timetick. If the commit timetick is in the
+// window, the whole transaction is dumped; otherwise the whole transaction is
+// skipped. DumpMessages never splits a transaction by filtering individual body
+// messages by their original timeticks.
+// Strict consumers should buffer expanded transaction messages until CommitTxn.
+// If the stream returns a non-EOF error before a transaction is complete, the
+// incomplete transaction prefix must be discarded and replayed from checkpoint.
+//
+// DumpMessagesRequest.start_message_id is a raw WAL start MessageID. For
+// resumable consumption, callers should normally use a LastConfirmedMessageID
+// carried by a previously dumped message, rather than an arbitrary message ID.
+// DumpMessages cannot prove start-message existence after the scanner has
+// applied transaction assembly and filtering. If the requested start point is no
+// longer retained by the underlying WAL, the stream may begin at the earliest
+// currently readable message instead of failing at this layer.
+//
+// IncludeStartMessage makes the underlying WAL read inclusive. The requested
+// start message is not guaranteed to appear in DumpMessages responses:
+// self-controlled internal messages and rollback transaction messages are still
+// filtered, and the scanner may aggregate or ignore transaction messages. If the
+// requested start point is inside a transaction rather than before its begin
+// message, messages from that transaction may not be returned.
+//
+// Strict resume consumers should store the dumped message's MessageID and
+// LastConfirmedMessageID, call DumpMessages with LastConfirmedMessageID and
+// IncludeStartMessage=true, then skip locally until the stored MessageID is
+// seen. Best-effort dump consumers may pass an approximate start MessageID, but
+// gaps or duplicates are possible if that point is filtered, inside a
+// transaction, or no longer retained by the underlying WAL.
 func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
 	ctx := stream.Context()
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DumpMessages")
@@ -7058,6 +7172,11 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 	if req.GetStartMessageId() == nil || len(req.GetStartMessageId().GetId()) == 0 {
 		return merr.WrapErrParameterMissing("start_message_id")
 	}
+	startTimetick := req.GetStartTimetick()
+	endTimetick := req.GetEndTimetick()
+	if startTimetick > 0 && endTimetick > 0 && endTimetick < startTimetick {
+		return merr.WrapErrParameterInvalidMsg("end_timetick must be greater than or equal to start_timetick")
+	}
 
 	// Unmarshal the message id without panicking: the id bytes are
 	// client-controlled, so a malformed value must be rejected as an invalid
@@ -7067,9 +7186,10 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		return merr.WrapErrParameterInvalidMsg("invalid start_message_id: %s", err.Error())
 	}
 
-	// Use exclusive start position (dump messages AFTER start_message_id)
-	// This is appropriate for salvage scenarios where start_message_id is the last synced message
 	deliverPolicy := options.DeliverPolicyStartAfter(startMsgID)
+	if req.GetIncludeStartMessage() {
+		deliverPolicy = options.DeliverPolicyStartFrom(startMsgID)
+	}
 
 	// Create a channel-based message handler
 	msgCh := make(adaptor.ChanMessageHandler, 16)
@@ -7081,10 +7201,6 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		MessageHandler: msgCh,
 	})
 	defer scanner.Close()
-
-	// Get timetick filters
-	startTimetick := req.GetStartTimetick()
-	endTimetick := req.GetEndTimetick()
 
 	msgCount := 0
 	// Stream messages
@@ -7104,38 +7220,35 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		case msg, ok := <-msgCh:
 			if !ok {
 				// Channel closed
+				if err := scanner.Error(); err != nil {
+					logger.Warn(ctx, "DumpMessages scanner error", mlog.Err(err), mlog.Int("messageCount", msgCount))
+					return err
+				}
 				logger.Info(ctx, "DumpMessages channel closed", mlog.Int("messageCount", msgCount))
 				return nil
 			}
 
 			msgTimetick := msg.TimeTick()
 
-			// Check start timetick filter
-			if startTimetick > 0 && msgTimetick < startTimetick {
-				continue
-			}
-
+			// A transaction is filtered as one atomic unit here: TimeTick is the
+			// commit timetick for assembled transactions, and expansion happens
+			// only after the whole transaction passes the window.
 			// Check end timetick condition
 			if endTimetick > 0 && msgTimetick > endTimetick {
 				logger.Info(ctx, "DumpMessages reached end timetick", mlog.Int("messageCount", msgCount))
 				return nil
 			}
 
-			// Filter system messages
-			if !shouldDumpMessage(msg.MessageType()) {
+			// Check start timetick filter
+			if startTimetick > 0 && msgTimetick < startTimetick {
 				continue
 			}
 
-			// Send message to stream (using oneof - only message, no status)
-			if err := stream.Send(&milvuspb.DumpMessagesResponse{
-				Response: &milvuspb.DumpMessagesResponse_Message{
-					Message: msg.IntoImmutableMessageProto(),
-				},
-			}); err != nil {
-				logger.Warn(ctx, "DumpMessages send failed", mlog.Err(err))
+			dumpedCount, err := dumpOneMessage(ctx, stream, msg, logger)
+			if err != nil {
 				return err
 			}
-			msgCount++
+			msgCount += dumpedCount
 		}
 	}
 }

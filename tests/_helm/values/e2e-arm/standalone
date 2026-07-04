@@ -31,7 +31,6 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
-      targetVecIndexVersion: 10
       compaction:
         bumpSchemaVersion:
           enabled: true

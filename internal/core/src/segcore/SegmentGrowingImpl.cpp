@@ -28,6 +28,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 #include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
@@ -93,6 +94,75 @@ namespace milvus::segcore {
 using namespace milvus::cachinglayer;
 
 namespace {
+
+int64_t
+GetLoadedFieldRows(
+    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+        column_group_results,
+    FieldId field_id) {
+    int64_t rows = 0;
+    bool found = false;
+    for (const auto& column_group_result : column_group_results) {
+        auto it = column_group_result.find(field_id);
+        if (it == column_group_result.end()) {
+            continue;
+        }
+        found = true;
+        for (const auto& field_data : it->second) {
+            rows += field_data->get_num_rows();
+        }
+    }
+    return found ? rows : -1;
+}
+
+void
+AssertLoadedFieldRows(
+    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+        column_group_results,
+    FieldId field_id,
+    int64_t expected_rows,
+    const char* field_name) {
+    if (expected_rows == 0) {
+        return;
+    }
+    auto rows = GetLoadedFieldRows(column_group_results, field_id);
+    AssertInfo(rows == expected_rows,
+               "growing segment StorageV3 manifest loads {} rows for {} "
+               "field {}, but SegmentLoadInfo expects {} rows",
+               rows,
+               field_name,
+               field_id.get(),
+               expected_rows);
+}
+
+void
+AssertAllLoadedFieldRows(
+    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+        column_group_results,
+    int64_t expected_rows) {
+    if (expected_rows == 0) {
+        return;
+    }
+
+    std::unordered_map<FieldId, int64_t> loaded_rows;
+    for (const auto& column_group_result : column_group_results) {
+        for (const auto& [field_id, field_data] : column_group_result) {
+            auto& rows = loaded_rows[field_id];
+            for (const auto& data : field_data) {
+                rows += data->get_num_rows();
+            }
+        }
+    }
+
+    for (const auto& [field_id, rows] : loaded_rows) {
+        AssertInfo(rows == expected_rows,
+                   "growing segment StorageV3 manifest loads {} rows for "
+                   "field {}, but SegmentLoadInfo expects {} rows",
+                   rows,
+                   field_id.get(),
+                   expected_rows);
+    }
+}
 
 int32_t
 GetVectorArrayLength(const proto::schema::VectorField& vec_field,
@@ -2620,9 +2690,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
-        auto future = pool.Submit([this, column_groups, properties, i] {
-            return LoadColumnGroup(column_groups, properties, i);
-        });
+        auto future =
+            pool.Submit([this, column_groups, properties, i, num_rows] {
+                return LoadColumnGroup(column_groups, properties, i, num_rows);
+            });
         load_group_futures.emplace_back(std::move(future));
     }
 
@@ -2648,8 +2719,30 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         std::rethrow_exception(load_exceptions[0]);
     }
 
+    AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
+    AssertLoadedFieldRows(
+        column_group_results, primary_field_id, num_rows, "primary");
+    AssertAllLoadedFieldRows(column_group_results, num_rows);
+    auto timestamp_rows =
+        GetLoadedFieldRows(column_group_results, TimestampFieldID);
+    auto row_id_rows = GetLoadedFieldRows(column_group_results, RowFieldID);
+
     auto reserved_offset = PreInsert(num_rows);
     text_loaded_row_count_ = num_rows;
+
+    if (timestamp_rows == -1 && num_rows > 0) {
+        std::vector<Timestamp> timestamps(num_rows, 0);
+        insert_record_.timestamps_.set_data_raw(
+            reserved_offset, timestamps.data(), num_rows);
+        stats_.mem_size += num_rows * sizeof(Timestamp);
+    }
+    if (row_id_rows == -1 && num_rows > 0) {
+        std::vector<int64_t> row_ids(num_rows);
+        std::iota(row_ids.begin(), row_ids.end(), reserved_offset);
+        insert_record_.row_ids_.set_data_raw(
+            reserved_offset, row_ids.data(), num_rows);
+        stats_.mem_size += num_rows * sizeof(int64_t);
+    }
 
     for (auto& column_group_result : column_group_results) {
         for (auto& [field_id, field_data] : column_group_result) {
@@ -2675,7 +2768,8 @@ std::unordered_map<FieldId, std::vector<FieldDataPtr>>
 SegmentGrowingImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    int64_t index) {
+    int64_t index,
+    int64_t row_limit) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
     auto column_group = column_groups->at(index);
@@ -2694,14 +2788,38 @@ SegmentGrowingImpl::LoadColumnGroup(
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
-    std::vector<int64_t> all_row_groups(chunk_reader->total_number_of_chunks());
+    AssertInfo(row_limit >= 0,
+               "load column group row limit should be non-negative, got {}",
+               row_limit);
+    auto chunk_rows_result = chunk_reader->get_chunk_rows();
+    AssertInfo(chunk_rows_result.ok(),
+               "get chunk rows failed, segment {}, column group index {}, "
+               "error: {}",
+               get_segment_id(),
+               index,
+               chunk_rows_result.status().ToString());
 
-    std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+    auto chunk_rows = std::move(chunk_rows_result).ValueOrDie();
+    std::vector<int64_t> row_groups_to_load;
+    row_groups_to_load.reserve(chunk_rows.size());
+    auto rows_to_read = int64_t{0};
+    for (auto chunk_index = size_t{0};
+         chunk_index < chunk_rows.size() && rows_to_read < row_limit;
+         ++chunk_index) {
+        row_groups_to_load.push_back(static_cast<int64_t>(chunk_index));
+        rows_to_read += static_cast<int64_t>(chunk_rows[chunk_index]);
+    }
+    AssertInfo(rows_to_read >= row_limit,
+               "column group {} has fewer rows than checkpoint row count, "
+               "loaded rows {}, expected rows {}",
+               index,
+               rows_to_read,
+               row_limit);
 
     // create parallel degree split strategy
     auto strategy =
         std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
-    auto split_result = strategy->split(all_row_groups);
+    auto split_result = strategy->split(row_groups_to_load);
 
     auto& thread_pool =
         ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
@@ -2721,10 +2839,18 @@ SegmentGrowingImpl::LoadColumnGroup(
     }
 
     std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
-    for (auto& future : part_futures) {
-        auto part_result = future.get();
+    // Growing recovery may reuse a manifest that already contains rows past the
+    // segment checkpoint. Only load rows covered by SegmentLoadInfo so WAL
+    // replay can append the remaining rows at the expected offsets.
+    int64_t loaded_rows = 0;
+    storage::ProcessFuturesInOrder(part_futures, [&](auto part_result) {
         for (auto& record_batch : part_result) {
+            if (loaded_rows >= row_limit) {
+                break;
+            }
             auto batch_num_rows = record_batch->num_rows();
+            auto rows_to_load =
+                std::min<int64_t>(batch_num_rows, row_limit - loaded_rows);
             for (auto i = 0; i < record_batch->num_columns(); ++i) {
                 auto column = record_batch->column_name(i);
 
@@ -2741,13 +2867,17 @@ SegmentGrowingImpl::LoadColumnGroup(
                             !IsSparseFloatVectorDataType(data_type)
                         ? field.get_dim()
                         : 1,
-                    batch_num_rows);
+                    rows_to_load);
                 auto array = record_batch->column(i);
+                if (rows_to_load < batch_num_rows) {
+                    array = array->Slice(0, rows_to_load);
+                }
                 field_data->FillFieldData(array);
                 field_data_map[field_id].push_back(field_data);
             }
+            loaded_rows += rows_to_load;
         }
-    }
+    });
 
     LOG_INFO("Finished loading segment {} column group {}", id_, index);
     return field_data_map;
