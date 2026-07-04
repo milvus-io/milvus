@@ -132,6 +132,7 @@ func TestRepackInsertWithPartitionKey_ForStreamingService(t *testing.T) {
 		result,
 		partitionKeys,
 		nil, // no encryption
+		nil, // schema: nil means no namespace partition-key routing
 		1,   // schemaVersion
 	)
 	assert.NoError(t, err)
