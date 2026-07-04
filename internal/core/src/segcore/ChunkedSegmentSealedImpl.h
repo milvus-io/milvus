@@ -374,6 +374,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             FieldId,
             std::unordered_map<std::string, index::CacheIndexBasePtr>>
             ngram_indexings;
+        std::unordered_map<FieldId, std::string> text_lob_paths;
         std::shared_ptr<milvus_storage::api::Reader> reader;
         std::shared_ptr<TimestampData> timestamps;
         std::shared_ptr<const TimestampIndex> timestamp_index;
@@ -1716,7 +1717,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     InitTextLobPaths(const std::string& manifest_path,
-                     const SchemaPtr& schema_snapshot);
+                     const SchemaPtr& schema_snapshot,
+                     RuntimeResourceState* runtime);
 
     void
     SynthesizeExternalSystemFields(const SegmentLoadInfo& segment_load_info,
@@ -1806,6 +1808,38 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                               milvus::OpContext* op_ctx = nullptr,
                               bool publish_marker = true,
                               RuntimeResourceState* runtime = nullptr);
+
+    using TextIndexVariant =
+        std::variant<std::unique_ptr<milvus::index::TextMatchIndex>,
+                     std::shared_ptr<milvus::index::TextMatchIndexHolder>,
+                     std::shared_ptr<milvus::cachinglayer::CacheSlot<
+                         milvus::index::TextMatchIndex>>>;
+
+    class ScopedTextIndexBuildGuard {
+     public:
+        ScopedTextIndexBuildGuard(ChunkedSegmentSealedImpl& segment,
+                                  FieldId field_id,
+                                  bool publish_marker)
+            : segment_(segment),
+              field_id_(field_id),
+              publish_marker_(publish_marker) {
+        }
+
+        void
+        Register();
+
+        void
+        Commit(TextIndexVariant index);
+
+        ~ScopedTextIndexBuildGuard();
+
+     private:
+        ChunkedSegmentSealedImpl& segment_;
+        FieldId field_id_;
+        bool publish_marker_;
+        bool registered_{false};
+        bool committed_{false};
+    };
 
     void
     RecordTextIndexCreated(SegmentLoadInfo& segment_load_info,
@@ -1986,6 +2020,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable folly::Synchronized<
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
         fields_;
+    std::unordered_set<FieldId> pending_text_index_fields_;
     std::unordered_set<FieldId> mmap_field_ids_;
 
     // only useful in binlog
@@ -2004,9 +2039,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // The reader object itself now lives in RuntimeResourceState snapshots so
     // reopen/load can stage a replacement reader without exposing it early.
     mutable std::mutex reader_mutex_;
-
-    // stores the base path for TEXT LOBs, keyed by field id.
-    std::unordered_map<FieldId, std::string> text_lob_paths_;
 
     // Array offsets grouped by the shared struct-array parent name.
     std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
@@ -2111,7 +2143,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     SetTextLobPathForTesting(FieldId field_id, std::string lob_base_path) {
-        text_lob_paths_[field_id] = std::move(lob_base_path);
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto next = ClonePublishedState(current);
+        auto runtime = CloneRuntimeResourceState(current->runtime);
+        runtime->text_lob_paths[field_id] = std::move(lob_base_path);
+        next->runtime = ToConstRuntimeState(std::move(runtime));
+        PublishState(std::move(next));
     }
 
     std::shared_ptr<const SegmentLoadInfo>
@@ -2122,6 +2160,27 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     TestRecordTextIndexCreated(FieldId field_id) {
         RecordTextIndexCreated(field_id);
+    }
+
+    bool
+    TestHasPendingTextIndex(FieldId field_id) const {
+        return pending_text_index_fields_.count(field_id) > 0;
+    }
+
+    void
+    TestRegisterPendingTextIndex(FieldId field_id, bool publish_marker) {
+        ScopedTextIndexBuildGuard guard(*this, field_id, publish_marker);
+        guard.Register();
+    }
+
+    void
+    TestCreateTextIndexWithSchema(FieldId field_id,
+                                  const SchemaPtr& schema_snapshot,
+                                  milvus::OpContext* op_ctx = nullptr,
+                                  bool publish_marker = true,
+                                  RuntimeResourceState* runtime = nullptr) {
+        CreateTextIndexWithSchema(
+            field_id, schema_snapshot, op_ctx, publish_marker, runtime);
     }
 
     std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>

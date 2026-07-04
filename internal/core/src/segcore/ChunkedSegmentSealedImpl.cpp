@@ -835,6 +835,7 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
     state->scalar_indexings = current->scalar_indexings;
     state->ngram_fields = current->ngram_fields;
     state->ngram_indexings = current->ngram_indexings;
+    state->text_lob_paths = current->text_lob_paths;
     state->reader = current->reader;
     state->timestamps = current->timestamps;
     state->timestamp_index = current->timestamp_index;
@@ -1084,6 +1085,7 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     runtime->scalar_indexings = current.scalar_indexings;
     runtime->ngram_fields = current.ngram_fields;
     runtime->ngram_indexings = current.ngram_indexings;
+    runtime->text_lob_paths = current.text_lob_paths;
     runtime->reader = current.reader;
     runtime->timestamps = current.timestamps;
     runtime->timestamp_index = current.timestamp_index;
@@ -3851,6 +3853,11 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
               }
           },
           segment_id) {
+    deleted_record_.set_get_insert_timestamp_func(
+        [this](int64_t row_id) -> Timestamp {
+            return ReadTimestamp(
+                row_id, CaptureRuntimeResourceState(), EffectiveCommitTs());
+        });
     auto load_info = std::make_shared<const SegmentLoadInfo>(
         milvus::proto::segcore::SegmentLoadInfo(), schema);
     std::atomic_store(&published_state_,
@@ -4211,8 +4218,11 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
-    auto it = text_lob_paths_.find(field_id);
-    AssertInfo(it != text_lob_paths_.end(),
+    auto snapshot = CapturePublishedState();
+    auto runtime = snapshot->runtime != nullptr ? snapshot->runtime
+                                                : BuildRuntimeResourceState();
+    auto it = runtime->text_lob_paths.find(field_id);
+    AssertInfo(it != runtime->text_lob_paths.end(),
                "TEXT field {} has no LOB path. TEXT type requires StorageV3 "
                "with manifest. segment_id={}",
                field_id.get(),
@@ -4298,6 +4308,56 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 }
 
 void
+ChunkedSegmentSealedImpl::ScopedTextIndexBuildGuard::Register() {
+    std::lock_guard<std::mutex> reopen_guard(segment_.reopen_mutex_);
+    std::unique_lock lck(segment_.mutex_);
+
+    AssertInfo(segment_.pending_text_index_fields_.count(field_id_) == 0,
+               "text index for field {} is already being built",
+               field_id_.get());
+    AssertInfo(
+        segment_.text_indexes_.find(field_id_) == segment_.text_indexes_.end(),
+        "text index for field {} already exists, refusing to rebuild",
+        field_id_.get());
+
+    segment_.pending_text_index_fields_.insert(field_id_);
+    registered_ = true;
+}
+
+void
+ChunkedSegmentSealedImpl::ScopedTextIndexBuildGuard::Commit(
+    TextIndexVariant index) {
+    std::lock_guard<std::mutex> reopen_guard(segment_.reopen_mutex_);
+    std::unique_lock lck(segment_.mutex_);
+
+    AssertInfo(segment_.pending_text_index_fields_.count(field_id_) == 1,
+               "text index for field {} lost pending build state",
+               field_id_.get());
+    AssertInfo(
+        segment_.text_indexes_.find(field_id_) == segment_.text_indexes_.end(),
+        "text index for field {} already exists at commit",
+        field_id_.get());
+
+    segment_.text_indexes_[field_id_] = std::move(index);
+    segment_.pending_text_index_fields_.erase(field_id_);
+    committed_ = true;
+
+    if (publish_marker_) {
+        segment_.RecordTextIndexCreatedLocked(field_id_);
+    }
+}
+
+ChunkedSegmentSealedImpl::ScopedTextIndexBuildGuard::
+    ~ScopedTextIndexBuildGuard() {
+    if (!registered_ || committed_) {
+        return;
+    }
+    std::lock_guard<std::mutex> reopen_guard(segment_.reopen_mutex_);
+    std::unique_lock lck(segment_.mutex_);
+    segment_.pending_text_index_fields_.erase(field_id_);
+}
+
+void
 ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
     FieldId field_id,
     const SchemaPtr& schema_snapshot,
@@ -4309,11 +4369,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                       field_id.get(),
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
 
-    std::unique_lock lck(mutex_);
-
-    AssertInfo(text_indexes_.find(field_id) == text_indexes_.end(),
-               "text index for field {} already exists, refusing to rebuild",
-               field_id.get());
+    ScopedTextIndexBuildGuard build_guard(*this, field_id, publish_marker);
+    build_guard.Register();
 
     const auto& field_meta = schema_snapshot->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -4355,12 +4412,18 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                               field_id.get(),
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
             if (field_meta.get_data_type() == DataType::TEXT) {
-                auto it = text_lob_paths_.find(field_id);
-                AssertInfo(it != text_lob_paths_.end(),
+                const auto* path_map =
+                    runtime != nullptr
+                        ? &runtime->text_lob_paths
+                        : &CaptureRuntimeResourceState()->text_lob_paths;
+                auto it = path_map->find(field_id);
+                AssertInfo(it != path_map->end(),
                            "TEXT field {} has no LOB path. TEXT type "
                            "requires StorageV3 with manifest. segment_id={}",
                            field_id.get(),
                            id_);
+
+                const auto& lob_base_path = it->second;
 
                 struct TextIndexEntry {
                     size_t offset;
@@ -4374,7 +4437,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     if (entries.empty()) {
                         return;
                     }
-                    auto texts = ReadTextLobBatch(it->second, encoded_refs);
+                    auto texts = ReadTextLobBatch(lob_base_path, encoded_refs);
                     AssertInfo(texts.size() == encoded_refs.size(),
                                "TEXT field {} LOB batch read returned {} "
                                "texts for {} refs. segment_id={}",
@@ -4469,11 +4532,14 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
     index->RegisterAnalyzer("milvus_tokenizer",
                             field_meta.get_analyzer_params().c_str());
 
-    text_indexes_[field_id] = std::make_shared<index::TextMatchIndexHolder>(
+    auto text_index_holder = std::make_shared<index::TextMatchIndexHolder>(
         std::move(index), cfg.GetScalarIndexEnableMmap());
-    if (publish_marker) {
-        RecordTextIndexCreatedLocked(field_id);
-    }
+
+    CheckCancellation(op_ctx,
+                      id_,
+                      field_id.get(),
+                      "ChunkedSegmentSealedImpl::CreateTextIndex()");
+    build_guard.Commit(std::move(text_index_holder));
 }
 
 void
@@ -4588,8 +4654,10 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator), op_ctx);
 
-    std::unique_lock lck(mutex_);
-    text_indexes_[field_id] = std::move(cache_slot);
+    ScopedTextIndexBuildGuard build_guard(*this, field_id, false);
+    build_guard.Register();
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::LoadTextIndex()");
+    build_guard.Commit(std::move(cache_slot));
 }
 
 void
@@ -4778,8 +4846,12 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
 
         case DataType::TEXT: {
             // TEXT type is only supported in StorageV3 with LOB files.
-            auto it = text_lob_paths_.find(field_id);
-            AssertInfo(it != text_lob_paths_.end(),
+            auto snapshot = CapturePublishedState();
+            auto runtime = snapshot->runtime != nullptr
+                               ? snapshot->runtime
+                               : BuildRuntimeResourceState();
+            auto it = runtime->text_lob_paths.find(field_id);
+            AssertInfo(it != runtime->text_lob_paths.end(),
                        "TEXT field {} has no LOB path. TEXT type requires "
                        "StorageV3 with manifest. segment_id={}",
                        field_id.get(),
@@ -6002,7 +6074,8 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (segment_load_info.HasManifestPath()) {
-        InitTextLobPaths(segment_load_info.GetManifestPath(), schema_snapshot);
+        InitTextLobPaths(
+            segment_load_info.GetManifestPath(), schema_snapshot, runtime);
     }
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
@@ -6513,15 +6586,23 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
                      nullptr,
                      false,
                      runtime.get());
-    PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
 
-    // initialize LOB paths for TEXT fields
-    InitTextLobPaths(manifest_path, schema_snapshot);
+    // initialize LOB paths for TEXT fields inside staged runtime
+    InitTextLobPaths(manifest_path, schema_snapshot, runtime.get());
+    PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
 }
 
 void
 ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path,
-                                           const SchemaPtr& schema_snapshot) {
+                                           const SchemaPtr& schema_snapshot,
+                                           RuntimeResourceState* runtime) {
+    RuntimeResourceState* target_runtime = runtime;
+    std::shared_ptr<RuntimeResourceState> owned_runtime;
+    if (target_runtime == nullptr) {
+        owned_runtime = CloneMutableRuntimeResourceState();
+        target_runtime = owned_runtime.get();
+    }
+
     std::vector<FieldId> text_field_ids;
     for (auto& [field_id, field_meta] : schema_snapshot->get_fields()) {
         if (field_meta.get_data_type() == DataType::TEXT) {
@@ -6551,11 +6632,16 @@ ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path,
     for (auto field_id : text_field_ids) {
         std::filesystem::path lob_base_path =
             partition_path / "lobs" / std::to_string(field_id.get());
-        text_lob_paths_[field_id] = lob_base_path.string();
+        target_runtime->text_lob_paths[field_id] = lob_base_path.string();
         LOG_INFO("Initialized TEXT LOB path for segment {} field {}: {}",
                  id_,
                  field_id.get(),
                  lob_base_path.string());
+    }
+
+    if (owned_runtime != nullptr) {
+        PublishRuntimeStateLocked(
+            ToConstRuntimeState(std::move(owned_runtime)));
     }
 }
 
@@ -7987,8 +8073,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         const std::string* text_lob_path = nullptr;
         if (!is_external_collection &&
             field_meta.get_data_type() == DataType::TEXT) {
-            auto path_it = text_lob_paths_.find(field_id);
-            if (path_it == text_lob_paths_.end()) {
+            auto path_it = snapshot->runtime->text_lob_paths.find(field_id);
+            if (path_it == snapshot->runtime->text_lob_paths.end()) {
                 LogTakeFallback(
                     "retrieve",
                     id_,
@@ -8197,8 +8283,8 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
         const std::string* text_lob_path = nullptr;
         if (!is_external_collection &&
             field_meta.get_data_type() == DataType::TEXT) {
-            auto path_it = text_lob_paths_.find(field_id);
-            if (path_it == text_lob_paths_.end()) {
+            auto path_it = snapshot->runtime->text_lob_paths.find(field_id);
+            if (path_it == snapshot->runtime->text_lob_paths.end()) {
                 LogTakeFallback(
                     "search",
                     id_,

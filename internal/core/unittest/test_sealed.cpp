@@ -3699,6 +3699,35 @@ TEST(SealedSegmentReopen, DropFieldReopenPublishesSchemaAndLoadInfoTogether) {
     EXPECT_FALSE(sealed->FieldAccessible(dropped_id));
 }
 
+TEST(SealedSegmentReopen, TextIndexCancellationGuardDoesNotLeakPendingState) {
+    std::map<std::string, std::string> analyzer_params;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = schema->AddDebugVarcharField(FieldName("text_field"),
+                                                 DataType::VARCHAR,
+                                                 /*max_length=*/65535,
+                                                 /*nullable=*/false,
+                                                 /*enable_match=*/true,
+                                                 /*enable_analyzer=*/true,
+                                                 analyzer_params,
+                                                 std::nullopt);
+    schema->set_primary_field_id(pk_id);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    EXPECT_FALSE(sealed->TestHasPendingTextIndex(text_fid));
+    EXPECT_FALSE(
+        sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+
+    sealed->TestRegisterPendingTextIndex(text_fid, true);
+
+    EXPECT_FALSE(sealed->TestHasPendingTextIndex(text_fid));
+    EXPECT_FALSE(
+        sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+}
+
 TEST(SealedSegmentReopen, RuntimeTextIndexMarkerPublishesToLoadInfoSnapshot) {
     std::map<std::string, std::string> analyzer_params;
     auto schema = std::make_shared<Schema>();
