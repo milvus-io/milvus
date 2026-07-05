@@ -1475,8 +1475,7 @@ OpArithCompareImpl<int8_t, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
                   AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
-                  AOp == ArithOpType::Shl ||
-                  AOp == ArithOpType::Shr) {
+                  AOp == ArithOpType::Shl || AOp == ArithOpType::Shr) {
         return false;
     } else {
         using T = int64_t;
@@ -1506,8 +1505,7 @@ OpArithCompareImpl<int16_t, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
                   AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
-                  AOp == ArithOpType::Shl ||
-                  AOp == ArithOpType::Shr) {
+                  AOp == ArithOpType::Shl || AOp == ArithOpType::Shr) {
         return false;
     } else {
         using T = int64_t;
@@ -1537,8 +1535,7 @@ OpArithCompareImpl<int32_t, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
                   AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
-                  AOp == ArithOpType::Shl ||
-                  AOp == ArithOpType::Shr) {
+                  AOp == ArithOpType::Shl || AOp == ArithOpType::Shr) {
         return false;
     } else {
         using T = int64_t;
@@ -1568,8 +1565,7 @@ OpArithCompareImpl<int64_t, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
                   AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
-                  AOp == ArithOpType::Shl ||
-                  AOp == ArithOpType::Shr) {
+                  AOp == ArithOpType::Shl || AOp == ArithOpType::Shr) {
         return false;
     } else {
         using T = int64_t;
@@ -1599,8 +1595,7 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
                   AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
-                  AOp == ArithOpType::Shl ||
-                  AOp == ArithOpType::Shr) {
+                  AOp == ArithOpType::Shl || AOp == ArithOpType::Shr) {
         return false;
     } else {
         if constexpr (AOp == ArithOpType::Div) {
@@ -1666,8 +1661,7 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
                   AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
-                  AOp == ArithOpType::Shl ||
-                  AOp == ArithOpType::Shr) {
+                  AOp == ArithOpType::Shl || AOp == ArithOpType::Shr) {
         return false;
     } else {
         if constexpr (AOp == ArithOpType::Div) {
