@@ -32,8 +32,7 @@ namespace exec {
 bool
 ConvertPredicateToFilteredBitset(TargetBitmapView data,
                                  TargetBitmapView valid,
-                                 size_t size,
-                                 bool valid_all_true = false);
+                                 size_t size);
 
 class PhyFilterBitsNode : public Operator {
  public:

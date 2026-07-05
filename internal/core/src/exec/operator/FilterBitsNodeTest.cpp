@@ -18,7 +18,6 @@
 
 #include <initializer_list>
 #include <memory>
-#include <optional>
 #include <vector>
 
 #include "common/Types.h"
@@ -71,24 +70,38 @@ TEST(FilterBitsNodeTest, PredicateConversionUsesFastPathForAllValidResults) {
     EXPECT_TRUE(valid.all());
 }
 
-TEST(FilterBitsNodeTest, PredicateConversionUsesKnownAllValidMetadata) {
+TEST(FilterBitsNodeTest, PredicateConversionUsesLiveAllValidBitmap) {
     auto data = MakeBitmap({true, false, true, false});
     TargetBitmap valid(data.size(), true);
-    auto col_vec = std::make_shared<ColumnVector>(
-        std::move(data), std::move(valid), std::optional<size_t>{0});
-
-    ASSERT_TRUE(col_vec->AllValidKnown());
+    auto col_vec =
+        std::make_shared<ColumnVector>(std::move(data), std::move(valid));
 
     TargetBitmapView data_view(col_vec->GetRawData(), col_vec->size());
     TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
     const bool used_all_valid_fast_path = ConvertPredicateToFilteredBitset(
-        data_view, valid_view, col_vec->size(), col_vec->AllValidKnown());
-    col_vec->MarkAllValid();
+        data_view, valid_view, col_vec->size());
 
     EXPECT_TRUE(used_all_valid_fast_path);
     EXPECT_EQ(ToVector(data_view),
               (std::vector<bool>{false, true, false, true}));
-    EXPECT_TRUE(col_vec->AllValidKnown());
+    EXPECT_TRUE(valid_view.all());
+}
+
+TEST(FilterBitsNodeTest, PredicateConversionUsesLiveInvalidBitmap) {
+    auto data = MakeBitmap({true, false, true, false});
+    auto valid = MakeBitmap({true, true, false, false});
+    auto col_vec =
+        std::make_shared<ColumnVector>(std::move(data), std::move(valid));
+
+    TargetBitmapView data_view(col_vec->GetRawData(), col_vec->size());
+    TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
+    const bool used_all_valid_fast_path = ConvertPredicateToFilteredBitset(
+        data_view, valid_view, col_vec->size());
+
+    EXPECT_FALSE(used_all_valid_fast_path);
+    EXPECT_EQ(ToVector(data_view),
+              (std::vector<bool>{false, true, true, true}));
+    EXPECT_TRUE(valid_view.all());
 }
 
 TEST(FilterBitsNodeTest, PredicateConversionFiltersOutInvalidResults) {
