@@ -290,6 +290,7 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 				mlog.Int64("bytes", newBytes))
 		}))
 	initcore.RegisterStorageV2AsyncLoadEnabledWatcher(node.ctx, pt, "querynode")
+	initcore.RegisterScalarIndexV3AsyncLoadEnabledWatcher(node.ctx, pt, "querynode")
 	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
 

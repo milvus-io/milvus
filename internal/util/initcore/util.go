@@ -319,6 +319,37 @@ func GetStorageV2AsyncLoadReadWindowSizeBytes() int64 {
 	return int64(C.GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
+func UpdateScalarIndexV3AsyncLoadEnabled(enabled bool) {
+	C.SetScalarIndexV3AsyncLoadEnabled(C.bool(enabled))
+}
+
+// RegisterScalarIndexV3AsyncLoadEnabledWatcher keeps the C++ scalar-index
+// async-load switch synchronized with paramtable.
+func RegisterScalarIndexV3AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string) {
+	registerScalarIndexV3AsyncLoadEnabledWatcher(ctx, pt, source, UpdateScalarIndexV3AsyncLoadEnabled)
+}
+
+func registerScalarIndexV3AsyncLoadEnabledWatcher(ctx context.Context, pt *paramtable.ComponentParam, source string, apply func(bool)) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	item := &pt.QueryNodeCfg.ScalarIndexV3EnableAsyncLoad
+	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+		pt.Watch(item.Key, config.NewHandler(item.Key+"."+source, func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			syncConfig()
+		}))
+	}, func() {
+		enabled := item.GetAsBool()
+		apply(enabled)
+		mlog.Info(ctx, "queryNode.segcore.scalarIndexV3.enableAsyncLoad updated",
+			mlog.String("source", source),
+			mlog.Bool("enabled", enabled))
+	})
+}
+
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
 }

@@ -137,6 +137,10 @@ SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
 int64_t
 GetStorageV2AsyncLoadReadWindowSizeBytes();
 
+// Enable async entry loading for scalar packed-index v3 files.
+void
+SetScalarIndexV3AsyncLoadEnabled(bool enabled);
+
 #ifdef __cplusplus
 };
 #endif

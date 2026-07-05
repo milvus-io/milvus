@@ -99,6 +99,20 @@ func TestComponentParam(t *testing.T) {
 		params.Save(item.Key, "33554432")
 		assert.EqualValues(t, 32*1024*1024, item.GetAsInt64())
 	})
+
+	t.Run("query node scalar index v3 async load config", func(t *testing.T) {
+		item := &params.QueryNodeCfg.ScalarIndexV3EnableAsyncLoad
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.segcore.scalarIndexV3.enableAsyncLoad", item.Key)
+		assert.True(t, item.Export)
+		assert.False(t, item.GetAsBool())
+
+		params.Save(item.Key, "true")
+		assert.True(t, item.GetAsBool())
+	})
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := &params.CommonCfg
 
