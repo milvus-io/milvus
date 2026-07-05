@@ -29,10 +29,15 @@
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
+
+namespace arrow::internal {
+class Executor;
+}  // namespace arrow::internal
 
 namespace milvus::storage {
 
@@ -49,6 +54,14 @@ struct EntryStreamLoadInfo {
     bool encrypted{false};
     size_t total_transient_bytes{0};
     size_t max_task_transient_bytes{0};
+};
+
+struct EntryStreamAsyncOptions {
+    milvus::proto::common::LoadPriority priority{
+        milvus::proto::common::LoadPriority::HIGH};
+    arrow::internal::Executor* localize_disk_executor{nullptr};
+    std::string trace_label;
+    size_t slice_size = DefaultEntryStreamSliceSize();
 };
 
 class IndexEntryReader {
@@ -111,6 +124,24 @@ class IndexEntryReader {
         const std::string& name,
         std::function<void(const uint8_t* data, size_t len)> slice_consumer,
         size_t slice_size = DefaultEntryStreamSliceSize());
+
+    void
+    ReadEntryStreamAsync(
+        const std::string& name,
+        std::function<void(const uint8_t* data, size_t len)> slice_consumer,
+        EntryStreamAsyncOptions options = EntryStreamAsyncOptions{});
+
+    Entry
+    ReadEntryToMemoryAsync(
+        const std::string& name,
+        EntryStreamAsyncOptions options = EntryStreamAsyncOptions{});
+
+    void
+    ReadEntryToFileAsync(
+        const std::string& name,
+        const std::string& local_path,
+        EntryStreamAsyncOptions options = EntryStreamAsyncOptions{},
+        io::Priority write_priority = io::Priority::MIDDLE);
 
     /// Return the uncompressed data size of an entry without reading it.
     size_t
@@ -191,6 +222,20 @@ class IndexEntryReader {
         const EncryptedEntryMeta& em,
         const std::function<void(const uint8_t* data, size_t len)>&
             slice_consumer);
+
+    void
+    ReadPlainEntryStreamAsync(
+        const PlainEntryMeta& pm,
+        const std::function<void(const uint8_t* data, size_t len)>&
+            slice_consumer,
+        const EntryStreamAsyncOptions& options);
+
+    void
+    ReadEncryptedEntryStreamAsync(
+        const EncryptedEntryMeta& em,
+        const std::function<void(const uint8_t* data, size_t len)>&
+            slice_consumer,
+        const EntryStreamAsyncOptions& options);
 
     void
     VerifyCrc32c(uint32_t expected,
