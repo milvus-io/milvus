@@ -120,6 +120,12 @@ class StringIndexMarisa : public StringIndex {
         return true;
     }
 
+ protected:
+    void
+    LoadEntriesWithAsyncRead(storage::IndexEntryReader& reader,
+                             const Config& config,
+                             ScalarIndexV3AsyncLoadContext& async_ctx) override;
+
  private:
     void
     fill_str_ids(size_t n, const std::string* values, const bool* valid_data);
