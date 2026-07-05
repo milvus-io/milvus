@@ -54,6 +54,7 @@
 #include "storage/IndexEntryWriter.h"
 #include "storage/MemFileManagerImpl.h"
 #include "segcore/async_load/AsyncLoadExecutor.h"
+#include "milvus-storage/common/extend_status.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -732,7 +733,6 @@ ScalarIndexSort<T>::LoadEntriesWithAsyncRead(
 
     storage::EntryStreamAsyncOptions read_options;
     read_options.priority = load_priority;
-    read_options.scheduler = &async_ctx.scheduler;
     read_options.localize_disk_executor =
         milvus::segcore::async_load::AsyncLoadDiskExecutor();
     read_options.trace_label = async_ctx.trace_label;
@@ -762,9 +762,9 @@ ScalarIndexSort<T>::LoadEntriesWithAsyncRead(
                                 return arrow::Status::OK();
                             });
                     auto status = std::move(write_future).get();
-                    AssertInfo(status.ok(),
-                               "Failed to write async stlsort data slice: {}",
-                               status.ToString());
+                    if (!status.ok()) {
+                        throw milvus_storage::ToSegcoreError(status);
+                    }
                     total_data_size += len;
                 },
                 read_options);
@@ -777,9 +777,9 @@ ScalarIndexSort<T>::LoadEntriesWithAsyncRead(
                         return arrow::Status::OK();
                     });
                 auto status = std::move(write_future).get();
-                AssertInfo(status.ok(),
-                           "Failed to write async stlsort padding: {}",
-                           status.ToString());
+                if (!status.ok()) {
+                    throw milvus_storage::ToSegcoreError(status);
+                }
             };
 
             auto aligned_size =

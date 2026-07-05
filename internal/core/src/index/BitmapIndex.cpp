@@ -43,6 +43,7 @@
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
 #include "segcore/async_load/AsyncLoadExecutor.h"
+#include "milvus-storage/common/extend_status.h"
 
 namespace milvus {
 namespace index {
@@ -1570,7 +1571,6 @@ BitmapIndex<T>::LoadEntriesWithAsyncRead(
 
     storage::EntryStreamAsyncOptions read_options;
     read_options.priority = async_ctx.load_priority;
-    read_options.scheduler = &async_ctx.scheduler;
     read_options.localize_disk_executor =
         milvus::segcore::async_load::AsyncLoadDiskExecutor();
     read_options.trace_label = async_ctx.trace_label;
@@ -1645,9 +1645,9 @@ BitmapIndex<T>::LoadEntriesWithAsyncRead(
                                        return arrow::Status::OK();
                                    }))
                 .get();
-        AssertInfo(status.ok(),
-                   "Failed to materialize async bitmap mmap index: {}",
-                   status.ToString());
+        if (!status.ok()) {
+            throw milvus_storage::ToSegcoreError(status);
+        }
     } else {
         auto index_data_entry =
             reader.ReadEntryToMemoryAsync(BITMAP_INDEX_DATA, read_options);
@@ -1666,9 +1666,9 @@ BitmapIndex<T>::LoadEntriesWithAsyncRead(
                                        return arrow::Status::OK();
                                    }))
                 .get();
-        AssertInfo(status.ok(),
-                   "Failed to materialize async bitmap index: {}",
-                   status.ToString());
+        if (!status.ok()) {
+            throw milvus_storage::ToSegcoreError(status);
+        }
     }
 
     if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
@@ -1678,9 +1678,9 @@ BitmapIndex<T>::LoadEntriesWithAsyncRead(
                 BuildOffsetCache();
                 return arrow::Status::OK();
             })).get();
-        AssertInfo(status.ok(),
-                   "Failed to build async bitmap offset cache: {}",
-                   status.ToString());
+        if (!status.ok()) {
+            throw milvus_storage::ToSegcoreError(status);
+        }
     }
 
     auto file_index_meta = this->file_manager_->GetIndexMeta();

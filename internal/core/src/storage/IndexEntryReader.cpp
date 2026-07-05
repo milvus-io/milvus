@@ -1583,9 +1583,9 @@ IndexEntryReader::ReadEntryToFileAsync(const std::string& name,
                     return arrow::Status::OK();
                 });
             auto status = std::move(write_future).get();
-            AssertInfo(status.ok(),
-                       "Failed to write async entry slice: {}",
-                       status.ToString());
+            if (!status.ok()) {
+                throw milvus_storage::ToSegcoreError(status);
+            }
         },
         std::move(options));
     writer.Finish();

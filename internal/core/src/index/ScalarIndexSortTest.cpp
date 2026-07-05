@@ -22,7 +22,6 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "segcore/async_load/AsyncLoadScheduler.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 #include "test_utils/TmpPath.h"
@@ -92,6 +91,7 @@ CreateScalarSortTestFileManagerContext() {
 }
 
 TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
     ScalarSortAsyncLoadFixture fixture("scalar_sort_async_memory");
     std::vector<int64_t> data{50, 10, 30, 20, 40};
 
@@ -109,12 +109,9 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::index::ENABLE_MMAP] = false;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::segcore::async_load::LoadAdmissionScheduler scheduler(
-        {/*total_bytes=*/0, /*high_reserved_bytes=*/0});
     milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
         nullptr,
         milvus::proto::common::LoadPriority::HIGH,
-        scheduler,
         "scalar_sort_async_memory"};
 
     load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
@@ -133,6 +130,7 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
 }
 
 TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
     ScalarSortAsyncLoadFixture fixture("scalar_sort_async_mmap");
     std::vector<int64_t> data{5, 4, 3, 2, 1, 0};
 
@@ -150,12 +148,9 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::index::ENABLE_MMAP] = true;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::segcore::async_load::LoadAdmissionScheduler scheduler(
-        {/*total_bytes=*/0, /*high_reserved_bytes=*/0});
     milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
         nullptr,
         milvus::proto::common::LoadPriority::HIGH,
-        scheduler,
         "scalar_sort_async_mmap"};
 
     load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);

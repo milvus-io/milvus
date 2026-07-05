@@ -23,10 +23,32 @@
 #include <vector>
 
 #include "storage/FileManager.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/RemoteInputStream.h"
 
 namespace milvus::test {
+
+class ScopedLoadTransientBudget {
+ public:
+    explicit ScopedLoadTransientBudget(size_t capacity_bytes)
+        : budget_(storage::TransientMemoryBudget::GetLoadTransientBudget()),
+          previous_capacity_bytes_(budget_.CapacityBytes()) {
+        budget_.SetCapacityBytes(capacity_bytes);
+    }
+
+    ScopedLoadTransientBudget(const ScopedLoadTransientBudget&) = delete;
+    ScopedLoadTransientBudget&
+    operator=(const ScopedLoadTransientBudget&) = delete;
+
+    ~ScopedLoadTransientBudget() {
+        budget_.SetCapacityBytes(previous_capacity_bytes_);
+    }
+
+ private:
+    storage::TransientMemoryBudget& budget_;
+    size_t previous_capacity_bytes_;
+};
 
 class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
  public:

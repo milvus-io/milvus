@@ -154,6 +154,11 @@ class StringIndexSort : public StringIndex {
                 const Config& config) override;
 
  protected:
+    void
+    LoadEntriesWithAsyncRead(storage::IndexEntryReader& reader,
+                             const Config& config,
+                             ScalarIndexV3AsyncLoadContext& async_ctx) override;
+
     int64_t
     CalculateTotalSize() const;
 

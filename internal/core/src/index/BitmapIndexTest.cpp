@@ -61,7 +61,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "segcore/async_load/AsyncLoadScheduler.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus::index;
@@ -271,6 +271,7 @@ GenerateData<std::string>(const size_t size, const size_t cardinality) {
 }
 
 TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
     BitmapAsyncLoadFixture fixture("bitmap_async_memory");
     auto old_enabled = milvus::index::ScalarIndexV3AsyncLoadEnabled();
     auto guard = folly::makeGuard([old_enabled]() {
@@ -295,12 +296,9 @@ TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     config[milvus::index::ENABLE_OFFSET_CACHE] = true;
-    milvus::segcore::async_load::LoadAdmissionScheduler scheduler(
-        {/*total_bytes=*/0, /*high_reserved_bytes=*/0});
     milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
         nullptr,
         milvus::proto::common::LoadPriority::HIGH,
-        scheduler,
         "bitmap_async_memory"};
 
     load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
@@ -321,6 +319,7 @@ TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
 }
 
 TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
     BitmapAsyncLoadFixture fixture("bitmap_async_mmap");
     fixture.field_schema.set_nullable(false);
     fixture.field_meta.field_schema = fixture.field_schema;
@@ -345,12 +344,9 @@ TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     config[milvus::index::MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
-    milvus::segcore::async_load::LoadAdmissionScheduler scheduler(
-        {/*total_bytes=*/0, /*high_reserved_bytes=*/0});
     milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
         nullptr,
         milvus::proto::common::LoadPriority::HIGH,
-        scheduler,
         "bitmap_async_mmap"};
 
     load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
