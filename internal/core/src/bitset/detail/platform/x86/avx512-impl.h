@@ -1,4 +1,4 @@
-// Licensed to the LF AI & Data foundation under one
+﻿// Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
@@ -1789,7 +1789,8 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<float>& value,
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
-                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor || AOp == ArithOpType::Shl ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
+                  AOp == ArithOpType::Shl ||
                   AOp == ArithOpType::Shr) {
         return false;
     } else {
@@ -1936,7 +1937,8 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<double>& value,
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
-                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor || AOp == ArithOpType::Shl ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor ||
+                  AOp == ArithOpType::Shl ||
                   AOp == ArithOpType::Shr) {
         return false;
     } else {
