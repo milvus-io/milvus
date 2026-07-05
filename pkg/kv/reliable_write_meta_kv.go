@@ -97,9 +97,7 @@ func (kv *ReliableWriteMetaKv) retryWithBackoff(ctx context.Context, fn func(ctx
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(nextInterval):
-			kv.Logger().Warn(ctx,
-
-				"failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
+			kv.Logger().Warn(ctx, "failed to persist operation, wait for retry...", mlog.Duration("nextRetryInterval", nextInterval), mlog.Err(err))
 		}
 	}
 }

@@ -518,9 +518,7 @@ func (m *StatsManager) updateConfig() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cfg != cfg {
-		m.Logger().Info(context.TODO(),
-
-			"update stats manager config", mlog.Any("newConfig", cfg), mlog.Any("oldConfig", m.cfg))
+		m.Logger().Info(context.TODO(), "update stats manager config", mlog.Any("newConfig", cfg), mlog.Any("oldConfig", m.cfg))
 		m.cfg = cfg
 	}
 }

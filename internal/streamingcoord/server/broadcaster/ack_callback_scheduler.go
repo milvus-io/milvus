@@ -100,13 +100,9 @@ func (s *ackCallbackScheduler) Close() {
 func (s *ackCallbackScheduler) background() {
 	defer func() {
 		s.notifier.Finish(struct{}{})
-		s.Logger().Info(context.TODO(),
-
-			"ack scheduler background exit")
+		s.Logger().Info(context.TODO(), "ack scheduler background exit")
 	}()
-	s.Logger().Info(context.TODO(),
-
-		"ack scheduler background start")
+	s.Logger().Info(context.TODO(), "ack scheduler background start")
 
 	// it's weired to find that FastLock may be failure even if there's no resource-key locked,
 	// also see: #45285
@@ -156,9 +152,7 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
-			s.Logger().Warn(context.TODO(),
-
-				"lock is occupied, delay the ack callback", mlog.Uint64("broadcastID", task.Header().BroadcastID), mlog.Err(err))
+			s.Logger().Warn(context.TODO(), "lock is occupied, delay the ack callback", mlog.Uint64("broadcastID", task.Header().BroadcastID), mlog.Err(err))
 			pendingTasks = append(pendingTasks, task)
 			continue
 		}
@@ -205,16 +199,11 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 	})
 
 	if len(incompleteTasks) == 0 {
-		s.Logger().Info(ctx,
-
-			"No incomplete broadcasts to fix for force promote")
+		s.Logger().Info(ctx, "No incomplete broadcasts to fix for force promote")
 		return nil
 	}
 
-	s.Logger().Info(ctx,
-
-		"Fixing incomplete broadcasts for force promote",
-		mlog.Int("incompleteTasks", len(incompleteTasks)))
+	s.Logger().Info(ctx, "Fixing incomplete broadcasts for force promote", mlog.Int("incompleteTasks", len(incompleteTasks)))
 
 	// Mark AlterReplicateConfig tasks with ignore=true (to prevent old config overwriting force promote config)
 	// MarkIgnore is a memory-only operation. It only runs on tasks where IsAlterReplicateConfigMessage() == true,
@@ -223,10 +212,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		if !task.IsAlterReplicateConfigMessage() {
 			continue
 		}
-		s.Logger().Info(ctx,
-
-			"Marking AlterReplicateConfig task with ignore=true",
-			mlog.Uint64("broadcastID", task.Header().BroadcastID))
+		s.Logger().Info(ctx, "Marking AlterReplicateConfig task with ignore=true", mlog.Uint64("broadcastID", task.Header().BroadcastID))
 
 		if err := task.MarkIgnore(); err != nil {
 			panic(fmt.Sprintf("unreachable: MarkIgnore failed on AlterReplicateConfig task %d: %v", task.Header().BroadcastID, err))
@@ -245,7 +231,6 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 			pending.pendingMessages[i] = message.ClearReplicateHeader(msg)
 		}
 		s.Logger().Info(ctx,
-
 			"Delegating incomplete task to broadcastScheduler",
 			mlog.Uint64("broadcastID", task.Header().BroadcastID),
 			mlog.String("messageType", task.msg.MessageType().String()),
@@ -254,9 +239,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 			return merr.Wrapf(err, "failed to supplement task %d via broadcastScheduler", task.Header().BroadcastID)
 		}
 	}
-	s.Logger().Info(ctx,
-
-		"All incomplete broadcasts fixed and tombstoned")
+	s.Logger().Info(ctx, "All incomplete broadcasts fixed and tombstoned")
 	return nil
 }
 
@@ -321,7 +304,6 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 		}
 		nextInterval := backoff.NextBackOff()
 		s.Logger().Warn(ctx,
-
 			"failed to call message ack callback, wait for retry...",
 			mlog.FieldMessage(msg),
 			mlog.Duration("nextInterval", nextInterval),

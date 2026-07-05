@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -53,8 +54,21 @@ func (s *fakeCommitGrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
 
-func (s *fakeCommitGrowingFlushSource) FlushGrowingData(context.Context, int64, int64, *GrowingFlushConfig) (*GrowingFlushResult, error) {
-	return &GrowingFlushResult{ManifestPath: "manifest", NumRows: 10}, nil
+func (s *fakeCommitGrowingFlushSource) FlushGrowingData(_ context.Context, _, _ int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
+	return &GrowingFlushResult{
+		ManifestPath:  "manifest",
+		NumRows:       10,
+		TimestampFrom: 101,
+		TimestampTo:   200,
+		ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, map[int64]int64{
+			0:   80,
+			101: 120,
+			102: 160,
+		}),
+		FieldNullCounts: map[int64]int64{
+			101: 2,
+		},
+	}, nil
 }
 
 func (s *fakeCommitGrowingFlushSource) Release() {
@@ -386,8 +400,14 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 	metaWriter.EXPECT().UpdateGrowingSourceSync(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, task *GrowingSourceSyncTask) error {
 			require.Len(t, task.insertBinlogs, 3)
-			require.Empty(t, task.insertBinlogs[0].GetBinlogs())
 			require.Equal(t, []int64{100}, task.insertBinlogs[0].GetChildFields())
+			require.Len(t, task.insertBinlogs[0].GetBinlogs(), 1)
+			require.EqualValues(t, 10, task.insertBinlogs[0].GetBinlogs()[0].GetEntriesNum())
+			require.EqualValues(t, 101, task.insertBinlogs[0].GetBinlogs()[0].GetTimestampFrom())
+			require.EqualValues(t, 200, task.insertBinlogs[0].GetBinlogs()[0].GetTimestampTo())
+			require.EqualValues(t, 80, task.insertBinlogs[0].GetBinlogs()[0].GetMemorySize())
+			require.EqualValues(t, 500, task.insertBinlogs[0].GetBinlogs()[0].GetLogID())
+			require.EqualValues(t, 2, task.insertBinlogs[101].GetBinlogs()[0].GetFieldNullCounts()[101])
 			return nil
 		})
 
@@ -404,11 +424,26 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 		WithMetaWriter(metaWriter).
 		WithSchema(schema).
 		WithChunkManager(cm).
+		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(&fakeCommitGrowingFlushSource{})
 
 	require.NoError(t, task.Run(context.Background()))
 	require.Len(t, segment.GetCurrentSplit(), 3)
 	require.Equal(t, []int64{100}, segment.GetCurrentSplit()[0].Fields)
+}
+
+func TestBuildGrowingSourceInsertBinlogsRequiresColumnGroupMemorySize(t *testing.T) {
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 10, Fields: []int64{100}},
+	}
+	result := &GrowingFlushResult{
+		NumRows:                1,
+		ColumnGroupMemorySizes: map[int64]int64{},
+	}
+
+	_, err := buildGrowingSourceInsertBinlogs(columnGroups, result, []int64{1})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
 }
 
 func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.T) {
@@ -477,12 +512,28 @@ func (s *fakeBM25GrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
 
-func (s *fakeBM25GrowingFlushSource) FlushGrowingData(context.Context, int64, int64, *GrowingFlushConfig) (*GrowingFlushResult, error) {
+func (s *fakeBM25GrowingFlushSource) FlushGrowingData(_ context.Context, _, _ int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
 	return &GrowingFlushResult{
-		ManifestPath: "manifest-after-flush",
-		NumRows:      10,
-		BM25Stats:    s.stats,
+		ManifestPath:           "manifest-after-flush",
+		NumRows:                10,
+		ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, nil),
+		BM25Stats:              s.stats,
 	}, nil
+}
+
+func fakeColumnGroupMemorySizes(config *GrowingFlushConfig, sizes map[int64]int64) map[int64]int64 {
+	if config == nil || len(config.ColumnGroups) == 0 {
+		return sizes
+	}
+	result := make(map[int64]int64, len(config.ColumnGroups))
+	for _, columnGroup := range config.ColumnGroups {
+		if size, ok := sizes[columnGroup.GroupID]; ok {
+			result[columnGroup.GroupID] = size
+			continue
+		}
+		result[columnGroup.GroupID] = 80
+	}
+	return result
 }
 
 func (s *fakeBM25GrowingFlushSource) Release() {

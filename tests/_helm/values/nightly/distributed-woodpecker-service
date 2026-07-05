@@ -89,9 +89,6 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
-    proxy:
-      http:
-        enabled: true
     common:
       storage:
         enablev2: true
@@ -106,8 +103,6 @@ extraConfigFiles:
           enabled: true
         storageFormat:
           enabled: true
-      targetVecIndexVersion: 10
-      compaction:
         bumpSchemaVersion:
           enabled: true
       gc:
