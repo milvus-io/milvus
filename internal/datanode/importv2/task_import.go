@@ -214,6 +214,13 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 
 func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 	syncTasks := make([]syncmgr.Task, 0)
+	maxInflight := paramtable.Get().DataNodeCfg.ImportMaxInflightReadBatches.GetAsInt() // configurable, default 1
+	type pendingBatch struct {
+		futures []*conc.Future[struct{}]
+		tasks   []syncmgr.Task
+	}
+	var pending []pendingBatch
+
 	for {
 		data, err := reader.Read()
 		if err != nil {
@@ -254,11 +261,26 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
-		err = conc.AwaitAll(fs...)
-		if err != nil {
+
+		pending = append(pending, pendingBatch{
+			futures: fs,
+			tasks:   sts,
+		})
+		if len(pending) >= maxInflight {
+			oldest := pending[0]
+			if err := conc.AwaitAll(oldest.futures...); err != nil {
+				return err
+			}
+			syncTasks = append(syncTasks, oldest.tasks...)
+			pending = pending[1:]
+		}
+	}
+	// Drain remaining batches.
+	for _, p := range pending {
+		if err := conc.AwaitAll(p.futures...); err != nil {
 			return err
 		}
-		syncTasks = append(syncTasks, sts...)
+		syncTasks = append(syncTasks, p.tasks...)
 	}
 	for _, syncTask := range syncTasks {
 		segmentInfo, err := NewImportSegmentInfo(syncTask, t.metaCaches)

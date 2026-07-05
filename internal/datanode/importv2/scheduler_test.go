@@ -441,13 +441,17 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 }
 
 func (s *SchedulerSuite) TestScheduler_ImportFile_SyncError() {
+	future := conc.Go(func() (struct{}, error) {
+		return struct{}{}, errors.New("mock async sync error")
+	})
+
 	s.syncMgr.EXPECT().
 		SyncDataWithChunkManager(
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 		).
-		Return(nil, errors.New("mock sync error"))
+		Return(future, nil)
 
 	data, err := testutil.CreateInsertData(s.schema, s.numRows)
 	s.NoError(err)
