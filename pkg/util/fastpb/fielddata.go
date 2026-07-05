@@ -75,12 +75,15 @@ func (d dec) fieldData(b []byte, fd *schemapb.FieldData) error {
 		}
 		// Known field with an unexpected wire type → official codec, to match
 		// proto.Unmarshal instead of misdecoding the wrong shape. Field 7 (ValidData)
-		// is a packed repeated bool and legitimately accepts both wire types, so it is
-		// excluded and handled in its own case.
+		// is a packed repeated bool and legitimately accepts varint (unpacked) and
+		// bytes (packed); any other wire type falls back like the rest.
 		if (num == 1 || num == 5 || num == 6) && wtype != 0 {
 			return fallbackUnmarshal(full, fd)
 		}
 		if (num == 2 || num == 3 || num == 4 || num == 8) && wtype != 2 {
+			return fallbackUnmarshal(full, fd)
+		}
+		if num == 7 && wtype != 0 && wtype != 2 {
 			return fallbackUnmarshal(full, fd)
 		}
 		switch num {

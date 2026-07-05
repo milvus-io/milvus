@@ -79,6 +79,11 @@ func TestMalformedWirePerField(t *testing.T) {
 		{"FieldData/validdata-truncated-packed-varint", wfield(7, truncTag), newFieldData, decFieldData},
 		{"FieldData/validdata-single-varint-ok", protowire.AppendVarint(wtag(7, protowire.VarintType), 1), newFieldData, decFieldData},
 		{"FieldData/validdata-single-varint-truncated", cat(wtag(7, protowire.VarintType), truncTag), newFieldData, decFieldData},
+		// ValidData accepts varint and bytes; fixed32/fixed64 must fall back to the
+		// official codec (which keeps them as unknown fields) instead of misreading
+		// the payload as varints.
+		{"FieldData/validdata-fixed32-fallback", protowire.AppendFixed32(wtag(7, protowire.Fixed32Type), 1), newFieldData, decFieldData},
+		{"FieldData/validdata-fixed64-fallback", protowire.AppendFixed64(wtag(7, protowire.Fixed64Type), 1), newFieldData, decFieldData},
 		{"FieldData/structarrays-len-overruns-buffer", cat(wtag(8, protowire.BytesType), []byte{0x05}), newFieldData, decFieldData},
 		{"FieldData/structarrays-malformed-submsg", wfield(8, truncTag), newFieldData, decFieldData},
 		{"FieldData/unknown-truncated-varint", cat(wtag(99, protowire.VarintType), truncTag), newFieldData, decFieldData},
