@@ -445,7 +445,6 @@ func (s *DelegatorSuite) TestGetSegmentInfo() {
 		Version:     2001,
 	})
 
-	s.delegator.(*shardDelegator).distribution.Flush()
 	sealed, growing = s.delegator.GetSegmentInfo(false)
 	s.EqualValues([]SnapshotItem{
 		{
@@ -777,7 +776,6 @@ func (s *DelegatorSuite) TestSearch() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
@@ -966,7 +964,6 @@ func (s *DelegatorSuite) TestQuery() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
@@ -1250,7 +1247,6 @@ func (s *DelegatorSuite) TestQueryStream() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
@@ -1428,7 +1424,6 @@ func (s *DelegatorSuite) TestGetStats() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
@@ -1564,7 +1559,6 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)
