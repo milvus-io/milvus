@@ -302,7 +302,6 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
             continue;
         }
         for (const auto& load_index_info : load_index_infos) {
-            new_index_ids.insert(load_index_info.index_id);
             if (current_index_ids.find(load_index_info.index_id) ==
                 current_index_ids.end()) {
                 // New index_id: check if field already has an index loaded

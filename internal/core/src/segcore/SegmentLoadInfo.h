@@ -637,8 +637,8 @@ class SegmentLoadInfo {
      */
     [[nodiscard]] bool
     HasIndexInfo(FieldId field_id) const {
-        return field_index_id_cache_.find(field_id) !=
-               field_index_id_cache_.end();
+        return converted_field_index_cache_.find(field_id) !=
+               converted_field_index_cache_.end();
     }
 
     /**
@@ -662,7 +662,7 @@ class SegmentLoadInfo {
     [[nodiscard]] std::set<FieldId>
     GetIndexedFieldIds() const {
         std::set<FieldId> result;
-        for (const auto& pair : field_index_id_cache_) {
+        for (const auto& pair : converted_field_index_cache_) {
             result.insert(pair.first);
         }
         return result;

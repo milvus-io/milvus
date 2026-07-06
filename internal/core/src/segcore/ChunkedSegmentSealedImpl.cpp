@@ -6575,6 +6575,23 @@ ChunkedSegmentSealedImpl::ApplySchemaForReopen(SchemaPtr sch) {
 }
 
 void
+ChunkedSegmentSealedImpl::CompactRuntimeLoadInfoForManifest() {
+    auto current = CapturePublishedState();
+    if (current == nullptr || current->load_info == nullptr ||
+        !current->load_info->HasManifestPath()) {
+        return;
+    }
+
+    auto compacted = std::make_shared<SegmentLoadInfo>(*current->load_info);
+    compacted->CompactRuntimeInfoForManifest();
+    auto published = std::const_pointer_cast<const SegmentLoadInfo>(compacted);
+    PublishReopenState(
+        current,
+        MakeStateDelta(
+            current->schema, published, current->runtime, current->commit_ts));
+}
+
+void
 ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
     milvus::OpContext* op_ctx,
     SegmentLoadInfo& segment_load_info,
@@ -6887,6 +6904,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
     committer.Publish(current, delta);
+    CompactRuntimeLoadInfoForManifest();
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }
@@ -6963,6 +6981,7 @@ ChunkedSegmentSealedImpl::Reopen(
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
     committer.Publish(current, delta);
+    CompactRuntimeLoadInfoForManifest();
 
     LOG_INFO("Reopen segment {} done", id_);
 }
@@ -8223,17 +8242,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
-
-    auto current = std::atomic_load(&segment_load_info_);
-    std::shared_ptr<const SegmentLoadInfo> published;
-    do {
-        auto compacted = std::make_shared<SegmentLoadInfo>(*current);
-        compacted->CompactRuntimeInfoForManifest();
-        published = std::const_pointer_cast<const SegmentLoadInfo>(compacted);
-    } while (!std::atomic_compare_exchange_weak(
-        &segment_load_info_, &current, published));
-    use_take_for_output_.store(published->GetUseTakeForOutput(),
-                               std::memory_order_relaxed);
+    CompactRuntimeLoadInfoForManifest();
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }

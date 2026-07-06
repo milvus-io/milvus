@@ -98,6 +98,29 @@ func TestGetSegmentRelatedDataSize(t *testing.T) {
 		assert.EqualValues(t, 10, GetSegmentRelatedDataSize(segment))
 	})
 
+	t.Run("local sealed segment uses cached zero log size", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogSize: 10,
+						},
+					},
+				},
+			},
+		}
+		segment := &LocalSegment{
+			baseSegment: baseSegment{
+				segmentType: SegmentTypeSealed,
+				loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](compactSegmentLoadInfoForRuntime(loadInfo)),
+			},
+			relatedDataSize: atomic.NewInt64(0),
+		}
+
+		assert.EqualValues(t, 0, GetSegmentRelatedDataSize(segment))
+	})
+
 	t.Run("growing segment", func(t *testing.T) {
 		segment := NewMockSegment(t)
 		segment.EXPECT().Type().Return(SegmentTypeGrowing)

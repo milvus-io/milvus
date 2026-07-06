@@ -660,6 +660,9 @@ class Schema {
     }
 
  private:
+    // Keep Schema's copy constructor and assignment operator in sync with
+    // these members. Runtime-only caches, such as loon_arrow_lob_schema_cache_,
+    // are intentionally reset instead of copied.
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
 
