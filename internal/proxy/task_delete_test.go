@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -135,6 +136,19 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 	resChannels := dt.getChannels()
 	assert.ElementsMatch(t, channels, resChannels)
 	assert.ElementsMatch(t, channels, dt.pChannels)
+}
+
+func TestDeleteTask_PreExecuteSkipsNamespaceValidationWhenUnset(t *testing.T) {
+	cache := globalMetaCache
+	globalMetaCache = nil
+	defer func() {
+		globalMetaCache = cache
+	}()
+
+	dt := deleteTask{
+		req: &milvuspb.DeleteRequest{},
+	}
+	assert.NoError(t, dt.PreExecute(context.Background()))
 }
 
 func TestDeleteTask_Execute(t *testing.T) {
@@ -333,6 +347,38 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 		s.Require().Equal(0, len(dr.partitionIDs))
 	})
 
+	s.Run("namespace assigns partition", func() {
+		mockChMgr := NewMockChannelsMgr(s.T())
+		namespace := "ns-1"
+		partitionNames := []string{"_default_0", "_default_1"}
+		partitionIDs := map[string]int64{"_default_0": 100, "_default_1": 101}
+		schema := namespaceEnabledSchema(
+			&schemapb.FieldSchema{FieldID: common.StartOfUserFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			&schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 1, Name: "non_pk", DataType: schemapb.DataType_Int64},
+		)
+		s.schema = newSchemaInfo(schema)
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: s.collectionName,
+				Expr:           "pk == 1",
+				Namespace:      &namespace,
+			},
+			chMgr: mockChMgr,
+		}
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
+		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil).Twice()
+		s.mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return(partitionNames, nil)
+		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(partitionIDs, nil)
+		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+
+		globalMetaCache = s.mockCache
+		s.NoError(dr.Init(context.Background()))
+
+		s.Equal([]int64{expectedNamespacePartitionID(namespace, partitionNames, partitionIDs)}, dr.partitionIDs)
+	})
+
 	s.Run("pk == 1, no partition name", func() {
 		mockChMgr := NewMockChannelsMgr(s.T())
 		dr := deleteRunner{
@@ -415,11 +461,89 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 		s.Equal(1, len(dr.partitionIDs))
 		s.EqualValues(1000, dr.partitionIDs[0])
 	})
+
+	s.Run("namespace partition mode routes to namespace partition", func() {
+		mockChMgr := NewMockChannelsMgr(s.T())
+		namespace := "tenant_partition"
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: s.collectionName,
+				Namespace:      &namespace,
+				Expr:           "pk == 1",
+			},
+			chMgr: mockChMgr,
+		}
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
+		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+		schema := &schemapb.CollectionSchema{
+			Name:            s.collectionName,
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      common.StartOfUserFieldID,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  common.StartOfUserFieldID + 1,
+					Name:     "non_pk",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		schemaInfo := newSchemaInfo(schema)
+		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Once()
+		s.mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, namespace).Return(int64(1000), nil)
+		mockChMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"vchan1"}, nil)
+
+		globalMetaCache = s.mockCache
+		s.NoError(dr.Init(context.Background()))
+
+		s.Equal(namespace, dr.req.GetPartitionName())
+		s.Equal([]UniqueID{1000}, dr.partitionIDs)
+		s.Nil(dr.plan.Namespace)
+	})
 }
 
 func (s *DeleteRunnerSuite) TestInitFailure() {
 	s.Run("empty collection name", func() {
 		dr := deleteRunner{}
+		s.Error(dr.Init(context.Background()))
+	})
+
+	s.Run("namespace disabled", func() {
+		mockChMgr := NewMockChannelsMgr(s.T())
+		namespace := "ns-1"
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: s.collectionName,
+				Expr:           "pk == 1",
+				Namespace:      &namespace,
+			},
+			chMgr: mockChMgr,
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: s.collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      common.StartOfUserFieldID,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+		}
+		s.schema = newSchemaInfo(schema)
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
+		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(s.schema, nil)
+
+		globalMetaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})
 

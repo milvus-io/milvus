@@ -386,6 +386,41 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
     EXPECT_EQ(m.GetPhysicalOffset(11), 6);
 }
 
+TYPED_TEST(ChunkedColumnInterfaceTest, CellsLoadedDoesNotFetchCells) {
+    ColumnSpec spec{{5, 3, 4}, {}, /*nullable=*/false};
+    auto fx = TypeParam::Create(spec);
+
+    const int64_t offsets[] = {0, 6};
+
+    EXPECT_FALSE(fx.column->CellsLoaded(offsets, std::size(offsets)));
+    EXPECT_TRUE(fx.fetched->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, CellsLoadedTracksFetchedCells) {
+    ColumnSpec spec{{5, 3, 4}, {}, /*nullable=*/false};
+    auto fx = TypeParam::Create(spec);
+
+    const int64_t chunk0_offsets[] = {0, 4};
+    const int64_t chunk1_offsets[] = {6};
+    const int64_t mixed_offsets[] = {0, 6};
+
+    std::vector<int32_t> values(std::size(chunk1_offsets));
+    fx.column->BulkVectorValueAt(nullptr,
+                                 values.data(),
+                                 chunk1_offsets,
+                                 kElementSize,
+                                 std::size(chunk1_offsets));
+
+    EXPECT_TRUE(
+        fx.column->CellsLoaded(chunk1_offsets, std::size(chunk1_offsets)));
+    EXPECT_FALSE(
+        fx.column->CellsLoaded(chunk0_offsets, std::size(chunk0_offsets)));
+    EXPECT_FALSE(
+        fx.column->CellsLoaded(mixed_offsets, std::size(mixed_offsets)));
+    EXPECT_EQ(fx.fetched->size(), 1u);
+    EXPECT_EQ(fx.fetched->count(1), 1u);
+}
+
 TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
     ColumnSpec spec{{5, 5}, {}, /*nullable=*/false};
     auto fx = TypeParam::Create(spec);

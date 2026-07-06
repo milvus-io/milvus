@@ -59,6 +59,57 @@ import (
 
 // delegator data related part
 
+const defaultAnalyzerName = "default"
+
+func normalizeAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
+	if textNum == 0 {
+		return []string{}, nil
+	}
+
+	switch len(analyzerNames) {
+	case 0:
+		names := make([]string, textNum)
+		for i := range names {
+			names[i] = defaultAnalyzerName
+		}
+		return names, nil
+	case 1:
+		name := analyzerNames[0]
+		if name == "" {
+			name = defaultAnalyzerName
+		}
+		names := make([]string, textNum)
+		for i := range names {
+			names[i] = name
+		}
+		return names, nil
+	case textNum:
+		names := append([]string(nil), analyzerNames...)
+		for i, name := range names {
+			if name == "" {
+				names[i] = defaultAnalyzerName
+			}
+		}
+		return names, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("analyzer names size must be 0, 1, or equal to text size, got analyzer names size [%d], text size [%d]", len(analyzerNames), textNum)
+	}
+}
+
+func normalizeHighlightAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
+	if len(analyzerNames) != textNum {
+		return nil, merr.WrapErrServiceInternalMsg("highlight analyzer names size must equal text size, got analyzer names size [%d], text size [%d]", len(analyzerNames), textNum)
+	}
+
+	names := append([]string(nil), analyzerNames...)
+	for i, name := range names {
+		if name == "" {
+			names[i] = defaultAnalyzerName
+		}
+	}
+	return names, nil
+}
+
 // segmentEffectiveTs returns the timestamp for delete-buffer pin/ListAfter.
 // For import segments with commit_timestamp, only deletes from T_commit onwards
 // are applied via the buffer (pre-commit deletes are in the delta log or L0 path).
@@ -86,6 +137,11 @@ type DeleteData struct {
 	PrimaryKeys []storage.PrimaryKey
 	Timestamps  []uint64
 	RowCount    int64
+}
+
+type DeleteBatch struct {
+	Ts   uint64
+	Data []*DeleteData
 }
 
 // Append appends another delete data into this one.
@@ -198,9 +254,16 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 // delegator puts deleteData into buffer first,
 // then dispatch data to segments according to the result of bloom filter check.
 func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
+	sd.ProcessDeleteBatches([]DeleteBatch{{Ts: ts, Data: deleteData}})
+}
+
+func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 	// Early return if delegator is stopped - ProcessDelete becomes a no-op
 	// This prevents unnecessary processing and side effects during shutdown
 	if sd.Stopped() {
+		return
+	}
+	if len(batches) == 0 {
 		return
 	}
 
@@ -212,26 +275,35 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 
 	log := sd.getLogger(context.Background())
 
-	log.Debug(context.TODO(), "start to process delete", mlog.Uint64("ts", ts))
-	// add deleteData into buffer.
-	cacheItems := make([]deletebuffer.BufferItem, 0, len(deleteData))
-	for _, entry := range deleteData {
-		cacheItems = append(cacheItems, deletebuffer.BufferItem{
-			PartitionID: entry.PartitionID,
-			DeleteData: storage.DeleteData{
-				Pks:      entry.PrimaryKeys,
-				Tss:      entry.Timestamps,
-				RowCount: entry.RowCount,
-			},
+	log.Debug(context.TODO(), "start to process delete batches", mlog.Int("batchNum", len(batches)))
+	allDeleteData := make([]*DeleteData, 0, len(batches))
+	for _, batch := range batches {
+		if len(batch.Data) == 0 {
+			continue
+		}
+
+		cacheItems := make([]deletebuffer.BufferItem, 0, len(batch.Data))
+		for _, entry := range batch.Data {
+			cacheItems = append(cacheItems, deletebuffer.BufferItem{
+				PartitionID: entry.PartitionID,
+				DeleteData: storage.DeleteData{
+					Pks:      entry.PrimaryKeys,
+					Tss:      entry.Timestamps,
+					RowCount: entry.RowCount,
+				},
+			})
+		}
+
+		sd.deleteBuffer.Put(&deletebuffer.Item{
+			Ts:   batch.Ts,
+			Data: cacheItems,
 		})
+		allDeleteData = append(allDeleteData, batch.Data...)
 	}
 
-	sd.deleteBuffer.Put(&deletebuffer.Item{
-		Ts:   ts,
-		Data: cacheItems,
-	})
-
-	sd.forwardStreamingDeletion(context.Background(), deleteData)
+	if len(allDeleteData) > 0 {
+		sd.forwardStreamingDeletion(context.Background(), allDeleteData)
+	}
 
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -428,7 +500,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 		return nil
 	}
 
-	pool := segments.GetBM25LoadPool()
+	pool := segments.GetLoadPool()
 
 	cm := sd.loader.GetChunkManager()
 	futures := make([]*conc.Future[any], 0, len(infos))
@@ -484,7 +556,7 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
 	}
 
-	pool := segments.GetBM25LoadPool()
+	pool := segments.GetLoadPool()
 	cm := sd.loader.GetChunkManager()
 	futures := make([]*conc.Future[any], 0, len(infos))
 	for _, info := range infos {
@@ -1367,7 +1439,11 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 				return analyzeErr
 			}
 			if len(analyzer.GetInputFields()) == 2 {
-				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzerNames())
+				analyzerNames, err := normalizeHighlightAnalyzerNames(task.GetAnalyzerNames(), len(task.GetTexts()))
+				if err != nil {
+					return err
+				}
+				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts(), analyzerNames)
 				return analyzeErr
 			}
 			return nil

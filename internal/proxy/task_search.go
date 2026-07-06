@@ -125,6 +125,8 @@ type searchTask struct {
 
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
+
+	chMgr channelsMgr
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -196,6 +198,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Warn(ctx, "is partition key mode failed", mlog.Err(err))
 		return err
 	}
+	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
+	if err != nil {
+		return err
+	}
+	if namespaceAsPartition {
+		t.request.PartitionNames = partitionNames
+	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -211,10 +220,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			log.Warn(ctx, "failed to get partition ids", mlog.Err(err))
 			return err
 		}
-	}
-	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
-	if err != nil {
-		return err
 	}
 
 	var aggs []agg.AggregateBase
@@ -494,6 +499,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	var err error
+	if err := validateFunctionChainSearchRequest(t.request, true); err != nil {
+		return err
+	}
 	if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	} else {
@@ -553,6 +561,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if queryInfo.GetSearchIteratorV2Info() != nil {
+			return merr.WrapErrParameterInvalid("", "",
+				"search iterator v2 is not supported for hybrid search")
+		}
 
 		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
 		if err != nil {
@@ -580,6 +592,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			subSearchInfo.Collapse = collapseConfig
 		}
 
+		// ArrayOfVector hybrid validation is kind-specific: embedding-list
+		// rejects range/iterator here, element-level rejects legacy iterator
+		// here, and group-by is validated after same-struct inference below.
+
 		// Hybrid search only supports plain top-K on ArrayOfVector fields. Both
 		// element-level and embedding-list searches reject advanced controls here.
 		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
@@ -590,13 +606,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 				if isStructEmbListSubSearch {
 					searchKind = "embedding-list"
 				}
-				if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				if isStructEmbListSubSearch && gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
 					return merr.WrapErrParameterInvalid("", "",
 						"range search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
-				}
-				if t.rankParams.GetGroupByFieldId() > 0 || len(t.rankParams.GetGroupByFieldIds()) > 0 {
-					return merr.WrapErrParameterInvalid("", "",
-						"group by search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
 				}
 				if subIsIterator {
 					return merr.WrapErrParameterInvalid("", "",
@@ -678,7 +690,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
 		}
-		plan.Namespace = t.request.Namespace
+		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
@@ -696,6 +708,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
+	if err := t.validateHybridArrayOfVectorGroupBy(); err != nil {
+		return err
+	}
 	for index, info := range t.hybridSubSearchInfos {
 		if t.hybridElementLevel && info.ElementScopeProvided {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed for same-struct element-level hybrid search", elementScopeKey)
@@ -726,6 +741,50 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
+	return nil
+}
+
+func (t *searchTask) validateHybridArrayOfVectorGroupBy() error {
+	groupByFieldIDs := t.rankParams.GetGroupByFieldIds()
+	if len(groupByFieldIDs) == 0 {
+		return nil
+	}
+
+	fieldName := func(index int) string {
+		if index >= 0 && index < len(t.queryInfos) {
+			if field := typeutil.GetField(t.schema.CollectionSchema, t.queryInfos[index].GetQueryFieldId()); field != nil {
+				return field.GetName()
+			}
+		}
+		return ""
+	}
+
+	hasStructElementSubSearch := false
+	for index, info := range t.hybridSubSearchInfos {
+		switch info.Kind {
+		case hybridSubSearchStructEmbList:
+			return merr.WrapErrParameterInvalid("", "",
+				"group by search is not supported for vector array (embedding-list) fields in hybrid search, fieldName:"+fieldName(index))
+		case hybridSubSearchStructElement:
+			hasStructElementSubSearch = true
+			if !t.hybridElementLevel {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by search is only supported for same-struct element-level vector array fields in hybrid search, fieldName:"+fieldName(index))
+			}
+		}
+	}
+	if !hasStructElementSubSearch {
+		return nil
+	}
+
+	pkField, err := t.schema.GetPkField()
+	if err != nil {
+		return err
+	}
+	if len(groupByFieldIDs) != 1 || pkField == nil || groupByFieldIDs[0] != pkField.GetFieldID() {
+		return merr.WrapErrParameterInvalid("", "",
+			"only group by primary key is supported for same-struct element-level vector array fields in hybrid search")
+	}
 	return nil
 }
 
@@ -789,7 +848,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 			return err
 		}
 	}
-	return h.initHighlightQueries(t)
+	return h.initHighlightQueries(t, analyzerName)
 }
 
 func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
@@ -831,13 +890,22 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	t.SearchType = searchType
 
-	if t.request.FunctionScore != nil {
+	if err := validateFunctionChainSearchRequest(t.request, false); err != nil {
+		return err
+	}
+	if len(t.request.GetFunctionChains()) > 0 {
+		meta, err := newFunctionChainRerankMeta(t.request.GetFunctionChains(), t.schema)
+		if err != nil {
+			return err
+		}
+		t.rerankMeta = meta
+	} else if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
-	// order_by and function_score cannot be used together
+	// order_by and function rerank cannot be used together
 	if len(t.orderByFields) > 0 && t.rerankMeta != nil {
-		return merr.WrapErrParameterInvalidMsg("order_by and function_score cannot be used together: they specify conflicting sort criteria")
+		return merr.WrapErrParameterInvalidMsg("order_by and function rerank cannot be used together: they specify conflicting sort criteria")
 	}
 
 	analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
@@ -935,7 +1003,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			}
 		}
 	}
-	plan.Namespace = t.request.Namespace
+	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	// Propagate agg-path overrides into queryInfo BEFORE plan serialization so
 	// segcore sees the derived topK / groupSize and plural GroupByFieldIds.
@@ -1047,7 +1115,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
 	return t.schema != nil &&
 		t.schema.CollectionSchema != nil &&
-		common.IsNamespaceModePartition(t.schema.GetProperties()...)
+		namespacePartitionModeEnabled(t.schema.CollectionSchema)
 }
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
@@ -1091,8 +1159,8 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
 	searchType := internalpb.SearchType_DEFAULT
-	// if function score is not nil, set searchType to DEFAULT, optimizations will be disabled in queryhook
-	if t.request.GetFunctionScore() == nil {
+	// if function rerank is set, keep searchType DEFAULT; optimizations will be disabled in queryhook
+	if !hasFunctionRerank(t.request) {
 		searchType = searchInfo.DetermineSearchType(hasFilter)
 	}
 
@@ -1113,6 +1181,23 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
+	if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.request.GetDbName(), t.collectionName, t.request.Namespace)
+		if err != nil {
+			mlog.Warn(t.ctx, "failed to assign namespace partition key", mlog.Err(err))
+			return nil, err
+		}
+		if len(hashedPartitionNames) > 0 {
+			PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+			if err2 != nil {
+				mlog.Warn(t.ctx, "failed to get namespace partition ids", mlog.Err(err2))
+				return nil, err2
+			}
+			return PartitionIDs, nil
+		}
+		return nil, nil
+	}
+
 	expr, err := exprutil.ParseExprFromPlan(plan)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to parse expr", mlog.Err(err))
@@ -1146,6 +1231,36 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
+	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		if err != nil {
+			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
+			return err
+		}
+		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+				Db:              t.request.GetDbName(),
+				CollectionName:  t.collectionName,
+				CollectionID:    t.CollectionID,
+				Channel:         channelName,
+				Nq:              t.Nq,
+				Exec:            t.searchShard,
+				PreferredNodeID: preferredNodeFromConcurrentMap(t.queryChannelsNode, channelName),
+			}); err != nil {
+				log.Warn(ctx, "search execute failed", mlog.Err(err))
+				return errors.Wrap(err, "failed to search")
+			}
+
+			log.Debug(ctx, "Search Execute done.",
+				mlog.Int64("collection", t.GetCollectionID()),
+				mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+			return nil
+		}
+	}
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
 		CollectionID:   t.CollectionID,

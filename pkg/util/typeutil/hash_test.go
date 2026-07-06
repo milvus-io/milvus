@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestUint64(t *testing.T) {
@@ -150,7 +151,8 @@ func TestHashPK2Channels(t *testing.T) {
 			},
 		},
 	}
-	ret := HashPK2Channels(int64IDs, channels)
+	ret, err := HashPK2Channels(int64IDs, channels)
+	assert.NoError(t, err)
 	assert.Equal(t, 5, len(ret))
 	// same pk hash to same channel
 	assert.Equal(t, ret[1], ret[2])
@@ -162,9 +164,147 @@ func TestHashPK2Channels(t *testing.T) {
 			},
 		},
 	}
-	ret = HashPK2Channels(stringIDs, channels)
+	ret, err = HashPK2Channels(stringIDs, channels)
+	assert.NoError(t, err)
 	assert.Equal(t, 5, len(ret))
 	assert.Equal(t, ret[1], ret[2])
+}
+
+func TestHashPK2ChannelsMatchesLegacyModulo(t *testing.T) {
+	channels := []string{"channel-0", "channel-1", "channel-2", "channel-3"}
+
+	t.Run("int64 primary keys", func(t *testing.T) {
+		keys := []int64{0, 1, 10, 100, 1000, -1}
+		ids := &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: keys},
+			},
+		}
+		expected := make([]uint32, 0, len(keys))
+		for _, key := range keys {
+			hash, err := Hash32Int64(key)
+			assert.NoError(t, err)
+			expected = append(expected, hash%uint32(len(channels)))
+		}
+
+		got, err := HashPK2Channels(ids, channels)
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, got)
+	})
+
+	t.Run("varchar primary keys", func(t *testing.T) {
+		keys := []string{"ab", "bc", "bc", "abd", "milvus"}
+		ids := &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{Data: keys},
+			},
+		}
+		expected := make([]uint32, 0, len(keys))
+		for _, key := range keys {
+			expected = append(expected, HashString2Uint32(key)%uint32(len(channels)))
+		}
+
+		got, err := HashPK2Channels(ids, channels)
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, got)
+	})
+}
+
+func TestHashPK2ChannelsReturnsRoutingError(t *testing.T) {
+	ids := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		},
+	}
+
+	got, err := HashPK2Channels(ids, nil)
+
+	assert.ErrorIs(t, err, common.ErrRoutingTableNoValues)
+	assert.Nil(t, got)
+}
+
+func TestLocateRoutingIndexesMatchesLegacyModulo(t *testing.T) {
+	t.Run("int64 keys", func(t *testing.T) {
+		keys := []int64{0, 1, 10, 100, 1000, -1}
+		const targetCount = 5
+		expected := make([]uint32, 0, len(keys))
+		for _, key := range keys {
+			hash, err := Hash32Int64(key)
+			assert.NoError(t, err)
+			expected = append(expected, hash%targetCount)
+		}
+
+		got, err := locateRoutingIndexes(keys, targetCount, int64RoutingHasher{})
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, got)
+	})
+
+	t.Run("varchar keys", func(t *testing.T) {
+		keys := []string{"ab", "bc", "bc", "abd", "milvus"}
+		const targetCount = 4
+		expected := make([]uint32, 0, len(keys))
+		for _, key := range keys {
+			expected = append(expected, HashString2Uint32(key)%targetCount)
+		}
+
+		got, err := locateRoutingIndexes(keys, targetCount, stringRoutingHasher{})
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, got)
+	})
+}
+
+func TestHashKey2PartitionsMatchesLegacyModulo(t *testing.T) {
+	partitions := []string{"p_0", "p_1", "p_2"}
+
+	t.Run("int64 keys", func(t *testing.T) {
+		keys := []int64{0, 1, 10, 100, 1000, -1}
+		fieldData := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: keys},
+					},
+				},
+			},
+		}
+		expected := make([]uint32, 0, len(keys))
+		for _, key := range keys {
+			hash, err := Hash32Int64(key)
+			assert.NoError(t, err)
+			expected = append(expected, hash%uint32(len(partitions)))
+		}
+
+		got, err := HashKey2Partitions(fieldData, partitions)
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, got)
+	})
+
+	t.Run("varchar keys", func(t *testing.T) {
+		keys := []string{"ab", "bc", "bc", "abd", "milvus"}
+		fieldData := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: keys},
+					},
+				},
+			},
+		}
+		expected := make([]uint32, 0, len(keys))
+		for _, key := range keys {
+			expected = append(expected, HashString2Uint32(key)%uint32(len(partitions)))
+		}
+
+		got, err := HashKey2Partitions(fieldData, partitions)
+
+		assert.NoError(t, err)
+		assert.Equal(t, expected, got)
+	})
 }
 
 func TestRearrangePartitionsForPartitionKey(t *testing.T) {

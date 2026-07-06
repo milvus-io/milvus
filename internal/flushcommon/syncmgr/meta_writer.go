@@ -168,6 +168,13 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		return merr.WrapErrSegmentNotFound(task.segmentID)
 	}
 
+	insertFieldBinlogs := segment.Binlogs()
+	if len(task.insertBinlogs) > 0 {
+		insertFieldBinlogs = append(segment.Binlogs(), storage.SortFieldBinlogs(task.insertBinlogs)...)
+	}
+	statsFieldBinlogs := segment.Statslogs()
+	deltaFieldBinlogs := segment.Deltalogs()
+	bm25FieldBinlogs := segment.Bm25logs()
 	startPos := task.startPositions()
 	checkPoints := []*datapb.CheckPoint{{
 		SegmentID: task.segmentID,
@@ -181,6 +188,10 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		mlog.Int64("ParitionID", task.partitionID),
 		mlog.Any("startPos", startPos),
 		mlog.Any("checkPoints", checkPoints),
+		mlog.Int("binlogNum", lo.SumBy(insertFieldBinlogs, func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) })),
+		mlog.Int("statslogNum", lo.SumBy(statsFieldBinlogs, func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) })),
+		mlog.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) })),
+		mlog.Int("bm25logNum", lo.SumBy(bm25FieldBinlogs, func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) })),
 		mlog.String("manifestPath", task.manifestPath),
 		mlog.String("vChannelName", task.channelName),
 	)
@@ -191,18 +202,22 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithSourceID(b.serverID),
 		),
-		SegmentID:       task.segmentID,
-		CollectionID:    task.collectionID,
-		PartitionID:     task.partitionID,
-		CheckPoints:     checkPoints,
-		StartPositions:  startPos,
-		Flushed:         task.IsFlush(),
-		Dropped:         task.IsDrop(),
-		Channel:         task.channelName,
-		SegLevel:        task.level,
-		StorageVersion:  storage.StorageV3,
-		WithFullBinlogs: false,
-		ManifestPath:    task.manifestPath,
+		SegmentID:           task.segmentID,
+		CollectionID:        task.collectionID,
+		PartitionID:         task.partitionID,
+		Field2BinlogPaths:   insertFieldBinlogs,
+		Field2StatslogPaths: statsFieldBinlogs,
+		Field2Bm25LogPaths:  bm25FieldBinlogs,
+		Deltalogs:           deltaFieldBinlogs,
+		CheckPoints:         checkPoints,
+		StartPositions:      startPos,
+		Flushed:             task.IsFlush(),
+		Dropped:             task.IsDrop(),
+		Channel:             task.channelName,
+		SegLevel:            task.level,
+		StorageVersion:      storage.StorageV3,
+		WithFullBinlogs:     true,
+		ManifestPath:        task.manifestPath,
 	}
 
 	err := retry.Handle(ctx, func() (bool, error) {
@@ -229,6 +244,12 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 	task.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) int64 {
 		return pos.GetSegmentID()
 	})...))
+	task.metacache.UpdateSegments(metacache.MergeSegmentAction(
+		metacache.UpdateBinlogs(insertFieldBinlogs),
+		metacache.UpdateStatslogs(statsFieldBinlogs),
+		metacache.UpdateDeltalogs(deltaFieldBinlogs),
+		metacache.UpdateBm25logs(bm25FieldBinlogs),
+	), metacache.WithSegmentIDs(task.segmentID))
 	return nil
 }
 

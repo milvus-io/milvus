@@ -221,9 +221,14 @@ func (node *DataNode) Init() error {
 		err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
+			return
 		}
 
-		analyzer.InitOptions()
+		if err := analyzer.InitOptions(); err != nil {
+			log.Error(node.ctx, "DataNode init analyzer options failed", mlog.Err(err))
+			initError = err
+			return
+		}
 		log.Info(node.ctx, "init datanode done", mlog.String("Address", node.address))
 	})
 	return initError
@@ -257,6 +262,15 @@ func (node *DataNode) Start() error {
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		// Eagerly construct the goroutine pools up front so the first Prometheus
+		// scrape reads them without triggering pool creation / warmup as a side effect.
+		initPools()
+		metrics.SetDataNodePoolCollectFn(
+			fmt.Sprint(node.GetNodeID()),
+			collectPoolStats,
+		)
+
 		mlog.Info(node.ctx, "datanode start successfully")
 	})
 	return startErr

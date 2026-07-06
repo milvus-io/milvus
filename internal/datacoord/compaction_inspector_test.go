@@ -444,7 +444,7 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksCluster
 		Channel:     "ch-1",
 		PartitionID: 10,
 		NodeID:      102,
-	}, nil, s.mockMeta, s.mockHandler, nil)))
+	}, nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager())))
 
 	gotTasks := s.handler.schedule()
 	s.Equal([]UniqueID{1}, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
@@ -916,7 +916,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompaction() {
 			NodeID:        1,
 			InputSegments: []UniqueID{1, 2},
 		},
-		nil, s.mockMeta, s.mockHandler, nil)
+		nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager())
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
 	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -963,7 +963,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
 			IsClusteringKey: true,
 		},
 	},
-		nil, s.mockMeta, s.mockHandler, nil)
+		nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager())
 
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
@@ -1013,7 +1013,7 @@ func (s *CompactionPlanHandlerSuite) TestKeepClean() {
 				NodeID:        1,
 				InputSegments: []UniqueID{1, 2},
 			},
-				nil, s.mockMeta, s.mockHandler, nil),
+				nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager()),
 		},
 	}
 	for _, test := range tests {
@@ -1107,7 +1107,7 @@ func TestCheckDelay(t *testing.T) {
 	handler.checkDelay(t2)
 	t3 := newClusteringCompactionTask(&datapb.CompactionTask{
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
-	}, nil, nil, nil, nil)
+	}, nil, nil, nil, nil, newMockVersionManager())
 	handler.checkDelay(t3)
 	t4 := newBumpSchemaVersionTask(&datapb.CompactionTask{
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
@@ -1136,7 +1136,7 @@ func TestGetCompactionTasksNum(t *testing.T) {
 			StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
 			CollectionID: 10,
 			Type:         datapb.CompactionType_ClusteringCompaction,
-		}, nil, nil, nil, nil),
+		}, nil, nil, nil, nil, newMockVersionManager()),
 	)
 	executingTasks := make(map[int64]CompactionTask, 0)
 	executingTasks[1] = newMixCompactionTask(&datapb.CompactionTask{

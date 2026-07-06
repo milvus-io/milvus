@@ -44,6 +44,18 @@ func GetCollectionNameFromRequest(req any) (any, bool) {
 	return getter.GetCollectionName(), true
 }
 
+type CollectionNamesGetter interface {
+	GetCollectionNames() []string
+}
+
+func GetCollectionNamesFromRequest(req any) (any, bool) {
+	getter, ok := req.(CollectionNamesGetter)
+	if !ok {
+		return nil, false
+	}
+	return getter.GetCollectionNames(), true
+}
+
 type DBNameGetter interface {
 	GetDbName() string
 }

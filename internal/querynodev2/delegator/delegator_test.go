@@ -189,8 +189,10 @@ func (s *DelegatorSuite) SetupTest() {
 }
 
 func (s *DelegatorSuite) TearDownTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
-	s.delegator.Close()
+	if s.delegator != nil {
+		s.delegator.Close()
+	}
+	function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
 	s.delegator = nil
 }
 
@@ -259,8 +261,9 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
+		defer delegator.Close()
 	})
 }
 
@@ -1506,12 +1509,8 @@ func (s *DelegatorSuite) ResetDelegator() {
 }
 
 func (s *DelegatorSuite) allocFunctionRunnersForTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
 	sd := s.delegator.(*shardDelegator)
-	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, sd.collection.Schema())
-	if errCh != nil {
-		s.Require().NoError(<-errCh)
-	}
+	s.Require().NoError(function.UpdateFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), sd.collection.Schema()))
 }
 
 func (s *DelegatorSuite) nextSchemaBarrierLoadMeta() *querypb.LoadMetaInfo {
@@ -1652,7 +1651,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 		s.Equal(2, len(result[1].GetTokens()))
 	})
 
-	s.Run("error multi analyzer but no analyzer name", func() {
+	s.Run("multi analyzer defaults analyzer name", func() {
 		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Version: s.nextSchemaVersion(),
 			Fields: []*schemapb.FieldSchema{
@@ -1703,6 +1702,13 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 		_, err = s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
 			FieldId:     100,
 			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		s.Require().NoError(err)
+
+		_, err = s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:       100,
+			Placeholder:   [][]byte{[]byte("test doc")},
+			AnalyzerNames: []string{"default", "standard"},
 		})
 		s.Require().Error(err)
 	})
@@ -1866,6 +1872,66 @@ func (s *DelegatorSuite) TestGetHighlight() {
 		})
 		s.Require().NoError(err)
 		s.Require().Equal(2, len(result))
+
+		result, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					AnalyzerNames: []string{"default", "default", "default"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(1, len(result))
+
+		_, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().Error(err)
+
+		_, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					AnalyzerNames: []string{"standard"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().Error(err)
+
+		_, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					AnalyzerNames: []string{"default", "standard"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().Error(err)
 	})
 
 	s.Run("empty target texts", func() {
@@ -2218,8 +2284,19 @@ func TestBM25FunctionSetAdditiveValidation(t *testing.T) {
 
 	changed := proto.Clone(newBM25FunctionSchema()).(*schemapb.FunctionSchema)
 	changed.InputFieldIds = []int64{103}
-	assert.False(t, newBM25FunctionSet(newFunctionRuntimeTestSchema(changed)).IsSupersetOf(base))
-	assert.False(t, newBM25FunctionSet(newFunctionRuntimeTestSchema()).IsSupersetOf(base))
+	changedSet := newBM25FunctionSet(newFunctionRuntimeTestSchema(changed))
+	assert.False(t, changedSet.IsSupersetOf(base))
+	assert.True(t, changedSet.HasIncompatibleCommonFunction(base))
+
+	droppedSet := newBM25FunctionSet(newFunctionRuntimeTestSchema())
+	assert.False(t, droppedSet.IsSupersetOf(base))
+	assert.False(t, droppedSet.HasIncompatibleCommonFunction(base))
+
+	readded := proto.Clone(newBM25FunctionSchema()).(*schemapb.FunctionSchema)
+	readded.OutputFieldIds = []int64{104}
+	readdedSet := newBM25FunctionSet(newFunctionRuntimeTestSchema(readded))
+	assert.False(t, readdedSet.IsSupersetOf(base))
+	assert.False(t, readdedSet.HasIncompatibleCommonFunction(base))
 }
 
 func TestBM25FunctionSetIgnoresAnalyzerParams(t *testing.T) {
@@ -2253,7 +2330,7 @@ func TestBM25FunctionSetNormalizesFunctionParamOrder(t *testing.T) {
 	assert.True(t, changed.IsSupersetOf(base))
 }
 
-func TestUpdateSchemaRejectsNonAdditiveBM25FunctionChange(t *testing.T) {
+func TestUpdateSchemaRejectsIncompatibleBM25FunctionChange(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	workerManager := cluster.NewMockManager(t)
@@ -2280,7 +2357,7 @@ func TestUpdateSchemaRejectsNonAdditiveBM25FunctionChange(t *testing.T) {
 	changed.InputFieldIds = []int64{103}
 	err := sd.UpdateSchema(context.Background(), newFunctionRuntimeTestSchemaWithVersion(1, changed), 100)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported non-additive BM25 function schema change")
+	assert.Contains(t, err.Error(), "unsupported incompatible BM25 function schema change")
 	assert.True(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
 	assert.Same(t, oldOracle, sd.getIDFOracle())
 }
@@ -2433,7 +2510,7 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 	changed.InputFieldIds = []int64{103}
 	err = sd.UpdateSchema(context.Background(), newFunctionRuntimeTestSchemaWithVersion(2, changed), 200)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported non-additive BM25 function schema change")
+	assert.Contains(t, err.Error(), "unsupported incompatible BM25 function schema change")
 	require.Equal(t, uint64(1), sd.collection.SchemaVersion())
 }
 
@@ -2884,10 +2961,8 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		s.Require().NoError(err)
 		defer delegator.Close()
 
-		function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
-		errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, schema1)
-		s.Require().NotNil(errCh)
-		s.NoError(<-errCh)
+		function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
+		s.NoError(function.AllocFunctionRunners(s.collectionID, "WAL-"+s.vchannelName, schema1))
 
 		changed, err := function.FillFunctionData(context.Background(), s.collectionID, schema1, &msgpb.InsertRequest{
 			FieldsData: []*schemapb.FieldData{{
@@ -2912,7 +2987,8 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
+		defer delegator.Close()
 	})
 }

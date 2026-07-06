@@ -41,6 +41,7 @@ func TestGetJSONParams(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, Params{
 		StorageVersion:            storageVersion,
+		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),

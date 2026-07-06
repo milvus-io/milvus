@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include <boost/filesystem/path.hpp>
@@ -110,6 +111,11 @@ struct FileManagerContext {
         stats_base_path = path;
     }
 
+    void
+    set_storage_column_mapping(int64_t field_id, StorageColumnMapping mapping) {
+        storage_column_mappings[field_id] = std::move(mapping);
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
@@ -118,6 +124,7 @@ struct FileManagerContext {
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
     std::string stats_base_path;
+    StorageColumnMappings storage_column_mappings;
 };
 
 #define FILEMANAGER_TRY try {
@@ -351,6 +358,15 @@ class FileManagerImpl : public milvus::FileManager {
         return "";
     }
 
+    std::optional<StorageColumnMapping>
+    GetStorageColumnMapping(int64_t field_id) const {
+        auto it = storage_column_mappings_.find(field_id);
+        if (it == storage_column_mappings_.end()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
  protected:
     // collection meta
     FieldDataMeta field_meta_;
@@ -361,6 +377,7 @@ class FileManagerImpl : public milvus::FileManager {
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
+    StorageColumnMappings storage_column_mappings_;
 
     // stats base path computed by Go caller; when non-empty, overrides
     // the internally computed remote prefix for text/json stats files.

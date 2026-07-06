@@ -16,6 +16,7 @@
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
+#include "storage/PrefetchThreadPool.h"
 
 namespace milvus {
 namespace exec {
@@ -27,6 +28,7 @@ PhyTimestamptzArithCompareExpr::ToString() const {
 
 void
 PhyTimestamptzArithCompareExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     result = ExecCompareVisitorImpl<int64_t>(input);
@@ -77,6 +79,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                 active_count_,
                 batch_size_,
                 consistency_level_);
+            helperPhyExpr_->EnsureExecPathDetermined();
         }
         return helperPhyExpr_->ExecRangeVisitorImpl<T>(input);
     }

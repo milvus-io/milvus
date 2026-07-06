@@ -12,51 +12,40 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
+func walFunctionRunnerKey(vchannel string) string {
+	return "WAL-" + vchannel
+}
+
 func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
-	if !function.HasEmbeddingFunctions(schema) {
-		return
-	}
-	errCh := function.AllocFunctionRunners(collectionID, vchannel, schema)
-	if errCh == nil {
-		return
-	}
-	schemaVersion := int32(0)
+	key := walFunctionRunnerKey(vchannel)
+	schemaVersion := function.LatestFunctionRunnerVersion
 	if schema != nil {
 		schemaVersion = schema.GetVersion()
 	}
-	go func() {
-		if err := <-errCh; err != nil {
-			impl.shardManager.Logger().Warn(context.TODO(), "failed to allocate function runners",
-				mlog.Int64("collectionID", collectionID),
-				mlog.String("vchannel", vchannel),
-				mlog.Int32("schemaVersion", schemaVersion),
-				mlog.Err(err))
-		}
-	}()
+	if err := function.AllocFunctionRunners(collectionID, key, schema); err != nil {
+		impl.shardManager.Logger().Warn(context.TODO(), "failed to allocate function runners",
+			mlog.Int64("collectionID", collectionID),
+			mlog.String("vchannel", vchannel),
+			mlog.String("key", key),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
+	}
 }
 
 func (impl *shardInterceptor) updateFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
-	if !function.HasEmbeddingFunctions(schema) {
-		function.ReleaseFunctionRunners(collectionID, vchannel)
-		return
-	}
-	errCh := function.UpdateFunctionRunners(collectionID, vchannel, schema)
-	if errCh == nil {
-		return
-	}
-	schemaVersion := int32(0)
+	key := walFunctionRunnerKey(vchannel)
+	schemaVersion := function.LatestFunctionRunnerVersion
 	if schema != nil {
 		schemaVersion = schema.GetVersion()
 	}
-	go func() {
-		if err := <-errCh; err != nil {
-			impl.shardManager.Logger().Warn(context.TODO(), "failed to update function runners",
-				mlog.Int64("collectionID", collectionID),
-				mlog.String("vchannel", vchannel),
-				mlog.Int32("schemaVersion", schemaVersion),
-				mlog.Err(err))
-		}
-	}()
+	if err := function.UpdateFunctionRunners(collectionID, key, schema); err != nil {
+		impl.shardManager.Logger().Warn(context.TODO(), "failed to update function runners",
+			mlog.Int64("collectionID", collectionID),
+			mlog.String("vchannel", vchannel),
+			mlog.String("key", key),
+			mlog.Int32("schemaVersion", schemaVersion),
+			mlog.Err(err))
+	}
 }
 
 type collectionSchemaProvider interface {

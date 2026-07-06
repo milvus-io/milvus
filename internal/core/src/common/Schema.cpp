@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,7 +28,10 @@
 #include "arrow/util/key_value_metadata.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
+#include "common/SystemProperty.h"
+#include "common/VirtualPK.h"
 #include "milvus-storage/common/constants.h"
+#include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "protobuf_utils.h"
 
@@ -60,6 +64,56 @@ ParseFieldIdColumnName(const std::string& column_name) {
     return FieldId(field_id);
 }
 
+bool
+IsMilvusTableExternalSpec(const std::string& external_spec) {
+    if (external_spec.empty()) {
+        return false;
+    }
+    try {
+        auto spec = nlohmann::json::parse(external_spec);
+        return spec.value("format", "parquet") == "milvus-table";
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+namespace {
+
+bool
+IsMilvusTableExternalDataField(FieldId field_id,
+                               const std::string& field_name,
+                               bool is_function_output) {
+    return !SystemProperty::Instance().IsSystem(field_id) &&
+           !is_function_output && field_name != VIRTUAL_PK_FIELD_NAME;
+}
+
+}  // namespace
+
+PhysicalColumnMapping
+ResolvePhysicalColumnMapping(
+    bool is_milvus_table,
+    const milvus::proto::schema::FieldSchema& field_schema) {
+    PhysicalColumnMapping mapping;
+    mapping.schema_column_name = field_schema.name();
+    mapping.storage_column_name = std::to_string(field_schema.fieldid());
+    if (is_milvus_table &&
+        IsMilvusTableExternalDataField(FieldId(field_schema.fieldid()),
+                                       field_schema.name(),
+                                       field_schema.is_function_output())) {
+        mapping.is_external_column = true;
+    } else if (!field_schema.external_field().empty()) {
+        mapping.storage_column_name = field_schema.external_field();
+        mapping.is_external_column = true;
+    }
+    return mapping;
+}
+
+void
+Schema::set_external_spec(const std::string& spec) {
+    external_spec_ = spec;
+    is_milvus_table_external_ = IsMilvusTableExternalSpec(spec);
+}
+
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
@@ -72,6 +126,10 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
         auto f = FieldMeta::ParseFrom(child);
         schema->AddField(std::move(f));
+
+        if (child.is_function_output()) {
+            schema->add_function_output_field_id(field_id);
+        }
 
         if (child.is_primary_key()) {
             AssertInfo(!schema->get_primary_field_id().has_value(),
@@ -120,7 +178,17 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             continue;
         }
         for (const auto output_field_id : function.output_field_ids()) {
-            schema->bm25_function_output_fields_.emplace(output_field_id);
+            auto field_id = FieldId(output_field_id);
+            if (schema->is_function_output(field_id)) {
+                schema->bm25_function_output_fields_.emplace(field_id);
+            }
+        }
+        for (const auto& output_field_name : function.output_field_names()) {
+            auto it = schema->name_ids_.find(FieldName(output_field_name));
+            if (it != schema->name_ids_.end() &&
+                schema->is_function_output(it->second)) {
+                schema->bm25_function_output_fields_.emplace(it->second);
+            }
         }
     }
 
@@ -165,13 +233,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         schema->set_external_spec(schema_proto.external_spec());
     }
 
-    // Collect function output field ids from FunctionSchema list.
-    for (const auto& fn : schema_proto.functions()) {
-        for (auto out_id : fn.output_field_ids()) {
-            schema->add_function_output_field_id(FieldId(out_id));
-        }
-    }
-
     return schema;
 }
 
@@ -210,7 +271,7 @@ Schema::ConvertToArrowSchema() const {
 }
 
 const ArrowSchemaPtr
-Schema::ConvertToLoonArrowSchema() const {
+Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
     arrow::FieldVector arrow_fields;
     arrow_fields.reserve(field_ids_.size());
     for (const auto& field_id : field_ids_) {
@@ -227,6 +288,8 @@ Schema::ConvertToLoonArrowSchema() const {
             !IsSparseFloatVectorDataType(data_type) &&
             data_type != DataType::VECTOR_ARRAY;
         if (is_nullable_dense_vector) {
+            arrow_data_type = arrow::binary();
+        } else if (text_lob_as_binary && data_type == DataType::TEXT) {
             arrow_data_type = arrow::binary();
         } else if (data_type == DataType::VECTOR_ARRAY) {
             arrow_data_type = GetArrowDataTypeForVectorArray(
@@ -293,20 +356,69 @@ Schema::GetExternalColumnNames() const {
         auto it = fields_.find(field_id);
         if (it == fields_.end())
             continue;
-        if (it->second.is_external_field()) {
-            columns->push_back(it->second.get_external_field());
-        } else if (is_function_output(field_id)) {
-            // Function output fields are computed by Milvus and stored by
-            // numeric field id, same as internal collection fields.
-            columns->push_back(std::to_string(field_id.get()));
+        if (IsExternalManifestStoredField(field_id)) {
+            columns->push_back(GetPhysicalColumnName(field_id));
         }
     }
     return columns;
 }
 
+// Mirror pkg/util/typeutil.StorageColumnResolver. Keep Go and C++ behavior
+// aligned when changing external physical-column rules.
+bool
+Schema::IsExternalDataField(FieldId field_id) const {
+    auto it = fields_.find(field_id);
+    if (it == fields_.end() || !is_external_collection()) {
+        return false;
+    }
+    const auto& meta = it->second;
+    if (!is_milvus_table_external_collection()) {
+        return meta.is_external_field();
+    }
+    return IsMilvusTableExternalDataField(
+        field_id, meta.get_name().get(), is_function_output(field_id));
+}
+
+bool
+Schema::IsExternalManifestStoredField(FieldId field_id) const {
+    if (!is_external_collection()) {
+        return false;
+    }
+    if (field_id == TimestampFieldID && RequiresSourceInsertTimestamps()) {
+        return true;
+    }
+    return IsExternalDataField(field_id) || is_function_output(field_id);
+}
+
+bool
+Schema::RequiresSourceInsertTimestamps() const {
+    return is_milvus_table_external_collection() &&
+           primary_field_id_opt_.has_value() &&
+           IsExternalDataField(primary_field_id_opt_.value());
+}
+
+std::string
+Schema::GetPhysicalColumnName(FieldId field_id) const {
+    const auto& meta = (*this)[field_id];
+    if (is_milvus_table_external_collection() &&
+        IsExternalDataField(field_id)) {
+        return std::to_string(field_id.get());
+    }
+    if (meta.is_external_field()) {
+        return meta.get_external_field();
+    }
+    return std::to_string(field_id.get());
+}
+
 FieldId
 Schema::ResolveColumnFieldId(const std::string& column_name) const {
     if (is_external_collection()) {
+        if (is_milvus_table_external_collection()) {
+            if (auto field_id = ParseFieldIdColumnName(column_name);
+                field_id.has_value() && fields_.count(field_id.value())) {
+                return field_id.value();
+            }
+        }
         for (const auto& [fid, meta] : fields_) {
             if (meta.is_external_field() &&
                 meta.get_external_field() == column_name) {

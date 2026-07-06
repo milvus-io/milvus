@@ -545,24 +545,37 @@ func (s *delegatorGrowingFlushSource) CurrentOffset() int64 {
 
 func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 	result, err := s.segment.FlushData(ctx, startOffset, endOffset, &segments.FlushConfig{
-		SegmentBasePath:      config.SegmentBasePath,
-		PartitionBasePath:    config.PartitionBasePath,
-		CollectionID:         config.CollectionID,
-		PartitionID:          config.PartitionID,
-		TextFieldIDs:         config.TextFieldIDs,
-		TextLobPaths:         config.TextLobPaths,
-		BM25FieldIDs:         config.BM25FieldIDs,
-		BM25StatsLogIDs:      config.BM25StatsLogIDs,
-		WriteMergedBM25Stats: config.WriteMergedBM25Stats,
-		ReadVersion:          config.ReadVersion,
+		SegmentBasePath:         config.SegmentBasePath,
+		PartitionBasePath:       config.PartitionBasePath,
+		CollectionID:            config.CollectionID,
+		PartitionID:             config.PartitionID,
+		Schema:                  config.Schema,
+		TextFieldIDs:            config.TextFieldIDs,
+		TextLobPaths:            config.TextLobPaths,
+		TextInlineThreshold:     config.TextInlineThreshold,
+		TextMaxLobFileBytes:     config.TextMaxLobFileBytes,
+		TextFlushThresholdBytes: config.TextFlushThresholdBytes,
+		BM25FieldIDs:            config.BM25FieldIDs,
+		BM25StatsLogIDs:         config.BM25StatsLogIDs,
+		WriteMergedBM25Stats:    config.WriteMergedBM25Stats,
+		ReadVersion:             config.ReadVersion,
+		WriterFormat:            config.WriterFormat,
+		SchemaBasedPattern:      config.SchemaBasedPattern,
+		SchemaBasedFormats:      config.SchemaBasedFormats,
+		AllowedFieldIDs:         config.AllowedFieldIDs,
+		ColumnGroups:            config.ColumnGroups,
 	})
 	if err != nil || result == nil {
 		return nil, err
 	}
 	return &syncmgr.GrowingFlushResult{
-		ManifestPath: result.ManifestPath,
-		NumRows:      result.NumRows,
-		BM25Stats:    result.BM25Stats,
+		ManifestPath:           result.ManifestPath,
+		NumRows:                result.NumRows,
+		TimestampFrom:          result.TimestampFrom,
+		TimestampTo:            result.TimestampTo,
+		ColumnGroupMemorySizes: result.ColumnGroupMemorySizes,
+		FieldNullCounts:        result.FieldNullCounts,
+		BM25Stats:              result.BM25Stats,
 	}, nil
 }
 

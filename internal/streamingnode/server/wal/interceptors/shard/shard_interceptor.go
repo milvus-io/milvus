@@ -102,7 +102,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.ReleaseFunctionRunners(dropCollectionMessage.Header().GetCollectionId(), dropCollectionMessage.VChannel())
+	function.ReleaseFunctionRunners(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -151,7 +151,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	header := insertMsg.Header()
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
-	if correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header); err != nil {
+	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
+	if err != nil {
 		if errors.Is(err, shards.ErrCollectionNotFound) {
 			return nil, status.NewUnrecoverableError("collection %d not found", collectionID)
 		}
@@ -175,6 +176,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			mlog.Err(err))
 		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
 	}
+	schemaVersion = correctSchemaVersion
 	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
 		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
 			mlog.Int64("collectionID", header.GetCollectionId()),
@@ -375,7 +377,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.ReleaseFunctionRunners(collectionID, schemaInfo.VChannel)
+			function.ReleaseFunctionRunners(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }

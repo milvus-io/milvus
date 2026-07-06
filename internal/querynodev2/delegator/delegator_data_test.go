@@ -301,15 +301,12 @@ func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
 }
 
 func (s *DelegatorDataSuite) TearDownTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+	function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
+	function.ReleaseFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))
 }
 
 func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
-	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, s.delegator.collection.Schema())
-	if errCh != nil {
-		s.Require().NoError(<-errCh)
-	}
+	s.Require().NoError(function.UpdateFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), s.delegator.collection.Schema()))
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
@@ -634,6 +631,50 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.Require().NoError(err)
 	// Serviceable state remains unchanged since ProcessDelete is a no-op after Close()
 	s.True(s.delegator.distribution.Serviceable())
+}
+
+func (s *DelegatorDataSuite) TestProcessDeleteBatchesPreservesBatchTsInDeleteBuffer() {
+	batches := []DeleteBatch{
+		{
+			Ts: 10,
+			Data: []*DeleteData{
+				{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{
+						storage.NewInt64PrimaryKey(10),
+					},
+					Timestamps: []uint64{10},
+					RowCount:   1,
+				},
+			},
+		},
+		{
+			Ts: 20,
+			Data: []*DeleteData{
+				{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{
+						storage.NewInt64PrimaryKey(20),
+					},
+					Timestamps: []uint64{20},
+					RowCount:   1,
+				},
+			},
+		},
+	}
+
+	s.delegator.ProcessDeleteBatches(batches)
+
+	after15 := s.delegator.deleteBuffer.ListAfter(15)
+	s.Require().Len(after15, 1)
+	s.Equal(uint64(20), after15[0].Ts)
+	s.Require().Len(after15[0].Data, 1)
+	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(20)}, after15[0].Data[0].DeleteData.Pks)
+
+	after0 := s.delegator.deleteBuffer.ListAfter(0)
+	s.Require().Len(after0, 2)
+	s.Equal(uint64(10), after0[0].Ts)
+	s.Equal(uint64(20), after0[1].Ts)
 }
 
 func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {

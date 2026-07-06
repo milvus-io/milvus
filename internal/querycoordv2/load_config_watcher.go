@@ -70,13 +70,9 @@ func (w *LoadConfigWatcher) Trigger() {
 func (w *LoadConfigWatcher) background() {
 	defer func() {
 		w.notifier.Finish(struct{}{})
-		w.Logger().Info(context.TODO(),
-
-			"load config watcher stopped")
+		w.Logger().Info(context.TODO(), "load config watcher stopped")
 	}()
-	w.Logger().Info(context.TODO(),
-
-		"load config watcher started")
+	w.Logger().Info(context.TODO(), "load config watcher started")
 
 	balanceTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: loadConfigWatcherInterval,
@@ -95,9 +91,7 @@ func (w *LoadConfigWatcher) background() {
 		case <-w.notifier.Context().Done():
 			return
 		case <-w.triggerCh:
-			w.Logger().Info(context.TODO(),
-
-				"load config watcher triggered")
+			w.Logger().Info(context.TODO(), "load config watcher triggered")
 		case <-nextTimer:
 		case <-promotionTicker.C:
 			w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
@@ -125,14 +119,12 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 
 	if newReplicaNum <= 0 || len(newRGs) == 0 {
 		w.Logger().Info(context.TODO(),
-
 			"illegal cluster level load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
 		return nil
 	}
 
 	if len(newRGs) != 1 && len(newRGs) != int(newReplicaNum) {
 		w.Logger().Info(context.TODO(),
-
 			"illegal cluster level load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
 		return nil
 	}
@@ -141,7 +133,6 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	rgChanged := len(left) > 0 || len(right) > 0
 	if w.previousReplicaNum == newReplicaNum && !rgChanged {
 		w.Logger().Info(context.TODO(),
-
 			"no need to update load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
 		return nil
 	}
@@ -151,29 +142,22 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
 		collection := w.s.meta.GetCollection(w.notifier.Context(), collectionID)
 		if collection.UserSpecifiedReplicaMode {
-			w.Logger().Info(context.TODO(),
-
-				"collection is user specified replica mode, skip update load config", mlog.FieldCollectionID(collectionID))
+			w.Logger().Info(context.TODO(), "collection is user specified replica mode, skip update load config", mlog.FieldCollectionID(collectionID))
 			return false
 		}
 		return true
 	})
 
 	if len(collectionIDs) == 0 {
-		w.Logger().Info(context.TODO(),
-
-			"no collection to update load config, skip it")
+		w.Logger().Info(context.TODO(), "no collection to update load config, skip it")
 	}
 
 	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, true); err != nil {
-		w.Logger().Warn(context.TODO(),
-
-			"failed to update load config", mlog.Err(err))
+		w.Logger().Warn(context.TODO(), "failed to update load config", mlog.Err(err))
 		return err
 	}
 	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
 	w.Logger().Info(context.TODO(),
-
 		"apply load config changes",
 		mlog.Int64s("collectionIDs", collectionIDs),
 		mlog.Int32("previousReplicaNum", w.previousReplicaNum),

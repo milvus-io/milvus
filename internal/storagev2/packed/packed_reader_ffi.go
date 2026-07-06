@@ -21,6 +21,18 @@ package packed
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+
+CStatus NewPackedFFIReaderWithColumnGroups(
+    const LoonColumnGroups* column_groups,
+    struct ArrowSchema* schema,
+    char** needed_columns,
+    int64_t needed_columns_size,
+    CFFIPackedReader* c_loon_reader,
+    CStorageConfig c_storage_config,
+    CPluginContext* c_plugin_context,
+    int64_t collection_id,
+    const char* external_source,
+    const char* external_spec);
 */
 import "C"
 
@@ -41,105 +53,171 @@ import (
 // ExternalReaderContext carries per-collection context needed by the FFI
 // reader to resolve extfs aliases for external collections. Zero value is
 // safe for non-external collections.
-type ExternalReaderContext struct {
-	CollectionID int64
-	Source       string
-	Spec         string
+type ExternalReaderContext = ExternalSpecContext
+
+// NewFFIPackedReader opens a StorageV3 manifest reader with optional external
+// reader context.
+func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
+	return NewFFIPackedReaderWithExtfs(
+		manifestPath,
+		schema,
+		neededColumns,
+		bufferSize,
+		storageConfig,
+		storagePluginContext,
+		ext,
+	)
 }
 
-func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
-	collectionID := ext.CollectionID
-	externalSource := ext.Source
-	externalSpec := ext.Spec
-	cLoonManifest, err := GetManifestHandle(manifestPath, storageConfig)
+// NewFFIPackedReaderWithExtfs opens a StorageV3 manifest after injecting
+// external filesystem properties for source manifests referenced by
+// milvus-table external collections.
+func NewFFIPackedReaderWithExtfs(
+	manifestPath string,
+	schema *arrow.Schema,
+	neededColumns []string,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs ExternalSpecContext,
+) (*FFIPackedReader, error) {
+	cLoonManifest, err := GetManifestHandleWithExtfs(manifestPath, storageConfig, extfs)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cLoonManifest)
 
+	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
+		func(cSchema *C.struct_ArrowSchema,
+			cNeededColumnArray **C.char,
+			cNumColumns C.int64_t,
+			cPackedReader *C.CFFIPackedReader,
+			cStorageConfig C.CStorageConfig,
+			pluginContextPtr *C.CPluginContext,
+			collectionID C.int64_t,
+			cExternalSource *C.char,
+			cExternalSpec *C.char,
+		) C.CStatus {
+			return C.NewPackedFFIReaderWithManifest(
+				cLoonManifest,
+				cSchema,
+				cNeededColumnArray,
+				cNumColumns,
+				cPackedReader,
+				cStorageConfig,
+				pluginContextPtr,
+				collectionID,
+				cExternalSource,
+				cExternalSpec,
+			)
+		})
+}
+
+// NewFFIPackedReaderWithFragments opens a packed reader from explicit physical
+// fragments. It is used for StorageV3 deltalogs where the manifest already
+// provides each file's EntriesNum and the caller must preserve those row
+// boundaries when constructing column groups.
+func NewFFIPackedReaderWithFragments(
+	columns []string,
+	format string,
+	fragments []Fragment,
+	schema *arrow.Schema,
+	neededColumns []string,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs ExternalSpecContext,
+) (*FFIPackedReader, error) {
+	readerFragments, err := resolveFFIReaderFragments(fragments, storageConfig, extfs)
+	if err != nil {
+		return nil, err
+	}
+	cColumnGroups, err := createColumnGroups(columns, format, readerFragments)
+	if err != nil {
+		return nil, err
+	}
+	defer C.loon_column_groups_destroy(cColumnGroups)
+
+	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
+		func(cSchema *C.struct_ArrowSchema,
+			cNeededColumnArray **C.char,
+			cNumColumns C.int64_t,
+			cPackedReader *C.CFFIPackedReader,
+			cStorageConfig C.CStorageConfig,
+			pluginContextPtr *C.CPluginContext,
+			collectionID C.int64_t,
+			cExternalSource *C.char,
+			cExternalSpec *C.char,
+		) C.CStatus {
+			return C.NewPackedFFIReaderWithColumnGroups(
+				cColumnGroups,
+				cSchema,
+				cNeededColumnArray,
+				cNumColumns,
+				cPackedReader,
+				cStorageConfig,
+				pluginContextPtr,
+				collectionID,
+				cExternalSource,
+				cExternalSpec,
+			)
+		})
+}
+
+type ffiReaderOpenFunc func(
+	cSchema *C.struct_ArrowSchema,
+	cNeededColumnArray **C.char,
+	cNumColumns C.int64_t,
+	cPackedReader *C.CFFIPackedReader,
+	cStorageConfig C.CStorageConfig,
+	pluginContextPtr *C.CPluginContext,
+	collectionID C.int64_t,
+	cExternalSource *C.char,
+	cExternalSpec *C.char,
+) C.CStatus
+
+func openFFIPackedReader(
+	schema *arrow.Schema,
+	neededColumns []string,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs ExternalSpecContext,
+	open ffiReaderOpenFunc,
+) (*FFIPackedReader, error) {
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	var cPackedReader C.CFFIPackedReader
-	var status C.CStatus
 
-	var pluginContextPtr *C.CPluginContext
-	if storagePluginContext != nil {
-		ckey := C.CString(storagePluginContext.EncryptionKey)
-		defer C.free(unsafe.Pointer(ckey))
-		var pluginContext C.CPluginContext
-		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
-		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
-		pluginContext.key = ckey
-		pluginContextPtr = &pluginContext
-	}
+	pluginContextPtr, cleanupPluginContext := newCPluginContext(storagePluginContext)
+	defer cleanupPluginContext()
 
-	if storageConfig != nil {
-		cStorageConfig := C.CStorageConfig{
-			address:                C.CString(storageConfig.GetAddress()),
-			bucket_name:            C.CString(storageConfig.GetBucketName()),
-			access_key_id:          C.CString(storageConfig.GetAccessKeyID()),
-			access_key_value:       C.CString(storageConfig.GetSecretAccessKey()),
-			root_path:              C.CString(storageConfig.GetRootPath()),
-			storage_type:           C.CString(storageConfig.GetStorageType()),
-			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
-			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("warn"),
-			useSSL:                 C.bool(storageConfig.GetUseSSL()),
-			sslCACert:              C.CString(storageConfig.GetSslCACert()),
-			useIAM:                 C.bool(storageConfig.GetUseIAM()),
-			region:                 C.CString(storageConfig.GetRegion()),
-			useVirtualHost:         C.bool(storageConfig.GetUseVirtualHost()),
-			requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
-			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
-			use_custom_part_upload: true,
-			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
-			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
-			use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
-		}
-		defer C.free(unsafe.Pointer(cStorageConfig.address))
-		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_id))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_value))
-		defer C.free(unsafe.Pointer(cStorageConfig.root_path))
-		defer C.free(unsafe.Pointer(cStorageConfig.storage_type))
-		defer C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
-		defer C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
-		defer C.free(unsafe.Pointer(cStorageConfig.log_level))
-		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
-		defer C.free(unsafe.Pointer(cStorageConfig.region))
-		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
-
-		cNeededColumn := make([]*C.char, len(neededColumns))
-		for i, columnName := range neededColumns {
-			cNeededColumn[i] = C.CString(columnName)
-			defer C.free(unsafe.Pointer(cNeededColumn[i]))
-		}
-		var cNeededColumnArray **C.char
-		if len(cNeededColumn) > 0 {
-			cNeededColumnArray = (**C.char)(unsafe.Pointer(&cNeededColumn[0]))
-		}
-		cNumColumns := C.int64_t(len(neededColumns))
-
-		// Avoid C.CString allocations on the non-external hot path. The C side
-		// treats nullptr the same as an empty string (empty-source guard).
-		var cExternalSource, cExternalSpec *C.char
-		if externalSource != "" {
-			cExternalSource = C.CString(externalSource)
-			defer C.free(unsafe.Pointer(cExternalSource))
-			if externalSpec != "" {
-				cExternalSpec = C.CString(externalSpec)
-				defer C.free(unsafe.Pointer(cExternalSpec))
-			}
-		}
-
-		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr, C.int64_t(collectionID), cExternalSource, cExternalSpec)
-	} else {
+	if storageConfig == nil {
 		return nil, merr.WrapErrServiceInternalMsg("storageConfig is required")
 	}
+	cStorageConfig, cleanupStorageConfig := newCStorageConfig(storageConfig)
+	defer cleanupStorageConfig()
+
+	cNeededColumnArray, cNumColumns, cleanupNeededColumns := newCNeededColumns(neededColumns)
+	defer cleanupNeededColumns()
+
+	cExternalSource, cExternalSpec, cleanupExternalContext := newCExternalContext(extfs.Source, extfs.Spec)
+	defer cleanupExternalContext()
+
+	status := open(
+		cSchema,
+		cNeededColumnArray,
+		cNumColumns,
+		&cPackedReader,
+		cStorageConfig,
+		pluginContextPtr,
+		C.int64_t(extfs.CollectionID),
+		cExternalSource,
+		cExternalSpec,
+	)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
@@ -164,6 +242,123 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		recordReader:  recordReader,
 		schema:        schema,
 	}, nil
+}
+
+func newCPluginContext(storagePluginContext *indexcgopb.StoragePluginContext) (*C.CPluginContext, func()) {
+	if storagePluginContext == nil {
+		return nil, func() {}
+	}
+	ckey := C.CString(storagePluginContext.EncryptionKey)
+	pluginContext := &C.CPluginContext{
+		ez_id:         C.int64_t(storagePluginContext.EncryptionZoneId),
+		collection_id: C.int64_t(storagePluginContext.CollectionId),
+		key:           ckey,
+	}
+	return pluginContext, func() {
+		C.free(unsafe.Pointer(ckey))
+	}
+}
+
+func newCStorageConfig(storageConfig *indexpb.StorageConfig) (C.CStorageConfig, func()) {
+	cStorageConfig := C.CStorageConfig{
+		address:                C.CString(storageConfig.GetAddress()),
+		bucket_name:            C.CString(storageConfig.GetBucketName()),
+		access_key_id:          C.CString(storageConfig.GetAccessKeyID()),
+		access_key_value:       C.CString(storageConfig.GetSecretAccessKey()),
+		root_path:              C.CString(storageConfig.GetRootPath()),
+		storage_type:           C.CString(storageConfig.GetStorageType()),
+		cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
+		iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
+		log_level:              C.CString("warn"),
+		useSSL:                 C.bool(storageConfig.GetUseSSL()),
+		sslCACert:              C.CString(storageConfig.GetSslCACert()),
+		useIAM:                 C.bool(storageConfig.GetUseIAM()),
+		region:                 C.CString(storageConfig.GetRegion()),
+		useVirtualHost:         C.bool(storageConfig.GetUseVirtualHost()),
+		requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
+		gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
+		use_custom_part_upload: true,
+		max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
+		tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+		use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
+	}
+	return cStorageConfig, func() {
+		C.free(unsafe.Pointer(cStorageConfig.address))
+		C.free(unsafe.Pointer(cStorageConfig.bucket_name))
+		C.free(unsafe.Pointer(cStorageConfig.access_key_id))
+		C.free(unsafe.Pointer(cStorageConfig.access_key_value))
+		C.free(unsafe.Pointer(cStorageConfig.root_path))
+		C.free(unsafe.Pointer(cStorageConfig.storage_type))
+		C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
+		C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
+		C.free(unsafe.Pointer(cStorageConfig.log_level))
+		C.free(unsafe.Pointer(cStorageConfig.sslCACert))
+		C.free(unsafe.Pointer(cStorageConfig.region))
+		C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
+		C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
+	}
+}
+
+func newCNeededColumns(neededColumns []string) (**C.char, C.int64_t, func()) {
+	cNeededColumn := make([]*C.char, len(neededColumns))
+	for i, columnName := range neededColumns {
+		cNeededColumn[i] = C.CString(columnName)
+	}
+	cleanup := func() {
+		for _, columnName := range cNeededColumn {
+			C.free(unsafe.Pointer(columnName))
+		}
+	}
+	if len(cNeededColumn) == 0 {
+		return nil, 0, cleanup
+	}
+	return (**C.char)(unsafe.Pointer(&cNeededColumn[0])), C.int64_t(len(cNeededColumn)), cleanup
+}
+
+func newCExternalContext(externalSource, externalSpec string) (*C.char, *C.char, func()) {
+	if externalSource == "" {
+		return nil, nil, func() {}
+	}
+	cExternalSource := C.CString(externalSource)
+	var cExternalSpec *C.char
+	if externalSpec != "" {
+		cExternalSpec = C.CString(externalSpec)
+	}
+	return cExternalSource, cExternalSpec, func() {
+		C.free(unsafe.Pointer(cExternalSource))
+		if cExternalSpec != nil {
+			C.free(unsafe.Pointer(cExternalSpec))
+		}
+	}
+}
+
+func resolveFFIReaderFragments(
+	fragments []Fragment,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) ([]Fragment, error) {
+	if extfs.Source == "" {
+		return fragments, nil
+	}
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to create properties")
+	}
+	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return nil, merr.Wrap(err, "inject extfs")
+	}
+
+	resolvedFragments := make([]Fragment, len(fragments))
+	copy(resolvedFragments, fragments)
+	for i := range resolvedFragments {
+		resolvedPath, err := resolveExternalSourceRelativePath(resolvedFragments[i].FilePath, cProperties, extfs)
+		if err != nil {
+			return nil, err
+		}
+		resolvedFragments[i].FilePath = resolvedPath
+	}
+	return resolvedFragments, nil
 }
 
 // ReadNext reads the next record batch from the reader
@@ -216,6 +411,17 @@ func (r *FFIPackedReader) Release() {
 }
 
 func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
+	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+}
+
+// GetManifestHandleWithExtfs opens a StorageV3 manifest with optional extfs
+// properties so external source manifests can be resolved with their own
+// storage credentials and endpoint aliases.
+func GetManifestHandleWithExtfs(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) (loonManifestHandle *C.LoonManifest, err error) {
 	var cManifestHandle *C.LoonManifest
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
@@ -228,6 +434,9 @@ func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig
 		return cManifestHandle, err
 	}
 	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return cManifestHandle, merr.Wrap(err, "inject extfs")
+	}
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 

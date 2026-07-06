@@ -50,6 +50,7 @@ func (s *EtcdSourceSuite) TestNewSource() {
 	source, err := NewEtcdSource(&EtcdInfo{
 		Endpoints:       s.endpoints,
 		KeyPrefix:       "by-dev",
+		DialTimeout:     5 * time.Second,
 		RefreshInterval: time.Second,
 	})
 	s.NoError(err)

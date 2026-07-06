@@ -882,7 +882,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 
 	var result *segcore.InsertResult
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	GetMutatePool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -937,7 +937,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	// been applied to this segment, and skipping them causes silent data loss.
 
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	GetMutatePool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -1001,6 +1001,8 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+		LoadPriority:   s.LoadInfo().GetPriority(),
+		Shard:          s.LoadInfo().GetInsertChannel(),
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -1072,7 +1074,10 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
 	*/
 	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
+	// Delta-log replay during segment load runs on the load pool, not the
+	// online-write mutate pool, so a large post-compaction replay cannot starve
+	// online insert/delete (and thus tSafe advancement).
+	GetLoadPool().Submit(func() (any, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -1177,6 +1182,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		mlog.Warn(ctx, "fail to append load index info", mlog.Err(err))
 		return err
 	}
+	loadIndexInfo.setShard(loadInfo.GetInsertChannel())
 	return f(loadIndexInfo)
 }
 
@@ -1656,12 +1662,30 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	if startOffset == endOffset {
 		return nil, nil
 	}
+	if config == nil {
+		return nil, merr.WrapErrServiceInternalMsg("flush config is nil")
+	}
+	if config.Schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("flush schema is nil")
+	}
+
+	schemaBlob, err := proto.Marshal(config.Schema)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalMsg("marshal flush schema failed: %s", err.Error())
+	}
+	if len(schemaBlob) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("marshal flush schema returned empty blob")
+	}
 
 	// build C flush config
 	var cConfig C.CFlushConfig
 	cSegmentPath := C.CString(config.SegmentBasePath)
 	defer C.free(unsafe.Pointer(cSegmentPath))
 	cConfig.segment_path = cSegmentPath
+	cSchemaBlob := C.CBytes(schemaBlob)
+	defer C.free(cSchemaBlob)
+	cConfig.schema_blob = cSchemaBlob
+	cConfig.schema_length = C.int64_t(len(schemaBlob))
 
 	cConfig.read_version = C.int64_t(config.ReadVersion)
 	cConfig.retry_limit = C.uint32_t(3)
@@ -1670,6 +1694,64 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		cWriterFormat := C.CString(writerFormat)
 		defer C.free(unsafe.Pointer(cWriterFormat))
 		cConfig.writer_format = cWriterFormat
+	}
+	schemaBasedPattern := config.SchemaBasedPattern
+	if schemaBasedPattern != "" {
+		cSchemaBasedPattern := C.CString(schemaBasedPattern)
+		defer C.free(unsafe.Pointer(cSchemaBasedPattern))
+		cConfig.schema_based_pattern = cSchemaBasedPattern
+	}
+	schemaBasedFormats := config.SchemaBasedFormats
+	if schemaBasedFormats != "" {
+		cSchemaBasedFormats := C.CString(schemaBasedFormats)
+		defer C.free(unsafe.Pointer(cSchemaBasedFormats))
+		cConfig.schema_based_formats = cSchemaBasedFormats
+	}
+	numAllowedFields := len(config.AllowedFieldIDs)
+	if numAllowedFields > 0 {
+		cAllowedFieldIDs := (*C.int64_t)(C.malloc(C.size_t(numAllowedFields) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cAllowedFieldIDs))
+		allowedFieldIDSlice := unsafe.Slice(cAllowedFieldIDs, numAllowedFields)
+		for i, fieldID := range config.AllowedFieldIDs {
+			allowedFieldIDSlice[i] = C.int64_t(fieldID)
+		}
+		cConfig.allowed_field_ids = cAllowedFieldIDs
+		cConfig.num_allowed_fields = C.size_t(numAllowedFields)
+	}
+	numColumnGroups := len(config.ColumnGroups)
+	if numColumnGroups > 0 {
+		totalFieldCount := 0
+		for _, columnGroup := range config.ColumnGroups {
+			totalFieldCount += len(columnGroup.Fields)
+		}
+		cColumnGroupIDs := (*C.int64_t)(C.malloc(C.size_t(numColumnGroups) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cColumnGroupIDs))
+		cColumnGroupFieldCounts := (*C.size_t)(C.malloc(C.size_t(numColumnGroups) * C.size_t(unsafe.Sizeof(C.size_t(0)))))
+		defer C.free(unsafe.Pointer(cColumnGroupFieldCounts))
+		var cColumnGroupFieldIDs *C.int64_t
+		if totalFieldCount > 0 {
+			cColumnGroupFieldIDs = (*C.int64_t)(C.malloc(C.size_t(totalFieldCount) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+			defer C.free(unsafe.Pointer(cColumnGroupFieldIDs))
+		}
+		groupIDSlice := unsafe.Slice(cColumnGroupIDs, numColumnGroups)
+		fieldCountSlice := unsafe.Slice(cColumnGroupFieldCounts, numColumnGroups)
+		var fieldIDSlice []C.int64_t
+		if totalFieldCount > 0 {
+			fieldIDSlice = unsafe.Slice(cColumnGroupFieldIDs, totalFieldCount)
+		}
+		fieldOffset := 0
+		for i, columnGroup := range config.ColumnGroups {
+			groupIDSlice[i] = C.int64_t(columnGroup.GroupID)
+			fieldCountSlice[i] = C.size_t(len(columnGroup.Fields))
+			for _, fieldID := range columnGroup.Fields {
+				fieldIDSlice[fieldOffset] = C.int64_t(fieldID)
+				fieldOffset++
+			}
+		}
+		cConfig.column_group_ids = cColumnGroupIDs
+		cConfig.column_group_field_ids = cColumnGroupFieldIDs
+		cConfig.column_group_field_counts = cColumnGroupFieldCounts
+		cConfig.num_column_groups = C.size_t(numColumnGroups)
 	}
 
 	// populate TEXT column configs
@@ -1693,6 +1775,9 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 		cConfig.text_field_ids = cFieldIDs
 		cConfig.text_lob_paths = cLobPathPtrs
+		cConfig.text_inline_threshold = C.int64_t(config.TextInlineThreshold)
+		cConfig.text_max_lob_file_bytes = C.int64_t(config.TextMaxLobFileBytes)
+		cConfig.text_flush_threshold_bytes = C.int64_t(config.TextFlushThresholdBytes)
 		cConfig.num_text_columns = C.size_t(numTextCols)
 	} else {
 		cConfig.text_field_ids = nil
@@ -1758,6 +1843,23 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		basePath = rawPath[:idx]
 	}
 	manifestPath := packed.MarshalManifestPath(basePath, committedVersion)
+	fieldNullCounts := make(map[int64]int64, int(cResult.num_field_stats))
+	if cResult.num_field_stats > 0 {
+		fieldIDs := unsafe.Slice(cResult.field_ids, int(cResult.num_field_stats))
+		nullCounts := unsafe.Slice(cResult.field_null_counts, int(cResult.num_field_stats))
+		for i := 0; i < int(cResult.num_field_stats); i++ {
+			fieldID := int64(fieldIDs[i])
+			fieldNullCounts[fieldID] = int64(nullCounts[i])
+		}
+	}
+	columnGroupMemorySizes := make(map[int64]int64, int(cResult.num_column_groups))
+	if cResult.num_column_groups > 0 {
+		columnGroupIDs := unsafe.Slice(cResult.column_group_ids, int(cResult.num_column_groups))
+		memorySizes := unsafe.Slice(cResult.column_group_memory_sizes, int(cResult.num_column_groups))
+		for i := 0; i < int(cResult.num_column_groups); i++ {
+			columnGroupMemorySizes[int64(columnGroupIDs[i])] = int64(memorySizes[i])
+		}
+	}
 	bm25Stats := make(map[int64]*storage.BM25Stats, int(cResult.num_bm25_stats))
 	if cResult.num_bm25_stats > 0 {
 		fieldIDs := unsafe.Slice(cResult.bm25_field_ids, int(cResult.num_bm25_stats))
@@ -1774,8 +1876,12 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	}
 
 	return &FlushResult{
-		ManifestPath: manifestPath,
-		NumRows:      int64(cResult.num_rows),
-		BM25Stats:    bm25Stats,
+		ManifestPath:           manifestPath,
+		NumRows:                int64(cResult.num_rows),
+		TimestampFrom:          uint64(cResult.timestamp_from),
+		TimestampTo:            uint64(cResult.timestamp_to),
+		ColumnGroupMemorySizes: columnGroupMemorySizes,
+		FieldNullCounts:        fieldNullCounts,
+		BM25Stats:              bm25Stats,
 	}, nil
 }

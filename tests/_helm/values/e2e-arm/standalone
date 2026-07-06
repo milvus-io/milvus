@@ -31,7 +31,9 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
-      targetVecIndexVersion: 10
+      compaction:
+        bumpSchemaVersion:
+          enabled: true
       gc:
         interval: 1800
         missingTolerance: 1800

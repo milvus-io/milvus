@@ -7,6 +7,7 @@ expr:
 	| FloatingConstant										                                                # Floating
 	| BooleanConstant										                                                # Boolean
 	| StringLiteral											                                                # String
+	| RawStringLiteral										                                                # RawString
 	| (Identifier|Meta)           			      							                                # Identifier
 	| JSONIdentifier                                                                                        # JSONIdentifier
 	| StructFieldIdentifier                                                                                 # StructField
@@ -144,7 +145,8 @@ Identifier: Nondigit (Nondigit | Digit)*;
 Meta: '$meta';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
-JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | DecimalConstant) ']')+;
+RawStringLiteral: [rR] ('"' DoubleRChar* '"' | '\'' SingleRChar* '\'');
+JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | RawStringLiteral | DecimalConstant) ']')+;
 StructIndexFieldIdentifier: Identifier '[' DecimalConstant ']' '[' Identifier ']';
 StructFieldIdentifier: Identifier '[' Identifier ']';
 StructSubFieldIdentifier: '$[' Identifier ']';
@@ -156,6 +158,10 @@ fragment SingleSCharSequence: SingleSChar+;
 
 fragment DoubleSChar: ~["\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
 fragment SingleSChar: ~['\\\r\n] | EscapeSequence | '\\\n' | '\\\r\n';
+// Raw string chars: a backslash is kept verbatim (no unescaping). A backslash
+// before the delimiter only prevents termination; both bytes stay in the token.
+fragment DoubleRChar: ~["\\\r\n] | '\\' ~[\r\n];
+fragment SingleRChar: ~['\\\r\n] | '\\' ~[\r\n];
 fragment Nondigit: [a-zA-Z_];
 fragment Digit: [0-9];
 fragment BinaryConstant: '0' [bB] [0-1]+;

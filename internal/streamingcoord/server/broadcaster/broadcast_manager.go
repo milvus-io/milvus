@@ -232,15 +232,12 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 	task, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
 		bm.Logger().Warn(ctx,
-
 			"broadcast task not found, it may already acked, ignore the request", mlog.Uint64("broadcastID", broadcastID), mlog.String("vchannel", vchannel))
 		return nil
 	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
 	if msg == nil {
-		task.Logger().Warn(ctx,
-
-			"vchannel is already acked, ignore the ack request", mlog.String("vchannel", vchannel))
+		task.Logger().Warn(ctx, "vchannel is already acked, ignore the ack request", mlog.String("vchannel", vchannel))
 		return nil
 	}
 	return bm.Ack(ctx, msg)
@@ -256,7 +253,6 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
 		bm.Logger().Debug(ctx,
-
 			"task is tombstone, ignored the ack request",
 			mlog.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
 			mlog.String("vchannel", msg.VChannel()))
@@ -274,9 +270,7 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 
 	t, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
-		bm.Logger().Debug(ctx,
-
-			"task is not found, ignored the drop tombstone request", mlog.Uint64("broadcastID", broadcastID))
+		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.Uint64("broadcastID", broadcastID))
 		return nil
 	}
 	if err := t.DropTombstone(ctx); err != nil {
@@ -321,9 +315,7 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 		return t, t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 	}
 	if msg.ReplicateHeader() == nil {
-		bm.Logger().Warn(context.TODO(),
-
-			"try to recover task from the wal from non-replicate message, ignore it")
+		bm.Logger().Warn(context.TODO(), "try to recover task from the wal from non-replicate message, ignore it")
 		return nil, false
 	}
 

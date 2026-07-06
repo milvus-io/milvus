@@ -23,7 +23,7 @@ The secondary maintains a `ReplicateCheckpoint` per PChannel: `{ClusterID, PChan
 
 - **Non-transactional messages**: checkpoint advances immediately after successful append.
 - **Transactional messages**: checkpoint advances only on **CommitTxn** — not on BeginTxn or body messages. This ensures that on recovery, uncommitted transactions can be re-replicated without data loss.
-- **Deduplication**: messages with `TimeTick ≤ checkpoint.TimeTick` are ignored (for txn body messages, `< checkpoint.TimeTick` is used since all messages within a transaction share the same TimeTick).
+- **Deduplication**: messages with `TimeTick ≤ checkpoint.TimeTick` are ignored. Txn body messages for the current in-flight transaction keep the equality case for the txn helper to deduplicate by message ID, since all messages within a transaction share the same TimeTick.
 
 The checkpoint is persisted in the [WALCheckpoint](../wal/recovery-storage.md) and can be queried by the primary via `GetReplicateInfo` to resume replication from the correct position after restart.
 

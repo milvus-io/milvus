@@ -166,7 +166,10 @@ func (t *SearchTask) executeGoReduceFastPath(
 	allSearchCount int64,
 	groupByOpts *groupByOptions,
 ) error {
-	reduceResult, err := heapMergeReduce(defaultAllocator, segDFs, plan.GetTopK(), groupByOpts)
+	// plan.GetTopK() may be reduced by the delegator optimizer. t.topk is the
+	// task's unity topK across merged slices, preserving the worker reduce
+	// contract based on the original request topK.
+	reduceResult, err := heapMergeReduce(defaultAllocator, segDFs, t.topk, groupByOpts)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to heapMergeReduce", mlog.Err(err))
 		return err

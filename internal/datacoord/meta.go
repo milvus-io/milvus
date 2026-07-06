@@ -1589,7 +1589,7 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 					mlog.Int64("segment binlog row count (correct)", count))
 			}
 			segment.NumOfRows = count
-		} else if cpNumRows > 0 {
+		} else if cpNumRows > 0 && segment.GetStorageVersion() == storage.StorageV3 {
 			// V3 storage: binlogs are empty, use checkpoint's NumOfRows
 			segment.NumOfRows = cpNumRows
 		}
@@ -3365,8 +3365,8 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 	schemaVersion int32,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
 	idRange := t.GetPreAllocatedSegmentIDs()
-	if idRange == nil || idRange.GetBegin()+1 != idRange.GetEnd() || resultSegment.GetSegmentID() != idRange.GetBegin() {
-		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump replacement result segment ID %d does not match the pre-allocated segment ID", resultSegment.GetSegmentID())
+	if idRange == nil || idRange.GetBegin() >= idRange.GetEnd() || resultSegment.GetSegmentID() != idRange.GetBegin() {
+		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump replacement result segment ID %d does not match the pre-allocated segment ID range", resultSegment.GetSegmentID())
 	}
 
 	dropped := oldSegment.Clone()

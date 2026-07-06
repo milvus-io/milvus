@@ -265,6 +265,32 @@ func Test_resetParserPool(t *testing.T) {
 	putLexer(lexer2)
 }
 
+// Test_getParserResetsPredictionMode verifies the pool always hands out a parser
+// in the default LL prediction mode, even after a previous borrower left it stuck
+// in SLL (as parseExpr's stage-1 fast path does). Without the reset in getParser,
+// a reused parser would run SLL-only and could reject inputs that full LL accepts.
+func Test_getParserResetsPredictionMode(t *testing.T) {
+	resetLexerPool()
+	resetParserPool()
+
+	// Borrow a parser, force it into SLL (mimicking parseExpr's stage-1 fast path
+	// returning without restoring LL), and return it to the pool.
+	lexer1 := getLexer(genNaiveInputStream(), &errorListenerImpl{})
+	parser1 := getParser(lexer1, &errorListenerImpl{})
+	parser1.GetInterpreter().SetPredictionMode(antlr.PredictionModeSLL)
+	putParser(parser1)
+	putLexer(lexer1)
+
+	// The next borrow must come back in LL mode regardless of how it was left.
+	lexer2 := getLexer(genNaiveInputStream(), &errorListenerImpl{})
+	parser2 := getParser(lexer2, &errorListenerImpl{})
+	assert.Equal(t, antlr.PredictionModeLL, parser2.GetInterpreter().GetPredictionMode(),
+		"pool must hand out a parser in default LL mode, not a leaked SLL state")
+	assert.NotNil(t, parser2.Expr())
+	putParser(parser2)
+	putLexer(lexer2)
+}
+
 // Test_poolParserBuildParseTrees verifies that BuildParseTrees is set correctly
 // This is important for the parser to generate the parse tree
 func Test_poolParserBuildParseTrees(t *testing.T) {

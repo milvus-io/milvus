@@ -16,8 +16,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type fakeAllocator struct {
@@ -51,8 +54,21 @@ func (s *fakeCommitGrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
 
-func (s *fakeCommitGrowingFlushSource) FlushGrowingData(context.Context, int64, int64, *GrowingFlushConfig) (*GrowingFlushResult, error) {
-	return &GrowingFlushResult{ManifestPath: "manifest", NumRows: 10}, nil
+func (s *fakeCommitGrowingFlushSource) FlushGrowingData(_ context.Context, _, _ int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
+	return &GrowingFlushResult{
+		ManifestPath:  "manifest",
+		NumRows:       10,
+		TimestampFrom: 101,
+		TimestampTo:   200,
+		ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, map[int64]int64{
+			0:   80,
+			101: 120,
+			102: 160,
+		}),
+		FieldNullCounts: map[int64]int64{
+			101: 2,
+		},
+	}, nil
 }
 
 func (s *fakeCommitGrowingFlushSource) Release() {
@@ -63,6 +79,14 @@ func (s *fakeCommitGrowingFlushSource) CommitGrowingFlush(targetOffset int64) {
 }
 
 func TestGrowingSourceSyncTaskBuildFlushConfigBM25(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key, "12345")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.TextMaxLobFileBytes.Key, "67890")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.TextFlushThresholdBytes.Key, "23456")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.TextMaxLobFileBytes.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.TextFlushThresholdBytes.Key)
+
 	segmentID := int64(1)
 	schema := &schemapb.CollectionSchema{
 		Name: "bm25",
@@ -97,10 +121,16 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25(t *testing.T) {
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithFlush()
 
-	config, err := task.buildFlushConfig(segment)
+	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
+	config, err := task.buildFlushConfig(segment, columnGroups)
+	require.NoError(t, err)
+	require.Equal(t, schema, config.Schema)
 	require.Equal(t, []int64{101}, config.TextFieldIDs)
 	require.Equal(t, []string{"/root/insert_log/3/2/lobs/101"}, config.TextLobPaths)
+	require.EqualValues(t, 12345, config.TextInlineThreshold)
+	require.EqualValues(t, 67890, config.TextMaxLobFileBytes)
+	require.EqualValues(t, 23456, config.TextFlushThresholdBytes)
 	require.Equal(t, []int64{102}, config.BM25FieldIDs)
 	require.Equal(t, []int64{500}, config.BM25StatsLogIDs)
 	require.True(t, config.WriteMergedBM25Stats)
@@ -121,7 +151,9 @@ func TestGrowingSourceSyncTaskBuildFlushConfigStartsFromEarliestManifest(t *test
 		WithSegmentID(1).
 		WithChunkManager(cm)
 
-	config, err := task.buildFlushConfig(segment)
+	columnGroups, err := task.getColumnGroups(segment)
+	require.NoError(t, err)
+	config, err := task.buildFlushConfig(segment, columnGroups)
 	require.NoError(t, err)
 	require.EqualValues(t, packed.ManifestEarliest, config.ReadVersion)
 }
@@ -144,7 +176,9 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25AllocatorError(t *testing.T) {
 		WithChunkManager(cm).
 		WithAllocator(&fakeAllocator{err: errors.New("alloc failed")})
 
-	_, err := task.buildFlushConfig(segment)
+	columnGroups, err := task.getColumnGroups(segment)
+	require.NoError(t, err)
+	_, err = task.buildFlushConfig(segment, columnGroups)
 	require.ErrorContains(t, err, "alloc failed")
 }
 
@@ -165,8 +199,251 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25RequiresAllocator(t *testing.T
 		WithSchema(schema).
 		WithChunkManager(cm)
 
-	_, err := task.buildFlushConfig(segment)
+	columnGroups, err := task.getColumnGroups(segment)
+	require.NoError(t, err)
+	_, err = task.buildFlushConfig(segment, columnGroups)
 	require.ErrorContains(t, err, "id allocator is nil")
+}
+
+func TestGrowingSourceSyncTaskBuildFlushConfigUsesCurrentSplitPattern(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "text",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		},
+	}
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().RootPath().Return("/root").Maybe()
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   `{"ver":7,"base_path":"/root/insert_log/3/2/1"}`,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{100}, Format: "parquet"},
+			{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
+			{FieldID: 102, ChildFields: []int64{102}, Format: "parquet"},
+		},
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithSchema(schema).
+		WithChunkManager(cm)
+
+	columnGroups, err := task.getColumnGroups(segment)
+	require.NoError(t, err)
+	config, err := task.buildFlushConfig(segment, columnGroups)
+	require.NoError(t, err)
+	require.Equal(t, "100,101,102", config.SchemaBasedPattern)
+	require.Equal(t, "parquet,vortex,parquet", config.SchemaBasedFormats)
+	require.Equal(t, []int64{100, 101, 102}, config.AllowedFieldIDs)
+	require.Equal(t, columnGroups, segment.GetCurrentSplit())
+	require.NotEmpty(t, config.WriterFormat)
+}
+
+func TestGrowingSourceSyncTaskBuildFlushConfigRequiresCurrentSplitFormatForExistingManifest(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "text",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+		},
+	}
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().RootPath().Return("/root").Maybe()
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/root/insert_log/3/2/1", 7),
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{100}},
+			{FieldID: 101, ChildFields: []int64{101}, Format: "parquet"},
+		},
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithSchema(schema).
+		WithChunkManager(cm)
+
+	columnGroups, err := task.getColumnGroups(segment)
+	require.NoError(t, err)
+	_, err = task.buildFlushConfig(segment, columnGroups)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "missing format")
+}
+
+func TestGrowingSourceSyncTaskBuildFlushConfigAllowsMissingFormatForEarliestManifest(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "text",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+		},
+	}
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().RootPath().Return("/root").Maybe()
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/root/insert_log/3/2/1", packed.ManifestEarliest),
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{100}},
+			{FieldID: 101, ChildFields: []int64{101}},
+		},
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithSchema(schema).
+		WithChunkManager(cm)
+
+	columnGroups, err := task.getColumnGroups(segment)
+	require.NoError(t, err)
+	config, err := task.buildFlushConfig(segment, columnGroups)
+	require.NoError(t, err)
+	require.EqualValues(t, packed.ManifestEarliest, config.ReadVersion)
+	require.NotEmpty(t, config.SchemaBasedFormats)
+}
+
+func TestGrowingSourceSyncTaskBuildFlushConfigProjectsToCurrentSplit(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "text",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			{FieldID: 103, Name: "added_scalar", DataType: schemapb.DataType_Int64, Nullable: true},
+			{FieldID: 104, Name: "added_text", DataType: schemapb.DataType_Text, Nullable: true},
+			{FieldID: 105, Name: "added_sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{105}},
+		},
+	}
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().RootPath().Return("/root").Maybe()
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   `{"ver":7,"base_path":"/root/insert_log/3/2/1"}`,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 100, ChildFields: []int64{100}, Format: "parquet"},
+			{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
+			{FieldID: 102, ChildFields: []int64{102}, Format: "parquet"},
+		},
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithSchema(schema).
+		WithChunkManager(cm).
+		WithAllocator(&fakeAllocator{next: 500}).
+		WithFlush()
+
+	columnGroups, err := task.getColumnGroups(segment)
+	require.NoError(t, err)
+	config, err := task.buildFlushConfig(segment, columnGroups)
+	require.NoError(t, err)
+	require.Equal(t, schema, config.Schema)
+	require.Equal(t, []int64{100, 101, 102}, config.AllowedFieldIDs)
+	require.Equal(t, []int64{101}, config.TextFieldIDs)
+	require.Equal(t, []string{"/root/insert_log/3/2/lobs/101"}, config.TextLobPaths)
+	require.Empty(t, config.BM25FieldIDs)
+	require.Empty(t, config.BM25StatsLogIDs)
+	require.True(t, config.WriteMergedBM25Stats)
+}
+
+func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "text",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		},
+	}
+	mc := metacache.NewMockMetaCache(t)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV3,
+	}, pkoracle.NewBloomFilterSet(), nil)
+	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(segment)
+	}).Return()
+
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().RootPath().Return("/root").Maybe()
+	metaWriter := NewMockMetaWriter(t)
+	metaWriter.EXPECT().UpdateGrowingSourceSync(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, task *GrowingSourceSyncTask) error {
+			require.Len(t, task.insertBinlogs, 3)
+			require.Equal(t, []int64{100}, task.insertBinlogs[0].GetChildFields())
+			require.Len(t, task.insertBinlogs[0].GetBinlogs(), 1)
+			require.EqualValues(t, 10, task.insertBinlogs[0].GetBinlogs()[0].GetEntriesNum())
+			require.EqualValues(t, 101, task.insertBinlogs[0].GetBinlogs()[0].GetTimestampFrom())
+			require.EqualValues(t, 200, task.insertBinlogs[0].GetBinlogs()[0].GetTimestampTo())
+			require.EqualValues(t, 80, task.insertBinlogs[0].GetBinlogs()[0].GetMemorySize())
+			require.EqualValues(t, 500, task.insertBinlogs[0].GetBinlogs()[0].GetLogID())
+			require.EqualValues(t, 2, task.insertBinlogs[101].GetBinlogs()[0].GetFieldNullCounts()[101])
+			return nil
+		})
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithChannelName("ch").
+		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
+		WithBatchRows(10).
+		WithTargetOffset(10).
+		WithMetaCache(mc).
+		WithMetaWriter(metaWriter).
+		WithSchema(schema).
+		WithChunkManager(cm).
+		WithAllocator(&fakeAllocator{next: 500}).
+		WithSource(&fakeCommitGrowingFlushSource{})
+
+	require.NoError(t, task.Run(context.Background()))
+	require.Len(t, segment.GetCurrentSplit(), 3)
+	require.Equal(t, []int64{100}, segment.GetCurrentSplit()[0].Fields)
+}
+
+func TestBuildGrowingSourceInsertBinlogsRequiresColumnGroupMemorySize(t *testing.T) {
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 10, Fields: []int64{100}},
+	}
+	result := &GrowingFlushResult{
+		NumRows:                1,
+		ColumnGroupMemorySizes: map[int64]int64{},
+	}
+
+	_, err := buildGrowingSourceInsertBinlogs(columnGroups, result, []int64{1})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
 }
 
 func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.T) {
@@ -235,12 +512,28 @@ func (s *fakeBM25GrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
 
-func (s *fakeBM25GrowingFlushSource) FlushGrowingData(context.Context, int64, int64, *GrowingFlushConfig) (*GrowingFlushResult, error) {
+func (s *fakeBM25GrowingFlushSource) FlushGrowingData(_ context.Context, _, _ int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
 	return &GrowingFlushResult{
-		ManifestPath: "manifest-after-flush",
-		NumRows:      10,
-		BM25Stats:    s.stats,
+		ManifestPath:           "manifest-after-flush",
+		NumRows:                10,
+		ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, nil),
+		BM25Stats:              s.stats,
 	}, nil
+}
+
+func fakeColumnGroupMemorySizes(config *GrowingFlushConfig, sizes map[int64]int64) map[int64]int64 {
+	if config == nil || len(config.ColumnGroups) == 0 {
+		return sizes
+	}
+	result := make(map[int64]int64, len(config.ColumnGroups))
+	for _, columnGroup := range config.ColumnGroups {
+		if size, ok := sizes[columnGroup.GroupID]; ok {
+			result[columnGroup.GroupID] = size
+			continue
+		}
+		result[columnGroup.GroupID] = 80
+	}
+	return result
 }
 
 func (s *fakeBM25GrowingFlushSource) Release() {

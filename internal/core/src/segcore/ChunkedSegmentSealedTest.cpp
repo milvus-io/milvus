@@ -42,6 +42,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
 #include "common/OffsetMapping.h"
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
@@ -64,6 +65,7 @@
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
@@ -94,6 +96,53 @@ struct DeferRelease {
 };
 
 using namespace milvus;
+
+namespace {
+
+class ScopedRejectRemoteVectorOutput {
+ public:
+    explicit ScopedRejectRemoteVectorOutput(bool enabled)
+        : old_value_(segcore::SegcoreConfig::default_config()
+                         .get_reject_remote_vector_output()) {
+        segcore::SegcoreConfig::default_config()
+            .set_reject_remote_vector_output(enabled);
+    }
+
+    ~ScopedRejectRemoteVectorOutput() {
+        segcore::SegcoreConfig::default_config()
+            .set_reject_remote_vector_output(old_value_);
+    }
+
+ private:
+    bool old_value_;
+};
+
+SearchResult
+MakeSearchResult(std::vector<int64_t> offsets) {
+    SearchResult result;
+    result.seg_offsets_ = std::move(offsets);
+    result.distances_.resize(result.seg_offsets_.size(), 0.0F);
+    return result;
+}
+
+segcore::SegmentSealedUPtr
+CreateColdVectorOutputSegment(const SchemaPtr& schema,
+                              const FieldId& vector_field_id,
+                              int64_t row_count) {
+    auto dataset = segcore::DataGen(schema, row_count);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    load_info.field_infos.at(vector_field_id.get()).warmup_policy = "disable";
+
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(load_info);
+    return segment;
+}
+
+}  // namespace
+
 TEST(test_chunk_segment, TestSearchOnSealed) {
     int dim = 16;
     int chunk_num = 3;
@@ -211,6 +260,119 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     }
 }
 
+TEST(test_chunk_segment, RejectRemoteVectorOutputFailsWhenVectorCellsAreCold) {
+    constexpr int64_t row_count = 16;
+    constexpr int64_t dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+
+    auto segment = CreateColdVectorOutputSegment(schema, vector_id, row_count);
+    auto* chunked =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(chunked, nullptr);
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {vector_id};
+    auto result = MakeSearchResult({0, 3, 7});
+
+    ScopedRejectRemoteVectorOutput scoped_config(true);
+
+    try {
+        chunked->TestFillTargetEntry(&plan, result);
+        FAIL() << "expected cold vector output to be rejected";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), RetrieveError);
+        EXPECT_NE(std::string(err.what()).find("vector field"),
+                  std::string::npos);
+    }
+}
+
+TEST(test_chunk_segment,
+     RejectRemoteVectorOutputFailsForRetrieveWhenVectorCellsAreCold) {
+    constexpr int64_t row_count = 16;
+    constexpr int64_t dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+
+    auto segment = CreateColdVectorOutputSegment(schema, vector_id, row_count);
+    auto* chunked =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(chunked, nullptr);
+
+    query::RetrievePlan plan(schema);
+    plan.field_ids_ = {vector_id};
+    const int64_t offsets[] = {0, 3, 7};
+
+    ScopedRejectRemoteVectorOutput scoped_config(true);
+
+    try {
+        auto results = chunked->Retrieve(
+            nullptr,
+            &plan,
+            offsets,
+            static_cast<int64_t>(sizeof(offsets) / sizeof(offsets[0])),
+            folly::CancellationToken());
+        (void)results;
+        FAIL() << "expected cold vector output to be rejected";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), RetrieveError);
+        EXPECT_NE(std::string(err.what()).find("vector field"),
+                  std::string::npos);
+    }
+}
+
+TEST(test_chunk_segment,
+     RejectRemoteVectorOutputAllowsScalarAndDisabledConfig) {
+    constexpr int64_t row_count = 16;
+    constexpr int64_t dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto scalar_id = schema->AddDebugField("scalar", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+
+    {
+        auto segment =
+            CreateColdVectorOutputSegment(schema, vector_id, row_count);
+        auto* chunked =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(chunked, nullptr);
+
+        query::Plan scalar_plan(schema);
+        scalar_plan.target_entries_ = {scalar_id};
+        auto scalar_result = MakeSearchResult({1, 2, 5});
+
+        ScopedRejectRemoteVectorOutput scoped_config(true);
+        ASSERT_NO_THROW(
+            chunked->TestFillTargetEntry(&scalar_plan, scalar_result));
+        ASSERT_EQ(scalar_result.output_fields_data_.count(scalar_id), 1);
+    }
+
+    {
+        auto segment =
+            CreateColdVectorOutputSegment(schema, vector_id, row_count);
+        auto* chunked =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(chunked, nullptr);
+
+        query::Plan vector_plan(schema);
+        vector_plan.target_entries_ = {vector_id};
+        auto vector_result = MakeSearchResult({1, 2, 5});
+
+        ScopedRejectRemoteVectorOutput scoped_config(false);
+        ASSERT_NO_THROW(
+            chunked->TestFillTargetEntry(&vector_plan, vector_result));
+        ASSERT_EQ(vector_result.output_fields_data_.count(vector_id), 1);
+    }
+}
+
 TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
@@ -249,6 +411,24 @@ TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
 
     segment->Reopen(new_schema);
     EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
+// #50783 defense-in-depth: GetFieldIndexMeta must throw (AssertInfo) rather than
+// dereference end() for a missing field; assert() is compiled out under NDEBUG.
+TEST(test_chunk_segment, GetFieldIndexMetaThrowsOnMissingField) {
+    std::map<FieldId, FieldIndexMeta> field_metas;
+    FieldId present(100);
+    field_metas.emplace(
+        present,
+        FieldIndexMeta(
+            present, {{"index_type", "IVF_FLAT"}, {"metric_type", "L2"}}, {}));
+    CollectionIndexMeta meta(1024, std::move(field_metas));
+
+    EXPECT_TRUE(meta.HasField(present));
+    EXPECT_NO_THROW(meta.GetFieldIndexMeta(present));
+    EXPECT_FALSE(meta.HasField(FieldId(present.get() + 1)));
+    EXPECT_THROW(meta.GetFieldIndexMeta(FieldId(present.get() + 1)),
+                 SegcoreError);
 }
 
 TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {

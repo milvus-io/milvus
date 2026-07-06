@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1439,6 +1440,25 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
+// GetCurDBNameFromRequestOrContext returns the database a request actually
+// operates on. It prefers the DbName carried in the request body (which is
+// what downstream handlers execute against, after DatabaseInterceptor has
+// normalized it) and only falls back to the connection-context db / cluster
+// default when the request carries none.
+//
+// Privilege checks MUST use this rather than GetCurDBNameFromContextOrDefault:
+// authorizing against the connection-context db while the operation runs
+// against the request's DbName both falsely denies legitimate access and
+// allows cross-database privilege escalation (see milvus-io/milvus#50678).
+func GetCurDBNameFromRequestOrContext(ctx context.Context, req interface{}) string {
+	if getter, ok := req.(requestutil.DBNameGetter); ok {
+		if dbName := getter.GetDbName(); dbName != "" {
+			return dbName
+		}
+	}
+	return GetCurDBNameFromContextOrDefault(ctx)
+}
+
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
 	dbKey := strings.ToLower(util.HeaderDBName)
 	if dbName != "" {
@@ -2332,6 +2352,15 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 		}
 	}
+	for _, structSchema := range schema.GetStructArrayFields() {
+		if structSchema.GetNullable() {
+			continue
+		}
+		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
+			log.Info(context.TODO(), "no corresponding struct fieldData pass in", mlog.String("structFieldSchema", structSchema.GetName()))
+			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
+		}
+	}
 
 	return nil
 }
@@ -2594,12 +2623,16 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	return partitionNames, nil
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
-	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
+func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
+	if err != nil {
+		return nil, err
+	}
+	insertMsg.HashValues = hashValues
 
 	numChannels := len(channelNames)
 	if numChannels == 0 {
-		return nil
+		return nil, nil
 	}
 
 	numRows := len(insertMsg.HashValues)
@@ -2621,6 +2654,30 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
 	}
 
+	return channel2RowOffsets, nil
+}
+
+func assignChannelsByNamespace(namespace string, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	if len(channelNames) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
+	}
+	channelID := typeutil.HashNamespace2Channels(namespace, channelNames)
+	return assignChannelsByChannel(channelID, channelNames, insertMsg), nil
+}
+
+func assignChannelsByChannel(channelID uint32, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
+	insertMsg.HashValues = make([]uint32, insertMsg.NumRows)
+	for i := range insertMsg.HashValues {
+		insertMsg.HashValues[i] = channelID
+	}
+
+	channelName := channelNames[channelID]
+	channel2RowOffsets := map[string][]int{
+		channelName: make([]int, 0, insertMsg.NRows()),
+	}
+	for i := range insertMsg.HashValues {
+		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], i)
+	}
 	return channel2RowOffsets
 }
 
@@ -2642,6 +2699,16 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 
 	hashedPartitionNames, err := typeutil2.HashKey2Partitions(partitionKeyFieldSchema, keys, partitionNames)
 	return hashedPartitionNames, err
+}
+
+func assignNamespacePartitionKey(ctx context.Context, dbName string, collName string, namespace *string) ([]string, error) {
+	if namespace == nil {
+		return nil, nil
+	}
+
+	return assignPartitionKeys(ctx, dbName, collName, []*planpb.GenericValue{
+		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
+	})
 }
 
 func ErrWithLog(logger *mlog.Logger, msg string, err error) error {
@@ -2683,7 +2750,6 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -2721,12 +2787,122 @@ func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, in
 	return doCheckDynamicFieldData(schema, insertMsg, true)
 }
 
+func namespaceShardingEnabled(schema *schemapb.CollectionSchema) bool {
+	if schema == nil || !schema.GetEnableNamespace() {
+		return false
+	}
+	enabled, err := common.IsNamespaceShardingEnabled(schema.GetProperties()...)
+	return err == nil && enabled
+}
+
+func namespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
+	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartitionKey(schema.GetProperties()...)
+}
+
+func namespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {
+	return namespaceShardingEnabled(schema) && namespacePartitionKeyMode(schema)
+}
+
+func namespacePartitionModeEnabled(schema *schemapb.CollectionSchema) bool {
+	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartition(schema.GetProperties()...)
+}
+
+func namespaceShardingChannelID(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (uint32, bool, error) {
+	if namespace == nil || !namespacePartitionKeyModeEnabled(schema) {
+		return 0, false, nil
+	}
+	if len(channelNames) == 0 {
+		return 0, false, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
+	}
+	return typeutil.HashNamespace2Channels(*namespace, channelNames), true, nil
+}
+
+func namespaceShardingChannel(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (string, bool, error) {
+	channelID, ok, err := namespaceShardingChannelID(schema, namespace, channelNames)
+	if !ok || err != nil {
+		return "", ok, err
+	}
+	return channelNames[channelID], true, nil
+}
+
+func preferredNodeForChannel(preferredNodes map[string]int64, channel string) int64 {
+	if preferredNodes == nil {
+		return 0
+	}
+	preferredNodeID, ok := preferredNodes[channel]
+	if !ok {
+		return 0
+	}
+	return preferredNodeID
+}
+
+func preferredNodeFromConcurrentMap(preferredNodes *typeutil.ConcurrentMap[string, int64], channel string) int64 {
+	if preferredNodes == nil {
+		return 0
+	}
+	preferredNodeID, ok := preferredNodes.Get(channel)
+	if !ok {
+		return 0
+	}
+	return preferredNodeID
+}
+
+func resolveNamespacePartitionName(schema *schemapb.CollectionSchema, namespace *string, partitionName string) (string, bool, error) {
+	if err := common.CheckNamespace(schema, namespace); err != nil {
+		return "", false, err
+	}
+	if !namespacePartitionModeEnabled(schema) {
+		return partitionName, false, nil
+	}
+
+	namespacePartitionName := *namespace
+	if err := validatePartitionTag(namespacePartitionName, true); err != nil {
+		return "", true, err
+	}
+	if partitionName != "" && partitionName != namespacePartitionName {
+		return "", true, merr.WrapErrParameterInvalidMsg("partition name %q mismatches namespace %q", partitionName, namespacePartitionName)
+	}
+	return namespacePartitionName, true, nil
+}
+
+func resolveNamespacePartitionNames(schema *schemapb.CollectionSchema, namespace *string, partitionNames []string) ([]string, bool, error) {
+	if err := common.CheckNamespace(schema, namespace); err != nil {
+		return nil, false, err
+	}
+	if !namespacePartitionModeEnabled(schema) {
+		return partitionNames, false, nil
+	}
+
+	namespacePartitionName := *namespace
+	if err := validatePartitionTag(namespacePartitionName, true); err != nil {
+		return nil, true, err
+	}
+	if len(partitionNames) == 0 {
+		return []string{namespacePartitionName}, true, nil
+	}
+	if len(partitionNames) == 1 && partitionNames[0] == namespacePartitionName {
+		return partitionNames, true, nil
+	}
+	return nil, true, merr.WrapErrParameterInvalidMsg("partition names %v mismatch namespace %q", partitionNames, namespacePartitionName)
+}
+
+func namespaceForPlan(schema *schemapb.CollectionSchema, namespace *string) *string {
+	if namespacePartitionModeEnabled(schema) {
+		return nil
+	}
+	return namespace
+}
+
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	err := common.CheckNamespace(schema, insertMsg.Namespace)
+	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(schema, insertMsg.Namespace, insertMsg.GetPartitionName())
 	if err != nil {
 		return err
 	}
 	if !schema.GetEnableNamespace() {
+		return nil
+	}
+	if namespaceAsPartition {
+		insertMsg.PartitionName = partitionName
 		return nil
 	}
 
@@ -2902,6 +3078,13 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err
+	case *milvuspb.HybridSearchRequest:
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		nq := 0
+		for _, subReq := range r.GetRequests() {
+			nq += int(subReq.GetNq())
+		}
+		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, nq, err
 	case *milvuspb.QueryRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1
@@ -2909,6 +3092,11 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
+		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.RestoreExternalSnapshotRequest:
+		return getDatabaseID(r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.ExportSnapshotRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
@@ -2954,8 +3142,10 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		}
 		return db.dbID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
-		dbName := GetCurDBNameFromContextOrDefault(ctx)
-		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
+		// Use the db the request actually targets (normalized by
+		// DatabaseInterceptor), consistent with the sibling cases, so quota is
+		// accounted against the correct database. See milvus-io/milvus#50678.
+		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
 		if err != nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
@@ -3004,6 +3194,14 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.CreateDatabaseRequest, *milvuspb.DropDatabaseRequest,
 		*milvuspb.AlterDatabaseRequest:
 		return merr.Status(err)
+	case *milvuspb.RestoreExternalSnapshotRequest:
+		return &milvuspb.RestoreExternalSnapshotResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.ExportSnapshotRequest:
+		return &milvuspb.ExportSnapshotResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.FlushRequest:
 		return &milvuspb.FlushResponse{
 			Status: merr.Status(err),
@@ -3099,9 +3297,11 @@ func reconstructStructFieldData(
 		if _, ok := regularFieldIDs[fieldID]; ok {
 			newFieldsData = append(newFieldsData, field)
 			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
-		} else {
-			structFieldID := subFieldToStructMap[fieldID]
+		} else if structFieldID, ok := subFieldToStructMap[fieldID]; ok {
 			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
+		} else {
+			newFieldsData = append(newFieldsData, field)
+			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
 		}
 	}
 

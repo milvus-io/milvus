@@ -76,13 +76,16 @@ func TestOptimizeLikePattern(t *testing.T) {
 		{"%abc%", planpb.OpType_InnerMatch, "abc", true},
 		{"%a\\%b%", planpb.OpType_InnerMatch, "a%b", true},
 		{"%a\\_b%", planpb.OpType_InnerMatch, "a_b", true},
-		{"%a\\\\%", planpb.OpType_InnerMatch, "a\\\\", true},
+		// "%a\\%": '\\' collapses to a single literal '\', so the core is "a\".
+		{"%a\\\\%", planpb.OpType_InnerMatch, "a\\", true},
 		{"%a\t%", planpb.OpType_InnerMatch, "a\t", true},
 		{"%", planpb.OpType_PrefixMatch, "", true},
 		{"%%", planpb.OpType_PrefixMatch, "", true},
 		{"%a%b%", planpb.OpType_Invalid, "", false},
 		{"%a_b%", planpb.OpType_Invalid, "", false},
-		{"%abc\\", planpb.OpType_PostfixMatch, "abc\\", true},
+		// "%abc\\" ends in a dangling backslash -> not optimizable, falls back to
+		// OpType_Match where the C++ matcher raises ExprInvalid.
+		{"%abc\\", planpb.OpType_Invalid, "", false},
 		{"%核心%", planpb.OpType_InnerMatch, "核心", true},
 		{"%核%", planpb.OpType_InnerMatch, "核", true},
 		{"%\u6838%", planpb.OpType_InnerMatch, "核", true},
@@ -107,6 +110,25 @@ func TestOptimizeLikePattern(t *testing.T) {
 		{"a\\%bc", planpb.OpType_Equal, "a%bc", true},
 		{"a\\_bc", planpb.OpType_Equal, "a_bc", true},
 		{"abc_", planpb.OpType_Invalid, "", false},
+
+		// escaped trailing % is a literal, not a wildcard (issue #43864)
+		{"a\\%", planpb.OpType_Equal, "a%", true},
+		{"%abc\\%", planpb.OpType_PostfixMatch, "abc%", true},
+		{"\\%", planpb.OpType_Equal, "%", true},
+
+		// a backslash escapes the next byte, so "\\" collapses to one literal
+		// "\" — matching the C++ canonical escape model (issue #43864)
+		{"\\\\%", planpb.OpType_PrefixMatch, "\\", true},
+		{"a\\\\%", planpb.OpType_PrefixMatch, "a\\", true},
+		{"\\\\", planpb.OpType_Equal, "\\", true},
+		{"a\\\\b", planpb.OpType_Equal, "a\\b", true},
+		{"%a\\\\b%", planpb.OpType_InnerMatch, "a\\b", true},
+		// a backslash escapes any byte, not only wildcards: "\a" -> literal "a"
+		{"\\a", planpb.OpType_Equal, "a", true},
+
+		// a lone trailing backslash has nothing to escape -> not optimizable
+		{"abc\\", planpb.OpType_Invalid, "", false},
+		{"\\", planpb.OpType_Invalid, "", false},
 
 		// null pattern
 		{"", planpb.OpType_Equal, "", true},

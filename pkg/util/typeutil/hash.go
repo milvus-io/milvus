@@ -32,6 +32,25 @@ import (
 
 const substringLengthForCRC = 100
 
+type routingIndex uint32
+
+func (idx routingIndex) String() string {
+	return strconv.FormatUint(uint64(idx), 10)
+}
+
+type int64RoutingHasher struct{}
+
+func (int64RoutingHasher) Hash(key int64) (uint64, error) {
+	value, err := Hash32Int64(key)
+	return uint64(value), err
+}
+
+type stringRoutingHasher struct{}
+
+func (stringRoutingHasher) Hash(key string) (uint64, error) {
+	return uint64(HashString2Uint32(key)), nil
+}
+
 // Hash32Bytes hashing a byte array to uint32
 func Hash32Bytes(b []byte) (uint32, error) {
 	h := murmur3.New32()
@@ -85,58 +104,63 @@ func HashString2LessUint32(v string) uint32 {
 	return crc32.ChecksumIEEE([]byte(subString)) % math.MaxUint32
 }
 
-// HashPK2Channels hash primary keys to channels
-func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) []uint32 {
-	numShard := uint32(len(shardNames))
+func newRoutingIndexValues(targetCount int) []routingIndex {
+	values := make([]routingIndex, 0, targetCount)
+	for idx := 0; idx < targetCount; idx++ {
+		values = append(values, routingIndex(idx))
+	}
+	return values
+}
+
+func locateRoutingIndexes[K comparable](keys []K, targetCount int, hasher common.Hasher[K]) ([]uint32, error) {
+	table := common.NewHashRoutingTable[K](newRoutingIndexValues(targetCount), hasher)
 	var hashValues []uint32
+	for _, key := range keys {
+		idx, err := table.LocateKey(key)
+		if err != nil {
+			return nil, err
+		}
+		hashValues = append(hashValues, uint32(idx))
+	}
+	return hashValues, nil
+}
+
+// HashPK2Channels hash primary keys to channels
+func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) ([]uint32, error) {
+	var hashValues []uint32
+	var err error
 	switch primaryKeys.IdField.(type) {
 	case *schemapb.IDs_IntId:
 		pks := primaryKeys.GetIntId().Data
-		for _, pk := range pks {
-			value, _ := Hash32Int64(pk)
-			hashValues = append(hashValues, value%numShard)
-		}
+		hashValues, err = locateRoutingIndexes(pks, len(shardNames), int64RoutingHasher{})
 	case *schemapb.IDs_StrId:
 		pks := primaryKeys.GetStrId().Data
-		for _, pk := range pks {
-			hash := HashString2Uint32(pk)
-			hashValues = append(hashValues, hash%numShard)
-		}
+		hashValues, err = locateRoutingIndexes(pks, len(shardNames), stringRoutingHasher{})
 	default:
 		// TODO::
 	}
 
-	return hashValues
+	return hashValues, err
 }
 
 // HashKey2Partitions hash partition keys to partitions
 func HashKey2Partitions(keys *schemapb.FieldData, partitionNames []string) ([]uint32, error) {
-	var hashValues []uint32
-	numPartitions := uint32(len(partitionNames))
 	switch keys.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		scalarField := keys.GetScalars()
 		switch scalarField.Data.(type) {
 		case *schemapb.ScalarField_LongData:
 			longKeys := scalarField.GetLongData().Data
-			for _, key := range longKeys {
-				value, _ := Hash32Int64(key)
-				hashValues = append(hashValues, value%numPartitions)
-			}
+			return locateRoutingIndexes(longKeys, len(partitionNames), int64RoutingHasher{})
 		case *schemapb.ScalarField_StringData:
 			stringKeys := scalarField.GetStringData().Data
-			for _, key := range stringKeys {
-				value := HashString2Uint32(key)
-				hashValues = append(hashValues, value%numPartitions)
-			}
+			return locateRoutingIndexes(stringKeys, len(partitionNames), stringRoutingHasher{})
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as partition key Field")
 		}
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("currently not support vector field as partition keys")
 	}
-
-	return hashValues, nil
 }
 
 // this method returns a static sequence for partitions for partiton key mode
@@ -162,4 +186,10 @@ func RearrangePartitionsForPartitionKey(partitions map[string]int64) ([]string, 
 	}
 
 	return partitionNames, partitionIDs, nil
+}
+
+func HashNamespace2Channels(namespace string, shardNames []string) uint32 {
+	numShard := uint32(len(shardNames))
+	hashValue := HashString2Uint32(namespace)
+	return hashValue % numShard
 }

@@ -52,6 +52,24 @@ constexpr int64_t kTestRows = 5;
 constexpr int64_t kVecDim = 4;
 constexpr int64_t kBinaryVecDim = 16;
 
+class ScopedRejectRemoteVectorOutput {
+ public:
+    explicit ScopedRejectRemoteVectorOutput(bool enabled)
+        : old_value_(SegcoreConfig::default_config()
+                         .get_reject_remote_vector_output()) {
+        SegcoreConfig::default_config().set_reject_remote_vector_output(
+            enabled);
+    }
+
+    ~ScopedRejectRemoteVectorOutput() {
+        SegcoreConfig::default_config().set_reject_remote_vector_output(
+            old_value_);
+    }
+
+ private:
+    bool old_value_;
+};
+
 std::string
 BuildDenseVectorBytes(int row, int byte_width, int seed) {
     std::string bytes(byte_width, '\0');
@@ -186,6 +204,47 @@ class MockTakeReader : public milvus_storage::api::Reader {
         return result.table();
     }
 };
+
+struct FunctionOutputExternalInfo {
+    SchemaPtr schema;
+    FieldId output_id;
+    std::shared_ptr<arrow::Table> table;
+};
+
+FunctionOutputExternalInfo
+BuildFunctionOutputExternalInfo() {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+
+    auto pk_id = FieldId(100);
+    auto output_id = FieldId(201);
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               pk_id,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "pk_col"));
+    schema->AddField(FieldMeta(
+        FieldName("score"), output_id, DataType::INT64, false, std::nullopt));
+    schema->set_primary_field_id(pk_id);
+    schema->add_function_output_field_id(output_id);
+    schema->set_external_source("s3://test-bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+
+    arrow::Int64Builder score_builder;
+    EXPECT_TRUE(score_builder.AppendValues({10, 20, 30, 40, 50}).ok());
+    auto score_array = score_builder.Finish().ValueOrDie();
+    auto table = arrow::Table::Make(
+        arrow::schema({arrow::field("201", arrow::int64())}), {score_array});
+
+    return {schema, output_id, table};
+}
 
 // Build a test Arrow Table with kTestRows rows and all supported types.
 std::shared_ptr<arrow::Table>
@@ -1464,6 +1523,30 @@ TEST(ExternalTakeTest, TryTakeForSearch_MultiTypes) {
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(4), 12.0f);
 }
 
+TEST(ExternalTakeTest, TryTakeForSearch_FunctionOutputStoredColumn) {
+    auto info = BuildFunctionOutputExternalInfo();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(info.table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(info.schema);
+    plan->target_entries_ = {info.output_id};
+
+    std::vector<int64_t> offsets = {1, 3};
+    SearchResult results;
+    auto ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results.output_fields_data_.size(), 1);
+    auto& data = results.output_fields_data_.at(info.output_id);
+    EXPECT_EQ(data->field_id(), info.output_id.get());
+    ASSERT_EQ(data->scalars().long_data().data_size(), 2);
+    EXPECT_EQ(data->scalars().long_data().data(0), 20);
+    EXPECT_EQ(data->scalars().long_data().data(1), 40);
+}
+
 TEST(ExternalTakeTest, TryTakeForSearch_NullableVectorUsesCompactData) {
     auto info = BuildExternalSchema();
     auto table = BuildNullableVectorArrowTable();
@@ -2010,6 +2093,31 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_VirtualPK_FillIds) {
     EXPECT_TRUE(found_int32);
 }
 
+TEST(ExternalTakeTest, TryTakeForRetrieve_FunctionOutputStoredColumn) {
+    auto info = BuildFunctionOutputExternalInfo();
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(info.table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.output_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {1, 3};
+    auto ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 1);
+    const auto& data = results->fields_data(0);
+    EXPECT_EQ(data.field_id(), info.output_id.get());
+    ASSERT_EQ(data.scalars().long_data().data_size(), 2);
+    EXPECT_EQ(data.scalars().long_data().data(0), 20);
+    EXPECT_EQ(data.scalars().long_data().data(1), 40);
+}
+
 // ignore_non_pk=true with external PK: PK taken but not added to fields_data
 // (by design: !ignore_non_pk guard prevents AddAllocated for external PK).
 // With virtual PK + ignore_non_pk, the PK is generated and fill_ids populates ids.
@@ -2326,6 +2434,36 @@ TEST(ExternalTakeAccessMode, RetrieveEnabledUsesTake) {
     EXPECT_EQ(results->fields_data(0).scalars().long_data().data_size(), size);
 }
 
+TEST(ExternalTakeAccessMode, RetrieveRejectRemoteVectorOutputReturnsFalse) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {vec_id};
+
+    ScopedRejectRemoteVectorOutput scoped_config(true);
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(results->fields_data_size(), 0);
+}
+
 // use_take_for_output=false: TryTakeForSearch returns false
 TEST(ExternalTakeAccessMode, SearchDisabledReturnsFalse) {
     auto [schema,
@@ -2386,6 +2524,36 @@ TEST(ExternalTakeAccessMode, SearchEnabledUsesTake) {
     EXPECT_EQ(int64_arr->scalars().long_data().data(0), 0);
     EXPECT_EQ(int64_arr->scalars().long_data().data(1), 20000);
     EXPECT_EQ(int64_arr->scalars().long_data().data(2), 40000);
+}
+
+TEST(ExternalTakeAccessMode, SearchRejectRemoteVectorOutputReturnsFalse) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(schema);
+    plan->target_entries_ = {vec_id};
+
+    ScopedRejectRemoteVectorOutput scoped_config(true);
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {0, 2, 4};
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+    EXPECT_FALSE(ok);
+    EXPECT_TRUE(results.output_fields_data_.empty());
 }
 
 // NormalizeVectorArraysToFixedSizeBinary tests are skipped in this file
@@ -2566,6 +2734,73 @@ TEST(SchemaExternalColumns, ResolveColumnFieldIdConsistency) {
     // Each column name should resolve to the correct FieldId
     EXPECT_EQ(schema->ResolveColumnFieldId((*columns)[0]), FieldId(100));
     EXPECT_EQ(schema->ResolveColumnFieldId((*columns)[1]), FieldId(101));
+}
+
+TEST(SchemaExternalColumns, MilvusTableUsesFieldIdPhysicalColumns) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(FieldName("target_pk"),
+                               FieldId(100),
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "source_pk"));
+    schema->AddField(FieldMeta(FieldName("vector"),
+                               FieldId(101),
+                               DataType::VECTOR_FLOAT,
+                               4,
+                               knowhere::metric::L2,
+                               false,
+                               std::nullopt,
+                               "source_vector"));
+    schema->AddField(FieldMeta(FieldName("__virtual_pk__"),
+                               FieldId(102),
+                               DataType::INT64,
+                               false,
+                               std::nullopt));
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+
+    auto columns = schema->GetExternalColumnNames();
+    ASSERT_NE(columns, nullptr);
+    ASSERT_EQ(columns->size(), 2);
+    EXPECT_EQ((*columns)[0], "100");
+    EXPECT_EQ((*columns)[1], "101");
+    EXPECT_EQ(schema->ResolveColumnFieldId("100"), FieldId(100));
+    EXPECT_EQ(schema->ResolveColumnFieldId("101"), FieldId(101));
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(100)), "100");
+}
+
+TEST(SchemaExternalColumns, MilvusTableSeparatesSourceAndStoredFields) {
+    auto schema = std::make_shared<Schema>();
+    auto source_field_id = FieldId(100);
+    auto function_output_id = FieldId(201);
+    schema->AddField(FieldMeta(FieldName("target_pk"),
+                               source_field_id,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "source_pk"));
+    schema->AddField(FieldMeta(FieldName("bm25"),
+                               function_output_id,
+                               DataType::INT64,
+                               false,
+                               std::nullopt));
+    schema->add_function_output_field_id(function_output_id);
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+
+    EXPECT_TRUE(schema->IsExternalDataField(source_field_id));
+    EXPECT_FALSE(schema->IsExternalDataField(function_output_id));
+    EXPECT_TRUE(schema->IsExternalManifestStoredField(source_field_id));
+    EXPECT_TRUE(schema->IsExternalManifestStoredField(function_output_id));
+    EXPECT_EQ(schema->GetPhysicalColumnName(source_field_id), "100");
+    EXPECT_EQ(schema->GetPhysicalColumnName(function_output_id), "201");
+
+    auto columns = schema->GetExternalColumnNames();
+    ASSERT_NE(columns, nullptr);
+    ASSERT_EQ(columns->size(), 2);
+    EXPECT_EQ((*columns)[0], "100");
+    EXPECT_EQ((*columns)[1], "201");
 }
 
 // ---------------------------------------------------------------------------

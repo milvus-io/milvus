@@ -189,6 +189,111 @@ func TestValidateResourceGroupName(t *testing.T) {
 	}
 }
 
+func TestNamespacePartitionRoutingHelpers(t *testing.T) {
+	namespace := "tenant_partition"
+	partitionModeSchema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+	}
+	partitionKeyModeSchema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+		},
+	}
+
+	t.Run("single partition name", func(t *testing.T) {
+		partitionName, usedNamespacePartition, err := resolveNamespacePartitionName(partitionModeSchema, &namespace, "")
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, namespace, partitionName)
+
+		partitionName, usedNamespacePartition, err = resolveNamespacePartitionName(partitionModeSchema, &namespace, namespace)
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, namespace, partitionName)
+
+		_, _, err = resolveNamespacePartitionName(partitionModeSchema, &namespace, "other_partition")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		emptyNamespace := ""
+		_, _, err = resolveNamespacePartitionName(partitionModeSchema, &emptyNamespace, "")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("partition name list", func(t *testing.T) {
+		partitionNames, usedNamespacePartition, err := resolveNamespacePartitionNames(partitionModeSchema, &namespace, nil)
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, []string{namespace}, partitionNames)
+
+		partitionNames, usedNamespacePartition, err = resolveNamespacePartitionNames(partitionModeSchema, &namespace, []string{namespace})
+		require.NoError(t, err)
+		assert.True(t, usedNamespacePartition)
+		assert.Equal(t, []string{namespace}, partitionNames)
+
+		_, _, err = resolveNamespacePartitionNames(partitionModeSchema, &namespace, []string{"other_partition"})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		_, _, err = resolveNamespacePartitionNames(partitionModeSchema, &namespace, []string{namespace, "other_partition"})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("default mode keeps namespace as plan filter", func(t *testing.T) {
+		partitionName, usedNamespacePartition, err := resolveNamespacePartitionName(partitionKeyModeSchema, &namespace, "")
+		require.NoError(t, err)
+		assert.False(t, usedNamespacePartition)
+		assert.Empty(t, partitionName)
+
+		partitionNames, usedNamespacePartition, err := resolveNamespacePartitionNames(partitionKeyModeSchema, &namespace, nil)
+		require.NoError(t, err)
+		assert.False(t, usedNamespacePartition)
+		assert.Empty(t, partitionNames)
+
+		assert.Same(t, &namespace, namespaceForPlan(partitionKeyModeSchema, &namespace))
+		assert.Nil(t, namespaceForPlan(partitionModeSchema, &namespace))
+	})
+}
+
+func TestAddNamespaceDataPartitionMode(t *testing.T) {
+	namespace := "tenant_partition"
+	schema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+	}
+	insertMsg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			Namespace: &namespace,
+			NumRows:   3,
+		},
+	}
+
+	err := addNamespaceData(schema, insertMsg)
+	require.NoError(t, err)
+	assert.Equal(t, namespace, insertMsg.GetPartitionName())
+	assert.Empty(t, insertMsg.GetFieldsData())
+}
+
+func TestConvertHybridSearchToSearchCopiesNamespace(t *testing.T) {
+	namespace := "tenant_partition"
+	req := &milvuspb.HybridSearchRequest{
+		DbName:         "default",
+		CollectionName: "coll",
+		Namespace:      &namespace,
+		Requests: []*milvuspb.SearchRequest{
+			{Dsl: "pk > 0"},
+		},
+	}
+
+	searchReq := convertHybridSearchToSearch(req)
+	require.NotNil(t, searchReq.Namespace)
+	assert.Equal(t, namespace, searchReq.GetNamespace())
+}
+
 func TestValidateDatabaseName(t *testing.T) {
 	assert.Nil(t, ValidateDatabaseName("dbname"))
 	assert.Nil(t, ValidateDatabaseName("_123abc"))
@@ -4613,6 +4718,71 @@ func Test_reconstructStructFieldData(t *testing.T) {
 		// Should not modify anything for count(*) query
 		assert.Equal(t, originalFieldsData, resultFieldsData)
 		assert.Equal(t, originalOutputFields, resultOutputFields)
+	})
+
+	t.Run("group by with count(*) should preserve aggregate field", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				FieldId:   100,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "count(*)",
+				FieldId:   0,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{3, 4}},
+						},
+					},
+				},
+			},
+		}
+		outputFields := []string{"id", "count(*)"}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "test_struct[sub_field]",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
+
+		assert.Len(t, resultFieldsData, 2)
+		assert.Equal(t, "id", resultFieldsData[0].FieldName)
+		assert.Equal(t, int64(100), resultFieldsData[0].FieldId)
+		assert.Equal(t, "count(*)", resultFieldsData[1].FieldName)
+		assert.Equal(t, int64(0), resultFieldsData[1].FieldId)
+		assert.Equal(t, []string{"id", "count(*)"}, resultOutputFields)
+		assert.Equal(t, []int64{3, 4}, resultFieldsData[1].GetScalars().GetLongData().GetData())
 	})
 
 	t.Run("struct field query - should reconstruct struct field", func(t *testing.T) {

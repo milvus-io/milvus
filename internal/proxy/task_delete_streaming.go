@@ -6,6 +6,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -26,6 +27,17 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	}
 
 	dt.tr = timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
+
+	var collectionSchema *schemapb.CollectionSchema
+	if dt.req.Namespace != nil || hookutil.IsClusterEncryptionEnabled() {
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+		if err != nil {
+			mlog.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", dt.req.GetCollectionName()), mlog.Err(err))
+			return err
+		}
+		collectionSchema = schema.CollectionSchema
+	}
+
 	result, numRows, err := repackDeleteMsgByHash(
 		ctx, dt.primaryKeys,
 		dt.vChannels, dt.idAllocator,
@@ -33,6 +45,8 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		dt.req.GetCollectionName(),
 		dt.partitionID, dt.req.GetPartitionName(),
 		dt.req.GetDbName(),
+		dt.req.Namespace,
+		collectionSchema,
 	)
 	if err != nil {
 		return err
@@ -40,13 +54,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
-		schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-		if err != nil {
-			mlog.Warn(ctx, "get collection schema from global meta cache failed", mlog.String("collectionName", dt.req.GetCollectionName()), mlog.Err(err))
-			return err
-		}
-
-		ez = hookutil.GetEzByCollProperties(schema.GetProperties(), dt.collectionID).AsMessageConfig()
+		ez = hookutil.GetEzByCollProperties(collectionSchema.GetProperties(), dt.collectionID).AsMessageConfig()
 	}
 
 	var msgs []message.MutableMessage

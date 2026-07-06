@@ -116,6 +116,25 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                const char* external_spec);
 
 /**
+ * @brief Creates a new packed FFI reader from explicit column groups.
+ *
+ * This is used when the caller already has the physical file layout, such as
+ * StorageV3 deltalogs from a manifest. The reader uses the same property
+ * injection and CMEK path as NewPackedFFIReaderWithManifest.
+ */
+CStatus
+NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
+                                   struct ArrowSchema* schema,
+                                   char** needed_columns,
+                                   int64_t needed_columns_size,
+                                   CFFIPackedReader* c_loon_reader,
+                                   CStorageConfig c_storage_config,
+                                   CPluginContext* c_plugin_context,
+                                   int64_t collection_id,
+                                   const char* external_source,
+                                   const char* external_spec);
+
+/**
  * @brief Gets an ArrowArrayStream from the FFI reader for streaming data access.
  *
  * This function returns an ArrowArrayStream that can be used to iterate through

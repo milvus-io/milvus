@@ -392,6 +392,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	loadingResourceFactor := C.float(params.QueryNodeCfg.TieredLoadingResourceFactor.GetAsFloat())
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
+	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
@@ -409,7 +410,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
 		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath,
-		loadingTimeoutMs, warmupLoadingTimeoutMs, prefetchPoolThreads)
+		loadingTimeoutMs, warmupLoadingTimeoutMs, rejectRemoteVectorOutput, prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
@@ -453,11 +454,13 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
 		warmupLoadingTimeoutMs,
 		storageUsageTrackingEnabled,
+		rejectRemoteVectorOutput,
 		scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
@@ -520,12 +523,8 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().CommonCfg.StreamBudgetRatio.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			ratio, err := strconv.ParseFloat(newValue, 64)
-			if err != nil {
-				return err
-			}
-			UpdateStreamBudgetRatio(ratio)
+		paramtable.Get().CommonCfg.LoadTransientBudgetBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			UpdateLoadTransientBudgetBytes(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
 			return nil
 		})
 
@@ -696,6 +695,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.StorageUsageTrackingEnabled.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredRejectRemoteVectorOutput.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)

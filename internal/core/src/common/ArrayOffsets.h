@@ -100,6 +100,21 @@ class ArrayOffsetsSealed : public IArrayOffsets {
                    "row_to_element_start must have at least one element");
     }
 
+    // Build an all-zeros offsets (every row is an empty array) and charge its
+    // heap cost to the caching layer, mirroring BuildFromSegment so the
+    // destructor's RefundLoadedResource is balanced. Used when a scalar or
+    // struct ARRAY field is materialized for old sealed rows (schema evolution)
+    // without going through the normal offsets-build path.
+    static std::shared_ptr<ArrayOffsetsSealed>
+    BuildAllZeros(int64_t row_count) {
+        auto result = std::make_shared<ArrayOffsetsSealed>(
+            std::vector<int32_t>(row_count + 1, 0));
+        result->resource_size_ = 4 * (row_count + 1);
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            cachinglayer::ResourceUsage{result->resource_size_, 0});
+        return result;
+    }
+
     ~ArrayOffsetsSealed() {
         cachinglayer::Manager::GetInstance().RefundLoadedResource(
             {resource_size_, 0});

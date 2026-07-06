@@ -251,7 +251,7 @@ func convertLegacyParams(rankParams []*commonpb.KeyValuePair) (*schemapb.Functio
 //     Merge(Weighted) → Sort/GroupBy → [RoundDecimal] → Select
 //
 //  3. Decay:
-//     Merge(Max|Sum|Avg) → Map(DecayExpr→_decay_score) → Map(ScoreCombine: $score*_decay_score→$score) → Sort/GroupBy → [RoundDecimal] → Select
+//     Merge(Max|Sum|Avg) → Map(DecayExpr→_decay_score) → Map(NumCombine: $score*_decay_score→$score) → Sort/GroupBy → [RoundDecimal] → Select
 //
 //  4. Model:
 //     Merge(Max) → Map(RerankModelExpr) → Sort/GroupBy → [RoundDecimal] → Select
@@ -331,7 +331,7 @@ func buildRerankChainInternal(
 		fc.Add(groupByOp)
 	} else {
 		// Non-grouping: sort by score and apply limit
-		fc.Sort(types.ScoreFieldName, sortDescending)
+		fc.Sort(types.ScoreFieldName, sortDescending, types.IDFieldName)
 		if searchParams.Limit > 0 {
 			fc.LimitWithOffset(searchParams.Limit, searchParams.Offset)
 		}
@@ -491,7 +491,7 @@ func buildDecayChain(fc *FuncChain, collSchema *schemapb.CollectionSchema, funcS
 		WithForceDescending(true))
 
 	// DecayExpr only computes the decay factor (0~1) into an intermediate column,
-	// then ScoreCombineExpr multiplies it with $score.
+	// then NumCombineExpr multiplies it with $score.
 	decayScoreCol := "_decay_score"
 
 	decayExpr, err := expr.NewDecayExpr(
@@ -509,7 +509,7 @@ func buildDecayChain(fc *FuncChain, collSchema *schemapb.CollectionSchema, funcS
 		[]string{inputField},
 		[]string{decayScoreCol})
 
-	combineExpr, err := expr.NewScoreCombineExpr(expr.ModeMultiply, nil, expr.WithNullPolicy(expr.ScoreCombineNullAsZero))
+	combineExpr, err := expr.NewNumCombineExpr(expr.ModeMultiply, nil, expr.WithNullPolicy(expr.NumCombineNullAsZero))
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("rerank_builder: %v", err)
 	}

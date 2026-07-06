@@ -249,6 +249,24 @@ func FreeProperties(props *C.LoonProperties) {
 	}
 }
 
+// MilvusTablePrimaryKeyMode describes whether a milvus-table target segment
+// keeps source primary keys or uses target-generated virtual primary keys.
+type MilvusTablePrimaryKeyMode int
+
+const (
+	// MilvusTablePrimaryKeyModeUnspecified keeps the legacy real-PK behavior for
+	// callers that do not know the collection schema.
+	MilvusTablePrimaryKeyModeUnspecified MilvusTablePrimaryKeyMode = iota
+	// MilvusTablePrimaryKeyModeExternal means source primary keys are preserved.
+	MilvusTablePrimaryKeyModeExternal
+	// MilvusTablePrimaryKeyModeVirtual means DataNode generates virtual PKs.
+	MilvusTablePrimaryKeyModeVirtual
+)
+
+func (m MilvusTablePrimaryKeyMode) usesExternalPrimaryKey() bool {
+	return m != MilvusTablePrimaryKeyModeVirtual
+}
+
 // ExternalSpecContext carries the raw external-table inputs that C++
 // InjectExternalSpecProperties needs to derive both extfs.{collectionID}.*
 // (storage layer) and format-layer properties (e.g. iceberg.snapshot_id)
@@ -259,6 +277,11 @@ type ExternalSpecContext struct {
 	CollectionID int64
 	Source       string
 	Spec         string // raw JSON; C++ InjectExternalSpecProperties parses
+
+	// MilvusTablePKMode is only used by the milvus-table format. The zero
+	// value keeps the legacy real-PK behavior for direct storage helpers; callers
+	// with a collection schema should set this explicitly.
+	MilvusTablePKMode MilvusTablePrimaryKeyMode
 }
 
 // injectExternalSpecProperties appends every external_spec-derived property

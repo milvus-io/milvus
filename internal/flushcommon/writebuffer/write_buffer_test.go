@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -419,6 +420,147 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		wb.EvictBuffer(GetOldestBufferPolicy(1))
 	})
 
+	s.Run("sync_submit_outside_lock", func() {
+		buf, err := newSegmentBuffer(4, s.collSchema)
+		s.Require().NoError(err)
+		buf.insertBuffer.startPos = &msgpb.MsgPosition{Timestamp: 440}
+		buf.deltaBuffer.startPos = &msgpb.MsgPosition{Timestamp: 400}
+
+		wb.mut.Lock()
+		wb.buffers[4] = buf
+		wb.checkpoint = &msgpb.MsgPosition{Timestamp: 1000}
+		wb.mut.Unlock()
+
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 4,
+		}, nil, nil)
+		s.metacache.EXPECT().GetSegmentByID(int64(4)).Return(segment, true)
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+
+		submitEntered := make(chan struct{})
+		releaseSubmit := make(chan struct{})
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
+			return task != nil && task.SegmentID() == 4
+		}), mock.Anything).RunAndReturn(
+			func(context.Context, syncmgr.Task, ...func(error) error) (*conc.Future[struct{}], error) {
+				close(submitEntered)
+				<-releaseSubmit
+				return conc.Go[struct{}](func() (struct{}, error) {
+					return struct{}{}, nil
+				}), nil
+			},
+		).Once()
+
+		evictDone := make(chan struct{})
+		go func() {
+			defer close(evictDone)
+			wb.EvictBuffer(GetOldestBufferPolicy(1))
+		}()
+
+		select {
+		case <-submitEntered:
+		case <-time.After(3 * time.Second):
+			s.FailNow("SyncData should be called before checking the write buffer lock")
+		}
+
+		readDone := make(chan struct{})
+		go func() {
+			defer close(readDone)
+			_ = wb.MemorySize()
+		}()
+
+		select {
+		case <-readDone:
+		case <-time.After(3 * time.Second):
+			s.FailNow("write buffer read lock should not be blocked by SyncData submit")
+		}
+
+		close(releaseSubmit)
+		select {
+		case <-evictDone:
+		case <-time.After(3 * time.Second):
+			s.FailNow("EvictBuffer should finish after SyncData submit is released")
+		}
+	})
+
+	s.Run("drop_close_sync_submit_outside_lock", func() {
+		syncMgr := syncmgr.NewMockSyncManager(s.T())
+		metaCache := metacache.NewMockMetaCache(s.T())
+		metaWriter := syncmgr.NewMockMetaWriter(s.T())
+		metaCache.EXPECT().GetSchema(mock.Anything).Return(s.collSchema).Maybe()
+		metaCache.EXPECT().Collection().Return(s.collID).Maybe()
+
+		closeWB, err := newWriteBufferBase(s.channelName, metaCache, syncMgr, &writeBufferOption{
+			metaWriter: metaWriter,
+			pkStatsFactory: func(vchannel *datapb.SegmentInfo) pkoracle.PkStat {
+				return pkoracle.NewBloomFilterSet()
+			},
+		})
+		s.Require().NoError(err)
+
+		buf, err := newSegmentBuffer(5, s.collSchema)
+		s.Require().NoError(err)
+		buf.insertBuffer.startPos = &msgpb.MsgPosition{Timestamp: 540}
+		buf.deltaBuffer.startPos = &msgpb.MsgPosition{Timestamp: 500}
+
+		closeWB.mut.Lock()
+		closeWB.buffers[5] = buf
+		closeWB.checkpoint = &msgpb.MsgPosition{Timestamp: 1000}
+		closeWB.mut.Unlock()
+
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 5,
+		}, nil, nil)
+		metaCache.EXPECT().GetSegmentByID(int64(5)).Return(segment, true)
+		metaCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+
+		submitEntered := make(chan struct{})
+		releaseSubmit := make(chan struct{})
+		syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
+			return task != nil && task.SegmentID() == 5 && task.IsDrop()
+		}), mock.Anything).RunAndReturn(
+			func(context.Context, syncmgr.Task, ...func(error) error) (*conc.Future[struct{}], error) {
+				close(submitEntered)
+				<-releaseSubmit
+				return conc.Go[struct{}](func() (struct{}, error) {
+					return struct{}{}, nil
+				}), nil
+			},
+		).Once()
+		metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).Return(nil).Once()
+
+		closeDone := make(chan struct{})
+		go func() {
+			defer close(closeDone)
+			closeWB.Close(context.Background(), true)
+		}()
+
+		select {
+		case <-submitEntered:
+		case <-time.After(3 * time.Second):
+			s.FailNow("SyncData should be called before checking the write buffer lock")
+		}
+
+		readDone := make(chan struct{})
+		go func() {
+			defer close(readDone)
+			_ = closeWB.MemorySize()
+		}()
+
+		select {
+		case <-readDone:
+		case <-time.After(3 * time.Second):
+			s.FailNow("write buffer read lock should not be blocked by Close SyncData submit")
+		}
+
+		close(releaseSubmit)
+		select {
+		case <-closeDone:
+		case <-time.After(3 * time.Second):
+			s.FailNow("Close should finish after SyncData submit is released")
+		}
+	})
+
 	s.Run("await_outside_lock", func() {
 		mockAllocator := allocator.NewMockAllocator(s.T())
 		var nextSegmentID atomic.Int64
@@ -557,6 +699,15 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 		s.True(selected)
 	})
 
+	s.Run("non_retryable_failure", func() {
+		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1007, &growingSourceProgress{
+			segmentID:           1007,
+			pendingFlush:        true,
+			nonRetryableFailure: true,
+		})
+		s.False(selected)
+	})
+
 	s.Run("sealed_segment", func() {
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:    1002,
@@ -622,6 +773,39 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 		})
 		s.True(selected)
 	})
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceLayoutMismatch() {
+	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column count mismatch at index 0: existing has 21 columns, but appended has 44 columns: segcore error[segcoreCode=2001]")))
+	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")))
+	s.False(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: mock transient error")))
+	s.False(isGrowingSourceLayoutMismatch(nil))
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceProgressSyncableSkipsNonRetryableFailure() {
+	syncable, retry := s.wb.growingSourceProgressSyncable(1001, &growingSourceProgress{
+		segmentID:           1001,
+		nonRetryableFailure: true,
+		batches: []growingSourceProgressBatch{
+			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
+		},
+	}, false, true)
+	s.False(syncable)
+	s.False(retry)
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceProgressRetrySkipsNonRetryableFailure() {
+	s.wb.growingSourceProgress[1001] = &growingSourceProgress{
+		segmentID:           1001,
+		nonRetryableFailure: true,
+		batches: []growingSourceProgressBatch{
+			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
+		},
+	}
+
+	segments, retry := s.wb.getGrowingSourceSegmentsToRetry()
+	s.Empty(segments)
+	s.False(retry)
 }
 
 func (s *WriteBufferSuite) TestDropPartitions() {
@@ -872,10 +1056,7 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 		},
 	}
 
-	errCh := function.AllocFunctionRunners(1, "v1", collSchema)
-	if errCh != nil {
-		assert.NoError(t, <-errCh)
-	}
+	assert.NoError(t, function.AllocFunctionRunners(1, "v1", collSchema))
 	_, err := function.FillFunctionData(context.Background(), 1, collSchema, insertMsg.InsertRequest)
 	assert.NoError(t, err)
 	defer function.ReleaseFunctionRunners(1, "v1")

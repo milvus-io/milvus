@@ -596,7 +596,7 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = newL0CompactionTask(t, c.allocator, c.meta)
 	case datapb.CompactionType_ClusteringCompaction:
-		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler)
+		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler, c.ievm)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
 		task = newBumpSchemaVersionTask(t, c.allocator, c.meta, c.ievm)
 	default:

@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
@@ -72,6 +73,21 @@ func (s *RoundDecimalExprTestSuite) TestNewRoundDecimalExpr_InvalidDecimals() {
 
 	_, err = NewRoundDecimalExpr(7)
 	s.Error(err)
+}
+
+func (s *RoundDecimalExprTestSuite) TestNewRoundDecimalExprFromParams() {
+	expr, err := NewRoundDecimalExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{"decimal": intParam(2)}})
+	s.Require().NoError(err)
+	s.Equal(RoundDecimalFuncName, expr.Name())
+
+	_, err = NewRoundDecimalExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{}})
+	s.ErrorContains(err, "missing required parameter")
+
+	_, err = NewRoundDecimalExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{"decimal": doubleParam(1.5)}})
+	s.ErrorContains(err, "must be an integer")
+
+	_, err = NewRoundDecimalExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: map[string]*schemapb.FunctionParamValue{"decimal": intParam(7)}})
+	s.ErrorContains(err, "decimal must be in range")
 }
 
 func (s *RoundDecimalExprTestSuite) TestExecute_RoundTo2Decimals() {

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -49,6 +50,7 @@ import (
 
 type mixCompactionTask struct {
 	binlogIO    io.BinlogIO
+	cm          storage.ChunkManager
 	currentTime time.Time
 
 	plan *datapb.CompactionPlan
@@ -72,7 +74,8 @@ type mixCompactionTask struct {
 	ttlFieldID int64
 
 	// lobContext holds LOB compaction strategy decisions for TEXT columns
-	lobContext *compaction.LOBCompactionContext
+	lobContext            *compaction.LOBCompactionContext
+	lobContextInitialized bool
 
 	// estimatedOutputSegmentCount is the estimated number of output segments
 	// computed during preCompact, used for LOB compaction strategy decision
@@ -84,6 +87,7 @@ var _ Compactor = (*mixCompactionTask)(nil)
 func NewMixCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
+	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
 	sortByFieldIDs []int64,
@@ -93,6 +97,7 @@ func NewMixCompactionTask(
 		ctx:              ctx1,
 		cancel:           cancel,
 		binlogIO:         binlogIO,
+		cm:               cm,
 		plan:             plan,
 		tr:               timerecord.NewTimeRecorder("mergeSplit compaction"),
 		currentTime:      time.Now(),
@@ -150,31 +155,24 @@ func (t *mixCompactionTask) preCompact() error {
 	return nil
 }
 
-func (t *mixCompactionTask) mergeSplit(
-	ctx context.Context,
-) ([]*datapb.CompactionSegment, error) {
-	_ = t.tr.RecordSpan()
-
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "MergeSplit")
-	defer span.End()
-
-	if err := t.initLOBCompactionContext(ctx); err != nil {
-		return nil, err
+func (t *mixCompactionTask) ensureLOBCompactionContext(ctx context.Context) error {
+	if t.lobContextInitialized {
+		return nil
 	}
+	if err := t.initLOBCompactionContext(ctx); err != nil {
+		return err
+	}
+	t.lobContextInitialized = true
+	return nil
+}
 
-	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
-	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
-	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-
-	writerSchema := t.plan.GetSchema()
-
-	// build writer options
+func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.RwOption {
 	writerOpts := []storage.RwOption{
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
 
-	// add TEXT column configs for REWRITE_ALL mode
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
 		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
 		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
@@ -187,11 +185,37 @@ func (t *mixCompactionTask) mergeSplit(
 		)
 		if len(textColumnConfigs) > 0 {
 			writerOpts = append(writerOpts, storage.WithTextColumnConfigs(textColumnConfigs))
-			mlog.Info(context.TODO(), "TEXT column REWRITE_ALL mode enabled",
+			mlog.Info(ctx, "TEXT column REWRITE_ALL mode enabled",
 				mlog.Int("rewriteFieldCount", len(textColumnConfigs)),
 			)
 		}
 	}
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
+	}
+
+	return writerOpts
+}
+
+func (t *mixCompactionTask) mergeSplit(
+	ctx context.Context,
+) ([]*datapb.CompactionSegment, error) {
+	_ = t.tr.RecordSpan()
+
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "MergeSplit")
+	defer span.End()
+
+	if err := t.ensureLOBCompactionContext(ctx); err != nil {
+		return nil, err
+	}
+
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
+	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
+	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
+
+	writerSchema := t.plan.GetSchema()
+
+	writerOpts := t.buildWriterOptions(ctx)
 
 	mWriter, err := NewMultiSegmentWriter(ctx,
 		t.binlogIO, compAlloc, t.plan.GetMaxSize(), writerSchema,
@@ -438,6 +462,10 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
 	}
 
+	if err := t.ensureLOBCompactionContext(ctx); err != nil {
+		return nil, err
+	}
+
 	sortMergeAppicable := t.compactionParams.UseMergeSort
 	if sortMergeAppicable {
 		for _, segment := range t.plan.GetSegmentBinlogs() {
@@ -457,8 +485,10 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	var err error
 	if sortMergeAppicable {
 		mlog.Info(context.TODO(), "compact by merge sort")
+		writerOpts := t.buildWriterOptions(ctx)
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
+			writerOpts, t.lobContext, t.sortByFieldIDs)
 		if err != nil {
 			mlog.Warn(context.TODO(), "compact wrong, fail to merge sort segments", mlog.Err(err))
 			return nil, err
@@ -480,6 +510,57 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if err := t.applyLOBCompaction(ctx, res); err != nil {
 		return nil, err
 	}
+
+	// Build text index inline for each output segment so the segment arrives at
+	// QueryNode with TextStatsLogs populated, avoiding the CGO_LOAD CreateTextIndex
+	// fallback at load time. Mirrors sortCompaction.
+	//
+	// Only sorted outputs get an inline text index. Unsorted mix-compaction outputs
+	// (from mergeSplit) are interim: a later sortcompaction will re-emit them as
+	// sorted and build the text index inline at that step. Building here would be
+	// discarded work. For non-external collections, stats_inspector also skips
+	// unsorted segments in its TextIndexJob filter, so the index would never be
+	// promoted to text_stats_logs in datacoord either. External collections are the
+	// exception (allowUnsorted = collection.IsExternal() in stats_inspector.go),
+	// where the async TextIndexJob still covers unsorted segments as a fallback.
+	textIndexStart := time.Now()
+	for _, resultSegment := range res {
+		if resultSegment.GetNumOfRows() == 0 {
+			continue
+		}
+		if !resultSegment.GetIsSorted() && !resultSegment.GetIsSortedByNamespace() {
+			continue
+		}
+		textStatsLogs, err := t.createTextIndex(ctx, resultSegment)
+		if err != nil {
+			mlog.Warn(context.TODO(), "failed to create text indexes",
+				mlog.Int64("targetSegmentID", resultSegment.GetSegmentID()), mlog.Err(err))
+			return nil, err
+		}
+		// For V3 segments, register text index stats in manifest.
+		// TextStatsLogs already carries full object keys for mixed-version compatibility;
+		// AddStatsToManifest stores the manifest-relative representation at commit time.
+		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
+			statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
+			newManifest, mErr := packed.AddStatsToManifest(
+				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
+			if mErr != nil {
+				mlog.Warn(context.TODO(), "failed to add text index stats to manifest",
+					mlog.Int64("targetSegmentID", resultSegment.GetSegmentID()), mlog.Err(mErr))
+				return nil, mErr
+			}
+			resultSegment.Manifest = newManifest
+			// Dual-write: V3 segments store text index stats in both manifest and segment metadata.
+			// Manifest is the source of truth at load time; metadata acts as a placeholder so that
+			// needDoTextIndex() in stats_inspector.go won't trigger a redundant TextIndexJob.
+		}
+		resultSegment.TextStatsLogs = textStatsLogs
+	}
+	createTextIndexCost := time.Since(textIndexStart)
+	metrics.DataNodeCompactionStageLatency.
+		WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String(), "create_text_index").
+		Observe(float64(createTextIndexCost.Milliseconds()))
+	mlog.Info(context.TODO(), "compact create text index done", mlog.Duration("createTextIndexCost", createTextIndexCost))
 
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,
@@ -541,6 +622,16 @@ func GetBM25FieldIDs(coll *schemapb.CollectionSchema) []int64 {
 //   - REUSE_ALL: all TEXT fields reuse existing LOB files, merge LOB file references
 //   - REWRITE_ALL: all TEXT fields are rewritten, LOB files handled by segment writer
 //
+// createTextIndex delegates to the shared package-level createTextIndex helper,
+// sourcing collection/partition from the task and segment-specific fields from the
+// output segment. Mirrors sortCompactionTask.createTextIndex.
+func (t *mixCompactionTask) createTextIndex(ctx context.Context,
+	segment *datapb.CompactionSegment,
+) (map[int64]*datapb.TextIndexStats, error) {
+	return createTextIndex(ctx, t.cm, t.plan, t.compactionParams, segment.GetStorageVersion(),
+		t.collectionID, t.partitionID, segment.GetSegmentID(), t.GetPlanID(), segment)
+}
+
 // NOTE: SetSegmentRowStats() must be called during compaction iteration to track deleted rows per segment.
 func (t *mixCompactionTask) applyLOBCompaction(ctx context.Context, outputSegments []*datapb.CompactionSegment) error {
 	if t.lobContext == nil {
@@ -635,7 +726,6 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	}
 	if !hasLobFiles {
 		mlog.Info(context.TODO(), "no LOB files found in source segments")
-		return nil
 	}
 
 	// create LOB compaction context and compute strategies

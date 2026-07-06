@@ -38,7 +38,53 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// IsRetriableWatchErr reports whether an etcd watch error can be recovered by
+// re-establishing the watch.
+//
+// It returns true for:
+//   - ErrCompacted: the watched revision has been compacted; re-watch from a
+//     fresh revision (pre-existing behavior).
+//   - auth-token errors (ErrInvalidAuthToken, ErrUserEmpty, ErrAuthOldRevision):
+//     with etcd auth enabled, the auth token held by a client can be
+//     invalidated server-side (the default "simple" token is GC'd after idle
+//     TTL, is member-local, and is lost on member restart). A long-idle standby
+//     coordinator hits this on promotion. clientv3 treats the resulting
+//     Unauthenticated error on an already-established watch stream as a halt
+//     error (see isHaltErr) and tears the stream down WITHOUT refreshing the
+//     token, so the watch owner must re-watch. Re-watching issues a unary
+//     request first, which goes through clientv3's unary retry interceptor and
+//     refreshes the auth token, so the new watch stream recovers.
+//
+// Genuine authorization failures (permission denied, bad credentials) carry
+// different codes (PermissionDenied, InvalidArgument, FailedPrecondition) and
+// are deliberately NOT retriable. We match the etcd sentinels via errors.Is
+// rather than the raw gRPC Unauthenticated code: clientv3 maps watch errors
+// back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
+// source of Unauthenticated, so matching the sentinel is both sufficient and
+// narrower than trusting the code.
+//
+// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
+// genuinely persistent failure does not loop forever.
+func IsRetriableWatchErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, rpctypes.ErrCompacted) ||
+		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
+		errors.Is(err, rpctypes.ErrUserEmpty) ||
+		errors.Is(err, rpctypes.ErrAuthOldRevision)
+}
+
 type ClientOption func(*clientv3.Config)
+
+// WithDialTimeout overrides the etcd client dial timeout. A non-positive value keeps the default.
+func WithDialTimeout(dialTimeout time.Duration) ClientOption {
+	return func(cfg *clientv3.Config) {
+		if dialTimeout > 0 {
+			cfg.DialTimeout = dialTimeout
+		}
+	}
+}
 
 // WithDialKeepAlive configures gRPC keepalive and autosync behaviors for the etcd client.
 func WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout time.Duration) ClientOption {

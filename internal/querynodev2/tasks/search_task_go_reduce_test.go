@@ -1058,6 +1058,84 @@ func TestExecuteMergedSubTasks_MixedTopK(t *testing.T) {
 		subTaskTopks, subTaskNqs, maxTopK)
 }
 
+func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) {
+	paramtable.Init()
+
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer pool.AssertSize(t, 0)
+
+	// Simulate three per-segment result sets produced after the delegator reduced
+	// plan topK to 2. The worker can still assemble 5 rows from all segment
+	// candidates, matching the original request topK.
+	segDFs := []*chain.DataFrame{
+		buildTestDF(pool, [][]int64{{1, 2}}, [][]float32{{0.99, 0.98}}),
+		buildTestDF(pool, [][]int64{{3, 4}}, [][]float32{{0.97, 0.96}}),
+		buildTestDF(pool, [][]int64{{5, 6}}, [][]float32{{0.95, 0.94}}),
+	}
+	defer func() {
+		for _, df := range segDFs {
+			df.Release()
+		}
+	}()
+
+	schema := mock_segcore.GenTestCollectionSchema("test-reduced-plan-topk", schemapb.DataType_Int64, true)
+	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
+	manager := segments.NewManager()
+	require.NoError(t, manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: testCollectionID,
+		PartitionIDs: []int64{testPartitionID},
+	}))
+	collection := manager.Collection.Get(testCollectionID)
+	require.NotNil(t, collection)
+	defer manager.Collection.Unref(collection.ID(), 1)
+
+	reducedPlanReq, err := mock_segcore.GenSearchPlanAndRequestsWithTopK(
+		collection.GetCCollection(), []int64{1, 2, 3}, 1, 2)
+	require.NoError(t, err)
+	defer reducedPlanReq.Delete()
+	reducedPlan := reducedPlanReq.Plan()
+	require.Equal(t, int64(2), reducedPlan.GetTopK())
+
+	mocker := mockey.Mock(lateMaterializeOutputFields).To(
+		func(ctx context.Context, results []*segments.SearchResult, plan *segcore.SearchPlan, sources [][]segmentSource, searchResultData *schemapb.SearchResultData) error {
+			return nil
+		},
+	).Build()
+	defer mocker.UnPatch()
+
+	task := &SearchTask{
+		ctx:         context.Background(),
+		topk:        5,
+		originNqs:   []int64{1},
+		originTopks: []int64{5},
+		serverID:    1,
+	}
+
+	tr := timerecord.NewTimeRecorder("reduced-plan-topk-test")
+	require.NoError(t, task.executeGoReduceFastPath(segDFs, nil, reducedPlan, "IP", tr, 0, 6, nil))
+
+	require.NotNil(t, task.result)
+	assert.Equal(t, int64(1), task.result.NumQueries)
+	assert.Equal(t, int64(5), task.result.TopK)
+
+	data := task.result.ResultData
+	if data == nil {
+		require.NotEmpty(t, task.result.SlicedBlob)
+		data = &schemapb.SearchResultData{}
+		require.NoError(t, proto.Unmarshal(task.result.SlicedBlob, data))
+	}
+
+	assert.Equal(t, int64(1), data.NumQueries)
+	assert.Equal(t, int64(5), data.TopK)
+	assert.Equal(t, []int64{5}, data.Topks)
+	assert.Len(t, data.Scores, 5)
+
+	intIDs, ok := data.Ids.IdField.(*schemapb.IDs_IntId)
+	require.True(t, ok)
+	assert.Len(t, intIDs.IntId.Data, 5)
+}
+
 func TestExecuteGoReduceHonorsEnableResultZeroCopy(t *testing.T) {
 	const (
 		numSegments = 1

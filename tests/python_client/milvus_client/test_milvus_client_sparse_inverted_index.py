@@ -1114,7 +1114,6 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
             "sindi_window_size",
         )
 
-    @pytest.mark.xfail(reason="Known issue #50108: server accepts unsupported sparse inverted index codec values")
     def test_sparse_index_rejects_invalid_codec(self):
         """
         target: verify ordinary sparse indexes reject unsupported posting-list codecs
@@ -1125,15 +1124,25 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
             "bad_codec",
             "IP",
             {"inverted_index_algo": "DAAT_MAXSCORE", "inverted_index_codec": "invalid_codec"},
-            "inverted_index_codec",
+            "inverted_index_codec invalid_codec not found or not supported, supported: [block_streamvbyte block_maskedvbyte]: invalid parameter",
         )
 
-    @pytest.mark.xfail(reason="Known issue #50108: server accepts non-positive block_max_block_size values")
     @pytest.mark.parametrize(
-        "field_name, block_size",
-        [("bad_block_size_zero", 0), ("bad_block_size_negative", -1)],
+        "field_name, block_size, error_message",
+        [
+            (
+                "bad_block_size_zero",
+                0,
+                "Out of range in json: param 'block_max_block_size' (0) should be in range [1, 2147483647]: invalid parameter",
+            ),
+            (
+                "bad_block_size_negative",
+                -1,
+                "Out of range in json: param 'block_max_block_size' (-1) should be in range [1, 2147483647]: invalid parameter",
+            ),
+        ],
     )
-    def test_block_max_rejects_invalid_block_size(self, field_name, block_size):
+    def test_block_max_rejects_invalid_block_size(self, field_name, block_size, error_message):
         """
         target: verify Block-Max sparse indexes reject non-positive block size params
         method: create BLOCK_MAX_WAND indexes with zero and negative block_max_block_size
@@ -1143,5 +1152,5 @@ class TestSparseInvertedIndexV3Negative(_SparseInvertedIndexV3Base):
             field_name,
             "IP",
             {"inverted_index_algo": "BLOCK_MAX_WAND", "block_max_block_size": block_size},
-            "block_max_block_size",
+            error_message,
         )

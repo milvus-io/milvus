@@ -89,9 +89,6 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
-    proxy:
-      http:
-        enabled: true
     common:
       storage:
         enablev2: true
@@ -101,7 +98,13 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
-      targetVecIndexVersion: 10
+      compaction:
+        storageVersion:
+          enabled: true
+        storageFormat:
+          enabled: true
+        bumpSchemaVersion:
+          enabled: true
       gc:
         interval: 1800
         missingTolerance: 1800

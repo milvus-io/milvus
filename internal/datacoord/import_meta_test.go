@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
@@ -376,6 +377,82 @@ func TestHandleCommitVchannel(t *testing.T) {
 	err = im.HandleCommitVchannel(context.TODO(), int64(9999), "ch1", cb)
 	assert.Error(t, err)
 	assert.Equal(t, 1, callCount) // callback not called for missing job
+}
+
+func TestHandleCommitVchannel_BeforeUncommitted_RetryWithoutMutation(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	const jobID int64 = 102
+	err = im.AddJob(context.TODO(), &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:     jobID,
+			State:     internalpb.ImportJobState_Importing,
+			Vchannels: []string{"ch1"},
+		},
+	})
+	assert.NoError(t, err)
+
+	callCount := 0
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", func() error {
+		callCount++
+		return nil
+	})
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
+	assert.Equal(t, 0, callCount)
+	updated := im.GetJob(context.TODO(), jobID)
+	assert.Equal(t, internalpb.ImportJobState_Importing, updated.GetState())
+	assert.NotContains(t, updated.GetCommittedVchannels(), "ch1")
+}
+
+func TestHandleCommitVchannel_RetryAfterUncommitted(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	const jobID int64 = 103
+	err = im.AddJob(context.TODO(), &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:     jobID,
+			State:     internalpb.ImportJobState_Importing,
+			Vchannels: []string{"ch1"},
+		},
+	})
+	assert.NoError(t, err)
+
+	callCount := 0
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", func() error {
+		callCount++
+		return nil
+	})
+	assert.Error(t, err)
+	assert.Equal(t, 0, callCount)
+
+	err = im.UpdateJob(context.TODO(), jobID, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	assert.NoError(t, err)
+
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", func() error {
+		callCount++
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callCount)
+	updated := im.GetJob(context.TODO(), jobID)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updated.GetState())
+	assert.Contains(t, updated.GetCommittedVchannels(), "ch1")
 }
 
 func TestHandleCommitVchannelTransitionsUncommittedToCommittingBeforeCallback(t *testing.T) {

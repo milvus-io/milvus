@@ -32,6 +32,9 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "exec/Task.h"
+#include "exec/operator/SearchGroupByNode.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "common/common_type_c.h"
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
@@ -63,6 +66,35 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace milvus::storage;
 using namespace milvus::tracer;
+using namespace milvus::exec;
+
+namespace {
+
+class FixedVectorIterator : public VectorIterator {
+ public:
+    explicit FixedVectorIterator(std::vector<std::pair<int64_t, float>> results)
+        : results_(std::move(results)) {
+    }
+
+    bool
+    HasNext() override {
+        return pos_ < results_.size();
+    }
+
+    std::optional<std::pair<int64_t, float>>
+    Next() override {
+        if (!HasNext()) {
+            return std::nullopt;
+        }
+        return results_[pos_++];
+    }
+
+ private:
+    std::vector<std::pair<int64_t, float>> results_;
+    size_t pos_{0};
+};
+
+}  // namespace
 
 const char* METRICS_TYPE = "metric_type";
 
@@ -501,6 +533,175 @@ TEST(GroupBY, SealedData) {
                 << "unexpected count on group " << it.first;
         }
     }
+}
+
+TEST(GroupBY, ElementLevelKeepsElementIndices) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    size_t N = 3;
+    int array_len = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    auto array_offsets = growing->GetArrayOffsets(vec_fid);
+    ASSERT_NE(array_offsets, nullptr);
+
+    SearchInfo search_info;
+    search_info.topk_ = 10;
+    search_info.group_size_ = 2;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.group_by_field_ids_.push_back(pk_fid);
+    search_info.array_offsets_ = array_offsets;
+
+    // Element IDs map to rows as:
+    // row 0: element IDs 0, 1, 2
+    // row 1: element IDs 3, 4, 5
+    // row 2: element IDs 6, 7, 8
+    // group_size=2 should keep only two hits from row 0 while preserving
+    // element indices for all accepted hits.
+    std::vector<std::shared_ptr<VectorIterator>> iterators{
+        std::make_shared<FixedVectorIterator>(
+            std::vector<std::pair<int64_t, float>>{
+                {0, 0.1F},
+                {1, 0.2F},
+                {2, 0.3F},
+                {3, 0.4F},
+                {4, 0.5F},
+                {6, 0.6F},
+            })};
+
+    OpContext op_context;
+    std::vector<CompositeGroupKey> group_by_values;
+    std::vector<int64_t> seg_offsets;
+    std::vector<float> distances;
+    std::vector<size_t> topk_per_nq_prefix_sum;
+    std::vector<int32_t> element_indices;
+
+    SearchGroupBy(&op_context,
+                  iterators,
+                  search_info,
+                  group_by_values,
+                  *growing,
+                  seg_offsets,
+                  distances,
+                  topk_per_nq_prefix_sum,
+                  &element_indices);
+
+    ASSERT_EQ(seg_offsets, (std::vector<int64_t>{0, 0, 1, 1, 2}));
+    ASSERT_EQ(element_indices, (std::vector<int32_t>{0, 1, 0, 1, 0}));
+    ASSERT_EQ(topk_per_nq_prefix_sum, (std::vector<size_t>{0, 5}));
+    ASSERT_EQ(group_by_values.size(), seg_offsets.size());
+    ASSERT_EQ(distances, (std::vector<float>{0.1F, 0.2F, 0.4F, 0.5F, 0.6F}));
+}
+
+TEST(GroupBY, SearchGroupByNodeKeepsElementIndices) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    size_t N = 3;
+    int array_len = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    auto array_offsets = growing->GetArrayOffsets(vec_fid);
+    ASSERT_NE(array_offsets, nullptr);
+
+    SearchInfo search_info;
+    search_info.topk_ = 10;
+    search_info.group_size_ = 2;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.group_by_field_ids_.push_back(pk_fid);
+    search_info.array_offsets_ = array_offsets;
+
+    SearchResult search_result;
+    search_result.total_nq_ = 1;
+    search_result.unity_topK_ = search_info.topk_;
+    search_result.element_level_ = true;
+    search_result.vector_iterators_ =
+        std::vector<std::shared_ptr<VectorIterator>>{
+            std::make_shared<FixedVectorIterator>(
+                std::vector<std::pair<int64_t, float>>{
+                    {0, 0.1F},
+                    {1, 0.2F},
+                    {2, 0.3F},
+                    {3, 0.4F},
+                    {4, 0.5F},
+                    {6, 0.6F},
+                })};
+
+    OpContext op_context;
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "search_group_by_node_element_level",
+        growing,
+        N,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+    query_context->set_search_info(search_info);
+    query_context->set_array_offsets(array_offsets);
+    query_context->set_search_result(std::move(search_result));
+    query_context->set_op_context(&op_context);
+
+    auto group_by_plan =
+        std::make_shared<milvus::plan::SearchGroupByNode>("group_by");
+    auto task =
+        milvus::exec::Task::Create("search_group_by_node_element_level",
+                                   milvus::plan::PlanFragment(group_by_plan),
+                                   0,
+                                   query_context);
+    milvus::exec::DriverContext driver_context(task, 0, 0, 0, 0);
+    milvus::exec::PhySearchGroupByNode node(1, &driver_context, group_by_plan);
+
+    auto input = std::make_shared<RowVector>(std::vector<VectorPtr>{});
+    node.AddInput(input);
+    node.NoMoreInput();
+    auto output = node.GetOutput();
+    ASSERT_NE(output, nullptr);
+
+    auto grouped = query_context->get_search_result();
+    ASSERT_TRUE(grouped.element_level_);
+    ASSERT_EQ(grouped.seg_offsets_, (std::vector<int64_t>{0, 0, 1, 1, 2}));
+    ASSERT_EQ(grouped.element_indices_, (std::vector<int32_t>{0, 1, 0, 1, 0}));
+    ASSERT_EQ(grouped.topk_per_nq_prefix_sum_, (std::vector<size_t>{0, 5}));
+    ASSERT_TRUE(grouped.composite_group_by_values_.has_value());
+    ASSERT_EQ(grouped.composite_group_by_values_->size(),
+              grouped.seg_offsets_.size());
+    ASSERT_TRUE(grouped.group_size_.has_value());
+    ASSERT_EQ(grouped.group_size_.value(), 2);
 }
 
 TEST(GroupBY, GrowingRawData) {

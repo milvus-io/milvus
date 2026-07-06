@@ -65,7 +65,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	if it.partitionKeys == nil {
 		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schemaVersion)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion)
 	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -96,7 +96,10 @@ func repackInsertDataForStreamingService(
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
-	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	channel2RowOffsets, err := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	if err != nil {
+		return nil, err
+	}
 	partitionName := insertMsg.PartitionName
 	partitionID, err := globalMetaCache.GetPartitionID(ctx, insertMsg.GetDbName(), insertMsg.CollectionName, partitionName)
 	if err != nil {
@@ -143,11 +146,21 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	result *milvuspb.MutationResult,
 	partitionKeys *schemapb.FieldData,
 	ez *message.CipherConfig,
+	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
-	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	var channel2RowOffsets map[string][]int
+	var err error
+	if namespacePartitionKeyModeEnabled(schema) && insertMsg.Namespace != nil {
+		channel2RowOffsets, err = assignChannelsByNamespace(*insertMsg.Namespace, channelNames, insertMsg)
+	} else {
+		channel2RowOffsets, err = assignChannelsByPK(result.IDs, channelNames, insertMsg)
+	}
+	if err != nil {
+		return nil, err
+	}
 	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
 		mlog.Warn(ctx, "get default partition names failed in partition key mode",

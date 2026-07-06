@@ -67,6 +67,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.field_id = field_id.get();
     load_index_info.collection_id = GetCollectionID();
     load_index_info.partition_id = GetPartitionID();
+    load_index_info.shard = GetInsertChannel();
 
     // Get field type from schema
     const auto& field_meta = schema_->operator[](field_id);

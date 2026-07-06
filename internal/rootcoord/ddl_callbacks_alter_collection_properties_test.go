@@ -129,6 +129,34 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	// atler a property of a collection.
 	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 1)
+
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "set namespace mode",
+			properties: []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "delete namespace mode",
+			deleteKeys: []string{common.NamespaceModeKey},
+		},
+	} {
+		t.Run("reject "+tc.name, func(t *testing.T) {
+			resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Properties:     tc.properties,
+				DeleteKeys:     tc.deleteKeys,
+			})
+			alterErr := merr.CheckRPCCall(resp, err)
+			require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
+			require.ErrorContains(t, alterErr, common.NamespaceModeKey)
+		})
+	}
+
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -185,6 +213,46 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}, {Key: common.CollectionReplicaNumber, Value: "1"}},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func TestValidateNamespaceModeImmutable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "set namespace mode",
+			properties: []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "set namespace mode with wrong case",
+			properties: []*commonpb.KeyValuePair{{Key: "Namespace.Mode", Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "delete namespace mode",
+			deleteKeys: []string{common.NamespaceModeKey},
+		},
+		{
+			name:       "delete namespace mode with wrong case",
+			deleteKeys: []string{"Namespace.Mode"},
+		},
+	} {
+		t.Run("reject "+tc.name, func(t *testing.T) {
+			err := validateNamespaceModeImmutable(tc.properties, tc.deleteKeys)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, common.NamespaceModeKey)
+		})
+	}
+
+	require.NoError(t, validateNamespaceModeImmutable(
+		[]*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "2"}},
+		nil,
+	))
+	require.NoError(t, validateNamespaceModeImmutable(
+		nil,
+		[]string{common.CollectionReplicaNumber},
+	))
 }
 
 func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *testing.T) {
@@ -663,10 +731,10 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
@@ -683,12 +751,12 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 		DbName: dbName, CollectionName: collectionName,
 		Properties: []*commonpb.KeyValuePair{
 			{Key: common.CollectionExternalSource, Value: "s3://bucket/new/"},
-			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`},
 		},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
 }
 
 // Regression for #49335: refresh override path may carry source-only updates
@@ -707,10 +775,10 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-east-1"}}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
@@ -731,7 +799,7 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"region":"us-east-1"}}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
 }
 
 // Regression for #49335: alter that mixes external_source with a regular
@@ -750,10 +818,10 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)

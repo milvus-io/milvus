@@ -983,6 +983,15 @@ struct fmt::formatter<milvus::proto::plan::ArithOpType>
             case ArithOpType::ArrayLength:
                 name = "ArrayLength";
                 break;
+            case ArithOpType::BitAnd:
+                name = "BitAnd";
+                break;
+            case ArithOpType::BitOr:
+                name = "BitOr";
+                break;
+            case ArithOpType::BitXor:
+                name = "BitXor";
+                break;
             case ArithOpType::ArithOpType_INT_MIN_SENTINEL_DO_NOT_USE_:
                 name = "ArithOpType_INT_MIN_SENTINEL_DO_NOT_USE_";
                 break;

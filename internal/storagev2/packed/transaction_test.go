@@ -16,6 +16,7 @@ package packed
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -348,6 +349,12 @@ func TestGetDeltaLogPathsFromManifest(t *testing.T) {
 	// basePath = path.Join(storageConfig.GetRootPath(), "insert_log", collID, partID, segID)
 	basePath := filepath.Join(dir, "insert_log/1/2/3")
 
+	t.Run("invalid manifest path", func(t *testing.T) {
+		paths, err := GetDeltaLogPathsFromManifest("invalid-manifest-path", storageConfig)
+		assert.Error(t, err)
+		assert.Nil(t, paths)
+	})
+
 	t.Run("no delta logs", func(t *testing.T) {
 		manifestPath := createBaseManifest(t, basePath, storageConfig)
 		paths, err := GetDeltaLogPathsFromManifest(manifestPath, storageConfig)
@@ -408,10 +415,372 @@ func TestGetDeltaLogPathsFromManifest(t *testing.T) {
 		assert.Contains(t, paths[0], "_delta/501")
 	})
 
+	t.Run("zero-entry delta log marker is not a readable path", func(t *testing.T) {
+		bp := filepath.Join(dir, "insert_log/1/2/3_zero_delta")
+		manifestPath := createBaseManifest(t, bp, storageConfig)
+
+		deltaFullPath := filepath.Join(bp, "_delta/601")
+		newManifest, err := AddDeltaLogsToManifest(manifestPath, storageConfig, []DeltaLogEntry{
+			{Path: deltaFullPath, NumEntries: 0},
+		})
+		require.NoError(t, err)
+
+		paths, err := GetDeltaLogPathsFromManifest(newManifest, storageConfig)
+		assert.NoError(t, err)
+		assert.Nil(t, paths)
+	})
+
 	t.Run("empty deltaLogs input returns original manifest", func(t *testing.T) {
 		manifestPath := createBaseManifest(t, basePath+"_empty", storageConfig)
 		sameManifest, err := AddDeltaLogsToManifest(manifestPath, storageConfig, []DeltaLogEntry{})
 		require.NoError(t, err)
 		assert.Equal(t, manifestPath, sameManifest)
 	})
+}
+
+func TestCreateMilvusTableManifestFromSegmentManifests_ImportsSourceDeltalogs(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	sourceBasePath := filepath.Join(dir, "insert_log/1/2/source")
+	sourceManifest := createBaseManifest(t, sourceBasePath, storageConfig)
+	sourceDeltaPath := filepath.Join(sourceBasePath, "_delta/701")
+	sourceManifest, err := AddDeltaLogsToManifest(sourceManifest, storageConfig, []DeltaLogEntry{
+		{Path: sourceDeltaPath, NumEntries: 7},
+	})
+	require.NoError(t, err)
+
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: 1, RowCount: 1}},
+		storageConfig,
+		ExternalSpecContext{},
+	)
+	require.NoError(t, err)
+
+	paths, err := GetDeltaLogPathsFromManifest(targetManifest, storageConfig)
+	require.NoError(t, err)
+	require.Len(t, paths, 1)
+	assert.Equal(t, sourceDeltaPath, paths[0])
+}
+
+func TestGetDeltaLogsFromManifestWithExtfsResolvesRelativeSourceDeltalogs(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	sourceBasePath := "files/source/segment/10"
+	sourceManifest := createBaseManifest(t, sourceBasePath, cfg)
+	sourceDeltaPath := path.Join(sourceBasePath, "_delta/9001")
+
+	sourceManifest, err := AddDeltaLogsToManifest(sourceManifest, cfg, []DeltaLogEntry{
+		{Path: sourceDeltaPath, NumEntries: 7},
+	})
+	require.NoError(t, err)
+
+	deltalogs, err := GetDeltaLogsFromManifestWithExtfs(sourceManifest, cfg, ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://source-bucket/snapshots/100/metadata/200.json",
+		Spec:         `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+	})
+	require.NoError(t, err)
+	require.Len(t, deltalogs, 1)
+	require.Len(t, deltalogs[0].GetBinlogs(), 1)
+	assert.Equal(t, sourceDeltaPath, deltalogs[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, int64(7), deltalogs[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+func TestCreateMilvusTableManifestFromSegmentManifests_VirtualPKSkipsSourceDeltalogs(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	sourceBasePath := filepath.Join(dir, "insert_log/1/2/source")
+	sourceManifest := createBaseManifest(t, sourceBasePath, storageConfig)
+	sourceDeltaPath := filepath.Join(sourceBasePath, "_delta/701")
+	sourceManifest, err := AddDeltaLogsToManifest(sourceManifest, storageConfig, []DeltaLogEntry{
+		{Path: sourceDeltaPath, NumEntries: 7},
+	})
+	require.NoError(t, err)
+
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: 1, RowCount: 1}},
+		storageConfig,
+		ExternalSpecContext{MilvusTablePKMode: MilvusTablePrimaryKeyModeVirtual},
+	)
+	require.NoError(t, err)
+
+	paths, err := GetDeltaLogPathsFromManifest(targetManifest, storageConfig)
+	require.NoError(t, err)
+	assert.Empty(t, paths)
+}
+
+func TestCreateMilvusTableManifestFromSegmentManifests_PreservesSourceFragmentIdentity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	sourceBasePath := filepath.Join(dir, "insert_log/1/2/source")
+	sourceManifest := createBaseManifest(t, sourceBasePath, storageConfig)
+	sourceRowCount := int64(7)
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: sourceRowCount, RowCount: sourceRowCount}},
+		storageConfig,
+		ExternalSpecContext{MilvusTablePKMode: MilvusTablePrimaryKeyModeVirtual},
+	)
+	require.NoError(t, err)
+
+	fragments, err := ReadFragmentsFromManifest(targetManifest, storageConfig, []string{"pk"})
+	require.NoError(t, err)
+	require.Len(t, fragments, 1)
+	assert.Equal(t, sourceManifest, fragments[0].FilePath)
+	assert.Equal(t, int64(0), fragments[0].StartRow)
+	assert.Equal(t, sourceRowCount, fragments[0].EndRow)
+	assert.Equal(t, sourceRowCount, fragments[0].RowCount)
+}
+
+func TestCreateMilvusTableManifestFromSegmentManifests_RejectsMissingSourceRowCount(t *testing.T) {
+	_, err := CreateMilvusTableManifestFromSegmentManifests(
+		"target",
+		[]string{"pk"},
+		[]Fragment{{FilePath: "source-manifest"}},
+		&indexpb.StorageConfig{},
+		ExternalSpecContext{},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-positive row count")
+}
+
+func TestCreateMilvusTableManifestFromSegmentManifests_RejectsMultipleSourceFragments(t *testing.T) {
+	_, err := CreateMilvusTableManifestFromSegmentManifests(
+		"target",
+		[]string{"pk"},
+		[]Fragment{
+			{FilePath: "source-manifest-1", RowCount: 1},
+			{FilePath: "source-manifest-2", RowCount: 1},
+		},
+		&indexpb.StorageConfig{},
+		ExternalSpecContext{},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one source fragment")
+}
+
+func TestReadFragmentsFromManifest_MilvusTableCarriesManifestDeltalogs(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	sourceBasePath := filepath.Join(dir, "insert_log/1/2/source")
+	sourceManifest := createBaseManifest(t, sourceBasePath, storageConfig)
+	sourceDeltaPath := filepath.Join(sourceBasePath, "_delta/701")
+	sourceManifest, err := AddDeltaLogsToManifest(sourceManifest, storageConfig, []DeltaLogEntry{
+		{Path: sourceDeltaPath, NumEntries: 7},
+	})
+	require.NoError(t, err)
+
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: 1, RowCount: 1}},
+		storageConfig,
+		ExternalSpecContext{},
+	)
+	require.NoError(t, err)
+
+	fragments, err := ReadFragmentsFromManifest(targetManifest, storageConfig, []string{"pk"})
+	require.NoError(t, err)
+	require.Len(t, fragments, 1)
+	require.Len(t, fragments[0].Deltalogs, 1)
+	require.Len(t, fragments[0].Deltalogs[0].GetBinlogs(), 1)
+	assert.Equal(t, sourceDeltaPath, fragments[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, int64(7), fragments[0].Deltalogs[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+func TestReadFragmentsFromManifest_MilvusTableCarriesZeroEntryDeltalogMarker(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+	sourceManifest := createBaseManifest(t, filepath.Join(dir, "insert_log/1/2/source"), storageConfig)
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: 1, RowCount: 1}},
+		storageConfig,
+		ExternalSpecContext{MilvusTablePKMode: MilvusTablePrimaryKeyModeVirtual},
+	)
+	require.NoError(t, err)
+	targetDeltaPath := filepath.Join(targetBasePath, "_delta/702")
+	targetManifest, err = AddDeltaLogsToManifest(targetManifest, storageConfig, []DeltaLogEntry{
+		{Path: targetDeltaPath, NumEntries: 0},
+	})
+	require.NoError(t, err)
+
+	fragments, err := ReadFragmentsFromManifest(targetManifest, storageConfig, []string{"pk"})
+	require.NoError(t, err)
+	require.Len(t, fragments, 1)
+	require.Len(t, fragments[0].Deltalogs, 1)
+	require.Len(t, fragments[0].Deltalogs[0].GetBinlogs(), 1)
+	assert.Equal(t, targetDeltaPath, fragments[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, int64(0), fragments[0].Deltalogs[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+func TestCreateMilvusTableManifestFromSegmentManifests_ImportsSourceBloomFilterStats(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	sourceBasePath := filepath.Join(dir, "insert_log/1/2/source")
+	sourceManifest := createBaseManifest(t, sourceBasePath, storageConfig)
+	sourceBFPath := filepath.Join(sourceBasePath, "_stats/bloom_filter.100/1001")
+	sourceManifest, err := AddStatsToManifest(sourceManifest, storageConfig, []StatEntry{
+		{
+			Key:      "bloom_filter.100",
+			Files:    []string{sourceBFPath},
+			Metadata: map[string]string{"memory_size": "4096"},
+		},
+	})
+	require.NoError(t, err)
+
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: 1, RowCount: 1}},
+		storageConfig,
+		ExternalSpecContext{},
+	)
+	require.NoError(t, err)
+
+	resolver := NewStatsResolver(targetManifest, storageConfig)
+	paths, err := resolver.BloomFilterPaths(100)
+	require.NoError(t, err)
+	require.Equal(t, []string{sourceBFPath}, paths)
+
+	memorySize, err := resolver.BloomFilterMemorySize(100)
+	require.NoError(t, err)
+	assert.EqualValues(t, 4096, memorySize)
+}
+
+func TestCreateMilvusTableManifestFromSegmentManifests_VirtualPKSkipsSourceBloomFilterStats(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	sourceBasePath := filepath.Join(dir, "insert_log/1/2/source")
+	sourceManifest := createBaseManifest(t, sourceBasePath, storageConfig)
+	sourceBFPath := filepath.Join(sourceBasePath, "_stats/bloom_filter.100/1001")
+	sourceManifest, err := AddStatsToManifest(sourceManifest, storageConfig, []StatEntry{
+		{
+			Key:      "bloom_filter.100",
+			Files:    []string{sourceBFPath},
+			Metadata: map[string]string{"memory_size": "4096"},
+		},
+	})
+	require.NoError(t, err)
+
+	targetBasePath := filepath.Join(dir, "insert_log/1/2/target")
+	targetManifest, err := CreateMilvusTableManifestFromSegmentManifests(
+		targetBasePath,
+		[]string{"pk", "ts"},
+		[]Fragment{{FilePath: sourceManifest, StartRow: 0, EndRow: 1, RowCount: 1}},
+		storageConfig,
+		ExternalSpecContext{MilvusTablePKMode: MilvusTablePrimaryKeyModeVirtual},
+	)
+	require.NoError(t, err)
+
+	resolver := NewStatsResolver(targetManifest, storageConfig)
+	paths, err := resolver.BloomFilterPaths(100)
+	require.NoError(t, err)
+	assert.Empty(t, paths)
+
+	memorySize, err := resolver.BloomFilterMemorySize(100)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, memorySize)
 }

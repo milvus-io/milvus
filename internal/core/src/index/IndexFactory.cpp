@@ -950,6 +950,9 @@ IndexFactory::CreateNestedIndex(
         return CreateNestedIndexInverted(tantivy_index_version,
                                          file_manager_context);
     }
+    if (index_type == BITMAP_INDEX_TYPE) {
+        return CreateNestedIndexBitmap(file_manager_context);
+    }
 
     return CreateNestedIndexScalarIndexSort(file_manager_context);
 }
@@ -990,6 +993,36 @@ IndexFactory::CreateNestedIndexInverted(
         case DataType::VARCHAR:
             return std::make_unique<InvertedIndexTantivy<std::string>>(
                 tantivy_index_version, file_manager_context, false, true, true);
+        default:
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateNestedIndexBitmap(
+    const storage::FileManagerContext& file_manager_context) {
+    DataType element_type = static_cast<DataType>(
+        file_manager_context.fieldDataMeta.field_schema.element_type());
+    switch (element_type) {
+        case DataType::BOOL:
+            return std::make_unique<BitmapIndex<bool>>(file_manager_context,
+                                                       true);
+        case DataType::INT8:
+            return std::make_unique<BitmapIndex<int8_t>>(file_manager_context,
+                                                         true);
+        case DataType::INT16:
+            return std::make_unique<BitmapIndex<int16_t>>(file_manager_context,
+                                                          true);
+        case DataType::INT32:
+            return std::make_unique<BitmapIndex<int32_t>>(file_manager_context,
+                                                          true);
+        case DataType::INT64:
+            return std::make_unique<BitmapIndex<int64_t>>(file_manager_context,
+                                                          true);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_unique<BitmapIndex<std::string>>(
+                file_manager_context, true);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }

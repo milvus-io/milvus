@@ -97,6 +97,13 @@ class ChunkedColumnGroup {
         return SemiInlineGet(slot_->PinCells(op_ctx, chunk_ids));
     }
 
+    bool
+    CellsLoaded(const std::vector<cachinglayer::cid_t>& cids) const {
+        return std::all_of(cids.begin(), cids.end(), [this](cid_t cid) {
+            return slot_->IsCached(cid);
+        });
+    }
+
     std::vector<PinWrapper<GroupChunk*>>
     GetAllGroupChunks(milvus::OpContext* op_ctx) {
         auto ca = SemiInlineGet(slot_->PinAllCells(op_ctx));
@@ -301,6 +308,15 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PrefetchChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) const override {
         group_->GetGroupChunks(op_ctx, chunk_ids);
+    }
+
+    bool
+    CellsLoaded(const int64_t* offsets, int64_t count) const override {
+        if (count == 0) {
+            return true;
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        return group_->CellsLoaded(cids);
     }
 
     PinWrapper<SpanBase>

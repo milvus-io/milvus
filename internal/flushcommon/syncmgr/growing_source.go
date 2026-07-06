@@ -21,10 +21,12 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -42,25 +45,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type GrowingFlushConfig struct {
-	SegmentBasePath      string
-	PartitionBasePath    string
-	CollectionID         int64
-	PartitionID          int64
-	TextFieldIDs         []int64
-	TextLobPaths         []string
-	BM25FieldIDs         []int64
-	BM25StatsLogIDs      []int64
-	WriteMergedBM25Stats bool
-	ReadVersion          int64
+	SegmentBasePath         string
+	PartitionBasePath       string
+	CollectionID            int64
+	PartitionID             int64
+	Schema                  *schemapb.CollectionSchema
+	TextFieldIDs            []int64
+	TextLobPaths            []string
+	TextInlineThreshold     int64
+	TextMaxLobFileBytes     int64
+	TextFlushThresholdBytes int64
+	BM25FieldIDs            []int64
+	BM25StatsLogIDs         []int64
+	WriteMergedBM25Stats    bool
+	ReadVersion             int64
+	WriterFormat            string
+	SchemaBasedPattern      string
+	SchemaBasedFormats      string
+	AllowedFieldIDs         []int64
+	ColumnGroups            []storagecommon.ColumnGroup
 }
 
 type GrowingFlushResult struct {
-	ManifestPath string
-	NumRows      int64
-	BM25Stats    map[int64]*storage.BM25Stats
+	ManifestPath           string
+	NumRows                int64
+	TimestampFrom          uint64
+	TimestampTo            uint64
+	ColumnGroupMemorySizes map[int64]int64
+	FieldNullCounts        map[int64]int64
+	BM25Stats              map[int64]*storage.BM25Stats
 }
 
 type GrowingFlushSource interface {
@@ -320,14 +337,16 @@ type GrowingSourceSyncTask struct {
 	schema     *schemapb.CollectionSchema
 	source     GrowingFlushSource
 
-	chunkManager storage.ChunkManager
-	allocator    allocator.Interface
-	manifestPath string
-	flushedSize  int64
-	bm25Stats    map[int64]*storage.BM25Stats
+	chunkManager  storage.ChunkManager
+	allocator     allocator.Interface
+	manifestPath  string
+	flushedSize   int64
+	insertBinlogs map[int64]*datapb.FieldBinlog
+	bm25Stats     map[int64]*storage.BM25Stats
 
-	committedManifestPath string
-	committedBM25Stats    map[int64]*storage.BM25Stats
+	committedManifestPath  string
+	committedBM25Stats     map[int64]*storage.BM25Stats
+	committedInsertBinlogs map[int64]*datapb.FieldBinlog
 
 	writeRetryOpts  []retry.Option
 	failureCallback func(error)
@@ -413,9 +432,12 @@ func (t *GrowingSourceSyncTask) WithSource(source GrowingFlushSource) *GrowingSo
 	return t
 }
 
-func (t *GrowingSourceSyncTask) WithCommittedFlush(manifestPath string, bm25Stats map[int64]*storage.BM25Stats) *GrowingSourceSyncTask {
+func (t *GrowingSourceSyncTask) WithCommittedFlush(manifestPath string, bm25Stats map[int64]*storage.BM25Stats, insertBinlogs ...map[int64]*datapb.FieldBinlog) *GrowingSourceSyncTask {
 	t.committedManifestPath = manifestPath
 	t.committedBM25Stats = bm25Stats
+	if len(insertBinlogs) > 0 {
+		t.committedInsertBinlogs = cloneFieldBinlogMap(insertBinlogs[0])
+	}
 	return t
 }
 
@@ -485,6 +507,13 @@ func (t *GrowingSourceSyncTask) CommittedBM25Stats() map[int64]*storage.BM25Stat
 	return t.bm25Stats
 }
 
+func (t *GrowingSourceSyncTask) CommittedInsertBinlogs() map[int64]*datapb.FieldBinlog {
+	if len(t.committedInsertBinlogs) > 0 {
+		return cloneFieldBinlogMap(t.committedInsertBinlogs)
+	}
+	return cloneFieldBinlogMap(t.insertBinlogs)
+}
+
 func (t *GrowingSourceSyncTask) BatchRows() int64 {
 	return t.batchRows
 }
@@ -541,9 +570,14 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		return merr.WrapErrServiceInternalMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
 			segment.FlushedRows(), t.targetOffset, t.segmentID)
 	}
+	columnGroups, err := t.getColumnGroups(segment)
+	if err != nil {
+		return err
+	}
 	if t.committedManifestPath != "" {
 		t.manifestPath = t.committedManifestPath
 		t.bm25Stats = t.committedBM25Stats
+		t.insertBinlogs = cloneFieldBinlogMap(t.committedInsertBinlogs)
 	} else if expectedRows == 0 {
 		t.manifestPath = segment.ManifestPath()
 	} else {
@@ -553,9 +587,16 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if t.source.CurrentOffset() < t.targetOffset {
 			return merr.WrapErrServiceInternalMsg("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
 		}
-		config, err := t.buildFlushConfig(segment)
+		config, err := t.buildFlushConfig(segment, columnGroups)
 		if err != nil {
 			return err
+		}
+		var insertSummaryLogIDs []int64
+		if t.metaWriter != nil && len(columnGroups) > 0 {
+			insertSummaryLogIDs, err = t.allocLogIDs(len(columnGroups), "growing source insert summary")
+			if err != nil {
+				return err
+			}
 		}
 		result, err := t.source.FlushGrowingData(ctx, segment.FlushedRows(), t.targetOffset, config)
 		if err != nil {
@@ -572,8 +613,18 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		if len(result.BM25Stats) > 0 {
 			t.bm25Stats = result.BM25Stats
 		}
+		if t.metaWriter != nil && len(columnGroups) > 0 {
+			t.insertBinlogs, err = buildGrowingSourceInsertBinlogs(columnGroups, result, insertSummaryLogIDs)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	t.flushedSize = expectedRows
+	if t.metaWriter != nil && expectedRows > 0 && len(columnGroups) > 0 && len(t.insertBinlogs) == 0 {
+		return merr.WrapErrDataIntegrityMsg("growing source committed flush missing insert binlog summary, segmentID=%d targetOffset=%d",
+			t.segmentID, t.targetOffset)
+	}
 
 	if t.metaWriter != nil {
 		if err := t.metaWriter.UpdateGrowingSourceSync(ctx, t); err != nil {
@@ -590,6 +641,9 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	}
 	if len(t.bm25Stats) > 0 {
 		actions = append(actions, metacache.MergeBm25Stats(t.bm25Stats))
+	}
+	if len(columnGroups) > 0 {
+		actions = append(actions, metacache.UpdateCurrentSplit(columnGroups))
 	}
 	if t.IsFlush() {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
@@ -612,18 +666,45 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	return nil
 }
 
-func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo) (*GrowingFlushConfig, error) {
+func (t *GrowingSourceSyncTask) getColumnGroups(segment *metacache.SegmentInfo) ([]storagecommon.ColumnGroup, error) {
+	return resolveColumnGroups(segment, t.schema, t.segmentID, func() map[int64]storagecommon.ColumnStats {
+		return map[int64]storagecommon.ColumnStats{}
+	}), nil
+}
+
+func (t *GrowingSourceSyncTask) schemaBasedPattern(columnGroups []storagecommon.ColumnGroup) (string, error) {
+	if len(columnGroups) == 0 {
+		return "", nil
+	}
+	arrowSchema, err := storage.ConvertToArrowSchema(t.schema, true)
+	if err != nil {
+		return "", merr.WrapErrServiceInternal(
+			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", t.schema.GetName(), err.Error()))
+	}
+	schemaBasedPattern, err := packed.SchemaBasedPattern(arrowSchema, columnGroups)
+	if err != nil {
+		return "", merr.WrapErrServiceInternal(
+			fmt.Sprintf("can not build schema based writer pattern %s", err.Error()))
+	}
+	return schemaBasedPattern, nil
+}
+
+func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo, columnGroups []storagecommon.ColumnGroup) (*GrowingFlushConfig, error) {
 	segmentBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
 		metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID))
 	partitionBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
 		metautil.JoinIDPath(t.collectionID, t.partitionID))
 
+	allowedFieldIDs, allowedFieldSet := allowedFieldsFromColumnGroups(columnGroups)
 	var textFieldIDs []int64
 	var textLobPaths []string
 	var bm25FieldIDs []int64
 	var bm25StatsLogIDs []int64
 	if t.schema != nil {
-		for _, field := range t.schema.GetFields() {
+		for _, field := range typeutil.GetAllFieldSchemas(t.schema) {
+			if !fieldAllowed(allowedFieldSet, field.GetFieldID()) {
+				continue
+			}
 			if field.GetDataType() == schemapb.DataType_Text {
 				fieldID := field.GetFieldID()
 				textFieldIDs = append(textFieldIDs, fieldID)
@@ -632,7 +713,10 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo)
 		}
 		for _, function := range t.schema.GetFunctions() {
 			if function.GetType() == schemapb.FunctionType_BM25 && len(function.GetOutputFieldIds()) > 0 {
-				bm25FieldIDs = append(bm25FieldIDs, function.GetOutputFieldIds()[0])
+				outputFieldID := function.GetOutputFieldIds()[0]
+				if fieldAllowed(allowedFieldSet, outputFieldID) {
+					bm25FieldIDs = append(bm25FieldIDs, outputFieldID)
+				}
 			}
 		}
 	}
@@ -643,24 +727,95 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo)
 			return nil, err
 		}
 	}
+	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	schemaBasedPattern, err := t.schemaBasedPattern(columnGroups)
+	if err != nil {
+		return nil, err
+	}
+	readVersion, err := growingSourceReadVersion(segment.ManifestPath(), columnGroups)
+	if err != nil {
+		return nil, err
+	}
+	schemaBasedFormats := strings.Join(storagecommon.ColumnGroupFormats(columnGroups, writerFormat), ",")
 
 	return &GrowingFlushConfig{
-		SegmentBasePath:      segmentBasePath,
-		PartitionBasePath:    partitionBasePath,
-		CollectionID:         t.collectionID,
-		PartitionID:          t.partitionID,
-		TextFieldIDs:         textFieldIDs,
-		TextLobPaths:         textLobPaths,
-		BM25FieldIDs:         bm25FieldIDs,
-		BM25StatsLogIDs:      bm25StatsLogIDs,
-		WriteMergedBM25Stats: t.IsFlush() && t.level != datapb.SegmentLevel_L0 && t.schema != nil && hasBM25Function(t.schema),
-		ReadVersion:          manifestVersion(segment.ManifestPath()),
+		SegmentBasePath:         segmentBasePath,
+		PartitionBasePath:       partitionBasePath,
+		CollectionID:            t.collectionID,
+		PartitionID:             t.partitionID,
+		Schema:                  t.schema,
+		TextFieldIDs:            textFieldIDs,
+		TextLobPaths:            textLobPaths,
+		TextInlineThreshold:     paramtable.Get().DataNodeCfg.TextInlineThreshold.GetAsInt64(),
+		TextMaxLobFileBytes:     paramtable.Get().DataNodeCfg.TextMaxLobFileBytes.GetAsInt64(),
+		TextFlushThresholdBytes: paramtable.Get().DataNodeCfg.TextFlushThresholdBytes.GetAsInt64(),
+		BM25FieldIDs:            bm25FieldIDs,
+		BM25StatsLogIDs:         bm25StatsLogIDs,
+		WriteMergedBM25Stats:    t.IsFlush() && t.level != datapb.SegmentLevel_L0 && t.schema != nil && hasBM25Function(t.schema),
+		ReadVersion:             readVersion,
+		WriterFormat:            writerFormat,
+		SchemaBasedPattern:      schemaBasedPattern,
+		SchemaBasedFormats:      schemaBasedFormats,
+		AllowedFieldIDs:         allowedFieldIDs,
+		ColumnGroups:            columnGroups,
 	}, nil
 }
 
+func growingSourceReadVersion(manifestPath string, columnGroups []storagecommon.ColumnGroup) (int64, error) {
+	if manifestPath == "" {
+		return packed.ManifestEarliest, nil
+	}
+	_, version, err := packedManifestVersion(manifestPath)
+	if err != nil {
+		return 0, err
+	}
+	if version == packed.ManifestEarliest {
+		return version, nil
+	}
+	for _, columnGroup := range columnGroups {
+		if columnGroup.Format == "" {
+			return 0, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
+				columnGroup.GroupID, columnGroup.Fields, manifestPath)
+		}
+	}
+	return version, nil
+}
+
+func allowedFieldsFromColumnGroups(columnGroups []storagecommon.ColumnGroup) ([]int64, map[int64]struct{}) {
+	if len(columnGroups) == 0 {
+		return nil, nil
+	}
+	allowed := make(map[int64]struct{})
+	for _, group := range columnGroups {
+		for _, fieldID := range group.Fields {
+			allowed[fieldID] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return nil, nil
+	}
+	allowedFieldIDs := lo.Keys(allowed)
+	sort.Slice(allowedFieldIDs, func(i, j int) bool {
+		return allowedFieldIDs[i] < allowedFieldIDs[j]
+	})
+	return allowedFieldIDs, allowed
+}
+
+func fieldAllowed(allowed map[int64]struct{}, fieldID int64) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[fieldID]
+	return ok
+}
+
 func (t *GrowingSourceSyncTask) allocBM25StatsLogIDs(count int) ([]int64, error) {
+	return t.allocLogIDs(count, "bm25 stats")
+}
+
+func (t *GrowingSourceSyncTask) allocLogIDs(count int, purpose string) ([]int64, error) {
 	if t.allocator == nil {
-		return nil, merr.WrapErrServiceInternal("id allocator is nil when allocating bm25 stats log ids")
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("id allocator is nil when allocating %s ids", purpose))
 	}
 	ids := make([]int64, count)
 	for i := range ids {
@@ -671,6 +826,61 @@ func (t *GrowingSourceSyncTask) allocBM25StatsLogIDs(count int) ([]int64, error)
 		ids[i] = id
 	}
 	return ids, nil
+}
+
+func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, result *GrowingFlushResult, logIDs []int64) (map[int64]*datapb.FieldBinlog, error) {
+	if result == nil || result.NumRows <= 0 || len(columnGroups) == 0 {
+		return nil, nil
+	}
+	if len(logIDs) != len(columnGroups) {
+		return nil, merr.WrapErrDataIntegrityMsg("growing source insert summary log id count mismatch, logIDs=%d columnGroups=%d",
+			len(logIDs), len(columnGroups))
+	}
+	logIDByGroup := make(map[int64]int64, len(columnGroups))
+	for i, columnGroup := range columnGroups {
+		logIDByGroup[columnGroup.GroupID] = logIDs[i]
+	}
+	for _, columnGroup := range columnGroups {
+		if _, ok := result.ColumnGroupMemorySizes[columnGroup.GroupID]; !ok {
+			return nil, merr.WrapErrDataIntegrityMsg("growing source missing column group memory size, groupID=%d fields=%v",
+				columnGroup.GroupID, columnGroup.Fields)
+		}
+	}
+	memorySize := func(columnGroupID int64) int64 {
+		return result.ColumnGroupMemorySizes[columnGroupID]
+	}
+	fieldNullCounts := func(columnGroup storagecommon.ColumnGroup) map[int64]int64 {
+		counts := make(map[int64]int64, len(columnGroup.Fields))
+		for _, fieldID := range columnGroup.Fields {
+			counts[fieldID] = result.FieldNullCounts[fieldID]
+		}
+		return counts
+	}
+	return buildV3ColumnGroupFieldBinlogs(
+		columnGroups,
+		result.NumRows,
+		result.TimestampFrom,
+		result.TimestampTo,
+		func(columnGroupID int64) int64 { return 0 },
+		memorySize,
+		func(columnGroupID int64) int64 { return logIDByGroup[columnGroupID] },
+		nil,
+		fieldNullCounts,
+	), nil
+}
+
+func cloneFieldBinlogMap(binlogs map[int64]*datapb.FieldBinlog) map[int64]*datapb.FieldBinlog {
+	if len(binlogs) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]*datapb.FieldBinlog, len(binlogs))
+	for fieldID, binlog := range binlogs {
+		if binlog == nil {
+			continue
+		}
+		cloned[fieldID] = proto.Clone(binlog).(*datapb.FieldBinlog)
+	}
+	return cloned
 }
 
 func manifestVersion(manifestPath string) int64 {

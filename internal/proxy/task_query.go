@@ -87,6 +87,7 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 	storageCost          segcore.StorageCost
 	aggregationFieldMap  *agg.AggregationFieldMap
+	chMgr                channelsMgr
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -700,9 +701,12 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
-	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
+	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
 	if err != nil {
 		return err
+	}
+	if namespaceAsPartition {
+		t.request.PartitionNames = partitionNames
 	}
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
@@ -802,7 +806,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// convert partition names only when requery is false
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
-		if t.partitionKeyMode {
+		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
+			if err != nil {
+				return err
+			}
+
+			partitionNames = append(partitionNames, hashedPartitionNames...)
+		} else if t.partitionKeyMode {
 			expr, err := exprutil.ParseExprFromPlan(t.plan)
 			if err != nil {
 				return err
@@ -826,7 +837,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
-	t.plan.Namespace = t.request.Namespace
+	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	t.SerializedExprPlan, err = proto.Marshal(t.plan)
 	if err != nil {
@@ -916,6 +927,34 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
+	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
+		if err != nil {
+			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
+			return err
+		}
+		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+				Db:              t.request.GetDbName(),
+				CollectionName:  t.collectionName,
+				CollectionID:    t.CollectionID,
+				Channel:         channelName,
+				Nq:              1,
+				Exec:            t.queryShard,
+				PreferredNodeID: preferredNodeForChannel(t.preferredNodes, channelName),
+			}); err != nil {
+				log.Warn(ctx, "fail to execute query", mlog.Err(err))
+				return errors.Wrap(err, "failed to query")
+			}
+
+			log.Debug(ctx, "Query Execute done.")
+			return nil
+		}
+	}
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             t.request.GetDbName(),
 		CollectionID:   t.CollectionID,

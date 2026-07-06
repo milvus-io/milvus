@@ -168,7 +168,6 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 		}
 
 		tokenStream := analyzer.NewTokenStream(text[i])
-		defer tokenStream.Destroy()
 
 		for tokenStream.Advance() {
 			token := tokenStream.Token()
@@ -176,6 +175,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 			hash := typeutil.HashString2LessUint32(token)
 			embeddingMap[hash] += 1
 		}
+		tokenStream.Destroy()
 		dst[i] = embeddingMap
 	}
 	return nil
@@ -258,7 +258,6 @@ func (v *MultiAnalyzerBM25FunctionRunner) analyze(data []string, analyzerName []
 		}
 
 		tokenStream := analyzer.NewTokenStream(data[i])
-		defer tokenStream.Destroy()
 		for tokenStream.Advance() {
 			var token *milvuspb.AnalyzerToken
 			if withDetail {
@@ -274,6 +273,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) analyze(data []string, analyzerName []
 			}
 			result = append(result, token)
 		}
+		tokenStream.Destroy()
 		dst[i] = result
 	}
 	return nil
