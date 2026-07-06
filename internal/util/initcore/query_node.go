@@ -140,6 +140,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
 
+	cDriverPrefetchEnabled := C.bool(paramtable.Get().CommonCfg.EnableDriverPrefetch.GetAsBool())
+	C.SetDefaultDriverPrefetchEnable(cDriverPrefetchEnabled)
+
 	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.SetDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)
 
