@@ -1351,11 +1351,7 @@ func (sd *shardDelegator) Close() {
 		sd.growingSourceProvider.Deactivate()
 	}
 
-	// Stop background snapshot loop before refunding candidates
 	sd.distribution.Close()
-
-	// Refund all sealed segment candidates in distribution
-	sd.distribution.RefundAllCandidates()
 
 	// clean idf oracle
 	if idfOracle := sd.getIDFOracle(); idfOracle != nil {

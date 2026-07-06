@@ -17,6 +17,7 @@
 package delegator
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -43,10 +44,34 @@ func (s *DistributionSuite) SetupTest() {
 }
 
 func (s *DistributionSuite) TearDownTest() {
-	if s.dist != nil {
-		s.dist.Close()
-	}
 	s.dist = nil
+}
+
+func TestAddDistributionsPublishesSnapshotSynchronously(t *testing.T) {
+	oldProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(oldProcs)
+
+	paramtable.Init()
+	dist := NewDistribution("channel-1", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+
+	dist.AddDistributions(SegmentEntry{
+		NodeID:      1,
+		SegmentID:   1,
+		PartitionID: 1,
+	})
+
+	sealed, _, version := dist.PinOnlineSegments()
+	defer dist.Unpin(version)
+
+	requireSnapshot := assert.New(t)
+	if requireSnapshot.Len(sealed, 1) {
+		requireSnapshot.ElementsMatch([]SegmentEntry{{
+			NodeID:        1,
+			SegmentID:     1,
+			PartitionID:   1,
+			TargetVersion: unreadableTargetVersion,
+		}}, sealed[0].Segments)
+	}
 }
 
 func (s *DistributionSuite) TestAddDistribution() {
@@ -196,7 +221,6 @@ func (s *DistributionSuite) TestAddDistribution() {
 			_, _, _, version, err := s.dist.PinReadableSegments(1.0, 1)
 			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
-			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(false)
 			s.compareSnapshotItems(tc.expected, sealed)
 			s.dist.Unpin(version)
@@ -633,7 +657,6 @@ func (s *DistributionSuite) TestPeek() {
 			defer s.TearDownTest()
 
 			s.dist.AddDistributions(tc.input...)
-			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(tc.readable)
 			s.compareSnapshotItems(tc.expected, sealed)
 		})
@@ -700,7 +723,6 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 				DroppedInTarget:       nil,
 			}, nil)
 			s.dist.MarkOfflineSegments(tc.offlines...)
-			s.dist.Flush()
 			s.Equal(tc.serviceable, s.dist.Serviceable())
 
 			for _, offline := range tc.offlines {
@@ -829,13 +851,12 @@ func TestDistribution_NewDistribution(t *testing.T) {
 	assert.NotNil(t, dist.current)
 }
 
-func TestDistribution_NotifyAfterClose(t *testing.T) {
+func TestDistribution_AddDistributionsAfterClose(t *testing.T) {
 	dist := NewDistribution("test_channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
 	dist.Close()
-	refunded := false
+	refundCount := 0
 
 	assert.NotPanics(t, func() {
-		dist.notifySnapshotUpdate()
 		dist.AddDistributions(SegmentEntry{
 			NodeID:      1,
 			SegmentID:   1,
@@ -843,12 +864,39 @@ func TestDistribution_NotifyAfterClose(t *testing.T) {
 			Version:     1,
 			Candidate: &refundTrackingCandidate{
 				mockCandidate: mockCandidate{id: 1, partition: 1},
-				refunded:      &refunded,
+				refundCount:   &refundCount,
 			},
 		})
 	})
-	assert.True(t, refunded)
+	assert.Equal(t, 1, refundCount)
 	assert.False(t, dist.SealedSegmentExists(1))
+}
+
+func TestDistribution_CloseRefundsExistingCandidate(t *testing.T) {
+	dist := NewDistribution("test_channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+	refundCount := 0
+	dist.AddDistributions(SegmentEntry{
+		NodeID:      1,
+		SegmentID:   1,
+		PartitionID: 1,
+		Version:     1,
+		Candidate: &refundTrackingCandidate{
+			mockCandidate: mockCandidate{id: 1, partition: 1},
+			refundCount:   &refundCount,
+		},
+	})
+
+	assert.True(t, dist.SealedSegmentExists(1))
+	assert.Zero(t, refundCount)
+
+	dist.Close()
+
+	assert.Equal(t, 1, refundCount)
+	dist.mut.RLock()
+	entry, ok := dist.sealedSegments[1]
+	dist.mut.RUnlock()
+	assert.True(t, ok)
+	assert.Nil(t, entry.Candidate)
 }
 
 func TestDistribution_UpdateServiceable(t *testing.T) {
@@ -1466,10 +1514,6 @@ func TestPinReadableSegments(t *testing.T) {
 			SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100},
 			GrowingInTarget:       []int64{},
 		}, []int64{1})
-		// Flush pending snapshot and stop background goroutine to avoid
-		// data race with mockey patches in sub-tests.
-		dist.Flush()
-		dist.Close()
 		return dist
 	}
 
@@ -1553,10 +1597,6 @@ func TestPinReadableSegments_ServiceableLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
-	// Stop background goroutine to avoid data race with mockey patches.
-	dist.Flush()
-	dist.Close()
-
 	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0
 	// This tests the case where load ratio is satisfied but serviceable is false
 	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
@@ -1589,10 +1629,6 @@ func TestPinReadableSegments_LoadRatioLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
-	// Stop background goroutine to avoid data race with mockey patches.
-	dist.Flush()
-	dist.Close()
-
 	// Test case: requireFullResult=false, loadRatioSatisfy=false
 	// This tests the case where partial result is requested but load ratio is insufficient
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.3).Build()
@@ -1622,10 +1658,6 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 		SealedSegmentRowCount: map[int64]int64{1: 100},
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
-
-	// Stop background goroutine to avoid data race with mockey patches.
-	dist.Flush()
-	dist.Close()
 
 	// Test case 1: requiredLoadRatio = 0.0 (edge case)
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
@@ -1687,10 +1719,6 @@ func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
-	// Stop background goroutine to avoid data race with mockey patches.
-	dist.Flush()
-	dist.Close()
-
 	// Call PinReadableSegments with partial result enabled (requiredLoadRatio < 1.0)
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)
 
@@ -1748,11 +1776,11 @@ func (m *mockCandidate) Refund()                                  {}
 
 type refundTrackingCandidate struct {
 	mockCandidate
-	refunded *bool
+	refundCount *int
 }
 
 func (m *refundTrackingCandidate) Refund() {
-	*m.refunded = true
+	(*m.refundCount)++
 }
 
 func TestBatchGetFromSegments(t *testing.T) {
