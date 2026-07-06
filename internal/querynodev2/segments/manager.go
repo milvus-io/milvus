@@ -270,14 +270,19 @@ func (segments segments) RangeWithFilter(criterion *segmentCriterion, process fu
 	}
 
 	for _, candidate := range candidates {
+		stopped := false
 		candidate.Range(func(id typeutil.UniqueID, segment Segment) bool {
 			if criterion.Match(segment) {
 				if !process(id, segment.Type(), segment) {
+					stopped = true
 					return false
 				}
 			}
 			return true
 		})
+		if stopped {
+			return
+		}
 	}
 }
 
