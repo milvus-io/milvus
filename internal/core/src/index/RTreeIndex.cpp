@@ -456,10 +456,15 @@ RTreeIndex<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
     std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
-    auto end = std::lower_bound(
-        null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
-    for (auto it = null_offset_.begin(); it != end; ++it) {
-        bitset.set(*it);
+    // null_offset_ is not guaranteed to be sorted: the concurrent multi-writer
+    // AddGeometry path appends offsets in completion order, so a std::lower_bound
+    // shortcut would be undefined and could leave in-range offsets past the
+    // bound (or, worse, iterate offsets >= count). Bounds-check each element
+    // instead so an out-of-range offset can never write past the bitset.
+    for (auto off : null_offset_) {
+        if (off < static_cast<size_t>(count)) {
+            bitset.set(off);
+        }
     }
     return bitset;
 }
@@ -470,10 +475,12 @@ RTreeIndex<T>::IsNotNull() {
     int64_t count = Count();
     TargetBitmap bitset(count, true);
     std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
-    auto end = std::lower_bound(
-        null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
-    for (auto it = null_offset_.begin(); it != end; ++it) {
-        bitset.reset(*it);
+    // See IsNull(): null_offset_ may be unsorted under concurrent writers, so
+    // bounds-check every offset rather than relying on a sorted-range shortcut.
+    for (auto off : null_offset_) {
+        if (off < static_cast<size_t>(count)) {
+            bitset.reset(off);
+        }
     }
     return bitset;
 }
