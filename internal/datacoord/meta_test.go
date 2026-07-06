@@ -2949,6 +2949,37 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	checkVersion(6, 3, 3, 3, 3)
 }
 
+func TestReloadL0SegmentWithSidePrefixDeltalogs(t *testing.T) {
+	rootPath := "ReloadL0SegmentWithSidePrefixDeltalogs-" + funcutil.RandomString(10)
+	meta, err := newMetaWithEtcd(t, rootPath)
+	require.NoError(t, err)
+
+	collectionID := int64(1)
+	partitionID := int64(1)
+	segmentID := int64(1)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		ID:            segmentID,
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L0,
+		InsertChannel: "by-dev-rootcoord-dml_0_1v0",
+		Deltalogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 100)},
+	})
+	require.NoError(t, meta.AddSegment(context.TODO(), segment))
+	require.EqualValues(t, 0, segment.GetNumOfRows())
+
+	reloaded, err := newMetaWithEtcdCollections(t, rootPath, collectionID)
+	require.NoError(t, err)
+
+	reloadedSegment := reloaded.GetSegment(context.TODO(), segmentID)
+	require.NotNil(t, reloadedSegment)
+	require.EqualValues(t, 0, reloadedSegment.GetNumOfRows())
+	require.Len(t, reloadedSegment.GetDeltalogs(), 1)
+	require.Len(t, reloadedSegment.GetDeltalogs()[0].GetBinlogs(), 1)
+	require.EqualValues(t, 100, reloadedSegment.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
+}
+
 func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)

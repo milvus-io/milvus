@@ -114,6 +114,24 @@ func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
 	return newMeta(context.TODO(), catalog, nil, broker, segmentPersist, rootPath)
 }
 
+func newMetaWithEtcdCollections(t *testing.T, rootPath string, collectionIDs ...int64) (*meta, error) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	catalogKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
+		Status: merr.Success(),
+		DbCollections: []*rootcoordpb.DBCollections{
+			{
+				DbName:        "default",
+				CollectionIDs: collectionIDs,
+			},
+		},
+	}, nil)
+	segmentPersist := NewSegmentTxnWrapper(NewOptimisticTxnEtcdPersist(etcdCli))
+	return newMeta(context.TODO(), catalog, nil, broker, segmentPersist, rootPath)
+}
+
 func newMockAllocator(t *testing.T) *allocator.MockAllocator {
 	counter := atomic.NewInt64(0)
 	mockAllocator := allocator.NewMockAllocator(t)

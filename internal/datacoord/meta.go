@@ -399,13 +399,14 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 			if err != nil {
 				return nil, err
 			}
-			// Backward-compat: older clusters persist binlog fields as separate KVs and
-			// strip them from the segment proto. A segment with rows but no embedded
-			// binlogs indicates such legacy data; stitch binlogs from their side-prefix KVs.
+			// Backward-compat: older clusters persist binlog fields as separate KVs
+			// and strip them from the segment proto. A segment with no embedded
+			// binlog-family fields may still have side-prefix KVs, including L0
+			// delete-only segments whose NumOfRows is zero.
 			needsBinlogFallback := false
 			for _, seg := range values {
-				if seg.GetNumOfRows() > 0 && len(seg.GetBinlogs()) == 0 &&
-					len(seg.GetDeltalogs()) == 0 && len(seg.GetStatslogs()) == 0 {
+				if len(seg.GetBinlogs()) == 0 && len(seg.GetDeltalogs()) == 0 &&
+					len(seg.GetStatslogs()) == 0 && len(seg.GetBm25Statslogs()) == 0 {
 					needsBinlogFallback = true
 					break
 				}
