@@ -206,6 +206,36 @@ GetNotMatchExpr(SchemaPtr schema,
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     return parsed;
 };
+
+std::shared_ptr<milvus::plan::FilterBitsNode>
+GetFuzzyMatchExpr(SchemaPtr schema,
+                  const std::string& query,
+                  int64_t max_edit_distance) {
+    // For TextMatchFuzzy the single extra value carries the max edit distance,
+    // reusing the slot phrase match uses for slop.
+    return GetMatchExpr(
+        schema, query, proto::plan::OpType::TextMatchFuzzy, max_edit_distance);
+};
+
+std::shared_ptr<milvus::plan::FilterBitsNode>
+GetFuzzyMatchExprNoDistance(SchemaPtr schema, const std::string& query) {
+    // A fuzzy plan with no extra value at all, to reach the executor's
+    // "max_edit_distance is required" guard.
+    const auto& str_meta = schema->operator[](FieldName("str"));
+    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                           proto::schema::DataType::VarChar,
+                                           false,
+                                           false);
+    auto unary_range_expr =
+        test::GenUnaryRangeExpr(proto::plan::OpType::TextMatchFuzzy, query);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto expr = test::GenExpr();
+    expr->set_allocated_unary_range_expr(unary_range_expr);
+    auto parser = ProtoParser(schema);
+    auto typed_expr = parser.ParseExprs(*expr);
+    return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  typed_expr);
+};
 }  // namespace
 
 TEST(ParseJson, Naive) {
@@ -309,6 +339,52 @@ TEST(TextMatch, Index) {
         ASSERT_FALSE(res4[0]);
         ASSERT_FALSE(res4[1]);
         ASSERT_TRUE(res4[2]);
+    }
+}
+
+TEST(TextMatch, FuzzyIndex) {
+    using Index = index::TextMatchIndex;
+    auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                         "unique_id",
+                                         "milvus_tokenizer",
+                                         "{}");
+    index->CreateReader(milvus::index::SetBitsetSealed);
+    index->AddTextSealed("football, basketball, pingpang", true, 0);
+    index->AddTextSealed("", false, 1);
+    index->AddTextSealed("swimming, football", true, 2);
+    index->Commit();
+    index->Reload();
+
+    {
+        // "footbal" is one edit from "football", so distance 1 matches rows 0 and 2.
+        auto res = index->FuzzyMatchQuery("footbal", 1);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_TRUE(res[2]);
+
+        // the same typo under exact text match finds nothing: fuzzy really differs.
+        auto exact = index->MatchQuery("footbal", 1);
+        ASSERT_EQ(exact.size(), 3);
+        ASSERT_FALSE(exact[0]);
+        ASSERT_FALSE(exact[2]);
+
+        // distance 0 is exact, so the typo still finds nothing.
+        auto res0 = index->FuzzyMatchQuery("footbal", 0);
+        ASSERT_EQ(res0.size(), 3);
+        ASSERT_FALSE(res0[0]);
+        ASSERT_FALSE(res0[2]);
+
+        // "fotbal" is two edits from "football": excluded at distance 1, matched at distance 2.
+        auto miss = index->FuzzyMatchQuery("fotbal", 1);
+        ASSERT_EQ(miss.size(), 3);
+        ASSERT_FALSE(miss[0]);
+        ASSERT_FALSE(miss[2]);
+        auto hit = index->FuzzyMatchQuery("fotbal", 2);
+        ASSERT_EQ(hit.size(), 3);
+        ASSERT_TRUE(hit[0]);
+        ASSERT_FALSE(hit[1]);
+        ASSERT_TRUE(hit[2]);
     }
 }
 
@@ -826,6 +902,33 @@ TEST(TextMatch, GrowingNaive) {
         ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
     }
+
+    {
+        // A typo (edit distance 1) matches the same rows as the exact term and
+        // exercises the executor + growing commit/reload path for fuzzy match.
+        BitsetType final;
+        auto expr = GetFuzzyMatchExpr(schema, "footbal", 1);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        auto expr1 =
+            GetNotMatchExpr(schema, "footbal", OpType::TextMatchFuzzy, 1);
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+
+    {
+        // The executor rejects an out-of-range or missing max_edit_distance
+        // (the parser guarantees [0, 2], but a raw proto may not).
+        auto bad = GetFuzzyMatchExpr(schema, "footbal", 3);
+        ASSERT_ANY_THROW(ExecuteQueryExpr(bad, seg.get(), N, MAX_TIMESTAMP));
+        auto missing = GetFuzzyMatchExprNoDistance(schema, "footbal");
+        ASSERT_ANY_THROW(
+            ExecuteQueryExpr(missing, seg.get(), N, MAX_TIMESTAMP));
+    }
 }
 
 // Regression test for https://github.com/milvus-io/milvus/issues/48388
@@ -1084,6 +1187,23 @@ TEST(TextMatch, SealedNaive) {
         final = ExecuteQueryExpr(expr3, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
+        ASSERT_FALSE(final[1]);
+    }
+
+    {
+        // A typo (edit distance 1) matches the same rows as the exact term,
+        // exercising the executor dispatch for fuzzy on a sealed segment.
+        BitsetType final;
+        auto expr = GetFuzzyMatchExpr(schema, "footbal", 1);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_TRUE(final[0]);
+        ASSERT_TRUE(final[1]);
+        auto expr1 =
+            GetNotMatchExpr(schema, "footbal", OpType::TextMatchFuzzy, 1);
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
     }
 }
