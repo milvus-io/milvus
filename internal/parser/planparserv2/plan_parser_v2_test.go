@@ -1456,12 +1456,12 @@ func TestExpr_BitwiseArith(t *testing.T) {
 		expected int64
 	}
 	foldCases := []foldCase{
-		{`Int64Field == (7 & 3)`, 3},   // 7 & 3 = 3
-		{`Int64Field == (5 | 2)`, 7},   // 5 | 2 = 7
-		{`Int64Field == (6 ^ 3)`, 5},   // 6 ^ 3 = 5
-		{`Int64Field == (1 << 3)`, 8},  // 1 << 3 = 8
+		{`Int64Field == (7 & 3)`, 3},     // 7 & 3 = 3
+		{`Int64Field == (5 | 2)`, 7},     // 5 | 2 = 7
+		{`Int64Field == (6 ^ 3)`, 5},     // 6 ^ 3 = 5
+		{`Int64Field == (1 << 3)`, 8},    // 1 << 3 = 8
 		{`Int64Field == (256 >> 2)`, 64}, // 256 >> 2 = 64
-		{`Int64Field == ~5`, -6},       // ~5 = -6
+		{`Int64Field == ~5`, -6},         // ~5 = -6
 	}
 	for _, c := range foldCases {
 		expr, err := ParseExpr(helper, c.expr, nil)
