@@ -13,6 +13,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, WeightedRanker
+from pymilvus.client.types import LoadState
 from utils.util_log import test_log as log
 
 DIM = 16
@@ -1377,6 +1378,69 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         assert_rows_payload(sealed_rows, expected, [CONTENT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_text_lob_not_loaded_flush_and_reload(self):
+        """
+        target: verify unloaded TEXT insert/flush succeeds without requiring growing-source logs
+        method: create an unloaded TEXT/BM25 collection, insert and flush, then load/reload and validate payloads/search
+        expected: flush succeeds and loaded/reloaded TEXT payloads remain exact
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        rows = [
+            build_row(2600, "unloaded_small", "g02 unloaded writebuffer vector database"),
+            build_row(
+                2601,
+                "unloaded_large",
+                make_text(96 * 1024, "g02-unloaded-large"),
+                content_zh=None,
+                content_alt=make_text(64 * 1024, "g02-unloaded-alt"),
+                varchar_text="g02 unloaded large vector database",
+            ),
+            build_row(
+                2602,
+                "unloaded_bm25",
+                "writebuffer vector database " * 8 + "manual flush text lob",
+            ),
+        ]
+        expected = expected_payloads(rows)
+        self.create_text_lob_collection(client, collection_name, rows=None, load=False)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, (
+            f"Expected NotLoad before unloaded insert/flush, but got {load_state['state']}"
+        )
+
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        row_ids = [row[ID_FIELD] for row in rows]
+        rows_by_id = query_by_ids(self, client, collection_name, row_ids, TEXT_FIELDS + [VARCHAR_TEXT_FIELD])
+        assert_rows_payload(rows_by_id, expected, TEXT_FIELDS + [VARCHAR_TEXT_FIELD])
+        res, _ = self.search(
+            client,
+            collection_name,
+            data=["writebuffer vector database"],
+            anns_field=CONTENT_SPARSE_FIELD,
+            search_params={"metric_type": "BM25", "params": {}},
+            limit=3,
+            output_fields=[ID_FIELD, CONTENT_FIELD],
+            consistency_level="Strong",
+        )
+        assert_search_results(
+            res,
+            nq=1,
+            limit=3,
+            metric="BM25",
+            output_fields=[CONTENT_FIELD],
+            required_ids={2602},
+        )
+
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        reloaded_rows = query_by_ids(self, client, collection_name, row_ids, [CONTENT_FIELD, CONTENT_ALT_FIELD])
+        assert_rows_payload(reloaded_rows, expected, [CONTENT_FIELD, CONTENT_ALT_FIELD])
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_text_lob_text_match_without_text_index_release_reload(self):
         """
         target: verify text_match does not depend on an explicit text scalar index and survives release/load
@@ -2158,80 +2222,6 @@ class TestMilvusClientTextLOBNegative(TestMilvusClientV2Base):
 class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
     """Plan coverage that needs external storage, config mutation, or cluster orchestration."""
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_text_lob_config_gated_storage_paths(self):
-        pytest.skip(
-            "out of scope for this P0 local coverage pass: requires Milvus runtime config mutation for "
-            "useLoonFFI, text.inlineThreshold, maxLobFileBytes, and queryNode.idfOracle.preload"
-        )
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_text_lob_not_loaded_flush_and_reload(self):
-        """
-        target: verify unloaded TEXT insert/flush succeeds without requiring growing-source logs
-        method: create an unloaded TEXT/BM25 collection, insert and flush, then load/reload and validate payloads/search
-        expected: flush succeeds and loaded/reloaded TEXT payloads remain exact
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        rows = [
-            build_row(2600, "unloaded_small", "g02 unloaded writebuffer vector database"),
-            build_row(
-                2601,
-                "unloaded_large",
-                make_text(96 * 1024, "g02-unloaded-large"),
-                content_zh=None,
-                content_alt=make_text(64 * 1024, "g02-unloaded-alt"),
-                varchar_text="g02 unloaded large vector database",
-            ),
-            build_row(
-                2602,
-                "unloaded_bm25",
-                "writebuffer vector database " * 8 + "manual flush text lob",
-            ),
-        ]
-        expected = expected_payloads(rows)
-        schema = build_text_lob_schema(client)
-        index_params = build_text_lob_index_params(client)
-        self.create_collection(
-            client,
-            collection_name,
-            schema=schema,
-            index_params=index_params,
-            consistency_level="Strong",
-        )
-
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        row_ids = [row[ID_FIELD] for row in rows]
-        rows_by_id = query_by_ids(self, client, collection_name, row_ids, TEXT_FIELDS + [VARCHAR_TEXT_FIELD])
-        assert_rows_payload(rows_by_id, expected, TEXT_FIELDS + [VARCHAR_TEXT_FIELD])
-        res, _ = self.search(
-            client,
-            collection_name,
-            data=["writebuffer vector database"],
-            anns_field=CONTENT_SPARSE_FIELD,
-            search_params={"metric_type": "BM25", "params": {}},
-            limit=3,
-            output_fields=[ID_FIELD, CONTENT_FIELD],
-            consistency_level="Strong",
-        )
-        assert_search_results(
-            res,
-            nq=1,
-            limit=3,
-            metric="BM25",
-            output_fields=[CONTENT_FIELD],
-            required_ids={2602},
-        )
-
-        self.release_collection(client, collection_name)
-        self.load_collection(client, collection_name)
-        reloaded_rows = query_by_ids(self, client, collection_name, row_ids, [CONTENT_FIELD, CONTENT_ALT_FIELD])
-        assert_rows_payload(reloaded_rows, expected, [CONTENT_FIELD, CONTENT_ALT_FIELD])
-
     @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_text_lob_release_during_insert_or_flush(self):
         """
@@ -2424,13 +2414,6 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
         for pk in [3101, 3102]:
             key = lob_object_key(partition_base, content_field_id, refs[pk])
             assert key in lob_keys, f"LOB object {key} referenced by row {pk} was not found in {lob_keys}"
-
-    @pytest.mark.tags(CaseLabel.ClusterOnly)
-    def test_text_lob_compaction_reuse_rewrite_lob_files(self):
-        pytest.skip(
-            "C-01/C-02 require object-store or manifest inspection: low-hole compaction must reuse LOB files "
-            "and high-hole compaction must rewrite LOB files and leave old files GC-eligible"
-        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_text_lob_bm25_multi_analyzer_by_field(self):
