@@ -48,7 +48,7 @@ New op type `TextMatchFuzzy = 17`. The edit distance rides in the existing `Unar
 
 ### 2. ANTLR grammar + Go parser (`internal/parser/planparserv2/`)
 
-New grammar rule `text_match_fuzzy(Identifier, expr, max_edit_distance = IntegerConstant)`. `VisitTextMatchFuzzy` validates `K ∈ [0, 2]` and stores it in `extra_values`. The shared prologue of the three text visitors (`text_match` / `text_match_fuzzy` / `phrase_match`) is extracted into `parseTextMatchOperand`.
+New grammar rule `text_match_fuzzy(Identifier, expr, max_edit_distance = IntegerConstant)`. The `max_edit_distance` option name is a **soft keyword** — the grammar accepts a plain `Identifier` in that slot and `VisitTextMatchFuzzy` validates it (case-insensitively) equals `max_edit_distance` — so it is *not* reserved and a scalar field literally named `max_edit_distance` remains usable elsewhere in a filter. `VisitTextMatchFuzzy` also validates `K ∈ [0, 2]` and stores it in `extra_values`. The shared prologue of the three text visitors (`text_match` / `text_match_fuzzy` / `phrase_match`) is extracted into `parseTextMatchOperand`.
 
 ### 3. C++ executor (`internal/core/src/exec/expression/`)
 
@@ -60,7 +60,7 @@ New grammar rule `text_match_fuzzy(Identifier, expr, max_edit_distance = Integer
 
 ### 5. Rust / tantivy binding (`internal/core/thirdparty/tantivy/...`)
 
-`fuzzy_match_query` tokenizes the query and ORs one `FuzzyTermQuery` (distance `K`, `transposition_cost_one = true`) per token, reusing the shared `tokenize_terms` helper. It is exposed over FFI as `tantivy_fuzzy_match_query`.
+`fuzzy_match_query` tokenizes the query and ORs one `FuzzyTermQuery` (distance `K`, `transposition_cost_one = true`) per token via `BooleanQuery::union`, reusing the shared `tokenize_terms` helper. It is exposed over FFI as `tantivy_fuzzy_match_query`. As `K = 0` is exactly a term match, it short-circuits to the cheaper `match_query` (multiterms) path instead of building a Levenshtein automaton per token.
 
 ---
 

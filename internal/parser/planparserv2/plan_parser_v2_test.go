@@ -851,6 +851,53 @@ func TestExpr_TextMatchFuzzy(t *testing.T) {
 	}
 }
 
+func TestExpr_TextMatchFuzzy_SoftKeyword(t *testing.T) {
+	// A wrong option name is rejected: the option name is a soft keyword, so
+	// only "max_edit_distance" (any case) is accepted.
+	{
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `text_match_fuzzy(VarCharField, "query", fuzziness=1)`
+		_, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "expected max_edit_distance")
+	}
+
+	// The option name is case-insensitive.
+	{
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `text_match_fuzzy(VarCharField, "query", MAX_EDIT_DISTANCE=1)`
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 10, MetricType: "L2",
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+	}
+
+	// max_edit_distance is a soft keyword, not a reserved word: a scalar field
+	// literally named "max_edit_distance" stays usable in an ordinary filter
+	// (issue #51058 — hard-keywording it would break such collections).
+	{
+		schema := newTestSchema(false)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 9999, Name: "max_edit_distance", DataType: schemapb.DataType_Int64,
+		})
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `max_edit_distance > 1`
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 10, MetricType: "L2",
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+	}
+}
+
 func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	enableMatch(schema)

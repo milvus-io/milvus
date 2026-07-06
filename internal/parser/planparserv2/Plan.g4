@@ -22,7 +22,7 @@ expr:
 	| expr REGEXMATCH expr                                                                                  # RegexMatch
 	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
 	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
-	| TEXTMATCHFUZZY'('Identifier',' expr ',' MAX_EDIT_DISTANCE ASSIGN IntegerConstant ')'                  # TextMatchFuzzy
+	| TEXTMATCHFUZZY'('Identifier',' expr ',' Identifier ASSIGN IntegerConstant ')'                         # TextMatchFuzzy
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
@@ -82,7 +82,6 @@ MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
-MAX_EDIT_DISTANCE: 'max_edit_distance' | 'MAX_EDIT_DISTANCE';
 THRESHOLD: 'threshold' | 'THRESHOLD';
 REGEXMATCH: '=~';
 REGEXNOTMATCH: '!~';
