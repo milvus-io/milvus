@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,12 +21,36 @@ import (
 var (
 	ErrKeyAlreadyExists = fmt.Errorf("key already exists")
 	ErrKeyNotFound      = fmt.Errorf("key not found")
+	ErrPartialCommit    = fmt.Errorf("partial txn commit")
 	// ErrCASFailed is returned by Commit when an Update op's expectedVersion
 	// doesn't match the backend's current version for that key. Callers that
 	// want read-modify-write semantics retry: re-read the latest version,
 	// re-mutate, re-commit.
 	ErrCASFailed = fmt.Errorf("CAS precondition failed")
 )
+
+type partialCommitError struct {
+	cause error
+}
+
+func newPartialCommitError(cause error) error {
+	return &partialCommitError{cause: cause}
+}
+
+func (e *partialCommitError) Error() string {
+	if e.cause == nil {
+		return ErrPartialCommit.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrPartialCommit, e.cause)
+}
+
+func (e *partialCommitError) Unwrap() error {
+	return e.cause
+}
+
+func (e *partialCommitError) Is(target error) bool {
+	return target == ErrPartialCommit
+}
 
 // OptimisticTxnPersist is a bytes-only persist layer with atomic multi-key
 // transactions. Typed callers wrap this (see SegmentTxnWrapper) to add
@@ -164,12 +189,18 @@ func (t *etcdTxn) Commit() ([]TxnResult, error) {
 	results := make([]TxnResult, len(t.ops))
 
 	batchSize := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if batchSize <= 0 {
+		return nil, merr.WrapErrServiceInternalMsg("invalid max etcd txn num: %d", batchSize)
+	}
 	for batchStart := 0; batchStart < len(t.ops); batchStart += batchSize {
 		batchEnd := batchStart + batchSize
 		if batchEnd > len(t.ops) {
 			batchEnd = len(t.ops)
 		}
 		if err := t.commitBatch(t.ops[batchStart:batchEnd], results[batchStart:batchEnd]); err != nil {
+			if batchStart > 0 {
+				return results, newPartialCommitError(err)
+			}
 			return nil, err
 		}
 	}
@@ -400,12 +431,23 @@ func (t *tikvTxn) Commit() ([]TxnResult, error) {
 
 	cts := t.persist.captureCommitTS(txn)
 	if err := txn.Commit(t.ctx); err != nil {
-		return nil, err
+		return nil, classifyTiKVCommitError(err)
 	}
 	for i := range t.ops {
 		results[i].Version = int64(*cts)
 	}
 	return results, nil
+}
+
+func classifyTiKVCommitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var latchConflict *tikverr.ErrWriteConflictInLatch
+	if tikverr.IsErrWriteConflict(err) || errors.As(err, &latchConflict) {
+		return merr.Wrapf(ErrCASFailed, "tikv commit conflict: %s", err.Error())
+	}
+	return err
 }
 
 func (t *tikvTxn) validateTiKVTxn(txn *transaction.KVTxn) error {

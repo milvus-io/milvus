@@ -24,7 +24,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -98,6 +100,50 @@ func SetSchemaVersion(schemaVersion int32) SegmentOperator {
 		}
 		segment.SchemaVersion = schemaVersion
 		return BinlogIncrement{}, true
+	}
+}
+
+func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint, skipDmlPositionCheck ...bool) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			var cpNumRows int64
+			for _, cp := range checkpoints {
+				if cp.GetSegmentID() != segmentID {
+					mlog.Warn(context.TODO(), "checkpoint in segment is not same as flush segment to update, ignore",
+						mlog.Int64("current", segmentID),
+						mlog.Int64("checkpoint segment", cp.GetSegmentID()))
+					continue
+				}
+				if cp.GetPosition() == nil {
+					mlog.Warn(context.TODO(), "checkpoint has nil position, skip", mlog.Int64("segmentID", segmentID))
+					continue
+				}
+				if segment.GetDmlPosition() != nil &&
+					segment.GetDmlPosition().GetTimestamp() >= cp.GetPosition().GetTimestamp() &&
+					(len(skipDmlPositionCheck) == 0 || !skipDmlPositionCheck[0]) {
+					mlog.Warn(context.TODO(), "checkpoint in segment is larger than reported",
+						mlog.Any("current", segment.GetDmlPosition()),
+						mlog.Any("reported", cp.GetPosition()))
+					continue
+				}
+				cpNumRows = cp.GetNumOfRows()
+				segment.DmlPosition = cp.GetPosition()
+			}
+
+			count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
+			if count > 0 {
+				if cpNumRows != count {
+					mlog.Info(context.TODO(), "check point reported row count inconsistent with binlog row count",
+						mlog.Int64("segmentID", segmentID),
+						mlog.Int64("binlog reported (wrong)", cpNumRows),
+						mlog.Int64("segment binlog row count (correct)", count))
+				}
+				segment.NumOfRows = count
+			} else if cpNumRows > 0 && segment.GetStorageVersion() == storage.StorageV3 {
+				segment.NumOfRows = cpNumRows
+			}
+			return BinlogIncrement{}, true
+		}},
 	}
 }
 

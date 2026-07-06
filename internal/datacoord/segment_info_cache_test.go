@@ -18,9 +18,12 @@ package datacoord
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -93,4 +96,34 @@ func TestCachedSegmentsInfo_SetSegmentRejectsStaleVersion(t *testing.T) {
 	assert.Equal(t, int64(100), seg.GetNumOfRows())
 	assert.Len(t, cache.GetSegmentsBySelector(WithCollection(10), WithChannel("ch-1")), 1)
 	assert.Empty(t, cache.GetSegmentsBySelector(WithCollection(11), WithChannel("ch-2")))
+}
+
+func TestCachedSegmentsInfo_SetSegmentPreservingLocalState(t *testing.T) {
+	cache := NewCachedSegmentsInfo()
+	base := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            6,
+		CollectionID:  10,
+		PartitionID:   20,
+		InsertChannel: "ch-1",
+		NumOfRows:     100,
+	}}
+	cache.SetSegment(6, base, 10)
+
+	localFlushTime := time.Unix(100, 0)
+	cache.SetIsCompacting(6, true)
+	cache.SetAllocations(6, []*Allocation{{SegmentID: 6, NumOfRows: 8}})
+	cache.SetFlushTime(6, localFlushTime)
+	cache.SetRowCount(6, 123)
+
+	persisted := base.Clone(SetState(commonpb.SegmentState_Flushed))
+	old, existed := cache.SetSegmentPreservingLocalState(6, base, persisted, 11)
+	require.True(t, existed)
+	require.NotNil(t, old)
+
+	updated := cache.GetSegment(6)
+	require.NotNil(t, updated)
+	assert.True(t, updated.isCompacting)
+	assert.Equal(t, []*Allocation{{SegmentID: 6, NumOfRows: 8}}, updated.allocations)
+	assert.Equal(t, localFlushTime, updated.lastFlushTime)
+	assert.EqualValues(t, 123, updated.GetNumOfRows(), "local row count should survive when the persisted mutation did not change row count")
 }

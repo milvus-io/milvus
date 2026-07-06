@@ -18,12 +18,64 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/stretchr/testify/require"
+	tikverr "github.com/tikv/client-go/v2/error"
 
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	tikvtest "github.com/milvus-io/milvus/pkg/v3/util/tikv"
 )
+
+func TestSegmentTxnWrapperStagesMainRecordAfterAuxiliaryKVs(t *testing.T) {
+	ctx := context.Background()
+	inner := &recordingPersist{}
+	wrapper := NewSegmentTxnWrapper(inner).WithMetaRootPath("root")
+
+	txn := wrapper.Txn(ctx)
+	segment := &datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: 100,
+		PartitionID:  20,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 101}}},
+		},
+	}
+	require.NoError(t, txn.Insert(segmentKey(100, 20, 10), segment))
+
+	require.GreaterOrEqual(t, len(inner.txn.ops), 2)
+	require.Equal(t, opPut, inner.txn.ops[0].kind, "side-prefix binlog writes must be staged before the segment key")
+	require.Equal(t, opInsert, inner.txn.ops[len(inner.txn.ops)-1].kind, "segment key must be the last op for this typed segment")
+	require.Equal(t, segmentKey(100, 20, 10), inner.txn.ops[len(inner.txn.ops)-1].key)
+}
+
+func TestSegmentTxnWrapperReturnsCommittedMainResultsOnPartialCommit(t *testing.T) {
+	ctx := context.Background()
+	partialErr := errors.New("later batch failed")
+	inner := &partialResultPersist{
+		results: []TxnResult{
+			{Version: 21},
+			{Version: 22},
+		},
+		err: newPartialCommitError(partialErr),
+	}
+	wrapper := NewSegmentTxnWrapper(inner)
+
+	txn := wrapper.Txn(ctx)
+	segment := &datapb.SegmentInfo{
+		ID:           10,
+		CollectionID: 100,
+		PartitionID:  20,
+	}
+	require.NoError(t, txn.Insert(segmentKey(100, 20, 10), segment))
+
+	results, err := txn.Commit()
+	require.ErrorIs(t, err, ErrPartialCommit)
+	require.Len(t, results, 1)
+	require.EqualValues(t, 21, results[0].Version)
+}
 
 func TestTiKVTxnUpdateRejectsStaleVersion(t *testing.T) {
 	ctx := context.Background()
@@ -91,3 +143,84 @@ func TestMemoryTxnUpdateRejectsStaleVersion(t *testing.T) {
 	_, err = txn.Commit()
 	require.ErrorIs(t, err, ErrCASFailed)
 }
+
+func TestClassifyTiKVCommitConflictAsCASFailed(t *testing.T) {
+	writeConflict := tikverr.NewErrWriteConflictWithArgs(1, 2, 3, []byte("k"), kvrpcpb.WriteConflict_Optimistic)
+	require.ErrorIs(t, classifyTiKVCommitError(writeConflict), ErrCASFailed)
+
+	latchConflict := &tikverr.ErrWriteConflictInLatch{StartTS: 1}
+	require.ErrorIs(t, classifyTiKVCommitError(latchConflict), ErrCASFailed)
+
+	rawErr := errors.New("other tikv failure")
+	require.Same(t, rawErr, classifyTiKVCommitError(rawErr))
+}
+
+type recordingPersist struct {
+	txn *recordingTxn
+}
+
+func (p *recordingPersist) Txn(ctx context.Context) Txn {
+	p.txn = &recordingTxn{}
+	return p.txn
+}
+
+func (p *recordingPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
+	return nil, nil, nil, nil
+}
+
+type recordingTxn struct {
+	ops []txnOp
+}
+
+func (t *recordingTxn) Insert(key string, value []byte) {
+	t.ops = append(t.ops, txnOp{kind: opInsert, key: key, value: value})
+}
+
+func (t *recordingTxn) Update(key string, value []byte, expectedVersion int64) {
+	t.ops = append(t.ops, txnOp{kind: opUpdate, key: key, value: value, expectedVersion: expectedVersion})
+}
+
+func (t *recordingTxn) Delete(key string) {
+	t.ops = append(t.ops, txnOp{kind: opDelete, key: key})
+}
+
+func (t *recordingTxn) Put(key string, value []byte) {
+	t.ops = append(t.ops, txnOp{kind: opPut, key: key, value: value})
+}
+
+func (t *recordingTxn) Remove(key string) {
+	t.ops = append(t.ops, txnOp{kind: opRemove, key: key})
+}
+
+func (t *recordingTxn) Commit() ([]TxnResult, error) {
+	results := make([]TxnResult, len(t.ops))
+	for i := range results {
+		results[i].Version = int64(i + 1)
+	}
+	return results, nil
+}
+
+type partialResultPersist struct {
+	results []TxnResult
+	err     error
+}
+
+func (p *partialResultPersist) Txn(ctx context.Context) Txn {
+	return partialResultTxn{results: p.results, err: p.err}
+}
+
+func (p *partialResultPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
+	return nil, nil, nil, nil
+}
+
+type partialResultTxn struct {
+	results []TxnResult
+	err     error
+}
+
+func (t partialResultTxn) Insert(key string, value []byte)                        {}
+func (t partialResultTxn) Update(key string, value []byte, expectedVersion int64) {}
+func (t partialResultTxn) Delete(key string)                                      {}
+func (t partialResultTxn) Put(key string, value []byte)                           {}
+func (t partialResultTxn) Remove(key string)                                      {}
+func (t partialResultTxn) Commit() ([]TxnResult, error)                           { return t.results, t.err }

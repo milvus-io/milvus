@@ -963,7 +963,8 @@ func (m *meta) updateSegmentCAS(ctx context.Context, segmentID UniqueID, mutate 
 		if cur == nil {
 			return retry.Unrecoverable(merr.WrapErrSegmentNotFound(segmentID))
 		}
-		clone := cur.Clone()
+		base := cur.Clone()
+		clone := base.Clone()
 		inc, ok := mutate(clone)
 		if !ok {
 			out = cur
@@ -976,10 +977,18 @@ func (m *meta) updateSegmentCAS(ctx context.Context, segmentID UniqueID, mutate 
 		}
 		results, err := txn.Commit()
 		if err != nil {
+			if errors.Is(err, ErrPartialCommit) {
+				if len(results) > 0 && results[0].Version > 0 {
+					m.segments.SetSegmentPreservingLocalState(segmentID, base, clone, results[0].Version)
+					out = m.segments.GetSegment(segmentID)
+					return nil
+				}
+				return ErrCASFailed
+			}
 			return err
 		}
-		m.segments.SetSegment(segmentID, clone, results[0].Version)
-		out = clone
+		m.segments.SetSegmentPreservingLocalState(segmentID, base, clone, results[0].Version)
+		out = m.segments.GetSegment(segmentID)
 		return nil
 	}, retry.Attempts(segmentCASMaxRetries), retry.Sleep(0), retry.RetryErr(isCASFailed))
 	if err != nil {
@@ -1076,28 +1085,31 @@ func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) erro
 // inserts newSegments. Existing-segment operators run against a clone of the
 // cached (fully-stitched) SegmentInfo; writes are CAS-gated on the cache
 // version. On CAS conflict the whole operation retries from the cache read.
+type segmentMutationEntry struct {
+	segID   int64
+	key     string
+	version int64
+	base    *SegmentInfo
+	clone   *SegmentInfo
+	inc     BinlogIncrement
+}
+
+type segmentNewEntry struct {
+	segID int64
+	info  *SegmentInfo
+}
+
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
 	if len(mutations) == 0 && len(newSegments) == 0 {
 		return nil
 	}
 
-	type mutatedEntry struct {
-		segID   int64
-		key     string
-		version int64
-		clone   *SegmentInfo
-		inc     BinlogIncrement
-	}
-	type newEntry struct {
-		segID int64
-		info  *SegmentInfo
-	}
-
-	var lastMutated []mutatedEntry
-	var lastNew []newEntry
+	var lastMutated []segmentMutationEntry
+	var lastNew []segmentNewEntry
 	var results []SegmentTxnResult
 	var noop bool
 	committedL0Manifests := make(map[int64]string)
+	committedNewSegments := make(map[int64]struct{})
 
 	err := retry.Do(ctx, func() error {
 		noop = false
@@ -1105,7 +1117,7 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 		lastMutated = nil
 		lastNew = nil
 
-		mutated := make([]mutatedEntry, 0, len(mutations))
+		mutated := make([]segmentMutationEntry, 0, len(mutations))
 		l0ManifestUpdates := make([]*l0ManifestUpdate, 0)
 		for segID, fns := range mutations {
 			cur, version := m.segments.GetSegmentWithVersion(segID)
@@ -1114,7 +1126,8 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 					mlog.Int64("segmentID", segID))
 				continue
 			}
-			clone := cur.Clone()
+			base := cur.Clone()
+			clone := base.Clone()
 			var inc BinlogIncrement
 			shouldWrite := true
 			for _, fn := range fns {
@@ -1133,7 +1146,7 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 			}
 			key := m.segmentKey(clone.GetCollectionID(), clone.GetPartitionID(), segID)
 			l0ManifestUpdates = append(l0ManifestUpdates, clone.pendingL0ManifestUpdates...)
-			mutated = append(mutated, mutatedEntry{segID: segID, key: key, version: version, clone: clone, inc: inc})
+			mutated = append(mutated, segmentMutationEntry{segID: segID, key: key, version: version, base: base, clone: clone, inc: inc})
 		}
 
 		for _, update := range l0ManifestUpdates {
@@ -1167,13 +1180,18 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 				return retry.Unrecoverable(err)
 			}
 		}
-		newEntries := make([]newEntry, 0, len(newSegments))
+		newEntries := make([]segmentNewEntry, 0, len(newSegments))
 		for _, seg := range newSegments {
+			if _, ok := committedNewSegments[seg.GetID()]; ok {
+				if existing := m.segments.GetSegment(seg.GetID()); existing != nil {
+					continue
+				}
+			}
 			key := m.segmentKey(seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID())
 			if err := txn.Insert(key, seg); err != nil {
 				return retry.Unrecoverable(err)
 			}
-			newEntries = append(newEntries, newEntry{segID: seg.GetID(), info: NewSegmentInfo(seg)})
+			newEntries = append(newEntries, segmentNewEntry{segID: seg.GetID(), info: NewSegmentInfo(seg)})
 		}
 
 		if len(mutated) == 0 && len(newEntries) == 0 {
@@ -1183,6 +1201,12 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 
 		committed, err := txn.Commit()
 		if err != nil {
+			if errors.Is(err, ErrPartialCommit) {
+				for _, segID := range m.applyPartialSegmentResults(mutated, newEntries, committed) {
+					committedNewSegments[segID] = struct{}{}
+				}
+				return ErrCASFailed
+			}
 			return err
 		}
 		lastMutated = mutated
@@ -1205,8 +1229,8 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 	}
 	idx := 0
 	for _, e := range lastMutated {
-		newSeg := e.clone
-		oldSeg, existed := m.segments.SetSegment(e.segID, newSeg, results[idx].Version)
+		oldSeg, existed := m.segments.SetSegmentPreservingLocalState(e.segID, e.base, e.clone, results[idx].Version)
+		newSeg := m.segments.GetSegment(e.segID)
 		if existed {
 			metricMutation.append(oldSeg.GetState(), newSeg.GetState(), newSeg.GetLevel(), newSeg.GetIsSorted(), newSeg.GetStorageVersion(), segmentMetricFormatLabel(newSeg), newSeg.GetNumOfRows())
 			if !sameSegmentMetricLabels(oldSeg, newSeg) {
@@ -1222,6 +1246,31 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 	}
 	metricMutation.commit()
 	return nil
+}
+
+func (m *meta) applyPartialSegmentResults(mutated []segmentMutationEntry, newEntries []segmentNewEntry, results []SegmentTxnResult) []int64 {
+	committedNewSegments := make([]int64, 0, len(newEntries))
+	idx := 0
+	for _, e := range mutated {
+		if idx >= len(results) {
+			return committedNewSegments
+		}
+		if results[idx].Version > 0 {
+			m.segments.SetSegmentPreservingLocalState(e.segID, e.base, e.clone, results[idx].Version)
+		}
+		idx++
+	}
+	for _, e := range newEntries {
+		if idx >= len(results) {
+			return committedNewSegments
+		}
+		if results[idx].Version > 0 {
+			m.segments.SetSegment(e.segID, e.info, results[idx].Version)
+			committedNewSegments = append(committedNewSegments, e.segID)
+		}
+		idx++
+	}
+	return committedNewSegments
 }
 
 // UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop
@@ -2799,16 +2848,45 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		newSegment.DroppedAt = uint64(time.Now().UnixNano())
 	}
 
-	binlogsIncrement := metastore.BinlogsIncrement{Segment: newSegment.SegmentInfo}
 	mlog.Info(m.ctx, "meta update: prepare replacement for schema bump full rewrite", mlog.Int64("num rows", newSegment.GetNumOfRows()))
 
-	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{dropped.SegmentInfo, newSegment.SegmentInfo}, binlogsIncrement); err != nil {
+	currentOld, version := m.segments.GetSegmentWithVersion(oldSegment.GetID())
+	if currentOld == nil {
+		return nil, nil, merr.WrapErrSegmentNotFound(oldSegment.GetID())
+	}
+	oldKey := m.segmentKey(dropped.GetCollectionID(), dropped.GetPartitionID(), dropped.GetID())
+	newKey := m.segmentKey(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
+	txn := m.segmentPersist.Txn(m.ctx)
+	if err := txn.Update(oldKey, dropped.SegmentInfo, version, BinlogIncrement{
+		Binlogs:       dropped.GetBinlogs(),
+		Deltalogs:     dropped.GetDeltalogs(),
+		Statslogs:     dropped.GetStatslogs(),
+		Bm25Statslogs: dropped.GetBm25Statslogs(),
+	}); err != nil {
+		return nil, nil, err
+	}
+	if err := txn.Insert(newKey, newSegment.SegmentInfo); err != nil {
+		return nil, nil, err
+	}
+	results, err := txn.Commit()
+	if err != nil {
+		if errors.Is(err, ErrPartialCommit) {
+			if len(results) > 0 && results[0].Version > 0 {
+				m.segments.SetSegmentPreservingLocalState(dropped.GetID(), currentOld, dropped, results[0].Version)
+			}
+			if len(results) > 1 && results[1].Version > 0 {
+				m.segments.SetSegment(newSegment.GetID(), newSegment, results[1].Version)
+			}
+		}
 		mlog.Warn(m.ctx, "fail to alter replacement segments for schema bump compaction", mlog.Err(err))
 		return nil, nil, err
 	}
+	if len(results) != 2 {
+		return nil, nil, merr.WrapErrServiceInternalMsg("schema bump replacement expected 2 segment txn results, got %d", len(results))
+	}
 
-	m.segments.SetSegment(dropped.GetID(), dropped, math.MaxInt64)
-	m.segments.SetSegment(newSegment.GetID(), newSegment, math.MaxInt64)
+	m.segments.SetSegmentPreservingLocalState(dropped.GetID(), currentOld, dropped, results[0].Version)
+	m.segments.SetSegment(newSegment.GetID(), newSegment, results[1].Version)
 	mlog.Info(m.ctx, "meta update: alter in memory meta after schema bump full rewrite replacement - complete")
 	return []*SegmentInfo{newSegment}, metricMutation, nil
 }

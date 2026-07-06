@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -129,8 +130,6 @@ func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
 	if err != nil {
 		return err
 	}
-	t.inner.Insert(key, value)
-	t.recordMain(seg)
 	for k, v := range binlogKvs {
 		t.inner.Put(k, v)
 		t.recordAux()
@@ -139,6 +138,8 @@ func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
 		t.inner.Remove(k)
 		t.recordAux()
 	}
+	t.inner.Insert(key, value)
+	t.recordMain(seg)
 	return nil
 }
 
@@ -160,8 +161,6 @@ func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion
 	if err != nil {
 		return err
 	}
-	t.inner.Update(key, value, expectedVersion)
-	t.recordMain(seg)
 	for k, v := range binlogKvs {
 		t.inner.Put(k, v)
 		t.recordAux()
@@ -170,18 +169,20 @@ func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion
 		t.inner.Remove(k)
 		t.recordAux()
 	}
+	t.inner.Update(key, value, expectedVersion)
+	t.recordMain(seg)
 	return nil
 }
 
 // Delete removes the segment record and its binlog KVs atomically.
 // Fails (ErrKeyNotFound) if the segment key is missing.
 func (t *SegmentTxn) Delete(key string, seg *datapb.SegmentInfo) {
-	t.inner.Delete(key)
-	t.recordMain(nil)
 	for _, k := range t.segmentBinlogKeys(seg) {
 		t.inner.Remove(k)
 		t.recordAux()
 	}
+	t.inner.Delete(key)
+	t.recordMain(nil)
 }
 
 // RawTxn returns the underlying bytes-only transaction for call sites that
@@ -195,11 +196,14 @@ func (t *SegmentTxn) RawTxn() Txn { return t.inner }
 // than the stripped proto persisted in the main segment key.
 func (t *SegmentTxn) Commit() ([]SegmentTxnResult, error) {
 	raws, err := t.inner.Commit()
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrPartialCommit) {
 		return nil, err
 	}
 	results := make([]SegmentTxnResult, 0, len(t.mainIdx))
 	for i, idx := range t.mainIdx {
+		if idx >= len(raws) {
+			break
+		}
 		r := raws[idx]
 		out := SegmentTxnResult{Version: r.Version}
 		if t.mainSegments[i] != nil {
@@ -207,7 +211,7 @@ func (t *SegmentTxn) Commit() ([]SegmentTxnResult, error) {
 		}
 		results = append(results, out)
 	}
-	return results, nil
+	return results, err
 }
 
 func (t *SegmentTxn) recordMain(seg *datapb.SegmentInfo) {

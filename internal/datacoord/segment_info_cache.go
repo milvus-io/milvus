@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -158,6 +160,70 @@ func (s *CachedSegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo
 	s.addSecondaryIndex(segment)
 	s.addCompactTo(segment)
 	return old, existed
+}
+
+func (s *CachedSegmentsInfo) SetSegmentPreservingLocalState(segmentID UniqueID, base, segment *SegmentInfo, version int64) (old *SegmentInfo, existed bool) {
+	old, updated, existed, applied := s.segments.UpdateWithResult(segmentID, func(current *SegmentInfo) bool {
+		applyPersistedSegmentPreservingLocalState(current, base, segment)
+		return true
+	}, version)
+	if !applied {
+		return old, false
+	}
+	if existed {
+		s.removeSecondaryIndex(old)
+		s.deleteCompactTo(old)
+	}
+	s.addSecondaryIndex(updated)
+	s.addCompactTo(updated)
+	return old, existed
+}
+
+func applyPersistedSegmentPreservingLocalState(current, base, persisted *SegmentInfo) {
+	currentNumOfRows := current.GetNumOfRows()
+	currentDmlPosition := cloneMsgPosition(current.GetDmlPosition())
+	currentStartPosition := cloneMsgPosition(current.GetStartPosition())
+	currentLastExpireTime := current.GetLastExpireTime()
+	currentLevel := current.GetLevel()
+	currentAllocations := current.allocations
+	currentLastFlushTime := current.lastFlushTime
+	currentIsCompacting := current.isCompacting
+	currentLastWrittenTime := current.lastWrittenTime
+
+	current.SegmentInfo = proto.Clone(persisted.SegmentInfo).(*datapb.SegmentInfo)
+	current.allocations = currentAllocations
+	current.lastFlushTime = currentLastFlushTime
+	current.isCompacting = currentIsCompacting
+	current.lastWrittenTime = currentLastWrittenTime
+	current.size.Store(0)
+	current.deltaRowcount.Store(-1)
+	current.earliestTs.Store(0)
+
+	if base == nil {
+		return
+	}
+	if persisted.GetNumOfRows() == base.GetNumOfRows() {
+		current.NumOfRows = currentNumOfRows
+	}
+	if proto.Equal(persisted.GetDmlPosition(), base.GetDmlPosition()) {
+		current.DmlPosition = currentDmlPosition
+	}
+	if proto.Equal(persisted.GetStartPosition(), base.GetStartPosition()) {
+		current.StartPosition = currentStartPosition
+	}
+	if persisted.GetLastExpireTime() == base.GetLastExpireTime() {
+		current.LastExpireTime = currentLastExpireTime
+	}
+	if persisted.GetLevel() == base.GetLevel() {
+		current.Level = currentLevel
+	}
+}
+
+func cloneMsgPosition(pos *msgpb.MsgPosition) *msgpb.MsgPosition {
+	if pos == nil {
+		return nil
+	}
+	return proto.Clone(pos).(*msgpb.MsgPosition)
 }
 
 // DropSegment marks the segment as a tombstone; the version blocks later stale writes.

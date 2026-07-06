@@ -99,19 +99,24 @@ func (c *Cache[K, V]) Insert(key K, value V, version int64) (old V, existed bool
 // If version == 0, keeps current version (for local-only updates without persist).
 // Returns the pre-update value and whether the key existed (non-tombstone).
 func (c *Cache[K, V]) Update(key K, fn CacheUpdateFunc[V], version int64) (old V, existed bool) {
+	old, _, existed, _ = c.UpdateWithResult(key, fn, version)
+	return old, existed
+}
+
+func (c *Cache[K, V]) UpdateWithResult(key K, fn CacheUpdateFunc[V], version int64) (old V, updated V, existed bool, applied bool) {
 	var zero V
 	for {
 		entry, ok := c.entries.Get(key)
 		if !ok || entry.deleted {
-			return zero, false
+			return zero, zero, false, false
 		}
 		if version > 0 && entry.version >= version {
-			return entry.value, true // stale
+			return entry.value, entry.value, true, false // stale
 		}
 		old = entry.value
 		cloned := c.cloneFn(old)
 		if !fn(cloned) {
-			return old, true // fn aborted
+			return old, old, true, false // fn aborted
 		}
 		newVersion := version
 		if newVersion == 0 {
@@ -119,7 +124,7 @@ func (c *Cache[K, V]) Update(key K, fn CacheUpdateFunc[V], version int64) (old V
 		}
 		newEntry := &cacheEntry[V]{value: cloned, version: newVersion}
 		if c.entries.CompareAndSwap(key, entry, newEntry) {
-			return old, true
+			return old, cloned, true, true
 		}
 		// CAS failed, retry
 	}

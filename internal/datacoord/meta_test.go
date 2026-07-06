@@ -2160,6 +2160,45 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.False(fieldIDs[102], "field 102 bm25 stats should NOT be added for V3 path")
 	})
 
+	suite.Run("replacement seeds real version for later CAS", func() {
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		m := newTestMetaFromCache(suite.T(), segs, nil)
+		newSegmentID := int64(1000)
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+			PreAllocatedSegmentIDs: &datapb.IDRange{
+				Begin: newSegmentID,
+				End:   newSegmentID + 1,
+			},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:  newSegmentID,
+					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Field2StatslogPaths: []*datapb.FieldBinlog{
+						getFieldBinlogIDs(0, 20001),
+					},
+					NumOfRows:      5,
+					Manifest:       "replacement-manifest",
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.Equal(newSegmentID, infos[0].GetID())
+
+		err = m.UpdateSegment(newSegmentID, SetSchemaVersion(4))
+		suite.NoError(err)
+		suite.EqualValues(4, m.GetSegment(context.TODO(), newSegmentID).GetSchemaVersion())
+	})
+
 	suite.Run("v3 same manifest and newer task schema accepted", func() {
 		manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
@@ -2319,15 +2358,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.EqualValues(0, unchanged.GetDataVersion())
 	})
 
-	suite.Run("catalog error replacement does not update memory", func() {
-		catalogErr := errors.New("catalog error")
-		metakv := mockkv.NewMetaKv(suite.T())
-		metakv.EXPECT().HasPrefix(mock.Anything, mock.Anything).Return(false, nil).Times(3)
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(catalogErr).Once()
-		m := &meta{
-			catalog:  datacoord.NewCatalog(metakv, "", ""),
-			segments: makeSegments(1, commonpb.SegmentState_Flushed),
-		}
+	suite.Run("persist error replacement does not update memory", func() {
+		persistErr := errors.New("persist error")
+		m := newTestMetaFromCache(suite.T(), makeSegments(1, commonpb.SegmentState_Flushed), nil)
+		m.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: persistErr})
 		task := &datapb.CompactionTask{
 			InputSegments:          []int64{1},
 			Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
@@ -2347,7 +2381,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		}
 
 		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
-		suite.ErrorIs(err, catalogErr)
+		suite.ErrorIs(err, persistErr)
 		suite.Nil(infos)
 		suite.Nil(mutation)
 		suite.Equal(commonpb.SegmentState_Flushed, m.segments.GetSegment(1).GetState())
@@ -3294,6 +3328,22 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.State, expected.State)
 		assert.Equal(t, updated.size.Load(), expected.size.Load())
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
+	})
+
+	t.Run("duplicate new segment returns error", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           10,
+			CollectionID: 100,
+			PartitionID:  20,
+			State:        commonpb.SegmentState_Growing,
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		err = meta.UpdateSegmentsInfo(context.TODO(), nil, proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo))
+		require.ErrorIs(t, err, ErrKeyAlreadyExists)
 	})
 
 	t.Run("update binlogs from save binlog paths", func(t *testing.T) {

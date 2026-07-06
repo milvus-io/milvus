@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -594,7 +595,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	segment := m.GetSegment(ctx, 2001)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
 	s.Equal("manifest-path", segment.GetManifestPath())
-	s.Equal(insertBinlogs, segment.GetBinlogs())
+	s.True(proto.Equal(&datapb.SegmentInfo{Binlogs: insertBinlogs}, &datapb.SegmentInfo{Binlogs: segment.GetBinlogs()}))
 
 	updatedTask := copyMeta.GetTask(ctx, 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
