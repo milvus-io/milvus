@@ -957,10 +957,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         case proto::plan::NotEqual:
                             return v != lit;
                         default:
-                            ThrowInfo(OpTypeInvalid,
-                                      "unsupported operator {} for JSON element "
-                                      "numeric predicate",
-                                      op_type);
+                            ThrowInfo(
+                                OpTypeInvalid,
+                                "unsupported operator {} for JSON element "
+                                "numeric predicate",
+                                op_type);
                     }
                 };
                 return e.is_int64 ? cmp(e.i64, val)

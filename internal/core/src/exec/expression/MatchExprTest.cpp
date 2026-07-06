@@ -3137,47 +3137,54 @@ TEST_P(JsonArrayMatchExprTest, Int64PrecisionAtPath) {
     // $ == 9007199254740993 : only rows whose array holds exactly 2^53+1 -> {0,3}.
     // (Old double path also matched row1's 2^53 -> {0,1,3}.)
     EXPECT_EQ(
-        RetrieveMatchedRows(
-            seg.get(), *schema, schema,
-            R"(MATCH_ANY(json["arr"], $ == 9007199254740993))"),
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_ANY(json["arr"], $ == 9007199254740993))"),
         (std::set<int64_t>{0, 3}));
     // $ == 9007199254740992 : only row1 -> {1}.
     EXPECT_EQ(
-        RetrieveMatchedRows(
-            seg.get(), *schema, schema,
-            R"(MATCH_ANY(json["arr"], $ == 9007199254740992))"),
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_ANY(json["arr"], $ == 9007199254740992))"),
         (std::set<int64_t>{1}));
 
     // --- Term ($ in [...]): membership must be int64-exact ---
     // $ in [9007199254740993] : {0,3} only, never row1.
-    EXPECT_EQ(
-        RetrieveMatchedRows(
-            seg.get(), *schema, schema,
-            R"(MATCH_ANY(json["arr"], $ in [9007199254740993]))"),
-        (std::set<int64_t>{0, 3}));
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_ANY(json["arr"], $ in [9007199254740993]))"),
+              (std::set<int64_t>{0, 3}));
 
     // --- Range boundary: $ > 2^53 must exclude 2^53 but include 2^53+1 ---
     // $ > 9007199254740992 : row0(2^53+1), row2(2^53+2), row3(2^53+1) -> {0,2,3}.
     // (Old double path evaluated 2^53+1 as 2^53, so row0/row3 were dropped.)
     EXPECT_EQ(
-        RetrieveMatchedRows(
-            seg.get(), *schema, schema,
-            R"(MATCH_ANY(json["arr"], $ > 9007199254740992))"),
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_ANY(json["arr"], $ > 9007199254740992))"),
         (std::set<int64_t>{0, 2, 3}));
     // Range with both bounds: 9007199254740992 < $ <= 9007199254740994
     // -> row0(2^53+1), row2(2^53+2), row3(2^53+1) -> {0,2,3}.
     EXPECT_EQ(
         RetrieveMatchedRows(
-            seg.get(), *schema, schema,
+            seg.get(),
+            *schema,
+            schema,
             R"(MATCH_ANY(json["arr"], 9007199254740992 < $ <= 9007199254740994))"),
         (std::set<int64_t>{0, 2, 3}));
 
     // --- Arithmetic: $ + 0 == 2^53+1 must be int64-exact -> {0,3}. ---
-    EXPECT_EQ(
-        RetrieveMatchedRows(
-            seg.get(), *schema, schema,
-            R"(MATCH_ANY(json["arr"], $ + 0 == 9007199254740993))"),
-        (std::set<int64_t>{0, 3}));
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_ANY(json["arr"], $ + 0 == 9007199254740993))"),
+              (std::set<int64_t>{0, 3}));
 
     // --- Cross-check element-level ($) vs row-level (json["v"]) on same data.
     // Row-level int64 path is the source of truth; element-level must agree.
@@ -3195,23 +3202,21 @@ TEST_P(JsonArrayMatchExprTest, Int64PrecisionAtPath) {
         auto elem = RetrieveMatchedRows(seg.get(), *schema, schema, elem_expr);
         auto row = RetrieveMatchedRows(seg.get(), *schema, schema, row_expr);
         EXPECT_EQ(elem, row)
-            << "element-level must match row-level for: " << elem_expr
-            << " vs " << row_expr;
+            << "element-level must match row-level for: " << elem_expr << " vs "
+            << row_expr;
     }
 
     // --- Regression: float literal / float element still behave as double. ---
     // $ == 1.5 (float literal): only the float element in row3 -> {3}.
     EXPECT_EQ(
         RetrieveMatchedRows(
-            seg.get(), *schema, schema,
-            R"(MATCH_ANY(json["arr"], $ == 1.5))"),
+            seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ == 1.5))"),
         (std::set<int64_t>{3}));
     // MATCH_ALL($ >= 1) over row3 [2^53+1, 1.5]: int element exact, float
     // element as double, both >= 1 -> row3 satisfies; all rows satisfy.
     EXPECT_EQ(
         RetrieveMatchedRows(
-            seg.get(), *schema, schema,
-            R"(MATCH_ALL(json["arr"], $ >= 1))"),
+            seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ >= 1))"),
         (std::set<int64_t>{0, 1, 2, 3}));
 }
 

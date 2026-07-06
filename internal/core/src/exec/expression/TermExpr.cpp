@@ -144,9 +144,10 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     // {1}, but not 1.1). This matches the row-level int64 term
                     // path (at_numeric). The previous double SetElement lost
                     // precision beyond 2^53 (2^53 and 2^53+1 collapsed).
-                    result = element_level
-                                 ? ExecTermJsonElement<int64_t>(context)
-                                 : ExecVisitorImplTemplateJson<int64_t>(context);
+                    result =
+                        element_level
+                            ? ExecTermJsonElement<int64_t>(context)
+                            : ExecVisitorImplTemplateJson<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
                     result = element_level

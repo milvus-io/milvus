@@ -98,10 +98,10 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     // while float elements (e.g. 3.5) are not silently dropped
                     // and use double arithmetic. This mirrors the row-level
                     // int64 arith path (at_numeric) element-by-element.
-                    result =
-                        element_level
-                            ? ExecRangeVisitorImplForJsonElement<int64_t>(context)
-                            : ExecRangeVisitorImplForJson<int64_t>(input);
+                    result = element_level
+                                 ? ExecRangeVisitorImplForJsonElement<int64_t>(
+                                       context)
+                                 : ExecRangeVisitorImplForJson<int64_t>(input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
