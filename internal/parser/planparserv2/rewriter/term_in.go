@@ -668,7 +668,7 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 		}
 		if containsAny {
-			if !canFoldInNotEqualTautologyToTrue(g.col) {
+			if !canFoldBoolDomainToConstant(g.col) {
 				continue
 			}
 			used[g.termIdx] = true

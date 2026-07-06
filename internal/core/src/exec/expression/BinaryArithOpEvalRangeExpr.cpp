@@ -197,7 +197,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
 // For int64_t GetType, uses at_numeric() to extract any JSON number in one
 // parse.  int64 values preserve precision; uint64/double fall back to double.
 // 'cmp' must reference 'json_v' (auto-typed as int64_t or double).
-#define BinaryArithRangeJSONCompareCore(cmp)                                \
+#define BinaryArithRangeJSONCompare(cmp)                                    \
     do {                                                                    \
         for (size_t i = 0; i < size; ++i) {                                 \
             auto offset = i;                                                \
@@ -238,11 +238,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             }                                                               \
         }                                                                   \
     } while (false)
-
-#define BinaryArithRangeJSONCompare(cmp) BinaryArithRangeJSONCompareCore(cmp)
-
-#define BinaryArithRangeJSONCompareNotEqual(cmp) \
-    BinaryArithRangeJSONCompareCore(cmp)
 
 #define BinaryArithRangeJONCompareArrayLength(cmp)              \
     do {                                                        \
@@ -346,27 +341,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::NotEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v + right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v + right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v - right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v - right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v * right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v * right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompareNotEqual(
-                            json_v / right_operand != val);
+                        BinaryArithRangeJSONCompare(json_v / right_operand !=
+                                                    val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             safe_mod(json_v, right_operand) != val);
                         break;
                     }
@@ -376,17 +371,17 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) & int64_t(right_operand)) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) | int64_t(right_operand)) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompareNotEqual(
+                        BinaryArithRangeJSONCompare(
                             (int64_t(json_v) ^ int64_t(right_operand)) != val);
                         break;
                     }
