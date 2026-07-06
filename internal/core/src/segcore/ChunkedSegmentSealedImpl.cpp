@@ -1248,8 +1248,8 @@ ChunkedSegmentSealedImpl::DropFieldFromState(PublishedSegmentState& state,
     clear_bit_if_present(state.field_data_ready_bitset, field_id);
     clear_bit_if_present(state.published_binlog_index_ready_bitset, field_id);
     clear_bit_if_present(state.binlog_index_bitset, field_id);
-    if (!get_bit(state.index_ready_bitset, field_id) &&
-        !get_bit(state.binlog_index_bitset, field_id)) {
+    if (!get_bit_if_present(state.index_ready_bitset, field_id) &&
+        !get_bit_if_present(state.binlog_index_bitset, field_id)) {
         ClearPublishedIndexRawDataInState(state, field_id);
         ClearIndexRawDataInState(state, field_id);
     }
@@ -1260,8 +1260,8 @@ ChunkedSegmentSealedImpl::DropIndexFromState(PublishedSegmentState& state,
                                              FieldId field_id) {
     clear_bit_if_present(state.published_index_ready_bitset, field_id);
     clear_bit_if_present(state.index_ready_bitset, field_id);
-    if (!get_bit(state.index_ready_bitset, field_id) &&
-        !get_bit(state.binlog_index_bitset, field_id)) {
+    if (!get_bit_if_present(state.index_ready_bitset, field_id) &&
+        !get_bit_if_present(state.binlog_index_bitset, field_id)) {
         ClearPublishedIndexRawDataInState(state, field_id);
         ClearIndexRawDataInState(state, field_id);
     }
@@ -1358,8 +1358,8 @@ ChunkedSegmentSealedImpl::HasRawDataFromState(
 bool
 ChunkedSegmentSealedImpl::IndexHasRawDataFromState(
     const PublishedSegmentState& state, FieldId field_id) const {
-    if (!get_bit(state.index_ready_bitset, field_id) &&
-        !get_bit(state.binlog_index_bitset, field_id)) {
+    if (!get_bit_if_present(state.index_ready_bitset, field_id) &&
+        !get_bit_if_present(state.binlog_index_bitset, field_id)) {
         return false;
     }
     return HasIndexRawDataFromState(state, field_id);

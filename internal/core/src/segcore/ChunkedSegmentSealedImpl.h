@@ -2252,6 +2252,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             field_id, ready, binlog_ready, has_raw_data);
     }
 
+    void
+    TestDropFieldFromState(PublishedSegmentState& state,
+                           FieldId field_id) const {
+        DropFieldFromState(state, field_id);
+    }
+
+    void
+    TestDropIndexFromState(PublishedSegmentState& state,
+                           FieldId field_id) const {
+        DropIndexFromState(state, field_id);
+    }
+
     bool
     TestTryTakeForSearch(const query::Plan* plan,
                          const int64_t* seg_offsets,

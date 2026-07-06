@@ -3969,6 +3969,63 @@ TEST(SealedSegmentCowState, ReopenNextStateMustNotInheritStaleVectorIndexBit) {
                 next->index_has_raw_data.end());
 }
 
+TEST(SealedSegmentCowState, DropShrunkHighestFieldStateDoesNotReadPastBitset) {
+    auto old_schema = std::make_shared<Schema>();
+    auto old_pk = old_schema->AddDebugField("pk", DataType::INT64);
+    auto dropped_vec = old_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    old_schema->set_primary_field_id(old_pk);
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk);
+    new_schema->set_schema_version(200);
+
+    auto segment = CreateSealedSegment(old_schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->TestPublishVectorIndexFacts(dropped_vec,
+                                        /*ready=*/true,
+                                        /*binlog_ready=*/false,
+                                        /*has_raw_data=*/true);
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(current->index_ready_bitset.size(), 2);
+    ASSERT_TRUE(current->published_index_has_raw_data.count(dropped_vec));
+
+    ChunkedSegmentSealedImpl::StateDelta delta;
+    delta.schema = new_schema;
+    delta.load_info = std::make_shared<const SegmentLoadInfo>(
+        current->load_info->GetProto(), new_schema);
+    delta.runtime = current->runtime;
+    delta.commit_ts = current->commit_ts;
+
+    auto staged_drop_field =
+        sealed->TestBuildNextPublishedState(current, delta);
+    ASSERT_EQ(staged_drop_field->index_ready_bitset.size(), 1);
+    ASSERT_TRUE(
+        staged_drop_field->published_index_has_raw_data.count(dropped_vec));
+    ASSERT_NO_THROW(
+        sealed->TestDropFieldFromState(*staged_drop_field, dropped_vec));
+    EXPECT_FALSE(
+        staged_drop_field->published_index_has_raw_data.count(dropped_vec));
+    EXPECT_TRUE(staged_drop_field->index_has_raw_data.find(dropped_vec) ==
+                staged_drop_field->index_has_raw_data.end());
+
+    auto staged_drop_index =
+        sealed->TestBuildNextPublishedState(current, delta);
+    ASSERT_EQ(staged_drop_index->index_ready_bitset.size(), 1);
+    ASSERT_TRUE(
+        staged_drop_index->published_index_has_raw_data.count(dropped_vec));
+    ASSERT_NO_THROW(
+        sealed->TestDropIndexFromState(*staged_drop_index, dropped_vec));
+    EXPECT_FALSE(
+        staged_drop_index->published_index_has_raw_data.count(dropped_vec));
+    EXPECT_TRUE(staged_drop_index->index_has_raw_data.find(dropped_vec) ==
+                staged_drop_index->index_has_raw_data.end());
+}
+
 TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
     auto old_schema = std::make_shared<Schema>();
     auto old_pk = old_schema->AddDebugField("pk", DataType::INT64);
