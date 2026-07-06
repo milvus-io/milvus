@@ -155,7 +155,7 @@ func TestAnalyzer(t *testing.T) {
 }
 
 func TestValidateAnalyzer(t *testing.T) {
-	InitOptions()
+	require.NoError(t, InitOptions())
 
 	// valid analyzer
 	{
@@ -182,7 +182,7 @@ func TestValidateAnalyzer(t *testing.T) {
 	{
 		resourcePath := pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
 		defer os.RemoveAll(resourcePath)
-		UpdateParams()
+		require.NoError(t, UpdateParams())
 		resourceID := int64(100)
 
 		// mock remote resource file
@@ -208,7 +208,7 @@ func TestValidateAnalyzer(t *testing.T) {
 	{
 		resourcePath := pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
 		defer os.RemoveAll(resourcePath)
-		UpdateParams()
+		require.NoError(t, UpdateParams())
 		resourceID := int64(100)
 
 		// mock remote resource file
@@ -234,4 +234,26 @@ func TestValidateAnalyzer(t *testing.T) {
 		assert.Equal(t, len(ids), 1)
 		assert.Equal(t, ids[0], resourceID)
 	}
+}
+
+func TestBuildRuntimeOptions(t *testing.T) {
+	params := paramtable.Get()
+	localResourcePath := "/tmp/milvus-analyzer-test"
+	urlKey := "function.analyzer.lindera.download_urls.ipadic"
+	require.NoError(t, params.Save(params.FunctionCfg.LocalResourcePath.Key, localResourcePath))
+	require.NoError(t, params.SaveGroup(map[string]string{urlKey: "http://a.test/ipadic.tar.gz, http://b.test/ipadic.tar.gz"}))
+	defer params.Reset(params.FunctionCfg.LocalResourcePath.Key)
+	defer params.Reset(urlKey)
+
+	options := BuildRuntimeOptions()
+	assert.Equal(t, localResourcePath, options[DefaultDictPathKey])
+	assert.Equal(t, pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()), options[ResourcePathKey])
+	assert.Equal(t,
+		map[string][]string{"ipadic": {"http://a.test/ipadic.tar.gz", "http://b.test/ipadic.tar.gz"}},
+		options[LinderaDictURLKey],
+	)
+	assert.Equal(t,
+		map[string][]string{"ipadic": {"http://a.test/ipadic.tar.gz"}},
+		buildLinderaDownloadURLs(map[string]string{".ipadic": "http://a.test/ipadic.tar.gz"}),
+	)
 }

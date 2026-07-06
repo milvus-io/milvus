@@ -124,7 +124,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
-            *vec_index, dataset, search_info, search_bitset);
+            *vec_index, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(
             search_result, offset_mapping, search_info.array_offsets_.get());
@@ -137,7 +137,8 @@ SearchOnSealedIndex(const Schema& schema,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      *vec_index);
+                                                      *vec_index,
+                                                      op_context);
     if (!use_iterator) {
         vec_index->Query(
             dataset, search_info, search_bitset, op_context, search_result);

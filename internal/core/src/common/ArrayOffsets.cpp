@@ -30,6 +30,7 @@
 #include "common/VectorArray.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -195,7 +196,6 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     FieldId field_id = field_meta.get_id();
     auto data_type = field_meta.get_data_type();
 
-    // Size is row_count + 1, last element stores total_element_count
     std::vector<int32_t> row_to_element_start(row_count + 1);
 
     auto temp_op_ctx = std::make_unique<OpContext>();
@@ -241,7 +241,6 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
         }
     }
 
-    // Store total element count as the last entry
     row_to_element_start[row_count] = total_elements;
 
     AssertInfo(current_row_id == row_count,
@@ -259,7 +258,88 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
 
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
-    // Memory usage: only row_to_element_start_ (4 bytes per entry)
+    result->resource_size_ = 4 * (row_count + 1);
+    cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+        cachinglayer::ResourceUsage{result->resource_size_, 0});
+    return result;
+}
+
+std::shared_ptr<ArrayOffsetsSealed>
+ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
+                                    const FieldMeta& field_meta,
+                                    int64_t row_count) {
+    if (row_count == 0) {
+        LOG_INFO(
+            "ArrayOffsetsSealed::BuildFromColumn: empty segment for struct "
+            "'{}'",
+            field_meta.get_name().get());
+        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{0});
+    }
+
+    auto data_type = field_meta.get_data_type();
+
+    std::vector<int32_t> row_to_element_start(row_count + 1);
+
+    auto temp_op_ctx = std::make_unique<OpContext>();
+    auto op_ctx_ptr = temp_op_ctx.get();
+
+    int64_t num_chunks = column.num_chunks();
+    int32_t current_row_id = 0;
+    int32_t total_elements = 0;
+
+    if (data_type == DataType::VECTOR_ARRAY) {
+        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            auto pin_wrapper =
+                column.VectorArrayViews(op_ctx_ptr, chunk_id, std::nullopt);
+            const auto& [vector_array_views, valid_flags] = pin_wrapper.get();
+
+            for (size_t i = 0; i < vector_array_views.size(); ++i) {
+                int32_t array_len = 0;
+                if (valid_flags.empty() || valid_flags[i]) {
+                    array_len = vector_array_views[i].length();
+                }
+
+                row_to_element_start[current_row_id] = total_elements;
+                total_elements += array_len;
+                current_row_id++;
+            }
+        }
+    } else {
+        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            auto pin_wrapper =
+                column.ArrayViews(op_ctx_ptr, chunk_id, std::nullopt);
+            const auto& [array_views, valid_flags] = pin_wrapper.get();
+
+            for (size_t i = 0; i < array_views.size(); ++i) {
+                int32_t array_len = 0;
+                if (valid_flags.empty() || valid_flags[i]) {
+                    array_len = array_views[i].length();
+                }
+
+                row_to_element_start[current_row_id] = total_elements;
+                total_elements += array_len;
+                current_row_id++;
+            }
+        }
+    }
+
+    row_to_element_start[row_count] = total_elements;
+
+    AssertInfo(current_row_id == row_count,
+               "Row count mismatch: expected {}, got {}",
+               row_count,
+               current_row_id);
+
+    LOG_INFO(
+        "ArrayOffsetsSealed::BuildFromColumn: struct_name='{}', "
+        "field_id={}, row_count={}, total_elements={}",
+        field_meta.get_name().get(),
+        field_meta.get_id().get(),
+        row_count,
+        total_elements);
+
+    auto result =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});

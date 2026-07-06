@@ -22,6 +22,7 @@ expr:
 	| expr REGEXMATCH expr                                                                                  # RegexMatch
 	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
 	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
+	| TEXTMATCHFUZZY'('Identifier',' expr ',' Identifier ASSIGN IntegerConstant ')'                         # TextMatchFuzzy
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
@@ -70,6 +71,7 @@ NE: '!=';
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
+TEXTMATCHFUZZY: 'text_match_fuzzy'|'TEXT_MATCH_FUZZY';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 MATCH_ALL: 'match_all' | 'MATCH_ALL';

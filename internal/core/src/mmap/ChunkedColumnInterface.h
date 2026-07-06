@@ -172,9 +172,8 @@ class ChunkedColumnInterface {
             offset,
             size,
             valid_data.size());
-        auto valid_data_ptr = valid_data.data() + offset;
         for (int64_t i = 0; i < size; ++i) {
-            if (!valid_data_ptr[i]) {
+            if (!chunk->isValid(offset + i)) {
                 valid_result[i] = false;
             }
         }

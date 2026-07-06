@@ -76,7 +76,8 @@ class VectorIndex : public IndexBase {
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
-                    const BitsetView& bitset) const {
+                    const BitsetView& bitset,
+                    milvus::OpContext* = nullptr) const {
         ThrowInfo(NotImplemented,
                   "VectorIndex:" + this->GetIndexType() +
                       " didn't implement VectorIterator interface, "

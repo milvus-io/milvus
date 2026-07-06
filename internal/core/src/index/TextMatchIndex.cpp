@@ -373,19 +373,22 @@ TextMatchIndex::RegisterAnalyzer(const char* analyzer_name,
     wrapper_->register_tokenizer(analyzer_name, analyzer_params);
 }
 
+// Refresh a growing index if due, then allocate the result bitset. Shared by
+// the text-index query methods so the commit/reload logic lives in one place.
 TargetBitmap
-TextMatchIndex::MatchQuery(const std::string& query,
-                           uint32_t min_should_match) {
-    tracer::AutoSpan span("TextMatchIndex::MatchQuery", tracer::GetRootSpan());
+TextMatchIndex::PrepareBitset() {
     if (shouldTriggerCommit()) {
         Commit();
         Reload();
     }
+    return TargetBitmap{static_cast<size_t>(Count())};
+}
 
-    TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
-    // So we cannot use the count operation to get the total count for bitmap.
-    // Just use the maximum offset of hits to get the total count for bitmap here.
+TargetBitmap
+TextMatchIndex::MatchQuery(const std::string& query,
+                           uint32_t min_should_match) {
+    tracer::AutoSpan span("TextMatchIndex::MatchQuery", tracer::GetRootSpan());
+    TargetBitmap bitset = PrepareBitset();
     wrapper_->match_query(query, min_should_match, &bitset);
     return bitset;
 }
@@ -394,16 +397,18 @@ TargetBitmap
 TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     tracer::AutoSpan span("TextMatchIndex::PhraseMatchQuery",
                           tracer::GetRootSpan());
-    if (shouldTriggerCommit()) {
-        Commit();
-        Reload();
-    }
-
-    TargetBitmap bitset{static_cast<size_t>(Count())};
-    // The count operation of tantivy may be get older cnt if the index is committed with new tantivy segment.
-    // So we cannot use the count operation to get the total count for bitmap.
-    // Just use the maximum offset of hits to get the total count for bitmap here.
+    TargetBitmap bitset = PrepareBitset();
     wrapper_->phrase_match_query(query, slop, &bitset);
+    return bitset;
+}
+
+TargetBitmap
+TextMatchIndex::FuzzyMatchQuery(const std::string& query,
+                                uint32_t max_edit_distance) {
+    tracer::AutoSpan span("TextMatchIndex::FuzzyMatchQuery",
+                          tracer::GetRootSpan());
+    TargetBitmap bitset = PrepareBitset();
+    wrapper_->fuzzy_match_query(query, max_edit_distance, &bitset);
     return bitset;
 }
 
