@@ -13,6 +13,7 @@
 #include <atomic>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "common/Geometry.h"
 #include "common/GeometryCache.h"
@@ -116,6 +117,69 @@ TEST(GeometryCacheLifetime, ConcurrentGetAndRemove) {
 
     stop.store(true);
     reader.join();
+    mgr.RemoveSegmentCaches(nullptr, seg_id);
+}
+
+// Regression for the shared cache-context concurrency defect: cache-owned
+// Geometry instances all carry the cache's single GEOS context, which is not
+// thread-safe. The GIS filter path evaluates predicates on those shared
+// geometries under a *shared* read lock, so concurrent queries must each drive
+// GEOS through their own per-thread context (the context-taking predicate
+// overloads) rather than the geometry's stored context. This test mirrors that
+// usage: many threads read the same cached geometry at once and evaluate
+// predicates on per-thread contexts. Under ASAN/TSAN a regression back to the
+// stored shared context surfaces as a data race / heap corruption here; results
+// must also stay correct.
+TEST(GeometryCacheConcurrency, PredicatesUsePerThreadContext) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000004;
+    const FieldId field_id(11);
+    const std::string wkb = MakePointWkb(1.0, 1.0);
+
+    auto cache = mgr.GetOrCreateCache(seg_id, field_id);
+    cache->AppendData(wkb.data(), wkb.size());
+    ASSERT_EQ(cache->Size(), 1u);
+
+    constexpr int kThreads = 8;
+    constexpr int kIters = 5000;
+    std::atomic<bool> go{false};
+    std::atomic<int> failures{0};
+
+    std::vector<std::thread> workers;
+    for (int t = 0; t < kThreads; ++t) {
+        workers.emplace_back([&, t]() {
+            // Each thread has its own GEOS context and its own query geometries.
+            GEOSContextHandle_t ctx = milvus::GetThreadLocalGEOSContext();
+            Geometry match(ctx, "POINT (1 1)");
+            Geometry miss(ctx, "POINT (9 9)");
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            for (int i = 0; i < kIters; ++i) {
+                auto lock = cache->AcquireReadLock();
+                const Geometry* g = cache->GetByOffsetUnsafe(0);
+                if (g == nullptr) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                // Drive predicates on THIS thread's context, not g's stored
+                // (cache-shared) context — exactly what the fixed filter path
+                // does. Results must match the geometry's semantics.
+                bool eq = g->equals(match, ctx);
+                bool inter = g->intersects(match, ctx);
+                bool inter_miss = g->intersects(miss, ctx);
+                if (!eq || !inter || inter_miss) {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& w : workers) {
+        w.join();
+    }
+
+    EXPECT_EQ(failures.load(), 0);
     mgr.RemoveSegmentCaches(nullptr, seg_id);
 }
 
