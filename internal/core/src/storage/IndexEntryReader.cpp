@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <future>
 #include <limits>
@@ -49,6 +50,46 @@ struct ActiveSliceTask {
     std::shared_ptr<StreamSliceResult> result;
     std::future<void> future;
 };
+
+void
+RememberFirstError(std::exception_ptr& first_error, std::exception_ptr error) {
+    if (error && !first_error) {
+        first_error = std::move(error);
+    }
+}
+
+std::exception_ptr
+WaitForAllFutures(std::vector<std::future<void>>& futures) {
+    std::exception_ptr first_error = nullptr;
+    for (auto& future : futures) {
+        if (!future.valid()) {
+            continue;
+        }
+        try {
+            future.get();
+        } catch (...) {
+            RememberFirstError(first_error, std::current_exception());
+        }
+    }
+    return first_error;
+}
+
+void
+RethrowIfError(const std::exception_ptr& error) {
+    if (error) {
+        std::rethrow_exception(error);
+    }
+}
+
+constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
+
+size_t
+EntryDownloadRangeCount(uint64_t size) {
+    if (size == 0) {
+        return 0;
+    }
+    return static_cast<size_t>((size - 1) / kEntryDownloadRangeSize + 1);
+}
 
 void
 ReadOrderedEntryStream(
@@ -419,9 +460,7 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     Entry result;
     result.data.resize(pm.size);
 
-    constexpr size_t kRangeSize = 16 * 1024 * 1024;
-
-    if (pm.size <= kRangeSize) {
+    if (pm.size <= kEntryDownloadRangeSize) {
         size_t n = input_->ReadAt(
             result.data.data(), MILVUS_V3_MAGIC_SIZE + pm.offset, pm.size);
         AssertInfo(n == pm.size, "Failed to read entry data");
@@ -435,26 +474,34 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     std::vector<std::future<void>> futures;
     size_t remaining = pm.size;
     size_t offset = 0;
+    std::exception_ptr first_error = nullptr;
 
-    while (remaining > 0) {
-        size_t len = std::min(remaining, kRangeSize);
-        size_t this_offset = offset;
+    try {
+        auto input = input_;
+        size_t entry_offset = pm.offset;
+        futures.reserve(EntryDownloadRangeCount(pm.size));
+        while (remaining > 0) {
+            size_t len = std::min(remaining, kEntryDownloadRangeSize);
+            size_t this_offset = offset;
 
-        futures.push_back(pool.Submit([this, dest, this_offset, len, &pm]() {
-            size_t n =
-                input_->ReadAt(dest + this_offset,
-                               MILVUS_V3_MAGIC_SIZE + pm.offset + this_offset,
-                               len);
-            AssertInfo(n == len, "Failed to read entry data range");
-        }));
+            futures.push_back(
+                pool.Submit([input, dest, this_offset, len, entry_offset]() {
+                    size_t n = input->ReadAt(
+                        dest + this_offset,
+                        MILVUS_V3_MAGIC_SIZE + entry_offset + this_offset,
+                        len);
+                    AssertInfo(n == len, "Failed to read entry data range");
+                }));
 
-        remaining -= len;
-        offset += len;
+            remaining -= len;
+            offset += len;
+        }
+    } catch (...) {
+        first_error = std::current_exception();
     }
 
-    for (auto& f : futures) {
-        f.get();
-    }
+    RememberFirstError(first_error, WaitForAllFutures(futures));
+    RethrowIfError(first_error);
 
     // CRC verification: sequential pass over the assembled buffer
     VerifyCrc32c(pm.crc32, result.data.data(), pm.size, "");
@@ -473,23 +520,38 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
 
     std::vector<std::future<void>> futures;
     size_t cur_output_offset = 0;
+    std::exception_ptr first_error = nullptr;
 
-    for (const auto& slice : em.slices) {
-        size_t this_output_offset = cur_output_offset;
-        size_t remaining = em.original_size - cur_output_offset;
-        size_t plain_len = std::min(remaining, slice_size_);
-        cur_output_offset += plain_len;
+    try {
+        auto input = input_;
+        auto cipher_plugin = cipher_plugin_;
+        int64_t ez_id = ez_id_;
+        int64_t collection_id = collection_id_;
+        auto edek = edek_;
+        futures.reserve(em.slices.size());
+        for (const auto& slice : em.slices) {
+            size_t this_output_offset = cur_output_offset;
+            size_t remaining = em.original_size - cur_output_offset;
+            size_t plain_len = std::min(remaining, slice_size_);
+            cur_output_offset += plain_len;
 
-        futures.push_back(
-            pool.Submit([this, slice, dest, this_output_offset, plain_len]() {
+            futures.push_back(pool.Submit([input,
+                                           cipher_plugin,
+                                           ez_id,
+                                           collection_id,
+                                           edek,
+                                           slice,
+                                           dest,
+                                           this_output_offset,
+                                           plain_len]() {
                 std::vector<uint8_t> cipher(slice.size);
-                size_t n = input_->ReadAt(cipher.data(),
-                                          MILVUS_V3_MAGIC_SIZE + slice.offset,
-                                          slice.size);
+                size_t n = input->ReadAt(cipher.data(),
+                                         MILVUS_V3_MAGIC_SIZE + slice.offset,
+                                         slice.size);
                 AssertInfo(n == slice.size, "Failed to read encrypted slice");
 
                 auto dec =
-                    cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+                    cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
                 auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
                 AssertInfo(plain.size() == plain_len,
@@ -499,11 +561,13 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
                 std::memcpy(
                     dest + this_output_offset, plain.data(), plain.size());
             }));
+        }
+    } catch (...) {
+        first_error = std::current_exception();
     }
 
-    for (auto& f : futures) {
-        f.get();
-    }
+    RememberFirstError(first_error, WaitForAllFutures(futures));
+    RethrowIfError(first_error);
 
     // CRC verification over full plaintext buffer
     VerifyCrc32c(em.crc32, result.data.data(), em.original_size, "");
@@ -515,8 +579,6 @@ IndexEntryReader::EntryDownloadState
 IndexEntryReader::PrepareEntryDownload(const std::string& name,
                                        const std::string& local_path,
                                        const EntryMeta& meta) {
-    constexpr size_t kRangeSize = 16 * 1024 * 1024;
-
     int fd = ::open(local_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     AssertInfo(fd != -1, "Failed to create file: {}", local_path);
 
@@ -535,7 +597,7 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
                        strerror(errno));
         } else {
             state.expected_crc = meta.plain.crc32;
-            size_t num_ranges = (meta.plain.size + kRangeSize - 1) / kRangeSize;
+            size_t num_ranges = EntryDownloadRangeCount(meta.plain.size);
             state.range_crcs.resize(num_ranges);
         }
     } catch (...) {
@@ -551,12 +613,19 @@ IndexEntryReader::SubmitEntryDownloadTasks(
     const EntryMeta& meta,
     EntryDownloadState& state,
     std::vector<std::future<void>>& futures) {
-    constexpr size_t kRangeSize = 16 * 1024 * 1024;
     auto& pool = ThreadPools::GetThreadPool(priority_);
+    futures.reserve(futures.size() + (meta.encrypted ? meta.enc.slices.size()
+                                                     : EntryDownloadRangeCount(
+                                                           meta.plain.size)));
 
     if (meta.encrypted) {
         const auto& em = meta.enc;
         size_t output_offset = 0;
+        auto input = input_;
+        auto cipher_plugin = cipher_plugin_;
+        int64_t ez_id = ez_id_;
+        int64_t collection_id = collection_id_;
+        auto edek = edek_;
 
         for (size_t i = 0; i < em.slices.size(); i++) {
             const auto& slice = em.slices[i];
@@ -565,7 +634,11 @@ IndexEntryReader::SubmitEntryDownloadTasks(
             size_t plain_len = std::min(remaining, slice_size_);
             output_offset += plain_len;
 
-            futures.push_back(pool.Submit([this,
+            futures.push_back(pool.Submit([input,
+                                           cipher_plugin,
+                                           ez_id,
+                                           collection_id,
+                                           edek,
                                            slice,
                                            fd = state.fd,
                                            this_output_offset,
@@ -573,13 +646,13 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                                            i,
                                            &state]() {
                 std::vector<uint8_t> cipher(slice.size);
-                size_t n = input_->ReadAt(cipher.data(),
-                                          MILVUS_V3_MAGIC_SIZE + slice.offset,
-                                          slice.size);
+                size_t n = input->ReadAt(cipher.data(),
+                                         MILVUS_V3_MAGIC_SIZE + slice.offset,
+                                         slice.size);
                 AssertInfo(n == slice.size, "Failed to read encrypted slice");
 
                 auto dec =
-                    cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+                    cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
                 auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
                 AssertInfo(plain.size() == plain_len,
@@ -602,14 +675,15 @@ IndexEntryReader::SubmitEntryDownloadTasks(
         size_t file_offset = 0;
         size_t src_offset = pm.offset;
         size_t range_idx = 0;
+        auto input = input_;
 
         while (remaining > 0) {
-            size_t len = std::min(remaining, kRangeSize);
+            size_t len = std::min(remaining, kEntryDownloadRangeSize);
             size_t this_file_offset = file_offset;
             size_t this_src_offset = src_offset;
             size_t this_range_idx = range_idx;
 
-            futures.push_back(pool.Submit([this,
+            futures.push_back(pool.Submit([input,
                                            this_src_offset,
                                            len,
                                            fd = state.fd,
@@ -617,7 +691,7 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                                            this_range_idx,
                                            &state]() {
                 std::vector<uint8_t> buf(len);
-                size_t n = input_->ReadAt(
+                size_t n = input->ReadAt(
                     buf.data(), MILVUS_V3_MAGIC_SIZE + this_src_offset, len);
                 AssertInfo(n == len, "Failed to read data for file");
                 auto written = ::pwrite(fd, buf.data(), len, this_file_offset);
@@ -663,18 +737,21 @@ IndexEntryReader::ReadEntryToFile(const std::string& name,
     const auto& meta = it->second;
 
     auto state = PrepareEntryDownload(name, local_path, meta);
+    std::vector<std::future<void>> futures;
     try {
-        std::vector<std::future<void>> futures;
+        futures.reserve(meta.encrypted
+                            ? meta.enc.slices.size()
+                            : EntryDownloadRangeCount(meta.plain.size));
         SubmitEntryDownloadTasks(meta, state, futures);
 
-        for (auto& f : futures) {
-            f.get();
-        }
+        RethrowIfError(WaitForAllFutures(futures));
 
         FinalizeEntryDownload(state);
     } catch (...) {
+        WaitForAllFutures(futures);
         if (state.fd != -1) {
             ::close(state.fd);
+            state.fd = -1;
         }
         throw;
     }
@@ -701,30 +778,35 @@ IndexEntryReader::ReadEntriesToFiles(
         }
     };
 
+    std::vector<std::future<void>> all_futures;
     try {
+        size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             auto it = entry_index_.find(name);
             AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
             states.push_back(PrepareEntryDownload(name, path, it->second));
+            total_task_count +=
+                it->second.encrypted
+                    ? it->second.enc.slices.size()
+                    : EntryDownloadRangeCount(it->second.plain.size);
         }
 
         // Submit ALL tasks for ALL entries at once (avoids thread pool deadlock)
-        std::vector<std::future<void>> all_futures;
+        all_futures.reserve(total_task_count);
         for (size_t i = 0; i < name_path_pairs.size(); i++) {
             const auto& meta = entry_index_.at(name_path_pairs[i].first);
             SubmitEntryDownloadTasks(meta, states[i], all_futures);
         }
 
         // Wait for ALL tasks to complete
-        for (auto& f : all_futures) {
-            f.get();
-        }
+        RethrowIfError(WaitForAllFutures(all_futures));
 
         // Verify CRCs and close all file descriptors
         for (auto& state : states) {
             FinalizeEntryDownload(state);
         }
     } catch (...) {
+        WaitForAllFutures(all_futures);
         close_all_fds();
         throw;
     }
