@@ -2352,6 +2352,15 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 		}
 	}
+	for _, structSchema := range schema.GetStructArrayFields() {
+		if structSchema.GetNullable() {
+			continue
+		}
+		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
+			log.Info(context.TODO(), "no corresponding struct fieldData pass in", mlog.String("structFieldSchema", structSchema.GetName()))
+			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
+		}
+	}
 
 	return nil
 }
@@ -2648,6 +2657,30 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 	return channel2RowOffsets, nil
 }
 
+func assignChannelsByNamespace(namespace string, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	if len(channelNames) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
+	}
+	channelID := typeutil.HashNamespace2Channels(namespace, channelNames)
+	return assignChannelsByChannel(channelID, channelNames, insertMsg), nil
+}
+
+func assignChannelsByChannel(channelID uint32, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
+	insertMsg.HashValues = make([]uint32, insertMsg.NumRows)
+	for i := range insertMsg.HashValues {
+		insertMsg.HashValues[i] = channelID
+	}
+
+	channelName := channelNames[channelID]
+	channel2RowOffsets := map[string][]int{
+		channelName: make([]int, 0, insertMsg.NRows()),
+	}
+	for i := range insertMsg.HashValues {
+		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], i)
+	}
+	return channel2RowOffsets
+}
+
 func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
 	partitionNames, err := globalMetaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
@@ -2666,6 +2699,16 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 
 	hashedPartitionNames, err := typeutil2.HashKey2Partitions(partitionKeyFieldSchema, keys, partitionNames)
 	return hashedPartitionNames, err
+}
+
+func assignNamespacePartitionKey(ctx context.Context, dbName string, collName string, namespace *string) ([]string, error) {
+	if namespace == nil {
+		return nil, nil
+	}
+
+	return assignPartitionKeys(ctx, dbName, collName, []*planpb.GenericValue{
+		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
+	})
 }
 
 func ErrWithLog(logger *mlog.Logger, msg string, err error) error {
@@ -2707,7 +2750,6 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -2745,8 +2787,64 @@ func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, in
 	return doCheckDynamicFieldData(schema, insertMsg, true)
 }
 
+func namespaceShardingEnabled(schema *schemapb.CollectionSchema) bool {
+	if schema == nil || !schema.GetEnableNamespace() {
+		return false
+	}
+	enabled, err := common.IsNamespaceShardingEnabled(schema.GetProperties()...)
+	return err == nil && enabled
+}
+
+func namespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
+	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartitionKey(schema.GetProperties()...)
+}
+
+func namespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {
+	return namespaceShardingEnabled(schema) && namespacePartitionKeyMode(schema)
+}
+
 func namespacePartitionModeEnabled(schema *schemapb.CollectionSchema) bool {
-	return schema.GetEnableNamespace() && common.IsNamespaceModePartition(schema.GetProperties()...)
+	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartition(schema.GetProperties()...)
+}
+
+func namespaceShardingChannelID(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (uint32, bool, error) {
+	if namespace == nil || !namespacePartitionKeyModeEnabled(schema) {
+		return 0, false, nil
+	}
+	if len(channelNames) == 0 {
+		return 0, false, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
+	}
+	return typeutil.HashNamespace2Channels(*namespace, channelNames), true, nil
+}
+
+func namespaceShardingChannel(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (string, bool, error) {
+	channelID, ok, err := namespaceShardingChannelID(schema, namespace, channelNames)
+	if !ok || err != nil {
+		return "", ok, err
+	}
+	return channelNames[channelID], true, nil
+}
+
+func preferredNodeForChannel(preferredNodes map[string]int64, channel string) int64 {
+	if preferredNodes == nil {
+		return 0
+	}
+	preferredNodeID, ok := preferredNodes[channel]
+	if !ok {
+		return 0
+	}
+	return preferredNodeID
+}
+
+func preferredNodeFromConcurrentMap(preferredNodes *typeutil.ConcurrentMap[string, int64], channel string) int64 {
+	if preferredNodes == nil {
+		return 0
+	}
+	preferredNodeID, ok := preferredNodes.Get(channel)
+	if !ok {
+		return 0
+	}
+	return preferredNodeID
 }
 
 func resolveNamespacePartitionName(schema *schemapb.CollectionSchema, namespace *string, partitionName string) (string, bool, error) {

@@ -263,6 +263,69 @@ class TestSearchTextMatchIndependent(TestMilvusClientV2Base):
             assert template_ids == literal_ids
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_query_with_text_match_fuzzy_filter(self):
+        """
+        target: verify text_match_fuzzy matches terms within an edit distance
+        method: index terms, then query with a one-edit typo at distance 1 and 0
+        expected: distance 1 matches the typo'd term; exact text_match and distance 0 do not
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        schema = self.create_schema(client)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field(
+            "text",
+            DataType.VARCHAR,
+            max_length=65535,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params={"tokenizer": "standard"},
+        )
+        schema.add_field("float32_emb", DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        data = [
+            {"id": 0, "text": "allergy season", "float32_emb": [0.1] * dim},
+            {"id": 1, "text": "allergic reaction", "float32_emb": [0.2] * dim},
+            {"id": 2, "text": "vector database", "float32_emb": [0.3] * dim},
+        ]
+        self.insert(client, collection_name, data=data)
+        self.flush(client, collection_name)
+
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name="float32_emb", index_type="FLAT", metric_type="L2", params={})
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
+
+        # "alergy" is one edit from "allergy" (id 0) and three from "allergic" (id 1).
+        fuzzy_res, _ = self.query(
+            client,
+            collection_name,
+            filter='text_match_fuzzy(text, "alergy", max_edit_distance=1)',
+            output_fields=["id"],
+        )
+        assert {row["id"] for row in fuzzy_res} == {0}
+
+        # the same typo under exact text_match finds nothing.
+        exact_res, _ = self.query(
+            client,
+            collection_name,
+            filter='text_match(text, "alergy")',
+            output_fields=["id"],
+        )
+        assert {row["id"] for row in exact_res} == set()
+
+        # distance 0 is exact, so the typo still finds nothing.
+        zero_res, _ = self.query(
+            client,
+            collection_name,
+            filter='text_match_fuzzy(text, "alergy", max_edit_distance=0)',
+            output_fields=["id"],
+        )
+        assert {row["id"] for row in zero_res} == set()
+
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.skip(reason="unstable: jieba tokenization vs Python substring mismatch, see analysis below")

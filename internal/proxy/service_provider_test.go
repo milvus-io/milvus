@@ -91,6 +91,7 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 	schema := &schemapb.CollectionSchema{
 		Name:               collectionName,
 		EnableDynamicField: true,
+		EnableNamespace:    true,
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:      common.StartOfUserFieldID,
@@ -128,6 +129,7 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.True(t, resp.GetSchema().GetEnableNamespace())
 
 	fieldNames := make(map[string]struct{})
 	for _, f := range resp.GetSchema().GetFields() {

@@ -221,9 +221,14 @@ func (node *DataNode) Init() error {
 		err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
+			return
 		}
 
-		analyzer.InitOptions()
+		if err := analyzer.InitOptions(); err != nil {
+			log.Error(node.ctx, "DataNode init analyzer options failed", mlog.Err(err))
+			initError = err
+			return
+		}
 		log.Info(node.ctx, "init datanode done", mlog.String("Address", node.address))
 	})
 	return initError

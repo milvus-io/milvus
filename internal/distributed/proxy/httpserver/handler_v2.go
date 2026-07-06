@@ -525,7 +525,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
@@ -534,6 +534,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		return authErr
 	}
 
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 
@@ -542,10 +543,11 @@ func checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface
 	if !ok || username.(string) == "" {
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		return authErr
 	}
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 
@@ -563,6 +565,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		if err != nil {
 			return nil, err
 		}
+		ctx = ginCtx.Request.Context()
 	}
 	if checkLimit {
 		_, err := CheckLimiter(ctx, req, pxy)
@@ -3415,6 +3418,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		if err != nil {
 			return nil, err
 		}
+		ctx = c.Request.Context()
 	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
@@ -3668,6 +3672,7 @@ func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
 		return nil, err
 	}
+	ctx = c.Request.Context()
 	req := &datapb.CommitImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
 		JobId: jobID,
@@ -3714,6 +3719,7 @@ func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq 
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
 		return nil, err
 	}
+	ctx = c.Request.Context()
 	req := &datapb.AbortImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
 		JobId: jobID,

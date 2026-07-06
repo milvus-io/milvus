@@ -23,9 +23,7 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 // OpenManager create a WAL Manager, which now uses dynamic opener that can handle multiple WALNames at runtime.
 // The specific WALName will be determined when opening each channel based on checkpoint's MessageID.WALName
 func OpenManager() (Manager, error) {
-	resource.Resource().Logger().Info(context.TODO(),
-
-		"open wal manager with dynamic opener")
+	resource.Resource().Logger().Info(context.TODO(), "open wal manager with dynamic opener")
 	// Create dynamic opener directly with interceptors
 	opener := adaptor.NewOpenerAdaptor(
 		[]interceptors.InterceptorBuilder{

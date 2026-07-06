@@ -1,0 +1,209 @@
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - preference:
+        matchExpressions:
+        - key: jenkins-e2e-amd
+          operator: In
+          values:
+          - "true"
+      weight: 100
+    - preference:
+        matchExpressions:
+        - key: node-role.kubernetes.io/e2e
+          operator: Exists
+      weight: 1
+cluster:
+  enabled: true
+woodpecker:
+  enabled: true
+  image:
+    repository: harbor.milvus.io/woodpecker/woodpecker
+    tag: master-latest
+    pullPolicy: Always
+streaming:
+  enabled: true
+  woodpecker:
+    embedded: false
+proxy:
+  replicas: 2
+  resources:
+    limits:
+      cpu: "1"
+      memory: 4Gi
+    requests:
+      cpu: "0.3"
+      memory: 256Mi
+dataNode:
+  replicas: 2
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "0.5"
+      memory: 500Mi
+indexNode:
+  enabled: false
+queryNode:
+  replicas: 2
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "1"
+      memory: 4Gi
+    requests:
+      cpu: "0.5"
+      memory: 512Mi
+streamingNode:
+  replicas: 2
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "0.5"
+      memory: 512Mi
+mixCoordinator:
+  resources:
+    limits:
+      cpu: "1"
+      memory: 4Gi
+    requests:
+      cpu: "0.2"
+      memory: 256Mi
+service:
+  type: ClusterIP
+log:
+  level: debug
+extraConfigFiles:
+  user.yaml: |+
+    common:
+      bloomFilterApplyBatchSize: 511
+      storage:
+        enablev2: true
+        # enable storage v3
+        useLoonFFI: true
+    dataNode:
+      storage:
+        format: vortex
+      segment:
+        insertBufSize: 1048576
+    dataCoord:
+      enableCompaction: true
+      compaction:
+        enableAutoCompaction: false
+        storageVersion:
+          enabled: true
+        storageFormat:
+          enabled: true
+        bumpSchemaVersion:
+          enabled: true
+      segment:
+        maxSize: 64
+        sealProportion: 0.05
+        sealProportionJitter: 0
+      gc:
+        interval: 1800
+        missingTolerance: 1800
+        dropTolerance: 1800
+    queryNode:
+      segcore:
+        exprEvalBatchSize: 511
+        storageV2:
+          cellTargetSizeBytes: 1048576
+      mmap:
+        vectorField: true
+        vectorIndex: true
+        scalarField: true
+        scalarIndex: true
+        growingMmapEnabled: true
+    queryCoord:
+      checkNodeInReplicaInterval: 3
+    quotaAndLimits:
+      flushRate:
+        collection:
+          max: 4
+metrics:
+  serviceMonitor:
+    enabled: true
+# dependencies
+etcd:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: jenkins-e2e-amd
+            operator: In
+            values:
+            - "true"
+        weight: 100
+      - preference:
+          matchExpressions:
+          - key: node-role.kubernetes.io/e2e
+            operator: Exists
+        weight: 1
+  metrics:
+    enabled: true
+    podMonitor:
+      enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 4Gi
+  tolerations:
+  - effect: PreferNoSchedule
+    key: jenkins-milvus-ci-only
+    operator: Equal
+    value: "true"
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/e2e
+    operator: Exists
+minio:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: jenkins-e2e-amd
+            operator: In
+            values:
+            - "true"
+        weight: 100
+      - preference:
+          matchExpressions:
+          - key: node-role.kubernetes.io/e2e
+            operator: Exists
+        weight: 1
+  mode: standalone
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 4Gi
+  tolerations:
+  - effect: PreferNoSchedule
+    key: jenkins-milvus-ci-only
+    operator: Equal
+    value: "true"
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/e2e
+    operator: Exists
+kafka:
+  enabled: false
+pulsarv3:
+  enabled: false
+# others
+image:
+  all:
+    pullPolicy: Always
+    repository: harbor.milvus.io/milvus/milvus
+    tag: nightly-20240821-ed4eaff

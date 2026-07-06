@@ -27,6 +27,6 @@ func BuildExtraResourceInfo(storage string, resources []*internalpb.FileResource
 	return canalyzer.BuildExtraResourceInfo(storage, resources)
 }
 
-func InitOptions() {
-	canalyzer.InitOptions()
+func InitOptions() error {
+	return canalyzer.InitOptions()
 }

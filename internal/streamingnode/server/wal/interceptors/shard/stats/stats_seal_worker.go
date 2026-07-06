@@ -96,9 +96,7 @@ func (m *sealWorker) loop() {
 func (m *sealWorker) notifyToSealSegmentWithTimePolicy() {
 	sealSegmentIDs := m.statsManager.selectSegmentsWithTimePolicy()
 	if len(sealSegmentIDs) != 0 {
-		m.Logger().Info(context.TODO(),
-
-			"notify to seal segments with time policy", mlog.Int("segmentNum", len(sealSegmentIDs)))
+		m.Logger().Info(context.TODO(), "notify to seal segments with time policy", mlog.Int("segmentNum", len(sealSegmentIDs)))
 		for segmentID, sealPolicy := range sealSegmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}
@@ -109,9 +107,7 @@ func (m *sealWorker) notifyToSealSegmentWithTimePolicy() {
 func (m *sealWorker) notifyToSealSegmentWithBlockingL0Policy() {
 	sealSegmentIDs := m.statsManager.selectSegmentsWithBlockingL0Policy()
 	if len(sealSegmentIDs) != 0 {
-		m.Logger().Info(context.TODO(),
-
-			"notify to seal segments with blocking l0 policy", mlog.Int("segmentNum", len(sealSegmentIDs)))
+		m.Logger().Info(context.TODO(), "notify to seal segments with blocking l0 policy", mlog.Int("segmentNum", len(sealSegmentIDs)))
 		for segmentID, sealPolicy := range sealSegmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}
@@ -123,7 +119,6 @@ func (m *sealWorker) notifyToSealSegmentUntilLessThanLWM(sealPolicy policy.SealP
 	segmentIDs := m.statsManager.selectSegmentsUntilLessThanLWM()
 	if len(segmentIDs) != 0 {
 		m.Logger().Info(context.TODO(),
-
 			"notify to seal segments until less than LWM", mlog.Int("segmentNum", len(segmentIDs)), mlog.String("policy", string(sealPolicy.Policy)))
 		for _, segmentID := range segmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)

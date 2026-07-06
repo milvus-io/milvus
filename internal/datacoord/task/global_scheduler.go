@@ -54,6 +54,55 @@ type globalTaskScheduler struct {
 	execPool     *conc.Pool[struct{}]
 	checkPool    *conc.Pool[struct{}]
 	cluster      session.Cluster
+	// backoffs delays re-dispatch of tasks that failed on a worker. Without
+	// it a task that keeps failing (e.g. its object-storage reads are being
+	// throttled) is re-sent every TaskScheduleInterval (~100ms), which turns
+	// one bad task into a dispatch storm that keeps the store throttled.
+	backoffs *typeutil.ConcurrentMap[int64, *taskBackoff]
+}
+
+// taskBackoff records how often a task failed on a worker and when it may be
+// dispatched again. Entries are replaced wholesale (copy-on-write) so readers
+// never observe a partially updated value.
+type taskBackoff struct {
+	failures  int
+	notBefore time.Time
+}
+
+// recordTaskFailure schedules the next dispatch of a failed task with
+// exponential backoff: interval * 2^(failures-1), capped at maxInterval.
+func (s *globalTaskScheduler) recordTaskFailure(task Task) {
+	interval := paramtable.Get().DataCoordCfg.TaskRetryBackoffInterval.GetAsDuration(time.Second)
+	if interval <= 0 {
+		return
+	}
+	maxInterval := paramtable.Get().DataCoordCfg.TaskRetryBackoffMaxInterval.GetAsDuration(time.Second)
+
+	failures := 1
+	if old, ok := s.backoffs.Get(task.GetTaskID()); ok {
+		failures = old.failures + 1
+	}
+	// cap the shift to keep the doubling far away from overflow
+	if shift := failures - 1; shift < 30 {
+		interval <<= shift
+	} else {
+		interval = maxInterval
+	}
+	if maxInterval > 0 && interval > maxInterval {
+		interval = maxInterval
+	}
+	s.backoffs.Insert(task.GetTaskID(), &taskBackoff{
+		failures:  failures,
+		notBefore: time.Now().Add(interval),
+	})
+	mlog.Info(s.ctx, "task failed on worker, backing off before retry",
+		WrapTaskLog(task, mlog.Int("failures", failures), mlog.Duration("backoff", interval))...)
+}
+
+// taskInBackoff reports whether the task's next dispatch is still delayed.
+func (s *globalTaskScheduler) taskInBackoff(task Task) bool {
+	bo, ok := s.backoffs.Get(task.GetTaskID())
+	return ok && time.Now().Before(bo.notBefore)
 }
 
 func (s *globalTaskScheduler) Enqueue(task Task) {
@@ -84,6 +133,7 @@ func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 		task.DropTaskOnWorker(s.cluster)
 		s.pendingTasks.Remove(taskID)
 	}
+	s.backoffs.Remove(taskID)
 }
 
 func (s *globalTaskScheduler) Start() {
@@ -166,10 +216,18 @@ func (s *globalTaskScheduler) schedule() {
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
 	futures := make([]*conc.Future[struct{}], 0)
+	var delayed []Task
 	for {
 		task := s.pendingTasks.Pop()
 		if task == nil {
 			break
+		}
+		// A task in failure backoff gives way: it re-enters the queue after
+		// this round and is dispatched once its delay elapses, so one
+		// persistently failing task cannot occupy the scheduler.
+		if s.taskInBackoff(task) {
+			delayed = append(delayed, task)
+			continue
 		}
 		taskSlot := task.GetTaskSlot()
 		nodeID := s.pickNode(nodeSlots, taskSlot)
@@ -185,6 +243,7 @@ func (s *globalTaskScheduler) schedule() {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
 				switch task.GetTaskState() {
 				case taskcommon.Init, taskcommon.Retry:
+					s.recordTaskFailure(task)
 					s.pendingTasks.Push(task)
 				case taskcommon.InProgress:
 					task.SetTaskTime(taskcommon.TimeStart, time.Now())
@@ -194,6 +253,9 @@ func (s *globalTaskScheduler) schedule() {
 			return struct{}{}, nil
 		})
 		futures = append(futures, future)
+	}
+	for _, task := range delayed {
+		s.pendingTasks.Push(task)
 	}
 	_ = conc.AwaitAll(futures...)
 }
@@ -214,13 +276,16 @@ func (s *globalTaskScheduler) check() {
 			switch task.GetTaskState() {
 			case taskcommon.None:
 				s.runningTasks.Remove(task.GetTaskID())
+				s.backoffs.Remove(task.GetTaskID())
 			case taskcommon.Init, taskcommon.Retry:
+				s.recordTaskFailure(task)
 				s.runningTasks.Remove(task.GetTaskID())
 				s.pendingTasks.Push(task)
 			case taskcommon.Finished, taskcommon.Failed:
 				task.SetTaskTime(taskcommon.TimeEnd, time.Now())
 				task.DropTaskOnWorker(s.cluster)
 				s.runningTasks.Remove(task.GetTaskID())
+				s.backoffs.Remove(task.GetTaskID())
 			}
 			return struct{}{}, nil
 		})
@@ -329,5 +394,6 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		execPool:     execPool,
 		checkPool:    checkPool,
 		cluster:      cluster,
+		backoffs:     typeutil.NewConcurrentMap[int64, *taskBackoff](),
 	}
 }

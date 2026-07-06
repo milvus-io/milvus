@@ -157,7 +157,19 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncPersistsColumnGroupBinlogs() {
 		WithTargetOffset(15).
 		WithMetaCache(s.metacache)
 	task.manifestPath = "manifest"
-	task.insertBinlogs = buildV3ColumnGroupFieldBinlogs(columnGroups, 0, 0, 0, nil, nil, nil, nil, nil)
+	task.insertBinlogs = buildV3ColumnGroupFieldBinlogs(
+		columnGroups,
+		10,
+		101,
+		200,
+		func(columnGroupID int64) int64 { return 0 },
+		func(columnGroupID int64) int64 { return columnGroupID + 1000 },
+		func(columnGroupID int64) int64 { return columnGroupID + 2000 },
+		nil,
+		func(columnGroup storagecommon.ColumnGroup) map[int64]int64 {
+			return map[int64]int64{columnGroup.Fields[0]: columnGroup.GroupID}
+		},
+	)
 
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
@@ -168,7 +180,13 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncPersistsColumnGroupBinlogs() {
 			s.EqualValues(0, req.GetField2BinlogPaths()[0].GetFieldID())
 			s.EqualValues([]int64{100}, req.GetField2BinlogPaths()[0].GetChildFields())
 			s.Equal("parquet", req.GetField2BinlogPaths()[0].GetFormat())
-			s.Empty(req.GetField2BinlogPaths()[0].GetBinlogs())
+			s.Len(req.GetField2BinlogPaths()[0].GetBinlogs(), 1)
+			s.EqualValues(10, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetEntriesNum())
+			s.EqualValues(101, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetTimestampFrom())
+			s.EqualValues(200, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetTimestampTo())
+			s.EqualValues(1000, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetMemorySize())
+			s.EqualValues(2000, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetLogID())
+			s.EqualValues(0, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetFieldNullCounts()[100])
 			s.EqualValues(101, req.GetField2BinlogPaths()[1].GetFieldID())
 			s.EqualValues([]int64{101}, req.GetField2BinlogPaths()[1].GetChildFields())
 			s.Len(req.GetField2StatslogPaths(), 1)
@@ -191,7 +209,7 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncPersistsColumnGroupBinlogs() {
 	s.Len(seg.Bm25logs(), 1)
 }
 
-func (s *MetaWriterSuite) TestGrowingSourceSyncDoesNotAccumulateColumnGroupSkeletons() {
+func (s *MetaWriterSuite) TestGrowingSourceSyncAppendsColumnGroupBinlogs() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -199,13 +217,23 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncDoesNotAccumulateColumnGroupSkele
 		{GroupID: 0, Fields: []int64{100}, Format: "parquet"},
 		{GroupID: 101, Fields: []int64{101}, Format: "vortex"},
 	}
-	existingSkeleton := storage.SortFieldBinlogs(buildV3ColumnGroupFieldBinlogs(columnGroups, 0, 0, 0, nil, nil, nil, nil, nil))
+	existingBinlogs := storage.SortFieldBinlogs(buildV3ColumnGroupFieldBinlogs(
+		columnGroups,
+		5,
+		10,
+		20,
+		func(columnGroupID int64) int64 { return 0 },
+		func(columnGroupID int64) int64 { return columnGroupID + 100 },
+		func(columnGroupID int64) int64 { return columnGroupID + 1000 },
+		nil,
+		nil,
+	))
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             1,
 		CollectionID:   3,
 		PartitionID:    2,
 		StorageVersion: storage.StorageV3,
-		Binlogs:        existingSkeleton,
+		Binlogs:        existingBinlogs,
 	}, pkoracle.NewBloomFilterSet(), nil)
 	metacache.UpdateNumOfRows(5)(seg)
 
@@ -226,27 +254,40 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncDoesNotAccumulateColumnGroupSkele
 		WithTargetOffset(15).
 		WithMetaCache(s.metacache)
 	task.manifestPath = "manifest"
-	task.insertBinlogs = buildV3ColumnGroupFieldBinlogs(columnGroups, 0, 0, 0, nil, nil, nil, nil, nil)
+	task.insertBinlogs = buildV3ColumnGroupFieldBinlogs(
+		columnGroups,
+		10,
+		30,
+		40,
+		func(columnGroupID int64) int64 { return 0 },
+		func(columnGroupID int64) int64 { return columnGroupID + 200 },
+		func(columnGroupID int64) int64 { return columnGroupID + 2000 },
+		nil,
+		nil,
+	)
 
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
 			s.True(req.GetWithFullBinlogs())
 			s.Equal("manifest", req.GetManifestPath())
-			s.Len(req.GetField2BinlogPaths(), 2)
+			s.Len(req.GetField2BinlogPaths(), 4)
 			s.EqualValues(0, req.GetField2BinlogPaths()[0].GetFieldID())
 			s.EqualValues([]int64{100}, req.GetField2BinlogPaths()[0].GetChildFields())
 			s.Equal("parquet", req.GetField2BinlogPaths()[0].GetFormat())
+			s.EqualValues(5, req.GetField2BinlogPaths()[0].GetBinlogs()[0].GetEntriesNum())
 			s.EqualValues(101, req.GetField2BinlogPaths()[1].GetFieldID())
-			s.EqualValues([]int64{101}, req.GetField2BinlogPaths()[1].GetChildFields())
-			s.Equal("vortex", req.GetField2BinlogPaths()[1].GetFormat())
+			s.EqualValues(10, req.GetField2BinlogPaths()[2].GetBinlogs()[0].GetEntriesNum())
+			s.EqualValues(30, req.GetField2BinlogPaths()[2].GetBinlogs()[0].GetTimestampFrom())
 			return nil
 		})
 
 	err := s.writer.UpdateGrowingSourceSync(ctx, task)
 	s.NoError(err)
-	s.Len(seg.Binlogs(), 2)
+	s.Len(seg.Binlogs(), 4)
 	s.EqualValues(0, seg.Binlogs()[0].GetFieldID())
 	s.EqualValues(101, seg.Binlogs()[1].GetFieldID())
+	s.EqualValues(0, seg.Binlogs()[2].GetFieldID())
+	s.EqualValues(101, seg.Binlogs()[3].GetFieldID())
 }
 
 func (s *MetaWriterSuite) TestGrowingSourceSyncMetaErrorsReturnError() {

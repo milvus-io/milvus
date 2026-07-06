@@ -414,6 +414,60 @@ func TestExpr_RawString(t *testing.T) {
 	assert.Equal(t, []string{`\u0041`}, jSq.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
 }
 
+// TestExpr_RawString_LikeEscapeModel exercises the LIKE escape model (issue
+// #43864) end-to-end through the raw-string literal r"...". Because a raw string
+// drops the string-literal Unquote layer, a backslash reaches the LIKE pattern
+// layer verbatim, so these read with the same single backslash the C++ canonical
+// matcher (RegexQuery.cpp) uses — no doubled/quadrupled backslashes. Each case
+// asserts the optimized op and the literal operand the executor must match
+// verbatim.
+func TestExpr_RawString_LikeEscapeModel(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	check := func(expr string, wantOp planpb.OpType, wantVal string) {
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan, expr)
+		ur := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.Equal(t, wantOp, ur.GetOp(), expr)
+		assert.Equal(t, wantVal, ur.GetValue().GetStringVal(), expr)
+	}
+
+	// An escaped wildcard is a LITERAL byte in the operand: the optimized op
+	// carries a literal '%'/'_', which the C++ side matches verbatim and must NOT
+	// re-interpret as a wildcard.
+	check(`A like r"a\%bc"`, planpb.OpType_Equal, `a%bc`)
+	check(`A like r"a\_bc"`, planpb.OpType_Equal, `a_bc`)
+	check(`A like r"abc\%%"`, planpb.OpType_PrefixMatch, `abc%`)
+	check(`A like r"%abc\%"`, planpb.OpType_PostfixMatch, `abc%`)
+	check(`A like r"%abc\%%"`, planpb.OpType_InnerMatch, `abc%`)
+
+	// A literal '\%' and an UNescaped '%' coexist: the literal lands in the
+	// operand verbatim, while the bare '%' is the prefix/postfix/inner boundary
+	// the C++ matcher expands to an ANY-length span.
+	check(`A like r"abc\%def%"`, planpb.OpType_PrefixMatch, `abc%def`)
+	check(`A like r"%abc\%def"`, planpb.OpType_PostfixMatch, `abc%def`)
+	check(`A like r"%abc\%def%"`, planpb.OpType_InnerMatch, `abc%def`)
+
+	// A backslash escapes ANY next byte, not only wildcards: r"\a" -> literal "a".
+	check(`A like r"\a"`, planpb.OpType_Equal, `a`)
+
+	// A raw "\\" collapses to one literal backslash at the pattern layer.
+	check(`A like r"a\\b"`, planpb.OpType_Equal, `a\b`)
+	check(`A like r"%a\\b%"`, planpb.OpType_InnerMatch, `a\b`)
+
+	// A dangling trailing backslash cannot be written as a raw string at all — a
+	// raw string may not end in an odd number of backslashes (it would not
+	// terminate). So the unterminated raw form is a parse error, and the literal
+	// trailing-backslash pattern can only be expressed via a normal string, where
+	// it is not optimizable and falls back to OpType_Match (the C++ matcher then
+	// raises ExprInvalid at execution).
+	assertInvalidExpr(t, helper, `A like r"abc\"`)
+	check(`A like "abc\\"`, planpb.OpType_Match, `abc\`)
+}
+
 func TestExpr_RegexMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
@@ -706,6 +760,91 @@ func TestExpr_TextMatch(t *testing.T) {
 	unsupported := []string{
 		`text_match(not_exist, "query")`,
 		`text_match(BoolField, "query")`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_TextMatchFuzzy(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// the field must enable match first, otherwise fuzzy match is rejected.
+	assertInvalidExpr(t, helper, `text_match_fuzzy(VarCharField, "query", max_edit_distance=1)`)
+	enableMatch(schema)
+
+	for _, v := range []int64{0, 1, 2} {
+		expr := fmt.Sprintf(`text_match_fuzzy(VarCharField, "query", max_edit_distance=%d)`, v)
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "query", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, v, extra[0].GetInt64Val())
+	}
+
+	{
+		// a templated query is filled at plan time and the edit distance survives.
+		expr := `text_match_fuzzy(VarCharField, {q}, max_edit_distance=2)`
+		mv := map[string]*schemapb.TemplateValue{
+			"q": generateTemplateValue(schemapb.DataType_VarChar, "hello"),
+		}
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:       10,
+			MetricType: "L2",
+		}, mv, nil)
+		assert.NoError(t, err, expr)
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "hello", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, int64(2), extra[0].GetInt64Val())
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=3)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max_edit_distance should be in [0, 2]")
+	}
+
+	{
+		// the distance argument is required by the grammar.
+		expr := `text_match_fuzzy(VarCharField, "query")`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=1.5)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=9223372036854775808)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid max_edit_distance value")
+	}
+
+	unsupported := []string{
+		`text_match_fuzzy(not_exist, "query", max_edit_distance=1)`,
+		`text_match_fuzzy(BoolField, "query", max_edit_distance=1)`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)

@@ -268,3 +268,80 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		}, 10*time.Second, 10*time.Millisecond)
 	})
 }
+
+func TestGlobalScheduler_RecordTaskFailureBackoff(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "1")
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffMaxInterval.Key, "4")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffMaxInterval.Key)
+
+	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(7).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+
+	// exponential: 1s, 2s, 4s, then capped at the 4s max
+	start := time.Now()
+	scheduler.recordTaskFailure(task)
+	bo, ok := scheduler.backoffs.Get(7)
+	assert.True(t, ok)
+	assert.Equal(t, 1, bo.failures)
+	assert.InDelta(t, 1.0, bo.notBefore.Sub(start).Seconds(), 0.5)
+	assert.True(t, scheduler.taskInBackoff(task))
+
+	scheduler.recordTaskFailure(task)
+	scheduler.recordTaskFailure(task)
+	scheduler.recordTaskFailure(task)
+	bo, _ = scheduler.backoffs.Get(7)
+	assert.Equal(t, 4, bo.failures)
+	assert.InDelta(t, 4.0, time.Until(bo.notBefore).Seconds(), 0.5)
+
+	// clearing the entry ends the backoff
+	scheduler.backoffs.Remove(7)
+	assert.False(t, scheduler.taskInBackoff(task))
+
+	// interval 0 disables the mechanism entirely
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "0")
+	scheduler.recordTaskFailure(task)
+	assert.False(t, scheduler.taskInBackoff(task))
+}
+
+func TestGlobalScheduler_FailedTaskBacksOffBeforeRedispatch(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+	}).Maybe()
+
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(1).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	// CreateTaskOnWorker never flips the state away from Init: every dispatch fails
+	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+	var createCalls atomic.Int32
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		createCalls.Add(1)
+	}).Maybe()
+
+	scheduler.Enqueue(task)
+
+	// the first dispatch happens promptly
+	assert.Eventually(t, func() bool { return createCalls.Load() == 1 }, 2*time.Second, 10*time.Millisecond)
+	// during the 1s backoff the ~100ms scheduling tick must NOT re-dispatch
+	// (without backoff this would already be ~5 more dispatches)
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, int32(1), createCalls.Load())
+	// after the backoff elapses it is dispatched again
+	assert.Eventually(t, func() bool { return createCalls.Load() >= 2 }, 3*time.Second, 10*time.Millisecond)
+}

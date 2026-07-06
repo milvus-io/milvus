@@ -16,8 +16,10 @@
 #include <folly/ExceptionWrapper.h>
 #include <folly/Try.h>
 #include <folly/futures/Promise.h>
+#include <algorithm>
 #include <cstring>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -83,10 +85,12 @@
 // milvus-storage headers for FlushGrowingSegmentData
 #include "milvus-storage/segment/segment_writer.h"
 #include "milvus-storage/transaction/transaction.h"
+#include "milvus-storage/common/arrow_util.h"
 #include "milvus-storage/common/layout.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/properties.h"
 
 // Arrow headers for FlushGrowingSegmentData
@@ -432,7 +436,8 @@ AsyncSearch(CTraceContext c_trace,
                                                 collection_ttl,
                                                 entity_ttl_physical_time_us,
                                                 filter_only,
-                                                enable_expr_cache);
+                                                enable_expr_cache,
+                                                span);
             }
             if (!filter_only &&
                 !milvus::PositivelyRelated(
@@ -1802,6 +1807,14 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         result->manifest_path = nullptr;
         result->committed_version = 0;
         result->num_rows = 0;
+        result->timestamp_from = 0;
+        result->timestamp_to = 0;
+        result->field_ids = nullptr;
+        result->field_null_counts = nullptr;
+        result->num_field_stats = 0;
+        result->column_group_ids = nullptr;
+        result->column_group_memory_sizes = nullptr;
+        result->num_column_groups = 0;
         result->bm25_field_ids = nullptr;
         result->bm25_stats = nullptr;
         result->bm25_stats_sizes = nullptr;
@@ -1828,6 +1841,13 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             return milvus::FailureCStatus(
                 milvus::UnexpectedError,
                 "invalid allowed field config: allowed_field_ids is null");
+        }
+        if (config->num_column_groups > 0 &&
+            (config->column_group_ids == nullptr ||
+             config->column_group_field_counts == nullptr)) {
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "invalid column group config: column group arrays are null");
         }
         if (config->schema_blob == nullptr || config->schema_length <= 0) {
             return milvus::FailureCStatus(
@@ -1876,37 +1896,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         std::vector<FieldInfo> field_infos;
         std::vector<std::shared_ptr<arrow::Field>> arrow_fields;
 
-        {
-            const auto& field_meta = milvus::FieldMeta::RowIdMeta;
-            FieldInfo info;
-            info.field_id = RowFieldID;
-            info.field_name = field_meta.get_name().get();
-            info.data_type = field_meta.get_data_type();
-            info.element_type = milvus::DataType::NONE;
-            info.nullable = field_meta.is_nullable();
-            info.dim = 0;
-            info.vec_base = &insert_record.row_ids_;
-            info.valid_data = nullptr;
-            info.text_lob_spillover = nullptr;
-            field_infos.push_back(std::move(info));
-
-            auto metadata = arrow::KeyValueMetadata::Make(
-                {milvus_storage::ARROW_FIELD_ID_KEY},
-                {std::to_string(RowFieldID.get())});
-            auto arrow_type =
-                milvus::GetArrowDataType(field_meta.get_data_type(), 0);
-            arrow_fields.push_back(
-                arrow::field(std::to_string(RowFieldID.get()),
-                             arrow_type,
-                             field_meta.is_nullable(),
-                             metadata));
-        }
-
         for (const auto& field_id : schema.get_field_ids()) {
-            if (field_id == RowFieldID) {
-                continue;  // skip RowID system field
-            }
-            if (!allowed_field_ids.empty() && field_id != TimestampFieldID &&
+            if (!allowed_field_ids.empty() &&
                 allowed_field_ids.find(field_id.get()) ==
                     allowed_field_ids.end()) {
                 continue;
@@ -1914,9 +1905,11 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
 
             const auto& field_meta = schema[field_id];
 
-            // Timestamp is stored in insert_record.timestamps_, not in data_ map
+            // System fields are stored outside the regular field data map.
             const milvus::segcore::VectorBase* vec_base;
-            if (field_id == TimestampFieldID) {
+            if (field_id == RowFieldID) {
+                vec_base = &insert_record.row_ids_;
+            } else if (field_id == TimestampFieldID) {
                 vec_base = &insert_record.timestamps_;
             } else {
                 vec_base = insert_record.get_data_base(field_id);
@@ -2099,6 +2092,12 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // this avoids copying all data into a single contiguous buffer
         int64_t size_per_chunk = field_infos[0].vec_base->get_size_per_chunk();
         int64_t current_offset = start_offset;
+        int64_t rows_written = 0;
+        std::unordered_map<int64_t, int64_t> field_uncompressed_sizes;
+        std::unordered_map<int64_t, int64_t> field_null_counts;
+        uint64_t timestamp_from = std::numeric_limits<uint64_t>::max();
+        uint64_t timestamp_to = 0;
+        bool has_timestamp = false;
 
         while (current_offset < end_offset) {
             int64_t chunk_id = current_offset / size_per_chunk;
@@ -2130,7 +2129,30 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                         milvus::UnexpectedError,
                         arr_result.status().ToString());
                 }
-                arrays.push_back(arr_result.ValueOrDie());
+                auto arr = arr_result.ValueOrDie();
+                auto field_id = field_info.field_id.get();
+                field_uncompressed_sizes[field_id] += static_cast<int64_t>(
+                    milvus_storage::GetArrowArrayMemorySize(arr));
+                field_null_counts[field_id] += arr->null_count();
+                if (field_info.field_id == TimestampFieldID) {
+                    auto ts_array =
+                        std::dynamic_pointer_cast<arrow::Int64Array>(arr);
+                    if (!ts_array) {
+                        return milvus::FailureCStatus(
+                            milvus::UnexpectedError,
+                            "timestamp field is not int64 array");
+                    }
+                    for (int64_t i = 0; i < ts_array->length(); i++) {
+                        if (ts_array->IsNull(i)) {
+                            continue;
+                        }
+                        auto ts = static_cast<uint64_t>(ts_array->Value(i));
+                        timestamp_from = std::min(timestamp_from, ts);
+                        timestamp_to = std::max(timestamp_to, ts);
+                        has_timestamp = true;
+                    }
+                }
+                arrays.push_back(arr);
 
                 auto stats_iter = bm25_stats.find(field_info.field_id.get());
                 if (stats_iter != bm25_stats.end()) {
@@ -2155,6 +2177,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             }
 
             current_offset += batch_rows;
+            rows_written += batch_rows;
         }
 
         // close writer — returns ColumnGroups + LobFiles, does NOT commit
@@ -2164,6 +2187,73 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                           close_result.status().ToString());
         }
         auto output = std::move(close_result).ValueOrDie();
+        if (rows_written > 0 && !has_timestamp) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "timestamp field was not flushed");
+        }
+        result->timestamp_from = has_timestamp ? timestamp_from : 0;
+        result->timestamp_to = has_timestamp ? timestamp_to : 0;
+        if (!field_infos.empty()) {
+            auto num_field_stats = field_infos.size();
+            result->field_ids = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * num_field_stats));
+            result->field_null_counts = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * num_field_stats));
+            if (!result->field_ids || !result->field_null_counts) {
+                return milvus::FailureCStatus(
+                    milvus::UnexpectedError,
+                    "failed to allocate growing flush field stats");
+            }
+            result->num_field_stats = num_field_stats;
+            for (size_t i = 0; i < num_field_stats; i++) {
+                auto field_id = field_infos[i].field_id.get();
+                result->field_ids[i] = field_id;
+                result->field_null_counts[i] = field_null_counts[field_id];
+            }
+        }
+        if (config->num_column_groups > 0) {
+            result->column_group_ids = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * config->num_column_groups));
+            result->column_group_memory_sizes = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * config->num_column_groups));
+            if (!result->column_group_ids ||
+                !result->column_group_memory_sizes) {
+                return milvus::FailureCStatus(
+                    milvus::UnexpectedError,
+                    "failed to allocate growing flush column group stats");
+            }
+            result->num_column_groups = config->num_column_groups;
+            size_t field_offset = 0;
+            for (size_t i = 0; i < config->num_column_groups; i++) {
+                auto group_id = config->column_group_ids[i];
+                int64_t group_memory_size = 0;
+                auto field_count = config->column_group_field_counts[i];
+                if (field_count > 0 &&
+                    config->column_group_field_ids == nullptr) {
+                    return milvus::FailureCStatus(
+                        milvus::UnexpectedError,
+                        "invalid column group config: field ids are null");
+                }
+                for (size_t j = 0; j < field_count; j++) {
+                    auto field_id =
+                        config->column_group_field_ids[field_offset + j];
+                    auto size_it = field_uncompressed_sizes.find(field_id);
+                    if (size_it == field_uncompressed_sizes.end()) {
+                        return milvus::FailureCStatus(
+                            milvus::UnexpectedError,
+                            fmt::format("missing memory size for field {} in "
+                                        "column group {} of segment {}",
+                                        field_id,
+                                        group_id,
+                                        growing_segment->get_segment_id()));
+                    }
+                    group_memory_size += size_it->second;
+                }
+                field_offset += field_count;
+                result->column_group_ids[i] = group_id;
+                result->column_group_memory_sizes[i] = group_memory_size;
+            }
+        }
 
         // commit via Transaction externally
         auto transaction_result =
@@ -2318,6 +2408,22 @@ FreeFlushResult(CFlushResult* result) {
         free(result->manifest_path);
         result->manifest_path = nullptr;
     }
+    if (result && result->field_ids) {
+        free(result->field_ids);
+        result->field_ids = nullptr;
+    }
+    if (result && result->field_null_counts) {
+        free(result->field_null_counts);
+        result->field_null_counts = nullptr;
+    }
+    if (result && result->column_group_ids) {
+        free(result->column_group_ids);
+        result->column_group_ids = nullptr;
+    }
+    if (result && result->column_group_memory_sizes) {
+        free(result->column_group_memory_sizes);
+        result->column_group_memory_sizes = nullptr;
+    }
     if (result && result->bm25_stats) {
         for (size_t i = 0; i < result->num_bm25_stats; i++) {
             free(result->bm25_stats[i]);
@@ -2334,6 +2440,8 @@ FreeFlushResult(CFlushResult* result) {
         result->bm25_stats_sizes = nullptr;
     }
     if (result) {
+        result->num_field_stats = 0;
+        result->num_column_groups = 0;
         result->num_bm25_stats = 0;
     }
 }

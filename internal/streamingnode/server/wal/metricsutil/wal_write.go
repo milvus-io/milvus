@@ -96,16 +96,12 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 		}
 	}
 	if appendMetrics.err != nil {
-		m.Logger().Warn(context.TODO(),
-
-			"append message into wal failed", appendMetrics.IntoLogFields()...)
+		m.Logger().Warn(context.TODO(), "append message into wal failed", appendMetrics.IntoLogFields()...)
 		return
 	}
 	if appendMetrics.appendDuration >= m.slowLogThreshold {
 		// log slow append catch
-		m.Logger().Warn(context.TODO(),
-
-			"append message into wal too slow", appendMetrics.IntoLogFields()...)
+		m.Logger().Warn(context.TODO(), "append message into wal too slow", appendMetrics.IntoLogFields()...)
 		return
 	}
 	logLV := appendMetrics.msg.MessageType().LogLevel()

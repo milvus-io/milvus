@@ -114,9 +114,10 @@ type growingSourceProgress struct {
 }
 
 type growingSourcePendingCommittedFlush struct {
-	targetOffset int64
-	manifestPath string
-	bm25Stats    map[int64]*storage.BM25Stats
+	targetOffset  int64
+	manifestPath  string
+	bm25Stats     map[int64]*storage.BM25Stats
+	insertBinlogs map[int64]*datapb.FieldBinlog
 }
 
 // growingFlushSourceDecision is the in-memory result of decideGrowingFlushSource.
@@ -937,9 +938,10 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 					if err != nil {
 						if growingSourceTask.HasCommittedFlush() && growingSourceTask.CommittedManifestPath() != "" {
 							progress.pendingCommitted = &growingSourcePendingCommittedFlush{
-								targetOffset: growingSourceTask.TargetOffset(),
-								manifestPath: growingSourceTask.CommittedManifestPath(),
-								bm25Stats:    cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
+								targetOffset:  growingSourceTask.TargetOffset(),
+								manifestPath:  growingSourceTask.CommittedManifestPath(),
+								bm25Stats:     cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
+								insertBinlogs: growingSourceTask.CommittedInsertBinlogs(),
 							}
 						}
 						progress.failSync(err)
@@ -1480,7 +1482,7 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			task.WithSource(source)
 		}
 		if pendingCommitted != nil {
-			task.WithCommittedFlush(pendingCommitted.manifestPath, cloneBM25StatsMap(pendingCommitted.bm25Stats))
+			task.WithCommittedFlush(pendingCommitted.manifestPath, cloneBM25StatsMap(pendingCommitted.bm25Stats), pendingCommitted.insertBinlogs)
 		}
 		if segmentInfo.State() == commonpb.SegmentState_Flushing {
 			task.WithFlush()

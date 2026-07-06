@@ -416,15 +416,19 @@ class SegmentLoadInfo {
 
     /**
      * @brief Copy constructor
-     * @note Rebuilds cache instead of copying (LoadIndexInfo is not copyable)
+     * @note Reuses converted index metadata; binlog pointers are rebuilt for
+     *       this instance's protobuf storage.
      */
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
-          column_groups_(other.column_groups_),
+          converted_index_infos_(other.converted_index_infos_),
+          converted_field_index_cache_(other.converted_field_index_cache_),
+          field_index_has_raw_data_(other.field_index_has_raw_data_),
           fields_filled_with_default_(other.fields_filled_with_default_),
+          column_groups_(other.column_groups_),
           created_text_indexes_(other.created_text_indexes_) {
-        BuildCache();
+        BuildFieldBinlogCache();
     }
 
     /**
@@ -446,17 +450,21 @@ class SegmentLoadInfo {
 
     /**
      * @brief Copy assignment operator
-     * @note Rebuilds cache instead of copying (LoadIndexInfo is not copyable)
+     * @note Reuses converted index metadata; binlog pointers are rebuilt for
+     *       this instance's protobuf storage.
      */
     SegmentLoadInfo&
     operator=(const SegmentLoadInfo& other) {
         if (this != &other) {
             info_ = other.info_;
             schema_ = other.schema_;
+            converted_index_infos_ = other.converted_index_infos_;
+            converted_field_index_cache_ = other.converted_field_index_cache_;
+            field_index_has_raw_data_ = other.field_index_has_raw_data_;
             column_groups_ = other.column_groups_;
             fields_filled_with_default_ = other.fields_filled_with_default_;
             created_text_indexes_ = other.created_text_indexes_;
-            BuildCache();
+            BuildFieldBinlogCache();
         }
         return *this;
     }
@@ -1074,7 +1082,7 @@ class SegmentLoadInfo {
 
  private:
     void
-    BuildCache() {
+    BuildFieldBinlogCache() {
         field_binlog_cache_.clear();
         // Build binlog cache
         for (int i = 0; i < info_.binlog_paths_size(); i++) {
@@ -1082,6 +1090,11 @@ class SegmentLoadInfo {
             auto field_id = FieldId(binlog.fieldid());
             field_binlog_cache_[field_id] = &binlog;
         }
+    }
+
+    void
+    BuildCache() {
+        BuildFieldBinlogCache();
 
         // Convert index infos to LoadIndexInfo and build per-field cache
         converted_index_infos_.clear();

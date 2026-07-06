@@ -40,7 +40,14 @@ func TestDelegatorGrowingFlushSourcePassesTaskSchema(t *testing.T) {
 			require.EqualValues(t, 3, startOffset)
 			require.EqualValues(t, 7, endOffset)
 			require.True(t, config.Schema == schema)
-			return &segments.FlushResult{ManifestPath: "manifest", NumRows: 4}, nil
+			return &segments.FlushResult{
+				ManifestPath:           "manifest",
+				NumRows:                4,
+				TimestampFrom:          100,
+				TimestampTo:            200,
+				ColumnGroupMemorySizes: map[int64]int64{100: 64},
+				FieldNullCounts:        map[int64]int64{100: 1},
+			}, nil
 		})
 
 	source := &delegatorGrowingFlushSource{segment: segment}
@@ -50,6 +57,10 @@ func TestDelegatorGrowingFlushSourcePassesTaskSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "manifest", result.ManifestPath)
 	require.EqualValues(t, 4, result.NumRows)
+	require.EqualValues(t, 100, result.TimestampFrom)
+	require.EqualValues(t, 200, result.TimestampTo)
+	require.EqualValues(t, 64, result.ColumnGroupMemorySizes[100])
+	require.EqualValues(t, 1, result.FieldNullCounts[100])
 }
 
 func TestDelegatorGrowingSourceProviderCloseWaitsForSourceRelease(t *testing.T) {
