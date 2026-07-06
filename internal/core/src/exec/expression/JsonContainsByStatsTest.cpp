@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
@@ -35,9 +36,12 @@
 #include "gtest/gtest.h"
 #include "index/IndexStats.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/metadata.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "parquet/arrow/writer.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -84,17 +88,25 @@ MakeNullableJsonArray(const std::vector<std::string>& json_strings,
     return std::static_pointer_cast<arrow::BinaryArray>(array);
 }
 
-std::shared_ptr<JsonKeyStats>
-BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
-                         const milvus::FieldId json_fid,
-                         const std::string& root_path,
-                         int64_t collection_id,
-                         int64_t partition_id,
-                         int64_t segment_id,
-                         int64_t field_id,
-                         int64_t build_id,
-                         int64_t version_id,
-                         const std::vector<uint8_t>* valid_data = nullptr) {
+struct BuiltJsonStatsIndex {
+    storage::FileManagerContext ctx;
+    Config load_config;
+    std::vector<std::string> index_files;
+    std::string stats_base_path;
+    milvus_storage::ArrowFileSystemPtr fs;
+};
+
+BuiltJsonStatsIndex
+BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
+                    const milvus::FieldId json_fid,
+                    const std::string& root_path,
+                    int64_t collection_id,
+                    int64_t partition_id,
+                    int64_t segment_id,
+                    int64_t field_id,
+                    int64_t build_id,
+                    int64_t version_id,
+                    const std::vector<uint8_t>* valid_data = nullptr) {
     std::vector<milvus::Json> data;
     data.reserve(json_strings.size());
     for (const auto& s : json_strings) {
@@ -160,18 +172,161 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     load_config["index_files"] = index_files;
     load_config[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
-    load_config[STATS_BASE_PATH_KEY] =
-        storage::GenRemoteJsonStatsPathPrefix(chunk_manager,
-                                              build_id,
-                                              version_id,
-                                              collection_id,
-                                              partition_id,
-                                              segment_id,
-                                              field_id);
+    auto stats_base_path = storage::GenRemoteJsonStatsPathPrefix(chunk_manager,
+                                                                 build_id,
+                                                                 version_id,
+                                                                 collection_id,
+                                                                 partition_id,
+                                                                 segment_id,
+                                                                 field_id);
+    load_config[STATS_BASE_PATH_KEY] = stats_base_path;
 
-    auto reader = std::make_shared<JsonKeyStats>(ctx, true);
-    reader->Load(milvus::tracer::TraceContext{}, load_config);
+    return BuiltJsonStatsIndex{ctx,
+                               std::move(load_config),
+                               std::move(index_files),
+                               std::move(stats_base_path),
+                               std::move(fs)};
+}
+
+std::shared_ptr<JsonKeyStats>
+LoadBuiltJsonStatsIndex(const BuiltJsonStatsIndex& built_index) {
+    auto reader = std::make_shared<JsonKeyStats>(built_index.ctx, true);
+    reader->Load(milvus::tracer::TraceContext{}, built_index.load_config);
     return reader;
+}
+
+std::shared_ptr<JsonKeyStats>
+BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
+                         const milvus::FieldId json_fid,
+                         const std::string& root_path,
+                         int64_t collection_id,
+                         int64_t partition_id,
+                         int64_t segment_id,
+                         int64_t field_id,
+                         int64_t build_id,
+                         int64_t version_id,
+                         const std::vector<uint8_t>* valid_data = nullptr) {
+    auto built_index = BuildJsonStatsIndex(json_strings,
+                                           json_fid,
+                                           root_path,
+                                           collection_id,
+                                           partition_id,
+                                           segment_id,
+                                           field_id,
+                                           build_id,
+                                           version_id,
+                                           valid_data);
+    return LoadBuiltJsonStatsIndex(built_index);
+}
+
+std::string
+FindFirstShreddingDataFile(const BuiltJsonStatsIndex& built_index) {
+    auto it =
+        std::find_if(built_index.index_files.begin(),
+                     built_index.index_files.end(),
+                     [](const std::string& file) {
+                         return file.find(JSON_STATS_SHREDDING_DATA_PATH) !=
+                                std::string::npos;
+                     });
+    AssertInfo(it != built_index.index_files.end(),
+               "json stats index has no shredding data file");
+    return built_index.stats_base_path + "/" + *it;
+}
+
+void
+OverwriteWithParquetMissingPackedFieldList(
+    const BuiltJsonStatsIndex& built_index,
+    const std::vector<int64_t>& values) {
+    auto path = FindFirstShreddingDataFile(built_index);
+
+    arrow::Int64Builder value_builder;
+    AssertInfo(value_builder.AppendValues(values).ok(),
+               "failed to append json stats values");
+    auto value_array = value_builder.Finish().ValueOrDie();
+
+    arrow::BinaryBuilder shared_builder;
+    for (size_t i = 0; i < values.size(); ++i) {
+        AssertInfo(shared_builder.AppendNull().ok(),
+                   "failed to append shared json null");
+    }
+    auto shared_array = shared_builder.Finish().ValueOrDie();
+
+    const auto value_field_id = START_JSON_STATS_FIELD_ID;
+    const auto shared_field_id = START_JSON_STATS_FIELD_ID + 1;
+    auto schema = arrow::schema({
+        arrow::field(
+            JsonKey("/a", JSONType::INT64).ToColumnName(),
+            arrow::int64(),
+            true,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(value_field_id)})),
+        arrow::field(
+            JSON_KEY_STATS_SHARED_FIELD_NAME,
+            arrow::binary(),
+            true,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(shared_field_id)})),
+    });
+    auto table = arrow::Table::Make(schema, {value_array, shared_array});
+
+    auto row_group_metadata = milvus_storage::RowGroupMetadataVector(
+        {milvus_storage::RowGroupMetadata(/*memory_size=*/128,
+                                          static_cast<int64_t>(values.size()),
+                                          /*row_offset=*/0)});
+    auto file_metadata =
+        arrow::key_value_metadata({milvus_storage::ROW_GROUP_META_KEY,
+                                   milvus_storage::STORAGE_VERSION_KEY},
+                                  {row_group_metadata.Serialize(), "2"});
+
+    auto output_result = built_index.fs->OpenOutputStream(path);
+    AssertInfo(output_result.ok(),
+               "failed to open parquet output {}: {}",
+               path,
+               output_result.status().ToString());
+    auto output = output_result.ValueOrDie();
+
+    auto writer_result = parquet::arrow::FileWriter::Open(
+        *schema, arrow::default_memory_pool(), output);
+    AssertInfo(writer_result.ok(),
+               "failed to open parquet writer: {}",
+               writer_result.status().ToString());
+    auto writer = std::move(writer_result).ValueOrDie();
+    AssertInfo(writer->AddKeyValueMetadata(file_metadata).ok(),
+               "failed to add parquet metadata");
+    AssertInfo(writer->WriteTable(*table, values.size()).ok(),
+               "failed to write parquet table");
+    AssertInfo(writer->Close().ok(), "failed to close parquet writer");
+    AssertInfo(output->Close().ok(), "failed to close parquet output");
+}
+
+TargetBitmap
+ReadJsonStatsInt64Equal(JsonKeyStats& stats,
+                        const std::string& field_name,
+                        int64_t expected,
+                        size_t size) {
+    TargetBitmap res(size);
+    TargetBitmap valid_res(size);
+    TargetBitmapView res_view(res);
+    TargetBitmapView valid_res_view(valid_res);
+
+    auto func = [expected](const int64_t* data,
+                           const bool* valid_data,
+                           const int chunk_size,
+                           TargetBitmapView res,
+                           TargetBitmapView valid_res) {
+        for (int i = 0; i < chunk_size; ++i) {
+            valid_res[i] = valid_data[i];
+            res[i] = valid_data[i] && data[i] == expected;
+        }
+    };
+
+    auto processed_size = stats.ExecutorForShreddingData<int64_t>(
+        nullptr, field_name, func, nullptr, res_view, valid_res_view);
+    AssertInfo(processed_size == size,
+               "processed json stats rows {} != {}",
+               processed_size,
+               size);
+    return res;
 }
 
 }  // namespace
@@ -274,6 +429,48 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
         bool should_match = ((i % 7) == 0) || ((i % 7) == 2) || ((i % 7) == 5);
         EXPECT_EQ(bool(result[i]), should_match);
     }
+}
+
+TEST(JsonStatsAsyncLoadTest, LoadsShreddingParquetWithoutPackedFieldList) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    std::vector<std::string> json_raw_data = {
+        R"({"a": 1})",
+        R"({"a": 2})",
+        R"({"a": 1})",
+        R"({"a": 3})",
+    };
+
+    const int64_t collection_id = 1201;
+    const int64_t partition_id = 2201;
+    const int64_t segment_id = 3201;
+    const int64_t field_id = json_fid.get();
+    const int64_t build_id = 5201;
+    const int64_t version_id = 1;
+    const std::string root_path = TestLocalPath;
+
+    auto built_index = BuildJsonStatsIndex(json_raw_data,
+                                           json_fid,
+                                           root_path,
+                                           collection_id,
+                                           partition_id,
+                                           segment_id,
+                                           field_id,
+                                           build_id,
+                                           version_id);
+    OverwriteWithParquetMissingPackedFieldList(
+        built_index, std::vector<int64_t>{1, 2, 1, 3});
+
+    auto stats = LoadBuiltJsonStatsIndex(built_index);
+    auto result = ReadJsonStatsInt64Equal(
+        *stats, JsonKey("/a", JSONType::INT64).ToColumnName(), 1, 4);
+
+    EXPECT_TRUE(result[0]);
+    EXPECT_FALSE(result[1]);
+    EXPECT_TRUE(result[2]);
+    EXPECT_FALSE(result[3]);
+    EXPECT_EQ(result.count(), 2);
 }
 
 TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {

@@ -47,8 +47,11 @@
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/format/parquet/parquet_format_reader.h"
+#include "milvus-storage/reader.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "mmap/Types.h"
 #include "nlohmann/detail/iterators/iteration_proxy.hpp"
@@ -56,7 +59,7 @@
 #include "parquet/metadata.h"
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
@@ -69,8 +72,96 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 
 namespace milvus::index {
+
+namespace {
+
+struct JsonStatsParquetMetadata {
+    std::shared_ptr<arrow::Schema> schema;
+    int64_t num_rows;
+};
+
+milvus_storage::api::Properties
+GetJsonStatsReadProperties() {
+    auto properties =
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    if (properties == nullptr) {
+        return {};
+    }
+    return *properties;
+}
+
+std::string
+NoopParquetKeyRetriever(const std::string&) {
+    return {};
+}
+
+JsonStatsParquetMetadata
+ReadJsonStatsParquetMetadata(const std::string& file) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto properties = GetJsonStatsReadProperties();
+    milvus_storage::parquet::ParquetFormatReader reader(
+        fs, file, properties, {}, NoopParquetKeyRetriever);
+
+    auto open_status = reader.open();
+    AssertInfo(open_status.ok(),
+               "[JsonStats] failed to open parquet metadata reader for {}: {}",
+               file,
+               open_status.ToString());
+
+    auto row_group_result = reader.get_row_group_infos();
+    AssertInfo(row_group_result.ok(),
+               "[JsonStats] failed to read parquet row groups for {}: {}",
+               file,
+               row_group_result.status().ToString());
+    auto row_groups = row_group_result.ValueOrDie();
+
+    int64_t num_rows = 0;
+    for (const auto& row_group : row_groups) {
+        num_rows +=
+            static_cast<int64_t>(row_group.end_offset - row_group.start_offset);
+    }
+
+    auto schema = reader.get_schema();
+    AssertInfo(schema != nullptr,
+               "[JsonStats] failed to read parquet schema for {}",
+               file);
+    return JsonStatsParquetMetadata{std::move(schema), num_rows};
+}
+
+FieldId
+GetJsonStatsFieldIdFromArrowField(const std::shared_ptr<arrow::Field>& field) {
+    const auto& metadata = field->metadata();
+    AssertInfo(metadata != nullptr &&
+                   metadata->Contains(milvus_storage::ARROW_FIELD_ID_KEY),
+               "json stats field id not found in metadata for field {}",
+               field->name());
+    auto result = metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY);
+    AssertInfo(result.ok(),
+               "failed to get json stats field id from metadata for field {}: "
+               "{}",
+               field->name(),
+               result.status().ToString());
+    return FieldId(std::stoll(result.ValueOrDie()));
+}
+
+std::pair<std::vector<FieldId>, std::vector<std::string>>
+GetJsonStatsFieldsFromSchema(const std::shared_ptr<arrow::Schema>& schema) {
+    std::vector<FieldId> field_ids;
+    std::vector<std::string> field_names;
+    field_ids.reserve(schema->num_fields());
+    field_names.reserve(schema->num_fields());
+
+    for (const auto& field : schema->fields()) {
+        field_ids.push_back(GetJsonStatsFieldIdFromArrowField(field));
+        field_names.push_back(field->name());
+    }
+    return {std::move(field_ids), std::move(field_names)};
+}
+
+}  // namespace
 
 JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
                            bool is_load,
@@ -793,13 +884,8 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
 void
 JsonKeyStats::GetColumnSchemaFromParquet(int64_t column_group_id,
                                          const std::string& file) {
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: {}",
-               result.status().ToString());
-    auto file_reader = result.ValueOrDie();
-    std::shared_ptr<arrow::Schema> file_schema = file_reader->schema();
+    auto parquet_metadata = ReadJsonStatsParquetMetadata(file);
+    std::shared_ptr<arrow::Schema> file_schema = parquet_metadata.schema;
     LOG_DEBUG("get column schema: [{}] for segment {}",
               file_schema->ToString(true),
               segment_id_);
@@ -963,20 +1049,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             remote_prefix, column_group_id, file_id));
     }
 
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto result = milvus_storage::FileRowGroupReader::Make(fs, files[0]);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: {}",
-               result.status().ToString());
-    auto file_reader = result.ValueOrDie();
-    std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
-        file_reader->file_metadata();
-    milvus_storage::FieldIDList field_id_list =
-        metadata->GetGroupFieldIDList().GetFieldIDList(column_group_id);
-    std::vector<FieldId> milvus_field_ids;
-    for (int i = 0; i < field_id_list.size(); ++i) {
-        milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
-    }
+    auto first_file_metadata = ReadJsonStatsParquetMetadata(files[0]);
+    auto [milvus_field_ids, column_names] =
+        GetJsonStatsFieldsFromSchema(first_file_metadata.schema);
 
     // Fetch row group metadata from all files in parallel using HIGH POOL
     // to avoid blocking the caller thread with serial S3 I/O
@@ -984,19 +1059,13 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     std::vector<std::future<int64_t>> futures;
     futures.reserve(files.size());
     for (const auto& file : files) {
-        futures.push_back(pool.Submit([&fs, file]() {
-            auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
-            auto reader = result.ValueOrDie();
-            auto row_group_meta_vector =
-                reader->file_metadata()->GetRowGroupMetadataVector();
-            return static_cast<int64_t>(row_group_meta_vector.row_num());
-        }));
+        futures.push_back(pool.Submit(
+            [file]() { return ReadJsonStatsParquetMetadata(file).num_rows; }));
     }
+    std::vector<int64_t> file_num_rows;
+    file_num_rows.reserve(files.size());
     // Ensure all futures are awaited even if one throws, to prevent
-    // use-after-free on captured references (&fs) in background tasks.
+    // use-after-free on captured references in background tasks.
     auto futures_guard = folly::makeGuard([&futures]() {
         for (auto& f : futures) {
             if (f.valid()) {
@@ -1008,7 +1077,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         }
     });
     for (auto& f : futures) {
-        num_rows += f.get();
+        auto file_rows = f.get();
+        file_num_rows.push_back(file_rows);
+        num_rows += file_rows;
     }
 
     if (num_rows_ == 0) {
@@ -1019,8 +1090,6 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                segment_id_);
 
     auto enable_mmap = !mmap_filepath_.empty();
-    auto column_group_info = FieldDataInfo(
-        column_group_id, field_id_, num_rows, mmap_filepath_, false, shard_);
     LOG_INFO(
         "loads column group {} with num_rows {} for segment "
         "{}",
@@ -1030,7 +1099,13 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 
     std::unordered_map<FieldId, FieldMeta> field_meta_map;
     for (const auto& inner_field_id : milvus_field_ids) {
-        auto field_name = field_id_to_name_map_[inner_field_id.get()];
+        auto field_name_it = field_id_to_name_map_.find(inner_field_id.get());
+        AssertInfo(field_name_it != field_id_to_name_map_.end(),
+                   "field id {} not found in json stats field map for "
+                   "segment {}",
+                   inner_field_id.get(),
+                   segment_id_);
+        auto field_name = field_name_it->second;
         FieldMeta field_meta(
             FieldName(field_name),
             inner_field_id,
@@ -1044,22 +1119,51 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
 
-    auto group_chunk_metadata = milvus::segcore::LoadGroupChunkMetadata(
-        files, {}, fmt::format("seg_{}_jks_{}", segment_id_, field_id_));
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->columns = column_names;
+    column_group->format = LOON_FORMAT_PARQUET;
+    column_group->files.reserve(files.size());
+    for (size_t i = 0; i < files.size(); ++i) {
+        column_group->files.push_back(milvus_storage::api::ColumnGroupFile{
+            .path = files[i],
+            .start_index = 0,
+            .end_index = file_num_rows[i],
+            .properties = {},
+        });
+    }
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    column_groups->push_back(std::move(column_group));
+    auto needed_columns =
+        std::make_shared<std::vector<std::string>>(std::move(column_names));
+    auto properties = GetJsonStatsReadProperties();
+    auto reader = milvus_storage::api::Reader::create(
+        column_groups, nullptr, needed_columns, properties);
+    auto chunk_reader_result = reader->get_chunk_reader(0, needed_columns);
+    AssertInfo(chunk_reader_result.ok(),
+               "[JsonStats] failed to create chunk reader for column group {} "
+               "segment {}: {}",
+               column_group_id,
+               segment_id_,
+               chunk_reader_result.status().ToString());
+    auto chunk_reader_unique = std::move(chunk_reader_result).ValueOrDie();
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader(
+        std::move(chunk_reader_unique));
 
     auto translator = std::make_unique<
-        milvus::segcore::storagev2translator::GroupChunkTranslator>(
+        milvus::segcore::storagev2translator::ManifestGroupTranslator>(
         segment_id_,
         GroupChunkType::JSON_KEY_STATS,
+        column_group_id,
+        std::move(chunk_reader),
         field_meta_map,
-        column_group_info,
-        std::move(files),
-        std::move(group_chunk_metadata.row_group_meta_list),
         enable_mmap,
         mmap_config.GetMmapPopulate(),
+        mmap_filepath_,
         milvus_field_ids.size(),
         load_priority_,
-        warmup_policy);
+        /*eager_load=*/true,
+        warmup_policy,
+        fmt::format("jks_{}", field_id_));
 
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
