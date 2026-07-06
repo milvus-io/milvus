@@ -148,7 +148,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.Contains(t, resp.Reason, "actual 1")
 	})
 
-	t.Run("user-specified replica mode skips cluster-level replica compliance", func(t *testing.T) {
+	t.Run("user-specified replica mode skips only cluster-level replica compliance", func(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, "false")
@@ -182,6 +182,12 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker3 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker3.UnPatch()
 
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		mockerLeak := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
+		defer mockerLeak.UnPatch()
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
 
@@ -193,6 +199,106 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, LoadConfigComplianceStateReady, resp.State)
 		assert.Empty(t, resp.Reason)
+	})
+
+	t.Run("user-specified replica mode still checks query visibility", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, "false")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key)
+		defer registerTestBalancer(t, nil)()
+
+		replica := meta.NewReplica(&querypb.Replica{
+			ID:            1,
+			CollectionID:  100,
+			ResourceGroup: "rg1",
+		}, typeutil.NewUniqueSet())
+		mutableReplica := replica.CopyForWrite()
+		mutableReplica.SetQueryInvisible(true)
+		replicas := []*meta.Replica{mutableReplica.IntoReplica()}
+
+		coord := &mixCoordImpl{
+			queryCoordServer: &querycoordv2.Server{},
+		}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).IsCollectionUserSpecifiedReplicaMode).Return(true).Build()
+		defer mocker2.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Contains(t, resp.Reason, "not query visible")
+	})
+
+	t.Run("user-specified replica mode still checks leaked resources", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, "false")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key)
+		defer registerTestBalancer(t, nil)()
+
+		replicas := []*meta.Replica{
+			meta.NewReplica(&querypb.Replica{
+				ID:            1,
+				CollectionID:  100,
+				ResourceGroup: "rg1",
+			}, typeutil.NewUniqueSet()),
+		}
+
+		coord := &mixCoordImpl{
+			queryCoordServer: &querycoordv2.Server{},
+		}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).IsCollectionUserSpecifiedReplicaMode).Return(true).Build()
+		defer mocker2.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mocker3.UnPatch()
+
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		mockerLeak := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(3, 0).Build()
+		defer mockerLeak.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Contains(t, resp.Reason, "not fully released")
+		assert.Contains(t, resp.Reason, "leaked segments=3")
 	})
 
 	t.Run("force override checks user-specified replica mode collection", func(t *testing.T) {

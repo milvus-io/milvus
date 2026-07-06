@@ -144,6 +144,9 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	collectionIDs := w.s.meta.GetAll(w.notifier.Context())
 	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
 		collection := w.s.meta.GetCollection(w.notifier.Context(), collectionID)
+		if collection == nil {
+			return false
+		}
 		if collection.UserSpecifiedReplicaMode && !forceOverrideUserReplicaMode {
 			w.Logger().Info(context.TODO(), "collection is user specified replica mode, skip update load config", mlog.FieldCollectionID(collectionID))
 			return false

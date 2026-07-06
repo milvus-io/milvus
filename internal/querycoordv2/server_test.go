@@ -519,6 +519,49 @@ func TestApplyLoadConfigChangesForceOverrideUserSpecifiedReplicaMode(t *testing.
 	})
 }
 
+func TestApplyLoadConfigChangesSkipsReleasedCollection(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChangesSkipsReleasedCollection", t, func() {
+		ctx := context.Background()
+
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		mockCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1001,
+				UserSpecifiedReplicaMode: false,
+			},
+		}
+
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+			if collectionID == 1001 {
+				return mockCollection
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+
+		var capturedCollectionIDs []int64
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
+			capturedCollectionIDs = collectionIDs
+			return nil
+		}).Build()
+
+		watcher := &LoadConfigWatcher{
+			s:         testServer,
+			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh: make(chan struct{}, 10),
+		}
+		watcher.applyLoadConfigChanges()
+
+		assert.Equal(t, []int64{1001}, capturedCollectionIDs)
+	})
+}
+
 func TestApplyLoadConfigChangesWhenForceOverrideConfigChanges(t *testing.T) {
 	mockey.PatchConvey("TestApplyLoadConfigChangesWhenForceOverrideConfigChanges", t, func() {
 		ctx := context.Background()

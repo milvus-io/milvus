@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
@@ -45,9 +46,12 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
-	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
-	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), req.GetCollectionID())
+	replicaNumber, resourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+		ctx,
+		req.GetReplicaNumber(),
+		req.GetResourceGroups(),
+		req.GetCollectionID(),
+	)
 	if err != nil {
 		return err
 	}
@@ -83,6 +87,43 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+func (s *Server) getLoadReplicaConfigForRequest(ctx context.Context, replicaNumber int32, resourceGroups []string, collectionID int64) (int32, []string, bool, error) {
+	// If force override is enabled with a complete cluster-level load config,
+	// new load requests are interpreted as cluster-managed even when the request
+	// carries explicit replica/RG parameters.
+	if overrideReplicaNumber, overrideResourceGroups, ok := getClusterLevelLoadConfigForForceOverride(); ok {
+		mlog.Info(ctx,
+			"force override user-specified replica mode for load request",
+			mlog.Int64("collectionID", collectionID),
+			mlog.Int32("replicaNumber", overrideReplicaNumber),
+			mlog.Strings("resourceGroups", overrideResourceGroups))
+		return overrideReplicaNumber, overrideResourceGroups, false, nil
+	}
+
+	// If user specified the replica number in load request, load config changes
+	// won't be applied to the collection automatically.
+	userSpecifiedReplicaMode := replicaNumber > 0
+	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, replicaNumber, resourceGroups, collectionID)
+	return replicaNumber, resourceGroups, userSpecifiedReplicaMode, err
+}
+
+func getClusterLevelLoadConfigForForceOverride() (int32, []string, bool) {
+	queryCoordCfg := paramtable.Get().QueryCoordCfg
+	if !queryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool() {
+		return 0, nil, false
+	}
+
+	replicaNumber := queryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
+	resourceGroups := queryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	if replicaNumber <= 0 || len(resourceGroups) == 0 {
+		return 0, nil, false
+	}
+	if len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
+		return 0, nil, false
+	}
+	return replicaNumber, resourceGroups, true
 }
 
 // getDefaultResourceGroupsAndReplicaNumber gets the default resource groups and replica number for the collection.

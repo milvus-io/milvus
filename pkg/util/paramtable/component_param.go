@@ -3420,7 +3420,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.clusterLevelLoadForceOverrideUserReplicaMode",
 		Version:      "2.6.14",
 		DefaultValue: "false",
-		Doc:          "when true, cluster-level load config overrides collections loaded with user-specified replica number. This is a one-way takeover: once a collection is updated, it is converted to cluster-level managed mode and turning this back off will not restore the previous user-specified replica mode.",
+		Doc:          "when true and cluster-level load replica/RG config is complete, new load requests use the cluster-level load config even if users specify replica number or resource groups. Existing user-specified collections are taken over when they need a load-config update; collections already matching the cluster-level config may not be rewritten immediately, so their user-specified marker can remain until a later update. This is a one-way takeover: once a collection is updated, it is converted to cluster-level managed mode and turning this back off will not restore the previous user-specified replica mode.",
 		Export:       false,
 	}
 	p.ClusterLevelLoadForceOverrideUserReplicaMode.Init(base.mgr)
