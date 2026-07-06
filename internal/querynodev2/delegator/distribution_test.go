@@ -53,11 +53,15 @@ func TestAddDistributionsPublishesSnapshotSynchronously(t *testing.T) {
 
 	paramtable.Init()
 	dist := NewDistribution("channel-1", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+	candidate := &mockCandidate{id: 1, partition: 1}
+	dist.queryView.syncedByCoord = true
 
 	dist.AddDistributions(SegmentEntry{
 		NodeID:      1,
 		SegmentID:   1,
 		PartitionID: 1,
+		Version:     1,
+		Candidate:   candidate,
 	})
 
 	sealed, _, version := dist.PinOnlineSegments()
@@ -69,9 +73,74 @@ func TestAddDistributionsPublishesSnapshotSynchronously(t *testing.T) {
 			NodeID:        1,
 			SegmentID:     1,
 			PartitionID:   1,
+			Version:       1,
 			TargetVersion: unreadableTargetVersion,
+			Candidate:     candidate,
 		}}, sealed[0].Segments)
 	}
+}
+
+func TestDistributionPreSyncDefersRecoverySnapshot(t *testing.T) {
+	paramtable.Init()
+	dist := NewDistribution("channel-1", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+	initialSnapshot := dist.current.Load()
+	candidate := &mockCandidate{id: 100, partition: 1}
+
+	dist.AddDistributions(SegmentEntry{
+		NodeID:      10,
+		SegmentID:   100,
+		PartitionID: 1,
+		Version:     1,
+		Candidate:   candidate,
+	})
+
+	current := dist.current.Load()
+	assert.Equal(t, initialSnapshot.version, current.version)
+	sealedInSnapshot, _ := current.Peek()
+	assert.Empty(t, sealedInSnapshot)
+
+	expected := []SnapshotItem{{
+		NodeID: 10,
+		Segments: []SegmentEntry{{
+			NodeID:        10,
+			SegmentID:     100,
+			PartitionID:   1,
+			Version:       1,
+			TargetVersion: unreadableTargetVersion,
+			Candidate:     candidate,
+		}},
+	}}
+
+	liveSealed, _ := dist.PeekSegments(false)
+	assert.ElementsMatch(t, expected, liveSealed)
+
+	onlineSealed, _, version := dist.PinOnlineSegments()
+	defer dist.Unpin(version)
+	assert.ElementsMatch(t, expected, onlineSealed)
+
+	readableSealed, _ := dist.PeekSegments(true)
+	assert.Empty(t, readableSealed)
+
+	dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         100,
+		SealedSegmentRowCount: map[int64]int64{100: 10},
+	}, []int64{1})
+
+	expectedAfterSync := []SnapshotItem{{
+		NodeID: 10,
+		Segments: []SegmentEntry{{
+			NodeID:        10,
+			SegmentID:     100,
+			PartitionID:   1,
+			Version:       1,
+			TargetVersion: 100,
+			Candidate:     candidate,
+		}},
+	}}
+	sealedAfterSync, _ := dist.current.Load().Peek()
+	assert.ElementsMatch(t, expectedAfterSync, sealedAfterSync)
+	_, _, _, _, err := dist.PinReadableSegments(1.0, 1)
+	assert.NoError(t, err)
 }
 
 func (s *DistributionSuite) TestAddDistribution() {
@@ -638,16 +707,7 @@ func (s *DistributionSuite) TestPeek() {
 					SegmentID: 3,
 				},
 			},
-			expected: []SnapshotItem{
-				{
-					NodeID:   1,
-					Segments: []SegmentEntry{},
-				},
-				{
-					NodeID:   2,
-					Segments: []SegmentEntry{},
-				},
-			},
+			expected: []SnapshotItem{},
 		},
 	}
 

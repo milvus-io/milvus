@@ -240,13 +240,64 @@ func (d *distribution) PinOnlineSegments(partitions ...int64) (sealed []Snapshot
 	defer d.mut.RUnlock()
 
 	current := d.current.Load()
-	sealed, growing = current.Get(partitions...)
+	if d.isPreSyncRecoveryLocked() {
+		current.inUse.Inc()
+		sealed, growing = d.peekLiveSegmentsLocked(partitions...)
+	} else {
+		sealed, growing = current.Get(partitions...)
+	}
 	filterOnline := func(entry SegmentEntry, _ int) bool {
 		return !entry.Offline
 	}
 	sealed, growing = d.filterSegments(sealed, growing, filterOnline)
 	version = current.version
 	return sealed, growing, version
+}
+
+// isPreSyncRecoveryLocked reports whether the delegator is still rebuilding
+// distribution before coord syncs the query view. During this window,
+// AddDistributions keeps the public snapshot unchanged, while online segment
+// readers look at live distribution maps under lock to support delete forward.
+func (d *distribution) isPreSyncRecoveryLocked() bool {
+	return !d.queryView.syncedByCoord
+}
+
+func (d *distribution) snapshotEntryForQueryView(entry SegmentEntry) SegmentEntry {
+	if !d.queryView.partitions.Contain(entry.PartitionID) {
+		entry.TargetVersion = unreadableTargetVersion
+	}
+	return entry
+}
+
+func (d *distribution) peekLiveSegmentsLocked(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
+	matched := func(entry SegmentEntry) bool {
+		return len(partitions) == 0 || lo.Contains(partitions, entry.PartitionID)
+	}
+
+	nodeSegments := make(map[int64][]SegmentEntry)
+	for _, entry := range d.sealedSegments {
+		if !matched(entry) {
+			continue
+		}
+		entry = d.snapshotEntryForQueryView(entry)
+		nodeSegments[entry.NodeID] = append(nodeSegments[entry.NodeID], entry)
+	}
+	sealed = make([]SnapshotItem, 0, len(nodeSegments))
+	for nodeID, segments := range nodeSegments {
+		sealed = append(sealed, SnapshotItem{
+			NodeID:   nodeID,
+			Segments: segments,
+		})
+	}
+
+	growing = make([]SegmentEntry, 0, len(d.growingSegments))
+	for _, entry := range d.growingSegments {
+		if !matched(entry) {
+			continue
+		}
+		growing = append(growing, d.snapshotEntryForQueryView(entry))
+	}
+	return sealed, growing
 }
 
 func (d *distribution) filterSegments(sealed []SnapshotItem, growing []SegmentEntry, filter func(SegmentEntry, int) bool) ([]SnapshotItem, []SegmentEntry) {
@@ -264,6 +315,14 @@ func (d *distribution) filterSegments(sealed []SnapshotItem, growing []SegmentEn
 // PeekAllSegments returns current snapshot without increasing inuse count
 // show only used by GetDataDistribution.
 func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry) {
+	d.mut.RLock()
+	if !readable && d.isPreSyncRecoveryLocked() {
+		sealed, growing = d.peekLiveSegmentsLocked(partitions...)
+		d.mut.RUnlock()
+		return sealed, growing
+	}
+	d.mut.RUnlock()
+
 	current := d.current.Load()
 	sealed, growing = current.Peek(partitions...)
 
@@ -395,7 +454,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 		updated = true
 	}
 
-	if updated {
+	if updated && !d.isPreSyncRecoveryLocked() {
 		d.genSnapshot()
 		d.updateServiceable("AddDistributions")
 	}
@@ -600,20 +659,14 @@ func (d *distribution) genSnapshot() chan struct{} {
 		dist = append(dist, SnapshotItem{
 			NodeID: nodeID,
 			Segments: lo.Map(items, func(entry SegmentEntry, _ int) SegmentEntry {
-				if !d.queryView.partitions.Contain(entry.PartitionID) {
-					entry.TargetVersion = unreadableTargetVersion
-				}
-				return entry
+				return d.snapshotEntryForQueryView(entry)
 			}),
 		})
 	}
 
 	growing := make([]SegmentEntry, 0, len(d.growingSegments))
 	for _, entry := range d.growingSegments {
-		if !d.queryView.partitions.Contain(entry.PartitionID) {
-			entry.TargetVersion = unreadableTargetVersion
-		}
-		growing = append(growing, entry)
+		growing = append(growing, d.snapshotEntryForQueryView(entry))
 	}
 
 	// update snapshot version
