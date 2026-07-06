@@ -112,7 +112,7 @@ func (s *Server) getLoadReplicaConfigForRequest(ctx context.Context, replicaNumb
 }
 
 func getClusterLevelLoadConfigForForceOverride() (int32, []string, bool) {
-	queryCoordCfg := paramtable.Get().QueryCoordCfg
+	queryCoordCfg := &paramtable.Get().QueryCoordCfg
 	if !queryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool() {
 		return 0, nil, false
 	}
