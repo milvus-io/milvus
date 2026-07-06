@@ -1,8 +1,14 @@
-# Design Document: Scalar Array Element Match (`MATCH_*` / `element_filter`)
+# Design Document: Array & JSON Element Match (`MATCH_*` / `element_filter`)
 
-**Branch**: `feat/scalar-array-match`
-**Date**: June 2026
+**Branch**: `feat/array-json-element-match`
+**Date**: June–July 2026
 **Scope**: Expression grammar + planparserv2 (Go), segcore (C++). No proto/RPC changes.
+
+Extends the quantified element-match capability (`MATCH_ANY/ALL/LEAST/MOST/EXACT`
++ `element_filter`) uniformly across the three array-shaped containers — scalar
+arrays, struct arrays, and **JSON arrays** — and lets scalar/JSON arrays build a
+**nested tantivy index** as the element carrier. Sections 1–5 describe the
+scalar-array core; §6 describes the JSON-array and nested-index extension.
 
 ---
 
@@ -273,7 +279,59 @@ inverted index on a scalar array field accelerates `MATCH_*` predicates.
 
 ---
 
-## 6. Compatibility & Risk
+## 6. JSON Array & Nested-Index Extension
+
+The scalar-array design (§1–5) generalizes to two further axes with no new syntax
+surface beyond the target locator: **JSON arrays** as a fourth `MATCH_*` target,
+and a **nested tantivy index** as the element carrier for scalar and JSON arrays.
+
+### 6.1 JSON array targets
+
+`MATCH_*` accepts a JSON-array target addressed by a JSON path, with the same `$`
+element-self token:
+
+```text
+MATCH_ANY(meta["scores"], $ > 90)
+MATCH_ALL(meta["tags"],   $ == "vip")
+MATCH_LEAST(meta["k"],    $ == 100, threshold=2)
+```
+
+- **Parse** (`parser_visitor.go`): a `JSONIdentifier` target resolves to the JSON
+  field + path; `MatchColumnInfo` carries `(field_id, nested_path)` instead of a
+  struct sub-field locator. Template placeholders inside the `element_filter` are
+  filled the same way as scalar arrays (commit `befb3aac`).
+- **Element read** (segcore): each row's JSON value at the path is opened with
+  simdjson and iterated as an array; each element is fed to the same
+  `element_filter` sub-expression evaluated with the `$`-bound value. Non-array
+  or missing paths contribute no elements (the row is a non-match, consistent
+  with `array_contains` semantics on missing paths, see #50976).
+- **Numeric precision**: element reads go through `at_numeric()`-aligned typing —
+  integral elements compare **exactly as int64** (no 2^53 double truncation),
+  uint64/double as double. This mirrors the row-level `*JSONCompare` path so that
+  `meta["id"] == 9007199254740993` behaves identically whether evaluated at row
+  level or element level (fix in this PR; guarded by `JsonNumericTest`).
+
+### 6.2 Nested index as element carrier
+
+Scalar and JSON arrays can build a **nested** tantivy index: one tantivy document
+per array element, the element's owning row-id carried as the user doc-id, so an
+element-level term/range predicate resolves to a row bitmap by reducing matched
+element-ids back to rows (word-wise `ElementBitsetToRowBitsetAny`).
+
+- **Build** (commit `7bec45df`): scalar array indexes build nested; nullable
+  compact-buffer reads are fixed for nested builds. The **old flat index remains
+  supported** — resolution falls back to it, so existing indexes keep working
+  across a rolling upgrade (no rebuild forced).
+- **AUTOINDEX**: numeric arrays resolve to HYBRID and fall through to
+  `ScalarIndexSort`, so sort remains the array default; nested tantivy is used
+  only when the field is explicitly `INVERTED`. (The sort-vs-inverted trade-off
+  for the nested element index is tracked separately in #51055; the single-segment
+  build optimization in #51054.)
+- **Compatibility**: the nested index is a new physical layout selected at build
+  time; query resolution reads whichever layout the segment carries, so mixed
+  flat/nested segments coexist during upgrade.
+
+## 7. Compatibility & Risk
 
 - **Wire compatibility**: no proto/RPC/SDK changes; `MatchExpr.struct_name` is
   reused to carry the array field name, so the message format is unchanged.

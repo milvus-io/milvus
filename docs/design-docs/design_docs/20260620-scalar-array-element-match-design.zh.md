@@ -1,8 +1,13 @@
-# 设计文档：标量数组元素匹配（`MATCH_*` / `element_filter`）
+# 设计文档：数组与 JSON 元素匹配（`MATCH_*` / `element_filter`）
 
-**分支**：`feat/scalar-array-match`
-**日期**：2026 年 6 月
+**分支**：`feat/array-json-element-match`
+**日期**：2026 年 6–7 月
 **范围**：表达式文法 + planparserv2（Go）、segcore（C++）。无 proto/RPC 改动。
+
+将量化元素匹配能力（`MATCH_ANY/ALL/LEAST/MOST/EXACT` + `element_filter`）在三类
+数组形态容器 —— 标量数组、结构体数组、**JSON 数组** —— 上统一起来，并允许标量/JSON
+数组以 **nested tantivy 索引**作为元素载体。第 1–5 节描述标量数组核心，第 6 节描述
+JSON 数组与 nested 索引扩展。
 
 ---
 
@@ -248,7 +253,48 @@ null 元素、VarChar 和空数组。无需新增访问器。
 
 ---
 
-## 6. 兼容性与风险
+## 6. JSON 数组与 nested 索引扩展
+
+标量数组设计（§1–5）沿两个维度自然推广，且除目标定位符外不引入新语法：**JSON 数组**
+作为第四种 `MATCH_*` 目标，以及以 **nested tantivy 索引**作为标量/JSON 数组的元素载体。
+
+### 6.1 JSON 数组目标
+
+`MATCH_*` 接受由 JSON path 定位的 JSON 数组目标，元素自引用 token `$` 语义一致：
+
+```text
+MATCH_ANY(meta["scores"], $ > 90)
+MATCH_ALL(meta["tags"],   $ == "vip")
+MATCH_LEAST(meta["k"],    $ == 100, threshold=2)
+```
+
+- **解析**（`parser_visitor.go`）：`JSONIdentifier` 目标解析为 JSON 字段 + path；
+  `MatchColumnInfo` 携带 `(field_id, nested_path)` 而非结构体子字段定位符。
+  `element_filter` 内的模板占位符按与标量数组相同的方式填充（commit `befb3aac`）。
+- **元素读取**（segcore）：用 simdjson 打开每行在该 path 上的 JSON 值并按数组迭代，
+  每个元素以 `$` 绑定后送入同一 `element_filter` 子表达式求值。非数组或缺失 path
+  不贡献任何元素（该行判为不匹配，与缺失 path 上 `array_contains` 语义一致，见 #50976）。
+- **数值精度**：元素读取走 `at_numeric()` 对齐的类型判定 —— 整型元素**精确按 int64**
+  比较（无 2^53 double 截断），uint64/double 按 double。这与行级 `*JSONCompare` 路径
+  一致，使 `meta["id"] == 9007199254740993` 在行级与元素级求值结果相同（本 PR 修复，
+  由 `JsonNumericTest` 守护）。
+
+### 6.2 nested 索引作为元素载体
+
+标量与 JSON 数组可构建 **nested** tantivy 索引：每个数组元素一个 tantivy 文档，元素所属
+row-id 作为 user doc-id，因此元素级 term/range 谓词通过将命中的 element-id 按字归约回 row
+（`ElementBitsetToRowBitsetAny`）得到行位图。
+
+- **构建**（commit `7bec45df`）：标量数组索引按 nested 构建；修复了 nested 构建下 nullable
+  紧凑缓冲的读取。**旧的扁平索引仍然支持** —— 解析回退到它，因此滚动升级期间既有索引照常
+  工作（不强制重建）。
+- **AUTOINDEX**：数值数组解析为 HYBRID 并回落到 `ScalarIndexSort`，故排序索引仍是数组默认；
+  仅当字段显式 `INVERTED` 时才用 nested tantivy。（nested 元素索引的排序 vs 倒排取舍见
+  #51055；构建期单段优化见 #51054。）
+- **兼容性**：nested 索引是构建期选择的新物理布局，查询解析读取段实际携带的布局，因此升级
+  期间扁平/nested 段可共存。
+
+## 7. 兼容性与风险
 
 - **线兼容性**：无 proto/RPC/SDK 改动；`MatchExpr.struct_name` 被复用来携带数组字段名，
   消息格式不变。
