@@ -180,6 +180,13 @@ func (s *ManagerSuite) TestRangeBy() {
 		return false
 	}, WithType(SegmentTypeSealed))
 	s.Len(segmentIDs, 1)
+
+	count := 0
+	s.mgr.RangeBy(func(segment Segment) bool {
+		count++
+		return false
+	})
+	s.Equal(1, count)
 }
 
 func (s *ManagerSuite) TestCountBy() {
