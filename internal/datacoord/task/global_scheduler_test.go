@@ -345,3 +345,47 @@ func TestGlobalScheduler_FailedTaskBacksOffBeforeRedispatch(t *testing.T) {
 	// after the backoff elapses it is dispatched again
 	assert.Eventually(t, func() bool { return createCalls.Load() >= 2 }, 3*time.Second, 10*time.Millisecond)
 }
+
+// TestGlobalScheduler_TerminalTaskClearsBackoff guards against a backoff-entry
+// leak: when CreateTaskOnWorker drives a task straight to a terminal state it
+// never enters runningTasks, so check()'s cleanup never runs. schedule() must
+// drop the backoff entry itself, otherwise it lives until datacoord restarts.
+func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+	}).Maybe()
+
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(9).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+
+	// CreateTaskOnWorker drives the task straight to a terminal state (e.g. its
+	// segment was compacted away), so it never reaches InProgress/runningTasks.
+	var created atomic.Bool
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		if created.Load() {
+			return taskcommon.None
+		}
+		return taskcommon.Init
+	}).Maybe()
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		created.Store(true)
+	}).Maybe()
+
+	// Seed a stale backoff entry from earlier dispatch failures whose delay has
+	// already elapsed, so the task is eligible for dispatch this round.
+	scheduler.backoffs.Insert(9, &taskBackoff{failures: 3, notBefore: time.Now().Add(-time.Second)})
+	scheduler.pendingTasks.Push(task)
+
+	scheduler.schedule()
+
+	_, ok := scheduler.backoffs.Get(9)
+	assert.False(t, ok, "backoff entry must be removed once the task reaches a terminal state")
+	assert.Equal(t, 0, scheduler.runningTasks.Len())
+	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
+}
