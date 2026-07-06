@@ -266,13 +266,13 @@ func (s *ExpressionSuite) searchWithBitwiseExpression() {
 // at plan time, so this also exercises that rewrite end-to-end.
 func (s *ExpressionSuite) searchWithShiftNotExpression() {
 	testcases := []testCase{
-		{"(E['F'] << 1) == 4", s.rowNum, 1},  // 2*i == 4 -> i == 2
-		{"(E['F'] >> 1) == 0", s.rowNum, 2},  // i>>1 == 0 -> i in {0,1}
-		{"(E['F'] >> 2) == 1", s.rowNum, 4},  // i>>2 == 1 -> i in {4,5,6,7}
-		{"(E['F'] >> 3) == 0", s.rowNum, 8},  // i>>3 == 0 -> i in {0..7}
-		{"(B >> 1) == 0", s.rowNum, 1},       // B = 100-i in {0,1} -> i == 99
-		{"~E['F'] == -1", s.rowNum, 1},       // ~i == -1 -> i == 0
-		{"~E['F'] < -50", s.rowNum, 50},      // ~i = -i-1 < -50 -> i > 49 -> i in {50..99}
+		{"(E['F'] << 1) == 4", s.rowNum, 1}, // 2*i == 4 -> i == 2
+		{"(E['F'] >> 1) == 0", s.rowNum, 2}, // i>>1 == 0 -> i in {0,1}
+		{"(E['F'] >> 2) == 1", s.rowNum, 4}, // i>>2 == 1 -> i in {4,5,6,7}
+		{"(E['F'] >> 3) == 0", s.rowNum, 8}, // i>>3 == 0 -> i in {0..7}
+		{"(B >> 1) == 0", s.rowNum, 1},      // B = 100-i in {0,1} -> i == 99
+		{"~E['F'] == -1", s.rowNum, 1},      // ~i == -1 -> i == 0
+		{"~E['F'] < -50", s.rowNum, 50},     // ~i = -i-1 < -50 -> i > 49 -> i in {50..99}
 	}
 	for _, c := range testcases {
 		params := integration.GetSearchParams(integration.IndexFaissIDMap, metric.IP)
