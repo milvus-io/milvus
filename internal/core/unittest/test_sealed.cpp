@@ -4077,33 +4077,36 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
         CreateTestCacheIndex("staged-vector", std::move(indexing));
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
 
-    ASSERT_NO_THROW(sealed->TestLoadIndex(
-        load_info, false, new_schema, runtime.get(), staged.get()));
-
-    auto published_after_staged_load = sealed->TestGetPublishedStateSnapshot();
-    EXPECT_FALSE(
-        published_after_staged_load->schema->get_fields().count(new_vec));
-    EXPECT_EQ(published_after_staged_load->index_ready_bitset.size(), 1);
-
-    EXPECT_TRUE(GetFieldBit(staged->index_ready_bitset, new_vec));
-    EXPECT_TRUE(staged->published_index_has_raw_data.at(new_vec));
-
     ChunkedSegmentSealedImpl::StateDelta final_delta;
     final_delta.schema = new_schema;
     final_delta.load_info = staged_load_info;
-    final_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     final_delta.commit_ts = current->commit_ts;
-    final_delta.published_index_ready_bitset =
-        staged->published_index_ready_bitset.clone();
-    final_delta.published_binlog_index_ready_bitset =
-        staged->published_binlog_index_ready_bitset.clone();
-    final_delta.published_index_has_raw_data =
-        staged->published_index_has_raw_data;
 
-    auto final_state =
-        sealed->TestBuildNextPublishedState(current, final_delta);
+    ASSERT_NO_THROW(sealed->TestStageLoadIndexThenPublish(
+        load_info,
+        false,
+        new_schema,
+        runtime,
+        staged.get(),
+        current,
+        final_delta,
+        [&] {
+            auto published_after_staged_load =
+                sealed->TestGetPublishedStateSnapshot();
+            EXPECT_FALSE(
+                published_after_staged_load->schema->get_fields().count(
+                    new_vec));
+            EXPECT_EQ(published_after_staged_load->index_ready_bitset.size(),
+                      1);
+            EXPECT_FALSE(sealed->TestVectorIndexReady(new_vec));
+
+            EXPECT_TRUE(GetFieldBit(staged->index_ready_bitset, new_vec));
+            EXPECT_TRUE(staged->published_index_has_raw_data.at(new_vec));
+        }));
+    auto final_state = sealed->TestGetPublishedStateSnapshot();
     EXPECT_TRUE(GetFieldBit(final_state->index_ready_bitset, new_vec));
     EXPECT_TRUE(final_state->index_has_raw_data.at(new_vec));
+    EXPECT_TRUE(sealed->TestVectorIndexReady(new_vec));
 }
 
 TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {

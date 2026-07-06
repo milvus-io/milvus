@@ -574,14 +574,16 @@ ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info,
                                     const SchemaPtr& schema_snapshot,
                                     bool is_replace,
                                     RuntimeResourceState* runtime,
-                                    PublishedSegmentState* staged_state) {
+                                    PublishedSegmentState* staged_state,
+                                    StagedStateCommitter* committer) {
     // print(info);
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_snapshot->operator[](field_id);
 
     if (field_meta.is_vector()) {
-        LoadVecIndex(info, schema_snapshot, is_replace, staged_state);
+        LoadVecIndex(
+            info, schema_snapshot, is_replace, staged_state, committer);
     } else {
         LoadScalarIndex(
             info, schema_snapshot, is_replace, runtime, staged_state);
@@ -592,15 +594,22 @@ void
 ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info,
                                     bool is_replace,
                                     RuntimeResourceState* runtime,
-                                    PublishedSegmentState* staged_state) {
-    LoadIndex(info, CaptureSchemaSnapshot(), is_replace, runtime, staged_state);
+                                    PublishedSegmentState* staged_state,
+                                    StagedStateCommitter* committer) {
+    LoadIndex(info,
+              CaptureSchemaSnapshot(),
+              is_replace,
+              runtime,
+              staged_state,
+              committer);
 }
 
 void
 ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
                                        const SchemaPtr& schema_snapshot,
                                        bool is_replace,
-                                       PublishedSegmentState* staged_state) {
+                                       PublishedSegmentState* staged_state,
+                                       StagedStateCommitter* committer) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto snapshot = CapturePublishedState();
@@ -616,12 +625,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
     bool has_binlog_index =
         get_bit_if_present(visible_state.binlog_index_bitset, field_id);
 
-    std::unique_lock lck(mutex_);
     if (is_replace) {
-        // Drop existing vector indexing for this field before replacing
-        if (has_index) {
-            vector_indexings_.drop_field_indexing(field_id);
-        }
         LOG_INFO("Replacing vector index for field {} in segment {}",
                  field_id.get(),
                  id_);
@@ -655,16 +659,16 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
     // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,
     // not here. This avoids unsafe ManualEvictCache on column groups.
 
-    if (has_binlog_index) {
-        vector_indexings_.drop_field_indexing(field_id);
-    }
-    vector_indexings_.append_field_indexing(
-        field_id, metric_type, std::move(info.cache_index));
-    LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
-             info.field_id,
-             id_);
-    lck.unlock();
+    bool drop_existing = (is_replace && has_index) || has_binlog_index;
     if (staged_state != nullptr) {
+        AssertInfo(committer != nullptr,
+                   "staged vector index load requires committer");
+        committer->StageVectorIndexMutationLocked(
+            field_id, metric_type, std::move(info.cache_index), drop_existing);
+        LOG_INFO("Has staged vec index load, fieldID:{}. segmentID:{}, ",
+                 info.field_id,
+                 id_);
+
         clear_bit_if_present(staged_state->published_binlog_index_ready_bitset,
                              field_id);
         set_bit(staged_state->published_index_ready_bitset, field_id, true);
@@ -672,6 +676,16 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
             *staged_state, field_id, request.has_raw_data);
         NormalizePublishedState(*staged_state);
     } else {
+        std::unique_lock lck(mutex_);
+        if (drop_existing) {
+            vector_indexings_.drop_field_indexing(field_id);
+        }
+        vector_indexings_.append_field_indexing(
+            field_id, metric_type, std::move(info.cache_index));
+        lck.unlock();
+        LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
+                 info.field_id,
+                 id_);
         PublishIndexReadyLocked(field_id, request.has_raw_data);
     }
 }
@@ -3265,6 +3279,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const BitsetView& bitset,
                                         milvus::OpContext* op_context,
                                         SearchResult& output) const {
+    std::shared_lock vector_state_lck(mutex_);
     auto snapshot = CapturePublishedState();
     AssertInfo(snapshot->system_field_ready, "System field is not ready");
     auto field_id = search_info.field_id_;
@@ -3400,6 +3415,7 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
                                      FieldId field_id,
                                      const int64_t* ids,
                                      int64_t count) const {
+    std::shared_lock vector_state_lck(mutex_);
     auto snapshot = CapturePublishedState();
     auto& field_meta = snapshot->schema->operator[](field_id);
     AssertInfo(field_meta.is_vector(), "vector field is not vector type");
@@ -3469,6 +3485,7 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
                                        const FieldMeta& field_meta,
                                        const int64_t* seg_offsets,
                                        int64_t count) const {
+    std::shared_lock vector_state_lck(mutex_);
     auto snapshot = CapturePublishedState();
     AssertInfo(field_meta.get_data_type() == DataType::VECTOR_ARRAY,
                "get_emb_list only supports VECTOR_ARRAY");
@@ -3634,7 +3651,7 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id,
     if (is_pk_field) {
         LOG_INFO(
             "Skip dropping pk field {} in segment {}", field_id.get(), id_);
-        if (has_binlog_index) {
+        if (runtime == nullptr && has_binlog_index) {
             MarkBinlogIndexReadyLocked(field_id, false);
             if (!get_bit(snapshot->index_ready_bitset, field_id)) {
                 ClearIndexHasRawDataLocked(field_id);
@@ -3642,7 +3659,7 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id,
         }
 
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        if (has_binlog_index) {
+        if (runtime == nullptr && has_binlog_index) {
             vector_indexings_.drop_field_indexing(field_id);
         }
         return;
@@ -3663,9 +3680,11 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id,
                                   ToConstRuntimeState(std::move(next_runtime)));
     }
 
-    std::unique_lock<std::shared_mutex> lck(mutex_);
-    if (has_binlog_index) {
-        vector_indexings_.drop_field_indexing(field_id);
+    if (runtime == nullptr) {
+        std::unique_lock<std::shared_mutex> lck(mutex_);
+        if (has_binlog_index) {
+            vector_indexings_.drop_field_indexing(field_id);
+        }
     }
 }
 
@@ -3699,8 +3718,10 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
                                   ToConstRuntimeState(std::move(next_runtime)));
     }
 
-    std::unique_lock lck(mutex_);
-    vector_indexings_.drop_field_indexing(field_id);
+    if (runtime == nullptr) {
+        std::unique_lock lck(mutex_);
+        vector_indexings_.drop_field_indexing(field_id);
+    }
 }
 
 void
@@ -5840,10 +5861,11 @@ ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
 
 bool
 ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
+    std::shared_lock lck(mutex_);
     auto snapshot = CapturePublishedState();
     auto fieldID = FieldId(field_id);
     const auto& field_meta = snapshot->schema->operator[](fieldID);
-    std::shared_lock lck(mutex_);
+
     if (IsVectorDataType(field_meta.get_data_type())) {
         if (get_bit(snapshot->index_ready_bitset, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
@@ -5871,6 +5893,7 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     size_t count,
     bool is_cosine,
     float* distances) const {
+    std::shared_lock vector_state_lck(mutex_);
     if (!vector_indexings_.is_ready(field_id)) {
         return false;
     }
@@ -5911,6 +5934,7 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
 bool
 ChunkedSegmentSealedImpl::IsIndexRefineEnabled(milvus::OpContext* op_ctx,
                                                FieldId field_id) const {
+    std::shared_lock vector_state_lck(mutex_);
     if (!vector_indexings_.is_ready(field_id)) {
         return false;
     }
@@ -6216,8 +6240,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(
         auto index_metric = field_binlog_config->GetMetricType();
 
         if (enable_binlog_index()) {
-            std::unique_lock lck(mutex_);
-
             std::unique_ptr<
                 milvus::cachinglayer::Translator<milvus::index::IndexBase>>
                 translator =
@@ -6236,11 +6258,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
                     std::move(translator));
-            // TODO: how to handle the binlog index?
-            vector_indexings_.append_field_indexing(
-                field_id, index_metric, std::move(interim_index_cache_slot));
-
-            vec_binlog_config_[field_id] = std::move(field_binlog_config);
             auto index_version =
                 knowhere::Version::GetCurrentVersion().VersionNumber();
             bool has_raw_data = false;
@@ -6256,19 +6273,39 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                 has_raw_data = knowhere::IndexStaticFaced<bfloat16>::HasRawData(
                     interim_index_type, index_version, build_config);
             }
-            lck.unlock();
+
             if (committer != nullptr) {
-                committer->Commit([&](RuntimeResourceState&,
-                                      PublishedSegmentState& staged_state) {
-                    clear_bit_if_present(
-                        staged_state.published_index_ready_bitset, field_id);
-                    set_bit(staged_state.published_binlog_index_ready_bitset,
+                committer->Commit(
+                    [&,
+                     interim_index_cache_slot =
+                         std::move(interim_index_cache_slot),
+                     field_binlog_config = std::move(field_binlog_config),
+                     has_raw_data](
+                        RuntimeResourceState&,
+                        PublishedSegmentState& staged_state) mutable {
+                        committer->StageInterimVectorIndexMutationLocked(
+                            field_id,
+                            index_metric,
+                            std::move(interim_index_cache_slot),
+                            std::move(field_binlog_config));
+                        clear_bit_if_present(
+                            staged_state.published_index_ready_bitset,
+                            field_id);
+                        set_bit(
+                            staged_state.published_binlog_index_ready_bitset,
                             field_id,
                             true);
-                    SetPublishedIndexRawDataInState(
-                        staged_state, field_id, has_raw_data);
-                });
+                        SetPublishedIndexRawDataInState(
+                            staged_state, field_id, has_raw_data);
+                    });
             } else {
+                std::unique_lock lck(mutex_);
+                vector_indexings_.append_field_indexing(
+                    field_id,
+                    index_metric,
+                    std::move(interim_index_cache_slot));
+                vec_binlog_config_[field_id] = std::move(field_binlog_config);
+                lck.unlock();
                 PublishBinlogIndexReadyLocked(field_id, has_raw_data);
             }
 
@@ -6704,6 +6741,7 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
             committer.Commit([&](RuntimeResourceState& runtime,
                                  PublishedSegmentState& staged_state) {
                 DropIndex(field_id, schema_snapshot, &runtime);
+                committer.StageVectorIndexDropLocked(field_id);
                 DropIndexFromState(staged_state, field_id);
             });
         }
@@ -6740,7 +6778,12 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
         for (auto field_id : diff.field_data_to_drop) {
             committer.Commit([&](RuntimeResourceState& runtime,
                                  PublishedSegmentState& staged_state) {
+                bool drop_binlog_index = get_bit_if_present(
+                    staged_state.binlog_index_bitset, field_id);
                 DropFieldData(field_id, schema_snapshot, &runtime);
+                if (drop_binlog_index) {
+                    committer.StageVectorIndexDropLocked(field_id);
+                }
                 DropFieldFromState(staged_state, field_id);
             });
         }
@@ -6798,7 +6841,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     delta.published_binlog_index_ready_bitset =
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
-    PublishReopenState(delta);
+    committer.Publish(current, delta);
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }
@@ -6864,7 +6907,7 @@ ChunkedSegmentSealedImpl::Reopen(
     delta.published_binlog_index_ready_bitset =
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
-    PublishReopenState(delta);
+    committer.Publish(current, delta);
 
     LOG_INFO("Reopen segment {} done", id_);
 }
@@ -6898,7 +6941,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     delta.published_binlog_index_ready_bitset =
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
-    PublishReopenState(current, delta);
+    committer.Publish(current, delta);
 }
 
 void
@@ -8022,7 +8065,8 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                               schema_snapshot,
                               is_replace,
                               &runtime,
-                              &staged_state);
+                              &staged_state,
+                              &committer);
                 });
             });
 
@@ -9286,6 +9330,7 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
 void
 ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
                                           FieldId field_id) const {
+    std::shared_lock vector_state_lck(mutex_);
     auto is_ready = this->vector_indexings_.is_ready(field_id);
     if (is_ready) {
         auto field_indexing =

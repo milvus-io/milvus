@@ -1335,7 +1335,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadVecIndex(LoadIndexInfo& info,
                  const SchemaPtr& schema_snapshot,
                  bool is_replace = false,
-                 PublishedSegmentState* staged_state = nullptr);
+                 PublishedSegmentState* staged_state = nullptr,
+                 StagedStateCommitter* committer = nullptr);
 
     void
     LoadScalarIndex(LoadIndexInfo& info,
@@ -1352,13 +1353,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
               const SchemaPtr& schema_snapshot,
               bool is_replace,
               RuntimeResourceState* runtime,
-              PublishedSegmentState* staged_state = nullptr);
+              PublishedSegmentState* staged_state = nullptr,
+              StagedStateCommitter* committer = nullptr);
 
     void
     LoadIndex(LoadIndexInfo& info,
               bool is_replace,
               RuntimeResourceState* runtime,
-              PublishedSegmentState* staged_state = nullptr);
+              PublishedSegmentState* staged_state = nullptr,
+              StagedStateCommitter* committer = nullptr);
 
     bool
     generate_interim_index(
@@ -1449,10 +1452,89 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             segment_.NormalizePublishedState(*staged_state_);
         }
 
+        void
+        StageVectorIndexMutationLocked(FieldId field_id,
+                                       const MetricType& metric_type,
+                                       index::CacheIndexBasePtr indexing,
+                                       bool drop_existing) {
+            vector_index_mutations_.push_back(VectorIndexMutation{
+                field_id,
+                metric_type,
+                std::move(indexing),
+                nullptr,
+                drop_existing,
+                false,
+            });
+        }
+
+        void
+        StageVectorIndexDropLocked(FieldId field_id) {
+            vector_index_mutations_.push_back(VectorIndexMutation{
+                field_id,
+                MetricType{},
+                nullptr,
+                nullptr,
+                true,
+                false,
+            });
+        }
+
+        void
+        StageInterimVectorIndexMutationLocked(
+            FieldId field_id,
+            const MetricType& metric_type,
+            index::CacheIndexBasePtr indexing,
+            std::unique_ptr<VecIndexConfig> binlog_config) {
+            vector_index_mutations_.push_back(VectorIndexMutation{
+                field_id,
+                metric_type,
+                std::move(indexing),
+                std::move(binlog_config),
+                false,
+                true,
+            });
+        }
+
+        void
+        Publish(const std::shared_ptr<const PublishedSegmentState>& current,
+                const StateDelta& delta) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            std::unique_lock<std::shared_mutex> segment_lock(segment_.mutex_);
+            for (auto& mutation : vector_index_mutations_) {
+                if (mutation.drop_existing) {
+                    segment_.vector_indexings_.drop_field_indexing(
+                        mutation.field_id);
+                }
+                if (mutation.indexing != nullptr) {
+                    segment_.vector_indexings_.append_field_indexing(
+                        mutation.field_id,
+                        mutation.metric_type,
+                        std::move(mutation.indexing));
+                }
+                if (mutation.update_binlog_config) {
+                    segment_.vec_binlog_config_[mutation.field_id] =
+                        std::move(mutation.binlog_config);
+                }
+            }
+            vector_index_mutations_.clear();
+            segment_.PublishState(
+                segment_.BuildNextPublishedState(current, delta));
+        }
+
      private:
+        struct VectorIndexMutation {
+            FieldId field_id;
+            MetricType metric_type;
+            index::CacheIndexBasePtr indexing;
+            std::unique_ptr<VecIndexConfig> binlog_config;
+            bool drop_existing;
+            bool update_binlog_config;
+        };
+
         ChunkedSegmentSealedImpl& segment_;
         RuntimeResourceState* runtime_;
         PublishedSegmentState* staged_state_;
+        std::vector<VectorIndexMutation> vector_index_mutations_;
         std::mutex mutex_;
     };
 
@@ -2239,8 +2321,52 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   bool is_replace,
                   const SchemaPtr& schema_snapshot,
                   RuntimeResourceState* runtime,
-                  PublishedSegmentState* staged_state) {
-        LoadIndex(info, schema_snapshot, is_replace, runtime, staged_state);
+                  PublishedSegmentState* staged_state,
+                  StagedStateCommitter* committer = nullptr) {
+        LoadIndex(info,
+                  schema_snapshot,
+                  is_replace,
+                  runtime,
+                  staged_state,
+                  committer);
+    }
+
+    template <typename Verifier>
+    void
+    TestStageLoadIndexThenPublish(
+        LoadIndexInfo& info,
+        bool is_replace,
+        const SchemaPtr& schema_snapshot,
+        std::shared_ptr<RuntimeResourceState> runtime,
+        PublishedSegmentState* staged_state,
+        const std::shared_ptr<const PublishedSegmentState>& current,
+        StateDelta& final_delta,
+        Verifier&& verifier) {
+        StagedStateCommitter committer(*this, runtime.get(), staged_state);
+        committer.Commit([&](RuntimeResourceState& staged_runtime,
+                             PublishedSegmentState& staged) {
+            LoadIndex(info,
+                      schema_snapshot,
+                      is_replace,
+                      &staged_runtime,
+                      &staged,
+                      &committer);
+        });
+        verifier();
+        final_delta.runtime = ToConstRuntimeState(std::move(runtime));
+        final_delta.published_index_ready_bitset =
+            staged_state->published_index_ready_bitset.clone();
+        final_delta.published_binlog_index_ready_bitset =
+            staged_state->published_binlog_index_ready_bitset.clone();
+        final_delta.published_index_has_raw_data =
+            staged_state->published_index_has_raw_data;
+        committer.Publish(current, final_delta);
+    }
+
+    bool
+    TestVectorIndexReady(FieldId field_id) const {
+        std::shared_lock lck(mutex_);
+        return vector_indexings_.is_ready(field_id);
     }
 
     void
