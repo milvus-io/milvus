@@ -5239,6 +5239,9 @@ type dataCoordConfig struct {
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
+	SingleCompactionThresholdJitter   ParamItem `refreshable:"true"`
+	SingleCompactionRateLimitTokens   ParamItem `refreshable:"true"`
+	SingleCompactionRateLimitInterval ParamItem `refreshable:"true"`
 
 	StorageVersionCompactionEnabled                   ParamItem `refreshable:"true"`
 	StorageFormatCompactionEnabled                    ParamItem `refreshable:"true"`
@@ -5800,6 +5803,39 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
+
+	p.SingleCompactionThresholdJitter = ParamItem{
+		Key:          "dataCoord.compaction.single.thresholdJitter",
+		Version:      "3.0.0",
+		DefaultValue: "0.25",
+		Doc: "Deterministic per-segment jitter applied to the single-compaction accumulation thresholds " +
+			"(deltalog count/size, deleted-rows ratio, expired-entities ratio/size). Each segment's effective " +
+			"threshold becomes configured x [1, 1+jitter], de-synchronizing same-batch segments so they do not " +
+			"trigger rewrites simultaneously. 0 disables (legacy behavior).",
+		Export: false,
+	}
+	p.SingleCompactionThresholdJitter.Init(base.mgr)
+
+	p.SingleCompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.single.rateLimitTokens",
+		Version:      "3.0.0",
+		DefaultValue: "256",
+		Doc: "Max single-compaction candidates admitted per rateLimitInterval (token bucket). Shock protection " +
+			"against mass eligibility (e.g. a threshold config change); size it well above steady-state demand — " +
+			"an undersized bucket defers rewrites indefinitely and lets deltalog backlog grow. Segments whose " +
+			"deltalog count exceeds 4x the configured maximum bypass the limit. 0 disables (legacy behavior).",
+		Export: false,
+	}
+	p.SingleCompactionRateLimitTokens.Init(base.mgr)
+
+	p.SingleCompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.single.rateLimitInterval",
+		Version:      "3.0.0",
+		DefaultValue: "60",
+		Doc:          "Refill interval of the single-compaction admission token bucket, in seconds.",
+		Export:       false,
+	}
+	p.SingleCompactionRateLimitInterval.Init(base.mgr)
 
 	p.StorageVersionCompactionEnabled = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.enabled",
