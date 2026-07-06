@@ -3440,6 +3440,14 @@ func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interfa
 // VisitMatchThreshold handles MATCH_LEAST, MATCH_MOST, and MATCH_EXACT expressions
 // Syntax: MATCH_LEAST/MATCH_MOST/MATCH_EXACT(structArrayField, $[intField] == 1, threshold=N)
 func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) interface{} {
+	// `threshold` is a soft keyword: the grammar accepts any Identifier in the
+	// keyword position so a field/template named `threshold` is not swallowed by
+	// the lexer. Enforce the exact keyword here (case-insensitive).
+	kw := ctx.GetKw().GetText()
+	if !strings.EqualFold(kw, "threshold") {
+		return merr.WrapErrParameterInvalidMsg("expected 'threshold', got '%s'", kw)
+	}
+
 	countStr := ctx.IntegerConstant().GetText()
 	count, err := strconv.ParseInt(countStr, 10, 64)
 	if err != nil {
@@ -3471,5 +3479,5 @@ func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) i
 		return merr.WrapErrParameterInvalidMsg("unhandled match threshold operator: %s", ctx.GetOp().GetText())
 	}
 
-	return v.parseMatchExpr(ctx.Identifier(), ctx.JSONIdentifier(), ctx.Expr(), matchType, count, opName)
+	return v.parseMatchExpr(ctx.Identifier(0), ctx.JSONIdentifier(), ctx.Expr(), matchType, count, opName)
 }

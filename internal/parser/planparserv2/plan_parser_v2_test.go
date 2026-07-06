@@ -54,6 +54,14 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		ElementType: schemapb.DataType_Int64,
 	})
 
+	// A field literally named "threshold" to exercise the soft-keyword behaviour:
+	// `threshold` must be usable as a normal field / template var, not swallowed by
+	// the MATCH_LEAST/MOST/EXACT `threshold=N` syntax.
+	fields = append(fields, &schemapb.FieldSchema{
+		FieldID: 136, Name: "threshold", IsPrimaryKey: false, Description: "field literally named threshold",
+		DataType: schemapb.DataType_Int64,
+	})
+
 	structArrayField := &schemapb.StructArrayFieldSchema{
 		FieldID: 132, Name: "struct_array", Fields: []*schemapb.FieldSchema{
 			{
@@ -3635,6 +3643,62 @@ func TestJSONArrayMatchVariants(t *testing.T) {
 
 }
 
+// TestExpr_ThresholdSoftKeyword verifies that `threshold` is a soft keyword:
+// it is only special inside the MATCH_LEAST/MOST/EXACT `threshold=N` position,
+// and is otherwise usable as a normal field name / template variable.
+func TestExpr_ThresholdSoftKeyword(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	thresholdField, err := helper.GetFieldFromName("threshold")
+	require.NoError(t, err)
+
+	t.Run("field named threshold parses and resolves", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `threshold > 5`, nil)
+		require.NoError(t, err)
+		ure := expr.GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, thresholdField.GetFieldID(), ure.GetColumnInfo().GetFieldId())
+		assert.Equal(t, schemapb.DataType_Int64, ure.GetColumnInfo().GetDataType())
+		assert.Equal(t, int64(5), ure.GetValue().GetInt64Val())
+	})
+
+	t.Run("threshold usable as template variable", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `threshold > {threshold}`, map[string]*schemapb.TemplateValue{
+			"threshold": generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+		})
+		require.NoError(t, err)
+		ure := expr.GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, thresholdField.GetFieldID(), ure.GetColumnInfo().GetFieldId())
+		assert.Equal(t, int64(7), ure.GetValue().GetInt64Val())
+	})
+
+	t.Run("regression: threshold=N still parses", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=3)`, nil)
+		require.NoError(t, err)
+		me := expr.GetMatchExpr()
+		require.NotNil(t, me)
+		assert.Equal(t, planpb.MatchType_MatchLeast, me.GetMatchType())
+		assert.Equal(t, int64(3), me.GetCount())
+	})
+
+	t.Run("case-insensitive THRESHOLD keyword accepted", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, THRESHOLD=2)`, nil)
+		require.NoError(t, err)
+		me := expr.GetMatchExpr()
+		require.NotNil(t, me)
+		assert.Equal(t, int64(2), me.GetCount())
+	})
+
+	t.Run("wrong keyword rejected with helpful message", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, foo=2)`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected 'threshold'")
+	})
+}
+
 // TestMatchTemplatePlaceholders covers template placeholders inside MATCH_*
 // predicates. For JSON targets the element type is inferred from the concrete
 // template values, which are always available at ParseExpr time: parseExprInner
@@ -3646,9 +3710,9 @@ func TestMatchTemplatePlaceholders(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("json int64 placeholder", func(t *testing.T) {
-		// note: `threshold` itself is a reserved keyword in the grammar
-		// (MATCH_LEAST/MOST/EXACT `threshold=N`), so it cannot be used as a
-		// template variable name; any other identifier works.
+		// note: `threshold` is a soft keyword (only special in the MATCH_*
+		// `threshold=N` position), so it can also be used as a template
+		// variable name — see TestExpr_ThresholdSoftKeyword.
 		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > {min_score})`, map[string]*schemapb.TemplateValue{
 			"min_score": generateTemplateValue(schemapb.DataType_Int64, int64(90)),
 		})

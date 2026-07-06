@@ -27,7 +27,7 @@ expr:
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
 	| op=(MATCH_ALL | MATCH_ANY) '(' (Identifier | JSONIdentifier) ',' expr ')'                                                 # MatchSimple
-	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' (Identifier | JSONIdentifier) ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
+	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' (Identifier | JSONIdentifier) ',' expr ',' kw=Identifier ASSIGN IntegerConstant ')'  # MatchThreshold
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -81,7 +81,6 @@ MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
-THRESHOLD: 'threshold' | 'THRESHOLD';
 REGEXMATCH: '=~';
 REGEXNOTMATCH: '!~';
 ASSIGN: '=';
