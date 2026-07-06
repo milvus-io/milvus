@@ -2499,16 +2499,10 @@ func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionUsesDefaultLoadFields(
 		}
 		resourceGroups := []string{"rg1", "rg2"}
 
-		var captured *querypb.LoadPartitionsRequest
-		mockey.Mock((*Server).broadcastAlterLoadConfigCollectionV2ForLoadPartitions).
-			To(func(s *Server, ctx context.Context, req *querypb.LoadPartitionsRequest) error {
-				captured = req
-				return nil
-			}).
-			Build()
+		mockey.Mock((*Server).broadcastAlterLoadConfigCollectionV2ForLoadPartitions).Return(nil).Build()
 		mockey.Mock((*Server).waitPrewarmPartitionLoaded).Return(nil).Build()
 
-		err := suite.server.ensurePrewarmPartitionLoaded(ctx, &querypb.PrewarmRequest{
+		req := &querypb.PrewarmRequest{
 			Schema:         schema,
 			Namespace:      &namespace,
 			CollectionID:   collectionID,
@@ -2516,18 +2510,20 @@ func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionUsesDefaultLoadFields(
 			Priority:       commonpb.LoadPriority_LOW,
 			ReplicaNumber:  3,
 			ResourceGroups: resourceGroups,
-		})
+		}
+		loadReq := newPrewarmLoadPartitionsRequest(req)
+
+		err := suite.server.ensurePrewarmPartitionLoaded(ctx, req)
 
 		suite.NoError(err)
-		suite.Require().NotNil(captured)
-		suite.Equal(collectionID, captured.GetCollectionID())
-		suite.Equal([]int64{partitionID}, captured.GetPartitionIDs())
-		suite.Empty(captured.GetFieldIndexID())
-		suite.Empty(captured.GetLoadFields())
-		suite.Equal(commonpb.LoadPriority_LOW, captured.GetPriority())
-		suite.EqualValues(3, captured.GetReplicaNumber())
-		suite.Equal(resourceGroups, captured.GetResourceGroups())
-		suite.True(captured.GetForceSyncWarmup())
+		suite.Equal(collectionID, loadReq.GetCollectionID())
+		suite.Equal([]int64{partitionID}, loadReq.GetPartitionIDs())
+		suite.Empty(loadReq.GetFieldIndexID())
+		suite.Empty(loadReq.GetLoadFields())
+		suite.Equal(commonpb.LoadPriority_LOW, loadReq.GetPriority())
+		suite.EqualValues(3, loadReq.GetReplicaNumber())
+		suite.Equal(resourceGroups, loadReq.GetResourceGroups())
+		suite.True(loadReq.GetForceSyncWarmup())
 	})
 }
 

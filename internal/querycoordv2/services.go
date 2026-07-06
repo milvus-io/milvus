@@ -455,21 +455,25 @@ func validatePrewarmRequest(req *querypb.PrewarmRequest) error {
 	return nil
 }
 
+func newPrewarmLoadPartitionsRequest(req *querypb.PrewarmRequest) *querypb.LoadPartitionsRequest {
+	return &querypb.LoadPartitionsRequest{
+		Base:            req.GetBase(),
+		DbID:            req.GetDbID(),
+		CollectionID:    req.GetCollectionID(),
+		PartitionIDs:    req.GetPartitionIDs(),
+		Schema:          req.GetSchema(),
+		Priority:        req.GetPriority(),
+		ForceSyncWarmup: true,
+		ReplicaNumber:   req.GetReplicaNumber(),
+		ResourceGroups:  req.GetResourceGroups(),
+	}
+}
+
 func (s *Server) ensurePrewarmPartitionLoaded(ctx context.Context, req *querypb.PrewarmRequest) error {
 	partitionID := req.GetPartitionIDs()[0]
 	partition := s.meta.GetPartition(ctx, partitionID)
 	if partition == nil {
-		loadReq := &querypb.LoadPartitionsRequest{
-			Base:            req.GetBase(),
-			DbID:            req.GetDbID(),
-			CollectionID:    req.GetCollectionID(),
-			PartitionIDs:    req.GetPartitionIDs(),
-			Schema:          req.GetSchema(),
-			Priority:        req.GetPriority(),
-			ForceSyncWarmup: true,
-			ReplicaNumber:   req.GetReplicaNumber(),
-			ResourceGroups:  req.GetResourceGroups(),
-		}
+		loadReq := newPrewarmLoadPartitionsRequest(req)
 		if err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx, loadReq); err != nil {
 			return err
 		}
