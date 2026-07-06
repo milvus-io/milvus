@@ -422,6 +422,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 0, Params.ClusterLevelLoadReplicaNumber.GetAsInt())
 		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
+		assert.False(t, Params.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool())
 
 		assert.Equal(t, 10, Params.CollectionChannelCountFactor.GetAsInt())
 		assert.Equal(t, 3000, Params.AutoBalanceInterval.GetAsInt())

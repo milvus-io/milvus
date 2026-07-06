@@ -41,8 +41,12 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		return err
 	}
 
-	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), req.GetCollectionID())
+	replicaNumber, resourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+		ctx,
+		req.GetReplicaNumber(),
+		req.GetResourceGroups(),
+		req.GetCollectionID(),
+	)
 	if err != nil {
 		return err
 	}
