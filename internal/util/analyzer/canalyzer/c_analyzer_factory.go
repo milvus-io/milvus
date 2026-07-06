@@ -11,6 +11,7 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -18,35 +19,72 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
-	LinderaDictURLKey = "lindera_download_urls"
-	ResourceMapKey    = "resource_map"
-	ResourcePathKey   = "resource_path"
-	StorageNameKey    = "storage_name"
+	AnalyzerConfigPrefix = "function.analyzer."
+	LinderaDictURLKey    = "lindera_download_urls"
+	DefaultDictPathKey   = "default_dict_path"
+	ResourceMapKey       = "resource_map"
+	ResourcePathKey      = "resource_path"
+	StorageNameKey       = "storage_name"
 )
 
-var initOnce sync.Once
+var (
+	initMu             sync.Mutex
+	optionsInitialized bool
+)
 
-func InitOptions() {
-	initOnce.Do(func() {
-		UpdateParams()
-	})
+func InitOptions() error {
+	initMu.Lock()
+	defer initMu.Unlock()
+
+	if optionsInitialized {
+		return nil
+	}
+
+	if err := UpdateParams(); err != nil {
+		return err
+	}
+
+	paramtable.Get().WatchKeyPrefix(AnalyzerConfigPrefix, config.NewHandler("analyzer.runtime_options", func(*config.Event) {
+		if err := updateParams(); err != nil {
+			mlog.Error(context.TODO(), "update analyzer option failed", mlog.Err(err))
+		}
+	}))
+	optionsInitialized = true
+	return nil
 }
 
-func UpdateParams() {
+func BuildRuntimeOptions() map[string]any {
 	cfg := paramtable.Get()
-	params := map[string]any{}
-	params[LinderaDictURLKey] = cfg.FunctionCfg.LinderaDownloadUrls.GetValue()
-	params[ResourcePathKey] = pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
+	return map[string]any{
+		LinderaDictURLKey:  buildLinderaDownloadURLs(cfg.FunctionCfg.LinderaDownloadUrls.GetValue()),
+		DefaultDictPathKey: cfg.FunctionCfg.LocalResourcePath.GetValue(),
+		ResourcePathKey:    pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()),
+	}
+}
 
-	bytes, err := json.Marshal(params)
+func buildLinderaDownloadURLs(values map[string]string) map[string][]string {
+	urls := make(map[string][]string, len(values))
+	for kind, value := range values {
+		urls[strings.TrimPrefix(kind, ".")] = paramtable.ParseAsStings(value)
+	}
+	return urls
+}
+
+func UpdateParams() error {
+	return updateParams()
+}
+
+func updateParams() error {
+	bytes, err := json.Marshal(BuildRuntimeOptions())
 	if err != nil {
-		mlog.Panic(context.TODO(), "init analyzer option failed", mlog.Err(err))
+		return err
 	}
 
 	paramPtr := C.CString(string(bytes))
@@ -54,8 +92,9 @@ func UpdateParams() {
 
 	status := C.set_tokenizer_option(paramPtr)
 	if err := HandleCStatus(&status, "failed to init segcore analyzer option"); err != nil {
-		mlog.Panic(context.TODO(), "init analyzer option failed", mlog.Err(err))
+		return err
 	}
+	return nil
 }
 
 func BuildExtraResourceInfo(storage string, resources []*internalpb.FileResourceInfo) (string, error) {
