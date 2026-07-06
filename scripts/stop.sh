@@ -15,11 +15,12 @@
 # limitations under the License.
 
 echo "Stopping milvus..."
-PROCESS=$(ps -e | grep milvus | grep -v grep | awk '{print $1}')
-if [ -z "$PROCESS" ]; then
+PROCESSES=$(ps -e -o pid= -o args= | awk '
+  /(^|[[:space:]])([^[:space:]]*\/)?bin\/milvus[[:space:]]+run[[:space:]]/ { print $1 }
+')
+if [ -z "$PROCESSES" ]; then
   echo "No milvus process"
   exit 0
 fi
-kill -15 $PROCESS
+kill -15 $PROCESSES
 echo "Milvus stopped"
-

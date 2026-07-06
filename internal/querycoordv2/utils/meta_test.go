@@ -18,6 +18,7 @@ package utils
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -27,17 +28,145 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func setupAssignReplicaWithSQNServeSegments(t *testing.T, streamingNodes map[int64]*types.StreamingNodeInfoWithResourceGroup) {
+	t.Helper()
+
+	paramtable.Init()
+
+	oldValue, existed := os.LookupEnv(streamingutil.MilvusStreamingServiceEnabled)
+	require.NoError(t, os.Setenv(streamingutil.MilvusStreamingServiceEnabled, "1"))
+	t.Cleanup(func() {
+		if existed {
+			require.NoError(t, os.Setenv(streamingutil.MilvusStreamingServiceEnabled, oldValue))
+		} else {
+			require.NoError(t, os.Unsetenv(streamingutil.MilvusStreamingServiceEnabled))
+		}
+	})
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.Key, "true"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.Key))
+	})
+
+	snmanager.ResetStreamingNodeManager()
+	t.Cleanup(snmanager.ResetStreamingNodeManager)
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}).Maybe()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(streamingNodes, nil)
+	balance.Register(b)
+}
+
+func TestAssignReplicaUsesSQNWhenSQNServeSegmentsEnabled(t *testing.T) {
+	ctx := context.Background()
+	setupAssignReplicaWithSQNServeSegments(t, map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		10: {
+			StreamingNodeInfo: types.StreamingNodeInfo{
+				ServerID: 10,
+				Address:  "localhost:10",
+			},
+			ResourceGroup: "",
+		},
+	})
+
+	store := mocks.NewQueryCoordCatalog(t)
+	nodeMgr := session.NewNodeManager()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+
+	replicas, err := AssignReplica(ctx, m, []string{meta.DefaultResourceGroupName}, 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{meta.DefaultResourceGroupName: 1}, replicas)
+}
+
+func TestAssignReplicaRejectsUncoveredRGWhenStrictSQNIsolationEnabled(t *testing.T) {
+	ctx := context.Background()
+	setupAssignReplicaWithSQNServeSegments(t, map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		10: {
+			StreamingNodeInfo: types.StreamingNodeInfo{
+				ServerID: 10,
+				Address:  "localhost:10",
+			},
+			ResourceGroup: meta.DefaultResourceGroupName,
+		},
+	})
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.Key, "true"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.Key))
+	})
+
+	store := mocks.NewQueryCoordCatalog(t)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	nodeMgr := session.NewNodeManager()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	_, err := m.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
+	require.NoError(t, err)
+
+	replicas, err := AssignReplica(ctx, m, []string{"rg1"}, 1, true)
+	require.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
+	assert.Nil(t, replicas)
+}
+
+func TestAssignReplicaRejectsUncoveredRGWhenDefaultSQNPoolTooSmall(t *testing.T) {
+	ctx := context.Background()
+	setupAssignReplicaWithSQNServeSegments(t, map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		10: {
+			StreamingNodeInfo: types.StreamingNodeInfo{
+				ServerID: 10,
+				Address:  "localhost:10",
+			},
+			ResourceGroup: meta.DefaultResourceGroupName,
+		},
+		11: {
+			StreamingNodeInfo: types.StreamingNodeInfo{
+				ServerID: 11,
+				Address:  "localhost:11",
+			},
+			ResourceGroup: "rg2",
+		},
+	})
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.Key))
+	})
+
+	store := mocks.NewQueryCoordCatalog(t)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	nodeMgr := session.NewNodeManager()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	_, err := m.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
+	require.NoError(t, err)
+
+	replicas, err := AssignReplica(ctx, m, []string{meta.DefaultResourceGroupName, "rg1"}, 2, true)
+	require.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
+	assert.Nil(t, replicas)
+}
 
 func TestSpawnReplicasWithRG(t *testing.T) {
 	paramtable.Init()

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -111,7 +112,9 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
-	if streamingutil.IsStreamingServiceEnabled() && checkNodeNum {
+	streamingEnabled := streamingutil.IsStreamingServiceEnabled()
+	sqnServeSegments := streamingEnabled && paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.GetAsBool()
+	if streamingEnabled && checkNodeNum && !sqnServeSegments {
 		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
 		if replicaNumber > int32(streamingNodeCount) {
 			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
@@ -136,10 +139,21 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 	// 1. replica1 got rg1's node snapshot but doesn't spawn finished.
 	// 2. rg1 is removed.
 	// 3. replica1 spawn finished, but cannot find related resource group.
-	for rgName, num := range replicaNumInRG {
+	for rgName := range replicaNumInRG {
 		if !m.ContainResourceGroup(ctx, rgName) {
 			return nil, merr.WrapErrResourceGroupNotFound(rgName)
 		}
+	}
+	if sqnServeSegments {
+		if checkNodeNum {
+			if err := checkSQNNodeNum(replicaNumInRG); err != nil {
+				return nil, err
+			}
+		}
+		return replicaNumInRG, nil
+	}
+
+	for rgName, num := range replicaNumInRG {
 		nodes, err := m.GetNodes(ctx, rgName)
 		if err != nil {
 			return nil, err
@@ -154,6 +168,55 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		}
 	}
 	return replicaNumInRG, nil
+}
+
+func checkSQNNodeNum(replicaNumInRG map[string]int) error {
+	sqnNodesByRG := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()
+	totalReplicaNumber := 0
+	for _, num := range replicaNumInRG {
+		totalReplicaNumber += num
+	}
+
+	allSQNodes := typeutil.NewUniqueSet()
+	for _, sqnNodes := range sqnNodesByRG {
+		for node := range sqnNodes {
+			allSQNodes.Insert(node)
+		}
+	}
+	totalSQNNodeCount := allSQNodes.Len()
+	if totalReplicaNumber > totalSQNNodeCount {
+		return merr.WrapErrStreamingNodeNotEnough(totalSQNNodeCount, totalReplicaNumber, fmt.Sprintf("when load %d replica count", totalReplicaNumber))
+	}
+
+	strictIsolation := paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool()
+	uncoveredReplicaCount := 0
+	sqnReplicaNumInRG := make(map[string]int, len(replicaNumInRG))
+	for rgName, num := range replicaNumInRG {
+		if _, ok := sqnNodesByRG[rgName]; ok {
+			sqnReplicaNumInRG[rgName] += num
+			continue
+		}
+		uncoveredReplicaCount += num
+	}
+
+	if uncoveredReplicaCount > 0 && !strictIsolation {
+		if _, ok := sqnNodesByRG[meta.DefaultResourceGroupName]; !ok {
+			return nil
+		}
+		sqnReplicaNumInRG[meta.DefaultResourceGroupName] += uncoveredReplicaCount
+		return checkSQNNodeNumInAssignment(sqnReplicaNumInRG, sqnNodesByRG)
+	}
+	return checkSQNNodeNumInAssignment(replicaNumInRG, sqnNodesByRG)
+}
+
+func checkSQNNodeNumInAssignment(replicaNumInRG map[string]int, sqnNodesByRG map[string]typeutil.UniqueSet) error {
+	for rgName, num := range replicaNumInRG {
+		nodeNum := sqnNodesByRG[rgName].Len()
+		if num > nodeNum {
+			return merr.WrapErrResourceGroupNodeNotEnough(rgName, nodeNum, num)
+		}
+	}
+	return nil
 }
 
 // SpawnReplicasWithReplicaConfig spawns replicas with replica config.
