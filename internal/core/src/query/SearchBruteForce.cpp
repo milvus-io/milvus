@@ -215,7 +215,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
         if (!res.has_value()) {
-            ThrowInfo(KnowhereError,
+            ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                       "Brute force range search fail: {}, {}",
                       KnowhereStatusString(res.error()),
                       res.what());
@@ -294,7 +294,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
-            ThrowInfo(KnowhereError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "Brute force search fail: {}",
                       KnowhereStatusString(stat));
         }

@@ -23,10 +23,12 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "parquet/arrow/reader.h"
+#include "parquet/exception.h"
 #include "parquet/file_reader.h"
 #include "parquet/metadata.h"
 #include "parquet/properties.h"
 #include "parquet/schema.h"
+#include "parquet/exception.h"
 #include "storage/PayloadReader.h"
 #include "storage/Util.h"
 
@@ -52,132 +54,171 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
     if (column_type_ == DataType::NONE) {
         payload_buf_ = std::make_shared<BytesBuf>(data, length);
     } else {
-        auto input = std::make_shared<arrow::io::BufferReader>(data, length);
-        arrow::MemoryPool* pool = arrow::default_memory_pool();
-        // Configure general Parquet reader settings
-        auto reader_properties = parquet::ReaderProperties(pool);
-        reader_properties.set_buffer_size(4096 * 4);
-        // reader_properties.enable_buffered_stream();
+        try {
+            auto input =
+                std::make_shared<arrow::io::BufferReader>(data, length);
+            arrow::MemoryPool* pool = arrow::default_memory_pool();
+            // Configure general Parquet reader settings
+            auto reader_properties = parquet::ReaderProperties(pool);
+            reader_properties.set_buffer_size(4096 * 4);
+            // reader_properties.enable_buffered_stream();
 
-        // Configure Arrow-specific Parquet reader settings
-        auto arrow_reader_props = parquet::ArrowReaderProperties();
-        arrow_reader_props.set_batch_size(128 * 1024);  // default 64 * 1024
-        arrow_reader_props.set_pre_buffer(false);
+            // Configure Arrow-specific Parquet reader settings
+            auto arrow_reader_props = parquet::ArrowReaderProperties();
+            arrow_reader_props.set_batch_size(128 * 1024);  // default 64 * 1024
+            arrow_reader_props.set_pre_buffer(false);
 
-        parquet::arrow::FileReaderBuilder reader_builder;
-        auto st = reader_builder.Open(input, reader_properties);
-        AssertInfo(st.ok(), "file to read file");
-        reader_builder.memory_pool(pool);
-        reader_builder.properties(arrow_reader_props);
+            parquet::arrow::FileReaderBuilder reader_builder;
+            auto st = reader_builder.Open(input, reader_properties);
+            if (!st.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(st),
+                          "failed to open parquet file reader: {}",
+                          st.ToString());
+            }
+            reader_builder.memory_pool(pool);
+            reader_builder.properties(arrow_reader_props);
 
-        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-        st = reader_builder.Build(&arrow_reader);
-        AssertInfo(st.ok(), "build file reader");
+            std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+            st = reader_builder.Build(&arrow_reader);
+            if (!st.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(st),
+                          "failed to build parquet file reader: {}",
+                          st.ToString());
+            }
 
-        int64_t column_index = 0;
-        auto file_meta = arrow_reader->parquet_reader()->metadata();
+            int64_t column_index = 0;
+            auto file_meta = arrow_reader->parquet_reader()->metadata();
 
-        // dim is unused for sparse float vector
-        // For nullable vectors, dim is stored in Arrow schema metadata
-        if (IsVectorDataType(column_type_) &&
-            !IsVectorArrayDataType(column_type_) &&
-            !IsSparseFloatVectorDataType(column_type_)) {
-            if (nullable_) {
+            // dim is unused for sparse float vector
+            // For nullable vectors, dim is stored in Arrow schema metadata
+            if (IsVectorDataType(column_type_) &&
+                !IsVectorArrayDataType(column_type_) &&
+                !IsSparseFloatVectorDataType(column_type_)) {
+                if (nullable_) {
+                    std::shared_ptr<arrow::Schema> arrow_schema;
+                    auto st = arrow_reader->GetSchema(&arrow_schema);
+                    if (!st.ok()) {
+                        ThrowInfo(ArrowStatusToErrorCode(st),
+                                  "failed to get arrow schema: {}",
+                                  st.ToString());
+                    }
+                    AssertInfo(
+                        arrow_schema->num_fields() == 1,
+                        "Vector field should have exactly 1 field, got {}",
+                        arrow_schema->num_fields());
+
+                    auto field = arrow_schema->field(0);
+                    if (field->HasMetadata()) {
+                        auto metadata = field->metadata();
+                        if (metadata->Contains(DIM_KEY)) {
+                            auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
+                            dim_ = std::stoi(dim_str);
+                            AssertInfo(
+                                dim_ > 0,
+                                "nullable vector dim must be positive, got {}",
+                                dim_);
+                        } else {
+                            ThrowInfo(DataTypeInvalid,
+                                      "nullable vector field metadata missing "
+                                      "required 'dim' field");
+                        }
+                    } else {
+                        ThrowInfo(DataTypeInvalid,
+                                  "nullable vector field is missing metadata");
+                    }
+                } else {
+                    dim_ = GetDimensionFromFileMetaData(
+                        file_meta->schema()->Column(column_index),
+                        column_type_);
+                }
+            } else {
+                dim_ = 1;
+            }
+
+            // For VectorArray, get element type and dim from Arrow schema metadata
+            auto element_type = DataType::NONE;
+            if (IsVectorArrayDataType(column_type_)) {
                 std::shared_ptr<arrow::Schema> arrow_schema;
-                auto st = arrow_reader->GetSchema(&arrow_schema);
-                AssertInfo(st.ok(), "Failed to get arrow schema");
+                st = arrow_reader->GetSchema(&arrow_schema);
+                if (!st.ok()) {
+                    ThrowInfo(ArrowStatusToErrorCode(st),
+                              "failed to get arrow schema for VectorArray: {}",
+                              st.ToString());
+                }
                 AssertInfo(arrow_schema->num_fields() == 1,
-                           "Vector field should have exactly 1 field, got {}",
+                           "VectorArray should have exactly 1 field, got {}",
                            arrow_schema->num_fields());
 
                 auto field = arrow_schema->field(0);
-                if (field->HasMetadata()) {
-                    auto metadata = field->metadata();
-                    if (metadata->Contains(DIM_KEY)) {
-                        auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
-                        dim_ = std::stoi(dim_str);
-                        AssertInfo(
-                            dim_ > 0,
-                            "nullable vector dim must be positive, got {}",
-                            dim_);
-                    } else {
-                        ThrowInfo(DataTypeInvalid,
-                                  "nullable vector field metadata missing "
-                                  "required 'dim' field");
+                AssertInfo(field->HasMetadata(),
+                           "VectorArray field is missing metadata");
+
+                auto metadata = field->metadata();
+                AssertInfo(metadata != nullptr, "VectorArray metadata is null");
+
+                // Get element type
+                AssertInfo(metadata->Contains(ELEMENT_TYPE_KEY_FOR_ARROW),
+                           "VectorArray metadata missing required "
+                           "'elementType' field");
+                auto element_type_str =
+                    metadata->Get(ELEMENT_TYPE_KEY_FOR_ARROW).ValueOrDie();
+                auto element_type_int = std::stoi(element_type_str);
+                element_type = static_cast<DataType>(element_type_int);
+
+                // Get dimension from metadata
+                AssertInfo(metadata->Contains(DIM_KEY),
+                           "VectorArray metadata missing required 'dim' field");
+                auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
+                dim_ = std::stoi(dim_str);
+                AssertInfo(
+                    dim_ > 0, "VectorArray dim must be positive, got {}", dim_);
+            }
+
+            std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+            st = arrow_reader->GetRecordBatchReader(&rb_reader);
+            if (!st.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(st),
+                          "failed to get record batch reader: {}",
+                          st.ToString());
+            }
+
+            if (is_field_data) {
+                auto total_num_rows = file_meta->num_rows();
+
+                // Create FieldData, passing element_type for VectorArray
+                field_data_ = CreateFieldData(column_type_,
+                                              element_type,
+                                              nullable_,
+                                              dim_,
+                                              total_num_rows);
+
+                for (arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+                         maybe_batch : *rb_reader) {
+                    if (!maybe_batch.ok()) {
+                        ThrowInfo(ArrowStatusToErrorCode(maybe_batch.status()),
+                                  "failed to read record batch: {}",
+                                  maybe_batch.status().ToString());
                     }
-                } else {
-                    ThrowInfo(DataTypeInvalid,
-                              "nullable vector field is missing metadata");
+                    auto array = maybe_batch.ValueOrDie()->column(column_index);
+                    // to read
+                    field_data_->FillFieldData(array);
+                }
+
+                if (!nullable_ || !IsVectorDataType(column_type_)) {
+                    AssertInfo(field_data_->IsFull(),
+                               "field data hasn't been filled done");
                 }
             } else {
-                dim_ = GetDimensionFromFileMetaData(
-                    file_meta->schema()->Column(column_index), column_type_);
+                arrow_reader_ = std::move(arrow_reader);
+                record_batch_reader_ = std::move(rb_reader);
             }
-        } else {
-            dim_ = 1;
-        }
-
-        // For VectorArray, get element type and dim from Arrow schema metadata
-        auto element_type = DataType::NONE;
-        if (IsVectorArrayDataType(column_type_)) {
-            std::shared_ptr<arrow::Schema> arrow_schema;
-            st = arrow_reader->GetSchema(&arrow_schema);
-            AssertInfo(st.ok(), "Failed to get arrow schema for VectorArray");
-            AssertInfo(arrow_schema->num_fields() == 1,
-                       "VectorArray should have exactly 1 field, got {}",
-                       arrow_schema->num_fields());
-
-            auto field = arrow_schema->field(0);
-            AssertInfo(field->HasMetadata(),
-                       "VectorArray field is missing metadata");
-
-            auto metadata = field->metadata();
-            AssertInfo(metadata != nullptr, "VectorArray metadata is null");
-
-            // Get element type
-            AssertInfo(
-                metadata->Contains(ELEMENT_TYPE_KEY_FOR_ARROW),
-                "VectorArray metadata missing required 'elementType' field");
-            auto element_type_str =
-                metadata->Get(ELEMENT_TYPE_KEY_FOR_ARROW).ValueOrDie();
-            auto element_type_int = std::stoi(element_type_str);
-            element_type = static_cast<DataType>(element_type_int);
-
-            // Get dimension from metadata
-            AssertInfo(metadata->Contains(DIM_KEY),
-                       "VectorArray metadata missing required 'dim' field");
-            auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
-            dim_ = std::stoi(dim_str);
-            AssertInfo(
-                dim_ > 0, "VectorArray dim must be positive, got {}", dim_);
-        }
-
-        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-        st = arrow_reader->GetRecordBatchReader(&rb_reader);
-        AssertInfo(st.ok(), "get record batch reader");
-
-        if (is_field_data) {
-            auto total_num_rows = file_meta->num_rows();
-
-            // Create FieldData, passing element_type for VectorArray
-            field_data_ = CreateFieldData(
-                column_type_, element_type, nullable_, dim_, total_num_rows);
-
-            for (arrow::Result<std::shared_ptr<arrow::RecordBatch>>
-                     maybe_batch : *rb_reader) {
-                AssertInfo(maybe_batch.ok(), "get batch record success");
-                auto array = maybe_batch.ValueOrDie()->column(column_index);
-                // to read
-                field_data_->FillFieldData(array);
-            }
-
-            if (!nullable_ || !IsVectorDataType(column_type_)) {
-                AssertInfo(field_data_->IsFull(),
-                           "field data hasn't been filled done");
-            }
-        } else {
-            arrow_reader_ = std::move(arrow_reader);
-            record_batch_reader_ = std::move(rb_reader);
+        } catch (const parquet::ParquetException& e) {
+            // parquet throws directly on malformed files (corrupt footer/
+            // pages) in addition to returning statuses; classify as permanent
+            // data corruption instead of collapsing to 2001 at the boundary.
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "parquet parse failed: {}",
+                      e.what());
         }
     }
 }

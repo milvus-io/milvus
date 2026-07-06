@@ -11,6 +11,7 @@
 
 #include "segcore/minhash_c.h"
 
+#include "common/CGoCatch.h"
 #include "minhash/MinHashComputer.h"
 #include "minhash/MinHashHook.h"
 
@@ -19,11 +20,14 @@ InitPermutations(int32_t num_hashes,
                  uint64_t seed,
                  uint64_t* perm_a,
                  uint64_t* perm_b) {
-    milvus::minhash::InitPermutations(num_hashes, seed, perm_a, perm_b);
+    try {
+        milvus::minhash::InitPermutations(num_hashes, seed, perm_a, perm_b);
+    }
+    CGO_CATCH_AND_LOG("InitPermutations")
 }
 
 // ComputeMinHashFromTexts implementation
-void
+CStatus
 ComputeMinHashFromTexts(const char** texts,
                         const int32_t* text_lengths,
                         int32_t num_texts,
@@ -34,18 +38,22 @@ ComputeMinHashFromTexts(const char** texts,
                         int hash_func,
                         int32_t num_hashes,
                         uint32_t* signatures) {
-    // Initialize SIMD hooks based on runtime CPU detection
-    milvus::minhash::minhash_hook_init();
+    try {
+        // Initialize SIMD hooks based on runtime CPU detection
+        milvus::minhash::minhash_hook_init();
 
-    milvus::minhash::ComputeFromTextsDirectly(
-        texts,
-        text_lengths,
-        num_texts,
-        tokenizer_ptr,
-        shingle_size,
-        perm_a,
-        perm_b,
-        (milvus::minhash::HashFunction)hash_func,
-        num_hashes,
-        signatures);
+        milvus::minhash::ComputeFromTextsDirectly(
+            texts,
+            text_lengths,
+            num_texts,
+            tokenizer_ptr,
+            shingle_size,
+            perm_a,
+            perm_b,
+            (milvus::minhash::HashFunction)hash_func,
+            num_hashes,
+            signatures);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

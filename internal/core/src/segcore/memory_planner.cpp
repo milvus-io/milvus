@@ -41,6 +41,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -375,10 +376,13 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                             reader_memory_limit,
                             milvus::storage::GetReaderProperties(),
                             milvus::storage::GetArrowReaderProperties());
-                        AssertInfo(
-                            result.ok(),
-                            "[StorageV2] Failed to create row group reader: {}",
-                            result.status().ToString());
+                        if (!result.ok()) {
+                            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
+                                          result.status()),
+                                      "[StorageV2] Failed to create row group "
+                                      "reader: {}",
+                                      result.status().ToString());
+                        }
                         auto row_group_reader = result.ValueOrDie();
                         auto close_guard =
                             folly::makeGuard([&row_group_reader]() {
@@ -387,23 +391,30 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                         auto status =
                             row_group_reader->SetRowGroupOffsetAndCount(
                                 block.offset, block.count);
-                        AssertInfo(status.ok(),
-                                   "[StorageV2] Failed to set row group offset "
-                                   "and count {} and {} with error {}",
-                                   block.offset,
-                                   block.count,
-                                   status.ToString());
+                        if (!status.ok()) {
+                            ThrowInfo(
+                                milvus::storage::ArrowStatusToErrorCode(status),
+                                "[StorageV2] Failed to set row group offset "
+                                "and count {} and {} with error {}",
+                                block.offset,
+                                block.count,
+                                status.ToString());
+                        }
                         auto ret = std::make_shared<ArrowDataWrapper>();
                         for (int64_t i = 0; i < block.count; ++i) {
                             std::shared_ptr<arrow::Table> table;
                             auto status =
                                 row_group_reader->ReadNextRowGroup(&table);
-                            AssertInfo(status.ok(),
-                                       "[StorageV2] Failed to read row group "
-                                       "{} from file {} with error {}",
-                                       block.offset + i,
-                                       file,
-                                       status.ToString());
+                            if (!status.ok()) {
+                                ThrowInfo(
+                                    milvus::storage::ArrowStatusToErrorCode(
+                                        status),
+                                    "[StorageV2] Failed to read row group "
+                                    "{} from file {} with error {}",
+                                    block.offset + i,
+                                    file,
+                                    status.ToString());
+                            }
                             ret->arrow_tables.push_back(
                                 {file_idx,
                                  static_cast<size_t>(block.offset + i),
@@ -582,9 +593,12 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                                    batch.rg_count,
                                                    reader_memory_limit,
                                                    read_parallelism);
-            AssertInfo(tables_result.ok(),
-                       "[StorageV2] Failed to read batch: " +
-                           tables_result.status().ToString());
+            if (!tables_result.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
+                              tables_result.status()),
+                          "[StorageV2] Failed to read batch: " +
+                              tables_result.status().ToString());
+            }
             auto all_tables = std::move(tables_result).ValueOrDie();
             AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
                        "reader returns less tables than expected, batch rg "

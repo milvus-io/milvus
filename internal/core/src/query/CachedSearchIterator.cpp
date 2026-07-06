@@ -70,8 +70,12 @@ CachedSearchIterator::CachedSearchIterator(
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Failed to create iterators from index");
+        // Route the knowhere status through the shared mapper so the
+        // retriability verdict survives (e.g. malloc_error -> retriable
+        // MemAllocateFailed) instead of collapsing to UnexpectedError.
+        ThrowInfo(KnowhereStatusToErrorCode(expected_iterators.error()),
+                  "Failed to create iterators from index: {}",
+                  expected_iterators.what());
     }
 }
 
@@ -98,8 +102,10 @@ CachedSearchIterator::InitializeChunkedIterators(
                               std::make_move_iterator(chunk_iterators.begin()),
                               std::make_move_iterator(chunk_iterators.end()));
         } else {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "Failed to create iterators from index");
+            // Same rationale as above: preserve the knowhere classification.
+            ThrowInfo(KnowhereStatusToErrorCode(expected_iterators.error()),
+                      "Failed to create brute-force iterators: {}",
+                      expected_iterators.what());
         }
         offset += chunk_size;
     }

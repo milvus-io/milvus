@@ -41,8 +41,12 @@ guess_data_type() {
         return TantivyDataType::F64;
     }
 
-    throw fmt::format("guess_data_type: unsupported data type: {}",
-                      typeid(T).name());
+    // NB: throwing a std::string (fmt::format result) put this outside the
+    // exception hierarchy entirely -- catch (std::exception&) could not see
+    // it, only catch (...). Throw a typed SegcoreError instead.
+    ThrowInfo(milvus::ErrorCode::Unsupported,
+              "guess_data_type: unsupported data type: {}",
+              typeid(T).name());
 }
 
 // TODO: should split this into IndexWriter & IndexReader.

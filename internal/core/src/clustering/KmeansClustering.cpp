@@ -321,7 +321,7 @@ KmeansClustering::StreamingAssignandUpload(
             dataset->SetIsOwner(true);
             auto res = cluster_node.Assign(*dataset);
             if (!res.has_value()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                           fmt::format("failed to kmeans assign: {}: {}",
                                       KnowhereStatusString(res.error()),
                                       res.what()));
@@ -451,7 +451,7 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     // return id mapping
     auto res = cluster_node.Train(*dataset, train_conf);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   fmt::format("failed to kmeans train: {}: {}",
                               KnowhereStatusString(res.error()),
                               res.what()));
@@ -465,10 +465,10 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
 
     auto centroids_res = cluster_node.GetCentroids();
     if (!centroids_res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(centroids_res.error()),
                   fmt::format("failed to get centroids: {}: {}",
-                              KnowhereStatusString(res.error()),
-                              res.what()));
+                              KnowhereStatusString(centroids_res.error()),
+                              centroids_res.what()));
     }
     // centroids owned by cluster_node
     centroids_res.value()->SetIsOwner(false);

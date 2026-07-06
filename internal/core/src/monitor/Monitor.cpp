@@ -338,6 +338,16 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_load,
                         internal_cgo_pool_size,
                         cgoLoadPoolLabel);
 
+std::map<std::string, std::string> untypedCgoExceptionLabel = {};
+DEFINE_PROMETHEUS_COUNTER_FAMILY(
+    internal_cgo_untyped_exception,
+    "[cpp]exceptions reaching the cgo boundary without a typed error code "
+    "(collapsed to UnexpectedError); shrinking rate = classification "
+    "coverage improving");
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_untyped_exception_total,
+                          internal_cgo_untyped_exception,
+                          untypedCgoExceptionLabel);
+
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_inflight_task_total,
                                "[cpp]async cgo inflight task");
 DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_search,

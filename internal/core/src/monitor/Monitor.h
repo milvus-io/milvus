@@ -91,6 +91,8 @@ DECLARE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_load);
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_executing_task_total);
 DECLARE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_search);
 DECLARE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_load);
+DECLARE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_untyped_exception);
+DECLARE_PROMETHEUS_COUNTER(internal_cgo_untyped_exception_total);
 
 // storage thread pool metrics
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_capacity);
