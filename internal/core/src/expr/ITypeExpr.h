@@ -914,25 +914,43 @@ using MatchType = proto::plan::MatchType;
 
 class MatchExpr : public ITypeFilterExpr {
  public:
-    MatchExpr(const std::string& struct_name,
+    MatchExpr(int64_t field_id,
+              const std::string& field_name,
+              std::vector<std::string> nested_path,
               MatchType match_type,
               int64_t count,
               const TypedExprPtr& predicate)
-        : struct_name_(struct_name), match_type_(match_type), count_(count) {
+        : field_id_(field_id),
+          field_name_(field_name),
+          nested_path_(std::move(nested_path)),
+          match_type_(match_type),
+          count_(count) {
         inputs_.push_back(predicate);
     }
 
     std::string
     ToString() const override {
-        return fmt::format("MatchExpr(struct_name={}, match_type={}, count={})",
-                           struct_name_,
-                           proto::plan::MatchType_Name(match_type_),
-                           count_);
+        return fmt::format(
+            "MatchExpr(field_id={}, field_name={}, match_type={}, count={})",
+            field_id_,
+            field_name_,
+            proto::plan::MatchType_Name(match_type_),
+            count_);
+    }
+
+    int64_t
+    get_field_id() const {
+        return field_id_;
     }
 
     const std::string&
-    get_struct_name() const {
-        return struct_name_;
+    get_field_name() const {
+        return field_name_;
+    }
+
+    const std::vector<std::string>&
+    get_nested_path() const {
+        return nested_path_;
     }
 
     MatchType
@@ -946,7 +964,17 @@ class MatchExpr : public ITypeFilterExpr {
     }
 
  private:
-    std::string struct_name_;
+    // field_id / field_name identify where to fetch ArrayOffsets from.
+    // For plain array and JSON: field_id resolves directly in the segment.
+    // For struct: field_id is the struct's logical id from Go schema and isn't
+    // resolvable in C++ schema.fields_.
+    // Dispatch in MatchExpr::Eval uses field_name first (struct check) and
+    // then falls back to schema.GetFieldType(field_id).
+    int64_t field_id_;
+    std::string field_name_;
+    // For JSON field MATCH: path to the array-of-scalars leaf used to
+    // pin the JSON path index. Empty for plain array / struct.
+    std::vector<std::string> nested_path_;
     MatchType match_type_;
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
 };

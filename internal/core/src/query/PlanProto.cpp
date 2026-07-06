@@ -1000,14 +1000,20 @@ ProtoParser::ParseElementFilterExprs(
 
 expr::TypedExprPtr
 ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
-    // field_name carries the struct/scalar array field name (the old struct_name);
-    // for struct and scalar arrays it still drives name-based field resolution.
-    auto struct_name = expr_pb.column().field_name();
+    const auto& column_info = expr_pb.column();
+    auto field_id = column_info.field_id();
+    auto field_name = column_info.field_name();
+    std::vector<std::string> nested_path(column_info.nested_path().begin(),
+                                         column_info.nested_path().end());
     auto match_type = expr_pb.match_type();
     auto count = expr_pb.count();
     auto predicate = this->ParseExprs(expr_pb.predicate());
-    return std::make_shared<expr::MatchExpr>(
-        struct_name, match_type, count, predicate);
+    return std::make_shared<expr::MatchExpr>(field_id,
+                                             field_name,
+                                             std::move(nested_path),
+                                             match_type,
+                                             count,
+                                             predicate);
 }
 
 expr::TypedExprPtr

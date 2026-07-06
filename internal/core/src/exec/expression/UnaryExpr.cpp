@@ -65,6 +65,171 @@ namespace milvus {
 class SkipIndex;
 
 namespace exec {
+namespace {
+
+template <typename T, typename ValueType>
+struct UnarySubBatchExecutor {
+    proto::plan::OpType op_type_;
+    const TargetBitmap& bitmap_input_;
+    size_t& processed_cursor_;
+
+    template <FilterType filter_type = FilterType::sequential>
+    void
+    operator()(const T* data,
+               const bool* valid_data,
+               const int32_t* offsets,
+               const int size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res,
+               const ValueType& val) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor_ += size;
+            return;
+        }
+        switch (op_type_) {
+            case proto::plan::GreaterThan: {
+                UnaryElementFunc<T, proto::plan::GreaterThan, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::GreaterEqual: {
+                UnaryElementFunc<T, proto::plan::GreaterEqual, filter_type>
+                    func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::LessThan: {
+                UnaryElementFunc<T, proto::plan::LessThan, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::LessEqual: {
+                UnaryElementFunc<T, proto::plan::LessEqual, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::Equal: {
+                UnaryElementFunc<T, proto::plan::Equal, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::NotEqual: {
+                UnaryElementFunc<T, proto::plan::NotEqual, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::PrefixMatch: {
+                UnaryElementFunc<T, proto::plan::PrefixMatch, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFunc<T, proto::plan::PostfixMatch, filter_type>
+                    func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFunc<T, proto::plan::InnerMatch, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            case proto::plan::Match: {
+                UnaryElementFunc<T, proto::plan::Match, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input_,
+                     processed_cursor_,
+                     offsets);
+                break;
+            }
+            default:
+                ThrowInfo(
+                    OpTypeInvalid,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op_type_));
+        }
+        // There is a batch operation in UnaryElementFunc, so keep the batch
+        // intact and mask invalid entries after the batch operation.
+        if (valid_data != nullptr) {
+            bool has_bitmap_input = !bitmap_input_.empty();
+            for (int i = 0; i < size; i++) {
+                if (has_bitmap_input && !bitmap_input_[i + processed_cursor_]) {
+                    continue;
+                }
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = (offsets) ? offsets[i] : i;
+                }
+                if (!valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
+        }
+        processed_cursor_ += size;
+    }
+};
+
+}  // namespace
+
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
@@ -190,7 +355,11 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    // JSON keeps its own DataType::JSON dispatch (by val_case) so that the
+    // element-level path and the normal JSON path share one branch. Only
+    // non-JSON element-level fields (struct / plain array) get rewritten.
+    if (expr_->column_.element_level_ &&
+        expr_->column_.data_type_ != DataType::JSON) {
         data_type = expr_->column_.element_type_;
     }
     switch (data_type) {
@@ -283,7 +452,11 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         result = ExecRangeVisitorImplJson<bool>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kInt64Val:
-                        result = ExecRangeVisitorImplJson<int64_t>(context);
+                        if (expr_->column_.element_level_) {
+                            result = ExecRangeVisitorImplJson<double>(context);
+                        } else {
+                            result = ExecRangeVisitorImplJson<int64_t>(context);
+                        }
                         break;
                     case proto::plan::GenericValue::ValCase::kFloatVal:
                         result = ExecRangeVisitorImplJson<double>(context);
@@ -747,6 +920,63 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     ExprValueType val = value_arg_.GetValue<ExprValueType>();
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+
+    if (expr_->column_.element_level_) {
+        AssertInfo(has_offset_input_ && input != nullptr,
+                   "JSON element-level raw filtering requires row offsets");
+        if constexpr (std::is_same_v<ExprValueType, proto::plan::Array>) {
+            ThrowInfo(DataTypeInvalid,
+                      "MATCH on JSON array elements does not support array "
+                      "literal comparison");
+        } else {
+            TargetBitmap json_res;
+            TargetBitmap json_valid_res;
+
+            size_t processed_cursor = 0;
+            UnarySubBatchExecutor<ExprValueType, ExprValueType>
+                execute_sub_batch{op_type, bitmap_input, processed_cursor};
+
+            int64_t processed_size = 0;
+            FixedVector<ExprValueType> element_values;
+            FixedVector<bool> element_valid;
+            VisitJsonRowsByOffsets(
+                input, [&](const Json& json, bool row_valid) {
+                    auto elem_count =
+                        ExtractJsonElementValues<ExprValueType>(json,
+                                                                row_valid,
+                                                                pointer,
+                                                                element_values,
+                                                                element_valid);
+                    if (elem_count == 0) {
+                        return;
+                    }
+
+                    auto old_size = json_res.size();
+                    json_res.resize(old_size + elem_count, false);
+                    json_valid_res.resize(old_size + elem_count, true);
+
+                    TargetBitmapView res_view(json_res);
+                    TargetBitmapView valid_res_view(json_valid_res);
+                    execute_sub_batch
+                        .template operator()<FilterType::sequential>(
+                            element_values.data(),
+                            element_valid.data(),
+                            nullptr,
+                            static_cast<int>(elem_count),
+                            res_view + old_size,
+                            valid_res_view + old_size,
+                            val);
+                    processed_size += elem_count;
+                });
+            AssertInfo(processed_size == static_cast<int64_t>(json_res.size()),
+                       "internal error: expr processed JSON elements {} not "
+                       "equal result size {}",
+                       processed_size,
+                       json_res.size());
+            return std::make_shared<ColumnVector>(std::move(json_res),
+                                                  std::move(json_valid_res));
+        }
+    }
 
 // For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
 // number in a single parse.  Branches on actual type to preserve int64
@@ -1916,7 +2146,9 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     // Refine: check if the index supports this specific operation/type.
     // May downgrade from ScalarIndex to RawData.
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    // See Eval() for the JSON exemption rationale.
+    if (expr_->column_.element_level_ &&
+        expr_->column_.data_type_ != DataType::JSON) {
         data_type = expr_->column_.element_type_;
     }
 

@@ -48,7 +48,8 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    if (expr_->column_.element_level_ &&
+        expr_->column_.data_type_ != DataType::JSON) {
         data_type = expr_->column_.element_type_;
     }
     switch (data_type) {

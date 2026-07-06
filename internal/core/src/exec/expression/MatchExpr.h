@@ -84,6 +84,27 @@ class PhyMatchFilterExpr : public Expr {
     }
 
  private:
+    // Shared element -> row aggregation. Works for any source of ArrayOffsets:
+    //   - plain array / struct array: segment_->GetArrayOffsets(field_id)
+    //   - JSON with path index (future): index-owned ArrayOffsets
+    // The predicate (inputs_[0]) must produce an element-level bitset aligned
+    // with the supplied ArrayOffsets.
+    void
+    EvalWithOffsets(EvalCtx& context,
+                    VectorPtr& result,
+                    std::shared_ptr<const milvus::IArrayOffsets> array_offsets);
+
+    // JSON path entry point. For this checkpoint it dispatches straight to the
+    // brute-force path; the index fast-path is added in a later step.
+    void
+    EvalJson(EvalCtx& context, VectorPtr& result);
+
+    // JSON brute-force: iterate JSON rows one at a time, evaluate the inner
+    // predicate through the normal Eval framework, then aggregate that row's
+    // element-level bitmap with MATCH semantics.
+    void
+    EvalJsonBrute(EvalCtx& context, VectorPtr& result);
+
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
     int64_t active_count_;

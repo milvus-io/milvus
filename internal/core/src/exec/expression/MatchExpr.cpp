@@ -228,10 +228,135 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
 
-    auto schema = segment_->get_schema();
-    auto field_meta = schema.ResolveArrayElementField(expr_->get_struct_name());
+    // Dispatch from schema. A real JSON field is resolvable by field_id, so we
+    // intercept it before name-based array resolution. Struct logical ids from
+    // the Go schema are NOT present in the C++ schema, so guard the type probe
+    // with has_field. Plain scalar arrays and struct arrays are resolved by
+    // name via ResolveArrayElementField, keeping the existing element
+    // aggregation (ArrayOffsets) path unchanged.
+    const auto& schema = segment_->get_schema();
+    auto field_id = FieldId(expr_->get_field_id());
+    if (schema.has_field(field_id) &&
+        schema.GetFieldType(field_id) == DataType::JSON) {
+        EvalJson(context, result);
+        return;
+    }
 
-    auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());
+    auto field_meta = schema.ResolveArrayElementField(expr_->get_field_name());
+    EvalWithOffsets(
+        context, result, segment_->GetArrayOffsets(field_meta.get_id()));
+}
+
+void
+PhyMatchFilterExpr::EvalJson(EvalCtx& context, VectorPtr& result) {
+    // The JSON path index fast-path is added in a later step; for this
+    // checkpoint JSON MATCH always runs the brute-force per-row path.
+    EvalJsonBrute(context, result);
+}
+
+void
+PhyMatchFilterExpr::EvalJsonBrute(EvalCtx& context, VectorPtr& result) {
+    auto input = context.get_offset_input();
+    int64_t batch_rows =
+        has_offset_input_ ? input->size()
+                          : std::min(batch_size_, active_count_ - current_pos_);
+
+    if (batch_rows <= 0) {
+        result = nullptr;
+        return;
+    }
+
+    result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
+                                            TargetBitmap(batch_rows, true));
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+    TargetBitmapView result_view(col_vec->GetRawData(), col_vec->size());
+
+    auto match_type = expr_->get_match_type();
+    int64_t threshold = expr_->get_count();
+
+    auto match_one_row = [&](int64_t row_idx,
+                             const TargetBitmapView& match_view,
+                             const TargetBitmapView& valid_view,
+                             int64_t elem_count,
+                             bool all_valid) {
+        auto dispatch = [&]<bool all_valid_v>() {
+            switch (match_type) {
+                case MatchType::MatchAny:
+                    return MatchSingleRow<MatchType::MatchAny, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchAll:
+                    return MatchSingleRow<MatchType::MatchAll, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchLeast:
+                    return MatchSingleRow<MatchType::MatchLeast, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchMost:
+                    return MatchSingleRow<MatchType::MatchMost, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchExact:
+                    return MatchSingleRow<MatchType::MatchExact, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                default:
+                    ThrowInfo(OpTypeInvalid,
+                              "Unsupported match type: {}",
+                              static_cast<int>(match_type));
+            }
+        };
+        if (all_valid ? dispatch.template operator()<true>()
+                      : dispatch.template operator()<false>()) {
+            result_view[row_idx] = true;
+        }
+    };
+
+    TargetBitmap empty_match;
+    TargetBitmap empty_valid;
+    TargetBitmapView empty_match_view(empty_match);
+    TargetBitmapView empty_valid_view(empty_valid);
+
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        int32_t row_id = has_offset_input_
+                             ? (*input)[i]
+                             : static_cast<int32_t>(current_pos_ + i);
+        OffsetVector one_row;
+        one_row.push_back(row_id);
+        EvalCtx eval_ctx(context.get_exec_context(), &one_row);
+
+        VectorPtr match_result;
+        inputs_[0]->Eval(eval_ctx, match_result);
+        if (match_result == nullptr) {
+            match_one_row(i, empty_match_view, empty_valid_view, 0, true);
+            continue;
+        }
+
+        auto match_result_col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(match_result);
+        AssertInfo(match_result_col_vec != nullptr,
+                   "Match result should be ColumnVector");
+        AssertInfo(match_result_col_vec->IsBitmap(),
+                   "Match result should be bitmap");
+
+        TargetBitmapView match_view(match_result_col_vec->GetRawData(),
+                                    match_result_col_vec->size());
+        TargetBitmapView valid_view(match_result_col_vec->GetValidRawData(),
+                                    match_result_col_vec->size());
+        match_one_row(i,
+                      match_view,
+                      valid_view,
+                      match_result_col_vec->size(),
+                      valid_view.all());
+    }
+
+    if (!has_offset_input_) {
+        current_pos_ += batch_rows;
+    }
+}
+
+void
+PhyMatchFilterExpr::EvalWithOffsets(
+    EvalCtx& context,
+    VectorPtr& result,
+    std::shared_ptr<const IArrayOffsets> array_offsets) {
+    auto input = context.get_offset_input();
     AssertInfo(array_offsets != nullptr, "Array offsets not available");
 
     int64_t batch_rows;
