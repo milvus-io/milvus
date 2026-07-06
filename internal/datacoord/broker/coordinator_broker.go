@@ -58,6 +58,11 @@ type Broker interface {
 	// DescribeDatabase retrieves database information via RootCoord.
 	// Used for CMEK validation during snapshot restore.
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
+
+	// CommitShardSplitRouting commits a shard-split routing change into the
+	// collection meta via RootCoord (the write-switch routing commit and the
+	// adoption flip of a split). The call is idempotent by shard state.
+	CommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) error
 }
 
 type coordinatorBroker struct {
@@ -322,4 +327,26 @@ func (b *coordinatorBroker) DescribeDatabase(ctx context.Context, dbName string)
 	}
 
 	return resp, nil
+}
+
+func (b *coordinatorBroker) CommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) error {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	log := mlog.With(
+		mlog.String("collectionName", req.GetCollectionName()),
+		mlog.Int64("collectionID", req.GetCollectionId()),
+	)
+
+	if req.Base == nil {
+		req.Base = commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID()))
+	}
+
+	resp, err := b.mixCoord.CommitShardSplitRouting(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn(ctx, "CommitShardSplitRouting failed", mlog.Err(err))
+		return err
+	}
+
+	log.Info(ctx, "CommitShardSplitRouting succeeded")
+	return nil
 }

@@ -56,6 +56,48 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestAssignChannelsByPK_FlagEquivalence(t *testing.T) {
+	ch := []string{"c0", "c1", "c2", "c3"}
+	pks := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7}}}}
+
+	key := paramtable.Get().ProxyCfg.EnableRoutingTable.Key
+	paramtable.Get().Save(key, "false")
+	msgOff := &msgstream.InsertMsg{}
+	legacy, err := assignChannelsByPK(pks, ch, msgOff)
+	assert.NoError(t, err)
+	legacyHash := msgOff.HashValues
+
+	paramtable.Get().Save(key, "true")
+	msgOn := &msgstream.InsertMsg{}
+	routed, err := assignChannelsByPK(pks, ch, msgOn)
+	assert.NoError(t, err)
+	routedHash := msgOn.HashValues
+
+	assert.Equal(t, legacy, routed)
+	assert.Equal(t, legacyHash, routedHash)
+	paramtable.Get().Reset(key)
+}
+
+func TestRouteDeleteHashValues_FlagEquivalence(t *testing.T) {
+	vChannels := []string{"c0", "c1", "c2", "c3"}
+	pks := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7}}}}
+
+	key := paramtable.Get().ProxyCfg.EnableRoutingTable.Key
+	paramtable.Get().Save(key, "false")
+	legacy, err := routeDeleteHashValues(pks, vChannels)
+	assert.NoError(t, err)
+	paramtable.Get().Save(key, "true")
+	routed, err := routeDeleteHashValues(pks, vChannels)
+	assert.NoError(t, err)
+	paramtable.Get().Reset(key)
+
+	// flag-off must equal the legacy hash, and flag-on must equal flag-off.
+	expected, err := typeutil.HashPK2Channels(pks, vChannels)
+	assert.NoError(t, err)
+	assert.Equal(t, expected, legacy)
+	assert.Equal(t, legacy, routed)
+}
+
 func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
 	info := &SearchInfo{
 		planInfo: &planpb.QueryInfo{

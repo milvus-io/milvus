@@ -641,3 +641,80 @@ func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 	}
 	return w
 }
+
+func newFlusherCreateVChannelMessage(t *testing.T, vchannel string, collectionID int64) message.ImmutableCreateVChannelMessageV2 {
+	t.Helper()
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:        collectionID,
+			PartitionIds:        []int64{2},
+			SplitTaskId:         100,
+			SplitSourceVchannel: "v1",
+			KeyRange:            &message.KeyRange{Upper: []byte{0x80}},
+		}).
+		WithBody(&message.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(4))
+	return message.MustAsImmutableCreateVChannelMessageV2(msg)
+}
+
+func TestFlusherWhenCreateVChannelAlreadyBuilt(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil).Once()
+	flusher := newTestWALFlusher(rs)
+	// a data sync service already exists for the target vchannel: skip the spawn.
+	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+	flusher.flusherComponents.WhenCreateVChannel(newFlusherCreateVChannelMessage(t, "v2", 7))
+	assert.Len(t, flusher.flusherComponents.dataServices, 1)
+}
+
+func TestFlusherWhenCreateVChannelOlderThanCheckpoint(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil).Once()
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.recoveryCheckPointTimeTick = 1000
+	// the genesis is older than the recovery checkpoint: skip the spawn.
+	flusher.flusherComponents.WhenCreateVChannel(newFlusherCreateVChannelMessage(t, "v2", 7))
+	assert.Empty(t, flusher.flusherComponents.dataServices)
+}
+
+// dispatch must NOT forward a CreateVChannel message to the data sync service
+// after spawning its genesis DSS. CreateVChannel is a V2 message and the msgpack
+// adaptor (fromMessageToTsMsgV2) has no case for it, so forwarding it would panic
+// ("unsupported message type"). The CreateCollection branch survives the same
+// fall-through only because it is a V1 message handled by the unmarshaler path.
+// Pre-populating dataServices makes spawnGenesisDataSyncService short-circuit (so
+// no real pipeline is built) while preserving the forward path that, without the
+// dispatch's `return nil`, would reach the panic.
+func TestWALFlusher_DispatchCreateVChannelDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+
+	msg := message.NewCreateVChannelMessageBuilderV2().
+		WithVChannel("v2").
+		WithHeader(&message.CreateVChannelMessageHeader{
+			CollectionId:        7,
+			PartitionIds:        []int64{2},
+			SplitTaskId:         100,
+			SplitSourceVchannel: "v1",
+			KeyRange:            &message.KeyRange{Upper: []byte{0x80}},
+		}).
+		WithBody(&message.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+		}).
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(4))
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+}

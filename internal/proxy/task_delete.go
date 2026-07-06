@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -147,6 +148,17 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// routeDeleteHashValues returns the per-row channel hash for delete repacking.
+// When the routing-table kill-switch is on it routes via the RoutingTable
+// (bit-for-bit equivalent to the legacy path); otherwise it falls back to the
+// legacy typeutil.HashPK2Channels.
+func routeDeleteHashValues(primaryKeys *schemapb.IDs, vChannels []string) ([]uint32, error) {
+	if paramtable.Get().ProxyCfg.EnableRoutingTable.GetAsBool() {
+		return routing.DeriveCompat(vChannels).HashPKs(primaryKeys), nil
+	}
+	return typeutil.HashPK2Channels(primaryKeys, vChannels)
+}
+
 func repackDeleteMsgByHash(
 	ctx context.Context,
 	primaryKeys *schemapb.IDs,
@@ -177,7 +189,7 @@ func repackDeleteMsgByHash(
 			hashValues[i] = channelID
 		}
 	} else {
-		hashValues, err = typeutil.HashPK2Channels(primaryKeys, vChannels)
+		hashValues, err = routeDeleteHashValues(primaryKeys, vChannels)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -396,6 +408,12 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	channelNames, err := dr.chMgr.getVChannels(dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get vchannels from collection", err)
+	}
+	// For a range-routed (namespace) collection, narrow the channel set to the single
+	// shard owning this request's namespace; the delete then lands wholly on that shard.
+	channelNames, err = resolveRangeRoutingChannels(colInfo, dr.req.GetNamespace(), channelNames)
+	if err != nil {
+		return ErrWithLog(log, "Failed to resolve range routing channel", err)
 	}
 	dr.vChannels = channelNames
 

@@ -291,6 +291,20 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			)
 			logger.Info(ddn.ctx, "receive schema change message")
 			ddn.msgHandler.HandleSchemaChange(ddn.ctx, schemaMsg.SchemaChangeMessage)
+		case commonpb.MsgType_SplitShard:
+			splitMsg := msg.(*adaptor.SplitShardMessageBody)
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", splitMsg.SplitShardMessage.TimeTick()),
+				mlog.Int64s("segmentIDs", splitMsg.SplitShardMessage.Header().FlushedSegmentIds),
+			)
+			logger.Info(ddn.ctx, "receive split shard message")
+			if err := ddn.msgHandler.HandleSplitShard(splitMsg.SplitShardMessage); err != nil {
+				logger.Warn(ddn.ctx, "handle split shard message failed", mlog.Err(err))
+			} else {
+				logger.Info(ddn.ctx, "handle split shard message success")
+			}
 		case commonpb.MsgType_AlterCollection:
 			alterCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)
 			logger := mlog.With(

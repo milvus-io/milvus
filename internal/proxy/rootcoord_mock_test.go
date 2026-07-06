@@ -694,6 +694,10 @@ func (coord *MixCoordMock) ShowCollectionIDs(ctx context.Context, req *rootcoord
 	panic("implements me")
 }
 
+func (coord *MixCoordMock) CommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 func (coord *MixCoordMock) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {

@@ -70,4 +70,27 @@ func TestStreamingError(t *testing.T) {
 	assert.True(t, streamingErr.IsUnrecoverable())
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, pbErr.Code)
+
+	streamingErr = NewShardFenced("v1", 4242)
+	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_SHARD_FENCED, cause: v1 is fenced by shard split")
+	assert.True(t, streamingErr.IsShardFenced())
+	// T_switch is carried on the error for the split coordinator to recover.
+	assert.Equal(t, uint64(4242), streamingErr.FencedTimeTick)
+	assert.False(t, streamingErr.IsRoutingStale())
+	// the producer must not retry on the fenced vchannel,
+	// the error should be returned to the caller to refresh the routing table.
+	assert.True(t, streamingErr.IsUnrecoverable())
+	assert.False(t, streamingErr.IsWrongStreamingNode())
+	assert.False(t, streamingErr.IsFenced())
+	pbErr = streamingErr.AsPBError()
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, pbErr.Code)
+
+	streamingErr = NewRoutingStale("routing version %d is stale, latest is %d", 1, 2)
+	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_ROUTING_STALE, cause: routing version 1 is stale, latest is 2")
+	assert.True(t, streamingErr.IsRoutingStale())
+	assert.False(t, streamingErr.IsShardFenced())
+	assert.True(t, streamingErr.IsUnrecoverable())
+	assert.False(t, streamingErr.IsWrongStreamingNode())
+	pbErr = streamingErr.AsPBError()
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ROUTING_STALE, pbErr.Code)
 }

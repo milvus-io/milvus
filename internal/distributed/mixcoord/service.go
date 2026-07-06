@@ -544,6 +544,10 @@ func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	return s.mixCoord.AlterCollectionField(ctx, request)
 }
 
+func (s *Server) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CommitShardSplitRouting(ctx, request)
+}
+
 func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	return s.mixCoord.AlterCollectionSchema(ctx, request)
 }

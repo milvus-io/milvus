@@ -88,6 +88,10 @@ type compactionInspector struct {
 	handler          Handler
 	scheduler        task.GlobalScheduler
 	ievm             IndexEngineVersionManager
+	// isChannelSplitting reports whether the channel is referenced by an
+	// active shard split task; such a channel accepts no new compaction
+	// during the split window. Nil means no shard split manager is wired.
+	isChannelSplitting func(channel string) bool
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -193,6 +197,60 @@ func newCompactionInspector(meta CompactionMeta,
 		scheduler:        scheduler,
 		analyzeScheduler: analyzeScheduler,
 		ievm:             ievm,
+	}
+}
+
+// setChannelSplittingChecker installs the shard-split freeze predicate: a
+// channel referenced by an active split task accepts no new compaction.
+func (c *compactionInspector) setChannelSplittingChecker(checker func(channel string) bool) {
+	c.isChannelSplitting = checker
+}
+
+// preemptTasksByChannel removes every queued and executing compaction task
+// of the channel and cleans them properly: the cleaned state is persisted
+// (so the task is not revived from the catalog after a restart) and the
+// compacting flags of the input segments are released (so the shard split
+// redistribution is never starved by segments locked by a dead task).
+// Together with the enqueue-time freeze it guarantees the split preempts
+// compaction instead of waiting behind it: in-flight tasks are killed here,
+// and new ones are rejected for the whole split window. A preempted task
+// still running on the worker is orphaned; its result is rejected at report
+// time because the task is no longer tracked — the same semantics as the
+// channel-release path.
+func (c *compactionInspector) preemptTasksByChannel(channel string) {
+	logger := mlog.With(mlog.String("channel", channel))
+	preempted := make([]CompactionTask, 0)
+	c.queueTasks.RemoveAll(func(task CompactionTask) bool {
+		if task.GetTaskProto().GetChannel() == channel {
+			preempted = append(preempted, task)
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+			return true
+		}
+		return false
+	})
+
+	c.executingGuard.Lock()
+	for id, task := range c.executingTasks {
+		if task.GetTaskProto().GetChannel() == channel {
+			preempted = append(preempted, task)
+			delete(c.executingTasks, id)
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+		}
+	}
+	c.executingGuard.Unlock()
+
+	for _, task := range preempted {
+		logger.Info(context.TODO(), "compaction task preempted by shard split",
+			mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
+			mlog.String("type", task.GetTaskProto().GetType().String()),
+			mlog.String("state", task.GetTaskProto().GetState().String()))
+		if !task.Clean() {
+			logger.Warn(context.TODO(), "failed to clean the preempted compaction task, it will be retried by the clean loop",
+				mlog.Int64("planID", task.GetTaskProto().GetPlanID()))
+			c.cleaningGuard.Lock()
+			c.cleaningTasks[task.GetTaskProto().GetPlanID()] = task
+			c.cleaningGuard.Unlock()
+		}
 	}
 }
 
@@ -552,6 +610,15 @@ func (c *compactionInspector) getCompactionTask(planID int64) CompactionTask {
 
 func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
+	if c.isChannelSplitting != nil && c.isChannelSplitting(task.GetChannel()) {
+		// The channel is referenced by an active shard split: compacting it
+		// would churn the redistribution work list and replace the segment
+		// IDs the in-place delegator handoff relies on. Every compaction
+		// path (mix, L0, clustering, manual) funnels through here, so this
+		// is the single freeze point of the split window.
+		log.RatedInfo(context.TODO(), rate.Limit(60), "channel is splitting, reject compaction during the split window", mlog.String("channel", task.GetChannel()))
+		return merr.WrapErrCompactionPlanConflict("channel is splitting")
+	}
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		// Conflict is normal

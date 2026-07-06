@@ -289,6 +289,22 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			return nil
 		}
 		impl.flusherComponents.WhenCreateCollection(createCollectionMsg)
+	case message.MessageTypeCreateVChannel:
+		createVChannelMsg, err := message.AsImmutableCreateVChannelMessageV2(msg)
+		if err != nil {
+			impl.logger.DPanic(context.TODO(), "the message type is not CreateVChannelMessage", mlog.Err(err))
+			return nil
+		}
+		impl.flusherComponents.WhenCreateVChannel(createVChannelMsg)
+		// Don't forward to the data sync service. WhenCreateVChannel already
+		// spawned the target vchannel's genesis DSS (with its seek position),
+		// and the flow graph has no use for the genesis message itself (the
+		// dd_node has no CreateCollection/CreateVChannel case). Forwarding it
+		// would route a V2 message into fromMessageToTsMsgV2, which has no
+		// CreateVChannel case and panics ("unsupported message type"). The
+		// CreateCollection branch above only survives its fall-through because
+		// it is a V1 message handled by the unmarshaler path.
+		return nil
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
