@@ -939,6 +939,8 @@ type CollectionReq struct {
 	IDType           string                 `json:"idType"`
 	AutoID           bool                   `json:"autoID"`
 	MetricType       string                 `json:"metricType"`
+	VectorFieldType  string                 `json:"vectorFieldType"`
+	ConsistencyLevel string                 `json:"consistencyLevel"`
 	PrimaryFieldName string                 `json:"primaryFieldName"`
 	VectorFieldName  string                 `json:"vectorFieldName"`
 	Schema           CollectionSchema       `json:"schema"`

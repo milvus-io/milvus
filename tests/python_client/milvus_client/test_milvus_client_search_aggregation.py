@@ -643,21 +643,66 @@ class TestSearchAggregation(TestMilvusClientV2Base):
     def test_search_aggregation_nullable_metric_field(self):
         """
         target: verify metrics on nullable scalar fields skip NULL values.
-        method: aggregate rows with price values and NULL price values in the same brand bucket.
+        method: aggregate controlled rows with price values and NULL price values in the same brand bucket.
         expected: count(price)/sum(price)/min(price)/max(price) match the non-NULL top_hits only.
         """
         client = self._client(alias=self.shared_alias)
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        controlled_brand = "nullable_metric_brand"
+        query_vector = [0.0] * self.dim
+        rows = [
+            {
+                self.primary_field: 0,
+                self.vector_field: query_vector,
+                self.brand_field: controlled_brand,
+                self.price_field: None,
+            },
+            {
+                self.primary_field: 1,
+                self.vector_field: [0.001] + [0.0] * (self.dim - 1),
+                self.brand_field: controlled_brand,
+                self.price_field: 10,
+            },
+            {
+                self.primary_field: 2,
+                self.vector_field: [0.002] + [0.0] * (self.dim - 1),
+                self.brand_field: controlled_brand,
+                self.price_field: 20,
+            },
+            {
+                self.primary_field: 3,
+                self.vector_field: [0.5] + [0.0] * (self.dim - 1),
+                self.brand_field: "other_brand",
+                self.price_field: 30,
+            },
+        ]
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(field_name=self.primary_field, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=self.vector_field, datatype=DataType.FLOAT_VECTOR, dim=self.dim)
+        schema.add_field(field_name=self.brand_field, datatype=DataType.VARCHAR, max_length=64)
+        schema.add_field(field_name=self.price_field, datatype=DataType.INT64, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+        self.insert(client, collection_name, data=rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=self.vector_field, index_type="FLAT", metric_type=self.metric_type)
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+
         res, _ = self.search(
             client,
-            self.collection_name,
-            data=[self._query_vectors()[0]],
+            collection_name,
+            data=[query_vector],
             anns_field=self.vector_field,
             search_params=self._search_params(),
             limit=ct.default_limit,
+            filter=f'{self.brand_field} == "{controlled_brand}"',
             output_fields=[self.brand_field, self.price_field],
             search_aggregation=SearchAggregation(
                 fields=[self.brand_field],
-                size=5,
+                size=1,
                 metrics={
                     "doc_count": {"count": "*"},
                     "price_count": {"count": self.price_field},
@@ -665,24 +710,22 @@ class TestSearchAggregation(TestMilvusClientV2Base):
                     "price_min": {"min": self.price_field},
                     "price_max": {"max": self.price_field},
                 },
-                top_hits=TopHits(size=10, sort=[{"_score": "asc"}]),
+                top_hits=TopHits(size=3, sort=[{"_score": "asc"}]),
             ),
         )
 
         assert len(res.agg_buckets) == 1
-        checked_nullable_metric = False
-        for bucket in res.agg_buckets[0]:
-            prices = [hit.fields.get(self.price_field) for hit in bucket.hits]
-            non_null_prices = [price for price in prices if price is not None]
-            assert bucket.metrics["doc_count"] == bucket.count
-            assert bucket.metrics["price_count"] == len(non_null_prices)
-            if non_null_prices:
-                assert bucket.metrics["price_sum"] == sum(non_null_prices)
-                assert bucket.metrics["price_min"] == min(non_null_prices)
-                assert bucket.metrics["price_max"] == max(non_null_prices)
-            if len(non_null_prices) < len(prices):
-                checked_nullable_metric = True
-        assert checked_nullable_metric
+        assert len(res.agg_buckets[0]) == 1
+        bucket = res.agg_buckets[0][0]
+        prices = [hit.fields.get(self.price_field) for hit in bucket.hits]
+        non_null_prices = [price for price in prices if price is not None]
+        assert self._key_value(bucket, self.brand_field) == controlled_brand
+        assert prices == [None, 10, 20]
+        assert bucket.metrics["doc_count"] == bucket.count == len(prices)
+        assert bucket.metrics["price_count"] == len(non_null_prices)
+        assert bucket.metrics["price_sum"] == sum(non_null_prices)
+        assert bucket.metrics["price_min"] == min(non_null_prices)
+        assert bucket.metrics["price_max"] == max(non_null_prices)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_single_field_top_hits(self):
