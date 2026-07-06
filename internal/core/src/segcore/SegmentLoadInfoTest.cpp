@@ -337,8 +337,8 @@ TEST_F(SegmentLoadInfoTest, CompactRuntimeInfoForManifest) {
     info.CompactRuntimeInfoForManifest();
 
     EXPECT_EQ(info.GetIndexInfoCount(), 0);
-    EXPECT_TRUE(info.HasIndexInfo(FieldId(101)));
-    EXPECT_TRUE(info.HasIndexInfo(FieldId(102)));
+    EXPECT_FALSE(info.HasIndexInfo(FieldId(101)));
+    EXPECT_FALSE(info.HasIndexInfo(FieldId(102)));
     auto index_infos = info.GetFieldIndexInfos(FieldId(101));
     EXPECT_TRUE(index_infos.empty());
     EXPECT_EQ(info.GetBinlogPathCount(), 0);
@@ -396,7 +396,7 @@ TEST_F(SegmentLoadInfoTest,
 
     current_info.CompactRuntimeInfoForManifest();
     EXPECT_EQ(current_info.GetIndexInfoCount(), 0);
-    EXPECT_TRUE(current_info.HasIndexInfo(FieldId(101)));
+    EXPECT_FALSE(current_info.HasIndexInfo(FieldId(101)));
     EXPECT_TRUE(current_info.GetFieldIndexInfos(FieldId(101)).empty());
 
     auto diff = current_info.ComputeDiff(new_info);
@@ -474,7 +474,7 @@ TEST_F(SegmentLoadInfoTest,
     new_info.ReplaceSchemaForReopen(new_schema);
 
     EXPECT_FALSE(new_info.HasIndexInfo(FieldId(101)));
-    EXPECT_TRUE(new_info.HasIndexInfo(FieldId(102)));
+    EXPECT_FALSE(new_info.HasIndexInfo(FieldId(102)));
     EXPECT_FALSE(new_info.IsFieldFilledWithDefault(FieldId(101)));
     EXPECT_TRUE(new_info.IsFieldFilledWithDefault(FieldId(102)));
     EXPECT_FALSE(new_info.HasTextIndexCreated(FieldId(101)));

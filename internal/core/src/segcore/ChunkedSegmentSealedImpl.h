@@ -2025,9 +2025,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ApplySchemaForReopen(SchemaPtr sch);
 
     void
-    CompactRuntimeLoadInfoForManifest();
-
-    void
     load_field_data_common(
         FieldId field_id,
         const std::shared_ptr<ChunkedColumnInterface>& column,
@@ -2042,6 +2039,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
+
+    void
+    CompactRuntimeLoadInfoForManifest();
 
     void
     load_field_data_common(

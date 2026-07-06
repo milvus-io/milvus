@@ -182,6 +182,9 @@ func cloneMsgPosition(position *msgpb.MsgPosition) *msgpb.MsgPosition {
 	return proto.Clone(position).(*msgpb.MsgPosition)
 }
 
+// compactSegmentLoadInfoForRuntime retains runtime identity/version metadata,
+// positions, deltalogs, and manifest/resource estimate fields; callers must
+// consume binlog, index, and stats metadata before compaction.
 func compactSegmentLoadInfoForRuntime(loadInfo *querypb.SegmentLoadInfo) *querypb.SegmentLoadInfo {
 	if loadInfo == nil {
 		return nil
@@ -216,7 +219,20 @@ func (s *baseSegment) compactLoadInfoForRuntime() {
 	if s.segmentType != SegmentTypeSealed || s.Level() == datapb.SegmentLevel_L0 {
 		return
 	}
-	s.loadInfo.Store(compactSegmentLoadInfoForRuntime(s.LoadInfo()))
+	loadInfo := s.LoadInfo()
+	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), loadInfo, resourceEstimateFactor{
+		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
+	})
+	if err != nil {
+		s.resourceUsageCache.Store(nil)
+		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))
+		return
+	}
+	s.resourceUsageCache.Store(usage)
+	s.loadInfo.Store(compactSegmentLoadInfoForRuntime(loadInfo))
 }
 
 func (s *baseSegment) SetPKCandidate(candidate pkoracle.Candidate) {
@@ -398,11 +414,6 @@ func (s *baseSegment) NeedUpdatedVersion() int64 {
 	return s.needUpdatedVersion.Load()
 }
 
-func (s *baseSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
-	s.resourceUsageCache.Store(nil)
-	s.loadInfo.Store(loadInfo)
-}
-
 func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
 	s.needUpdatedVersion.Store(version)
 }
@@ -508,7 +519,7 @@ func NewSegment(ctx context.Context,
 
 		memSize:         atomic.NewInt64(-1),
 		binlogSize:      atomic.NewInt64(0),
-		relatedDataSize: atomic.NewInt64(0),
+		relatedDataSize: atomic.NewInt64(-1),
 		rowNum:          atomic.NewInt64(-1),
 		insertCount:     atomic.NewInt64(0),
 	}
@@ -1570,33 +1581,6 @@ func (s *LocalSegment) RemoveFieldFile(fieldId int64) {
 		C.RemoveFieldFile(s.ptr, C.int64_t(fieldId))
 		return nil, nil
 	}).Await()
-}
-
-func (s *LocalSegment) RemoveUnusedFieldFiles() error {
-	schema := s.collection.Schema()
-	indexInfos, _ := separateIndexAndBinlog(s.LoadInfo())
-	for _, indexInfo := range indexInfos {
-		need, err := s.indexNeedLoadRawData(schema, indexInfo)
-		if err != nil {
-			return err
-		}
-		if !need {
-			s.RemoveFieldFile(indexInfo.IndexInfo.FieldID)
-		}
-	}
-	return nil
-}
-
-func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, indexInfo *IndexedFieldInfo) (bool, error) {
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return false, err
-	}
-	fieldSchema, err := schemaHelper.GetFieldFromID(indexInfo.IndexInfo.FieldID)
-	if err != nil {
-		return false, err
-	}
-	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
 }
 
 func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {

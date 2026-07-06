@@ -637,8 +637,8 @@ class SegmentLoadInfo {
      */
     [[nodiscard]] bool
     HasIndexInfo(FieldId field_id) const {
-        return field_index_id_cache_.find(field_id) !=
-               field_index_id_cache_.end();
+        return converted_field_index_cache_.find(field_id) !=
+               converted_field_index_cache_.end();
     }
 
     /**
@@ -662,7 +662,7 @@ class SegmentLoadInfo {
     [[nodiscard]] std::set<FieldId>
     GetIndexedFieldIds() const {
         std::set<FieldId> result;
-        for (const auto& pair : field_index_id_cache_) {
+        for (const auto& pair : converted_field_index_cache_) {
             result.insert(pair.first);
         }
         return result;
@@ -1056,7 +1056,7 @@ class SegmentLoadInfo {
         if (info_.index_infos_size() == 0 && info_.binlog_paths_size() == 0 &&
             info_.statslogs_size() == 0 && info_.deltalogs_size() == 0 &&
             info_.bm25logs_size() == 0 &&
-            converted_field_index_cache_.empty() && column_groups_ == nullptr) {
+            converted_field_index_cache_.empty()) {
             return;
         }
 
@@ -1084,7 +1084,6 @@ class SegmentLoadInfo {
         field_binlog_cache_.clear();
         decltype(converted_field_index_cache_)().swap(
             converted_field_index_cache_);
-        column_groups_.reset();
     }
 
     /**

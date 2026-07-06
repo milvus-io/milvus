@@ -235,6 +235,51 @@ func TestCompactSegmentLoadInfoForRuntime(t *testing.T) {
 	assert.Equal(t, "ch", compact.GetStartPosition().GetChannelName())
 }
 
+func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:  101,
+			Name:     "field_101",
+			DataType: schemapb.DataType_Int64,
+		}},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    11,
+		PartitionID:  22,
+		CollectionID: 33,
+		Level:        datapb.SegmentLevel_L1,
+		BinlogPaths: []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Binlogs: []*datapb.Binlog{{
+				MemorySize: 4096,
+				LogSize:    2048,
+			}},
+		}},
+	}
+	segment := &baseSegment{
+		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
+		segmentType:        SegmentTypeSealed,
+		loadInfo:           atomic.NewPointer(loadInfo),
+		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+	}
+
+	segment.compactLoadInfoForRuntime()
+
+	assert.Empty(t, segment.LoadInfo().GetBinlogPaths())
+	cached := segment.resourceUsageCache.Load()
+	if assert.NotNil(t, cached) {
+		assert.EqualValues(t, 4096, cached.MemorySize)
+	}
+	assert.EqualValues(t, 4096, segment.ResourceUsageEstimate().MemorySize)
+}
+
 func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)
@@ -354,9 +399,6 @@ func (suite *SegmentSuite) TestCASVersion() {
 
 	suite.True(segment.CASVersion(curVersion, curVersion+1))
 	suite.Equal(curVersion+1, segment.Version())
-}
-
-func (suite *SegmentSuite) TestSegmentRemoveUnusedFieldFiles() {
 }
 
 // TestDeleteSameTimestampAcrossBatches reproduces the DumpSnapshot Assert failure

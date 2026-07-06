@@ -6585,11 +6585,10 @@ ChunkedSegmentSealedImpl::CompactRuntimeLoadInfoForManifest() {
     auto compacted = std::make_shared<SegmentLoadInfo>(*current->load_info);
     compacted->CompactRuntimeInfoForManifest();
     auto published = std::const_pointer_cast<const SegmentLoadInfo>(compacted);
-    PublishReopenState(current,
-                       MakeStateDelta(current->schema,
-                                      published,
-                                      current->runtime,
-                                      current->commit_ts));
+    PublishReopenState(
+        current,
+        MakeStateDelta(
+            current->schema, published, current->runtime, current->commit_ts));
 }
 
 void

@@ -137,7 +137,6 @@ type Segment interface {
 
 	// lazy load related
 	NeedUpdatedVersion() int64
-	RemoveUnusedFieldFiles() error
 
 	GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
 }
