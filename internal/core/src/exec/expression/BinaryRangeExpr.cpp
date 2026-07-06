@@ -109,15 +109,23 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             span.GetSpan()->SetAttribute("json_filter_expr_type",
                                          "binary_range");
             // Element-level JSON array ($ inside MATCH_*/element_filter):
-            // evaluate the range per array element. Numeric bounds use double
-            // (consistent with the JSON element read in UnaryExpr and the
-            // index/stats paths); string bounds use std::string.
+            // evaluate the range per array element. Mirror the row-level dispatch
+            // below: string bounds use std::string; two int64 bounds use int64 so
+            // the comparison stays int64-exact (element-by-element at_numeric);
+            // any float bound falls back to double.
             if (expr_->column_.element_level_) {
                 auto lower_type = expr_->lower_val_.val_case();
+                auto upper_type = expr_->upper_val_.val_case();
                 if (lower_type ==
                     proto::plan::GenericValue::ValCase::kStringVal) {
                     result = ExecRangeVisitorImplForJsonElement<std::string>(
                         context);
+                } else if (lower_type ==
+                               proto::plan::GenericValue::ValCase::kInt64Val &&
+                           upper_type ==
+                               proto::plan::GenericValue::ValCase::kInt64Val) {
+                    result =
+                        ExecRangeVisitorImplForJsonElement<int64_t>(context);
                 } else {
                     result =
                         ExecRangeVisitorImplForJsonElement<double>(context);
@@ -676,53 +684,98 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonElement(EvalCtx& context) {
     TargetBitmap json_res;
     TargetBitmap json_valid_res;
     TargetBitmap empty_bitmap;
-    FixedVector<ValueType> element_values;
-    FixedVector<bool> element_valid;
     int64_t processed_size = 0;
 
-    VisitJsonRowsByOffsets(
-        input, [&](const milvus::Json& json, bool row_valid) {
-            auto elem_count = ExtractJsonElementValues<ValueType>(
-                json, row_valid, pointer, element_values, element_valid);
-            if (elem_count == 0) {
-                return;
-            }
-            auto old_size = json_res.size();
-            json_res.resize(old_size + elem_count, false);
-            json_valid_res.resize(old_size + elem_count, true);
-            TargetBitmapView res_view(json_res);
-            TargetBitmapView valid_res_view(json_valid_res);
-
-            auto run = [&]<bool li, bool ui>() {
-                BinaryRangeElementFunc<ValueType,
-                                       li,
-                                       ui,
-                                       FilterType::sequential>
-                    func;
-                func(val1,
-                     val2,
-                     element_values.data(),
-                     static_cast<size_t>(elem_count),
-                     res_view + old_size,
-                     empty_bitmap,
-                     0,
-                     nullptr);
+    if constexpr (std::is_same_v<ValueType, int64_t>) {
+        // Both bounds are int64 literals: read each numeric array element
+        // type-preserving so integral elements compare exactly as int64 (no
+        // 2^53 precision loss) while float/uint64 elements fall back to double,
+        // mirroring the row-level at_numeric() dispatch (BinaryRangeJSONCompare)
+        // element-by-element.
+        FixedVector<JsonNumericElement> element_values;
+        FixedVector<bool> element_valid;
+        auto in_range = [lower_inclusive, upper_inclusive, val1, val2](
+                            const JsonNumericElement& e) -> bool {
+            auto cmp = [lower_inclusive, upper_inclusive](
+                           auto v, auto lo, auto hi) -> bool {
+                bool lower_ok = lower_inclusive ? (lo <= v) : (lo < v);
+                bool upper_ok = upper_inclusive ? (v <= hi) : (v < hi);
+                return lower_ok && upper_ok;
             };
-            if (lower_inclusive && upper_inclusive) {
-                run.template operator()<true, true>();
-            } else if (lower_inclusive && !upper_inclusive) {
-                run.template operator()<true, false>();
-            } else if (!lower_inclusive && upper_inclusive) {
-                run.template operator()<false, true>();
-            } else {
-                run.template operator()<false, false>();
-            }
-            ApplyValidMask(element_valid.data(),
-                           res_view + old_size,
-                           valid_res_view + old_size,
-                           static_cast<int>(elem_count));
-            processed_size += elem_count;
-        });
+            return e.is_int64 ? cmp(e.i64, val1, val2)
+                              : cmp(e.f64,
+                                    static_cast<double>(val1),
+                                    static_cast<double>(val2));
+        };
+        VisitJsonRowsByOffsets(
+            input, [&](const milvus::Json& json, bool row_valid) {
+                auto elem_count = ExtractJsonNumericElements(
+                    json, row_valid, pointer, element_values, element_valid);
+                if (elem_count == 0) {
+                    return;
+                }
+                auto old_size = json_res.size();
+                json_res.resize(old_size + elem_count, false);
+                json_valid_res.resize(old_size + elem_count, true);
+                TargetBitmapView res_view(json_res);
+                TargetBitmapView valid_res_view(json_valid_res);
+                for (int64_t k = 0; k < elem_count; ++k) {
+                    if (!element_valid[k]) {
+                        res_view[old_size + k] = false;
+                        valid_res_view[old_size + k] = false;
+                        continue;
+                    }
+                    res_view[old_size + k] = in_range(element_values[k]);
+                }
+                processed_size += elem_count;
+            });
+    } else {
+        FixedVector<ValueType> element_values;
+        FixedVector<bool> element_valid;
+        VisitJsonRowsByOffsets(
+            input, [&](const milvus::Json& json, bool row_valid) {
+                auto elem_count = ExtractJsonElementValues<ValueType>(
+                    json, row_valid, pointer, element_values, element_valid);
+                if (elem_count == 0) {
+                    return;
+                }
+                auto old_size = json_res.size();
+                json_res.resize(old_size + elem_count, false);
+                json_valid_res.resize(old_size + elem_count, true);
+                TargetBitmapView res_view(json_res);
+                TargetBitmapView valid_res_view(json_valid_res);
+
+                auto run = [&]<bool li, bool ui>() {
+                    BinaryRangeElementFunc<ValueType,
+                                           li,
+                                           ui,
+                                           FilterType::sequential>
+                        func;
+                    func(val1,
+                         val2,
+                         element_values.data(),
+                         static_cast<size_t>(elem_count),
+                         res_view + old_size,
+                         empty_bitmap,
+                         0,
+                         nullptr);
+                };
+                if (lower_inclusive && upper_inclusive) {
+                    run.template operator()<true, true>();
+                } else if (lower_inclusive && !upper_inclusive) {
+                    run.template operator()<true, false>();
+                } else if (!lower_inclusive && upper_inclusive) {
+                    run.template operator()<false, true>();
+                } else {
+                    run.template operator()<false, false>();
+                }
+                ApplyValidMask(element_valid.data(),
+                               res_view + old_size,
+                               valid_res_view + old_size,
+                               static_cast<int>(elem_count));
+                processed_size += elem_count;
+            });
+    }
 
     AssertInfo(
         processed_size == static_cast<int64_t>(json_res.size()),

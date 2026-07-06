@@ -136,13 +136,17 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                  : ExecVisitorImplTemplateJson<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    // Element-level reads numeric JSON elements as double (an
-                    // array may hold ints and floats); the double SetElement
-                    // still matches integer literals exactly.
-                    result =
-                        element_level
-                            ? ExecTermJsonElement<double>(context)
-                            : ExecVisitorImplTemplateJson<int64_t>(context);
+                    // Element-level reads each numeric JSON element
+                    // type-preserving (ExtractJsonNumericElements): integral
+                    // elements test membership exactly as int64 (no 2^53
+                    // precision loss), while float elements test membership as
+                    // double only when they are whole numbers (e.g. 1.0 in
+                    // {1}, but not 1.1). This matches the row-level int64 term
+                    // path (at_numeric). The previous double SetElement lost
+                    // precision beyond 2^53 (2^53 and 2^53+1 collapsed).
+                    result = element_level
+                                 ? ExecTermJsonElement<int64_t>(context)
+                                 : ExecVisitorImplTemplateJson<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
                     result = element_level
@@ -925,33 +929,75 @@ PhyTermFilterExpr::ExecTermJsonElement(EvalCtx& context) {
 
     TargetBitmap json_res;
     TargetBitmap json_valid_res;
-    FixedVector<ValueType> element_values;
-    FixedVector<bool> element_valid;
     int64_t processed_size = 0;
 
-    VisitJsonRowsByOffsets(
-        input, [&](const milvus::Json& json, bool row_valid) {
-            auto elem_count = ExtractJsonElementValues<ValueType>(
-                json, row_valid, pointer, element_values, element_valid);
-            if (elem_count == 0) {
-                return;
-            }
-            auto old_size = json_res.size();
-            json_res.resize(old_size + elem_count, false);
-            json_valid_res.resize(old_size + elem_count, true);
-            TargetBitmapView res_view(json_res);
-            TargetBitmapView valid_res_view(json_valid_res);
-            for (int64_t k = 0; k < elem_count; ++k) {
-                if (!element_valid[k]) {
-                    res_view[old_size + k] = false;
-                    valid_res_view[old_size + k] = false;
-                    continue;
+    if constexpr (std::is_same_v<ValueType, int64_t>) {
+        // int64 term set: read each numeric array element type-preserving so
+        // integral elements test membership exactly as int64 (no 2^53 precision
+        // loss). A float element only matches an int64 term when it is a whole
+        // number (e.g. 1.0 matches {1}, 1.1 does not) — mirroring the row-level
+        // int64 term path (at_numeric).
+        FixedVector<JsonNumericElement> element_values;
+        FixedVector<bool> element_valid;
+        VisitJsonRowsByOffsets(
+            input, [&](const milvus::Json& json, bool row_valid) {
+                auto elem_count = ExtractJsonNumericElements(
+                    json, row_valid, pointer, element_values, element_valid);
+                if (elem_count == 0) {
+                    return;
                 }
-                res_view[old_size + k] =
-                    !empty_set && arg_set_->In(element_values[k]);
-            }
-            processed_size += elem_count;
-        });
+                auto old_size = json_res.size();
+                json_res.resize(old_size + elem_count, false);
+                json_valid_res.resize(old_size + elem_count, true);
+                TargetBitmapView res_view(json_res);
+                TargetBitmapView valid_res_view(json_valid_res);
+                for (int64_t k = 0; k < elem_count; ++k) {
+                    if (!element_valid[k]) {
+                        res_view[old_size + k] = false;
+                        valid_res_view[old_size + k] = false;
+                        continue;
+                    }
+                    const auto& e = element_values[k];
+                    bool matched = false;
+                    if (!empty_set) {
+                        if (e.is_int64) {
+                            matched = arg_set_->In(e.i64);
+                        } else {
+                            matched = std::floor(e.f64) == e.f64 &&
+                                      arg_set_->In(static_cast<int64_t>(e.f64));
+                        }
+                    }
+                    res_view[old_size + k] = matched;
+                }
+                processed_size += elem_count;
+            });
+    } else {
+        FixedVector<ValueType> element_values;
+        FixedVector<bool> element_valid;
+        VisitJsonRowsByOffsets(
+            input, [&](const milvus::Json& json, bool row_valid) {
+                auto elem_count = ExtractJsonElementValues<ValueType>(
+                    json, row_valid, pointer, element_values, element_valid);
+                if (elem_count == 0) {
+                    return;
+                }
+                auto old_size = json_res.size();
+                json_res.resize(old_size + elem_count, false);
+                json_valid_res.resize(old_size + elem_count, true);
+                TargetBitmapView res_view(json_res);
+                TargetBitmapView valid_res_view(json_valid_res);
+                for (int64_t k = 0; k < elem_count; ++k) {
+                    if (!element_valid[k]) {
+                        res_view[old_size + k] = false;
+                        valid_res_view[old_size + k] = false;
+                        continue;
+                    }
+                    res_view[old_size + k] =
+                        !empty_set && arg_set_->In(element_values[k]);
+                }
+                processed_size += elem_count;
+            });
+    }
 
     AssertInfo(
         processed_size == static_cast<int64_t>(json_res.size()),

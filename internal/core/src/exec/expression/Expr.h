@@ -233,6 +233,23 @@ class Expr : public std::enable_shared_from_this<Expr> {
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
 
+// A numeric value extracted from a JSON array element, preserving the original
+// int64/double type so element-level ($) comparisons match the row-level JSON
+// path (Json::at_numeric): integral elements compare exactly as int64 (no 2^53
+// precision loss), uint64/double elements compare as double. Callers branch on
+// `is_int64` exactly like the row-level *JSONCompare macros do on
+// simdjson::ondemand::number.
+struct JsonNumericElement {
+    bool is_int64{false};
+    int64_t i64{0};
+    double f64{0.0};
+
+    double
+    as_double() const {
+        return is_int64 ? static_cast<double>(i64) : f64;
+    }
+};
+
 /*
  * The expr has only one column.
  */
@@ -1063,6 +1080,68 @@ class SegmentExpr : public Expr {
             ElementType value{};
             bool valid = TryGetJsonElementValue<ElementType>(element, value);
             values.push_back(std::move(value));
+            valid_values.push_back(valid);
+        }
+        return values.size();
+    }
+
+    // Extract a JSON array element as a type-preserving numeric value, mirroring
+    // Json::at_numeric(): prefer an exact int64, then uint64 (as double), then
+    // double. A non-numeric element (string/bool/null/missing) yields false
+    // (invalid, i.e. NULL under 3VL) exactly like the row-level path. This is
+    // the element-level counterpart of the row-level at_numeric() read used by
+    // the *JSONCompare macros, and preserves int64 precision beyond 2^53.
+    static bool
+    TryGetJsonNumericElement(simdjson::dom::element element,
+                             JsonNumericElement& out) {
+        auto i = element.get<int64_t>();
+        if (!i.error()) {
+            out.is_int64 = true;
+            out.i64 = i.value();
+            return true;
+        }
+        auto u = element.get<uint64_t>();
+        if (!u.error()) {
+            out.is_int64 = false;
+            out.f64 = static_cast<double>(u.value());
+            return true;
+        }
+        auto d = element.get<double>();
+        if (!d.error()) {
+            out.is_int64 = false;
+            out.f64 = d.value();
+            return true;
+        }
+        return false;
+    }
+
+    // Type-preserving numeric extraction of a JSON array's elements, used by the
+    // element-level ($) paths when the query literal is an int64 so comparisons
+    // stay int64-exact (aligning with the row-level at_numeric path). Elements
+    // that are not numbers are marked invalid (valid_values[i] = false).
+    int64_t
+    ExtractJsonNumericElements(const Json& json,
+                               bool row_valid,
+                               const std::string& pointer,
+                               FixedVector<JsonNumericElement>& values,
+                               FixedVector<bool>& valid_values) {
+        if (!row_valid) {
+            return 0;
+        }
+
+        auto array_res = json.array_at(pointer);
+        if (array_res.error()) {
+            return 0;
+        }
+
+        auto array = array_res.value();
+        values.clear();
+        valid_values.clear();
+
+        for (auto element : array) {
+            JsonNumericElement value{};
+            bool valid = TryGetJsonNumericElement(element, value);
+            values.push_back(value);
             valid_values.push_back(valid);
         }
         return values.size();

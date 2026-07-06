@@ -452,11 +452,12 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         result = ExecRangeVisitorImplJson<bool>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kInt64Val:
-                        if (expr_->column_.element_level_) {
-                            result = ExecRangeVisitorImplJson<double>(context);
-                        } else {
-                            result = ExecRangeVisitorImplJson<int64_t>(context);
-                        }
+                        // Both element-level ($) and row-level use int64 so the
+                        // comparison stays int64-exact (see at_numeric); the
+                        // element-level branch of ExecRangeVisitorImplJson reads
+                        // each array element type-preserving via
+                        // ExtractJsonNumericElements.
+                        result = ExecRangeVisitorImplJson<int64_t>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kFloatVal:
                         result = ExecRangeVisitorImplJson<double>(context);
@@ -928,6 +929,76 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
             ThrowInfo(DataTypeInvalid,
                       "MATCH on JSON array elements does not support array "
                       "literal comparison");
+        } else if constexpr (std::is_same_v<ExprValueType, int64_t>) {
+            // int64 literal: read each numeric array element type-preserving so
+            // integral elements compare exactly as int64 (no 2^53 precision
+            // loss) while float/uint64 elements fall back to double. This
+            // mirrors the row-level at_numeric() dispatch (UnaryRangeJSONCompare)
+            // element-by-element.
+            TargetBitmap json_res;
+            TargetBitmap json_valid_res;
+            int64_t processed_size = 0;
+            FixedVector<JsonNumericElement> element_values;
+            FixedVector<bool> element_valid;
+
+            auto compare = [op_type, val](const JsonNumericElement& e) -> bool {
+                auto cmp = [op_type](auto v, auto lit) -> bool {
+                    switch (op_type) {
+                        case proto::plan::GreaterThan:
+                            return v > lit;
+                        case proto::plan::GreaterEqual:
+                            return v >= lit;
+                        case proto::plan::LessThan:
+                            return v < lit;
+                        case proto::plan::LessEqual:
+                            return v <= lit;
+                        case proto::plan::Equal:
+                            return v == lit;
+                        case proto::plan::NotEqual:
+                            return v != lit;
+                        default:
+                            ThrowInfo(OpTypeInvalid,
+                                      "unsupported operator {} for JSON element "
+                                      "numeric predicate",
+                                      op_type);
+                    }
+                };
+                return e.is_int64 ? cmp(e.i64, val)
+                                  : cmp(e.f64, static_cast<double>(val));
+            };
+
+            VisitJsonRowsByOffsets(
+                input, [&](const Json& json, bool row_valid) {
+                    auto elem_count = ExtractJsonNumericElements(json,
+                                                                 row_valid,
+                                                                 pointer,
+                                                                 element_values,
+                                                                 element_valid);
+                    if (elem_count == 0) {
+                        return;
+                    }
+                    auto old_size = json_res.size();
+                    json_res.resize(old_size + elem_count, false);
+                    json_valid_res.resize(old_size + elem_count, true);
+                    TargetBitmapView res_view(json_res);
+                    TargetBitmapView valid_res_view(json_valid_res);
+                    for (int64_t k = 0; k < elem_count; ++k) {
+                        if (!element_valid[k]) {
+                            res_view[old_size + k] = false;
+                            valid_res_view[old_size + k] = false;
+                            continue;
+                        }
+                        res_view[old_size + k] = compare(element_values[k]);
+                    }
+                    processed_size += elem_count;
+                });
+            AssertInfo(processed_size == static_cast<int64_t>(json_res.size()),
+                       "internal error: expr processed JSON elements {} not "
+                       "equal result size {}",
+                       processed_size,
+                       json_res.size());
+            return std::make_shared<ColumnVector>(std::move(json_res),
+                                                  std::move(json_valid_res));
         } else {
             TargetBitmap json_res;
             TargetBitmap json_valid_res;
