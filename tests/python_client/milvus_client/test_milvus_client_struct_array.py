@@ -4778,7 +4778,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         error = {
             ct.err_code: 1100,
             ct.err_msg: f"Field '{nullable_field}' in struct 'clips' cannot be nullable individually, "
-                        f"set nullable on the struct instead",
+            f"set nullable on the struct instead",
         }
         self.create_collection(
             client,
