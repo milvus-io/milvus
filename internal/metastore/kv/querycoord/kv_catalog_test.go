@@ -369,7 +369,7 @@ func (suite *CatalogTestSuite) TestRemoveCollectionTargets() {
 	suite.NoError(err)
 
 	// test error from meta store
-	mockStore := mocks.NewMetaKv(suite.T())
+	mockStore := kvmocks.NewMetaKv(suite.T())
 	mockErr := errors.New("failed to access etcd")
 	mockStore.EXPECT().RemoveWithPrefix(mock.Anything, CollectionTargetPrefix).Return(mockErr)
 

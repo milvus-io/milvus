@@ -61,7 +61,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) SetupTest() {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(ctx, catalog, cm, broker)
+	meta, err := newMeta(ctx, catalog, cm, broker, newTestSegmentPersist())
 	s.NoError(err)
 	s.meta = meta
 

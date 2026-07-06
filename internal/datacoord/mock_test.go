@@ -431,6 +431,26 @@ func (m *mockMixCoord) ShowPartitionsInternal(ctx context.Context, req *milvuspb
 	return m.ShowPartitions(ctx, req)
 }
 
+func (m *mockMixCoord) CreateNamespace(ctx context.Context, req *milvuspb.CreateNamespaceRequest) (*rootcoordpb.CreateNamespaceResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) DescribeNamespace(ctx context.Context, req *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) ListNamespaces(ctx context.Context, req *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) DropNamespace(ctx context.Context, req *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) HasNamespace(ctx context.Context, req *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 // global timestamp allocator
 func (m *mockMixCoord) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	if m.state != commonpb.StateCode_Healthy {

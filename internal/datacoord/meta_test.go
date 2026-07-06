@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -771,8 +770,8 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 	suite.Run("mixed schema version mix compaction uses task schema version", func() {
 		latestSegments := getLatestSegments()
-		latestSegments.segments[1].SchemaVersion = 2
-		latestSegments.segments[2].SchemaVersion = 3
+		latestSegments.GetSegment(1).SchemaVersion = 2
+		latestSegments.GetSegment(2).SchemaVersion = 3
 		compactToSeg := &datapb.CompactionSegment{
 			SegmentID:           5,
 			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
@@ -800,7 +799,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("mixed schema version clustering compaction uses task schema version", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -999,7 +998,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		// Input: two import segments with different commit_timestamps.
 		// After compaction, row timestamps are already rewritten to commit_ts
 		// by the compactor, so the output segment is normalized (CommitTimestamp = 0).
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -1031,7 +1030,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("sort compaction normalizes commit_timestamp to zero", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
@@ -1058,7 +1057,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("clustering compaction normalizes commit_timestamp to zero", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -1091,7 +1090,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	suite.Run("mix compaction with mixed import and normal segments normalizes to zero", func() {
 		// One import segment (commitTs=5000) + one normal segment (commitTs=0).
 		// After compaction, row timestamps are rewritten, so output is normalized.
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -1123,7 +1122,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("mix compaction with no import segments sets commit_timestamp to 0", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -1155,7 +1154,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("sort compaction normalizes stale import fallback start position", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
@@ -1185,7 +1184,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("mix compaction preserves fallback start while normalizing fallback dml", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -1225,7 +1224,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 }
 
 func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
-	latestSegments := NewSegmentsInfo()
+	latestSegments := NewCachedSegmentsInfo()
 	for segID, segment := range map[UniqueID]*SegmentInfo{
 		1: {SegmentInfo: &datapb.SegmentInfo{
 			ID:           1,
@@ -1297,7 +1296,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 	})
 
 	suite.Run("rejected when only middle segment is protected in multi-segment task", func() {
-		multiSegments := NewSegmentsInfo()
+		multiSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed}},
 			2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed}},
@@ -1509,7 +1508,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	}
 
 	suite.Run("mix_compaction_recalculates_positions_from_binlogs", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1570,7 +1569,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("mix_compaction_uses_output_timestamps_when_normal_segment_precedes_import_commit", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:              1,
@@ -1632,7 +1631,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("mix_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1693,7 +1692,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("cluster_compaction_recalculates_positions", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1752,7 +1751,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("cluster_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1810,7 +1809,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("sort_compaction_recalculates_positions", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -1855,7 +1854,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("sort_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -1988,9 +1987,9 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
-	// Helper to build a SegmentsInfo containing a single healthy Flushed segment with the given ID.
-	makeSegments := func(segID int64, state commonpb.SegmentState) *SegmentsInfo {
-		segs := NewSegmentsInfo()
+	// Helper to build a CachedSegmentsInfo containing a single healthy Flushed segment with the given ID.
+	makeSegments := func(segID int64, state commonpb.SegmentState) *CachedSegmentsInfo {
+		segs := NewCachedSegmentsInfo()
 		segs.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            segID,
 			CollectionID:  100,
@@ -2050,7 +2049,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		// Segment 99 is not in meta.
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 		}
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{99},
@@ -2430,7 +2429,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 	})
 
 	suite.Run("missing manifest rejected", func() {
-		segs := NewSegmentsInfo()
+		segs := NewCachedSegmentsInfo()
 		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            1,
 			CollectionID:  100,
@@ -2492,7 +2491,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 	})
 
 	suite.Run("v3 success - forward manifest updated", func() {
-		segs := NewSegmentsInfo()
+		segs := NewCachedSegmentsInfo()
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 1)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 2)
 		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -2929,7 +2928,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchemaVersion() {
 	manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
-	segs := NewSegmentsInfo()
+	segs := NewCachedSegmentsInfo()
 	segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:             1,
 		CollectionID:   100,
@@ -3295,7 +3294,7 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	checkVersion(1, 1, 1, 1, 1)
 
 	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
-		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+		1: {func(seg *datapb.SegmentInfo) bool {
 			seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
 			return true
 		}},
@@ -3304,7 +3303,7 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	checkVersion(2, 2, 1, 1, 1)
 
 	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
-		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+		1: {func(seg *datapb.SegmentInfo) bool {
 			seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
 			return true
 		}},
@@ -3313,7 +3312,7 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	checkVersion(3, 2, 2, 1, 1)
 
 	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
-		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+		1: {func(seg *datapb.SegmentInfo) bool {
 			seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
 			return true
 		}},
@@ -3322,7 +3321,7 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	checkVersion(4, 2, 2, 2, 1)
 
 	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
-		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+		1: {func(seg *datapb.SegmentInfo) bool {
 			seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
 			return true
 		}},
@@ -3331,7 +3330,7 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	checkVersion(5, 2, 2, 2, 2)
 
 	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
-		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+		1: {func(seg *datapb.SegmentInfo) bool {
 			seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
 			seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
 			seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
@@ -3361,7 +3360,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					// UpdateStatusOperator
 					seg.State = commonpb.SegmentState_Growing
 					// AddBinlogsOperator
@@ -3422,7 +3421,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.State = commonpb.SegmentState_Growing
 					// Replace binlogs (WithFullBinlogs style)
 					seg.Binlogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)})
@@ -3467,7 +3466,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					// Replace binlogs (WithFullBinlogs style)
 					seg.Binlogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 335, 337)})
 					seg.Statslogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{getFieldBinlogIDs(1, 336)})
@@ -3509,7 +3508,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.State = commonpb.SegmentState_Dropped
 					seg.DroppedAt = uint64(time.Now().UnixNano())
 					// Replace binlogs (WithFullBinlogs style)
@@ -3575,7 +3574,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.Compacted = true
 					return true
 				}},
@@ -3595,7 +3594,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.Compacted = true
 					return true
 				}},
@@ -3612,7 +3611,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.State = commonpb.SegmentState_Flushing
 					return true
 				}},
@@ -3623,7 +3622,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), nil)
 					seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), nil)
 					seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), nil)
@@ -3637,7 +3636,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.StartPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}
 					return true
 				}},
@@ -3648,7 +3647,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					// CheckPoint
 					count := segmentutil.CalcRowCountFromBinLog(seg)
 					if count > 0 {
@@ -3663,7 +3662,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.Binlogs = nil
 					seg.Statslogs = nil
 					seg.Deltalogs = nil
@@ -3677,7 +3676,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.DmlPosition = nil
 					return true
 				}},
@@ -3688,7 +3687,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.DmlPosition = &msgpb.MsgPosition{MsgID: []byte{1}}
 					return true
 				}},
@@ -3699,7 +3698,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.NumOfRows = 0
 					seg.MaxRowNum = 0
 					return true
@@ -3711,7 +3710,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.IsImporting = true
 					return true
 				}},
@@ -3722,7 +3721,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.ManifestPath = "files/binlogs/1/2/1000/manifest_0"
 					return true
 				}},
@@ -3731,7 +3730,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
-			1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+			1: {func(seg *datapb.SegmentInfo) bool {
 				if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
 					(seg.GetState() == commonpb.SegmentState_Flushing || seg.GetState() == commonpb.SegmentState_Flushed) {
 					seg.State = commonpb.SegmentState_Dropped
@@ -3750,7 +3749,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.State = commonpb.SegmentState_Flushing
 					// UpdateAsDroppedIfEmptyWhenFlushing
 					if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
@@ -3778,7 +3777,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					// Only apply checkpoint if matching segment ID
 					for _, cp := range []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}} {
 						if cp.SegmentID == seg.GetID() {
@@ -3823,7 +3822,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			map[int64][]MutateFunc{
-				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				1: {func(seg *datapb.SegmentInfo) bool {
 					seg.State = commonpb.SegmentState_Flushing
 					seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)})
 					seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)})

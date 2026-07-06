@@ -552,7 +552,7 @@ type NamespacePrewarmReq struct {
 	DbName         string `json:"dbName"`
 	CollectionName string `json:"collectionName" binding:"required"`
 	NamespaceName  string `json:"namespaceName" binding:"required"`
-	TtlSeconds     int64  `json:"ttlSeconds"`
+	TTLSeconds     int64  `json:"ttlSeconds"`
 	Priority       string `json:"priority"`
 }
 

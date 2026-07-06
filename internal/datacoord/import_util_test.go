@@ -790,7 +790,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// importing state, segmentImportedRows/totalRows = 1
 	for _, segID := range []int64{10, 20, 11, 12, 21, 22} {
 		err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
-			segID: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+			segID: {func(seg *datapb.SegmentInfo) bool {
 				seg.NumOfRows = 100
 				seg.MaxRowNum = 100
 				return true

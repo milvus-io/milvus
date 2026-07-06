@@ -30,8 +30,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type ctxTenantKey struct{}
-type ctxRequestIDKey struct{}
+type (
+	ctxTenantKey    struct{}
+	ctxRequestIDKey struct{}
+)
 
 // WithTenantID creates a new context that has tenantID injected.
 func WithTenantID(ctx context.Context, tenantID string) context.Context {

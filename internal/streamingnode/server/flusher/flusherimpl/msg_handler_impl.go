@@ -77,6 +77,7 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegme
 	}
 	return nil
 }
+
 func (impl *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {
 	vchannel := flushMsg.VChannel()
 	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, []int64{flushMsg.Header().SegmentId}); err != nil {

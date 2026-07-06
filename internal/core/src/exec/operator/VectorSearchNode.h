@@ -88,8 +88,8 @@ class PhyVectorSearchNode : public Operator {
             std::static_pointer_cast<PhyVectorSearchNode>(shared_from_this());
         const auto submit_time = std::chrono::steady_clock::now();
         auto* op_ctx = self->query_context_->get_op_context();
-        auto trace_id = milvus::tracer::GetTraceIDAsHexStr(
-            &self->search_info_.trace_ctx_);
+        auto trace_id =
+            milvus::tracer::GetTraceIDAsHexStr(&self->search_info_.trace_ctx_);
         if (trace_id.empty()) {
             trace_id = milvus::tracer::GetRequestTraceID(op_ctx);
         }

@@ -196,7 +196,7 @@ func TestIndexInspector_ProcessPendingIndexSegmentsRequeuesStillUnindexedSegment
 	)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
@@ -263,7 +263,7 @@ func TestIndexInspector_ProcessPendingIndexSegmentsCreatesIndexAndRemovesPending
 	versionManager := newIndexEngineVersionManager()
 	catalog := mocks2.NewDataCoordCatalog(t)
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -316,7 +316,7 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	versionManager := newIndexEngineVersionManager()
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -376,7 +376,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -603,7 +603,7 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),

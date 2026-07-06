@@ -2102,7 +2102,7 @@ func TestHandleSessionEvent(t *testing.T) {
 
 func newPostFlushTestServer(collection *collectionInfo, segments ...*datapb.SegmentInfo) *Server {
 	mt := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	if collection != nil {

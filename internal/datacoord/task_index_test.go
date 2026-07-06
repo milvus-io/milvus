@@ -309,29 +309,27 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVe
 			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			mt := &meta{
-				segments: &SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  s.collID,
-								PartitionID:   s.partID,
-								InsertChannel: "ch1",
-								NumOfRows:     tc.numRows,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     tc.numRows,
-								Level:         datapb.SegmentLevel_L2,
-								Binlogs: []*datapb.FieldBinlog{{
-									FieldID: s.fieldID,
-									Binlogs: []*datapb.Binlog{{
-										EntriesNum: tc.numRows,
-										MemorySize: tc.numRows*4 + tc.innerVectorCount*elementBytes + 1,
-									}},
+				segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+					s.segID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:            s.segID,
+							CollectionID:  s.collID,
+							PartitionID:   s.partID,
+							InsertChannel: "ch1",
+							NumOfRows:     tc.numRows,
+							State:         commonpb.SegmentState_Flushed,
+							MaxRowNum:     tc.numRows,
+							Level:         datapb.SegmentLevel_L2,
+							Binlogs: []*datapb.FieldBinlog{{
+								FieldID: s.fieldID,
+								Binlogs: []*datapb.Binlog{{
+									EntriesNum: tc.numRows,
+									MemorySize: tc.numRows*4 + tc.innerVectorCount*elementBytes + 1,
 								}},
-							},
+							}},
 						},
 					},
-				},
+				}),
 				indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 			}
 			mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
@@ -388,22 +386,20 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayEstimateFailureMarksFa
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     enoughRows,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     enoughRows,
-						Level:         datapb.SegmentLevel_L2,
-					},
+		segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+			s.segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            s.segID,
+					CollectionID:  s.collID,
+					PartitionID:   s.partID,
+					InsertChannel: "ch1",
+					NumOfRows:     enoughRows,
+					State:         commonpb.SegmentState_Flushed,
+					MaxRowNum:     enoughRows,
+					Level:         datapb.SegmentLevel_L2,
 				},
 			},
-		},
+		}),
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
@@ -452,23 +448,21 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     enoughRows,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     enoughRows,
-						Level:         datapb.SegmentLevel_L2,
-						SchemaVersion: 0,
-					},
+		segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+			s.segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            s.segID,
+					CollectionID:  s.collID,
+					PartitionID:   s.partID,
+					InsertChannel: "ch1",
+					NumOfRows:     enoughRows,
+					State:         commonpb.SegmentState_Flushed,
+					MaxRowNum:     enoughRows,
+					Level:         datapb.SegmentLevel_L2,
+					SchemaVersion: 0,
 				},
 			},
-		},
+		}),
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{

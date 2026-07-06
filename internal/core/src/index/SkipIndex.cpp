@@ -54,16 +54,17 @@ FieldChunkMetricsTranslator::get_cells(
         auto pw = column_->GetChunk(ctx, chunk_id);
         auto chunk_metrics = builder_.Build(data_type_, pw.get());
         cells.emplace_back(chunk_id, std::move(chunk_metrics));
-   }
+    }
 
     const auto d = std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::high_resolution_clock::now() - t1)
                        .count();
-    LOG_INFO("[sss] field chunk metrics trans get cells, traceID: {}, key: {}, "
-             "duration: {}",
-             milvus::tracer::GetRequestTraceID(ctx),
-             key_,
-             d);
+    LOG_INFO(
+        "[sss] field chunk metrics trans get cells, traceID: {}, key: {}, "
+        "duration: {}",
+        milvus::tracer::GetRequestTraceID(ctx),
+        key_,
+        d);
     return cells;
 }
 

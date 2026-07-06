@@ -710,7 +710,7 @@ func newCopySegmentTaskTestMeta(t *testing.T, task *copySegmentTask) (CopySegmen
 	catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	m := &meta{
 		catalog:  catalog,
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 	}
 	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
 	assert.NoError(t, err)
@@ -973,7 +973,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 		assert.False(s.T(), seg.GetIsImporting())
 		return nil
 	}).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewCachedSegmentsInfo()}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,
@@ -1016,7 +1016,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewCachedSegmentsInfo()}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1063,7 +1063,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewCachedSegmentsInfo()}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1113,7 +1113,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewCachedSegmentsInfo()}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,

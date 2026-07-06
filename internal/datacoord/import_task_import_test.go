@@ -275,7 +275,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			alloc: nil,
 			meta: &meta{
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -318,7 +318,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			meta: &meta{
 				catalog:     segCatalog,
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),

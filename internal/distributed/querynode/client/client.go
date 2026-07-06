@@ -166,7 +166,6 @@ func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequ
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(c.nodeID))
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
-
 		mlog.Info(ctx, "client load segments request prepared",
 			mlog.Duration("elapsed", time.Since(t1)),
 			mlog.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))

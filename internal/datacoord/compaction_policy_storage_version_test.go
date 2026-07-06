@@ -79,13 +79,9 @@ func (s *StorageVersionUpgradePolicySuite) SetupTest() {
 }
 
 func (s *StorageVersionUpgradePolicySuite) setPolicyMeta(collID int64, coll *collectionInfo, segments map[UniqueID]*SegmentInfo) {
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	segmentsInfo := NewCachedSegmentsInfo()
+	for segmentID, segment := range segments {
+		segmentsInfo.SetSegment(segmentID, segment)
 	}
 
 	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
@@ -996,22 +992,7 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerSkippedDueToVersionRequire
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
-	}
-
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
-	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
-	}
+	s.setPolicyMeta(collID, coll, segments)
 
 	// Should return empty views because version requirement is not met
 	events, err := s.policy.Trigger(ctx)
@@ -1064,22 +1045,7 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionRequirementSatisfie
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
-	}
-
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
-	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
-	}
+	s.setPolicyMeta(collID, coll, segments)
 
 	// Should trigger because version requirement is met
 	events, err := s.policy.Trigger(ctx)
@@ -1144,22 +1110,7 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionExactlyEqual() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
-	}
-
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
-	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
-	}
+	s.setPolicyMeta(collID, coll, segments)
 
 	// Should trigger because minVersion equals requirement (not less than)
 	events, err := s.policy.Trigger(ctx)

@@ -331,10 +331,7 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskExternalCollection() {
 			Level:         2,
 		},
 	}
-	s.mt.segments.segments[segmentID] = seg
-	s.mt.segments.secondaryIndexes.coll2Segments[2] = map[UniqueID]*SegmentInfo{
-		segmentID: seg,
-	}
+	s.mt.segments.SetSegment(segmentID, seg)
 
 	s.inspector.triggerTextStatsTask()
 

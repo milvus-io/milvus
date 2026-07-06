@@ -2052,7 +2052,7 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 	schema := newTestSchema()
 	schema.Version = 5
 	mt := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		indexMeta:   newSegmentIndexMeta(nil),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
@@ -2506,7 +2506,9 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 
 		const mb = 1024 * 1024
-		s.meta.segments.segments[1].Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		segment := s.meta.segments.GetSegment(1)
+		s.Require().NotNil(segment)
+		segment.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
 
 		tr := s.tr
 		handler := NewNMockHandler(s.T())

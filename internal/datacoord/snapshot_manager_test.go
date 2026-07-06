@@ -1846,7 +1846,7 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
 
-	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	mt := &meta{ctx: ctx, catalog: catalog, segments: NewCachedSegmentsInfo(), channelCPs: newChannelCps()}
 	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11}))
 
 	var err error

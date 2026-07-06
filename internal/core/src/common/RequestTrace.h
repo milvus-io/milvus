@@ -70,8 +70,8 @@ GetRequestTraceID(const CTraceContext& c_trace) {
     if (c_trace.requestID != nullptr && c_trace.requestID[0] != '\0') {
         return c_trace.requestID;
     }
-    auto trace_ctx = TraceContext{
-        c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+    auto trace_ctx =
+        TraceContext{c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
     return GetTraceIDAsHexStr(&trace_ctx);
 }
 

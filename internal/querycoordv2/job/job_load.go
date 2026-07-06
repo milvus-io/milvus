@@ -141,7 +141,7 @@ func (job *LoadCollectionJob) Execute() error {
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
 	replicaNumber := int32(len(replicas))
-	currentPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
 	currentPartitionMap := lo.SliceToMap(currentPartitions, func(partition *meta.Partition) (int64, *meta.Partition) {
 		return partition.GetPartitionID(), partition
 	})
@@ -185,12 +185,12 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 	if len(toReleasePartitions) > 0 {
 		job.targetObserver.ReleasePartition(req.GetCollectionId(), toReleasePartitions...)
-		if err := job.meta.CollectionManager.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
+		if err := job.meta.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
 			return merr.Wrap(err, "failed to remove partitions")
 		}
 	}
 
-	if err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...); err != nil {
+	if err = job.meta.PutCollection(job.ctx, collection, partitions...); err != nil {
 		msg := "failed to store collection and partitions"
 		mlog.Warn(job.ctx, msg, mlog.Err(err))
 		return merr.Wrapf(err, "%s", msg)

@@ -99,7 +99,7 @@ func (s *analyzeTaskSuite) SetupSuite() {
 	collections := typeutil.NewConcurrentMap[int64, *collectionInfo]()
 	collections.Insert(s.collID, &collectionInfo{Schema: schema})
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	segments.SetSegment(101, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:           101,

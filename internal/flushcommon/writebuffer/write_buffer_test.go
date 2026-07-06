@@ -457,7 +457,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		evictDone := make(chan struct{})
 		go func() {
 			defer close(evictDone)
-			wb.EvictBuffer(GetOldestBufferPolicy(1))
+			wb.EvictOldestBuffers(1)
 		}()
 
 		select {
@@ -632,7 +632,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		evictDone := make(chan struct{})
 		go func() {
 			defer close(evictDone)
-			l0wb.EvictBuffer(GetOldestBufferPolicy(1))
+			l0wb.EvictOldestBuffers(1)
 		}()
 
 		select {

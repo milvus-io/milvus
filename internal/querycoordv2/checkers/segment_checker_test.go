@@ -203,9 +203,9 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegmentsToSQNWhenEnabled() {
 		}
 	}()
 
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.ReplicaManager.Put(ctx, meta.NewReplica(&querypb.Replica{
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
 		ID:           1,
 		CollectionID: 1,
 		Nodes:        []int64{1, 2},
@@ -222,7 +222,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegmentsToSQNWhenEnabled() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID)
+		checker.meta.HandleNodeUp(ctx, nodeID)
 	}
 
 	segments := []*datapb.SegmentInfo{

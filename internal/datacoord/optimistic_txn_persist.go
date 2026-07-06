@@ -8,11 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/cockroachdb/errors"
 	tikverr "github.com/tikv/client-go/v2/error"
 	tikvkv "github.com/tikv/client-go/v2/kv"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -20,12 +16,16 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var (
-	ErrKeyAlreadyExists = fmt.Errorf("key already exists")
-	ErrKeyNotFound      = fmt.Errorf("key not found")
+	ErrKeyAlreadyExists = errors.New("key already exists")
+	ErrKeyNotFound      = errors.New("key not found")
 )
 
 // OptimisticTxnPersist is a persist layer that uses optimistic transactions.
@@ -78,7 +78,7 @@ func segmentKey(collectionID, partitionID, segmentID int64) string {
 func segmentIDFromKey(key string) (int64, error) {
 	parts := strings.Split(key, "/")
 	if len(parts) == 0 {
-		return 0, fmt.Errorf("invalid segment key: %s", key)
+		return 0, merr.WrapErrDataIntegrityMsg("invalid segment key: %s", key)
 	}
 	return strconv.ParseInt(parts[len(parts)-1], 10, 64)
 }
@@ -164,7 +164,7 @@ func (p *etcdPersist[K, V]) Scan(ctx context.Context, prefix K) ([]K, []V, []int
 		}
 		// Next batch starts after the last key
 		key = string(resp.Kvs[len(resp.Kvs)-1].Key) + "\x00"
-		mlog.Info(ctx, "etcdPersist.Scan next batch", zap.String("key", key))
+		mlog.Info(ctx, "etcdPersist.Scan next batch", mlog.String("key", key))
 	}
 	return ks, vals, vers, nil
 }
@@ -230,7 +230,7 @@ func (t *etcdTxn[K, V]) commitBatch(ops []txnOp[K, V], results []TxnResult[V]) e
 				}
 				exists := len(resp.Kvs) > 0
 				if exists {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyAlreadyExists, keyStr))
+					return retry.Unrecoverable(errors.Wrapf(ErrKeyAlreadyExists, "%s", keyStr))
 				}
 				cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(keyStr), "=", 0))
 				valBytes, err := t.persist.marshaler.Marshal(op.value)
@@ -248,7 +248,7 @@ func (t *etcdTxn[K, V]) commitBatch(ops []txnOp[K, V], results []TxnResult[V]) e
 				}
 				exists := len(resp.Kvs) > 0
 				if !exists {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyNotFound, keyStr))
+					return retry.Unrecoverable(errors.Wrapf(ErrKeyNotFound, "%s", keyStr))
 				}
 				existing, err := t.persist.marshaler.Unmarshal(resp.Kvs[0].Value)
 				if err != nil {
@@ -311,7 +311,7 @@ func (t *etcdTxn[K, V]) commitBatch(ops []txnOp[K, V], results []TxnResult[V]) e
 				exists := len(resp.Kvs) > 0
 
 				if !exists {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyNotFound, keyStr))
+					return retry.Unrecoverable(errors.Wrapf(ErrKeyNotFound, "%s", keyStr))
 				}
 				cmps = append(cmps, clientv3.Compare(clientv3.ModRevision(keyStr), "=", resp.Kvs[0].ModRevision))
 				putOps = append(putOps, clientv3.OpDelete(keyStr))
@@ -338,19 +338,19 @@ func (t *etcdTxn[K, V]) commitBatch(ops []txnOp[K, V], results []TxnResult[V]) e
 		totalDur := time.Since(commitStart)
 		if totalDur > 40*time.Millisecond {
 			mlog.Info(t.ctx, "etcdTxn.Commit slow",
-				zap.Duration("total", totalDur),
-				zap.Duration("etcdGet", getDur),
-				zap.Duration("etcdTxn", txnDur),
-				zap.Int("numOps", len(ops)),
-				zap.Int("numPuts", len(putOps)),
-				zap.Int("retryCount", retryCount))
+				mlog.Duration("total", totalDur),
+				mlog.Duration("etcdGet", getDur),
+				mlog.Duration("etcdTxn", txnDur),
+				mlog.Int("numOps", len(ops)),
+				mlog.Int("numPuts", len(putOps)),
+				mlog.Int("retryCount", retryCount))
 		}
 
 		if err != nil {
 			return err
 		}
 		if !txnResp.Succeeded {
-			return fmt.Errorf("CAS failed, concurrent modification")
+			return merr.WrapErrServiceInternalMsg("CAS failed, concurrent modification")
 		}
 		for i := range ops {
 			if written[i] {
@@ -392,7 +392,8 @@ func (p *tikvPersist[K, V]) captureCommitTS(txn interface{ SetCommitCallback(fun
 
 func (p *tikvPersist[K, V]) tikvKeyExists(ctx context.Context, txn interface {
 	Get(context.Context, []byte, ...tikvkv.GetOption) (tikvkv.ValueEntry, error)
-}, key []byte) ([]byte, bool, error) {
+}, key []byte,
+) ([]byte, bool, error) {
 	entry, err := txn.Get(ctx, key)
 	if err != nil {
 		if tikverr.IsErrNotFound(err) {
@@ -481,7 +482,7 @@ func (t *tikvTxn[K, V]) Commit() ([]TxnResult[V], error) {
 			switch op.kind {
 			case opInsert:
 				if exists {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyAlreadyExists, string(op.key)))
+					return retry.Unrecoverable(errors.Wrapf(ErrKeyAlreadyExists, "%s", string(op.key)))
 				}
 				valBytes, err := t.persist.marshaler.Marshal(op.value)
 				if err != nil {
@@ -495,7 +496,7 @@ func (t *tikvTxn[K, V]) Commit() ([]TxnResult[V], error) {
 
 			case opUpdate:
 				if !exists {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyNotFound, string(op.key)))
+					return retry.Unrecoverable(errors.Wrapf(ErrKeyNotFound, "%s", string(op.key)))
 				}
 				existing, err := t.persist.marshaler.Unmarshal(val)
 				if err != nil {
@@ -549,7 +550,7 @@ func (t *tikvTxn[K, V]) Commit() ([]TxnResult[V], error) {
 
 			case opDelete:
 				if !exists {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyNotFound, string(op.key)))
+					return retry.Unrecoverable(errors.Wrapf(ErrKeyNotFound, "%s", string(op.key)))
 				}
 				if err := txn.Delete(keyBytes); err != nil {
 					return err
@@ -571,7 +572,6 @@ func (t *tikvTxn[K, V]) Commit() ([]TxnResult[V], error) {
 		}
 		return err
 	}, retry.AttemptAlways())
-
 	if err != nil {
 		return nil, err
 	}
@@ -647,15 +647,15 @@ func (t *memTxn[K, V]) Commit() ([]TxnResult[V], error) {
 		switch op.kind {
 		case opInsert:
 			if _, ok := p.data[op.key]; ok {
-				return nil, fmt.Errorf("%w: %v", ErrKeyAlreadyExists, op.key)
+				return nil, errors.Wrapf(ErrKeyAlreadyExists, "%v", op.key)
 			}
 		case opUpdate:
 			if _, ok := p.data[op.key]; !ok {
-				return nil, fmt.Errorf("%w: %v", ErrKeyNotFound, op.key)
+				return nil, errors.Wrapf(ErrKeyNotFound, "%v", op.key)
 			}
 		case opDelete:
 			if _, ok := p.data[op.key]; !ok {
-				return nil, fmt.Errorf("%w: %v", ErrKeyNotFound, op.key)
+				return nil, errors.Wrapf(ErrKeyNotFound, "%v", op.key)
 			}
 		case opUpsert:
 			// always valid

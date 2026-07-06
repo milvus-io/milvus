@@ -67,11 +67,18 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 		}},
 	}}
 
-	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, operators ...UpdateOperator) error {
-			s.Len(operators, 5)
-			s.Equal(actualDeltaPath, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
-			s.EqualValues(9001, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mutations map[int64][]MutateFunc, newSegments ...*datapb.SegmentInfo) error {
+			s.Len(mutations, 3)
+			s.Contains(mutations, int64(100))
+			s.Contains(mutations, int64(101))
+			s.Contains(mutations, int64(200))
+			segment := &datapb.SegmentInfo{}
+			for _, mutate := range mutations[200] {
+				mutate(segment)
+			}
+			s.Equal(actualDeltaPath, segment.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+			s.EqualValues(9001, segment.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
 			return nil
 		},
 	).Once()

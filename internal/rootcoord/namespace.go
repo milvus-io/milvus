@@ -18,10 +18,11 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"

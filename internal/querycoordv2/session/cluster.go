@@ -381,7 +381,7 @@ func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types
 		return merr.WrapErrNodeNotFound(nodeID)
 	}
 
-	cli, err := c.clients.getOrCreate(ctx, node)
+	cli, err := c.getOrCreate(ctx, node)
 	if err != nil {
 		return err
 	}

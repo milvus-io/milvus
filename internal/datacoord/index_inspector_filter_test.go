@@ -50,7 +50,7 @@ func TestIndexInspectorGetUnIndexTaskSegmentsSkipsSegmentsCannotBuildIndexNow(t 
 		sortedSegmentID   = UniqueID(2002)
 	)
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
