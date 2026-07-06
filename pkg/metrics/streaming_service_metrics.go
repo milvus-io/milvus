@@ -279,6 +279,11 @@ var (
 		Help: "Bytes of segment growing on wal",
 	}, WALChannelLabelName, WALSegmentLevelLabelName)
 
+	WALGrowingSegmentFlushPressureBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_flush_pressure_bytes",
+		Help: "Runtime bytes used by WAL growing segment flush pressure decisions",
+	})
+
 	WALGrowingSegmentHWMBytes = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "growing_segment_hwm_bytes",
 		Help: "HWM of segment growing bytes on node",
@@ -642,6 +647,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALInsertBytes)
 	registry.MustRegister(WALDeleteRowsTotal)
 	registry.MustRegister(WALGrowingSegmentBytes)
+	registry.MustRegister(WALGrowingSegmentFlushPressureBytes)
 	registry.MustRegister(WALGrowingSegmentRowsTotal)
 	registry.MustRegister(WALGrowingSegmentHWMBytes)
 	registry.MustRegister(WALGrowingSegmentLWMBytes)
