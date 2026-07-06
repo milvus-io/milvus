@@ -941,11 +941,20 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 }
 
 func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) interface{} {
-	identifier := ctx.Identifier().GetText()
+	identifier := ctx.Identifier(0).GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(), "text match fuzzy", "text_match_fuzzy query")
 	if err != nil {
 		return err
+	}
+
+	// The option name is a soft keyword (a plain identifier) so that a scalar
+	// field literally named "max_edit_distance" is still usable elsewhere in a
+	// filter; only accept the expected option name here.
+	optionName := ctx.Identifier(1).GetText()
+	if !strings.EqualFold(optionName, "max_edit_distance") {
+		return merr.WrapErrParameterInvalidMsg(
+			"invalid option %q for text_match_fuzzy, expected max_edit_distance", optionName)
 	}
 
 	// tantivy's fuzzy automaton only supports an edit distance of 0, 1 or 2.

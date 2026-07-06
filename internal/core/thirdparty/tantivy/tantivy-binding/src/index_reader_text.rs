@@ -85,17 +85,23 @@ impl IndexReaderWrapper {
                 max_edit_distance
             )));
         }
-        use tantivy::query::{FuzzyTermQuery, Occur};
-        let distance = max_edit_distance as u8;
-        let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
-        for (_, term) in self.tokenize_terms(q) {
-            subqueries.push((
-                Occur::Should,
-                Box::new(FuzzyTermQuery::new(term, distance, true)),
-            ));
+        // An edit distance of 0 is exactly a term match. Take the cheaper
+        // multiterms path instead of building a Levenshtein automaton per token.
+        if max_edit_distance == 0 {
+            return self.match_query(q, bitset);
         }
-        // require 1 should-clause so the result is a plain OR over the fuzzy terms.
-        let query = BooleanQuery::with_minimum_required_clauses(subqueries, 1);
+        use tantivy::query::FuzzyTermQuery;
+        let distance = max_edit_distance as u8;
+        let queries: Vec<Box<dyn tantivy::query::Query>> = self
+            .tokenize_terms(q)
+            .into_iter()
+            .map(|(_, term)| {
+                Box::new(FuzzyTermQuery::new(term, distance, true))
+                    as Box<dyn tantivy::query::Query>
+            })
+            .collect();
+        // A pure disjunction (OR) over the per-token fuzzy queries.
+        let query = BooleanQuery::union(queries);
         self.search(&query, bitset)
     }
 
