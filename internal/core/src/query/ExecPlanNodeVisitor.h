@@ -27,6 +27,7 @@
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/QueryContext.h"
@@ -71,7 +72,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                             folly::CancellationToken(),
                         int32_t consistency_level = 0,
                         Timestamp collection_ttl = 0,
-                        int64_t entity_ttl_physical_time_us = 0)
+                        int64_t entity_ttl_physical_time_us = 0,
+                        milvus::tracer::SpanPtr trace_span = nullptr)
         : segment_(segment),
           timestamp_(timestamp),
           entity_ttl_physical_time_us_(
@@ -83,7 +85,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
           placeholder_group_(placeholder_group),
           cancel_token_(cancel_token),
           consistency_level_(consistency_level),
-          collection_ttl_timestamp_(collection_ttl) {
+          collection_ttl_timestamp_(collection_ttl),
+          trace_span_(std::move(trace_span)) {
     }
 
     // Only used for test
@@ -190,6 +193,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
     bool enable_expr_cache_ = false;
+    milvus::tracer::SpanPtr trace_span_ = nullptr;
 };
 
 // for test use only
