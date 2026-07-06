@@ -910,6 +910,61 @@ func TestServer_AlterIndex(t *testing.T) {
 			assert.NotEqual(t, common.MmapEnabledKey, param.GetKey())
 		}
 	})
+	t.Run("evictable_param", func(t *testing.T) {
+		mockGetCollectionInfo()
+		evictableReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Params: []*commonpb.KeyValuePair{{
+				Key:   common.EvictableEnabledKey,
+				Value: "false",
+			}},
+		}
+		resp, err := s.AlterIndex(ctx, evictableReq)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		evictable, ok := common.IsEvictableEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...)
+		assert.True(t, ok)
+		assert.False(t, evictable)
+	})
+	t.Run("invalid_evictable_param", func(t *testing.T) {
+		mockGetCollectionInfo()
+		evictableReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Params: []*commonpb.KeyValuePair{{
+				Key:   common.EvictableEnabledKey,
+				Value: "not-bool",
+			}},
+		}
+		resp, err := s.AlterIndex(ctx, evictableReq)
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	})
+	t.Run("delete_evictable_param", func(t *testing.T) {
+		mockGetCollectionInfo()
+		deleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			DeleteKeys:   []string{common.EvictableEnabledKey},
+		}
+		resp, err := s.AlterIndex(ctx, deleteReq)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		_, ok := common.IsEvictableEnabled(describeResp.IndexInfos[0].GetUserIndexParams()...)
+		assert.False(t, ok)
+	})
 	t.Run("update_and_delete_params", func(t *testing.T) {
 		mockGetCollectionInfo()
 		updateAndDeleteReq := &indexpb.AlterIndexRequest{
@@ -2916,6 +2971,41 @@ func TestValidateIndexParams(t *testing.T) {
 					Key:   common.MmapEnabledKey,
 					Value: "h",
 				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("valid evictable param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+				{Key: common.EvictableEnabledKey, Value: "false"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableEnabledKey, Value: "false"},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid evictable index param", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+				{Key: common.EvictableEnabledKey, Value: "not-bool"},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid evictable user index param", func(t *testing.T) {
+		index := &model.Index{
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableEnabledKey, Value: "not-bool"},
 			},
 		}
 		err := ValidateIndexParams(index)

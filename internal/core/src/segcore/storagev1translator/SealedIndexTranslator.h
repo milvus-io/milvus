@@ -79,6 +79,7 @@ class SealedIndexTranslator
         std::vector<std::string> index_files;
         std::string
             warmup_policy;  // "disable", "sync", or "async"; empty means use global config
+        bool support_eviction;
         std::optional<LoadResourceRequest> load_resource_request;
     };
 

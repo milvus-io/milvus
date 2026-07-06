@@ -822,6 +822,8 @@ LoadJsonKeyIndex(CTraceContext c_trace,
             config[milvus::index::WARMUP] = info_proto->warmup_policy();
         }
         config[milvus::index::INDEX_SIZE] = info_proto->stats_size();
+        config[milvus::index::SUPPORT_EVICTION] =
+            info_proto->support_eviction();
         if (!info_proto->base_path().empty()) {
             config[STATS_BASE_PATH_KEY] = info_proto->base_path();
         }

@@ -164,6 +164,15 @@ const std::string WARMUP_SCALAR_INDEX_KEY = "warmup.scalarIndex";
 const std::string WARMUP_SCALAR_FIELD_KEY = "warmup.scalarField";
 const std::string WARMUP_VECTOR_FIELD_KEY = "warmup.vectorField";
 
+// Evictable keys
+// Field/index-level key (in field/index params)
+const std::string EVICTABLE_ENABLED_KEY = "evictable.enabled";
+// Collection-level keys (in collection properties)
+const std::string EVICTABLE_VECTOR_INDEX_KEY = "evictable.vectorIndex";
+const std::string EVICTABLE_SCALAR_INDEX_KEY = "evictable.scalarIndex";
+const std::string EVICTABLE_SCALAR_FIELD_KEY = "evictable.scalarField";
+const std::string EVICTABLE_VECTOR_FIELD_KEY = "evictable.vectorField";
+
 // Scalar index version constants
 // Version 3 introduces hybrid index configuration support
 constexpr int32_t kHybridIndexConfigVersion = 3;

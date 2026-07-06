@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -106,6 +107,26 @@ func (s *IndexSuite) TestCreateIndex() {
 		_, err := s.client.CreateIndex(ctx, NewCreateIndexOption(collectionName, fieldName, index.NewHNSWIndex(entity.L2, 32, 128)).WithIndexName(indexName))
 		s.Error(err)
 	})
+}
+
+func (s *IndexSuite) TestIndexEvictableOptions() {
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+	fieldName := fmt.Sprintf("field_%s", s.randString(4))
+	indexName := fmt.Sprintf("idx_%s", s.randString(6))
+
+	createReq := NewCreateIndexOption(
+		collectionName,
+		fieldName,
+		index.NewHNSWIndex(entity.L2, 32, 128),
+	).WithEvictable(false).WithIndexName(indexName).Request()
+	createParams := entity.KvPairsMap(createReq.GetExtraParams())
+	s.Equal("false", createParams[common.EvictableEnabledKey])
+
+	alterReq := NewAlterIndexPropertiesOption(collectionName, indexName).
+		WithEvictable(false).
+		Request()
+	alterParams := entity.KvPairsMap(alterReq.GetExtraParams())
+	s.Equal("false", alterParams[common.EvictableEnabledKey])
 }
 
 func (s *IndexSuite) TestListIndexes() {

@@ -348,6 +348,13 @@ const (
 	WarmupDisable        = "disable"
 	WarmupSync           = "sync"
 	WarmupAsync          = "async"
+
+	// evictable related
+	EvictableEnabledKey     = "evictable.enabled"
+	EvictableScalarFieldKey = "evictable.scalarField"
+	EvictableScalarIndexKey = "evictable.scalarIndex"
+	EvictableVectorFieldKey = "evictable.vectorField"
+	EvictableVectorIndexKey = "evictable.vectorIndex"
 )
 
 const (
@@ -389,6 +396,46 @@ func IsMmapIndexEnabled(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+func IsEvictableEnabled(kvs ...*commonpb.KeyValuePair) (bool, bool) {
+	return GetEvictableByKey(EvictableEnabledKey, kvs...)
+}
+
+func GetEvictableByKey(key string, kvs ...*commonpb.KeyValuePair) (bool, bool) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable, true
+		}
+	}
+	return false, false
+}
+
+// IsEvictableKey checks if a key is any of the evictable-related keys.
+func IsEvictableKey(key string) bool {
+	return IsFieldEvictableKey(key) || IsCollectionEvictableKey(key)
+}
+
+// IsFieldEvictableKey checks if a key is the field/index-level evictable key.
+func IsFieldEvictableKey(key string) bool {
+	return key == EvictableEnabledKey
+}
+
+// IsCollectionEvictableKey checks if a key is a collection/table-level evictable key.
+func IsCollectionEvictableKey(key string) bool {
+	return key == EvictableScalarFieldKey ||
+		key == EvictableScalarIndexKey ||
+		key == EvictableVectorFieldKey ||
+		key == EvictableVectorIndexKey
+}
+
+// ValidateEvictableEnabled validates that the evictable value is a boolean string.
+func ValidateEvictableEnabled(value string) error {
+	if _, err := strconv.ParseBool(value); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid evictable enabled value: %s, must be a boolean", value)
+	}
+	return nil
 }
 
 // GetWarmupPolicy returns the warmup policy value and whether it exists from key-value pairs
@@ -509,6 +556,43 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 			if field.GetFieldID() == fieldID {
 				for _, kv := range field.GetTypeParams() {
 					if kv.Key == MmapEnabledKey {
+						return true
+					}
+				}
+				return false
+			}
+		}
+	}
+	return false
+}
+
+// FieldHasEvictableKey checks if a field has evictable key set in its TypeParams.
+func FieldHasEvictableKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			for _, kv := range field.GetTypeParams() {
+				if kv.Key == EvictableEnabledKey {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	// Check struct array fields
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetFieldID() == fieldID {
+			for _, kv := range structField.GetTypeParams() {
+				if kv.Key == EvictableEnabledKey {
+					return true
+				}
+			}
+			return false
+		}
+		// Check fields inside struct
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				for _, kv := range field.GetTypeParams() {
+					if kv.Key == EvictableEnabledKey {
 						return true
 					}
 				}

@@ -35,6 +35,7 @@ struct FieldBinlogInfo {
     std::string warmup_policy;
     std::vector<std::string> insert_files;
     std::vector<int64_t> child_field_ids;
+    bool support_eviction{true};
 };
 
 struct LoadFieldDataInfo {

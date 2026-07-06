@@ -2009,8 +2009,13 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
 			}
-			segmentEvictableMemorySize += estimateResult.FinalMemoryCost
-			segmentEvictableDiskSize += estimateResult.FinalDiskCost
+			if isIndexEvictableEnable(fieldSchema, fieldIndexInfo) {
+				segmentEvictableMemorySize += estimateResult.FinalMemoryCost
+				segmentEvictableDiskSize += estimateResult.FinalDiskCost
+			} else {
+				segmentInevictableMemorySize += estimateResult.FinalMemoryCost
+				segmentInevictableDiskSize += estimateResult.FinalDiskCost
+			}
 
 			// could skip binlog or
 			// could be missing for new field or storage v2 group 0
@@ -2054,6 +2059,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var doubleMemoryDataField bool
 		var legacyNilSchema bool
 		mmapEnabled := true
+		evictableEnabled := true
 		isVectorType := true
 
 		for _, fieldID := range fieldIDs {
@@ -2074,6 +2080,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
 			// constainSystemField = constainSystemField || common.IsSystemField(fieldSchema.GetFieldID())
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			evictableEnabled = evictableEnabled && isDataEvictableEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMemoryDataField = doubleMemoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
 		}
@@ -2097,17 +2104,37 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
-				segmentEvictableDiskSize += binlogSize
+				if evictableEnabled {
+					segmentEvictableDiskSize += binlogSize
+				} else {
+					segmentInevictableDiskSize += binlogSize
+				}
 			} else {
-				segmentEvictableMemorySize += binlogSize
+				if evictableEnabled {
+					segmentEvictableMemorySize += binlogSize
+				} else {
+					segmentInevictableMemorySize += binlogSize
+				}
 			}
 		} else if !mmapEnabled {
-			segmentEvictableMemorySize += binlogSize
-			if doubleMemoryDataField {
+			if evictableEnabled {
 				segmentEvictableMemorySize += binlogSize
+			} else {
+				segmentInevictableMemorySize += binlogSize
+			}
+			if doubleMemoryDataField {
+				if evictableEnabled {
+					segmentEvictableMemorySize += binlogSize
+				} else {
+					segmentInevictableMemorySize += binlogSize
+				}
 			}
 		} else {
-			segmentEvictableDiskSize += binlogSize
+			if evictableEnabled {
+				segmentEvictableDiskSize += binlogSize
+			} else {
+				segmentInevictableDiskSize += binlogSize
+			}
 		}
 	}
 
@@ -2134,13 +2161,24 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 5: calculate logical resource usage of text index stats data
 	// Text match indexes are evictable (support_eviction=true in caching layer).
-	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
-	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
 	for _, textStats := range loadInfo.GetTextStatsLogs() {
-		if textIndexMmapEnable {
-			segmentEvictableDiskSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		fieldSchema, err := schemaHelper.GetFieldFromID(textStats.GetFieldID())
+		if err != nil {
+			return nil, err
+		}
+		textStatsSize := uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		if isDataMmapEnable(fieldSchema) {
+			if isScalarStatsEvictableEnable(fieldSchema) {
+				segmentEvictableDiskSize += textStatsSize
+			} else {
+				segmentInevictableDiskSize += textStatsSize
+			}
 		} else {
-			segmentEvictableMemorySize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			if isScalarStatsEvictableEnable(fieldSchema) {
+				segmentEvictableMemorySize += textStatsSize
+			} else {
+				segmentInevictableMemorySize += textStatsSize
+			}
 		}
 	}
 
@@ -2211,7 +2249,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					fieldIndexInfo.GetBuildID())
 			}
 
-			if !multiplyFactor.TieredEvictionEnabled {
+			if !multiplyFactor.TieredEvictionEnabled || !isIndexEvictableEnable(fieldSchema, fieldIndexInfo) {
 				indexMemorySize += estimateResult.MaxMemoryCost
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
@@ -2262,6 +2300,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var doubleMomoryDataField bool
 		var legacyNilSchema bool
 		mmapEnabled := true
+		evictableEnabled := true
 		isVectorType := true
 		hasIndex := true
 
@@ -2290,6 +2329,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
 			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
+			evictableEnabled = evictableEnabled && isDataEvictableEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
 		}
@@ -2310,11 +2350,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
-				if !multiplyFactor.TieredEvictionEnabled {
+				if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
 					segDiskLoadingSize += binlogSize
 				}
 			} else {
-				if !multiplyFactor.TieredEvictionEnabled {
+				if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
@@ -2330,14 +2370,14 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !mmapEnabled {
-			if !multiplyFactor.TieredEvictionEnabled {
+			if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
 				segMemoryLoadingSize += binlogSize
 				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled {
+			if !multiplyFactor.TieredEvictionEnabled || !evictableEnabled {
 				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
 			}
 		}
@@ -2405,13 +2445,18 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// PART 5: calculate size of json key stats data
 	jsonStatsMmapEnable := paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool()
 	for _, jsonKeyStats := range loadInfo.GetJsonKeyStatsLogs() {
+		fieldSchema, err := schemaHelper.GetFieldFromID(jsonKeyStats.GetFieldID())
+		if err != nil {
+			return nil, err
+		}
+		jsonStatsSize := uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
 		if jsonStatsMmapEnable {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segDiskLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+			if !multiplyFactor.TieredEvictionEnabled || !isScalarStatsEvictableEnable(fieldSchema) {
+				segDiskLoadingSize += jsonStatsSize
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segMemoryLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+			if !multiplyFactor.TieredEvictionEnabled || !isScalarStatsEvictableEnable(fieldSchema) {
+				segMemoryLoadingSize += jsonStatsSize
 			}
 		}
 	}
@@ -2434,13 +2479,18 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	// so 1.0x is the baseline; textIndexExpansionFactor allows tuning if needed.
 	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
 	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		fieldSchema, err := schemaHelper.GetFieldFromID(textStats.GetFieldID())
+		if err != nil {
+			return nil, err
+		}
+		textStatsSize := uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
 		if textIndexMmapEnable {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segDiskLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			if !multiplyFactor.TieredEvictionEnabled || !isScalarStatsEvictableEnable(fieldSchema) {
+				segDiskLoadingSize += textStatsSize
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segMemoryLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			if !multiplyFactor.TieredEvictionEnabled || !isScalarStatsEvictableEnable(fieldSchema) {
+				segMemoryLoadingSize += textStatsSize
 			}
 		}
 	}

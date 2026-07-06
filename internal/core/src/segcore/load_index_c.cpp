@@ -31,6 +31,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
+#include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -328,13 +329,16 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->element_type = static_cast<milvus::DataType>(
                 info_proto->field().element_type());
             load_index_info->enable_mmap = info_proto->enable_mmap();
+            load_index_info->support_eviction = info_proto->support_eviction();
             load_index_info->index_id = info_proto->indexid();
             load_index_info->index_build_id = info_proto->index_buildid();
             load_index_info->index_version = info_proto->index_version();
             load_index_info->index_store_path_version =
                 info_proto->index_store_path_version();
             for (const auto& [k, v] : info_proto->index_params()) {
-                load_index_info->index_params[k] = v;
+                if (k != EVICTABLE_ENABLED_KEY) {
+                    load_index_info->index_params[k] = v;
+                }
             }
             load_index_info->index_files.assign(
                 info_proto->index_files().begin(),

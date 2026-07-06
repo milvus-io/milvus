@@ -2069,6 +2069,29 @@ func TestCheckParams(t *testing.T) {
 		}
 		assert.True(t, checkParams(fieldIndex, req))
 	})
+
+	t.Run("evictable enabled should be ignored", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.EvictableEnabledKey, Value: "false"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
 }
 
 // TestStoredIndexFilesSizeMetric exercises the stored_index_files_size gauge
