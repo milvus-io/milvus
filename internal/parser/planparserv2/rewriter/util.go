@@ -216,10 +216,6 @@ func canFoldBoolDomainToConstant(col *planpb.ColumnInfo) bool {
 	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
 }
 
-func canFoldInNotEqualTautologyToTrue(col *planpb.ColumnInfo) bool {
-	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
-}
-
 func hasMissingPathNotEqualSemantics(col *planpb.ColumnInfo, values ...*planpb.GenericValue) bool {
 	return hasMissingPathSemantics(col)
 }

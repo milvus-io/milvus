@@ -11,9 +11,12 @@
 
 #pragma once
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <type_traits>
+#include <utility>
 #include "common/EasyAssert.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
@@ -41,10 +44,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     In(size_t n, const T* values) override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::In",
                               tracer::GetRootSpan());
-        TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-        }
+        auto bitset = TermBitset(n, values);
         return bitset;
     }
 
@@ -64,11 +64,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         const std::function<bool(size_t /* offset */)>& filter) override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyFilter",
                               tracer::GetRootSpan());
-        TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-            apply_hits_with_filter(bitset, filter);
-        }
+        auto bitset = TermBitset(n, values);
+        apply_hits_with_filter(bitset, filter);
         return bitset;
     }
 
@@ -79,21 +76,15 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         const std::function<void(size_t /* offset */)>& callback) override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyCallback",
                               tracer::GetRootSpan());
-        TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-            apply_hits_with_callback(bitset, callback);
-        }
+        auto bitset = TermBitset(n, values);
+        apply_hits_with_callback(bitset, callback);
     }
 
     const TargetBitmap
     NotIn(size_t n, const T* values) override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::NotIn",
                               tracer::GetRootSpan());
-        TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-        }
+        auto bitset = TermBitset(n, values);
 
         bitset.flip();
 
@@ -148,6 +139,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                 ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType: {}", op));
         }
+        OrU64Range(bitset, U64RangeForValue(value, op));
         return bitset;
     }
 
@@ -172,6 +164,11 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                                          lb_inclusive,
                                          ub_inclusive,
                                          &bitset);
+        OrU64Range(bitset,
+                   U64RangeForBounds(lower_bound_value,
+                                     lb_inclusive,
+                                     upper_bound_value,
+                                     ub_inclusive));
         return bitset;
     }
 
@@ -221,7 +218,246 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                                          &double_bitset);
         bitset |= double_bitset;
 
+        TargetBitmap u64_bitset(this->Count());
+        this->wrapper_->json_range_query(json_path_,
+                                         std::numeric_limits<uint64_t>::min(),
+                                         std::numeric_limits<uint64_t>::max(),
+                                         false,
+                                         false,
+                                         true,
+                                         true,
+                                         &u64_bitset);
+        bitset |= u64_bitset;
+
         return bitset;
+    }
+
+    using U64Range = std::optional<std::pair<uint64_t, uint64_t>>;
+
+    TargetBitmap
+    TermBitset(size_t n, const T* values) {
+        TargetBitmap bitset(this->Count());
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
+        OrU64TermRanges(bitset, n, values);
+        return bitset;
+    }
+
+    void
+    OrU64TermRanges(TargetBitmap& bitset, size_t n, const T* values) {
+        if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
+            for (size_t i = 0; i < n; ++i) {
+                auto value = static_cast<double>(values[i]);
+                auto range = DoubleRangeForBounds(value, true, value, true);
+                if (RangeCoveredByExactU64Term(values[i], range)) {
+                    continue;
+                }
+                OrU64Range(bitset, range);
+            }
+        }
+    }
+
+    void
+    OrU64Range(TargetBitmap& bitset, U64Range range) {
+        if (!range.has_value()) {
+            return;
+        }
+        this->wrapper_->json_range_query(json_path_,
+                                         range->first,
+                                         range->second,
+                                         false,
+                                         false,
+                                         true,
+                                         true,
+                                         &bitset);
+    }
+
+    template <typename Predicate>
+    static std::optional<uint64_t>
+    FirstU64Where(Predicate pred) {
+        constexpr auto min = std::numeric_limits<uint64_t>::min();
+        constexpr auto max = std::numeric_limits<uint64_t>::max();
+        if (pred(min)) {
+            return min;
+        }
+        if (!pred(max)) {
+            return std::nullopt;
+        }
+
+        uint64_t low = min;
+        uint64_t high = max;
+        while (low < high) {
+            auto mid = low + (high - low) / 2;
+            if (pred(mid)) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        return low;
+    }
+
+    template <typename Predicate>
+    static std::optional<uint64_t>
+    LastU64Where(Predicate pred) {
+        constexpr auto min = std::numeric_limits<uint64_t>::min();
+        constexpr auto max = std::numeric_limits<uint64_t>::max();
+        if (!pred(min)) {
+            return std::nullopt;
+        }
+        if (pred(max)) {
+            return max;
+        }
+
+        uint64_t low = min;
+        uint64_t high = max;
+        while (low < high) {
+            auto mid = high - (high - low) / 2;
+            if (pred(mid)) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return low;
+    }
+
+    static U64Range
+    DoubleRangeForValue(double value, OpType op) {
+        if (std::isnan(value)) {
+            return std::nullopt;
+        }
+
+        switch (op) {
+            case OpType::LessThan: {
+                auto upper = LastU64Where([value](uint64_t u) {
+                    return static_cast<double>(u) < value;
+                });
+                if (!upper.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(std::numeric_limits<uint64_t>::min(),
+                                      *upper);
+            }
+            case OpType::LessEqual: {
+                auto upper = LastU64Where([value](uint64_t u) {
+                    return static_cast<double>(u) <= value;
+                });
+                if (!upper.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(std::numeric_limits<uint64_t>::min(),
+                                      *upper);
+            }
+            case OpType::GreaterThan: {
+                auto lower = FirstU64Where([value](uint64_t u) {
+                    return static_cast<double>(u) > value;
+                });
+                if (!lower.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(*lower,
+                                      std::numeric_limits<uint64_t>::max());
+            }
+            case OpType::GreaterEqual: {
+                auto lower = FirstU64Where([value](uint64_t u) {
+                    return static_cast<double>(u) >= value;
+                });
+                if (!lower.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(*lower,
+                                      std::numeric_limits<uint64_t>::max());
+            }
+            default:
+                ThrowInfo(OpTypeInvalid,
+                          fmt::format("Invalid OperatorType: {}", op));
+        }
+    }
+
+    static U64Range
+    DoubleRangeForBounds(double lower_bound_value,
+                         bool lb_inclusive,
+                         double upper_bound_value,
+                         bool ub_inclusive) {
+        if (std::isnan(lower_bound_value) || std::isnan(upper_bound_value)) {
+            return std::nullopt;
+        }
+
+        auto lower =
+            FirstU64Where([lower_bound_value, lb_inclusive](uint64_t u) {
+                auto value = static_cast<double>(u);
+                return lb_inclusive ? value >= lower_bound_value
+                                    : value > lower_bound_value;
+            });
+        if (!lower.has_value()) {
+            return std::nullopt;
+        }
+
+        auto upper =
+            LastU64Where([upper_bound_value, ub_inclusive](uint64_t u) {
+                auto value = static_cast<double>(u);
+                return ub_inclusive ? value <= upper_bound_value
+                                    : value < upper_bound_value;
+            });
+        if (!upper.has_value() || *lower > *upper) {
+            return std::nullopt;
+        }
+
+        return std::make_pair(*lower, *upper);
+    }
+
+    static bool
+    CanCastDoubleToU64(double value) {
+        return std::isfinite(value) && std::floor(value) == value &&
+               value >= 0 &&
+               static_cast<long double>(value) <=
+                   static_cast<long double>(
+                       std::numeric_limits<uint64_t>::max());
+    }
+
+    static bool
+    RangeCoveredByExactU64Term(T value, const U64Range& range) {
+        if (!range.has_value() || range->first != range->second) {
+            return false;
+        }
+
+        if constexpr (std::is_integral_v<T>) {
+            if constexpr (std::is_signed_v<T>) {
+                return value >= 0 &&
+                       static_cast<uint64_t>(value) == range->first;
+            } else {
+                return static_cast<uint64_t>(value) == range->first;
+            }
+        } else if constexpr (std::is_floating_point_v<T>) {
+            return CanCastDoubleToU64(value) &&
+                   static_cast<uint64_t>(value) == range->first;
+        } else {
+            return false;
+        }
+    }
+
+    static U64Range
+    U64RangeForValue(T value, OpType op) {
+        if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
+            return DoubleRangeForValue(static_cast<double>(value), op);
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    static U64Range
+    U64RangeForBounds(T lower_bound_value,
+                      bool lb_inclusive,
+                      T upper_bound_value,
+                      bool ub_inclusive) {
+        if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
+            return DoubleRangeForBounds(static_cast<double>(lower_bound_value),
+                                        lb_inclusive,
+                                        static_cast<double>(upper_bound_value),
+                                        ub_inclusive);
+        } else {
+            return std::nullopt;
+        }
     }
 
     TargetBitmap

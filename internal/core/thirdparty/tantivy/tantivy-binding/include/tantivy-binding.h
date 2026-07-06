@@ -226,6 +226,11 @@ RustResult tantivy_json_term_query_i64(void *ptr,
                                        int64_t term,
                                        void *bitset);
 
+RustResult tantivy_json_term_query_u64(void *ptr,
+                                       const char *json_path,
+                                       uint64_t term,
+                                       void *bitset);
+
 RustResult tantivy_json_term_query_f64(void *ptr, const char *json_path, double term, void *bitset);
 
 RustResult tantivy_json_term_query_bool(void *ptr, const char *json_path, bool term, void *bitset);
@@ -235,12 +240,52 @@ RustResult tantivy_json_term_query_keyword(void *ptr,
                                            const char *term,
                                            void *bitset);
 
+RustResult tantivy_json_terms_query_i64(void *ptr,
+                                        const char *json_path,
+                                        const int64_t *terms,
+                                        uintptr_t len,
+                                        void *bitset);
+
+RustResult tantivy_json_terms_query_u64(void *ptr,
+                                        const char *json_path,
+                                        const uint64_t *terms,
+                                        uintptr_t len,
+                                        void *bitset);
+
+RustResult tantivy_json_terms_query_f64(void *ptr,
+                                        const char *json_path,
+                                        const double *terms,
+                                        uintptr_t len,
+                                        void *bitset);
+
+RustResult tantivy_json_terms_query_bool(void *ptr,
+                                         const char *json_path,
+                                         const bool *terms,
+                                         uintptr_t len,
+                                         void *bitset);
+
+RustResult tantivy_json_terms_query_keyword(void *ptr,
+                                            const char *json_path,
+                                            const char *const *terms,
+                                            uintptr_t len,
+                                            void *bitset);
+
 RustResult tantivy_json_exist_query(void *ptr, const char *json_path, void *bitset);
 
 RustResult tantivy_json_range_query_i64(void *ptr,
                                         const char *json_path,
                                         int64_t lower_bound,
                                         int64_t higher_bound,
+                                        bool lb_unbounded,
+                                        bool up_unbounded,
+                                        bool lb_inclusive,
+                                        bool ub_inclusive,
+                                        void *bitset);
+
+RustResult tantivy_json_range_query_u64(void *ptr,
+                                        const char *json_path,
+                                        uint64_t lower_bound,
+                                        uint64_t higher_bound,
                                         bool lb_unbounded,
                                         bool up_unbounded,
                                         bool lb_inclusive,
