@@ -851,6 +851,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				}
 			}
 			fd.Field = vectors
+		case *schemapb.FieldData_StructArrays:
+			fd.Field = &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: PrepareResultFieldData(fieldData.GetStructArrays().GetFields(), topK),
+				},
+			}
 		}
 		result = append(result, fd)
 	}
@@ -1452,7 +1458,53 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 					dstVector.Data.(*schemapb.VectorField_Int8Vector).Int8Vector,
 					srcVector.Int8Vector[start:end]...)
 			}
+		case *schemapb.VectorField_VectorArray:
+			if srcVector.VectorArray == nil {
+				return
+			}
+			if dstVector.GetVectorArray() == nil {
+				dstVector.Data = &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        make([]*schemapb.VectorField, 0, len(dataIndices)),
+						Dim:         srcVector.VectorArray.Dim,
+						ElementType: srcVector.VectorArray.ElementType,
+					},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
+			}
 		}
+	case *schemapb.FieldData_StructArrays:
+		appendStructFieldDataByColumn(dst, srcField.StructArrays, dataIndices, rowIndices...)
+	}
+}
+
+func appendStructFieldDataByColumn(dst *schemapb.FieldData, src *schemapb.StructArrayField, dataIndices []int64, rowIndices ...[]int64) {
+	if src == nil {
+		return
+	}
+	if dst.GetStructArrays() == nil {
+		dst.Field = &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: PrepareResultFieldData(src.GetFields(), int64(len(dataIndices))),
+			},
+		}
+	}
+	dstStruct := dst.GetStructArrays()
+	dstSubFields := make(map[int64]*schemapb.FieldData, len(dstStruct.GetFields()))
+	for _, dstSubField := range dstStruct.GetFields() {
+		dstSubFields[dstSubField.GetFieldId()] = dstSubField
+	}
+	for _, srcSubField := range src.GetFields() {
+		dstSubField := dstSubFields[srcSubField.GetFieldId()]
+		if dstSubField == nil {
+			newFields := PrepareResultFieldData([]*schemapb.FieldData{srcSubField}, int64(len(dataIndices)))
+			dstSubField = newFields[0]
+			dstStruct.Fields = append(dstStruct.Fields, dstSubField)
+			dstSubFields[dstSubField.GetFieldId()] = dstSubField
+		}
+		AppendFieldDataByColumn(dstSubField, srcSubField, dataIndices, rowIndices...)
 	}
 }
 
@@ -3317,6 +3369,12 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 // This ensures global uniqueness while allowing same field names across different structs
 func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
+}
+
+// IsStructSubField checks if a field name follows the "structName[fieldName]" convention,
+// indicating it is a sub-field within a StructArrayField.
+func IsStructSubField(fieldName string) bool {
+	return strings.Contains(fieldName, "[")
 }
 
 func ExtractStructFieldName(fieldName string) (string, error) {

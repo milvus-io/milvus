@@ -5332,6 +5332,127 @@ func TestAppendFieldDataByColumn(t *testing.T) {
 		AppendFieldDataByColumn(dst, src, []int64{0, 2})
 		assert.Equal(t, [][]byte{{1, 2}, {5, 6}}, dst.GetVectors().GetSparseFloatVector().Contents)
 	})
+
+	t.Run("nullable array of vector copies dense row data", func(t *testing.T) {
+		validData := []bool{true, false, true, false}
+		src := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, validData)
+		dst := &schemapb.FieldData{Type: schemapb.DataType_ArrayOfVector}
+
+		AppendFieldDataByColumn(dst, src, []int64{0, 1, 2, 3}, []int64{0, 1, 2, 3})
+
+		got := dst.GetVectors().GetVectorArray()
+		require.NotNil(t, got)
+		require.Len(t, got.GetData(), 4)
+		assert.Equal(t, validData, dst.GetValidData())
+		assert.Equal(t, []float32{1}, got.GetData()[0].GetFloatVector().GetData())
+		assert.Empty(t, got.GetData()[1].GetFloatVector().GetData())
+		assert.Equal(t, []float32{3}, got.GetData()[2].GetFloatVector().GetData())
+		assert.Empty(t, got.GetData()[3].GetFloatVector().GetData())
+		assert.EqualValues(t, 1, got.GetDim())
+		assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
+	})
+
+	t.Run("struct array appends dense nullable sub-field rows", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			FieldName: "profile",
+			FieldId:   200,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "age",
+							FieldId:   201,
+							Type:      schemapb.DataType_Array,
+							ValidData: []bool{true, false, true},
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_ArrayData{
+										ArrayData: &schemapb.ArrayArray{
+											ElementType: schemapb.DataType_Int32,
+											Data: []*schemapb.ScalarField{
+												{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10}}}},
+												{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{}}},
+												{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{30}}}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		dst := PrepareResultFieldData([]*schemapb.FieldData{src}, 3)[0]
+
+		AppendFieldDataByColumn(dst, src, []int64{0, 1, 2})
+
+		require.NotNil(t, dst.GetStructArrays())
+		require.Len(t, dst.GetStructArrays().GetFields(), 1)
+		subField := dst.GetStructArrays().GetFields()[0]
+		assert.Equal(t, []bool{true, false, true}, subField.GetValidData())
+		got := subField.GetScalars().GetArrayData().GetData()
+		require.Len(t, got, 3)
+		assert.Equal(t, []int32{10}, got[0].GetIntData().GetData())
+		assert.Empty(t, got[1].GetIntData().GetData())
+		assert.Equal(t, []int32{30}, got[2].GetIntData().GetData())
+	})
+
+	t.Run("struct array matches sub-fields by id", func(t *testing.T) {
+		dst := &schemapb.FieldData{
+			FieldName: "profile",
+			FieldId:   200,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "profile[age]",
+							FieldId:   201,
+							Type:      schemapb.DataType_Array,
+							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Int32,
+								Data:        []*schemapb.ScalarField{},
+							}}}},
+						},
+					},
+				},
+			},
+		}
+		src := &schemapb.FieldData{
+			FieldName: "profile",
+			FieldId:   200,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "age",
+							FieldId:   201,
+							Type:      schemapb.DataType_Array,
+							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Int32,
+								Data: []*schemapb.ScalarField{
+									{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{42}}}},
+								},
+							}}}},
+						},
+					},
+				},
+			},
+		}
+
+		AppendFieldDataByColumn(dst, src, []int64{0})
+
+		require.NotNil(t, dst.GetStructArrays())
+		require.Len(t, dst.GetStructArrays().GetFields(), 1)
+		subField := dst.GetStructArrays().GetFields()[0]
+		assert.Equal(t, "profile[age]", subField.GetFieldName())
+		got := subField.GetScalars().GetArrayData().GetData()
+		require.Len(t, got, 1)
+		assert.Equal(t, []int32{42}, got[0].GetIntData().GetData())
+	})
 }
 
 func TestUpdateFieldDataByColumn(t *testing.T) {
@@ -5639,9 +5760,30 @@ func TestUpdateFieldDataByColumn(t *testing.T) {
 	})
 }
 
-func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, elementType schemapb.DataType, rowCount int) *schemapb.FieldData {
+func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, elementType schemapb.DataType, rows any) *schemapb.FieldData {
+	var rowCount int
+	var validData []bool
+	switch v := rows.(type) {
+	case int:
+		rowCount = v
+	case []bool:
+		validData = v
+		rowCount = len(v)
+	default:
+		panic("unexpected ArrayOfVector row spec")
+	}
+
 	data := make([]*schemapb.VectorField, rowCount)
 	for i := 0; i < rowCount; i++ {
+		if len(validData) > 0 && !validData[i] {
+			data[i] = &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{},
+				},
+			}
+			continue
+		}
 		data[i] = &schemapb.VectorField{
 			Dim: dim,
 			Data: &schemapb.VectorField_FloatVector{
@@ -5649,7 +5791,7 @@ func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, eleme
 			},
 		}
 	}
-	return &schemapb.FieldData{
+	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_ArrayOfVector,
 		FieldName: fieldName,
 		FieldId:   fieldID,
@@ -5666,6 +5808,10 @@ func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, eleme
 			},
 		},
 	}
+	if len(validData) > 0 {
+		fd.ValidData = validData
+	}
+	return fd
 }
 
 func TestFieldDataIdxComputer_ArrayOfVectorIsNonVector(t *testing.T) {

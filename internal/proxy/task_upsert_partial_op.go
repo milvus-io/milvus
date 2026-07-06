@@ -102,6 +102,10 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 	if len(fieldOps) == 0 {
 		return false, nil
 	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return false, err
+	}
 
 	// Precompute PK names and a lookup table of FieldData by name so we
 	// can validate payload alignment in O(1) per op.
@@ -131,6 +135,10 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 
 		op := opMsg.GetOp()
 		if op == schemapb.FieldPartialUpdateOp_REPLACE {
+			if typeutil.IsStructSubField(name) {
+				return false, merr.WrapErrParameterInvalidMsg(
+					"partial struct update is not supported for struct sub-field %q; use the whole struct field instead", name)
+			}
 			// An explicit REPLACE is legal but indistinguishable from no
 			// op at all. Accept silently — no further validation needed.
 			continue
@@ -140,6 +148,14 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 		if _, isPK := pkFields[name]; isPK {
 			return false, merr.WrapErrParameterInvalidMsg(
 				fmt.Sprintf("field %q is the primary key and cannot carry a partial-update op", name))
+		}
+		if schemaHelper.GetStructArrayFieldFromName(name) != nil {
+			return false, merr.WrapErrParameterInvalidMsg(
+				"op %s is not supported for struct field %q", op.String(), name)
+		}
+		if typeutil.IsStructSubField(name) {
+			return false, merr.WrapErrParameterInvalidMsg(
+				"op %s is not supported for struct field %q", op.String(), name)
 		}
 
 		fieldSchema, err := findFieldSchemaByName(schema, name)
