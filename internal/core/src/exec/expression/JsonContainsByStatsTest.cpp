@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <simdjson.h>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -233,11 +234,30 @@ FindFirstShreddingDataFile(const BuiltJsonStatsIndex& built_index) {
     return built_index.stats_base_path + "/" + *it;
 }
 
+std::string
+MakeShreddingDataFile(const BuiltJsonStatsIndex& built_index,
+                      int64_t column_group_id,
+                      int64_t file_id) {
+    return fmt::format("{}/{}/{}/{}",
+                       built_index.stats_base_path,
+                       JSON_STATS_SHREDDING_DATA_PATH,
+                       column_group_id,
+                       file_id);
+}
+
+std::string
+MakeShreddingDataRelativeFile(int64_t column_group_id, int64_t file_id) {
+    return fmt::format(
+        "{}/{}/{}", JSON_STATS_SHREDDING_DATA_PATH, column_group_id, file_id);
+}
+
 void
-OverwriteWithParquetMissingPackedFieldList(
+WriteShreddingParquetWithoutPackedFieldList(
     const BuiltJsonStatsIndex& built_index,
+    int64_t column_group_id,
+    int64_t file_id,
     const std::vector<int64_t>& values) {
-    auto path = FindFirstShreddingDataFile(built_index);
+    auto path = MakeShreddingDataFile(built_index, column_group_id, file_id);
 
     arrow::Int64Builder value_builder;
     AssertInfo(value_builder.AppendValues(values).ok(),
@@ -297,6 +317,22 @@ OverwriteWithParquetMissingPackedFieldList(
                "failed to write parquet table");
     AssertInfo(writer->Close().ok(), "failed to close parquet writer");
     AssertInfo(output->Close().ok(), "failed to close parquet output");
+}
+
+void
+OverwriteWithParquetMissingPackedFieldList(
+    const BuiltJsonStatsIndex& built_index,
+    const std::vector<int64_t>& values) {
+    (void)FindFirstShreddingDataFile(built_index);
+    WriteShreddingParquetWithoutPackedFieldList(
+        built_index, /*column_group_id=*/0, /*file_id=*/0, values);
+}
+
+void
+SetIndexFiles(BuiltJsonStatsIndex& built_index,
+              std::vector<std::string> index_files) {
+    built_index.index_files = std::move(index_files);
+    built_index.load_config["index_files"] = built_index.index_files;
 }
 
 TargetBitmap
@@ -470,6 +506,59 @@ TEST(JsonStatsAsyncLoadTest, LoadsShreddingParquetWithoutPackedFieldList) {
     EXPECT_FALSE(result[1]);
     EXPECT_TRUE(result[2]);
     EXPECT_FALSE(result[3]);
+    EXPECT_EQ(result.count(), 2);
+}
+
+TEST(JsonStatsAsyncLoadTest, LoadsMultipleShreddingParquetFilesInFileIdOrder) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    std::vector<std::string> json_raw_data = {
+        R"({"a": 1})",
+        R"({"a": 2})",
+        R"({"a": 3})",
+        R"({"a": 1})",
+        R"({"a": 4})",
+    };
+
+    const int64_t collection_id = 1202;
+    const int64_t partition_id = 2202;
+    const int64_t segment_id = 3202;
+    const int64_t field_id = json_fid.get();
+    const int64_t build_id = 5202;
+    const int64_t version_id = 1;
+    const std::string root_path = TestLocalPath;
+
+    auto built_index = BuildJsonStatsIndex(json_raw_data,
+                                           json_fid,
+                                           root_path,
+                                           collection_id,
+                                           partition_id,
+                                           segment_id,
+                                           field_id,
+                                           build_id,
+                                           version_id);
+    WriteShreddingParquetWithoutPackedFieldList(
+        built_index, /*column_group_id=*/0, /*file_id=*/0, {1, 2});
+    WriteShreddingParquetWithoutPackedFieldList(
+        built_index, /*column_group_id=*/0, /*file_id=*/1, {3, 1, 4});
+
+    std::vector<std::string> shuffled_index_files{
+        MakeShreddingDataRelativeFile(/*column_group_id=*/0, /*file_id=*/1)};
+    shuffled_index_files.insert(shuffled_index_files.end(),
+                                built_index.index_files.begin(),
+                                built_index.index_files.end());
+    SetIndexFiles(built_index, std::move(shuffled_index_files));
+
+    auto stats = LoadBuiltJsonStatsIndex(built_index);
+    auto result = ReadJsonStatsInt64Equal(
+        *stats, JsonKey("/a", JSONType::INT64).ToColumnName(), 1, 5);
+
+    EXPECT_TRUE(result[0]);
+    EXPECT_FALSE(result[1]);
+    EXPECT_FALSE(result[2]);
+    EXPECT_TRUE(result[3]);
+    EXPECT_FALSE(result[4]);
     EXPECT_EQ(result.count(), 2);
 }
 
