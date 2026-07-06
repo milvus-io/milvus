@@ -1023,3 +1023,99 @@ TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriter) {
     // Every row (null + non-null, disjoint offsets) must be accounted for once.
     EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kWriters * kPerWriter));
 }
+
+// Regression for the IsNull()/IsNotNull() heap out-of-bounds write on the
+// concurrent multi-writer growing index. Writers assign offsets round-robin so
+// null_offset_ is appended in NON-monotonic order (i.e. unsorted), and each
+// writer may publish a high offset while lower offsets are still in flight, so
+// null_offset_ transiently holds values >= Count(). Readers hammer IsNull()/
+// IsNotNull() throughout ingestion: with the old std::lower_bound shortcut over
+// unsorted data those offsets escaped the bound and wrote past the bitset (a
+// silent OOB in release builds; caught here under ASAN). The final bitsets must
+// also match the exact null / non-null partition.
+TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriterIsNullBounds) {
+    field_meta_.field_schema.set_nullable(true);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    constexpr int kWriters = 6;
+    constexpr int kTotal = 6000;  // divisible by kWriters
+    // Row is null iff (offset % 3 == 0). Deterministic, independent of thread
+    // scheduling, so the final counts are exact.
+    auto is_null_row = [](int64_t off) { return off % 3 == 0; };
+
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop_readers{false};
+    std::atomic<int64_t> reader_iters{0};
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            // Round-robin offsets: writer w owns w, w+kWriters, w+2*kWriters...
+            // so concurrent writers append null_offset_ out of order.
+            for (int64_t off = w; off < kTotal; off += kWriters) {
+                if (is_null_row(off)) {
+                    rtree.AddGeometry(std::string(), off);
+                } else {
+                    rtree.AddGeometry(CreatePointWKB(static_cast<double>(off),
+                                                     static_cast<double>(off)),
+                                      off);
+                }
+            }
+        });
+    }
+
+    // Readers concurrently drive the previously-unguarded null bitmap paths.
+    // The point is to run IsNull()/IsNotNull() against the growing index while
+    // null_offset_ is unsorted and mid-flight: under ASAN the old lower_bound
+    // shortcut faulted here. We intentionally do NOT cross-check the two
+    // results against each other, because IsNull() and IsNotNull() each take
+    // an independent Count() snapshot and a concurrent writer can grow the row
+    // count between the two calls (so their sizes legitimately differ by the
+    // rows added in between). Per-snapshot correctness is asserted after join.
+    std::vector<std::thread> readers;
+    for (int r = 0; r < 3; ++r) {
+        readers.emplace_back([&]() {
+            while (!stop_readers.load(std::memory_order_relaxed)) {
+                auto is_null = rtree.IsNull();
+                auto is_not_null = rtree.IsNotNull();
+                // Each result is self-consistent: no set bit lies outside its
+                // own length (the invariant the OOB fix restores).
+                EXPECT_LE(is_null.count(), is_null.size());
+                EXPECT_LE(is_not_null.count(), is_not_null.size());
+                reader_iters.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& t : writers) {
+        t.join();
+    }
+    stop_readers.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    EXPECT_GT(reader_iters.load(), 0);
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kTotal));
+
+    int64_t expected_nulls = 0;
+    for (int64_t off = 0; off < kTotal; ++off) {
+        if (is_null_row(off)) {
+            ++expected_nulls;
+        }
+    }
+    auto final_null = rtree.IsNull();
+    auto final_not_null = rtree.IsNotNull();
+    EXPECT_EQ(final_null.count(), expected_nulls);
+    EXPECT_EQ(final_not_null.count(), kTotal - expected_nulls);
+    // Every offset must land in exactly one of the two bitsets.
+    for (int64_t off = 0; off < kTotal; ++off) {
+        EXPECT_EQ(final_null[off], is_null_row(off)) << "offset " << off;
+        EXPECT_EQ(final_not_null[off], !is_null_row(off)) << "offset " << off;
+    }
+}
