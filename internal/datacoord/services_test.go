@@ -5811,3 +5811,57 @@ type (
 	embeddedBroadcastAPI struct{ broadcaster.BroadcastAPI }
 	embeddedBroker       struct{ broker.Broker }
 )
+
+func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
+	ctx := context.Background()
+	// A source whose own import failed (real reason, not user-aborted) must still be
+	// abortable, so the control plane can release the peer cluster's Uncommitted job.
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 2101, CollectionID: 300,
+		State: internalpb.ImportJobState_Failed, Reason: "disk quota exceeded",
+	}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2101)).Return(job).Times(2)
+
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	bm := mockey.Mock((*Server).broadcastRollbackImportMessage).Return(nil).Build()
+	defer bm.UnPatch()
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2101})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+}
+
+func TestAbortImport_CompletedRejected(t *testing.T) {
+	ctx := context.Background()
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 2103, State: internalpb.ImportJobState_Completed,
+	}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2103)).Return(job).Once()
+
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2103})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}
+
+func TestAbortImport_CommittingRejected(t *testing.T) {
+	ctx := context.Background()
+	// Committing is mid-commit and cannot be rolled back.
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 2104, State: internalpb.ImportJobState_Committing,
+	}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2104)).Return(job).Once()
+
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2104})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}

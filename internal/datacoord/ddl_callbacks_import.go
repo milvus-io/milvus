@@ -145,6 +145,23 @@ func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
 	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
 }
 
+// isReplicatingClusterNow reports whether this cluster is currently part of a CDC
+// replication topology. Any lookup error is treated as "not replicating" so callers
+// fall back to non-replicate behavior (no rollback broadcast). This differs from
+// validateImportReplication, which propagates the balancer error to block import
+// admission; here a transient balancer error must not strand a GC decision.
+func (s *Server) isReplicatingClusterNow(ctx context.Context) bool {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return false
+	}
+	assignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil || assignment == nil {
+		return false
+	}
+	return isReplicatingCluster(assignment.ReplicateConfiguration)
+}
+
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
@@ -235,8 +252,11 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
 	case internalpb.ImportJobState_Failed:
-		mlog.Info(ctx, "CommitImport: job already failed, no-op",
-			mlog.FieldJobID(jobID))
+		// Divergence signal: the source committed but this replica already failed, so
+		// this replica will NOT make the data visible. Left as a no-op here; surfaced
+		// at WARN for alerting.
+		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits — potential primary/standby divergence",
+			mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
 		return nil
 	default:
 		// CommitImport may be replicated before the local import task reaches

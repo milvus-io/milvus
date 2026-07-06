@@ -22,10 +22,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -40,6 +42,21 @@ type ImportChecker interface {
 	Close()
 }
 
+// importCheckerHooks bundles the coordinator callbacks the import checker invokes,
+// injected as one named unit (instead of a growing positional-arg list) so the checker
+// does not depend on *Server. A nil callback disables the corresponding behavior; tests
+// inject only the hooks they exercise.
+type importCheckerHooks struct {
+	// commitImport broadcasts a CommitImport WAL message. Required in production; a nil
+	// value is a programming error only when reached on the auto_commit=true path.
+	commitImport func(ctx context.Context, job ImportJob) error
+	// rollbackImport broadcasts a RollbackImport WAL message. nil disables GC self-heal.
+	rollbackImport func(ctx context.Context, job ImportJob) error
+	// isReplicatingCluster reports whether this cluster is currently replicating. nil is
+	// treated as "not replicating" (GC self-heal disabled).
+	isReplicatingCluster func(ctx context.Context) bool
+}
+
 type importChecker struct {
 	ctx        context.Context
 	meta       *meta
@@ -49,9 +66,7 @@ type importChecker struct {
 	ci         CompactionInspector
 	handler    Handler
 
-	// commitImportFn broadcasts a CommitImport WAL message.
-	// Injected at construction time so the checker does not depend on *Server.
-	commitImportFn func(ctx context.Context, job ImportJob) error
+	hooks importCheckerHooks
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -64,18 +79,18 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
-	commitImportFn func(ctx context.Context, job ImportJob) error, // required; nil OK for tests
+	hooks importCheckerHooks,
 ) ImportChecker {
 	return &importChecker{
-		ctx:            ctx,
-		meta:           meta,
-		broker:         broker,
-		alloc:          alloc,
-		importMeta:     importMeta,
-		ci:             ci,
-		handler:        handler,
-		commitImportFn: commitImportFn,
-		closeChan:      make(chan struct{}),
+		ctx:        ctx,
+		meta:       meta,
+		broker:     broker,
+		alloc:      alloc,
+		importMeta: importMeta,
+		ci:         ci,
+		handler:    handler,
+		hooks:      hooks,
+		closeChan:  make(chan struct{}),
 	}
 }
 
@@ -469,11 +484,11 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 	// collection-level resource-key lock serializes overlapping broadcasts, the
 	// ack callback only transitions when the job is still Uncommitted, and
 	// HandleCommitVchannel is idempotent on committed_vchannels.
-	if c.commitImportFn == nil {
-		log.Error(c.ctx, "commitImportFn is nil but auto_commit=true; this is a programming error")
+	if c.hooks.commitImport == nil {
+		log.Error(c.ctx, "commit hook is nil but auto_commit=true; this is a programming error")
 		return
 	}
-	if err := c.commitImportFn(c.ctx, job); err != nil {
+	if err := c.hooks.commitImport(c.ctx, job); err != nil {
 		log.Warn(c.ctx, "auto-commit broadcast failed, will retry on next tick", mlog.Err(err))
 	}
 }
@@ -600,6 +615,22 @@ func (c *importChecker) checkGC(job ImportJob) {
 		}
 		if !shouldRemoveJob {
 			return
+		}
+		// In a CDC replicating cluster, a failed 2PC source import must release the
+		// peer cluster's replicated Uncommitted job before we drop it — otherwise the
+		// peer is stranded with invisible imported segments and no recovery path, since
+		// source GC never touches the peer. Broadcast the RollbackImport first; if it
+		// fails transiently, keep the job and retry on the next GC tick. Removal of the
+		// job is itself the idempotency guard: once gone we never re-broadcast. A standby
+		// (not the replication primary) gets ErrNotPrimary and is allowed to proceed.
+		if c.hooks.rollbackImport != nil && c.hooks.isReplicatingCluster != nil &&
+			job.GetState() == internalpb.ImportJobState_Failed &&
+			c.hooks.isReplicatingCluster(c.ctx) {
+			if err := c.hooks.rollbackImport(c.ctx, job); err != nil && !errors.Is(err, broadcaster.ErrNotPrimary) {
+				log.Warn(c.ctx, "failed to broadcast rollback before GC of failed replicate import job, will retry", mlog.Err(err))
+				return
+			}
+			log.Info(c.ctx, "broadcast rollback to release peer before GC of failed replicate import job")
 		}
 		err := c.importMeta.RemoveJob(c.ctx, job.GetJobID())
 		if err != nil {
