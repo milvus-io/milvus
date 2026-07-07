@@ -149,7 +149,7 @@ func (s *segmentAllocManager) AllocRows(req *AssignSegmentRequest) (*AssignSegme
 		return nil, ErrNotGrowing
 	}
 
-	err := resource.Resource().SegmentStatsManager().AllocRows(s.GetSegmentID(), req.ModifiedMetrics)
+	err := resource.Resource().SegmentStatsManager().AllocRows(s.GetSegmentID(), req.ModifiedMetrics, req.RuntimeFlushSize)
 	if err != nil {
 		return nil, err
 	}

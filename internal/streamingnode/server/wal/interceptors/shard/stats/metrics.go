@@ -11,19 +11,21 @@ import (
 // newMetricsHelper creates a new metrics helper for the WAL segment.
 func newMetricsHelper() *metricsHelper {
 	return &metricsHelper{
-		growingBytesHWM:  metrics.WALGrowingSegmentHWMBytes.With(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
-		growingBytesLWM:  metrics.WALGrowingSegmentLWMBytes.With(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
-		growingBytes:     metrics.WALGrowingSegmentBytes.MustCurryWith(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
-		growingRowsTotal: metrics.WALGrowingSegmentRowsTotal.MustCurryWith(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
+		growingBytesHWM:    metrics.WALGrowingSegmentHWMBytes.With(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
+		growingBytesLWM:    metrics.WALGrowingSegmentLWMBytes.With(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
+		flushPressureBytes: metrics.WALGrowingSegmentFlushPressureBytes.With(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
+		growingBytes:       metrics.WALGrowingSegmentBytes.MustCurryWith(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
+		growingRowsTotal:   metrics.WALGrowingSegmentRowsTotal.MustCurryWith(prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}),
 	}
 }
 
 // metricsHelper is a helper struct for managing metrics related to WAL segments.
 type metricsHelper struct {
-	growingBytesHWM  prometheus.Gauge
-	growingBytesLWM  prometheus.Gauge
-	growingBytes     *prometheus.GaugeVec
-	growingRowsTotal *prometheus.GaugeVec
+	growingBytesHWM    prometheus.Gauge
+	growingBytesLWM    prometheus.Gauge
+	flushPressureBytes prometheus.Gauge
+	growingBytes       *prometheus.GaugeVec
+	growingRowsTotal   *prometheus.GaugeVec
 }
 
 // ObservePChannelBytesUpdate updates the bytes of a pchannel.
@@ -41,6 +43,11 @@ func (m *metricsHelper) ObservePChannelBytesUpdate(pchannel string, am *aggregat
 			m.growingRowsTotal.WithLabelValues(pchannel, lv.String()).Set(float64(metric.Rows))
 		}
 	}
+}
+
+// ObserveFlushPressureBytesUpdate updates the runtime bytes used by HWM/LWM flush decisions.
+func (m *metricsHelper) ObserveFlushPressureBytesUpdate(bytes uint64) {
+	m.flushPressureBytes.Set(float64(bytes))
 }
 
 // ObserveConfigUpdate is a update method for configuration changes.
