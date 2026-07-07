@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	utilmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -2008,6 +2009,53 @@ func (suite *ServiceSuite) TestGetDataDistribution_Normal() {
 	resp, err := suite.node.GetDataDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestGetDataDistribution_ReturnsCacheShardDiskUsageStats() {
+	ctx := context.Background()
+	oldGetCacheShardDiskUsageStats := getCacheShardDiskUsageStats
+	getCacheShardDiskUsageStats = func() []utilmetrics.CacheShardDiskUsageStats {
+		return []utilmetrics.CacheShardDiskUsageStats{
+			{
+				DataType:  "scalar_field",
+				Shard:     suite.vchannel,
+				DiskBytes: 1024,
+			},
+		}
+	}
+	defer func() {
+		getCacheShardDiskUsageStats = oldGetCacheShardDiskUsageStats
+	}()
+
+	req := &querypb.GetDataDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+	}
+
+	resp, err := suite.node.GetDataDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	suite.Equal([]*querypb.CacheShardDiskUsageStats{
+		{
+			DataType:  "scalar_field",
+			Shard:     suite.vchannel,
+			DiskBytes: 1024,
+		},
+	}, resp.GetCacheShardDiskUsageStats())
+
+	req.LastUpdateTs = resp.GetLastModifyTs()
+	resp, err = suite.node.GetDataDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	suite.Equal([]*querypb.CacheShardDiskUsageStats{
+		{
+			DataType:  "scalar_field",
+			Shard:     suite.vchannel,
+			DiskBytes: 1024,
+		},
+	}, resp.GetCacheShardDiskUsageStats())
 }
 
 func (suite *ServiceSuite) TestGetDataDistribution_Failed() {

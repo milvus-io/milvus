@@ -237,11 +237,19 @@ func (suite *OpsServiceSuite) TestGetQueryNodeDistribution() {
 	suite.NoError(err)
 	suite.False(merr.Ok(resp.Status))
 
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+	node := session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
 		Hostname: "localhost",
+	})
+	node.UpdateStats(session.WithCacheShardDiskUsageStats([]*querypb.CacheShardDiskUsageStats{
+		{
+			DataType:  "scalar_field",
+			Shard:     "channel1",
+			DiskBytes: 1024,
+		},
 	}))
+	suite.nodeMgr.Add(node)
 	// test success
 	channels := []*meta.DmChannel{
 		{
@@ -291,6 +299,13 @@ func (suite *OpsServiceSuite) TestGetQueryNodeDistribution() {
 	suite.True(merr.Ok(resp.Status))
 	suite.Equal(2, len(resp.GetChannelNames()))
 	suite.Equal(2, len(resp.GetSealedSegmentIDs()))
+	suite.Equal([]*querypb.CacheShardDiskUsageStats{
+		{
+			DataType:  "scalar_field",
+			Shard:     "channel1",
+			DiskBytes: 1024,
+		},
+	}, resp.GetCacheShardDiskUsageStats())
 }
 
 func (suite *OpsServiceSuite) TestCheckQueryNodeDistribution() {

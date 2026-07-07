@@ -16,11 +16,14 @@
 
 package session
 
+import "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+
 type stats struct {
-	segmentCnt      int
-	channelCnt      int
-	memCapacityInMB float64
-	CPUNum          int64
+	segmentCnt               int
+	channelCnt               int
+	memCapacityInMB          float64
+	CPUNum                   int64
+	cacheShardDiskUsageStats []*querypb.CacheShardDiskUsageStats
 }
 
 func (s *stats) setSegmentCnt(cnt int) {
@@ -55,6 +58,46 @@ func (s *stats) getCPUNum() int64 {
 	return s.CPUNum
 }
 
+func (s *stats) setCacheShardDiskUsageStats(stats []*querypb.CacheShardDiskUsageStats) {
+	s.cacheShardDiskUsageStats = cloneCacheShardDiskUsageStats(stats)
+}
+
+func (s *stats) getCacheShardDiskUsageStats() []*querypb.CacheShardDiskUsageStats {
+	return cloneCacheShardDiskUsageStats(s.cacheShardDiskUsageStats)
+}
+
 func newStats() stats {
 	return stats{}
+}
+
+func cloneCacheShardDiskUsageStats(stats []*querypb.CacheShardDiskUsageStats) []*querypb.CacheShardDiskUsageStats {
+	if len(stats) == 0 {
+		return nil
+	}
+
+	cloned := make([]*querypb.CacheShardDiskUsageStats, 0, len(stats))
+	for _, stat := range stats {
+		if stat == nil {
+			cloned = append(cloned, nil)
+			continue
+		}
+		cloned = append(cloned, &querypb.CacheShardDiskUsageStats{
+			DataType:  stat.GetDataType(),
+			Shard:     stat.GetShard(),
+			DiskBytes: stat.GetDiskBytes(),
+		})
+	}
+	return cloned
+}
+
+func (n *NodeInfo) CacheShardDiskUsageStats() []*querypb.CacheShardDiskUsageStats {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.getCacheShardDiskUsageStats()
+}
+
+func WithCacheShardDiskUsageStats(stats []*querypb.CacheShardDiskUsageStats) StatsOption {
+	return func(n *NodeInfo) {
+		n.setCacheShardDiskUsageStats(stats)
+	}
 }

@@ -53,9 +53,10 @@ func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
+	metaMgr ...*meta.Meta,
 ) *ChannelLevelScoreBalancer {
 	return &ChannelLevelScoreBalancer{
-		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, targetMgr),
+		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, targetMgr, metaMgr...),
 		targetMgr:          targetMgr,
 	}
 }
