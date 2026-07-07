@@ -283,7 +283,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
                     SetNotUseIndex();
-                    result = ExecRangeVisitorImplArray<double>(context);
+                    switch (expr_->column_.element_type_) {
+                        case DataType::FLOAT:
+                            result = ExecRangeVisitorImplArray<float>(context);
+                            break;
+                        case DataType::DOUBLE:
+                            result = ExecRangeVisitorImplArray<double>(context);
+                            break;
+                        default:
+                            ThrowInfo(DataTypeInvalid,
+                                      "floating point value is not supported "
+                                      "for array element type: {}",
+                                      expr_->column_.element_type_);
+                    }
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
                     SetNotUseIndex();
