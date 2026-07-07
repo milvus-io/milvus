@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
-#include "segcore/default_fs.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -69,7 +68,7 @@ GroupChunkTranslator::GroupChunkTranslator(
     GroupChunkType group_chunk_type,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     FieldDataInfo column_group_info,
-    std::vector<std::string> insert_files,
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     std::vector<milvus_storage::RowGroupMetadataVector>&& row_group_meta_list,
     bool use_mmap,
     bool mmap_populate,
@@ -96,7 +95,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       }()),
       field_metas_(field_metas),
       column_group_info_(column_group_info),
-      insert_files_(std::move(insert_files)),
+      chunk_reader_(std::move(chunk_reader)),
       row_group_meta_list_(std::move(row_group_meta_list)),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -137,6 +136,10 @@ GroupChunkTranslator::GroupChunkTranslator(
                                               DataType::ARRAY;
                                    })),
       load_priority_(load_priority) {
+    AssertInfo(chunk_reader_ != nullptr,
+               "[StorageV2] translator {} chunk reader is null",
+               key_);
+
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
     file_row_group_prefix_sum_.push_back(
@@ -337,11 +340,10 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     cell_specs.reserve(cids.size());
     for (auto cid : cids) {
         auto [rg_start, rg_end] = meta_.get_row_group_range(cid);
-        auto [file_idx, local_off] = get_file_and_row_group_offset(rg_start);
         cell_specs.push_back(
             {cid,
-             file_idx,
-             static_cast<int64_t>(local_off),
+             /*file_idx=*/0,
+             static_cast<int64_t>(rg_start),
              static_cast<int64_t>(rg_end - rg_start),
              meta_.chunk_memory_size_[cid],
              loading_overhead_bytes(meta_.chunk_memory_size_[cid])});
@@ -353,9 +355,7 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
         static_cast<size_t>(pool.GetMaxThreadNum() *
                             milvus::segcore::kChannelCapacityMultiplier));
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-
-    auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
+    auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
     auto finalize_cell =
         [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
                int64_t cid) {

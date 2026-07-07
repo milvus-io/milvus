@@ -1962,6 +1962,78 @@ struct FileMetadataLoadResult {
         per_field_row_group_stats;
 };
 
+std::vector<std::string>
+GetColumnNamesForFieldIds(const ArrowSchemaPtr& arrow_schema,
+                          const std::vector<FieldId>& field_ids,
+                          const std::string& debug_key) {
+    std::unordered_map<int64_t, std::string> column_names_by_field_id;
+    column_names_by_field_id.reserve(arrow_schema->num_fields());
+    for (const auto& field : arrow_schema->fields()) {
+        auto metadata = field->metadata();
+        if (metadata == nullptr ||
+            !metadata->Contains(milvus_storage::ARROW_FIELD_ID_KEY)) {
+            continue;
+        }
+        auto field_id = std::stoll(
+            metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY)->data());
+        column_names_by_field_id.emplace(field_id, field->name());
+    }
+
+    std::vector<std::string> column_names;
+    column_names.reserve(field_ids.size());
+    for (auto field_id : field_ids) {
+        auto it = column_names_by_field_id.find(field_id.get());
+        AssertInfo(it != column_names_by_field_id.end(),
+                   "[StorageV2] {} cannot find arrow column for field {}",
+                   debug_key,
+                   field_id.get());
+        column_names.push_back(it->second);
+    }
+    return column_names;
+}
+
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+BuildColumnGroupsForLegacyPackedFiles(
+    const std::vector<std::string>& insert_files,
+    const std::vector<FieldId>& field_ids,
+    const ArrowSchemaPtr& arrow_schema,
+    const std::vector<milvus_storage::RowGroupMetadataVector>&
+        row_group_meta_list,
+    const std::string& debug_key,
+    std::shared_ptr<std::vector<std::string>>& needed_columns) {
+    AssertInfo(insert_files.size() == row_group_meta_list.size(),
+               "[StorageV2] {} insert file count {} does not match row group "
+               "metadata count {}",
+               debug_key,
+               insert_files.size(),
+               row_group_meta_list.size());
+
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->format = LOON_FORMAT_PARQUET;
+    auto columns =
+        GetColumnNamesForFieldIds(arrow_schema, field_ids, debug_key);
+    column_group->columns = columns;
+
+    for (size_t file_idx = 0; file_idx < insert_files.size(); ++file_idx) {
+        int64_t rows_in_file = 0;
+        for (int i = 0; i < row_group_meta_list[file_idx].size(); ++i) {
+            rows_in_file += row_group_meta_list[file_idx].Get(i).row_num();
+        }
+        AssertInfo(rows_in_file > 0,
+                   "[StorageV2] {} file {} has no rows",
+                   debug_key,
+                   insert_files[file_idx]);
+        column_group->files.push_back(milvus_storage::api::ColumnGroupFile{
+            insert_files[file_idx], 0, rows_in_file, {}});
+    }
+
+    needed_columns =
+        std::make_shared<std::vector<std::string>>(std::move(columns));
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    column_groups->push_back(std::move(column_group));
+    return column_groups;
+}
+
 }  // namespace
 
 LoadedGroupChunkMetadata
@@ -2169,6 +2241,33 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 "seg_{}_cg_{}", get_segment_id(), column_group_id.get()));
         auto parquet_stats_by_field =
             std::move(metadata.parquet_stats_by_field);
+        std::shared_ptr<std::vector<std::string>> needed_columns;
+        auto debug_key = fmt::format(
+            "seg_{}_cg_{}", get_segment_id(), column_group_id.get());
+        auto column_groups =
+            BuildColumnGroupsForLegacyPackedFiles(insert_files,
+                                                  milvus_field_ids,
+                                                  arrow_schema,
+                                                  metadata.row_group_meta_list,
+                                                  debug_key,
+                                                  needed_columns);
+        auto properties =
+            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                .GetProperties();
+        AssertInfo(properties != nullptr,
+                   "[StorageV2] {} cannot create chunk reader without "
+                   "filesystem properties",
+                   debug_key);
+        auto reader = milvus_storage::api::Reader::create(
+            column_groups, arrow_schema, needed_columns, *properties);
+        auto chunk_reader_result =
+            reader->get_chunk_reader(/*column_group_index=*/0, needed_columns);
+        AssertInfo(chunk_reader_result.ok(),
+                   "[StorageV2] {} failed to create chunk reader: {}",
+                   debug_key,
+                   chunk_reader_result.status().ToString());
+        auto chunk_reader = std::shared_ptr<milvus_storage::api::ChunkReader>(
+            std::move(chunk_reader_result).ValueOrDie());
 
         auto translator =
             std::make_unique<storagev2translator::GroupChunkTranslator>(
@@ -2176,7 +2275,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
-                std::move(insert_files),
+                std::move(chunk_reader),
                 std::move(metadata.row_group_meta_list),
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
