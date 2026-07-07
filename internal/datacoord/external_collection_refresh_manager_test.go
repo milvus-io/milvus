@@ -26,6 +26,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -88,6 +90,87 @@ func testMilvusTableTargetRefreshSchema() *schemapb.CollectionSchema {
 	return schema
 }
 
+func TestExternalCollectionRefreshManager_ShouldForceSegmentRemapOnRefreshInfoChange(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.Key
+	paramtable.Get().Save(key, "10000000")
+	defer paramtable.Get().Reset(key)
+
+	ctx := context.Background()
+	catalog := &stubCatalog{
+		refreshInfos: map[int64]*datapb.ExternalCollectionRefreshInfo{
+			100: {
+				CollectionId:                100,
+				AppliedTargetRowsPerSegment: 1000000,
+			},
+		},
+	}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+	manager := &externalCollectionRefreshManager{refreshMeta: refreshMeta}
+
+	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	changed, err := manager.shouldForceSegmentRemap(ctx, 100, targetRowsPerSegment)
+	require.NoError(t, err)
+	missing, err := manager.shouldForceSegmentRemap(ctx, 200, targetRowsPerSegment)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(10000000), targetRowsPerSegment)
+	assert.True(t, changed)
+	assert.True(t, missing)
+}
+
+func TestExternalCollectionRefreshManager_DoesNotForceWhenRefreshInfoUnchanged(t *testing.T) {
+	ctx := context.Background()
+	targetRowsPerSegment := int64(1000000)
+	catalog := &stubCatalog{
+		refreshInfos: map[int64]*datapb.ExternalCollectionRefreshInfo{
+			100: {
+				CollectionId:                100,
+				AppliedTargetRowsPerSegment: targetRowsPerSegment,
+			},
+		},
+	}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+	manager := &externalCollectionRefreshManager{refreshMeta: refreshMeta}
+
+	force, err := manager.shouldForceSegmentRemap(ctx, 100, targetRowsPerSegment)
+	require.NoError(t, err)
+	assert.False(t, force)
+}
+
+func TestExternalCollectionRefreshManager_MissingRefreshInfoForcesSegmentRemap(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+	manager := &externalCollectionRefreshManager{refreshMeta: refreshMeta}
+
+	force, err := manager.shouldForceSegmentRemap(ctx, 100, 10000000)
+	require.NoError(t, err)
+	assert.True(t, force)
+}
+
+func TestExternalCollectionRefreshManager_RefreshInfoHelpersHandleMissingMetaAndErrors(t *testing.T) {
+	ctx := context.Background()
+	manager := &externalCollectionRefreshManager{}
+
+	force, err := manager.shouldForceSegmentRemap(ctx, 100, 10000000)
+	require.NoError(t, err)
+	assert.False(t, force)
+	require.NoError(t, manager.saveRefreshInfo(ctx, 100, 10000000))
+
+	catalogErr := errors.New("refresh info load failed")
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, &stubCatalog{getRefreshInfoErr: catalogErr})
+	require.NoError(t, err)
+	manager.refreshMeta = refreshMeta
+
+	force, err = manager.shouldForceSegmentRemap(ctx, 100, 10000000)
+	require.ErrorIs(t, err, catalogErr)
+	assert.False(t, force)
+}
+
 func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
@@ -134,6 +217,51 @@ func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	mgr.Stop()
 }
 
+func TestSubmitRefreshJobWithIDStoresRefreshInfoDerivedForceSegmentRemap(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	schema := &schemapb.CollectionSchema{
+		Name:           "ext",
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Version:        7,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", ExternalField: "id"},
+		},
+	}
+	mt := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	mt.collections.Insert(collectionID, &collectionInfo{
+		ID:            collectionID,
+		Schema:        schema,
+		VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
+		Partitions:    []int64{1},
+	})
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+	mgr := NewExternalCollectionRefreshManager(
+		ctx, mt, newStubScheduler(), &stubAllocator{nextID: 2000},
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+
+	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Build()
+	defer mockExplore.UnPatch()
+
+	jobID, err := mgr.SubmitRefreshJobWithID(
+		ctx, 1001, collectionID, "ext", "", "")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1001), jobID)
+
+	job := refreshMeta.GetJob(1001)
+	require.NotNil(t, job)
+	assert.True(t, job.GetForceSegmentRemap())
+
+	mgr.Stop()
+}
+
 func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
@@ -166,12 +294,14 @@ func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 	defer mockExplore.UnPatch()
 
 	job := &datapb.ExternalCollectionRefreshJob{
-		JobId:          1001,
-		CollectionId:   collectionID,
-		CollectionName: "ext",
-		ExternalSource: "s3://bucket/path",
-		ExternalSpec:   `{"format":"parquet"}`,
-		State:          indexpb.JobState_JobStateInit,
+		JobId:                1001,
+		CollectionId:         collectionID,
+		CollectionName:       "ext",
+		ExternalSource:       "s3://bucket/path",
+		ExternalSpec:         `{"format":"parquet"}`,
+		State:                indexpb.JobState_JobStateInit,
+		TargetRowsPerSegment: 10000000,
+		ForceSegmentRemap:    true,
 	}
 	assert.NoError(t, refreshMeta.AddJob(job))
 
@@ -181,6 +311,8 @@ func TestCreateTasksForJobCopiesJobMetadata(t *testing.T) {
 	assert.Equal(t, collectionID, tasks[0].GetCollectionId())
 	assert.Equal(t, "s3://bucket/path", tasks[0].GetExternalSource())
 	assert.Equal(t, `{"format":"parquet"}`, tasks[0].GetExternalSpec())
+	assert.Equal(t, int64(10000000), tasks[0].GetTargetRowsPerSegment())
+	assert.True(t, tasks[0].GetForceSegmentRemap())
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResults(t *testing.T) {
@@ -243,6 +375,141 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(20).GetState())
 	assert.Equal(t, int64(7), mt.segments.GetSegment(10).GetNumOfRows())
 	assert.Equal(t, int64(7), mt.segments.GetSegment(20).GetNumOfRows())
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsUpdatesRefreshInfo(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+	collectionID := int64(100)
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(collectionID),
+	}
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:                10,
+		CollectionId:         collectionID,
+		State:                indexpb.JobState_JobStateFinished,
+		TaskIds:              []int64{11},
+		TargetRowsPerSegment: 10000000,
+		ForceSegmentRemap:    true,
+	}
+	require.NoError(t, refreshMeta.AddJob(job))
+	require.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:       11,
+		JobId:        10,
+		CollectionId: collectionID,
+		State:        indexpb.JobState_JobStateFinished,
+		ResultReady:  true,
+		UpdatedSegments: []*datapb.SegmentInfo{
+			newTestExternalRefreshSegment(1000, collectionID, 10),
+		},
+	}))
+
+	m := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+	require.NoError(t, m.applyFinishedJobSegments(ctx, job))
+
+	info, ok := catalog.refreshInfos[collectionID]
+	require.True(t, ok)
+	assert.Equal(t, int64(10000000), info.GetAppliedTargetRowsPerSegment())
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsIgnoresRefreshInfoSaveError(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{saveRefreshInfoErr: errors.New("save refresh info failed")}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+
+	collectionID := int64(100)
+	mt := &meta{
+		catalog:     catalog,
+		segments:    NewSegmentsInfo(),
+		collections: newTestCollections(collectionID),
+	}
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:                10,
+		CollectionId:         collectionID,
+		State:                indexpb.JobState_JobStateFinished,
+		TaskIds:              []int64{11},
+		TargetRowsPerSegment: 10000000,
+		ForceSegmentRemap:    true,
+	}
+	require.NoError(t, refreshMeta.AddJob(job))
+	require.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:       11,
+		JobId:        10,
+		CollectionId: collectionID,
+		State:        indexpb.JobState_JobStateFinished,
+		ResultReady:  true,
+		UpdatedSegments: []*datapb.SegmentInfo{
+			newTestExternalRefreshSegment(1000, collectionID, 10),
+		},
+	}))
+
+	m := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+	require.NoError(t, m.applyFinishedJobSegments(ctx, job))
+
+	assert.NotNil(t, mt.segments.GetSegment(1000))
+	_, ok := catalog.refreshInfos[collectionID]
+	assert.False(t, ok)
+}
+
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsSkipsRefreshInfoUpdateWithKeptSegments(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+
+	collectionID := int64(100)
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1000, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1000,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		NumOfRows:    10,
+	}})
+	mt := &meta{
+		catalog:     catalog,
+		segments:    segments,
+		collections: newTestCollections(collectionID),
+	}
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:                10,
+		CollectionId:         collectionID,
+		State:                indexpb.JobState_JobStateFinished,
+		TaskIds:              []int64{11},
+		TargetRowsPerSegment: 10000000,
+	}
+	require.NoError(t, refreshMeta.AddJob(job))
+	require.NoError(t, refreshMeta.AddTask(&datapb.ExternalCollectionRefreshTask{
+		TaskId:       11,
+		JobId:        10,
+		CollectionId: collectionID,
+		State:        indexpb.JobState_JobStateFinished,
+		ResultReady:  true,
+		KeptSegments: []int64{1000},
+	}))
+
+	m := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+	require.NoError(t, m.applyFinishedJobSegments(ctx, job))
+
+	assert.NotNil(t, mt.segments.GetSegment(1000))
+	_, ok := catalog.refreshInfos[collectionID]
+	assert.False(t, ok)
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFinishedTask(t *testing.T) {
@@ -1357,8 +1624,7 @@ func TestHandleJobFinished_TriggersExploreTempCleanup(t *testing.T) {
 
 	mgr := NewExternalCollectionRefreshManager(
 		ctx, mt, scheduler, alloc, refreshMeta, nil,
-		testCollectionGetter(mt), schemaUpdater, cm,
-	).(*externalCollectionRefreshManager)
+		testCollectionGetter(mt), schemaUpdater, cm).(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
 		JobId:          555,

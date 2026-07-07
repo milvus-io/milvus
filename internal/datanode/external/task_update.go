@@ -228,7 +228,18 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 		return merr.Wrap(err, "failed to fetch fragments")
 	}
 
-	// Build current segment -> fragments mapping
+	if t.req.GetForceSegmentRemap() {
+		createdSegments, err := t.balanceFragmentsToSegments(ctx, newFragments)
+		if err != nil {
+			return err
+		}
+		t.updatedSegments = createdSegments
+		mlog.Info(ctx, "Segment organization complete with forced segment remap",
+			mlog.Int("newSegments", len(createdSegments)))
+		return nil
+	}
+
+	// Build current segment -> fragments mapping only when reuse is possible.
 	currentSegmentFragments, err := t.buildCurrentSegmentFragments()
 	if err != nil {
 		return merr.Wrap(err, "failed to build current segment fragments")
@@ -241,6 +252,13 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (t *RefreshExternalCollectionTask) targetRowsPerSegment() int64 {
+	if targetRows := t.req.GetTargetRowsPerSegment(); targetRows > 0 {
+		return targetRows
+	}
+	return paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
 }
 
 // fetchFragmentsFromExternalSource reads file info from the explore manifest
@@ -256,7 +274,7 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		mlog.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
 		mlog.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
-	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	targetRowsPerSegment := t.targetRowsPerSegment()
 
 	return packed.FetchFragmentsFromExternalSourceWithRange(
 		ctx,
@@ -720,8 +738,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			}
 		}
 	} else {
-		// Get target rows per segment from configuration
-		targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+		targetRowsPerSegment := t.targetRowsPerSegment()
 		if totalRows < targetRowsPerSegment {
 			targetRowsPerSegment = totalRows
 		}

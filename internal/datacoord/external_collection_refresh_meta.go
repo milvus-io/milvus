@@ -113,6 +113,23 @@ func (m *externalCollectionRefreshMeta) reloadFromKV() error {
 	return nil
 }
 
+func (m *externalCollectionRefreshMeta) GetRefreshInfo(ctx context.Context, collectionID int64) (*datapb.ExternalCollectionRefreshInfo, error) {
+	if m == nil || m.catalog == nil {
+		return nil, nil
+	}
+	return m.catalog.GetExternalCollectionRefreshInfo(ctx, collectionID)
+}
+
+func (m *externalCollectionRefreshMeta) SaveRefreshInfo(ctx context.Context, collectionID int64, appliedTargetRowsPerSegment int64) error {
+	if m == nil || m.catalog == nil {
+		return nil
+	}
+	return m.catalog.SaveExternalCollectionRefreshInfo(ctx, &datapb.ExternalCollectionRefreshInfo{
+		CollectionId:                collectionID,
+		AppliedTargetRowsPerSegment: appliedTargetRowsPerSegment,
+	})
+}
+
 // ==================== Internal Helper Methods ====================
 
 func (m *externalCollectionRefreshMeta) addToCollectionJobs(job *datapb.ExternalCollectionRefreshJob) {

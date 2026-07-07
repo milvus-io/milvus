@@ -1443,6 +1443,8 @@ message RefreshExternalCollectionTaskRequest {
   int64 file_index_begin = 12;            // File range start for this task
   int64 file_index_end = 13;              // File range end for this task
   int64 partitionID = 14;                 // target partition for manifest path
+  int64 target_rows_per_segment = 15;     // target row limit snapshot for deterministic segment layout
+  bool force_segment_remap = 16;          // skip old segment reuse and rebuild the layout
 }
 
 message RefreshExternalCollectionTaskResponse {
@@ -1488,6 +1490,8 @@ message ExternalCollectionRefreshJob {
   int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
   int64 progress = 10;           // Aggregated progress percentage (0-100)
   repeated int64 task_ids = 11;  // Task IDs belonging to this job
+  int64 target_rows_per_segment = 13;  // target row limit snapshot for this job
+  bool force_segment_remap = 14;        // whether tasks must rebuild segment layout
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
@@ -1517,6 +1521,13 @@ message ExternalCollectionRefreshTask {
   repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
   repeated SegmentInfo updated_segments = 16;  // Segment upsert payload produced by this task result
   bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
+  int64 target_rows_per_segment = 19;  // target row limit snapshot for this task
+  bool force_segment_remap = 20;        // skip old segment reuse and rebuild layout
+}
+
+message ExternalCollectionRefreshInfo {
+  int64 collection_id = 1;
+  int64 applied_target_rows_per_segment = 2;   // last fully applied target row limit
 }
 
 message GetRefreshExternalCollectionProgressResponse {

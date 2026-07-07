@@ -27,9 +27,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -40,11 +42,13 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -2195,4 +2199,66 @@ func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
 		assert.NotEmpty(t, key)
 		assert.Contains(t, key, "12345")
 	})
+}
+
+type metaKVMockTarget struct {
+	kv.MetaKv
+}
+
+func TestCatalog_ExternalCollectionRefreshInfo(t *testing.T) {
+	ctx := context.Background()
+	data := make(map[string]string)
+	metaKV := &metaKVMockTarget{}
+	mockSave := mockey.Mock((*metaKVMockTarget).Save).
+		To(func(_ *metaKVMockTarget, _ context.Context, key, value string) error {
+			data[key] = value
+			return nil
+		}).Build()
+	defer mockSave.UnPatch()
+	mockLoad := mockey.Mock((*metaKVMockTarget).Load).
+		To(func(_ *metaKVMockTarget, _ context.Context, key string) (string, error) {
+			if strings.HasSuffix(key, "/300") {
+				return "", errors.New("load failed")
+			}
+			value, ok := data[key]
+			if !ok {
+				return "", merr.WrapErrIoKeyNotFound(key)
+			}
+			return value, nil
+		}).Build()
+	defer mockLoad.UnPatch()
+
+	kc := &Catalog{MetaKv: metaKV}
+
+	info := &datapb.ExternalCollectionRefreshInfo{
+		CollectionId:                100,
+		AppliedTargetRowsPerSegment: 10000000,
+	}
+
+	require.NoError(t, kc.SaveExternalCollectionRefreshInfo(ctx, info))
+
+	saved, err := kc.GetExternalCollectionRefreshInfo(ctx, info.GetCollectionId())
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	assert.Equal(t, info.GetCollectionId(), saved.GetCollectionId())
+	assert.Equal(t, info.GetAppliedTargetRowsPerSegment(), saved.GetAppliedTargetRowsPerSegment())
+
+	info.AppliedTargetRowsPerSegment = 20000000
+	require.NoError(t, kc.SaveExternalCollectionRefreshInfo(ctx, info))
+
+	saved, err = kc.GetExternalCollectionRefreshInfo(ctx, info.GetCollectionId())
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	assert.Equal(t, int64(20000000), saved.GetAppliedTargetRowsPerSegment())
+
+	missing, err := kc.GetExternalCollectionRefreshInfo(ctx, 200)
+	require.NoError(t, err)
+	assert.Nil(t, missing)
+
+	_, err = kc.GetExternalCollectionRefreshInfo(ctx, 300)
+	require.ErrorContains(t, err, "load failed")
+
+	data[buildExternalCollectionRefreshInfoKey(400)] = "bad refresh info"
+	_, err = kc.GetExternalCollectionRefreshInfo(ctx, 400)
+	require.Error(t, err)
 }

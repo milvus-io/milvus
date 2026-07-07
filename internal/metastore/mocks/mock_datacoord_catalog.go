@@ -1331,6 +1331,65 @@ func (_c *DataCoordCatalog_GetCurrentPartitionStatsVersion_Call) RunAndReturn(ru
 	return _c
 }
 
+// GetExternalCollectionRefreshInfo provides a mock function with given fields: ctx, collectionID
+func (_m *DataCoordCatalog) GetExternalCollectionRefreshInfo(ctx context.Context, collectionID int64) (*datapb.ExternalCollectionRefreshInfo, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExternalCollectionRefreshInfo")
+	}
+
+	var r0 *datapb.ExternalCollectionRefreshInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*datapb.ExternalCollectionRefreshInfo, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *datapb.ExternalCollectionRefreshInfo); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ExternalCollectionRefreshInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_GetExternalCollectionRefreshInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExternalCollectionRefreshInfo'
+type DataCoordCatalog_GetExternalCollectionRefreshInfo_Call struct {
+	*mock.Call
+}
+
+// GetExternalCollectionRefreshInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *DataCoordCatalog_Expecter) GetExternalCollectionRefreshInfo(ctx interface{}, collectionID interface{}) *DataCoordCatalog_GetExternalCollectionRefreshInfo_Call {
+	return &DataCoordCatalog_GetExternalCollectionRefreshInfo_Call{Call: _e.mock.On("GetExternalCollectionRefreshInfo", ctx, collectionID)}
+}
+
+func (_c *DataCoordCatalog_GetExternalCollectionRefreshInfo_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_GetExternalCollectionRefreshInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_GetExternalCollectionRefreshInfo_Call) Return(_a0 *datapb.ExternalCollectionRefreshInfo, _a1 error) *DataCoordCatalog_GetExternalCollectionRefreshInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_GetExternalCollectionRefreshInfo_Call) RunAndReturn(run func(context.Context, int64) (*datapb.ExternalCollectionRefreshInfo, error)) *DataCoordCatalog_GetExternalCollectionRefreshInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListAnalyzeTasks provides a mock function with given fields: ctx
 func (_m *DataCoordCatalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	ret := _m.Called(ctx)
@@ -2891,6 +2950,53 @@ func (_c *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call) Return(_a0 error) *D
 }
 
 func (_c *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call) RunAndReturn(run func(context.Context, []*datapb.SegmentInfo) error) *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveExternalCollectionRefreshInfo provides a mock function with given fields: ctx, info
+func (_m *DataCoordCatalog) SaveExternalCollectionRefreshInfo(ctx context.Context, info *datapb.ExternalCollectionRefreshInfo) error {
+	ret := _m.Called(ctx, info)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveExternalCollectionRefreshInfo")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ExternalCollectionRefreshInfo) error); ok {
+		r0 = rf(ctx, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveExternalCollectionRefreshInfo'
+type DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call struct {
+	*mock.Call
+}
+
+// SaveExternalCollectionRefreshInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *datapb.ExternalCollectionRefreshInfo
+func (_e *DataCoordCatalog_Expecter) SaveExternalCollectionRefreshInfo(ctx interface{}, info interface{}) *DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call {
+	return &DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call{Call: _e.mock.On("SaveExternalCollectionRefreshInfo", ctx, info)}
+}
+
+func (_c *DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call) Run(run func(ctx context.Context, info *datapb.ExternalCollectionRefreshInfo)) *DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ExternalCollectionRefreshInfo))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call) Return(_a0 error) *DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call) RunAndReturn(run func(context.Context, *datapb.ExternalCollectionRefreshInfo) error) *DataCoordCatalog_SaveExternalCollectionRefreshInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

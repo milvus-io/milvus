@@ -350,14 +350,46 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	// self-heals them. Segment-level validation still rejects schema-version
 	// rollback, but drop, rename, or type changes need a schema gate or lock
 	// before they are supported.
-	return applyExternalCollectionSegmentUpdate(
+	if err := applyExternalCollectionSegmentUpdate(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
 		keptSegments,
 		updatedSegments,
 		mlog.FieldJobID(job.GetJobId()),
-	)
+	); err != nil {
+		return err
+	}
+
+	if job.GetTargetRowsPerSegment() > 0 && len(keptSegments) == 0 {
+		if err := m.saveRefreshInfo(ctx, job.GetCollectionId(), job.GetTargetRowsPerSegment()); err != nil {
+			mlog.Warn(ctx, "skip external refresh info update after segment apply",
+				mlog.FieldJobID(job.GetJobId()),
+				mlog.FieldCollectionID(job.GetCollectionId()),
+				mlog.Err(err))
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func (m *externalCollectionRefreshManager) shouldForceSegmentRemap(ctx context.Context, collectionID int64, targetRowsPerSegment int64) (bool, error) {
+	if targetRowsPerSegment <= 0 || m.refreshMeta == nil {
+		return false, nil
+	}
+	info, err := m.refreshMeta.GetRefreshInfo(ctx, collectionID)
+	if err != nil {
+		return false, err
+	}
+	return info == nil || info.GetAppliedTargetRowsPerSegment() != targetRowsPerSegment, nil
+}
+
+func (m *externalCollectionRefreshManager) saveRefreshInfo(ctx context.Context, collectionID int64, targetRowsPerSegment int64) error {
+	if m.refreshMeta == nil {
+		return nil
+	}
+	return m.refreshMeta.SaveRefreshInfo(ctx, collectionID, targetRowsPerSegment)
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto
@@ -557,18 +589,26 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	}
 
 	startTime := time.Now().UnixMilli()
+	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	forceSegmentRemap, err := m.shouldForceSegmentRemap(ctx, collectionID, targetRowsPerSegment)
+	if err != nil {
+		log.Warn(ctx, "failed to load external refresh info", mlog.Err(err))
+		return 0, err
+	}
 
 	// Phase A: persist the job record in Init state. No explore, no tasks.
 	job := &datapb.ExternalCollectionRefreshJob{
-		JobId:          jobID,
-		CollectionId:   collectionID,
-		CollectionName: collectionName,
-		ExternalSource: externalSource,
-		ExternalSpec:   externalSpec,
-		State:          indexpb.JobState_JobStateInit,
-		StartTime:      startTime,
-		Progress:       0,
-		TaskIds:        []int64{},
+		JobId:                jobID,
+		CollectionId:         collectionID,
+		CollectionName:       collectionName,
+		ExternalSource:       externalSource,
+		ExternalSpec:         externalSpec,
+		State:                indexpb.JobState_JobStateInit,
+		StartTime:            startTime,
+		Progress:             0,
+		TaskIds:              []int64{},
+		TargetRowsPerSegment: targetRowsPerSegment,
+		ForceSegmentRemap:    forceSegmentRemap,
 	}
 
 	if err := m.refreshMeta.AddJob(job); err != nil {
@@ -770,18 +810,20 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		}
 
 		task := &datapb.ExternalCollectionRefreshTask{
-			TaskId:              taskID,
-			JobId:               job.GetJobId(),
-			CollectionId:        job.GetCollectionId(),
-			Version:             0,
-			NodeId:              0,
-			State:               indexpb.JobState_JobStateInit,
-			ExternalSource:      job.GetExternalSource(),
-			ExternalSpec:        job.GetExternalSpec(),
-			Progress:            0,
-			ExploreManifestPath: manifestPath,
-			FileIndexBegin:      chunk.fileIndexBegin,
-			FileIndexEnd:        chunk.fileIndexEnd,
+			TaskId:               taskID,
+			JobId:                job.GetJobId(),
+			CollectionId:         job.GetCollectionId(),
+			Version:              0,
+			NodeId:               0,
+			State:                indexpb.JobState_JobStateInit,
+			ExternalSource:       job.GetExternalSource(),
+			ExternalSpec:         job.GetExternalSpec(),
+			Progress:             0,
+			ExploreManifestPath:  manifestPath,
+			FileIndexBegin:       chunk.fileIndexBegin,
+			FileIndexEnd:         chunk.fileIndexEnd,
+			TargetRowsPerSegment: job.GetTargetRowsPerSegment(),
+			ForceSegmentRemap:    job.GetForceSegmentRemap(),
 		}
 
 		if err = m.refreshMeta.AddTask(task); err != nil {

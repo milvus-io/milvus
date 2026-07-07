@@ -37,6 +37,7 @@ const (
 	StatsTaskPrefix                     = MetaPrefix + "/stats-task"
 	ExternalCollectionRefreshJobPrefix  = MetaPrefix + "/external-collection-refresh-job"
 	ExternalCollectionRefreshTaskPrefix = MetaPrefix + "/external-collection-refresh-task"
+	ExternalCollectionRefreshInfoPrefix = MetaPrefix + "/external-collection-refresh-info"
 	FileResourceMetaPrefix              = MetaPrefix + "/file_resource_info"
 	FileResourceVersionKey              = MetaPrefix + "/file_resource_version"
 	SnapshotPrefix                      = MetaPrefix + "/snapshot"

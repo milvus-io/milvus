@@ -324,6 +324,63 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Sing
 	s.Equal(int64(288000), binlog.GetLogSize())
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestTargetRowsPerSegmentUsesRequestSnapshot() {
+	paramtable.Init()
+	key := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.Key
+	paramtable.Get().Save(key, "1000000")
+	defer paramtable.Get().Reset(key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		TargetRowsPerSegment:   100,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 1}, nil).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, FilePath: "a.parquet", StartRow: 0, EndRow: 100, RowCount: 100},
+		{FragmentID: 2, FilePath: "b.parquet", StartRow: 0, EndRow: 100, RowCount: 100},
+		{FragmentID: 3, FilePath: "c.parquet", StartRow: 0, EndRow: 100, RowCount: 100},
+	}
+	segments, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(segments, 3)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestTargetRowsPerSegmentFallsBackToConfigWhenRequestUnset() {
+	paramtable.Init()
+	key := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.Key
+	paramtable.Get().Save(key, "1234")
+	defer paramtable.Get().Reset(key)
+
+	task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{})
+	s.Equal(int64(1234), task.targetRowsPerSegment())
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_MultipleFragments() {
 	paramtable.Init()
 
@@ -2235,6 +2292,74 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteWithMockedSteps() {
 	s.Equal(req.GetPreAllocatedSegmentIds(), task.preallocatedIDRange)
 	s.Equal(int64(3000), task.nextAllocID)
 	s.Equal(updated, task.GetUpdatedSegments())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestExecuteForceSegmentRemapSkipsCurrentSegmentFragments() {
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		ForceSegmentRemap:      true,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 3000, End: 4000},
+		CurrentSegments:        []*datapb.SegmentInfo{{ID: 1, ManifestPath: "stale-manifest"}},
+		ExploreManifestPath:    "manifest",
+		StorageConfig:          &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
+		Schema:                 &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar}}},
+		ExternalSource:         "s3://bucket/path",
+		ExternalSpec:           `{"format":"parquet"}`,
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"text"}
+	fragments := []packed.Fragment{{FragmentID: 1, FilePath: "file", StartRow: 0, EndRow: 10, RowCount: 10}}
+	updated := []*datapb.SegmentInfo{{ID: 3000}}
+
+	mockFetch := mockey.Mock(mockey.GetMethod(task, "fetchFragmentsFromExternalSource")).Return(fragments, nil).Build()
+	defer mockFetch.UnPatch()
+	calledBuild := false
+	mockBuild := mockey.Mock(mockey.GetMethod(task, "buildCurrentSegmentFragments")).
+		To(func() (packed.SegmentFragments, error) {
+			calledBuild = true
+			return nil, fmt.Errorf("current manifest should be skipped")
+		}).Build()
+	defer mockBuild.UnPatch()
+	mockBalance := mockey.Mock(mockey.GetMethod(task, "balanceFragmentsToSegments")).
+		To(func(ctx context.Context, newFragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
+			s.Equal(fragments, newFragments)
+			return updated, nil
+		}).Build()
+	defer mockBalance.UnPatch()
+
+	err := task.Execute(ctx)
+	s.NoError(err)
+	s.False(calledBuild)
+	s.Equal(updated, task.GetUpdatedSegments())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestExecuteForceSegmentRemapReturnsBalanceError() {
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		ForceSegmentRemap:      true,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 3000, End: 4000},
+		ExploreManifestPath:    "manifest",
+		StorageConfig:          &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
+		Schema:                 &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar}}},
+		ExternalSource:         "s3://bucket/path",
+		ExternalSpec:           `{"format":"parquet"}`,
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	fragments := []packed.Fragment{{FragmentID: 1, FilePath: "file", StartRow: 0, EndRow: 10, RowCount: 10}}
+	balanceErr := fmt.Errorf("balance failed")
+
+	mockFetch := mockey.Mock(mockey.GetMethod(task, "fetchFragmentsFromExternalSource")).Return(fragments, nil).Build()
+	defer mockFetch.UnPatch()
+	mockBalance := mockey.Mock(mockey.GetMethod(task, "balanceFragmentsToSegments")).Return(nil, balanceErr).Build()
+	defer mockBalance.UnPatch()
+
+	err := task.Execute(ctx)
+	s.ErrorIs(err, balanceErr)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestExecuteErrorPathsWithMockedSteps() {

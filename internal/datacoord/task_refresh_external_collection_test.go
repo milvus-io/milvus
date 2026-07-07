@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -43,10 +44,13 @@ import (
 // stubCatalog is a simple stub implementation of DataCoordCatalog for testing
 type stubCatalog struct {
 	metastore.DataCoordCatalog
-	jobs            []*datapb.ExternalCollectionRefreshJob
-	tasks           []*datapb.ExternalCollectionRefreshTask
-	alterSegmentErr error
-	alteredSegments []*datapb.SegmentInfo
+	jobs               []*datapb.ExternalCollectionRefreshJob
+	tasks              []*datapb.ExternalCollectionRefreshTask
+	refreshInfos       map[int64]*datapb.ExternalCollectionRefreshInfo
+	saveRefreshInfoErr error
+	getRefreshInfoErr  error
+	alterSegmentErr    error
+	alteredSegments    []*datapb.SegmentInfo
 }
 
 func (s *stubCatalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error) {
@@ -70,6 +74,28 @@ func (s *stubCatalog) DropExternalCollectionRefreshJob(ctx context.Context, jobI
 }
 
 func (s *stubCatalog) DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	return nil
+}
+
+func (s *stubCatalog) GetExternalCollectionRefreshInfo(ctx context.Context, collectionID int64) (*datapb.ExternalCollectionRefreshInfo, error) {
+	if s.getRefreshInfoErr != nil {
+		return nil, s.getRefreshInfoErr
+	}
+	info := s.refreshInfos[collectionID]
+	if info == nil {
+		return nil, nil
+	}
+	return proto.Clone(info).(*datapb.ExternalCollectionRefreshInfo), nil
+}
+
+func (s *stubCatalog) SaveExternalCollectionRefreshInfo(ctx context.Context, info *datapb.ExternalCollectionRefreshInfo) error {
+	if s.saveRefreshInfoErr != nil {
+		return s.saveRefreshInfoErr
+	}
+	if s.refreshInfos == nil {
+		s.refreshInfos = make(map[int64]*datapb.ExternalCollectionRefreshInfo)
+	}
+	s.refreshInfos[info.GetCollectionId()] = proto.Clone(info).(*datapb.ExternalCollectionRefreshInfo)
 	return nil
 }
 
@@ -910,6 +936,58 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NotNil(t, cluster.refreshReq)
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
 	})
+}
+
+func TestRefreshExternalCollectionTask_CreateTaskOnWorker_PropagatesRefreshOptions(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	require.NoError(t, err)
+
+	collectionID := int64(100)
+	segments := NewSegmentsInfo()
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collectionID, &collectionInfo{
+		ID: collectionID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "external_coll",
+		},
+		Partitions:    []int64{101},
+		VChannelNames: []string{"by-dev-rootcoord-dml_0_100v0"},
+	})
+	mt := &meta{
+		segments:    segments,
+		collections: collections,
+	}
+
+	taskProto := &datapb.ExternalCollectionRefreshTask{
+		TaskId:               10,
+		JobId:                20,
+		CollectionId:         collectionID,
+		State:                indexpb.JobState_JobStateInit,
+		ExternalSource:       "s3://bucket/prefix",
+		ExternalSpec:         `{"format":"parquet"}`,
+		ExploreManifestPath:  "manifest",
+		FileIndexBegin:       0,
+		FileIndexEnd:         1,
+		TargetRowsPerSegment: 10000000,
+		ForceSegmentRemap:    true,
+	}
+	require.NoError(t, refreshMeta.AddTask(taskProto))
+
+	task := newRefreshExternalCollectionTask(taskProto, refreshMeta, mt, &stubAllocator{nextID: 999})
+	cluster := &stubCluster{}
+
+	task.CreateTaskOnWorker(1, cluster)
+	require.NotNil(t, cluster.refreshReq)
+	assert.Equal(t, int64(10000000), cluster.refreshReq.GetTargetRowsPerSegment())
+	assert.True(t, cluster.refreshReq.GetForceSegmentRemap())
+
+	updated := refreshMeta.GetTask(taskProto.GetTaskId())
+	require.NotNil(t, updated)
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, updated.GetState())
 }
 
 // ==================== QueryTaskOnWorker Tests ====================

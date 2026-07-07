@@ -146,6 +146,8 @@ type DataCoordCatalog interface {
 	ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error)
 	SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error
 	DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error
+	GetExternalCollectionRefreshInfo(ctx context.Context, collectionID int64) (*datapb.ExternalCollectionRefreshInfo, error)
+	SaveExternalCollectionRefreshInfo(ctx context.Context, info *datapb.ExternalCollectionRefreshInfo) error
 
 	// Analyzer Resource
 	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error

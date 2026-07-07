@@ -1164,6 +1164,33 @@ func (kc *Catalog) DropExternalCollectionRefreshTask(ctx context.Context, taskID
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+// GetExternalCollectionRefreshInfo loads persisted refresh info for a collection.
+func (kc *Catalog) GetExternalCollectionRefreshInfo(ctx context.Context, collectionID int64) (*datapb.ExternalCollectionRefreshInfo, error) {
+	key := buildExternalCollectionRefreshInfoKey(collectionID)
+	value, err := kc.MetaKv.Load(ctx, key)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	info := &datapb.ExternalCollectionRefreshInfo{}
+	if err := proto.Unmarshal([]byte(value), info); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+// SaveExternalCollectionRefreshInfo saves external collection refresh info to etcd.
+func (kc *Catalog) SaveExternalCollectionRefreshInfo(ctx context.Context, info *datapb.ExternalCollectionRefreshInfo) error {
+	key := buildExternalCollectionRefreshInfoKey(info.GetCollectionId())
+	value, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
 func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
 	kvs := make(map[string]string)
 
