@@ -30,6 +30,7 @@ const (
 	StatFileLabel            = "stat_file"
 	IndexFileLabel           = "index_file"
 	segmentFileTypeLabelName = "segment_file_type"
+	quantileLabelName        = "quantile"
 )
 
 var (
@@ -85,6 +86,48 @@ var (
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
+		})
+
+	DataCoordL0DeltalogFileNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "l0_deltalog_file_num",
+			Help:      "total deltalog file count of Level zero segments",
+		}, []string{
+			collectionIDLabelName,
+		})
+
+	// DataCoordSegmentDeltalogFileCount publishes summary-style quantiles
+	// (0.5/0.9/0.99/1.0) of the per-segment deltalog file count over healthy
+	// non-L0 segments, recomputed exactly on each metrics refresh round.
+	// Compare against dataCoord.compaction.single.deltalog.maxnum: the 1.0
+	// quantile shows how close the dirtiest segment is to triggering a
+	// delete-driven compaction, while p50/p90 rising toward the threshold
+	// reveals a same-batch cohort building up toward a synchronized
+	// compaction wave (a lone dirty segment leaves them unmoved).
+	DataCoordSegmentDeltalogFileCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "segment_deltalog_file_count",
+			Help: "quantiles (0.5/0.9/0.99/1.0) of deltalog file count over healthy non-L0 " +
+				"segments; compare against dataCoord.compaction.single.deltalog.maxnum",
+		}, []string{
+			collectionIDLabelName,
+			quantileLabelName,
+		})
+
+	DataCoordSegmentDeletedRowsRatio = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "segment_deleted_rows_ratio",
+			Help: "quantiles (0.5/0.9/0.99/1.0) of deleted-rows/total-rows ratio over healthy " +
+				"non-L0 segments; compare against dataCoord.compaction.single.ratio.threshold",
+		}, []string{
+			collectionIDLabelName,
+			quantileLabelName,
 		})
 
 	// DataCoordNumStoredRows all metrics will be cleaned up after removing matched collectionID and
@@ -456,6 +499,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
 	registry.MustRegister(DataCoordL0DeleteEntriesNum)
+	registry.MustRegister(DataCoordL0DeltalogFileNum)
+	registry.MustRegister(DataCoordSegmentDeltalogFileCount)
+	registry.MustRegister(DataCoordSegmentDeletedRowsRatio)
 	registry.MustRegister(FlushedSegmentFileNum)
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
@@ -499,6 +545,15 @@ func CleanupDataCoordWithCollectionID(collectionID int64) {
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 	DataCoordL0DeleteEntriesNum.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordL0DeltalogFileNum.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordSegmentDeltalogFileCount.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordSegmentDeletedRowsRatio.DeletePartialMatch(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }
