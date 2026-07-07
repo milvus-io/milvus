@@ -94,6 +94,22 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
+	// GetAsInt/GetAsSize return 0 on a parse failure (e.g. a typo like "1,000"), and
+	// woodpecker reads maxBatchBytes==0 as "no byte limit" and clamps maxBatchEntries<=0
+	// to 1 (silently disabling batching). On an invalid value keep woodpecker's built-in
+	// default (already populated by NewConfiguration: 1000 / 2000000) and warn.
+	if v := cfg.AppendMaxBatchEntries.GetAsInt(); v > 0 {
+		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchEntries = v
+	} else {
+		log.Ctx(context.TODO()).Warn("invalid woodpecker maxBatchEntries, keeping woodpecker built-in default",
+			zap.String("value", cfg.AppendMaxBatchEntries.GetValue()))
+	}
+	if v := cfg.AppendMaxBatchBytes.GetAsSize(); v > 0 {
+		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchBytes = config.NewByteSize(v)
+	} else {
+		log.Ctx(context.TODO()).Warn("invalid woodpecker maxBatchBytes, keeping woodpecker built-in default",
+			zap.String("value", cfg.AppendMaxBatchBytes.GetValue()))
+	}
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = config.NewByteSize(cfg.SegmentRollingMaxSize.GetAsSize())
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxBlocks = cfg.SegmentRollingMaxBlocks.GetAsInt64()
@@ -104,6 +120,16 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	// logStore
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds()))
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds()))
+	// NOTE: SyncMaxIntervalForService is intentionally NOT wired here. It is only
+	// consumed by woodpecker's staged-storage writer, which is instantiated solely
+	// when storage.type == "service" — i.e. inside a standalone woodpecker log-store
+	// server that milvus talks to as a pure client (NewClient). That server is
+	// configured from its own config file, not from setCustomWpConfig; in embed mode
+	// the in-process server uses the disk/object-storage writer and never touches
+	// staged storage. The woodpecker.logstore.segmentSyncPolicy.maxIntervalForService
+	// key in milvus.yaml therefore exists only as the config surface for that
+	// server-side deployment path: open-source installs hand the same milvus.yaml to
+	// the woodpecker server, so the key reaches it (and is validated) there, not here.
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxEntries = cfg.SyncMaxEntries.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = config.NewByteSize(cfg.SyncMaxBytes.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushRetries = cfg.FlushMaxRetries.GetAsInt()
