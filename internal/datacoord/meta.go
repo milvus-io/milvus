@@ -628,7 +628,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 				agg, ok := deltalogAggregates[collIDStr]
 				if !ok {
-					agg = &deltalogAggregate{}
+					agg = &deltalogAggregate{dbName: coll.DatabaseName}
 					deltalogAggregates[collIDStr] = agg
 				}
 				agg.observe(segment)

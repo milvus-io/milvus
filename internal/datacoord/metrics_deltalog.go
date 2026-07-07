@@ -17,7 +17,9 @@
 package datacoord
 
 import (
+	"math"
 	"sort"
+	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -39,45 +41,58 @@ var deltalogQuantiles = []struct {
 	{"1.0", 1.0},
 }
 
-// deltalogAggregate collects per-collection deltalog observability stats,
-// mirroring the accumulation dimensions checked by hasTooManyDeletions.
+// deltalogAggregate collects per-collection deltalog observability stats over
+// healthy FLUSHED non-L0 segments — the population hasTooManyDeletions is
+// evaluated against (growing/sealed segments route deletes to L0 and would
+// pad the distributions with zeros). Three of its accumulation dimensions are
+// mirrored: deltalog file count, accumulated deltalog size, and deleted-rows
+// ratio; zero-row segments are excluded from the ratio distribution (the
+// trigger's own uncapped division would fire on them, but a +Inf sample would
+// poison the gauge). Deltalog files of L0 segments are counted separately
+// over all healthy L0 segments, matching l0_delete_entries_num.
 type deltalogAggregate struct {
-	fileCounts    []float64 // per non-L0 segment deltalog file count
-	deletedRatios []float64 // per non-L0 segment deleted-rows/total-rows
+	dbName        string
+	fileCounts    []float64
+	sizes         []float64
+	deletedRatios []float64
 	l0FileCount   int64
 }
 
 func (a *deltalogAggregate) observe(segment *SegmentInfo) {
 	fileCount := 0
+	size := int64(0)
 	deletedRows := int64(0)
 	for _, deltaLogs := range segment.GetDeltalogs() {
 		for _, l := range deltaLogs.GetBinlogs() {
 			deletedRows += l.GetEntriesNum()
+			size += l.GetMemorySize()
 		}
 		fileCount += len(deltaLogs.GetBinlogs())
 	}
 
 	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		// L0 segments hold the un-applied delete stream; their deltalogs never
-		// count toward the single-compaction trigger, so track them separately.
 		a.l0FileCount += int64(fileCount)
+		return
+	}
+	if !isFlushed(segment) {
 		return
 	}
 
 	a.fileCounts = append(a.fileCounts, float64(fileCount))
+	a.sizes = append(a.sizes, float64(size))
 	if segment.GetNumOfRows() > 0 {
 		a.deletedRatios = append(a.deletedRatios, float64(deletedRows)/float64(segment.GetNumOfRows()))
 	}
 }
 
-// quantile returns the exact nearest-rank quantile of values, sorting in
-// place; 0 for an empty slice.
+// quantile returns the exact nearest-rank quantile (rank = ceil(q*n)) of
+// values, sorting in place; 0 for an empty slice.
 func quantile(values []float64, q float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
 	sort.Float64s(values)
-	idx := int(q*float64(len(values))+0.5) - 1
+	idx := int(math.Ceil(q*float64(len(values)))) - 1
 	if idx < 0 {
 		idx = 0
 	}
@@ -87,18 +102,38 @@ func quantile(values []float64, q float64) float64 {
 	return values[idx]
 }
 
-// reportDeltalogMetrics resets and republishes the per-collection deltalog
-// gauges; the reset removes series of dropped collections (they are also
-// eagerly deleted in CleanupDataCoordWithCollectionID on DropCollection).
+var (
+	deltalogPublishMu sync.Mutex
+	// collections whose deltalog series are currently published; lets a
+	// refresh round prune collections that disappeared since the last one
+	publishedDeltalogCollections = make(map[string]struct{})
+)
+
+// reportDeltalogMetrics publishes the per-collection deltalog gauges, then
+// prunes series of collections absent from this round (dropped collections are
+// also eagerly cleaned in CleanupDataCoordWithCollectionID on DropCollection).
+// Publish-then-prune instead of Reset-then-Set so a concurrent scrape never
+// observes an empty window; the mutex serializes concurrent GetQuotaInfo
+// callers.
 func reportDeltalogMetrics(aggregates map[string]*deltalogAggregate) {
-	metrics.DataCoordSegmentDeltalogFileCount.Reset()
-	metrics.DataCoordSegmentDeletedRowsRatio.Reset()
-	metrics.DataCoordL0DeltalogFileNum.Reset()
+	deltalogPublishMu.Lock()
+	defer deltalogPublishMu.Unlock()
+
 	for collectionID, agg := range aggregates {
-		metrics.DataCoordL0DeltalogFileNum.WithLabelValues(collectionID).Set(float64(agg.l0FileCount))
+		metrics.DataCoordL0DeltalogFileNum.WithLabelValues(agg.dbName, collectionID).Set(float64(agg.l0FileCount))
 		for _, p := range deltalogQuantiles {
-			metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues(collectionID, p.label).Set(quantile(agg.fileCounts, p.q))
-			metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues(collectionID, p.label).Set(quantile(agg.deletedRatios, p.q))
+			metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues(agg.dbName, collectionID, p.label).Set(quantile(agg.fileCounts, p.q))
+			metrics.DataCoordSegmentDeltalogSize.WithLabelValues(agg.dbName, collectionID, p.label).Set(quantile(agg.sizes, p.q))
+			metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues(agg.dbName, collectionID, p.label).Set(quantile(agg.deletedRatios, p.q))
 		}
+	}
+	for collectionID := range publishedDeltalogCollections {
+		if _, ok := aggregates[collectionID]; !ok {
+			metrics.CleanupDataCoordDeltalogMetrics(collectionID)
+			delete(publishedDeltalogCollections, collectionID)
+		}
+	}
+	for collectionID := range aggregates {
+		publishedDeltalogCollections[collectionID] = struct{}{}
 	}
 }

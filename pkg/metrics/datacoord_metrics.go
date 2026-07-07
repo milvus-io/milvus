@@ -95,12 +95,14 @@ var (
 			Name:      "l0_deltalog_file_num",
 			Help:      "total deltalog file count of Level zero segments",
 		}, []string{
+			databaseLabelName,
 			collectionIDLabelName,
 		})
 
 	// DataCoordSegmentDeltalogFileCount publishes summary-style quantiles
 	// (0.5/0.9/0.99/1.0) of the per-segment deltalog file count over healthy
-	// non-L0 segments, recomputed exactly on each metrics refresh round.
+	// FLUSHED non-L0 segments (the population hasTooManyDeletions is evaluated
+	// against), recomputed exactly on each metrics refresh round.
 	// Compare against dataCoord.compaction.single.deltalog.maxnum: the 1.0
 	// quantile shows how close the dirtiest segment is to triggering a
 	// delete-driven compaction, while p50/p90 rising toward the threshold
@@ -111,9 +113,24 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "segment_deltalog_file_count",
-			Help: "quantiles (0.5/0.9/0.99/1.0) of deltalog file count over healthy non-L0 " +
-				"segments; compare against dataCoord.compaction.single.deltalog.maxnum",
+			Help: "quantiles (0.5/0.9/0.99/1.0) of deltalog file count over healthy flushed " +
+				"non-L0 segments; compare against dataCoord.compaction.single.deltalog.maxnum",
 		}, []string{
+			databaseLabelName,
+			collectionIDLabelName,
+			quantileLabelName,
+		})
+
+	DataCoordSegmentDeltalogSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "segment_deltalog_size",
+			Help: "quantiles (0.5/0.9/0.99/1.0) of accumulated deltalog size in bytes over " +
+				"healthy flushed non-L0 segments; compare against " +
+				"dataCoord.compaction.single.deltalog.maxsize (the varchar-PK trigger dimension)",
+		}, []string{
+			databaseLabelName,
 			collectionIDLabelName,
 			quantileLabelName,
 		})
@@ -124,8 +141,11 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "segment_deleted_rows_ratio",
 			Help: "quantiles (0.5/0.9/0.99/1.0) of deleted-rows/total-rows ratio over healthy " +
-				"non-L0 segments; compare against dataCoord.compaction.single.ratio.threshold",
+				"flushed non-L0 segments; compare against dataCoord.compaction.single.ratio.threshold. " +
+				"May exceed 1.0 (deltalog entries count repeated deletes of the same PK); " +
+				"zero-row segments are excluded",
 		}, []string{
+			databaseLabelName,
 			collectionIDLabelName,
 			quantileLabelName,
 		})
@@ -501,6 +521,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordL0DeleteEntriesNum)
 	registry.MustRegister(DataCoordL0DeltalogFileNum)
 	registry.MustRegister(DataCoordSegmentDeltalogFileCount)
+	registry.MustRegister(DataCoordSegmentDeltalogSize)
 	registry.MustRegister(DataCoordSegmentDeletedRowsRatio)
 	registry.MustRegister(FlushedSegmentFileNum)
 	registry.MustRegister(IndexRequestCounter)
@@ -547,13 +568,23 @@ func CleanupDataCoordWithCollectionID(collectionID int64) {
 	DataCoordL0DeleteEntriesNum.DeletePartialMatch(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
-	DataCoordL0DeltalogFileNum.DeletePartialMatch(prometheus.Labels{
-		collectionIDLabelName: fmt.Sprint(collectionID),
-	})
+	CleanupDataCoordDeltalogMetrics(fmt.Sprint(collectionID))
+}
+
+// CleanupDataCoordDeltalogMetrics removes one collection's deltalog
+// observability series; called on DropCollection and when a metrics refresh
+// round no longer observes the collection.
+func CleanupDataCoordDeltalogMetrics(collectionID string) {
 	DataCoordSegmentDeltalogFileCount.DeletePartialMatch(prometheus.Labels{
-		collectionIDLabelName: fmt.Sprint(collectionID),
+		collectionIDLabelName: collectionID,
+	})
+	DataCoordSegmentDeltalogSize.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: collectionID,
 	})
 	DataCoordSegmentDeletedRowsRatio.DeletePartialMatch(prometheus.Labels{
-		collectionIDLabelName: fmt.Sprint(collectionID),
+		collectionIDLabelName: collectionID,
+	})
+	DataCoordL0DeltalogFileNum.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: collectionID,
 	})
 }
