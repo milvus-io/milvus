@@ -3085,6 +3085,97 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SnapshotReference(t *testing.
 	assert.Empty(t, removeCalledPaths, "binlog files of snapshot-referenced segments should not be removed")
 }
 
+// TestGarbageCollector_recycleUnusedBinlogFiles_V3Orphan tests that V3-layout files whose
+// segment was never registered in meta (e.g. output uploaded by a failed sort compaction
+// attempt, issue #50962) are recycled after missingTolerance, while files of registered
+// V3 segments are still skipped.
+func TestGarbageCollector_recycleUnusedBinlogFiles_V3Orphan(t *testing.T) {
+	ctx := context.Background()
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	// Registered V3 segment, its files must be skipped by the orphan scan.
+	registered := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1001,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			InsertChannel:  "ch1",
+			StorageVersion: storage.StorageV3,
+		},
+	}
+
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		indexMeta:    &indexMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				1001: registered,
+			},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	var (
+		removedMu    sync.Mutex
+		removedPaths []string
+	)
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+		removedMu.Lock()
+		defer removedMu.Unlock()
+		removedPaths = append(removedPaths, filePath)
+		return nil
+	}).Build()
+	defer mockRemove.UnPatch()
+
+	expired := time.Now().Add(-2 * time.Hour)
+	insertPrefix := path.Join(cli.RootPath(), common.SegmentInsertLogPath)
+	files := []*storage.ChunkObjectInfo{
+		// deep V3 path of the registered segment: skipped
+		{FilePath: path.Join(insertPrefix, "100/10/1001/_stats/bloom_filter.100/2001"), ModifyTime: expired},
+		// deep V3 path of orphan segment 999 (not in meta), expired: removed
+		{FilePath: path.Join(insertPrefix, "100/10/999/_stats/bloom_filter.100/2002"), ModifyTime: expired},
+		// data file of the same orphan segment: removed
+		{FilePath: path.Join(insertPrefix, "100/10/999/_data/2003_uuid.parquet"), ModifyTime: expired},
+		// orphan V3 file still within missingTolerance: kept
+		{FilePath: path.Join(insertPrefix, "100/10/998/_stats/bloom_filter.100/2004"), ModifyTime: time.Now()},
+	}
+
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
+		if prefix != insertPrefix {
+			return nil
+		}
+		for _, file := range files {
+			if !fn(file) {
+				break
+			}
+		}
+		return nil
+	}).Build()
+	defer mockWalk.UnPatch()
+
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(false).Build()
+	defer mockIsSegBlocked.UnPatch()
+
+	gc.recycleUnusedBinlogFiles(ctx)
+
+	assert.ElementsMatch(t, []string{
+		path.Join(insertPrefix, "100/10/999/_stats/bloom_filter.100/2002"),
+		path.Join(insertPrefix, "100/10/999/_data/2003_uuid.parquet"),
+	}, removedPaths)
+}
+
 // TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil tests that GC handles nil snapshotMeta gracefully
 func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 	// Setup
