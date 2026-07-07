@@ -185,6 +185,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     Contain(const PkType& pk) const override;
 
     void
+    FillPrimaryKeys(const query::Plan* plan,
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const override;
+
+    void
     AddFieldDataInfoForSealed(
         const LoadFieldDataInfo& field_data_info) override;
 
