@@ -24,8 +24,8 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 		store,
 		reg,
 		&fakeNodeProvider{infos: map[int64]*NodeInfo{
-			1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
-			2: {NodeID: 2, Alive: true, MemoryCapacity: 1000},
+			1: {NodeID: 1, Alive: true},
+			2: {NodeID: 2, Alive: true},
 		}},
 		&fakeDataViewProvider{
 			collections: []*viewpb.DataViewOfCollection{{
@@ -64,7 +64,7 @@ func TestBalancer_ReconcileDirtyCollectionExpandsTrackedShards(t *testing.T) {
 		store,
 		reg,
 		&fakeNodeProvider{infos: map[int64]*NodeInfo{
-			1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
+			1: {NodeID: 1, Alive: true},
 		}},
 		&fakeDataViewProvider{
 			collections: []*viewpb.DataViewOfCollection{{
@@ -87,6 +87,41 @@ func TestBalancer_ReconcileDirtyCollectionExpandsTrackedShards(t *testing.T) {
 	assert.NotNil(t, stats.PreparingVersion)
 }
 
+func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {
+	const collID, replicaID int64 = 1, 10
+	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
+
+	store := storeWithConfig(t, collID, replicaID, []int64{100}, []int64{1})
+	reg := emptyRegistry(t)
+	reg.Ensure(shardID)
+	nodeProvider := &fakeNodeProvider{infos: map[int64]*NodeInfo{
+		1: {NodeID: 1, Alive: true},
+	}}
+	builder := NewSnapshotBuilder(
+		store,
+		reg,
+		nodeProvider,
+		&fakeDataViewProvider{
+			collections: []*viewpb.DataViewOfCollection{{
+				CollectionId: collID,
+				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
+				Shards:       []*viewpb.DataViewOfShard{shardDataView(shardID.VChannel, 100, 101)},
+			}},
+			segments: map[int64]*SegmentInfo{
+				101: {SegmentID: 101, PartitionID: 100, MemSize: 100},
+			},
+		},
+		policyTestConfig(),
+	)
+	b := NewDefaultBalancer(builder, reg, nil)
+
+	nodeProvider.notifyNodeChanged()
+	require.NoError(t, b.Reconcile(context.Background()))
+
+	stats := reg.Get(shardID).Stats()
+	assert.NotNil(t, stats.PreparingVersion)
+}
+
 func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 	const collID, replicaID int64 = 1, 10
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
@@ -98,7 +133,7 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 		store,
 		reg,
 		&fakeNodeProvider{infos: map[int64]*NodeInfo{
-			1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
+			1: {NodeID: 1, Alive: true},
 		}},
 		&fakeDataViewProvider{
 			collections: []*viewpb.DataViewOfCollection{{

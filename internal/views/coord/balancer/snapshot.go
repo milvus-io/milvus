@@ -95,21 +95,6 @@ func (s *BalancerSnapshot) ShardStatsMap() map[qviews.ShardID]*coordview.ShardSt
 	return s.ShardViewSnapshot.StatsMap()
 }
 
-// SegmentInfo carries the minimum per-segment metadata the Balancer needs.
-// Index type, vector dimension, compression and other attributes are folded
-// into DataCoord's MemSize estimate; the Balancer treats MemSize as opaque
-// bytes.
-type SegmentInfo struct {
-	SegmentID   int64
-	PartitionID int64
-	// MemSize is the estimated in-memory footprint in bytes once this segment
-	// is loaded onto a QueryNode. Primary load metric.
-	MemSize int64
-	// RowNum is the segment row count. Used as fallback when MemSize is zero
-	// (e.g., DataCoord has not yet produced an estimate for a new segment).
-	RowNum int64
-}
-
 // BalanceNode combines a QueryNode's identity, health and capacity with
 // cross-shard aggregated load derived from the ShardViewRegistry.
 //

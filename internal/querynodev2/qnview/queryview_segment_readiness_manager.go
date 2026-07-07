@@ -4,9 +4,12 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // QueryViewSegmentReadinessManager turns physically loaded segments into
@@ -117,7 +120,7 @@ func (m *QueryViewSegmentReadinessManager) acquire(req AcquireSegments) {
 			m.onPhysicalLoaded(loaded)
 		},
 		OnSegmentUnrecoverable: func(segmentID int64, err error) {
-			m.failSegment(segmentID)
+			m.failSegment(segmentID, err)
 		},
 		OnUnrecoverable: func() {
 			m.failView(req.Key)
@@ -221,7 +224,7 @@ func (m *QueryViewSegmentReadinessManager) markPhysicalLoaded(segment TransformS
 func (m *QueryViewSegmentReadinessManager) registerAndCatchup(segment TransformSegment) {
 	reg, err := m.buffer.RegisterSegment(context.Background(), segment)
 	if err != nil {
-		m.failSegment(segment.ID())
+		m.failSegment(segment.ID(), err)
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -233,7 +236,7 @@ func (m *QueryViewSegmentReadinessManager) registerAndCatchup(segment TransformS
 	if err := reg.WaitCatchup(ctx); err != nil {
 		cancel()
 		reg.Unregister()
-		m.failSegment(segment.ID())
+		m.failSegment(segment.ID(), err)
 		return
 	}
 	cancel()
@@ -274,7 +277,7 @@ func (m *QueryViewSegmentReadinessManager) markSegmentReady(segmentID int64) []t
 	return waiters
 }
 
-func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64) {
+func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64, err error) {
 	m.mu.Lock()
 	state := m.segments[segmentID]
 	if state == nil {
@@ -303,7 +306,15 @@ func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64) {
 	if resetter, ok := m.physical.(PhysicalSegmentResetter); ok {
 		resetter.ResetSegment(segmentID)
 	}
+	if err == nil {
+		err = errors.New("segment became unrecoverable")
+	}
 	for _, waiter := range waiters {
+		qvobserve.Observe(context.TODO(), qvobserve.QueryNodeSegmentFailureEvent{
+			View:      waiter.key,
+			SegmentID: segmentID,
+			Err:       err,
+		})
 		m.notifyUnrecoverable(waiter.key, waiter.onUnrecoverable)
 	}
 }

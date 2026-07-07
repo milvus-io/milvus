@@ -23,7 +23,7 @@ func cfgFor(collectionID, replicaID int64, partitions []int64, fields []int64) *
 		CollectionID: collectionID,
 		PartitionIDs: append([]int64{}, partitions...),
 		LoadFields:   lf,
-		Replicas:     []*loadmgr.ReplicaAssignment{{ReplicaID: replicaID}},
+		Replicas:     []*loadmgr.ReplicaAssignment{{ReplicaID: replicaID, ResourceGroup: "rg1"}},
 	}
 }
 
