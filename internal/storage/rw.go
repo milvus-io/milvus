@@ -67,7 +67,6 @@ type rwOptions struct {
 	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
-	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
 }
 
@@ -162,12 +161,6 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
-	}
-}
-
-func WithUseLoonFFI(useLoonFFI bool) RwOption {
-	return func(options *rwOptions) {
-		options.useLoonFFI = useLoonFFI
 	}
 }
 
@@ -402,20 +395,12 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
 		)
 	case StorageV2:
-		if rwOptions.useLoonFFI {
-			return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
-				blobsWriter, allocator, maxRowNum,
-				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
-				rwOptions.storageConfig,
-				pluginContext)
-		} else {
-			return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-				blobsWriter, allocator, maxRowNum,
-				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
-				rwOptions.storageConfig,
-				pluginContext,
-			)
-		}
+		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
+			blobsWriter, allocator, maxRowNum,
+			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+			rwOptions.storageConfig,
+			pluginContext,
+		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 }

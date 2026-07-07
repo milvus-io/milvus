@@ -75,15 +75,7 @@ func (s *StorageVersionUpgradePolicySuite) TestEnable() {
 }
 
 func (s *StorageVersionUpgradePolicySuite) TestTargetVersion() {
-	s.T().Skip("storage v3 not supported yet")
-	// Default: UseLoonFFI is false, target should be StorageV2
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
-	// defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-	// s.Equal(storage.StorageV2, s.policy.targetVersion())
-
-	// // When UseLoonFFI is true, target should be StorageV3
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	// s.Equal(storage.StorageV3, s.policy.targetVersion())
+	s.Equal(storage.StorageV2, s.policy.targetVersion())
 }
 
 func (s *StorageVersionUpgradePolicySuite) TestTriggerNoCollections() {
@@ -104,12 +96,10 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithSegments() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true") // target is StorageV3
 	defer func() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
-		// paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	}()
 
 	coll := &collectionInfo{
@@ -188,10 +178,6 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithCompactingSegment() {
 	ctx := context.Background()
 	collID := int64(100)
 
-	// Setup params
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	// defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-
 	coll := &collectionInfo{
 		ID:     collID,
 		Schema: newTestSchema(),
@@ -240,10 +226,6 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithCompactingSegment() {
 func (s *StorageVersionUpgradePolicySuite) TestTriggerWithImportingSegment() {
 	ctx := context.Background()
 	collID := int64(100)
-
-	// Setup params
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	// defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 
 	coll := &collectionInfo{
 		ID:     collID,
@@ -298,12 +280,10 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerRateLimiting() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "3600") // 1 hour
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "2")      // Max 2 per interval
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	defer func() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
-		// paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	}()
 
 	coll := &collectionInfo{
@@ -455,12 +435,10 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerMultipleCollections() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	defer func() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
-		// paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	}()
 
 	coll1 := &collectionInfo{
@@ -591,10 +569,6 @@ func (s *StorageVersionUpgradePolicySuite) TestDroppedSegmentFiltered() {
 	ctx := context.Background()
 	collID := int64(100)
 
-	// Setup params
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	// defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-
 	coll := &collectionInfo{
 		ID:     collID,
 		Schema: newTestSchema(),
@@ -642,10 +616,6 @@ func (s *StorageVersionUpgradePolicySuite) TestDroppedSegmentFiltered() {
 func (s *StorageVersionUpgradePolicySuite) TestGrowingSegmentFiltered() {
 	ctx := context.Background()
 	collID := int64(100)
-
-	// Setup params
-	// paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	// defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 
 	coll := &collectionInfo{
 		ID:     collID,
