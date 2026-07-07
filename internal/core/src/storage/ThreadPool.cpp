@@ -19,6 +19,7 @@
 #include <chrono>
 
 #include "log/Log.h"
+#include "milvus-storage/thread_pool.h"
 #include "storage/SafeQueue.h"
 
 namespace milvus {
@@ -58,6 +59,16 @@ SetLowPriorityThreadCoreCoefficient(const float coefficient) {
 void
 InitCpuNum(const int num) {
     CPU_NUM = num;
+    // Size the milvus-storage shared reader pool by the same CPU budget.
+    // Without this singleton, every parallel ChunkReader::get_chunks() call
+    // spins up its own ephemeral IOThreadPoolExecutor, so the number of
+    // decode threads is unbounded across concurrent segment loads. One
+    // shared pool keeps load-time decode parallelism <= the CPU budget so
+    // it cannot monopolize a container CPU quota. See #48060.
+    milvus_storage::ThreadPoolHolder::WithSingleton(
+        static_cast<size_t>(std::max(num, 1)));
+    LOG_INFO("init milvus-storage shared reader pool, threads: {}",
+             std::max(num, 1));
 }
 
 void
