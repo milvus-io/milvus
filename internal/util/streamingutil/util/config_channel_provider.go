@@ -159,5 +159,8 @@ func parseConfiguredDMLChannelIndex(pchannel string, prefix string) (int, bool) 
 	if err != nil {
 		return 0, false
 	}
+	if idx < 0 || fmt.Sprintf("%s_%d", prefix, idx) != pchannel {
+		return 0, false
+	}
 	return idx, true
 }

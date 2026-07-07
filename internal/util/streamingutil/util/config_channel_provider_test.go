@@ -154,6 +154,32 @@ func TestGetAllTopicsFromConfigurationAndPChannelsKeepsNonDMLChannels(t *testing
 	assert.True(t, channels.Contain(fmt.Sprintf("%s_0", paramtable.Get().CommonCfg.RootCoordDml.GetValue())))
 }
 
+func TestGetAllTopicsFromConfigurationAndPChannelsKeepsNonCanonicalDMLNames(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "1")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	defer paramtable.Get().Reset(paramtable.Get().RootCoordCfg.DmlChannelNum.Key)
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.RootCoordDml.Key)
+
+	prefix := paramtable.Get().CommonCfg.RootCoordDml.GetValue()
+	channels := getAllTopicsFromConfigurationAndPChannels([]string{
+		fmt.Sprintf("%s_3", prefix),
+		fmt.Sprintf("%s_-1", prefix),
+		fmt.Sprintf("%s_007", prefix),
+		fmt.Sprintf("%s_+7", prefix),
+	})
+
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_0", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_1", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_2", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_3", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_-1", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_007", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_+7", prefix)))
+	assert.False(t, channels.Contain(fmt.Sprintf("%s_4", prefix)))
+	assert.False(t, channels.Contain(fmt.Sprintf("%s_7", prefix)))
+}
+
 type testPChannelStats struct {
 	pchannels []string
 }
