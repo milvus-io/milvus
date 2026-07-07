@@ -305,3 +305,71 @@ impl IndexWriterWrapperImpl {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tantivy::Index;
+    use tempfile::TempDir;
+
+    use super::IndexWriterWrapperImpl;
+    use crate::data_type::TantivyDataType;
+
+    // tantivy's smallest per-thread arena (MEMORY_BUDGET_NUM_BYTES_MIN = 15 MB).
+    // With a single indexing thread this is tight enough that the doc count below
+    // spills into several auto-flushed segments before the finish-time commit,
+    // which is exactly the multi-segment build this test needs to exercise.
+    const MIN_MEMORY_BUDGET: usize = 15_000_000;
+    const NUM_DOCS: i64 = 1_000_000;
+
+    fn build_i64_writer(path: &str, enable_background_merge: bool) -> IndexWriterWrapperImpl {
+        IndexWriterWrapperImpl::new(
+            "number",
+            TantivyDataType::I64,
+            path.to_string(),
+            1, // single thread -> smallest arena -> forces multiple flushed segments
+            MIN_MEMORY_BUDGET,
+            false, // enable_user_specified_doc_id
+            enable_background_merge,
+        )
+        .unwrap()
+    }
+
+    /// A build-mode (enable_background_merge == false) V7 writer must collapse the
+    /// auto-flushed segments into exactly one searchable segment in finish().
+    ///
+    /// Regression guard for the finish-time merge-all (issue #51054): the V7 writer
+    /// previously shipped sealed indexes as many ~15 MB segments, and if the merge
+    /// is ever dropped again the index silently regresses to multi-segment with only
+    /// perf/logs to reveal it. The precondition assert keeps the test honest — it
+    /// proves the workload really produced >1 segment before finish() merged them.
+    #[test]
+    fn test_sealed_build_finishes_single_segment() {
+        let dir = TempDir::new().unwrap();
+        let mut writer = build_i64_writer(dir.path().to_str().unwrap(), false);
+        for i in 0..NUM_DOCS {
+            writer.add::<i64>(i, i as u32).unwrap();
+        }
+        writer.commit().unwrap();
+
+        // Precondition: the build workload genuinely auto-flushes multiple segments,
+        // so the single-segment assertion after finish() is meaningful.
+        let before = writer.index.searchable_segment_metas().unwrap();
+        assert!(
+            before.len() > 1,
+            "expected the build workload to auto-flush multiple segments, got {}",
+            before.len()
+        );
+
+        // finish() on a build-mode writer must merge them down to exactly one.
+        writer.finish().unwrap();
+
+        let index = Index::open_in_dir(dir.path()).unwrap();
+        let after = index.searchable_segment_metas().unwrap();
+        assert_eq!(
+            after.len(),
+            1,
+            "sealed build must produce exactly one tantivy segment, got {}",
+            after.len()
+        );
+    }
+}
