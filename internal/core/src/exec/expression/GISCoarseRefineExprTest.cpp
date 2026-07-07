@@ -23,7 +23,11 @@
 
 #include "ExprTestBase.h"
 #include "common/Common.h"
+#include "common/Consts.h"
 #include "common/GeometryCache.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
+#include "plan/PlanNode.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
@@ -110,10 +114,16 @@ EquivExprs() {
         R"expr(age >= 0 and st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))") and st_within(geo, "POLYGON((-100 -100, 100 -100, 100 100, -100 100, -100 -100))"))expr",
         // (6) single GIS only (no conjunction -> fusion must be a no-op)
         R"expr(st_intersects(geo, "POINT(0 0)"))expr",
-        // NOTE: the master PR also covers an STIsValid case (st_isvalid must stay
+        // NOTE: the master PR also covers STIsValid cases (st_isvalid must stay
         // off the split-fusion group path). The ST_IsValid GIS op does not exist
-        // on 2.6 (plan proto GISOp stops at DWithin), so that case is omitted
+        // on 2.6 (plan proto GISOp stops at DWithin), so those cases are omitted
         // here; the as_groupable_gis whitelist still defends against it.
+        // (7) direct AND-leaf + Shape-B subgroup on the SAME field: `geo`
+        // appears both as a direct conjunction leaf (st_within) and inside an
+        // OR subgroup (Shape B). Per the NOTE in Expr.cpp the rewrite emits two
+        // independent coarse/refine pairs for that field, so this dual-pair
+        // path is the trickiest one -- pin it down with an ON-vs-OFF case.
+        R"expr(st_within(geo, "POLYGON((-100 -100, 100 -100, 100 100, -100 100, -100 -100))") and (st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))") or st_intersects(geo, "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))expr",
     };
     return exprs;
 }
@@ -254,4 +264,55 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionMultiBatch) {
     ScopedSchemaHandle handle(*schema);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);
+}
+
+// The GIS filter slices only by its own batch cursor and never reads the
+// offset-input list, so it MUST report SupportOffsetInput() == false. If it
+// (or, with fusion ON, the conjunction wrapping it) reported true, the
+// IterativeFilterNode native path would feed a sparse offset list into an Eval
+// that ignores it and return misaligned rows (a silent wrong-results bug). This
+// locks the contract on both the baseline and the split-fusion path so a future
+// change cannot regress it. See PR #50675 review (Medium: SupportOffsetInput).
+TEST(GISCoarseRefineExprTest, GISDoesNotSupportOffsetInput) {
+    auto schema = MakeGISSchema();
+    const int64_t N = 256;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
+    ScopedSchemaHandle handle(*schema);
+
+    // Representative shapes: a bare GIS leaf (compiles to
+    // PhyGISFunctionFilterExpr) and a same-column conjunction that fusion
+    // rewrites into the Coarse/Refine nodes wrapped in a conjunction.
+    const std::vector<std::string> shapes = {
+        R"expr(st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))"))expr",
+        R"expr(st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))") and st_within(geo, "POLYGON((-100 -100, 100 -100, 100 100, -100 100, -100 -100))"))expr",
+    };
+
+    auto top_supports_offset_input = [&](const std::string& expr) -> bool {
+        auto bin = handle.ParseSearch(
+            expr, "vec", 5, knowhere::metric::L2, R"({"nprobe":10})", 3);
+        auto plan = CreateSearchPlanByExpr(schema, bin.data(), bin.size());
+        auto filter_node =
+            std::dynamic_pointer_cast<milvus::plan::FilterBitsNode>(
+                plan->plan_node_->plannodes_->sources()[0]->sources()[0]);
+        std::vector<milvus::expr::TypedExprPtr> filters{filter_node->filter()};
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+        milvus::exec::ExecContext exec_context(query_context.get());
+        milvus::exec::ExprSet expr_set(filters, &exec_context);
+        return expr_set.exprs()[0]->SupportOffsetInput();
+    };
+
+    for (const auto& e : shapes) {
+        {
+            GISSplitFusionGuard off(false);
+            EXPECT_FALSE(top_supports_offset_input(e))
+                << "fusion OFF, expr: " << e;
+        }
+        {
+            GISSplitFusionGuard on(true);
+            EXPECT_FALSE(top_supports_offset_input(e))
+                << "fusion ON, expr: " << e;
+        }
+    }
 }

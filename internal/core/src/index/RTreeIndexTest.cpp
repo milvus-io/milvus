@@ -16,6 +16,7 @@
 #include <fstream>
 
 #include "RTreeIndex.h"
+#include "common/Common.h"  // EXEC_EVAL_EXPR_BATCH_SIZE (indexed multi-batch test)
 #include "storage/Util.h"
 #include "storage/FileManager.h"
 #include "common/Types.h"
@@ -863,9 +864,41 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS filtering test");
 }
 
+namespace {
+// RAII guard so enableGISSplitFusion is always restored to false, even if
+// ExecuteQueryExpr throws mid-run (a bare set/restore would leak the global
+// flag into later tests).
+struct GisSplitFusionFlagGuard {
+    explicit GisSplitFusionFlagGuard(bool enable) {
+        milvus::segcore::SegcoreConfig::default_config()
+            .set_enable_gis_split_fusion(enable);
+    }
+    ~GisSplitFusionFlagGuard() {
+        milvus::segcore::SegcoreConfig::default_config()
+            .set_enable_gis_split_fusion(false);
+    }
+};
+
+// RAII guard for the expr batch size, restored on scope exit, so the indexed
+// equivalence check runs across MULTIPLE Eval batches (exercising the split
+// nodes' per-batch coarse slicing + dual-cursor advance on the indexed path).
+struct ExprBatchSizeGuardLocal {
+    int64_t saved;
+    explicit ExprBatchSizeGuardLocal(int64_t batch_size)
+        : saved(EXEC_EVAL_EXPR_BATCH_SIZE.load()) {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(batch_size);
+    }
+    ~ExprBatchSizeGuardLocal() {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+    }
+};
+}  // namespace
+
 // Equivalence test for the GIS coarse/refine split + same-column fusion on the
 // INDEXED path: with a geometry R-Tree index loaded, the Coarse node's
-// RunRTreeQuery is exercised. enableGISSplitFusion ON must match OFF.
+// RunRTreeQuery is exercised. enableGISSplitFusion ON must match OFF. The check
+// is run under a small batch size so the indexed coarse-bitmap slicing crosses
+// batch boundaries (indexed x multi-batch coverage).
 TEST_F(RTreeIndexTest, GIS_SplitFusion_Equivalence_Indexed) {
     using namespace milvus;
     using namespace milvus::query;
@@ -989,17 +1022,28 @@ TEST_F(RTreeIndexTest, GIS_SplitFusion_Equivalence_Indexed) {
         And(gis(kInter, "POLYGON((-2 -2,2 -2,2 2,-2 2,-2 -2))"),
             gis(kWithin,
                 "POLYGON((-100 -100,100 -100,100 100,-100 100,-100 -100))")),
+        // direct AND-leaf + Shape-B subgroup on the SAME field: geo is both a
+        // direct conjunction leaf (within) and inside an OR subgroup, so the
+        // rewrite emits two independent coarse/refine pairs for it -- the
+        // dual-pair path, on the indexed side.
+        And(gis(kWithin,
+                "POLYGON((-100 -100,100 -100,100 100,-100 100,-100 -100))"),
+            Or(gis(kInter, "POLYGON((-2 -2,2 -2,2 2,-2 2,-2 -2))"),
+               gis(kInter, "POLYGON((10 10,20 10,20 20,10 20,10 10))"))),
     };
 
     auto run = [&](const milvus::expr::TypedExprPtr& f,
                    bool enable) -> BitsetType {
-        SegcoreConfig::default_config().set_enable_gis_split_fusion(enable);
+        // RAII: flag restored even if ExecuteQueryExpr throws.
+        GisSplitFusionFlagGuard guard(enable);
         auto node =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, f);
-        auto bits = ExecuteQueryExpr(node, sealed.get(), N, MAX_TIMESTAMP);
-        SegcoreConfig::default_config().set_enable_gis_split_fusion(false);
-        return bits;
+        return ExecuteQueryExpr(node, sealed.get(), N, MAX_TIMESTAMP);
     };
+
+    // Force multiple Eval batches (N=200 -> ~4 batches) so the indexed coarse
+    // slicing is exercised across batch boundaries, not just a single batch.
+    ExprBatchSizeGuardLocal batch_guard(64);
 
     for (const auto& f : filters) {
         BitsetType baseline = run(f, false);
