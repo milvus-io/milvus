@@ -152,3 +152,30 @@ The `bitmap_input` chain: `B_coarse` contributes early → intermediate scalars 
 - Feature flag: `queryNode.segcore.enableGISSplitFusion`, default off, for gradual rollout.
 - Equivalence tests `GISCoarseRefineExprTest`: full-matrix equivalence against the original per-predicate Eval (AND/OR, intersects/within/contains, null, index/no-index, growing/sealed/mmap, empty bitmap_input).
 - Bench: reproduce multi-predicate geo queries; verify that the `Geometry::Geometry` CPU share drops from ~20% to ~0, the refine candidate row count shrinks, and p99 falls back from seconds.
+
+## 12. Measured Results (2026-07-06)
+
+A/B benchmark on the implementation PR (#50675): same binary and same data, only `enableGISSplitFusion` toggled across restarts, with `enableGeometryCache=false` in **both** modes. Dataset: 1M rows; `geo` holds 64-vertex polygons (construction-heavy, the workload this design targets) with an RTREE index; an `INT64` scalar column controls predicate selectivity; query viewports are sized to hit a controlled fraction of rows. Numbers are p50 of 100 sequential `query(count(*))` iterations (pure filter path).
+
+| case | filter shape | OFF p50 (ms) | ON p50 (ms) | speedup |
+|------|--------------|-------------:|------------:|--------:|
+| control | lone `ST_INTERSECTS` (5% viewport) — never split | 54.1 | 53.7 | 1.01x |
+| pruning 1% | `scalar(1%)` ∧ intersects(5%) | 55.6 | 5.2 | 10.7x |
+| pruning 10% | `scalar(10%)` ∧ intersects(5%) | 55.6 | 10.0 | 5.6x |
+| pruning 50% | `scalar(50%)` ∧ intersects(5%) | 55.1 | 28.8 | 1.9x |
+| fusion OR-2 | `scalar(10%)` ∧ (2-way OR, 5% total) | 57.4 | 9.9 | 5.8x |
+| fusion OR-4 | `scalar(10%)` ∧ (4-way OR, 5% total) | 60.3 | 10.9 | 5.5x |
+| pruning × fusion | `scalar(1%)` ∧ (4-way OR) | 60.6 | 6.0 | 10.1x |
+| AND fusion | `scalar(10%)` ∧ intersects(5%) ∧ within(20%) | 259.0 | 12.2 | 21.2x |
+| large coarse set | `scalar(10%)` ∧ intersects(20% viewport) | 209.0 | 27.4 | 7.6x |
+
+What the numbers confirm, per mechanism:
+
+- **No overhead where the rewrite does not apply**: the control case (a lone GIS predicate never enters `SplitFuseGISConjunct`) is 1.01x.
+- **`bitmap_input` pruning**: OFF is flat (~55 ms) regardless of scalar selectivity — the old refine pays for the whole coarse candidate set; ON scales with the surviving rows (5.2 / 10.0 / 28.8 ms at 1% / 10% / 50%).
+- **K→1 fusion**: a 4-way same-column OR costs the same as a single predicate with the same survivor set (10.9 vs 10.0 ms).
+- **Worst case**: an AND of a 5% and a 20% predicate (250k coarse-candidate constructions for a 5k-row answer) drops from 259 ms to 12 ms.
+- Both sides fit `latency ≈ 2.5 ms + 1.03 µs × (#GEOS constructions)` with constructions = Σ|coarseᵢ| when OFF vs |scalars ∧ B_coarse| when ON — matching the algebra in Section 3.
+- `count(*)` is identical ON vs OFF for all cases. Filtered `search` (topk=100) shows the same pattern end-to-end (4.8–18.6x).
+
+Full setup and discussion: https://github.com/milvus-io/milvus/pull/50675#issuecomment-4899397542
