@@ -18,15 +18,36 @@ package storage
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
+
+type oneShotRecordReader struct {
+	rec  Record
+	done bool
+}
+
+func (r *oneShotRecordReader) Next() (Record, error) {
+	if r.done {
+		return nil, io.EOF
+	}
+	r.done = true
+	return r.rec, nil
+}
+
+func (r *oneShotRecordReader) Close() error {
+	return nil
+}
 
 func TestRadixSortByInt64(t *testing.T) {
 	t.Run("edge values across records", func(t *testing.T) {
@@ -245,6 +266,49 @@ func TestMergeSort(t *testing.T) {
 		err = rw.Close()
 		assert.NoError(t, err)
 	})
+}
+
+func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
+	textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	textBuilder.Append("not-a-lob-ref")
+	textColumn := textBuilder.NewArray()
+	defer textColumn.Release()
+	textBuilder.Release()
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	pkBuilder.Append(1)
+	pkColumn := pkBuilder.NewArray()
+	defer pkColumn.Release()
+	pkBuilder.Release()
+
+	rec := NewSimpleArrowRecord(array.NewRecord(
+		arrow.NewSchema([]arrow.Field{
+			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "text", Type: arrow.BinaryTypes.String},
+		}, nil),
+		[]arrow.Array{pkColumn, textColumn},
+		1,
+	), map[FieldID]int{100: 0, 101: 1})
+	defer rec.Release()
+
+	reader := &oneShotRecordReader{rec: rec}
+	writer := &MockRecordWriter{
+		writefn: func(r Record) error {
+			return nil
+		},
+		closefn: func() error {
+			return nil
+		},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+	}}
+
+	_, err := MergeSort(1024, schema, []RecordReader{reader}, writer, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{100})
+	assert.ErrorContains(t, err, "failed to append value")
 }
 
 // Benchmark sort

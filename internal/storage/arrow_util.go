@@ -267,7 +267,9 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 		elementType = schema.GetElementType()
 	}
 	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)
-	if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
+	if schema.GetDataType() == schemapb.DataType_Text {
+		arrowType = arrow.BinaryTypes.Binary
+	} else if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
 		arrowType = arrow.BinaryTypes.Binary
 	}
 	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
