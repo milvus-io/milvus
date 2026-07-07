@@ -236,6 +236,7 @@ def gen_add_scalar_core_types_parquet_bytes(num_rows, start_id, dim=ct.default_d
         "score_float": pa.array([float(i) * 0.25 for i in ids], type=pa.float32()),
         "score_i64": pa.array([i * 10 for i in ids], type=pa.int64()),
         "tag": pa.array([f"tag_{i % 5}" for i in ids], type=pa.string()),
+        "text_body": pa.array([f"external text body {i}" for i in ids], type=pa.string()),
     }
     buf = io.BytesIO()
     pq.write_table(pa.table(columns), buf, compression="snappy")
@@ -959,9 +960,10 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
             ("float", DataType.FLOAT, {}, pa.float32(), lambda i: float(i) * 1.5),
             ("double", DataType.DOUBLE, {}, pa.float64(), lambda i: float(i) * 2.5),
             ("varchar", DataType.VARCHAR, {"max_length": 64}, pa.string(), lambda i: f"s_{i:05d}"),
+            ("text_body", DataType.TEXT, {}, pa.string(), lambda i: f"text body document {i}"),
             ("json", DataType.JSON, {}, pa.string(), lambda i: json.dumps({"k": i, "g": i % 3})),
         ],
-        ids=["bool", "int8", "int16", "int32", "int64", "float", "double", "varchar", "json"],
+        ids=["bool", "int8", "int16", "int32", "int64", "float", "double", "varchar", "text", "json"],
     )
     def test_milvus_client_external_table_scalar_type_e2e(
         self, type_name, dtype, extra, arrow_type, value_fn, minio_env, external_prefix
@@ -994,6 +996,15 @@ class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
         res = self.query(client, coll, filter="id == 0", output_fields=["id", scalar_name])[0]
         assert len(res) == 1
         assert res[0]["id"] == 0
+        expected_value = value_fn(0)
+        if type_name == "json":
+            if isinstance(res[0][scalar_name], dict):
+                actual_json = res[0][scalar_name]
+            else:
+                actual_json = json.loads(res[0][scalar_name])
+            assert actual_json == json.loads(expected_value)
+        else:
+            assert res[0][scalar_name] == expected_value
         log.info(f"[{type_name}] id=0 -> {res[0]}")
 
         vectors = _float_vectors([0], ct.default_dim).tolist()
@@ -2082,7 +2093,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
     def test_milvus_client_external_table_add_core_scalar_field_types(self, minio_env, external_prefix):
         """
         target: test external table add core scalar field types
-        method: add FLOAT, INT64, and VARCHAR fields, refresh, load, query, and filter them
+        method: add FLOAT, INT64, VARCHAR, and TEXT fields, refresh, load, query, and filter them
         expected: core scalar types added through schema evolution are readable and filterable
         """
         minio_client, cfg = minio_env
@@ -2109,6 +2120,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             ("score_float", DataType.FLOAT, {}),
             ("score_i64", DataType.INT64, {}),
             ("tag", DataType.VARCHAR, {"max_length": 16}),
+            ("text_body", DataType.TEXT, {}),
         ):
             self.add_collection_field(
                 client,
@@ -2127,7 +2139,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             client,
             coll,
             filter="id == 42",
-            output_fields=["id", "score_float", "score_i64", "tag"],
+            output_fields=["id", "score_float", "score_i64", "tag", "text_body"],
         )[0]
         assert len(rows) == 1
         row = rows[0]
@@ -2135,15 +2147,17 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         assert abs(row["score_float"] - 10.5) < 1e-3
         assert row["score_i64"] == 420
         assert row["tag"] == "tag_2"
+        assert row["text_body"] == "external text body 42"
 
         filtered = self.query(
             client,
             coll,
             filter='score_i64 >= 1000 && score_i64 < 1050 && tag == "tag_0"',
-            output_fields=["id", "score_i64", "tag"],
+            output_fields=["id", "score_i64", "tag", "text_body"],
             limit=10,
         )[0]
         assert {row["id"] for row in filtered} == {100}
+        assert filtered[0]["text_body"] == "external text body 100"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(
