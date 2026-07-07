@@ -515,6 +515,47 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
 }
 
+TEST_P(GroupChunkTranslatorTest, LoadLegacyPackedFilesThroughChunkReader) {
+    auto use_mmap = GetParam();
+    std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
+    auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_group_chunk");
+    auto chunk_reader = CreateChunkReaderForLegacyFiles(
+        paths_, FieldId(0), metadata.row_group_meta_list);
+
+    auto temp_dir =
+        std::filesystem::path(TestLocalPath) / "gctt_test_chunk_reader_backend";
+    std::filesystem::create_directory(temp_dir);
+    auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
+
+    auto translator = std::make_unique<GroupChunkTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        field_metas,
+        column_group_info,
+        std::move(chunk_reader),
+        std::move(metadata.row_group_meta_list),
+        use_mmap,
+        true,
+        schema_->get_field_ids().size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /* warmup_policy */ "");
+
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        cids.push_back(i);
+    }
+    auto cells = translator->get_cells(nullptr, cids);
+    ASSERT_EQ(cells.size(), cids.size());
+    for (size_t i = 0; i < cells.size(); ++i) {
+        EXPECT_EQ(cells[i].first, cids[i]);
+        EXPECT_NE(cells[i].second, nullptr);
+    }
+
+    if (use_mmap) {
+        std::filesystem::remove_all(temp_dir);
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(GroupChunkTranslatorTest,
                          GroupChunkTranslatorTest,
                          testing::Bool());
