@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "bitset/bitset.h"
@@ -1670,6 +1671,120 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
     }
+}
+
+TEST(Expr, TestArrayContainsFloatLiteralCastsToElementType) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto float_array_fid =
+        schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    constexpr int N = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 3);
+
+    constexpr double target_1 = 492710.03520180425;
+    constexpr double target_2 = 38241.68284883746;
+    bool replaced_array_field = false;
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != float_array_fid.get()) {
+            continue;
+        }
+
+        auto* arrays =
+            field_data->mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+
+        auto* matched = arrays->Add();
+        matched->mutable_float_data()->add_data(static_cast<float>(target_1));
+        matched->mutable_float_data()->add_data(static_cast<float>(target_2));
+
+        auto* close_but_different = arrays->Add();
+        close_but_different->mutable_float_data()->add_data(
+            static_cast<float>(target_1) + 1.0F);
+        close_but_different->mutable_float_data()->add_data(
+            static_cast<float>(target_2) + 1.0F);
+
+        arrays->Add();
+        replaced_array_field = true;
+        break;
+    }
+    ASSERT_TRUE(replaced_array_field);
+
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_promote, nullptr);
+
+    auto make_float_value = [](double target) {
+        proto::plan::GenericValue value;
+        value.set_float_val(target);
+        return value;
+    };
+
+    auto make_values = [&](std::vector<double> targets) {
+        std::vector<proto::plan::GenericValue> values;
+        values.reserve(targets.size());
+        for (auto target : targets) {
+            values.push_back(make_float_value(target));
+        }
+        return values;
+    };
+
+    auto expect_only_first_match =
+        [&](const std::shared_ptr<plan::FilterBitsNode>& plan) {
+            auto result = ExecuteQueryExpr(plan, seg_promote, N, MAX_TIMESTAMP);
+            ASSERT_EQ(result.size(), N);
+            EXPECT_TRUE(result[0]);
+            EXPECT_FALSE(result[1]);
+            EXPECT_FALSE(result[2]);
+        };
+
+    auto check = [&](proto::plan::JSONContainsExpr_JSONOp op,
+                     std::vector<double> targets) {
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(float_array_fid, DataType::ARRAY, DataType::FLOAT),
+            op,
+            true,
+            make_values(std::move(targets)));
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        expect_only_first_match(plan);
+    };
+
+    check(proto::plan::JSONContainsExpr_JSONOp_Contains, {target_1});
+    check(proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+          {target_1, target_2});
+    check(proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+          {target_1, target_2});
+
+    auto element_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(
+            float_array_fid, DataType::ARRAY, DataType::FLOAT, {"0"}),
+        proto::plan::OpType::Equal,
+        make_float_value(target_1));
+    expect_only_first_match(std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, element_expr));
+
+    auto array_value = make_float_value(0);
+    auto* array = array_value.mutable_array_val();
+    array->set_same_type(true);
+    array->set_element_type(proto::schema::DataType::Float);
+    array->add_array()->set_float_val(target_1);
+    array->add_array()->set_float_val(target_2);
+
+    auto array_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(float_array_fid, DataType::ARRAY, DataType::FLOAT),
+        proto::plan::OpType::Equal,
+        array_value);
+    expect_only_first_match(std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, array_expr));
 }
 
 TEST(Expr, TestArrayContainsEmptyValues) {
