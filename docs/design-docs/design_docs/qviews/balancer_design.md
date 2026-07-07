@@ -48,7 +48,8 @@ DDL Callbacks (WAL message acknowledgment)
 │  │  • ETCD persistence      │ │    across all shards     │  │
 │  └──────────────────────────┘ └──────────────────────────┘  │
 │  CollectionLoadManager lives in loadmgr and connects DDL     │
-│  callbacks to LoadConfigStore, ShardEnsurer, and Balancer.   │
+│  broadcast results to LoadConfigStore, ShardEnsurer, and     │
+│  Balancer.                                                   │
 │                                                              │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
 │  │ShardViewMgr │ │ShardViewMgr │ │ShardViewMgr │  ...       │
@@ -168,24 +169,27 @@ type BalancePlan struct {
 
 Load-config lifecycle facade in `loadmgr`. It absorbs the desired-state parts
 of the legacy `CollectionManager` and `ReplicaManager`: parsing DDL callback
-messages, assigning replica nodes, persisting `LoadConfig`, ensuring the
-corresponding shard managers exist through an injected callback, and notifying
-Balancer reconciliation.
+messages, persisting `LoadConfig`, and notifying Balancer reconciliation.
+Replica node membership is not persisted in load config; Balancer expands each
+replica's resource group to live QueryNodes when it allocates QueryViews.
 
 ```
 loadmgr.CollectionLoadManager
 ├── LoadConfigStore          ← desired state
 │   ├── LoadConfig per collection (persisted)
-│   ├── Replica assignments (persisted, embedded in LoadConfig)
+│   ├── Replica RG constraints (persisted, embedded in LoadConfig)
 │   └── Full-config writes with orphan cleanup
 │
-├── ShardEnsurer             ← injected coordview registry callback
+├── ShardEnsurer             ← uses broadcast result vchannels
 └── DirtyCollectionNotifier  ← injected balancer trigger callback
 ```
 
 #### LoadConfigStore
 
-Owns **desired state**: per-collection load config and replica node assignments. Does not know about ShardID or views — focused purely on LoadConfig persistence plus a resident immutable snapshot for Balancer.
+Owns **desired state**: per-collection load config and replica resource-group
+constraints. Does not know about ShardID, views, or live node membership —
+focused purely on LoadConfig persistence plus a resident immutable snapshot for
+Balancer.
 
 ```go
 // Concrete type, no interface abstraction. Snapshot returns an immutable
@@ -198,8 +202,7 @@ func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCat
 // Put persists the full LoadConfig. Always writes all current keys
 // (CollectionLoadInfo + all PartitionLoadInfo + all Replica), and deletes
 // orphan partitions / replicas present in the previous state but absent
-// from the new config. Caller is responsible for computing replica Nodes
-// before calling Put.
+// from the new config.
 func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error
 
 // Remove deletes all persisted state for a collection
@@ -219,19 +222,19 @@ type LoadConfig struct {
     Replicas                 []*ReplicaAssignment
 }
 
-// ReplicaAssignment unifies DDL config and runtime node assignment per replica.
+// ReplicaAssignment unifies DDL replica config. Runtime node membership is
+// derived from ResourceGroup by Balancer.
 type ReplicaAssignment struct {
     ReplicaID     int64                   // from DDL
     ResourceGroup string                  // from DDL
     Priority      commonpb.LoadPriority   // from DDL
-    Nodes         []int64                 // runtime assignment
 }
 
 // Deep-copy helpers for mutation by callers.
 func (c *LoadConfig) Clone() *LoadConfig
 func (r *ReplicaAssignment) Clone() *ReplicaAssignment
 
-// Skeleton builder from a DDL message (Nodes unassigned; caller fills them in).
+// Builder from a DDL message.
 func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *LoadConfig
 ```
 
@@ -265,10 +268,10 @@ Maintains live per-shard stats via ShardViewObserver callbacks from each ShardVi
 
 ```go
 type CollectionLoadManager interface {
-    // Facade computes replica Nodes (via Node Manager) before calling
-    // LoadConfigStore.Put. Then ensures the new shard list through an injected
-    // callback and triggers Balancer.
-    UpdateLoadConfig(ctx context.Context, msg *messagespb.AlterLoadConfigMessageHeader) error
+    // Facade parses the WAL ack broadcast result, calls LoadConfigStore.Put,
+    // ensures shard managers for the vchannels acknowledged by the broadcast,
+    // and triggers Balancer. No CollectionShardProvider is needed.
+    UpdateLoadConfig(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error
     ReleaseCollection(ctx context.Context, msg *messagespb.DropLoadConfigMessageHeader) error
 }
 ```
@@ -281,11 +284,10 @@ WAL ack → LoadCollectionJob → CollectionManager.PutCollection() + ReplicaMan
 
 // After (new):
 WAL ack of collection-vchannel AlterLoadConfig broadcast
-        → CollectionLoadManager.UpdateLoadConfig(msg.Header())
-         ├── parse msg → LoadConfig (without Nodes)
-         ├── compute replica Nodes (via Node Manager)
+        → CollectionLoadManager.UpdateLoadConfig(result)
+         ├── parse result.Message.Header() → LoadConfig
          ├── LoadConfigStore.Put(fullCfg)  // full write + orphan cleanup
-         ├── ShardViewRegistry.syncShards(cfg)  // create new shards
+         ├── ShardViewRegistry.Ensure(replicaID, vchannel) for result vchannels
          └── Balancer.Trigger(DirtyCollections: [collID])
 
 WAL ack of collection-vchannel DropLoadConfig broadcast
@@ -554,8 +556,8 @@ This gives cross-shard coordination without requiring the snapshot to be mutable
 
 ```
 1. Load RPC → broadcast AlterLoadConfigMessage to all collection vchannels → WAL ack
-2. DDL callback: CollectionLoadManager.UpdateLoadConfig(msg.Header())
-   → persist load config + create ShardViewManagers + Trigger(DirtyCollections: [C1])
+2. DDL callback: CollectionLoadManager.UpdateLoadConfig(result)
+   → persist load config + ensure result vchannel ShardViewManagers + Trigger(DirtyCollections: [C1])
 3. Balancer loop wakes, snapshot includes new LoadConfig but ShardStats is empty
 4. policy.Plan(snap, [shards of C1]):
    Phase 1: desired present, current absent → actionMust for each
@@ -580,7 +582,7 @@ This gives cross-shard coordination without requiring the snapshot to be mutable
 |---|---|---|
 | Balancer | Scheduling framework: work queue + reconcile loop + snapshot builder + plan executor | Work queue only |
 | BalancePolicy | Batch planning: classify dirty shards + compute assignments + accept/reject threshold | None |
-| CollectionLoadManager | Load-config lifecycle: DDL callback handling, replica assignment, desired-state persistence, shard ensure callback, dirty collection notify. | None beyond dependencies |
+| CollectionLoadManager | Load-config lifecycle: DDL broadcast-result handling, desired-state persistence, shard ensure callback from result vchannels, dirty collection notify. | None beyond dependencies |
 | ShardViewRegistry | Actual shard view state aggregation and resident ShardViewSnapshot publication. | Registry indexes + snapshot cache |
 | ShardViewManager | Per-shard multi-version view management (existing). Exposes `Stats()` for aggregation. | Per-shard state |
 

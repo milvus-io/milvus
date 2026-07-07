@@ -51,6 +51,9 @@ func TestDataViewSegmentStoreSelectSegmentsSkipsDroppedPartition(t *testing.T) {
 		CollectionID:                  1,
 		PartitionID:                   10,
 		InsertChannel:                 "ch-1",
+		NumOfRows:                     11,
+		Binlogs:                       []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 1024}, {LogSize: 256}}}},
+		Statslogs:                     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 128}}}},
 		State:                         commonpb.SegmentState_Flushed,
 		Level:                         datapb.SegmentLevel_L1,
 		StartPosition:                 &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
@@ -72,6 +75,8 @@ func TestDataViewSegmentStoreSelectSegmentsSkipsDroppedPartition(t *testing.T) {
 
 	require.Len(t, segments, 1)
 	require.Equal(t, int64(100), segments[0].GetID())
+	require.Equal(t, int64(11), segments[0].GetNumOfRows())
+	require.Equal(t, int64(1408), segments[0].GetMemSize())
 	require.Equal(t, uint64(500), segments[0].GetStartPosition().GetTimestamp())
 	require.Equal(t, uint64(500), segments[0].GetDeleteApplyStartAfterTimetick())
 }

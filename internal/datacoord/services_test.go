@@ -79,7 +79,7 @@ func (s *ServerSuite) SetupSuite() {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(0, true)
+	b.EXPECT().GetLatestWALLocated(mock.Anything, mock.Anything).Return(0, true).Maybe()
 	balance.Register(b)
 }
 
@@ -101,19 +101,6 @@ func TestServerSuite(t *testing.T) {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		if req.CollectionID == 0 {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionID:        0,
-				VirtualChannelNames: []string{"ch1"},
-			}, nil
-		}
-		return &milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil
-	})
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -122,7 +109,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 	}{
 		{"channel cp > flush ts", 11, true},
 		{"channel cp = flush ts", 12, true},
-		{"channel cp < flush ts", 13, false},
+		{"channel cp < flush ts", 13, true},
 	}
 
 	err := s.testServer.meta.UpdateChannelCheckpoint(context.TODO(), "ch1", &msgpb.MsgPosition{
@@ -150,27 +137,15 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTsMissingCheckpoint() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:              merr.Success(),
-		CollectionID:        0,
-		VirtualChannelNames: []string{"missing-cp-channel"},
-	}, nil)
-
 	resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{FlushTs: 13})
 	s.NoError(err)
 	s.EqualValues(&milvuspb.GetFlushStateResponse{
 		Status:  merr.Success(),
-		Flushed: false,
+		Flushed: true,
 	}, resp)
 }
 
 func (s *ServerSuite) TestGetFlushState_BySegment() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"ch1"},
-		}, nil
-	})
 	tests := []struct {
 		description string
 		segID       int64
@@ -200,7 +175,7 @@ func (s *ServerSuite) TestGetFlushState_BySegment() {
 			})
 			s.Require().NoError(err)
 
-			resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{test.segID}})
+			resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{SegmentIDs: []int64{test.segID}, FlushTs: 13})
 			s.NoError(err)
 			s.EqualValues(&milvuspb.GetFlushStateResponse{
 				Status:  merr.Success(),

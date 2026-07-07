@@ -386,6 +386,32 @@ func TestDataViewManagerSnapshotReturnsLatestVisibleClone(t *testing.T) {
 	require.Equal(t, []int64{100}, views[0].GetShards()[0].GetPartitions()[0].GetSegmentIds())
 }
 
+func TestDataViewManagerDataViewSnapshotForBalancer(t *testing.T) {
+	ctx := context.Background()
+	manager, _, store := newTestDataViewManager()
+	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 1000)
+	store.segments[100].NumOfRows = 11
+	store.segments[100].MemSize = 4096
+	require.NoError(t, noErrorVersion(manager.OnFlush(ctx, FlushDataViewEvent{CollectionID: 1, SegmentIDs: []int64{100}})))
+
+	snapshot := manager.DataViewSnapshot(ctx)
+	require.NotNil(t, snapshot)
+
+	version, ok := snapshot.DataVersion(1)
+	require.True(t, ok)
+	require.Equal(t, int64(1), version.StreamingVersion)
+
+	shard, ok := snapshot.ShardView(1, "ch-1")
+	require.True(t, ok)
+	require.Equal(t, []int64{100}, shard.GetPartitions()[0].GetSegmentIds())
+
+	segment, ok := snapshot.SegmentInfo(100)
+	require.True(t, ok)
+	require.Equal(t, int64(10), segment.PartitionID)
+	require.Equal(t, int64(4096), segment.MemSize)
+	require.Equal(t, int64(11), segment.RowNum)
+}
+
 func TestDataViewManagerCompactPendingOutputIsNoopUntilVisible(t *testing.T) {
 	ctx := context.Background()
 	manager, catalog, store := newTestDataViewManager()

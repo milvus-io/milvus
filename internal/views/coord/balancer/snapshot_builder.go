@@ -1,6 +1,8 @@
 package balancer
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -12,7 +14,7 @@ import (
 //
 // A builder is typically held by the Balancer and invoked at the start of
 // each reconcile cycle. It is stateless apart from its configured sources;
-// calling Build() twice produces two independent snapshots.
+// calling Build(ctx) twice produces two independent snapshots.
 type SnapshotBuilder struct {
 	configStore      *loadmgr.LoadConfigStore
 	viewRegistry     *coordview.ShardViewRegistry
@@ -47,7 +49,7 @@ func NewSnapshotBuilder(
 //
 // The returned snapshot is owned by the caller and not shared with the
 // builder's sources.
-func (b *SnapshotBuilder) Build() *BalancerSnapshot {
+func (b *SnapshotBuilder) Build(ctx context.Context) *BalancerSnapshot {
 	snap := &BalancerSnapshot{
 		Config: b.config,
 	}
@@ -61,8 +63,7 @@ func (b *SnapshotBuilder) Build() *BalancerSnapshot {
 	snap.ShardViewSnapshot = viewSnapshot
 
 	// 3. DataView + segment metadata snapshot.
-	dataSnapshot := b.dataViewProvider.Snapshot()
-	snap.DataViewSnapshot = dataSnapshot
+	snap.DataViewSnapshot = b.dataViewProvider.DataViewSnapshot(ctx)
 
 	// 5. Nodes: start from provider infos, then aggregate per-node load.
 	nodeSnapshot := b.nodeProvider.Snapshot()
@@ -79,12 +80,12 @@ func buildBalanceNodes(snapshot *NodeSnapshot) map[int64]*BalanceNode {
 	out := make(map[int64]*BalanceNode)
 	snapshot.Range(func(id int64, info *NodeInfo) bool {
 		out[id] = &BalanceNode{
-			NodeID:         info.NodeID,
-			Alive:          info.Alive,
-			Stopping:       info.Stopping,
-			ResourceGroup:  info.ResourceGroup,
-			MemoryCapacity: info.MemoryCapacity,
-			MemoryUsage:    info.MemoryUsage,
+			NodeID:        info.NodeID,
+			Alive:         info.Alive,
+			Stopping:      info.Stopping,
+			ResourceGroup: info.ResourceGroup,
+			// TODO: populate MemoryCapacity / MemoryUsage from node view once
+			// QueryNode reports the capacity signal into the coordinator path.
 		}
 		return true
 	})

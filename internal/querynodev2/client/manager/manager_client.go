@@ -1,4 +1,4 @@
-package client
+package manager
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -23,26 +22,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Client provides service discovery and gRPC connections to QueryNodes.
-// Wraps etcd Session Service Discovery, following the same pattern as
+// ManagerClient provides service discovery and gRPC connections to QueryNodes.
+// It wraps etcd session service discovery, following the same pattern as
 // StreamingNode's ManagerClient.
-type Client interface {
-	// WatchNodeChanged returns a channel that signals QueryNode membership changes.
-	WatchNodeChanged(ctx context.Context) (<-chan struct{}, error)
+type ManagerClient interface {
+	// RegisterNodeChangedNotifier registers a callback for QueryNode membership changes.
+	// The notifier must be non-blocking.
+	RegisterNodeChangedNotifier(notifier func())
 
 	// GetAllQueryNodes fetches all discovered QueryNode info.
-	GetAllQueryNodes(ctx context.Context) (map[int64]qviews.QueryNode, error)
+	// The result is fetched from service discovery, so there's no RPC call.
+	GetAllQueryNodes(ctx context.Context) (map[int64]*NodeInfo, error)
 
-	// GetViewSyncClient returns a ViewSyncServiceClient for making streaming RPCs.
-	// Use contextutil.WithPickServerID to route to specific nodes.
-	GetViewSyncClient(ctx context.Context) (viewpb.ViewSyncServiceClient, error)
+	// CreateViewSyncClient returns a ViewSyncServiceClient routed to the given QueryNode.
+	CreateViewSyncClient(ctx context.Context, queryNodeID int64) (viewpb.ViewSyncServiceClient, error)
 
-	// Close closes the client and releases resources.
+	// Close closes the manager client and releases resources.
 	Close()
 }
 
-// NewClient creates a new QueryNode client using etcd session discovery.
-func NewClient(etcdCli *clientv3.Client) Client {
+// NodeInfo is the basic QueryNode identity discovered from session service discovery.
+type NodeInfo struct {
+	ServerID     int64
+	Address      string
+	Stopping     bool
+	ServerLabels map[string]string
+}
+
+// NewManagerClient creates a new QueryNode manager client using etcd session discovery.
+func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 	role := sessionutil.GetSessionPrefixByRole(typeutil.QueryNodeRole)
 	rb := resolver.NewSessionBuilder(etcdCli, discoverer.OptSDPrefix(role), discoverer.OptSDVersionRange(">=2.6.0-dev"))
 	dialTimeout := paramtable.Get().QueryNodeGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
@@ -56,7 +64,7 @@ func NewClient(etcdCli *clientv3.Client) Client {
 			dialOptions...,
 		)
 	})
-	return &clientImpl{
+	return &managerClientImpl{
 		lifetime: typeutil.NewLifetime(),
 		stopped:  make(chan struct{}),
 		rb:       rb,

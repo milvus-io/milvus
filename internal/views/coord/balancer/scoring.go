@@ -1,6 +1,10 @@
 package balancer
 
-import "github.com/milvus-io/milvus/internal/views/coord/coordview"
+import (
+	"sort"
+
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+)
 
 // This file implements Phase 2 node selection: given a segment and a set of
 // candidate nodes, filter by hard constraints then pick the highest-scoring
@@ -18,14 +22,14 @@ import "github.com/milvus-io/milvus/internal/views/coord/coordview"
 //   - seg:           segment metadata; MemSize drives stickiness and load
 //   - currentStates: current per-node states for this segment. Controls the
 //     reuse / avoidance score.
-//   - replicaNodes:  nodeIDs eligible for this replica (from ReplicaAssignment).
-//     Nodes outside this list are never considered.
+//   - resourceGroup: resource-group constraint from ReplicaAssignment. Nodes
+//     outside this RG are never considered.
 //   - cfg:           scoring weights and baseline.
 func pickNode(
 	predicted map[int64]*BalanceNode,
 	seg *SegmentInfo,
 	currentStates map[int64]coordview.SegmentState,
-	replicaNodes []int64,
+	resourceGroup string,
 	cfg *BalanceConfig,
 ) (int64, bool) {
 	var (
@@ -33,22 +37,33 @@ func pickNode(
 		bestScore = -1.0
 		found     bool
 	)
-	for _, nodeID := range replicaNodes {
-		node, ok := predicted[nodeID]
-		if !ok {
-			continue
-		}
+	for _, nodeID := range candidateNodeIDs(predicted, resourceGroup) {
+		node := predicted[nodeID]
 		if !passHardConstraints(node, seg) {
 			continue
 		}
 		s := score(node, seg, currentStates, cfg)
-		if !found || s > bestScore {
+		if !found || s > bestScore || (s == bestScore && nodeID < bestID) {
 			bestID = nodeID
 			bestScore = s
 			found = true
 		}
 	}
 	return bestID, found
+}
+
+func candidateNodeIDs(predicted map[int64]*BalanceNode, resourceGroup string) []int64 {
+	ids := make([]int64, 0, len(predicted))
+	for nodeID, node := range predicted {
+		if node == nil || node.ResourceGroup != resourceGroup {
+			continue
+		}
+		ids = append(ids, nodeID)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i] < ids[j]
+	})
+	return ids
 }
 
 // passHardConstraints returns true iff the node can physically accept the

@@ -23,6 +23,7 @@ type SNQueryRuntimeManager interface {
 type resourceState struct {
 	initRef       bool
 	queryViewRefs map[qviews.QueryViewKey]struct{}
+	changed       chan struct{}
 
 	runtime *QueryRuntime
 	task    BuildTask
@@ -54,6 +55,13 @@ func NewManager(moduleBuilders ...QueryRuntimeModuleBuilder) SNQueryRuntimeManag
 	}
 }
 
+func newResourceState() *resourceState {
+	return &resourceState{
+		queryViewRefs: make(map[qviews.QueryViewKey]struct{}),
+		changed:       make(chan struct{}),
+	}
+}
+
 func (m *queryRuntimeManager) OnAlterLoadConfig(view walview.VChannelWALView) walview.VChannelLiveObserver {
 	runtime := NewQueryRuntime(m.newModules()...)
 	task := newResourceBuildTask(context.Background(), func(ctx context.Context) (*QueryRuntime, error) {
@@ -70,17 +78,21 @@ func (m *queryRuntimeManager) OnAlterLoadConfig(view walview.VChannelWALView) wa
 		runtime.Close()
 		return nil
 	}
-	if _, ok := m.resources[view.VChannel]; ok {
+	state := m.resources[view.VChannel]
+	if state != nil && (state.runtime != nil || state.task != nil) {
 		m.mu.Unlock()
 		runtime.Close()
 		return nil
 	}
-	m.resources[view.VChannel] = &resourceState{
-		initRef:       true,
-		queryViewRefs: make(map[qviews.QueryViewKey]struct{}),
-		runtime:       runtime,
-		task:          task,
+	if state == nil {
+		state = newResourceState()
+		state.initRef = true
+		m.resources[view.VChannel] = state
 	}
+	state.runtime = runtime
+	state.task = task
+	state.err = nil
+	m.notifyStateChangedLocked(state)
 	m.mu.Unlock()
 
 	m.scheduler.Submit(task)
@@ -139,6 +151,7 @@ func (m *queryRuntimeManager) finishBuild(vchannel string, task BuildTask) {
 		state.runtime = runtime
 		state.err = nil
 	}
+	m.notifyStateChangedLocked(state)
 	runtime, cleanupTask := m.cleanupIfUnreferencedLocked(vchannel)
 	m.mu.Unlock()
 
@@ -164,6 +177,7 @@ func (m *queryRuntimeManager) Release(req snview.ReleaseResource) {
 		delete(m.refIndex, req.Key)
 		if state := m.resources[vchannel]; state != nil {
 			delete(state.queryViewRefs, req.Key)
+			m.notifyStateChangedLocked(state)
 			advance, hasAdvance = minQueryViewDataVersion(state.queryViewRefs)
 			advanceRuntime = state.runtime
 		}
@@ -190,6 +204,7 @@ func (m *queryRuntimeManager) Close() {
 	runtimes := make([]*QueryRuntime, 0, len(m.resources))
 	tasks := make([]BuildTask, 0, len(m.resources))
 	for vchannel, state := range m.resources {
+		m.notifyStateChangedLocked(state)
 		if state.task != nil {
 			tasks = append(tasks, state.task)
 		}
@@ -228,7 +243,8 @@ func (m *queryRuntimeManager) registerQueryViewRef(req snview.AcquireResource) u
 	}
 	state := m.resources[vchannel]
 	if state == nil {
-		panic("query runtime is not initialized")
+		state = newResourceState()
+		m.resources[vchannel] = state
 	}
 	if existing, ok := m.refIndex[req.Key]; ok && existing != vchannel {
 		panic("query view already references a different runtime")
@@ -242,6 +258,7 @@ func (m *queryRuntimeManager) registerQueryViewRef(req snview.AcquireResource) u
 		m.refIndex[req.Key] = vchannel
 		m.refEpoch[req.Key]++
 		state.initRef = false
+		m.notifyStateChangedLocked(state)
 	}
 	return m.refEpoch[req.Key]
 }
@@ -256,9 +273,13 @@ func (m *queryRuntimeManager) assertMonotonicAcquireLocked(state *resourceState,
 
 func (m *queryRuntimeManager) waitRuntimeReady(key qviews.QueryViewKey, epoch uint64, onReady func()) {
 	for {
-		runtime, task, ok := m.runtimeForRef(key, epoch)
+		runtime, task, changed, ok := m.runtimeForRef(key, epoch)
 		if !ok {
 			return
+		}
+		if changed != nil {
+			<-changed
+			continue
 		}
 		if task != nil {
 			<-task.Done()
@@ -283,24 +304,27 @@ func (m *queryRuntimeManager) waitRuntimeReady(key qviews.QueryViewKey, epoch ui
 	}
 }
 
-func (m *queryRuntimeManager) runtimeForRef(key qviews.QueryViewKey, epoch uint64) (*QueryRuntime, BuildTask, bool) {
+func (m *queryRuntimeManager) runtimeForRef(key qviews.QueryViewKey, epoch uint64) (*QueryRuntime, BuildTask, <-chan struct{}, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.refEpoch[key] != epoch {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	vchannel, ok := m.refIndex[key]
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	state := m.resources[vchannel]
 	if state == nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	if state.err != nil && !errors.Is(state.err, context.Canceled) {
 		panic(errors.Wrap(state.err, "query runtime initialization failed"))
 	}
-	return state.runtime, state.task, true
+	if state.runtime == nil && state.task == nil {
+		return nil, nil, state.changed, true
+	}
+	return state.runtime, state.task, nil, true
 }
 
 func (m *queryRuntimeManager) oldestDataVersionForRef(key qviews.QueryViewKey, epoch uint64) (qviews.DataVersion, bool) {
@@ -346,8 +370,14 @@ func (m *queryRuntimeManager) cleanupIfUnreferencedLocked(vchannel string) (*Que
 	if state.initRef || len(state.queryViewRefs) > 0 {
 		return nil, nil
 	}
+	m.notifyStateChangedLocked(state)
 	delete(m.resources, vchannel)
 	return state.runtime, state.task
+}
+
+func (m *queryRuntimeManager) notifyStateChangedLocked(state *resourceState) {
+	close(state.changed)
+	state.changed = make(chan struct{})
 }
 
 func (m *queryRuntimeManager) queryViewRefCountLocked() int {

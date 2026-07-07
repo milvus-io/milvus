@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -33,10 +32,11 @@ import (
 )
 
 type AlterLoadConfigRequest struct {
-	Meta           *meta.Meta
-	CollectionInfo *milvuspb.DescribeCollectionResponse
-	Expected       ExpectedLoadConfig
-	Current        CurrentLoadConfig
+	Meta              *meta.Meta
+	CollectionInfo    *milvuspb.DescribeCollectionResponse
+	BroadcastChannels []string
+	Expected          ExpectedLoadConfig
+	Current           CurrentLoadConfig
 }
 
 // CheckIfLoadPartitionsExecutable checks if the load partitions is executable.
@@ -168,7 +168,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 	return message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(req.BroadcastChannels, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast(), nil
 }
 

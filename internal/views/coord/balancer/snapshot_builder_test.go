@@ -20,11 +20,24 @@ import (
 // --- fake providers used throughout the tests ---
 
 type fakeNodeProvider struct {
-	infos map[int64]*NodeInfo
+	infos     map[int64]*NodeInfo
+	notifiers []func()
 }
 
 func (f *fakeNodeProvider) Snapshot() *NodeSnapshot {
 	return NewNodeSnapshot(1, f.infos)
+}
+
+func (f *fakeNodeProvider) RegisterNodeChangedNotifier(notifier func()) {
+	if notifier != nil {
+		f.notifiers = append(f.notifiers, notifier)
+	}
+}
+
+func (f *fakeNodeProvider) notifyNodeChanged() {
+	for _, notifier := range f.notifiers {
+		notifier()
+	}
 }
 
 type fakeDataViewProvider struct {
@@ -32,7 +45,7 @@ type fakeDataViewProvider struct {
 	segments    map[int64]*SegmentInfo
 }
 
-func (f *fakeDataViewProvider) Snapshot() *DataViewSnapshot {
+func (f *fakeDataViewProvider) DataViewSnapshot(context.Context) *DataViewSnapshot {
 	return NewDataViewSnapshot(1, f.collections, newMapSegmentSnapshot(f.segments))
 }
 
@@ -132,7 +145,7 @@ func TestSnapshotBuilder_EmptyInputs(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build()
+	snap := builder.Build(context.Background())
 	require.NotNil(t, snap)
 	assert.Empty(t, snap.ConfigsMap())
 	assert.Empty(t, snap.ShardStatsMap())
@@ -147,8 +160,8 @@ func TestSnapshotBuilder_NodeInfosCopied(t *testing.T) {
 	reg := emptyRegistry(t)
 
 	nodes := map[int64]*NodeInfo{
-		1: {NodeID: 1, Alive: true, ResourceGroup: "default", MemoryCapacity: 1000},
-		2: {NodeID: 2, Alive: false, Stopping: true, MemoryCapacity: 2000, MemoryUsage: 500},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "default"},
+		2: {NodeID: 2, Alive: false, Stopping: true},
 	}
 
 	builder := NewSnapshotBuilder(
@@ -158,20 +171,18 @@ func TestSnapshotBuilder_NodeInfosCopied(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build()
+	snap := builder.Build(context.Background())
 	require.Len(t, snap.Nodes, 2)
 
 	n1 := snap.Nodes[1]
 	require.NotNil(t, n1)
 	assert.True(t, n1.Alive)
 	assert.Equal(t, "default", n1.ResourceGroup)
-	assert.Equal(t, int64(1000), n1.MemoryCapacity)
 	assert.Equal(t, int64(0), n1.UpMemLoad, "no shards → zero aggregate")
 
 	n2 := snap.Nodes[2]
 	require.NotNil(t, n2)
 	assert.True(t, n2.Stopping)
-	assert.Equal(t, int64(500), n2.MemoryUsage)
 }
 
 func TestSnapshotBuilder_AggregatePerNodeLoad(t *testing.T) {
@@ -198,8 +209,8 @@ func TestSnapshotBuilder_AggregatePerNodeLoad(t *testing.T) {
 	}
 
 	nodes := map[int64]*NodeInfo{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 10000},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 10000},
+		1: {NodeID: 1, Alive: true},
+		2: {NodeID: 2, Alive: true},
 	}
 
 	builder := NewSnapshotBuilder(
@@ -209,7 +220,7 @@ func TestSnapshotBuilder_AggregatePerNodeLoad(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build()
+	snap := builder.Build(context.Background())
 	require.Len(t, snap.Nodes, 2)
 
 	n1 := snap.Nodes[1]
@@ -261,7 +272,7 @@ func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build()
+	snap := builder.Build(context.Background())
 
 	// Segment metadata stays behind the DataView snapshot lookup; Build no
 	// longer materializes a segment map.
@@ -297,7 +308,7 @@ func TestSnapshotBuilder_UnknownNodeInPlacementIsSkipped(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build()
+	snap := builder.Build(context.Background())
 	// Node 99 does not appear in snap.Nodes; Balancer's Phase 1 will flag
 	// current view as referencing an unavailable node.
 	_, ok := snap.Nodes[99]
@@ -321,7 +332,7 @@ func TestSnapshotBuilder_MissingSegmentInfoContributesZero(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build()
+	snap := builder.Build(context.Background())
 	n1 := snap.Nodes[1]
 	// Only segment 101 contributes its MemSize; segment 102 contributes 0.
 	assert.Equal(t, int64(100), n1.PendingMemLoad)

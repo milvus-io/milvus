@@ -54,6 +54,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	balancerapi "github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -144,6 +145,10 @@ func (m *fakeGCDataViewManager) DataView(ctx context.Context, collectionID int64
 func (m *fakeGCDataViewManager) Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error) {
 	m.snapshotRequested = append([]int64(nil), collectionIDs...)
 	return m.snapshotViews, nil
+}
+
+func (m *fakeGCDataViewManager) DataViewSnapshot(ctx context.Context) *balancerapi.DataViewSnapshot {
+	return balancerapi.NewDataViewSnapshot(0, m.snapshotViews, nil)
 }
 
 func (m *fakeGCDataViewManager) ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error) {

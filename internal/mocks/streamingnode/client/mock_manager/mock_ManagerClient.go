@@ -7,6 +7,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	viewpb "github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
@@ -157,6 +158,65 @@ func (_c *MockManagerClient_CollectAllStatus_Call) Return(_a0 map[int64]*types.S
 }
 
 func (_c *MockManagerClient_CollectAllStatus_Call) RunAndReturn(run func(context.Context, string) (map[int64]*types.StreamingNodeStatus, error)) *MockManagerClient_CollectAllStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateViewSyncClient provides a mock function with given fields: ctx, streamingNodeID
+func (_m *MockManagerClient) CreateViewSyncClient(ctx context.Context, streamingNodeID int64) (viewpb.ViewSyncServiceClient, error) {
+	ret := _m.Called(ctx, streamingNodeID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateViewSyncClient")
+	}
+
+	var r0 viewpb.ViewSyncServiceClient
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (viewpb.ViewSyncServiceClient, error)); ok {
+		return rf(ctx, streamingNodeID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) viewpb.ViewSyncServiceClient); ok {
+		r0 = rf(ctx, streamingNodeID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(viewpb.ViewSyncServiceClient)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, streamingNodeID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockManagerClient_CreateViewSyncClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateViewSyncClient'
+type MockManagerClient_CreateViewSyncClient_Call struct {
+	*mock.Call
+}
+
+// CreateViewSyncClient is a helper method to define mock.On call
+//   - ctx context.Context
+//   - streamingNodeID int64
+func (_e *MockManagerClient_Expecter) CreateViewSyncClient(ctx interface{}, streamingNodeID interface{}) *MockManagerClient_CreateViewSyncClient_Call {
+	return &MockManagerClient_CreateViewSyncClient_Call{Call: _e.mock.On("CreateViewSyncClient", ctx, streamingNodeID)}
+}
+
+func (_c *MockManagerClient_CreateViewSyncClient_Call) Run(run func(ctx context.Context, streamingNodeID int64)) *MockManagerClient_CreateViewSyncClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockManagerClient_CreateViewSyncClient_Call) Return(_a0 viewpb.ViewSyncServiceClient, _a1 error) *MockManagerClient_CreateViewSyncClient_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManagerClient_CreateViewSyncClient_Call) RunAndReturn(run func(context.Context, int64) (viewpb.ViewSyncServiceClient, error)) *MockManagerClient_CreateViewSyncClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

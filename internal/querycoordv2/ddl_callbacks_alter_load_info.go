@@ -19,33 +19,13 @@ package querycoordv2
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // alterLoadConfigV2AckCallback is called when the put load config message is acknowledged
 func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error {
-	// currently, we only sent the put load config message to the control channel
-	// TODO: after we support query view in 3.0, we should broadcast the put load config message to all vchannels.
-	job := job.NewLoadCollectionJob(ctx, result, s.dist, s.meta, s.broker, s.targetMgr, s.targetObserver, s.collectionObserver, s.checkerController, s.nodeMgr, s.proxyClientManager)
-	if err := job.Execute(); err != nil {
-		// The collection's channel is already in dropped-sentinel state, meaning
-		// a concurrent DropCollection has landed at the channel level on this
-		// cluster (typically on a CDC replica). The load can never succeed; ack
-		// the broadcast so the broadcaster stops retrying forever and the
-		// pending rootcoord meta cleanup can complete. Mirrors the
-		// ErrCollectionNotFound early-return inside LoadCollectionJob.Execute().
-		if errors.Is(err, merr.ErrChannelDroppedSentinel) {
-			mlog.Warn(ctx, "ack alter load config: collection channel is dropped sentinel",
-				mlog.FieldCollectionID(result.Message.Header().GetCollectionId()),
-				mlog.Err(err))
-			return nil
-		}
+	if err := s.qviewsRuntime.loadManager.UpdateLoadConfig(ctx, result); err != nil {
 		return err
 	}
 	meta.GlobalFailedLoadCache.Remove(result.Message.Header().GetCollectionId())
