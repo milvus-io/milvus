@@ -149,7 +149,8 @@ StringIndexSort::StringIndexSort(
     bool is_nested_index)
     : StringIndex(ASCENDING_SORT),
       is_built_(false),
-      is_nested_index_(is_nested_index || IsArrayField(file_manager_context)) {
+      is_nested_index_(is_nested_index),
+      is_array_field_(IsArrayField(file_manager_context)) {
     if (file_manager_context.Valid()) {
         field_id_ = file_manager_context.fieldDataMeta.field_id;
         this->file_manager_ =
@@ -619,7 +620,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               SERIALIZATION_VERSION));
     }
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");

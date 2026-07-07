@@ -83,7 +83,8 @@ ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context,
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
-      is_nested_index_(is_nested_index || IsArrayField(file_manager_context)),
+      is_nested_index_(is_nested_index),
+      is_array_field_(IsArrayField(file_manager_context)),
       is_built_(false),
       data_() {
     // not valid means we are in unit test
@@ -715,7 +716,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
     size_t index_size = reader.GetMeta<size_t>("index_length");
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 

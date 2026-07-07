@@ -63,7 +63,7 @@ class StringIndexSort : public StringIndex {
 
     const bool
     HasRawData() const override {
-        return !is_nested_index_;
+        return !is_nested_index_ && !is_array_field_;
     }
 
     void
@@ -175,6 +175,7 @@ class StringIndexSort : public StringIndex {
     std::unique_ptr<StringIndexSortImpl> impl_;
 
     bool is_nested_index_ = false;
+    bool is_array_field_ = false;
 
     // for mmap: idx_to_offsets meta file
     char* mmap_meta_data_ = nullptr;

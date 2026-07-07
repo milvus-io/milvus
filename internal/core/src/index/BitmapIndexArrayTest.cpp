@@ -1427,9 +1427,11 @@ TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {
         numeric_root_path, proto::schema::DataType::Int32, true, 3121);
     auto numeric_index =
         std::make_unique<index::ScalarIndexSort<int32_t>>(numeric_ctx, true);
+    EXPECT_TRUE(numeric_index->IsNestedIndex());
     EXPECT_FALSE(numeric_index->HasRawData());
     auto numeric_index_from_schema =
         std::make_unique<index::ScalarIndexSort<int32_t>>(numeric_ctx, false);
+    EXPECT_FALSE(numeric_index_from_schema->IsNestedIndex());
     EXPECT_FALSE(numeric_index_from_schema->HasRawData());
 
     auto string_root_path =
@@ -1438,9 +1440,11 @@ TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {
         string_root_path, proto::schema::DataType::VarChar, true, 3122);
     auto string_index =
         std::make_unique<index::StringIndexSort>(string_ctx, true);
+    EXPECT_TRUE(string_index->IsNestedIndex());
     EXPECT_FALSE(string_index->HasRawData());
     auto string_index_from_schema =
         std::make_unique<index::StringIndexSort>(string_ctx, false);
+    EXPECT_FALSE(string_index_from_schema->IsNestedIndex());
     EXPECT_FALSE(string_index_from_schema->HasRawData());
 
     std::map<std::string, std::string> index_params{
