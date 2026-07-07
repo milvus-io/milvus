@@ -528,12 +528,12 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		syncedByCoord:         true,
 	}
 
-	sealedSet := typeutil.NewUniqueSet(action.GetSealedInTarget()...)
 	droppedSet := typeutil.NewUniqueSet(action.GetDroppedInTarget()...)
 	redundantGrowings := make([]int64, 0)
 	for _, s := range d.growingSegments {
 		// sealed segment already exists or dropped, make growing segment redundant
-		if sealedSet.Contain(s.SegmentID) || droppedSet.Contain(s.SegmentID) {
+		_, sealedInTarget := d.queryView.sealedSegmentRowCount[s.SegmentID]
+		if sealedInTarget || droppedSet.Contain(s.SegmentID) {
 			s.TargetVersion = redundantTargetVersion
 			mlog.Info(context.TODO(), "set growing segment redundant, wait for release",
 				mlog.FieldSegmentID(s.SegmentID),
@@ -582,7 +582,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		mlog.Bool("serviceable", d.queryView.Serviceable()),
 		mlog.Float64("loadedRatio", d.queryView.GetLoadedRatio()),
 		mlog.Int("growingSegmentNum", len(action.GetGrowingInTarget())),
-		mlog.Int("sealedSegmentNum", len(action.GetSealedInTarget())),
+		mlog.Int("sealedSegmentNum", len(action.GetSealedSegmentRowCount())),
 	)
 }
 
@@ -648,8 +648,17 @@ func (d *distribution) genSnapshot() chan struct{} {
 	// ok to be nil
 	last := d.current.Load()
 
-	nodeSegments := make(map[int64][]SegmentEntry)
+	nodeSegmentCounts := make(map[int64]int)
 	for _, entry := range d.sealedSegments {
+		nodeSegmentCounts[entry.NodeID]++
+	}
+
+	nodeSegments := make(map[int64][]SegmentEntry, len(nodeSegmentCounts))
+	for nodeID, count := range nodeSegmentCounts {
+		nodeSegments[nodeID] = make([]SegmentEntry, 0, count)
+	}
+	for _, entry := range d.sealedSegments {
+		entry = d.snapshotEntryForQueryView(entry)
 		nodeSegments[entry.NodeID] = append(nodeSegments[entry.NodeID], entry)
 	}
 
@@ -657,10 +666,8 @@ func (d *distribution) genSnapshot() chan struct{} {
 	dist := make([]SnapshotItem, 0, len(nodeSegments))
 	for nodeID, items := range nodeSegments {
 		dist = append(dist, SnapshotItem{
-			NodeID: nodeID,
-			Segments: lo.Map(items, func(entry SegmentEntry, _ int) SegmentEntry {
-				return d.snapshotEntryForQueryView(entry)
-			}),
+			NodeID:   nodeID,
+			Segments: items,
 		})
 	}
 

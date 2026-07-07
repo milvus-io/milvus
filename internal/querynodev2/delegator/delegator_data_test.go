@@ -2100,12 +2100,13 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 	}
 
 	s.delegator.SyncTargetVersion(&querypb.SyncAction{
-		TargetVersion:   5,
-		GrowingInTarget: []int64{1},
-		SealedInTarget:  []int64{2},
-		DroppedInTarget: []int64{3, 4},
-		Checkpoint:      &msgpb.MsgPosition{},
-		DeleteCP:        &msgpb.MsgPosition{},
+		TargetVersion:         5,
+		GrowingInTarget:       []int64{1},
+		SealedInTarget:        []int64{2},
+		SealedSegmentRowCount: map[int64]int64{2: 100},
+		DroppedInTarget:       []int64{3, 4},
+		Checkpoint:            &msgpb.MsgPosition{},
+		DeleteCP:              &msgpb.MsgPosition{},
 	}, []int64{500, 501})
 	s.Equal(int64(5), s.delegator.GetChannelQueryView().GetVersion())
 }

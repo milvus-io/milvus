@@ -194,11 +194,12 @@ func (s *StreamingForwardSuite) TestBFStreamingForward() {
 		SegmentID:   102,
 	})
 	delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
-		TargetVersion:   1,
-		GrowingInTarget: []int64{100},
-		SealedInTarget:  []int64{101, 102},
-		DroppedInTarget: nil,
-		Checkpoint:      nil,
+		TargetVersion:         1,
+		GrowingInTarget:       []int64{100},
+		SealedInTarget:        []int64{101, 102},
+		SealedSegmentRowCount: map[int64]int64{101: 100, 102: 100},
+		DroppedInTarget:       nil,
+		Checkpoint:            nil,
 	}, []int64{1})
 
 	deletedSegment := typeutil.NewConcurrentSet[int64]()
@@ -246,11 +247,12 @@ func (s *StreamingForwardSuite) TestDirectStreamingForward() {
 		SegmentID:   102,
 	})
 	delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
-		TargetVersion:   1,
-		GrowingInTarget: []int64{100},
-		SealedInTarget:  []int64{101, 102},
-		DroppedInTarget: nil,
-		Checkpoint:      nil,
+		TargetVersion:         1,
+		GrowingInTarget:       []int64{100},
+		SealedInTarget:        []int64{101, 102},
+		SealedSegmentRowCount: map[int64]int64{101: 100, 102: 100},
+		DroppedInTarget:       nil,
+		Checkpoint:            nil,
 	}, []int64{1})
 
 	// For Direct forward policy, candidates are not used for BF filtering

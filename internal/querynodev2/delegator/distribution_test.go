@@ -1535,10 +1535,13 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 			s.dist.AddGrowing(tc.growingSegments...)
 
 			// Call SyncTargetVersion to trigger redundant growing segment logic
+			sealedSegmentRowCount := lo.SliceToMap(tc.sealedInTarget, func(segmentID int64) (int64, int64) {
+				return segmentID, 100
+			})
 			s.dist.SyncTargetVersion(&querypb.SyncAction{
-				TargetVersion:   1000,
-				SealedInTarget:  tc.sealedInTarget,
-				DroppedInTarget: tc.droppedInTarget,
+				TargetVersion:         1000,
+				SealedSegmentRowCount: sealedSegmentRowCount,
+				DroppedInTarget:       tc.droppedInTarget,
 			}, []int64{1})
 
 			// Verify redundant segments have correct target version
