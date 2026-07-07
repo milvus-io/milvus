@@ -525,6 +525,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		mu            sync.Mutex
 		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
 	)
+	baseManifest := st.req.GetManifestPath()
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
@@ -641,6 +642,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		textIndexLogs,
+		baseManifest,
 		st.manifestPath)
 	totalElapse := st.tr.RecordSpan()
 	log.Info(ctx, "create text index done",
@@ -714,6 +716,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		mu                sync.Mutex
 		jsonKeyIndexStats = make(map[int64]*datapb.JsonKeyStats)
 	)
+	baseManifest := st.req.GetManifestPath()
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
@@ -821,6 +824,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		jsonKeyIndexStats,
+		baseManifest,
 		st.manifestPath)
 
 	metrics.DataNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
