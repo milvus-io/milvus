@@ -401,7 +401,7 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 	// Create a job with timeout in the past
-	timeoutTs := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Hour), 0)
+	timeoutTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
 	job := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
@@ -431,7 +431,7 @@ func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
 	s.catalog.EXPECT().DropCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 
 	// Create a completed job with cleanup time in the past
-	cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Hour), 0)
+	cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
 	job := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,

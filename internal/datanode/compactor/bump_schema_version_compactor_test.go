@@ -424,7 +424,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithFie
 	for i := 0; i < 3; i++ {
 		value := map[int64]interface{}{
 			common.RowIDField:     segID + int64(i),
-			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			100:                   segID + int64(i),
 			101:                   "test string " + string(rune('0'+i)),
 		}
@@ -433,7 +433,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithFie
 		}
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(segID + int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     value,
 		}
 		err = multiSegWriter.WriteValue(&v)
@@ -626,8 +626,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats(
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsDeletedAndExpiredRows() {
 	currentTime := getMilvusBirthday().Add(time.Hour)
-	insertTs := tsoutil.ComposeTSByTime(currentTime, 0)
-	oldTs := tsoutil.ComposeTSByTime(currentTime.Add(-2*time.Minute), 0)
+	insertTs := tsoutil.ComposeTSByTime(currentTime)
+	oldTs := tsoutil.ComposeTSByTime(currentTime.Add(-2 * time.Minute))
 	expiredByTTLField := currentTime.Add(-time.Minute).UnixMicro()
 	keptTTLField := currentTime.Add(time.Hour).UnixMicro()
 	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
@@ -645,7 +645,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsD
 		},
 		len: 5,
 	}
-	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second))
 	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{int64(2): deleteTs}, int64(time.Minute), currentTime, 0)
 
 	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true, nil)

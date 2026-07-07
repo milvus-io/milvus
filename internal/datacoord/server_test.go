@@ -2602,7 +2602,7 @@ func Test_CheckHealth(t *testing.T) {
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
 					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000*time.Hour), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 				},
@@ -2624,15 +2624,15 @@ func Test_CheckHealth(t *testing.T) {
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
 					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 					"cluster-id-rootcoord-dm_3_449684528748778323v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 					"invalid-vchannel-name": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 						MsgID:     []byte{1, 2, 3, 4},
 					},
 				},

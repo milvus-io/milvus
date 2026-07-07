@@ -223,7 +223,7 @@ func (s *MultiSegmentWriterSuite) genSimpleSchema() *schemapb.CollectionSchema {
 
 // genTestValue generates a test storage.Value for the given ID
 func (s *MultiSegmentWriterSuite) genTestValue(id int64) *storage.Value {
-	ts := tsoutil.ComposeTSByTime(time.Now(), 0)
+	ts := tsoutil.ComposeTSByTime(time.Now())
 	return &storage.Value{
 		PK:        storage.NewInt64PrimaryKey(id),
 		Timestamp: int64(ts),

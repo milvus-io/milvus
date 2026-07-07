@@ -190,7 +190,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 		wb := NewMockWriteBuffer(s.T())
 
 		manager.buffers.Insert(s.channelName, wb)
-		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0)}
+		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: tsoutil.ComposeTSByTime(time.Now())}
 		wb.EXPECT().GetCheckpoint().Return(pos)
 		wb.EXPECT().GetFlushTimestamp().Return(nonFlushTS)
 		result, needUpdate, err := manager.GetCheckpoint(s.channelName)
@@ -203,7 +203,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 		wb := NewMockWriteBuffer(s.T())
 
 		manager.buffers.Insert(s.channelName, wb)
-		cpTimestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
+		cpTimestamp := tsoutil.ComposeTSByTime(time.Now())
 
 		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: cpTimestamp}
 		wb.EXPECT().GetCheckpoint().Return(pos)

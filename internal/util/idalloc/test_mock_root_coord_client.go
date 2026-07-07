@@ -41,7 +41,7 @@ func NewMockRootCoordClient(t *testing.T) *mocks.MockMixCoordClient {
 			}
 			return &rootcoordpb.AllocTimestampResponse{
 				Status:    merr.Success(),
-				Timestamp: tsoutil.ComposeTSByTime(now, 0),
+				Timestamp: tsoutil.ComposeTSByTime(now),
 				Count:     atr.Count,
 			}, nil
 		},
