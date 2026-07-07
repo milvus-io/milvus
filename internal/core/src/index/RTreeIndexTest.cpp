@@ -920,11 +920,11 @@ struct GisSplitFusionFlagGuard {
 struct ExprBatchSizeGuardLocal {
     int64_t saved;
     explicit ExprBatchSizeGuardLocal(int64_t batch_size)
-        : saved(EXEC_EVAL_EXPR_BATCH_SIZE.load()) {
-        EXEC_EVAL_EXPR_BATCH_SIZE.store(batch_size);
+        : saved(milvus::EXEC_EVAL_EXPR_BATCH_SIZE.load()) {
+        milvus::EXEC_EVAL_EXPR_BATCH_SIZE.store(batch_size);
     }
     ~ExprBatchSizeGuardLocal() {
-        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        milvus::EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
     }
 };
 }  // namespace
