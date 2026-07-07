@@ -482,10 +482,6 @@ struct UnaryElementFunc {
         if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
             res[i] = false;                                                  \
         } else {                                                             \
-            if (index < 0) {                                                 \
-                res[i] = false;                                              \
-                continue;                                                    \
-            }                                                                \
             if (index >= src[offset].length()) {                             \
                 res[i] = false;                                              \
                 valid_res[i] = false;                                        \
@@ -527,6 +523,10 @@ struct UnaryElementFuncForArray {
                 regex_matcher.emplace(val);
             }
         }
+        if constexpr (!std::is_same_v<GetType, proto::plan::Array>) {
+            AssertInfo(index >= 0,
+                       "array element predicate requires nested path");
+        }
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -543,10 +543,6 @@ struct UnaryElementFuncForArray {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = src[offset].is_same_array(val);
                 } else {
-                    if (index < 0) {
-                        res[i] = false;
-                        continue;
-                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
                         valid_res[i] = false;
@@ -560,10 +556,6 @@ struct UnaryElementFuncForArray {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = !src[offset].is_same_array(val);
                 } else {
-                    if (index < 0) {
-                        res[i] = false;
-                        continue;
-                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
                         valid_res[i] = false;
@@ -593,10 +585,6 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index < 0) {
-                        res[i] = false;
-                        continue;
-                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
                         valid_res[i] = false;
@@ -617,10 +605,6 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index < 0) {
-                        res[i] = false;
-                        continue;
-                    }
                     if (index >= src[offset].length()) {
                         res[i] = false;
                         valid_res[i] = false;
