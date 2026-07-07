@@ -152,7 +152,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 
     // 1. Extract and load null_offset file(s) if present
     {
-        auto find_file = [&](const std::string& target) -> auto{
+        auto find_file = [&](const std::string& target) -> auto {
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
                     return GetFileName(filename) == target;
