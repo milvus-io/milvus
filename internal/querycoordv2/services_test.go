@@ -61,6 +61,7 @@ import (
 	componenttypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -301,6 +302,16 @@ func (suite *ServiceSuite) SetupTest() {
 
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+	runtime, err := newQViewsRuntime(context.Background(), qviewsRuntimeDependencies{
+		queryCoordCatalog:    suite.store,
+		queryViewCatalog:     &fakeQueryViewCatalog{},
+		viewSyncClient:       &fakeRuntimeViewSyncClient{},
+		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager: suite.meta,
+		dataViewProvider:     &fakeRuntimeDataViewProvider{},
+	})
+	suite.Require().NoError(err)
+	suite.server.qviewsRuntime = runtime
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
@@ -363,8 +374,8 @@ func (suite *ServiceSuite) TestShowCollections() {
 	suite.Equal(collection, resp.CollectionIDs[0])
 
 	// Test insufficient memory
-	colBak := suite.meta.GetCollection(ctx, collection)
-	err = suite.meta.CollectionManager.RemoveCollection(ctx, collection)
+	cfgBak := suite.server.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[collection].Clone()
+	err = suite.server.qviewsRuntime.loadConfigStore.Remove(ctx, collection)
 	suite.NoError(err)
 	meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 	resp, err = server.ShowLoadCollections(ctx, req)
@@ -374,7 +385,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded)
 	suite.Contains(resp.GetStatus().GetReason(), merr.ErrServiceMemoryLimitExceeded.Error())
 	meta.GlobalFailedLoadCache.Remove(collection)
-	err = suite.meta.PutCollection(ctx, colBak)
+	err = suite.server.qviewsRuntime.loadConfigStore.Put(ctx, cfgBak)
 	suite.NoError(err)
 
 	// Test when server is not healthy
@@ -419,32 +430,17 @@ func (suite *ServiceSuite) TestShowPartitions() {
 		}
 
 		// Test insufficient memory
-		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
-			colBak := suite.meta.GetCollection(ctx, collection)
-			err = suite.meta.CollectionManager.RemoveCollection(ctx, collection)
-			suite.NoError(err)
-			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
-			resp, err = server.ShowLoadPartitions(ctx, req)
-			suite.NoError(err)
-			err := merr.CheckRPCCall(resp, err)
-			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
-			meta.GlobalFailedLoadCache.Remove(collection)
-			err = suite.meta.PutCollection(ctx, colBak)
-			suite.NoError(err)
-		} else {
-			partitionID := partitions[0]
-			parBak := suite.meta.GetPartition(ctx, partitionID)
-			err = suite.meta.RemovePartition(ctx, collection, partitionID)
-			suite.NoError(err)
-			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
-			resp, err = server.ShowLoadPartitions(ctx, req)
-			suite.NoError(err)
-			err := merr.CheckRPCCall(resp, err)
-			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
-			meta.GlobalFailedLoadCache.Remove(collection)
-			err = suite.meta.PutPartition(ctx, parBak)
-			suite.NoError(err)
-		}
+		cfgBak := suite.server.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[collection].Clone()
+		err = suite.server.qviewsRuntime.loadConfigStore.Remove(ctx, collection)
+		suite.NoError(err)
+		meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
+		resp, err = server.ShowLoadPartitions(ctx, req)
+		suite.NoError(err)
+		err = merr.CheckRPCCall(resp, err)
+		assert.True(suite.T(), errors.Is(err, merr.ErrCollectionNotLoaded))
+		meta.GlobalFailedLoadCache.Remove(collection)
+		err = suite.server.qviewsRuntime.loadConfigStore.Put(ctx, cfgBak)
+		suite.NoError(err)
 	}
 
 	// Test when server is not healthy
@@ -2056,10 +2052,7 @@ func (suite *ServiceSuite) loadAll() {
 			}
 			resp, err := suite.server.LoadCollection(ctx, req)
 			suite.Require().NoError(merr.CheckRPCCall(resp, err))
-			suite.EqualValues(suite.replicaNumber[collection], suite.meta.GetReplicaNumber(ctx, collection))
-			suite.True(suite.meta.Exist(ctx, collection))
-			suite.NotNil(suite.meta.GetCollection(ctx, collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
+			suite.assertQViewsLoadConfigured(collection, suite.replicaNumber[collection], suite.partitions[collection], true)
 		} else {
 			req := &querypb.LoadPartitionsRequest{
 				CollectionID:  collection,
@@ -2068,22 +2061,31 @@ func (suite *ServiceSuite) loadAll() {
 			}
 			resp, err := suite.server.LoadPartitions(ctx, req)
 			suite.Require().NoError(merr.CheckRPCCall(resp, err))
-			suite.EqualValues(suite.replicaNumber[collection], suite.meta.GetReplicaNumber(ctx, collection))
-			suite.True(suite.meta.Exist(ctx, collection))
-			suite.NotNil(suite.meta.GetPartitionsByCollection(ctx, collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
+			suite.assertQViewsLoadConfigured(collection, suite.replicaNumber[collection], suite.partitions[collection], false)
 		}
 	}
 }
 
 func (suite *ServiceSuite) assertLoaded(ctx context.Context, collection int64) {
-	suite.True(suite.meta.Exist(ctx, collection))
-	for _, channel := range suite.channels[collection] {
-		suite.NotNil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.NextTarget))
+	suite.assertQViewsLoadConfigured(collection, 0, suite.partitions[collection], suite.loadTypes[collection] == querypb.LoadType_LoadCollection)
+}
+
+func (suite *ServiceSuite) assertQViewsLoadConfigured(collection int64, replicaNumber int32, partitions []int64, assertShardViews bool) {
+	cfg := suite.server.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[collection]
+	suite.Require().NotNil(cfg)
+	suite.ElementsMatch(partitions, cfg.PartitionIDs)
+	if replicaNumber > 0 {
+		suite.Len(cfg.Replicas, int(replicaNumber))
 	}
-	for _, partitions := range suite.segments[collection] {
-		for _, segment := range partitions {
-			suite.NotNil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.NextTarget))
+	if !assertShardViews {
+		return
+	}
+	for _, channel := range suite.channels[collection] {
+		for _, replica := range cfg.Replicas {
+			suite.NotNil(suite.server.qviewsRuntime.shardViewRegistry.Get(qviews.ShardID{
+				ReplicaID: replica.ReplicaID,
+				VChannel:  channel,
+			}))
 		}
 	}
 }

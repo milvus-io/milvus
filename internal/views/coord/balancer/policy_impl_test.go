@@ -54,7 +54,7 @@ func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
 			shardID: testShardStats(nil, nil, placement(101, 1, 1, coordview.SegmentStateUp)),
 		}),
 		LoadConfigSnapshot: loadmgr.NewLoadConfigSnapshot(1, map[int64]*loadmgr.LoadConfig{}),
-		Nodes:              map[int64]*BalanceNode{1: {NodeID: 1, Alive: true}},
+		Nodes:              map[int64]*BalanceNode{1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"}},
 		Config:             policyTestConfig(),
 	}
 
@@ -68,7 +68,6 @@ func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestFirst(t *testi
 	const collectionID, replicaID int64 = 1, 10
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
-	cfg.Replicas[0].Nodes = []int64{1, 2}
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
@@ -76,8 +75,8 @@ func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestFirst(t *testi
 		102: {SegmentID: 102, PartitionID: 1, MemSize: 100},
 	}), shardDataView("v0", 1, 101, 102))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
@@ -93,7 +92,6 @@ func TestDefaultBalancePolicy_PredictedLoadCoordinatesAcrossShards(t *testing.T)
 	shardA := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 	shardB := qviews.ShardID{ReplicaID: replicaID, VChannel: "v1"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
-	cfg.Replicas[0].Nodes = []int64{1, 2}
 	snap := baseSnap(cfg, shardA)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
@@ -101,8 +99,8 @@ func TestDefaultBalancePolicy_PredictedLoadCoordinatesAcrossShards(t *testing.T)
 		201: {SegmentID: 201, PartitionID: 1, MemSize: 600},
 	}), shardDataView("v0", 1, 101), shardDataView("v1", 1, 201))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardB, shardA})
@@ -118,7 +116,6 @@ func TestDefaultBalancePolicy_OptionalOptimizationRequiresMovement(t *testing.T)
 	version := qviews.DataVersion{StreamingVersion: 1}
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
-	cfg.Replicas[0].Nodes = []int64{1, 2}
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
@@ -126,8 +123,8 @@ func TestDefaultBalancePolicy_OptionalOptimizationRequiresMovement(t *testing.T)
 	}), shardDataView("v0", 1, 101))
 	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placement(101, 1, 1, coordview.SegmentStateUp))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000, UpMemLoad: 100},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000, UpMemLoad: 100},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 100},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 100},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
@@ -140,7 +137,6 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 	version := qviews.DataVersion{StreamingVersion: 1}
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
-	cfg.Replicas[0].Nodes = []int64{1, 2}
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, version, newMapSegmentSnapshot(map[int64]*SegmentInfo{
@@ -148,8 +144,8 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 	}), shardDataView("v0", 1, 101))
 	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placement(101, 1, 1, coordview.SegmentStateUp))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000, UpMemLoad: 900},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 900},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
@@ -163,7 +159,6 @@ func TestDefaultBalancePolicy_OptionalOptimizationRejectedByThreshold(t *testing
 	version := qviews.DataVersion{StreamingVersion: 1}
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
-	cfg.Replicas[0].Nodes = []int64{1, 2}
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	snap.Config.BalanceThreshold = 1_000
@@ -172,8 +167,8 @@ func TestDefaultBalancePolicy_OptionalOptimizationRejectedByThreshold(t *testing
 	}), shardDataView("v0", 1, 101))
 	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil, placement(101, 1, 1, coordview.SegmentStateUp))
 	snap.Nodes = map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000, UpMemLoad: 900},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 900},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
 	}
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})

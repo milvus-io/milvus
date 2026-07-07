@@ -45,6 +45,44 @@ func TestManagerAcquireWaitsForQueryRuntimeInitialization(t *testing.T) {
 	require.Len(t, state.queryViewRefs, 1)
 }
 
+func TestManagerAcquireBeforeLoadConfigWaitsForQueryRuntime(t *testing.T) {
+	manager := NewManager(testModuleBuilder{}).(*queryRuntimeManager)
+	version := qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1}
+	meta, key := testQueryViewMetaAndKey(1, 2, "ch", version, 3)
+
+	ready := make(chan struct{})
+	require.NotPanics(t, func() {
+		manager.Acquire(snview.AcquireResource{
+			Key:     key,
+			Meta:    meta,
+			OnReady: func() { close(ready) },
+		})
+	})
+
+	select {
+	case <-ready:
+		t.Fatal("ready callback should wait for load config")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	observer := manager.OnAlterLoadConfig(testWALView(1, "ch", version))
+	require.NotNil(t, observer)
+
+	select {
+	case <-ready:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ready callback")
+	}
+
+	state := manager.resourceState("ch")
+	require.NotNil(t, state)
+	require.False(t, state.initRef)
+	require.Nil(t, state.task)
+	require.NoError(t, state.err)
+	require.NotNil(t, state.runtime)
+	require.Len(t, state.queryViewRefs, 1)
+}
+
 func TestManagerReleaseClosesUnreferencedRuntime(t *testing.T) {
 	manager := NewManager(testModuleBuilder{}).(*queryRuntimeManager)
 	version := qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1}

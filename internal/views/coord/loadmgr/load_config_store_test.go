@@ -36,8 +36,8 @@ func sampleConfig() *LoadConfig {
 			{FieldId: 200, IndexId: 300},
 		},
 		Replicas: []*ReplicaAssignment{
-			{ReplicaID: 1000, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH, Nodes: []int64{1, 2}},
-			{ReplicaID: 1001, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH, Nodes: []int64{3, 4}},
+			{ReplicaID: 1000, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH},
+			{ReplicaID: 1001, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH},
 		},
 	}
 }
@@ -113,8 +113,8 @@ func TestPut_ReplicaRemovedDeletesOrphans(t *testing.T) {
 	// Drop replica 1001, change replica 1000, add replica 1002.
 	next := cfg.Clone()
 	next.Replicas = []*ReplicaAssignment{
-		{ReplicaID: 1000, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH, Nodes: []int64{1, 5}},
-		{ReplicaID: 1002, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH, Nodes: []int64{6, 7}},
+		{ReplicaID: 1000, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH},
+		{ReplicaID: 1002, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH},
 	}
 
 	catalog.EXPECT().ReleaseReplica(mock.Anything, int64(100), int64(1001)).
@@ -126,7 +126,6 @@ func TestPut_ReplicaRemovedDeletesOrphans(t *testing.T) {
 	assert.NotContains(t, snapshot.ReplicaToConfigMap(), int64(1001))
 	assert.Contains(t, snapshot.ReplicaToConfigMap(), int64(1000))
 	assert.Contains(t, snapshot.ReplicaToConfigMap(), int64(1002))
-	assert.ElementsMatch(t, []int64{1, 5}, snapshot.ConfigsMap()[100].Replicas[0].Nodes)
 }
 
 func TestPut_EmptyReplicasSkipsSaveReplica(t *testing.T) {
@@ -171,7 +170,7 @@ func TestSnapshot_ReturnsAllConfigs(t *testing.T) {
 	cfg2 := sampleConfig()
 	cfg2.CollectionID = 101
 	cfg2.Replicas = []*ReplicaAssignment{
-		{ReplicaID: 2000, ResourceGroup: "rg2", Nodes: []int64{5}},
+		{ReplicaID: 2000, ResourceGroup: "rg2"},
 	}
 
 	require.NoError(t, store.Put(context.Background(), cfg1))
@@ -208,7 +207,7 @@ func TestSnapshot_CoalescesMultipleMutations(t *testing.T) {
 	next := sampleConfig()
 	next.CollectionID = 101
 	next.Replicas = []*ReplicaAssignment{
-		{ReplicaID: 2000, ResourceGroup: "rg2", Nodes: []int64{5}},
+		{ReplicaID: 2000, ResourceGroup: "rg2"},
 	}
 	require.NoError(t, store.Put(context.Background(), next))
 
@@ -252,8 +251,8 @@ func TestRecoverLoadConfigStore_WithPersistedData(t *testing.T) {
 		},
 	}
 	replicas := []*querypb.Replica{
-		{ID: 1000, CollectionID: 100, ResourceGroup: "rg1", Nodes: []int64{1, 2}},
-		{ID: 1001, CollectionID: 100, ResourceGroup: "rg1", Nodes: []int64{3, 4}},
+		{ID: 1000, CollectionID: 100, ResourceGroup: "rg1"},
+		{ID: 1001, CollectionID: 100, ResourceGroup: "rg1"},
 	}
 
 	catalog.EXPECT().GetCollections(mock.Anything).Return(collections, nil).Once()
@@ -298,5 +297,4 @@ func TestFromAlterLoadConfigMessage(t *testing.T) {
 	require.Len(t, cfg.Replicas, 1)
 	assert.Equal(t, int64(1000), cfg.Replicas[0].ReplicaID)
 	assert.Equal(t, "rg1", cfg.Replicas[0].ResourceGroup)
-	assert.Empty(t, cfg.Replicas[0].Nodes) // caller computes Nodes
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	balancerapi "github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -52,6 +53,7 @@ type Manager interface {
 	DataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error)
 	LatestVisibleDataView(ctx context.Context, collectionID int64) (*viewpb.DataViewOfCollection, error)
 	Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error)
+	DataViewSnapshot(ctx context.Context) *balancerapi.DataViewSnapshot
 	ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error)
 	IsSegmentReferenced(ctx context.Context, collectionID int64, segmentID int64) (bool, error)
 	GarbageCollect(ctx context.Context, collectionID int64, protected []*viewpb.DataVersion, retainLatest int) error
@@ -122,6 +124,8 @@ type Segment struct {
 	CollectionID                  int64
 	PartitionID                   int64
 	InsertChannel                 string
+	NumOfRows                     int64
+	MemSize                       int64
 	State                         commonpb.SegmentState
 	Level                         datapb.SegmentLevel
 	IsImporting                   bool
@@ -160,6 +164,20 @@ func (s *Segment) GetInsertChannel() string {
 		return ""
 	}
 	return s.InsertChannel
+}
+
+func (s *Segment) GetNumOfRows() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.NumOfRows
+}
+
+func (s *Segment) GetMemSize() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.MemSize
 }
 
 func (s *Segment) GetState() commonpb.SegmentState {
@@ -493,6 +511,44 @@ func (m *dataViewManager) Snapshot(ctx context.Context, collectionIDs []int64) (
 		state.mu.RUnlock()
 	}
 	return views, nil
+}
+
+func (m *dataViewManager) DataViewSnapshot(ctx context.Context) *balancerapi.DataViewSnapshot {
+	views, _ := m.Snapshot(ctx, nil)
+	return balancerapi.NewDataViewSnapshot(0, views, m.segmentSnapshot(ctx, views))
+}
+
+type segmentSnapshot map[int64]*balancerapi.SegmentInfo
+
+func (s segmentSnapshot) Get(segmentID int64) (*balancerapi.SegmentInfo, bool) {
+	info, ok := s[segmentID]
+	return info, ok
+}
+
+func (m *dataViewManager) segmentSnapshot(ctx context.Context, views []*viewpb.DataViewOfCollection) balancerapi.SegmentSnapshot {
+	segments := make(segmentSnapshot)
+	for _, view := range views {
+		for _, shard := range view.GetShards() {
+			for _, partition := range shard.GetPartitions() {
+				for _, segmentID := range partition.GetSegmentIds() {
+					if _, ok := segments[segmentID]; ok {
+						continue
+					}
+					segment := m.segments.GetSegment(ctx, segmentID)
+					if segment == nil {
+						continue
+					}
+					segments[segmentID] = &balancerapi.SegmentInfo{
+						SegmentID:   segment.GetID(),
+						PartitionID: segment.GetPartitionID(),
+						MemSize:     segment.GetMemSize(),
+						RowNum:      segment.GetNumOfRows(),
+					}
+				}
+			}
+		}
+	}
+	return segments
 }
 
 func (m *dataViewManager) ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error) {

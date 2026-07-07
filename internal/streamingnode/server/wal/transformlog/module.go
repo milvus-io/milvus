@@ -91,6 +91,8 @@ func (m *Module) Name() moduleapi.ModuleName {
 
 func (m *Module) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
 	switch msg.MessageType() {
+	case message.MessageTypeCreateCollection:
+		m.observeCreateCollectionMessage(msg)
 	case message.MessageTypeDelete:
 		return m.observeTransformLogMessage(msg)
 	case message.MessageTypeTxn:
@@ -195,6 +197,13 @@ func (m *Module) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
 		kind:   scope.Kind,
 		owners: owners,
 	}
+}
+
+func (m *Module) observeCreateCollectionMessage(msg message.ImmutableMessage) {
+	if msg.VChannel() == "" {
+		return
+	}
+	m.getOrCreateLog(msg.VChannel())
 }
 
 func (m *Module) observeTransformLogMessage(msg message.ImmutableMessage) moduleapi.ObserveResult {

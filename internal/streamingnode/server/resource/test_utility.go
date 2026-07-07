@@ -4,7 +4,10 @@
 package resource
 
 import (
+	"context"
 	"testing"
+
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
@@ -15,11 +18,16 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type testMixCoordClient struct {
 	*mocks.MockMixCoordClient
+}
+
+func (c testMixCoordClient) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return &querypb.GetQueryViewSegmentLoadInfoResponse{}, nil
 }
 
 // OptWriteBufferManager provides a write buffer manager to the resource (test only).

@@ -30,7 +30,7 @@ func TestHardConstraints_MemCapacityExceededRejected(t *testing.T) {
 }
 
 func TestHardConstraints_ZeroCapacityTreatedAsUnlimited(t *testing.T) {
-	node := &BalanceNode{NodeID: 1, Alive: true, MemoryCapacity: 0, UpMemLoad: 1 << 40}
+	node := &BalanceNode{NodeID: 1, Alive: true, UpMemLoad: 1 << 40}
 	seg := &SegmentInfo{MemSize: 1 << 40}
 	assert.True(t, passHardConstraints(node, seg))
 }
@@ -140,12 +140,12 @@ func TestPickNode_PicksStickyHost(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000, UpMemLoad: 400}, // sticky
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000, UpMemLoad: 200}, // less loaded
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 400}, // sticky
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 200}, // less loaded
 	}
 
 	current := map[int64]coordview.SegmentState{1: coordview.SegmentStateUp}
-	id, ok := pickNode(predicted, seg, current, []int64{1, 2}, cfg)
+	id, ok := pickNode(predicted, seg, current, "rg1", cfg)
 	assert.True(t, ok)
 	assert.Equal(t, int64(1), id)
 }
@@ -154,11 +154,11 @@ func TestPickNode_PicksEmptierWhenNoStickiness(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000, UpMemLoad: 800},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000, UpMemLoad: 200},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 800},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 200},
 	}
 
-	id, ok := pickNode(predicted, seg, nil /* no current */, []int64{1, 2}, cfg)
+	id, ok := pickNode(predicted, seg, nil /* no current */, "rg1", cfg)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), id)
 }
@@ -167,13 +167,13 @@ func TestPickNode_SkipsHardConstraintFailures(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: false, MemoryCapacity: 1000},                // dead
-		2: {NodeID: 2, Alive: true, Stopping: true, MemoryCapacity: 1000}, // stopping
-		3: {NodeID: 3, Alive: true, MemoryCapacity: 50},                   // too small
-		4: {NodeID: 4, Alive: true, MemoryCapacity: 1000},                 // good
+		1: {NodeID: 1, Alive: false, ResourceGroup: "rg1", MemoryCapacity: 1000},                // dead
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", Stopping: true, MemoryCapacity: 1000}, // stopping
+		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 50},                   // too small
+		4: {NodeID: 4, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},                 // good
 	}
 
-	id, ok := pickNode(predicted, seg, nil, []int64{1, 2, 3, 4}, cfg)
+	id, ok := pickNode(predicted, seg, nil, "rg1", cfg)
 	assert.True(t, ok)
 	assert.Equal(t, int64(4), id)
 }
@@ -182,51 +182,48 @@ func TestPickNode_NoEligibleNodeReturnsFalse(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: false, MemoryCapacity: 1000},
-		2: {NodeID: 2, Alive: true, Stopping: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: false, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", Stopping: true, MemoryCapacity: 1000},
 	}
 
-	_, ok := pickNode(predicted, seg, nil, []int64{1, 2}, cfg)
+	_, ok := pickNode(predicted, seg, nil, "rg1", cfg)
 	assert.False(t, ok)
 }
 
-func TestPickNode_IgnoresNodesOutsideReplicaScope(t *testing.T) {
+func TestPickNode_IgnoresNodesOutsideReplicaResourceGroup(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000, UpMemLoad: 900}, // in scope, heavily loaded
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000, UpMemLoad: 0},   // out of replica scope
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000, UpMemLoad: 900},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg2", MemoryCapacity: 1000, UpMemLoad: 0},
 	}
 
-	// Only node 1 is in the replica.
-	id, ok := pickNode(predicted, seg, nil, []int64{1}, cfg)
+	id, ok := pickNode(predicted, seg, nil, "rg1", cfg)
 	assert.True(t, ok)
-	assert.Equal(t, int64(1), id, "node 2 must not be chosen despite being empty — it's outside the replica")
+	assert.Equal(t, int64(1), id, "node 2 must not be chosen despite being empty because it belongs to another RG")
 }
 
-func TestPickNode_UnknownNodeInReplicaScopeSkipped(t *testing.T) {
+func TestPickNode_ReplicaResourceGroupWithoutNodesReturnsFalse(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
 	}
 
-	// Replica lists node 99 but it's missing from predicted (e.g., just removed).
-	id, ok := pickNode(predicted, seg, nil, []int64{99, 1}, cfg)
-	assert.True(t, ok)
-	assert.Equal(t, int64(1), id)
+	_, ok := pickNode(predicted, seg, nil, "rg2", cfg)
+	assert.False(t, ok)
 }
 
 func TestPickNode_AvoidsUnrecoverableWhenAlternativeExists(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
-		2: {NodeID: 2, Alive: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
+		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
 	}
 	current := map[int64]coordview.SegmentState{1: coordview.SegmentStateUnrecoverable}
 
-	id, ok := pickNode(predicted, seg, current, []int64{1, 2}, cfg)
+	id, ok := pickNode(predicted, seg, current, "rg1", cfg)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), id)
 }
@@ -235,11 +232,11 @@ func TestPickNode_CanUseUnrecoverableNodeWhenOnlyEligible(t *testing.T) {
 	cfg := testConfig()
 	seg := &SegmentInfo{MemSize: 100}
 	predicted := map[int64]*BalanceNode{
-		1: {NodeID: 1, Alive: true, MemoryCapacity: 1000},
+		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", MemoryCapacity: 1000},
 	}
 	current := map[int64]coordview.SegmentState{1: coordview.SegmentStateUnrecoverable}
 
-	id, ok := pickNode(predicted, seg, current, []int64{1}, cfg)
+	id, ok := pickNode(predicted, seg, current, "rg1", cfg)
 	assert.True(t, ok)
 	assert.Equal(t, int64(1), id)
 }

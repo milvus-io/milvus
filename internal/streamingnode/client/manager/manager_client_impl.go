@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -294,6 +296,22 @@ func (c *managerClientImpl) Remove(ctx context.Context, pchannel types.PChannelI
 	return err
 }
 
+func (c *managerClientImpl) CreateViewSyncClient(ctx context.Context, streamingNodeID int64) (viewpb.ViewSyncServiceClient, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("manager client is closing")
+	}
+	defer c.lifetime.Done()
+
+	conn, err := c.service.GetConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &routedViewSyncServiceClient{
+		streamingNodeID: streamingNodeID,
+		client:          viewpb.NewViewSyncServiceClient(conn),
+	}, nil
+}
+
 // Close closes the manager client.
 func (c *managerClientImpl) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)
@@ -302,4 +320,17 @@ func (c *managerClientImpl) Close() {
 
 	c.service.Close()
 	c.rb.Close()
+}
+
+type routedViewSyncServiceClient struct {
+	streamingNodeID int64
+	client          viewpb.ViewSyncServiceClient
+}
+
+func (c *routedViewSyncServiceClient) SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
+	return c.client.SyncQueryView(contextutil.WithPickServerID(ctx, c.streamingNodeID), opts...)
+}
+
+func (c *routedViewSyncServiceClient) SyncDataView(ctx context.Context, in *viewpb.SyncDataViewRequest, opts ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
+	return c.client.SyncDataView(contextutil.WithPickServerID(ctx, c.streamingNodeID), in, opts...)
 }

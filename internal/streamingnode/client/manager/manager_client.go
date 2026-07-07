@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -45,6 +46,9 @@ type ManagerClient interface {
 
 	// Remove the wal instance for the channel on streaming node of given server id.
 	Remove(ctx context.Context, pchannel types.PChannelInfoAssigned) error
+
+	// CreateViewSyncClient returns a ViewSyncServiceClient routed to the given StreamingNode.
+	CreateViewSyncClient(ctx context.Context, streamingNodeID int64) (viewpb.ViewSyncServiceClient, error)
 
 	// Close closes the manager client.
 	// It close the underlying connection, stop the node watcher and release all resources.

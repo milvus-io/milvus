@@ -133,6 +133,9 @@ type Server struct {
 
 	// load config watcher
 	loadConfigWatcher *LoadConfigWatcher
+
+	// query view runtime
+	qviewsRuntime *qviewsRuntime
 }
 
 type FileResourceObserver interface {
@@ -367,9 +370,29 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
+	if err := s.initQViewsRuntime(); err != nil {
+		return err
+	}
+
 	RegisterDDLCallbacks(s)
 	mlog.Info(s.ctx, "init querycoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 	return err
+}
+
+func (s *Server) initQViewsRuntime() error {
+	mlog.Info(s.ctx, "init query view runtime")
+	runtime, err := newQViewsRuntime(s.ctx, newDefaultQViewsRuntimeDependencies(
+		s.kv,
+		s.etcdCli,
+		s.store,
+		s.meta.ResourceManager,
+		s.mixCoord,
+	))
+	if err != nil {
+		return err
+	}
+	s.qviewsRuntime = runtime
+	return nil
 }
 
 func (s *Server) initMeta() error {
@@ -525,6 +548,11 @@ func (s *Server) startServerLoop() {
 
 	mlog.Info(s.ctx, "start job scheduler...")
 	s.jobScheduler.Start()
+
+	mlog.Info(s.ctx, "start query view runtime...")
+	if s.qviewsRuntime != nil {
+		s.qviewsRuntime.start(s.ctx)
+	}
 }
 
 func (s *Server) Stop() error {
@@ -535,6 +563,11 @@ func (s *Server) Stop() error {
 	if s.loadConfigWatcher != nil {
 		mlog.Info(s.ctx, "stop load config watcher...")
 		s.loadConfigWatcher.Close()
+	}
+
+	if s.qviewsRuntime != nil {
+		mlog.Info(s.ctx, "stop query view runtime...")
+		s.qviewsRuntime.stop()
 	}
 
 	if s.jobScheduler != nil {

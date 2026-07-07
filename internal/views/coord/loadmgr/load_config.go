@@ -9,9 +9,8 @@ import (
 )
 
 // LoadConfig is the desired load configuration of one collection.
-// It unifies the DDL-side config (CollectionLoadInfo + LoadReplicaConfig) and
-// the runtime replica-to-node assignment. The caller computes Nodes before
-// persisting via LoadConfigStore.Put.
+// It unifies the DDL-side config (CollectionLoadInfo + LoadReplicaConfig).
+// Runtime node membership is derived from ResourceGroup by the Balancer.
 type LoadConfig struct {
 	DbID                     int64
 	CollectionID             int64
@@ -21,13 +20,12 @@ type LoadConfig struct {
 	Replicas                 []*ReplicaAssignment
 }
 
-// ReplicaAssignment pairs a replica's DDL config with its current node assignment.
-// All fields are persisted.
+// ReplicaAssignment pairs a replica ID with its desired resource-group
+// constraint. The Balancer expands ResourceGroup to live nodes at plan time.
 type ReplicaAssignment struct {
 	ReplicaID     int64
 	ResourceGroup string
 	Priority      commonpb.LoadPriority
-	Nodes         []int64
 }
 
 // Clone returns a deep copy of the LoadConfig. Safe for external mutation.
@@ -68,15 +66,10 @@ func (r *ReplicaAssignment) Clone() *ReplicaAssignment {
 		ResourceGroup: r.ResourceGroup,
 		Priority:      r.Priority,
 	}
-	if len(r.Nodes) > 0 {
-		out.Nodes = append([]int64{}, r.Nodes...)
-	}
 	return out
 }
 
-// FromAlterLoadConfigMessage builds a LoadConfig skeleton from a DDL message.
-// The returned LoadConfig has an empty Nodes list for each replica; the caller
-// must compute Nodes (via Node Manager + resource group) before calling Put.
+// FromAlterLoadConfigMessage builds a LoadConfig from a DDL message.
 func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *LoadConfig {
 	cfg := &LoadConfig{
 		DbID:                     msg.GetDbId(),
@@ -139,7 +132,6 @@ func buildFromPersisted(
 		cfg.Replicas = append(cfg.Replicas, &ReplicaAssignment{
 			ReplicaID:     r.GetID(),
 			ResourceGroup: r.GetResourceGroup(),
-			Nodes:         append([]int64{}, r.GetNodes()...),
 		})
 	}
 	sort.Slice(cfg.Replicas, func(i, j int) bool {
@@ -186,7 +178,6 @@ func (r *ReplicaAssignment) toReplicaProto(collectionID int64) *querypb.Replica 
 	return &querypb.Replica{
 		ID:            r.ReplicaID,
 		CollectionID:  collectionID,
-		Nodes:         append([]int64{}, r.Nodes...),
 		ResourceGroup: r.ResourceGroup,
 		// TODO: persist Priority once a proto field is added.
 	}

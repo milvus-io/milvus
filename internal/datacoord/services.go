@@ -1289,6 +1289,10 @@ func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.G
 			return resp, nil
 		}
 		cloned := segment.Clone()
+		if err := binlog.DecompressBinLogs(cloned.SegmentInfo); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 		segmentutil.ReCalcRowCount(segment.SegmentInfo, cloned.SegmentInfo)
 		resp.Infos = append(resp.Infos, s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes[segmentID]))
 	}
@@ -1788,11 +1792,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	return resp, nil
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log := mlog.With(mlog.Int64("collection", req.GetCollectionID()),
-		mlog.Uint64("flushTs", req.GetFlushTs()),
-		mlog.Time("flushTs in time", tsoutil.PhysicalTime(req.GetFlushTs())))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetFlushStateResponse{
 			Status: merr.Status(err),
@@ -1800,58 +1801,22 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	}
 
 	resp := &milvuspb.GetFlushStateResponse{Status: merr.Success()}
-	if len(req.GetSegmentIDs()) > 0 {
-		var unflushed []UniqueID
-		for _, sid := range req.GetSegmentIDs() {
-			segment := s.meta.GetHealthySegment(ctx, sid)
-			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
-			// TODO: Here's a dirty implementation, because a growing segment may cannot be seen right away by mixcoord,
-			// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
-			// use timetick for GetFlushState in-future but not segment list.
-			if segment == nil || isFlushState(segment.GetState()) {
-				continue
-			}
-			unflushed = append(unflushed, sid)
+	var unflushed []UniqueID
+	for _, sid := range req.GetSegmentIDs() {
+		segment := s.meta.GetHealthySegment(ctx, sid)
+		// segment is nil if it was compacted, or it's an empty segment and is set to dropped.
+		if segment == nil || isFlushState(segment.GetState()) {
+			continue
 		}
-		if len(unflushed) != 0 {
-			log.RatedInfo(ctx, rate.Limit(10), "DataCoord receive GetFlushState request, Flushed is false", mlog.Int64s("unflushed", unflushed), mlog.Int("len", len(unflushed)))
-			resp.Flushed = false
-
-			return resp, nil
-		}
+		unflushed = append(unflushed, sid)
 	}
+	if len(unflushed) != 0 {
+		resp.Flushed = false
 
-	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())
-	if err != nil {
-		return &milvuspb.GetFlushStateResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	if len(channels) == 0 { // For compatibility with old client
-		resp.Flushed = true
-
-		mlog.Info(context.TODO(), "GetFlushState all flushed without checking flush ts")
 		return resp, nil
 	}
 
-	for _, channel := range channels {
-		cp := s.meta.GetChannelCheckpoint(channel.GetName())
-		cpTs := uint64(0)
-		if cp != nil {
-			cpTs = cp.GetTimestamp()
-		}
-		if cp == nil || cpTs < req.GetFlushTs() {
-			resp.Flushed = false
-
-			log.RatedInfo(ctx, rate.Limit(10), "GetFlushState failed, channel unflushed", mlog.String("channel", channel.GetName()),
-				mlog.Time("CP", tsoutil.PhysicalTime(cpTs)),
-				mlog.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cpTs))))
-			return resp, nil
-		}
-	}
-
 	resp.Flushed = true
-	mlog.Info(context.TODO(), "GetFlushState all flushed")
 
 	return resp, nil
 }

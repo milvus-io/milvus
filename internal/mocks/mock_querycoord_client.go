@@ -1112,6 +1112,80 @@ func (_c *MockQueryCoordClient_GetQueryNodeDistribution_Call) RunAndReturn(run f
 	return _c
 }
 
+// GetQueryViewSegmentLoadInfo provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) GetQueryViewSegmentLoadInfo(ctx context.Context, in *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQueryViewSegmentLoadInfo")
+	}
+
+	var r0 *querypb.GetQueryViewSegmentLoadInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest, ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest, ...grpc.CallOption) *querypb.GetQueryViewSegmentLoadInfoResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.GetQueryViewSegmentLoadInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryViewSegmentLoadInfo'
+type MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call struct {
+	*mock.Call
+}
+
+// GetQueryViewSegmentLoadInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.GetQueryViewSegmentLoadInfoRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) GetQueryViewSegmentLoadInfo(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call {
+	return &MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call{Call: _e.mock.On("GetQueryViewSegmentLoadInfo",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call) Run(run func(ctx context.Context, in *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.GetQueryViewSegmentLoadInfoRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call) Return(_a0 *querypb.GetQueryViewSegmentLoadInfoResponse, _a1 error) *MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest, ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error)) *MockQueryCoordClient_GetQueryViewSegmentLoadInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetReplicas provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryCoordClient) GetReplicas(ctx context.Context, in *milvuspb.GetReplicasRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicasResponse, error) {
 	_va := make([]interface{}, len(opts))

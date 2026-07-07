@@ -10,10 +10,9 @@ import (
 
 // LoadConfigStore persists and serves the per-collection desired load state.
 // It is the in-memory + ETCD-backed source of truth for "what collections
-// should be loaded, and which nodes host each replica".
+// should be loaded, and which resource group constrains each replica".
 //
 // LoadConfigStore does NOT know about ShardID, QueryViews, or Node topology.
-// Callers are responsible for computing replica Nodes before calling Put.
 //
 // # Copy-On-Write semantics
 //
@@ -84,7 +83,7 @@ func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCat
 
 // Put persists the full LoadConfig to ETCD and updates the live in-memory state.
 // Orphan partitions / replicas (present in the previous state but not in cfg)
-// are deleted. The caller must have already computed replica Nodes.
+// are deleted.
 func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	if cfg == nil {
 		return nil
