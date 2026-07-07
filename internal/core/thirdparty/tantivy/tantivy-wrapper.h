@@ -90,7 +90,8 @@ struct TantivyIndexWrapper {
                         bool enable_user_specified_doc_id = true,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+                        bool enable_background_merge = false) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             AssertInfo(tantivy_index_version == 5,
@@ -106,7 +107,8 @@ struct TantivyIndexWrapper {
                                      tantivy_index_version,
                                      num_threads,
                                      overall_memory_budget_in_bytes,
-                                     enable_user_specified_doc_id));
+                                     enable_user_specified_doc_id,
+                                     enable_background_merge));
         }
         AssertInfo(res.result_->success,
                    "failed to create index: {}",
@@ -131,6 +133,10 @@ struct TantivyIndexWrapper {
     }
 
     // create index writer for text type with tokenizer.
+    // enable_background_merge: growing segments must keep tantivy's default
+    // merge policy (periodic commits would otherwise grow the segment count
+    // unbounded); sealed index builds pass false since finish() ends with an
+    // explicit merge-all.
     TantivyIndexWrapper(const char* field_name,
                         bool in_ram,
                         const char* path,
@@ -140,7 +146,8 @@ struct TantivyIndexWrapper {
                         const char* analyzer_extra_info = "",
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+                        bool enable_background_merge = false) {
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
@@ -150,7 +157,8 @@ struct TantivyIndexWrapper {
                                        analyzer_extra_info,
                                        num_threads,
                                        overall_memory_budget_in_bytes,
-                                       in_ram));
+                                       in_ram,
+                                       enable_background_merge));
         AssertInfo(res.result_->success,
                    "failed to create text writer: {}",
                    res.result_->error);

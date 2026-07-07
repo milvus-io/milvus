@@ -373,7 +373,8 @@ RustResult tantivy_create_index(const char *field_name,
                                 uint32_t tantivy_index_version,
                                 uintptr_t num_threads,
                                 uintptr_t overall_memory_budget_in_bytes,
-                                bool enable_user_specified_doc_id);
+                                bool enable_user_specified_doc_id,
+                                bool enable_background_merge);
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,
@@ -556,7 +557,8 @@ RustResult tantivy_create_text_writer(const char *field_name,
                                       const char *analyzer_extra_info,
                                       uintptr_t num_threads,
                                       uintptr_t overall_memory_budget_in_bytes,
-                                      bool in_ram);
+                                      bool in_ram,
+                                      bool enable_background_merge);
 
 void tantivy_set_log_level(const char *level);
 
