@@ -18,7 +18,13 @@
 
 #include <fmt/core.h>
 
+#include "bitset/bitset.h"
+#include "bitset/common.h"
+#include "cachinglayer/CacheSlot.h"
+#include "common/Array.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
@@ -186,6 +192,8 @@ struct BinaryRangeElementFuncForArray {
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
+        AssertInfo(index >= 0,
+                   "array element range predicate requires nested path");
         for (size_t i = 0; i < n; ++i) {
             if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
                 continue;
@@ -196,10 +204,6 @@ struct BinaryRangeElementFuncForArray {
             }
             if (valid_data != nullptr && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (index < 0) {
-                res[i] = false;
                 continue;
             }
             if (index >= src[offset].length()) {

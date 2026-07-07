@@ -140,6 +140,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                           fmt::format("Invalid OperatorType: {}", op));
         }
         OrU64Range(bitset, U64RangeForValue(value, op));
+        OrI64Range(bitset, I64RangeForValue(value, op));
         return bitset;
     }
 
@@ -166,6 +167,11 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                                          &bitset);
         OrU64Range(bitset,
                    U64RangeForBounds(lower_bound_value,
+                                     lb_inclusive,
+                                     upper_bound_value,
+                                     ub_inclusive));
+        OrI64Range(bitset,
+                   I64RangeForBounds(lower_bound_value,
                                      lb_inclusive,
                                      upper_bound_value,
                                      ub_inclusive));
@@ -233,6 +239,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     }
 
     using U64Range = std::optional<std::pair<uint64_t, uint64_t>>;
+    using I64Range = std::optional<std::pair<int64_t, int64_t>>;
 
     TargetBitmap
     TermBitset(size_t n, const T* values) {
@@ -258,6 +265,21 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     void
     OrU64Range(TargetBitmap& bitset, U64Range range) {
+        if (!range.has_value()) {
+            return;
+        }
+        this->wrapper_->json_range_query(json_path_,
+                                         range->first,
+                                         range->second,
+                                         false,
+                                         false,
+                                         true,
+                                         true,
+                                         &bitset);
+    }
+
+    void
+    OrI64Range(TargetBitmap& bitset, I64Range range) {
         if (!range.has_value()) {
             return;
         }
@@ -319,6 +341,66 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
         }
         return low;
+    }
+
+    static int64_t
+    I64FromOrdinal(uint64_t ordinal) {
+        constexpr auto sign_offset = uint64_t{1} << 63;
+        if (ordinal < sign_offset) {
+            return std::numeric_limits<int64_t>::lowest() +
+                   static_cast<int64_t>(ordinal);
+        }
+        return static_cast<int64_t>(ordinal - sign_offset);
+    }
+
+    template <typename Predicate>
+    static std::optional<int64_t>
+    FirstI64Where(Predicate pred) {
+        constexpr auto min = std::numeric_limits<uint64_t>::min();
+        constexpr auto max = std::numeric_limits<uint64_t>::max();
+        if (pred(I64FromOrdinal(min))) {
+            return I64FromOrdinal(min);
+        }
+        if (!pred(I64FromOrdinal(max))) {
+            return std::nullopt;
+        }
+
+        uint64_t low = min;
+        uint64_t high = max;
+        while (low < high) {
+            auto mid = low + (high - low) / 2;
+            if (pred(I64FromOrdinal(mid))) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        return I64FromOrdinal(low);
+    }
+
+    template <typename Predicate>
+    static std::optional<int64_t>
+    LastI64Where(Predicate pred) {
+        constexpr auto min = std::numeric_limits<uint64_t>::min();
+        constexpr auto max = std::numeric_limits<uint64_t>::max();
+        if (!pred(I64FromOrdinal(min))) {
+            return std::nullopt;
+        }
+        if (pred(I64FromOrdinal(max))) {
+            return I64FromOrdinal(max);
+        }
+
+        uint64_t low = min;
+        uint64_t high = max;
+        while (low < high) {
+            auto mid = high - (high - low) / 2;
+            if (pred(I64FromOrdinal(mid))) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return I64FromOrdinal(low);
     }
 
     static U64Range
@@ -406,6 +488,90 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return std::make_pair(*lower, *upper);
     }
 
+    static I64Range
+    DoubleI64RangeForValue(double value, OpType op) {
+        if (std::isnan(value)) {
+            return std::nullopt;
+        }
+
+        switch (op) {
+            case OpType::LessThan: {
+                auto upper = LastI64Where([value](int64_t i) {
+                    return static_cast<double>(i) < value;
+                });
+                if (!upper.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(std::numeric_limits<int64_t>::lowest(),
+                                      *upper);
+            }
+            case OpType::LessEqual: {
+                auto upper = LastI64Where([value](int64_t i) {
+                    return static_cast<double>(i) <= value;
+                });
+                if (!upper.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(std::numeric_limits<int64_t>::lowest(),
+                                      *upper);
+            }
+            case OpType::GreaterThan: {
+                auto lower = FirstI64Where([value](int64_t i) {
+                    return static_cast<double>(i) > value;
+                });
+                if (!lower.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(*lower,
+                                      std::numeric_limits<int64_t>::max());
+            }
+            case OpType::GreaterEqual: {
+                auto lower = FirstI64Where([value](int64_t i) {
+                    return static_cast<double>(i) >= value;
+                });
+                if (!lower.has_value()) {
+                    return std::nullopt;
+                }
+                return std::make_pair(*lower,
+                                      std::numeric_limits<int64_t>::max());
+            }
+            default:
+                ThrowInfo(OpTypeInvalid,
+                          fmt::format("Invalid OperatorType: {}", op));
+        }
+    }
+
+    static I64Range
+    DoubleI64RangeForBounds(double lower_bound_value,
+                            bool lb_inclusive,
+                            double upper_bound_value,
+                            bool ub_inclusive) {
+        if (std::isnan(lower_bound_value) || std::isnan(upper_bound_value)) {
+            return std::nullopt;
+        }
+
+        auto lower =
+            FirstI64Where([lower_bound_value, lb_inclusive](int64_t i) {
+                auto value = static_cast<double>(i);
+                return lb_inclusive ? value >= lower_bound_value
+                                    : value > lower_bound_value;
+            });
+        if (!lower.has_value()) {
+            return std::nullopt;
+        }
+
+        auto upper = LastI64Where([upper_bound_value, ub_inclusive](int64_t i) {
+            auto value = static_cast<double>(i);
+            return ub_inclusive ? value <= upper_bound_value
+                                : value < upper_bound_value;
+        });
+        if (!upper.has_value() || *lower > *upper) {
+            return std::nullopt;
+        }
+
+        return std::make_pair(*lower, *upper);
+    }
+
     static bool
     CanCastDoubleToU64(double value) {
         return std::isfinite(value) && std::floor(value) == value &&
@@ -455,6 +621,31 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                                         lb_inclusive,
                                         static_cast<double>(upper_bound_value),
                                         ub_inclusive);
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    static I64Range
+    I64RangeForValue(T value, OpType op) {
+        if constexpr (std::is_floating_point_v<T>) {
+            return DoubleI64RangeForValue(static_cast<double>(value), op);
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    static I64Range
+    I64RangeForBounds(T lower_bound_value,
+                      bool lb_inclusive,
+                      T upper_bound_value,
+                      bool ub_inclusive) {
+        if constexpr (std::is_floating_point_v<T>) {
+            return DoubleI64RangeForBounds(
+                static_cast<double>(lower_bound_value),
+                lb_inclusive,
+                static_cast<double>(upper_bound_value),
+                ub_inclusive);
         } else {
             return std::nullopt;
         }

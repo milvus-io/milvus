@@ -459,9 +459,12 @@ TEST_F(JsonFlatIndexTest, TestInt64RangeQuery) {
     ASSERT_TRUE(ge_result[2]);   // 1003 >= 1002
 }
 
-TEST(JsonFlatIndexUint64Test, TestNumericQueriesIncludeUint64Terms) {
+TEST(JsonFlatIndexUint64Test, TestNumericQueriesIncludeMixedIntegerTerms) {
     auto json_index = BuildInMemoryJsonFlatIndex({
+        R"({"a": -10})",
         R"({"a": 1})",
+        R"({"a": 10})",
+        R"({"a": 10.5})",
         R"({"a": 9223372036854775808})",
         R"({"a": 18446744073709551615})",
         R"({"a": "1"})",
@@ -471,56 +474,87 @@ TEST(JsonFlatIndexUint64Test, TestNumericQueriesIncludeUint64Terms) {
     std::string json_path = "/a";
     auto int_executor = json_index->create_executor<int64_t>(json_path);
     auto comparable_mask = int_executor->IsNotNull();
-    ASSERT_EQ(comparable_mask.size(), 5);
+    ASSERT_EQ(comparable_mask.size(), 8);
     EXPECT_TRUE(comparable_mask[0]);
     EXPECT_TRUE(comparable_mask[1]);
     EXPECT_TRUE(comparable_mask[2]);
-    EXPECT_FALSE(comparable_mask[3]);
-    EXPECT_FALSE(comparable_mask[4]);
+    EXPECT_TRUE(comparable_mask[3]);
+    EXPECT_TRUE(comparable_mask[4]);
+    EXPECT_TRUE(comparable_mask[5]);
+    EXPECT_FALSE(comparable_mask[6]);
+    EXPECT_FALSE(comparable_mask[7]);
 
     int64_t one = 1;
     auto not_one = int_executor->NotIn(1, &one);
-    ASSERT_EQ(not_one.size(), 5);
-    EXPECT_FALSE(not_one[0]);
-    EXPECT_TRUE(not_one[1]);
+    ASSERT_EQ(not_one.size(), 8);
+    EXPECT_TRUE(not_one[0]);
+    EXPECT_FALSE(not_one[1]);
     EXPECT_TRUE(not_one[2]);
-    EXPECT_FALSE(not_one[3]);
-    EXPECT_FALSE(not_one[4]);
+    EXPECT_TRUE(not_one[3]);
+    EXPECT_TRUE(not_one[4]);
+    EXPECT_TRUE(not_one[5]);
+    EXPECT_FALSE(not_one[6]);
+    EXPECT_FALSE(not_one[7]);
 
     int64_t max_int64 = std::numeric_limits<int64_t>::max();
     auto not_max_int64 = int_executor->NotIn(1, &max_int64);
-    ASSERT_EQ(not_max_int64.size(), 5);
+    ASSERT_EQ(not_max_int64.size(), 8);
     EXPECT_TRUE(not_max_int64[0]);
-    EXPECT_FALSE(not_max_int64[1]);
+    EXPECT_TRUE(not_max_int64[1]);
     EXPECT_TRUE(not_max_int64[2]);
-    EXPECT_FALSE(not_max_int64[3]);
+    EXPECT_TRUE(not_max_int64[3]);
     EXPECT_FALSE(not_max_int64[4]);
+    EXPECT_TRUE(not_max_int64[5]);
+    EXPECT_FALSE(not_max_int64[6]);
+    EXPECT_FALSE(not_max_int64[7]);
 
     auto greater_than_nine =
         int_executor->Range(int64_t(9), OpType::GreaterThan);
-    ASSERT_EQ(greater_than_nine.size(), 5);
+    ASSERT_EQ(greater_than_nine.size(), 8);
     EXPECT_FALSE(greater_than_nine[0]);
-    EXPECT_TRUE(greater_than_nine[1]);
+    EXPECT_FALSE(greater_than_nine[1]);
     EXPECT_TRUE(greater_than_nine[2]);
     EXPECT_FALSE(greater_than_nine[3]);
-    EXPECT_FALSE(greater_than_nine[4]);
+    EXPECT_TRUE(greater_than_nine[4]);
+    EXPECT_TRUE(greater_than_nine[5]);
+    EXPECT_FALSE(greater_than_nine[6]);
+    EXPECT_FALSE(greater_than_nine[7]);
 
     auto bounded = int_executor->Range(int64_t(0), true, int64_t(9), true);
-    ASSERT_EQ(bounded.size(), 5);
-    EXPECT_TRUE(bounded[0]);
-    EXPECT_FALSE(bounded[1]);
+    ASSERT_EQ(bounded.size(), 8);
+    EXPECT_FALSE(bounded[0]);
+    EXPECT_TRUE(bounded[1]);
     EXPECT_FALSE(bounded[2]);
     EXPECT_FALSE(bounded[3]);
     EXPECT_FALSE(bounded[4]);
+    EXPECT_FALSE(bounded[5]);
+    EXPECT_FALSE(bounded[6]);
+    EXPECT_FALSE(bounded[7]);
 
     auto double_executor = json_index->create_executor<double>(json_path);
-    auto double_range = double_executor->Range(double(9), OpType::GreaterThan);
-    ASSERT_EQ(double_range.size(), 5);
+    auto double_range =
+        double_executor->Range(double(9.5), OpType::GreaterThan);
+    ASSERT_EQ(double_range.size(), 8);
     EXPECT_FALSE(double_range[0]);
-    EXPECT_TRUE(double_range[1]);
+    EXPECT_FALSE(double_range[1]);
     EXPECT_TRUE(double_range[2]);
-    EXPECT_FALSE(double_range[3]);
-    EXPECT_FALSE(double_range[4]);
+    EXPECT_TRUE(double_range[3]);
+    EXPECT_TRUE(double_range[4]);
+    EXPECT_TRUE(double_range[5]);
+    EXPECT_FALSE(double_range[6]);
+    EXPECT_FALSE(double_range[7]);
+
+    auto double_bounded =
+        double_executor->Range(double(-10.5), false, double(10), true);
+    ASSERT_EQ(double_bounded.size(), 8);
+    EXPECT_TRUE(double_bounded[0]);
+    EXPECT_TRUE(double_bounded[1]);
+    EXPECT_TRUE(double_bounded[2]);
+    EXPECT_FALSE(double_bounded[3]);
+    EXPECT_FALSE(double_bounded[4]);
+    EXPECT_FALSE(double_bounded[5]);
+    EXPECT_FALSE(double_bounded[6]);
+    EXPECT_FALSE(double_bounded[7]);
 }
 
 TEST_F(JsonFlatIndexTest, TestArrayStringInQuery) {

@@ -392,6 +392,10 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
+        if (!term_set->Empty()) {
+            AssertInfo(index >= 0,
+                       "array element term predicate requires nested path");
+        }
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -408,7 +412,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (term_set->Empty() || index < 0) {
+            if (term_set->Empty()) {
                 res[i] = false;
                 continue;
             }

@@ -215,6 +215,60 @@ TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
     }
 }
 
+TEST(Expr, TestArrayElementPredicateWithoutNestedPathThrows) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 2;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 2);
+    SetInt64ArrayFieldData(raw_data, long_array_fid, {{1, 2}, {3, 4}});
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = seg->PreInsert(N);
+    seg->Insert(offset,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_promote, nullptr);
+
+    auto whole_array_column =
+        expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64);
+    std::vector<proto::plan::GenericValue> term_values{Int64Value(2)};
+    std::vector<std::pair<std::string, expr::TypedExprPtr>> cases = {
+        {"unary",
+         std::make_shared<expr::UnaryRangeFilterExpr>(
+             whole_array_column, proto::plan::OpType::Equal, Int64Value(2))},
+        {"binary_range",
+         std::make_shared<expr::BinaryRangeFilterExpr>(
+             whole_array_column, Int64Value(1), Int64Value(3), false, false)},
+        {"term",
+         std::make_shared<expr::TermFilterExpr>(whole_array_column,
+                                                term_values)},
+        {"arith",
+         std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+             whole_array_column,
+             proto::plan::OpType::Equal,
+             proto::plan::ArithOpType::Add,
+             Int64Value(3),
+             Int64Value(1))},
+    };
+
+    for (const auto& [name, typed_expr] : cases) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           typed_expr);
+        EXPECT_ANY_THROW({
+            auto vec = milvus::test::gen_filter_res(
+                plan.get(), seg_promote, N, MAX_TIMESTAMP);
+            (void)vec;
+        }) << name;
+    }
+}
+
 TEST(Expr, TestArrayRange) {
     std::vector<std::tuple<std::string,
                            std::string,

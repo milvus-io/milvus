@@ -16,6 +16,22 @@
 
 #include "BinaryArithOpEvalRangeExpr.h"
 
+#include <simdjson.h>
+#include <cstdint>
+#include <string_view>
+#include <variant>
+#include <vector>
+
+#include "common/Array.h"
+#include "common/EasyAssert.h"
+#include "common/Json.h"
+#include "common/Tracer.h"
+#include "common/VectorArray.h"
+#include "exec/expression/Expr.h"
+#include "exec/expression/Utils.h"
+#include "fmt/core.h"
+#include "opentelemetry/trace/span.h"
+
 namespace milvus {
 namespace exec {
 
@@ -596,10 +612,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
-            if (index < 0) {                                    \
-                res[i] = false;                                 \
-                continue;                                       \
-            }                                                   \
             if (index >= data[offset].length()) {               \
                 res[i] = false;                                 \
                 valid_res[i] = false;                           \
@@ -637,6 +649,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValueType val,
             ValueType right_operand,
             int index) {
+        if (arith_type != proto::plan::ArithOpType::ArrayLength) {
+            AssertInfo(index >= 0,
+                       "array arithmetic predicate requires nested path");
+        }
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // Nothing to do here since the caller has already handled valid_res.
         if (data == nullptr) {
