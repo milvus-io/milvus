@@ -37,7 +37,24 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     // Mirrors PhyGISFunctionFilterExpr::EvalForIndexSegment's coarse query.
     using Index = index::ScalarIndex<std::string>;
     EnsurePinnedIndex();
-    AssertInfo(num_index_chunk_ == 1, "num_index_chunk_ should be 1");
+
+    // p.has_index was sampled at compile time from segment_->HasIndex(), but
+    // HasIndex() can report true while the index is still mid-load, so the pin
+    // may yield nothing (num_index_chunk_ != 1) or a non-string index (the
+    // dynamic_cast below returns nullptr). Unlike the baseline
+    // DetermineExecPath(), this coarse path has no RawData fallback, so guard
+    // both here and degrade to an all-set coarse bitmap in that window -- the
+    // same behavior as the no-index path (p.has_index == false). The Refine
+    // node still evaluates the exact predicate, so results stay correct; we
+    // only lose R-Tree pruning for this segment while the index warms up.
+    const Index* scalar_index =
+        (num_index_chunk_ == 1 && !pinned_index_.empty())
+            ? dynamic_cast<const Index*>(pinned_index_[0].get())
+            : nullptr;
+    if (scalar_index == nullptr) {
+        p.coarse = TargetBitmap(active_count_, true);
+        return;
+    }
 
     // GEOS objects are bound to the per-thread context.
     GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
@@ -47,7 +64,6 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     ds->Set(milvus::index::OPERATOR_TYPE, p.op);
     ds->Set(milvus::index::MATCH_VALUE, query_geom);
 
-    auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
     auto* idx_ptr = const_cast<Index*>(scalar_index);
     auto tmp = idx_ptr->Query(ds);
     p.coarse = std::move(tmp);
