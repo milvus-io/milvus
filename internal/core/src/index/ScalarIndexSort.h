@@ -166,7 +166,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        return true;
+        return !is_nested_index_;
     }
 
     void

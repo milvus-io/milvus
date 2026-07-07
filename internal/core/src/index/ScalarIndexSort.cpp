@@ -47,6 +47,7 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
@@ -66,12 +67,23 @@ constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 
 const uint64_t MMAP_INDEX_PADDING = 1;
 
+namespace {
+
+bool
+IsArrayField(const storage::FileManagerContext& file_manager_context) {
+    return file_manager_context.Valid() &&
+           file_manager_context.fieldDataMeta.field_schema.data_type() ==
+               proto::schema::DataType::Array;
+}
+
+}  // namespace
+
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context,
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
-      is_nested_index_(is_nested_index),
+      is_nested_index_(is_nested_index || IsArrayField(file_manager_context)),
       is_built_(false),
       data_() {
     // not valid means we are in unit test
@@ -358,9 +370,11 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 
     auto is_nested_index = index_binary.GetByName("is_nested_index");
     if (is_nested_index) {
-        milvus::fastmem::FastMemcpy(&is_nested_index_,
+        bool loaded_is_nested_index = false;
+        milvus::fastmem::FastMemcpy(&loaded_is_nested_index,
                                     is_nested_index->data.get(),
                                     (size_t)is_nested_index->size);
+        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
     }
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);

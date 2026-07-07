@@ -1625,6 +1625,43 @@ TEST(Sealed, LoadArrayFieldData) {
     ASSERT_EQ(result_count, N);
 }
 
+TEST(Sealed, LoadArrayFieldDataWhenIndexHasRawData) {
+    auto dim = 4;
+    auto N = 10;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto array_id =
+        schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    auto counter_data = dataset.get_col<int64_t>(counter_id);
+    auto indexing = GenScalarIndexing<int64_t>(N, counter_data.data());
+
+    LoadIndexInfo array_index;
+    array_index.field_id = array_id.get();
+    array_index.field_type = DataType::ARRAY;
+    array_index.element_type = DataType::INT64;
+    array_index.index_params = GenIndexParams(indexing.get());
+    LoadResourceRequest request{};
+    request.has_raw_data = true;
+    array_index.load_resource_request = request;
+    array_index.cache_index =
+        CreateTestCacheIndex("array_raw_index", std::move(indexing));
+    segment->LoadIndex(array_index);
+
+    auto ids_ds = GenRandomIds(N);
+    auto s = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    auto array_result =
+        s->bulk_subscript(nullptr, array_id, ids_ds->GetIds(), N);
+    ASSERT_EQ(array_result->type(), proto::schema::DataType::Array);
+    ASSERT_EQ(array_result->scalars().array_data().data_size(), N);
+}
+
 TEST(Sealed, LoadArrayFieldDataWithMMap) {
     auto dim = 4;
     auto N = ROW_COUNT;

@@ -627,6 +627,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
                 num_rows_.value_or(0));
     }
 
+    request.has_raw_data =
+        milvus::index::IndexFactory::CanUseIndexRawDataForField(
+            field_meta.get_data_type(), request.has_raw_data);
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
     // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,

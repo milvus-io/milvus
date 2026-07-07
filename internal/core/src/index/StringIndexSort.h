@@ -63,7 +63,7 @@ class StringIndexSort : public StringIndex {
 
     const bool
     HasRawData() const override {
-        return true;
+        return !is_nested_index_;
     }
 
     void
