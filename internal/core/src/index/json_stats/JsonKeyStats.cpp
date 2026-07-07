@@ -1053,17 +1053,21 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     auto [milvus_field_ids, column_names] =
         GetJsonStatsFieldsFromSchema(first_file_metadata.schema);
 
-    // Fetch row group metadata from all files in parallel using HIGH POOL
-    // to avoid blocking the caller thread with serial S3 I/O
+    std::vector<int64_t> file_num_rows;
+    file_num_rows.reserve(files.size());
+    file_num_rows.push_back(first_file_metadata.num_rows);
+    num_rows += first_file_metadata.num_rows;
+
+    // Fetch row group metadata from remaining files in parallel using HIGH POOL
+    // to avoid blocking the caller thread with serial S3 I/O.
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<int64_t>> futures;
-    futures.reserve(files.size());
-    for (const auto& file : files) {
+    futures.reserve(files.size() - 1);
+    for (size_t i = 1; i < files.size(); ++i) {
+        const auto& file = files[i];
         futures.push_back(pool.Submit(
             [file]() { return ReadJsonStatsParquetMetadata(file).num_rows; }));
     }
-    std::vector<int64_t> file_num_rows;
-    file_num_rows.reserve(files.size());
     // Ensure all futures are awaited even if one throws, to prevent
     // use-after-free on captured references in background tasks.
     auto futures_guard = folly::makeGuard([&futures]() {
