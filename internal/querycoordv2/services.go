@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -303,6 +305,106 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	return merr.Success(), nil
 }
 
+const prewarmTaskIDPrefix = "prewarm_"
+
+func (s *Server) initPrewarmTaskStore() *prewarmTaskStore {
+	s.prewarmTaskMu.Lock()
+	defer s.prewarmTaskMu.Unlock()
+
+	if s.prewarmTasks == nil {
+		s.prewarmTasks = newPrewarmTaskStore()
+	}
+	return s.prewarmTasks
+}
+
+func (s *Server) preparePrewarmTaskID(req *querypb.PrewarmRequest) (string, error) {
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	msgID := req.Base.GetMsgID()
+	if msgID == 0 {
+		if s.idAllocator != nil {
+			allocated, err := s.idAllocator()
+			if err != nil {
+				return "", merr.Wrap(err, "failed to allocate prewarm task id")
+			}
+			msgID = allocated
+		} else {
+			msgID = time.Now().UnixNano()
+		}
+		req.Base.MsgID = msgID
+	}
+	return fmt.Sprintf("%s%d", prewarmTaskIDPrefix, msgID), nil
+}
+
+func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*querypb.PrewarmResponse, error) {
+	logger := mlog.With(
+		mlog.Int64("dbID", req.GetDbID()),
+		mlog.Int64("collectionID", req.GetCollectionID()),
+		mlog.Int64s("partitions", req.GetPartitionIDs()),
+		mlog.String("namespace", req.GetNamespace()),
+	)
+
+	logger.Info(ctx, "received prewarm request")
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		logger.Warn(ctx, "failed to prewarm", mlog.Err(err))
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
+	}
+
+	if err := validatePrewarmRequest(req); err != nil {
+		logger.Warn(ctx, "invalid prewarm request", mlog.Err(err))
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
+	}
+
+	if s.jobScheduler == nil {
+		err := merr.WrapErrServiceInternalMsg("querycoord job scheduler is not initialized")
+		logger.Warn(ctx, "failed to prewarm", mlog.Err(err))
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
+	}
+
+	taskID, err := s.preparePrewarmTaskID(req)
+	if err != nil {
+		logger.Warn(ctx, "failed to prepare prewarm task id", mlog.Err(err))
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
+	}
+
+	s.initPrewarmTaskStore().create(taskID)
+	job := newPrewarmJob(ctx, s, req, taskID)
+	s.jobScheduler.Add(job)
+	logger.Info(ctx, "prewarm task submitted", mlog.String("taskID", taskID))
+	return &querypb.PrewarmResponse{
+		Status:    merr.Success(),
+		TaskID:    taskID,
+		Namespace: req.Namespace,
+	}, nil
+}
+
+func (s *Server) DescribePrewarmTask(ctx context.Context, req *querypb.DescribePrewarmTaskRequest) (*querypb.DescribePrewarmTaskResponse, error) {
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return &querypb.DescribePrewarmTaskResponse{Status: merr.Status(err)}, nil
+	}
+
+	taskID := req.GetTaskID()
+	if taskID == "" {
+		err := merr.WrapErrParameterInvalidMsg("taskID is required")
+		return &querypb.DescribePrewarmTaskResponse{Status: merr.Status(err)}, nil
+	}
+
+	record, ok := s.initPrewarmTaskStore().describe(taskID)
+	if !ok {
+		err := merr.WrapErrParameterInvalidMsg("prewarm task %q not found", taskID)
+		return &querypb.DescribePrewarmTaskResponse{Status: merr.Status(err)}, nil
+	}
+
+	return &querypb.DescribePrewarmTaskResponse{
+		Status:       merr.Success(),
+		TaskID:       record.taskID,
+		State:        record.state,
+		Progress:     record.progress,
+		ErrorMessage: record.errorMessage,
+	}, nil
+}
+
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	logger := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionID()),
@@ -335,6 +437,143 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 	return merr.Success(), nil
+}
+
+func validatePrewarmRequest(req *querypb.PrewarmRequest) error {
+	if req.GetSchema() == nil {
+		return merr.WrapErrParameterInvalidMsg("schema is required for prewarm")
+	}
+	if err := common.CheckNamespace(req.GetSchema(), req.Namespace); err != nil {
+		return err
+	}
+	if !common.IsNamespaceModePartition(req.GetSchema().GetProperties()...) {
+		return merr.WrapErrParameterInvalidMsg("prewarm only supports namespace.mode=%s", common.NamespaceModePartition)
+	}
+	if len(req.GetPartitionIDs()) != 1 {
+		return merr.WrapErrParameterInvalid("single namespace partition", fmt.Sprintf("%d partitions", len(req.GetPartitionIDs())))
+	}
+	return nil
+}
+
+func newPrewarmLoadPartitionsRequest(req *querypb.PrewarmRequest) *querypb.LoadPartitionsRequest {
+	return &querypb.LoadPartitionsRequest{
+		Base:            req.GetBase(),
+		DbID:            req.GetDbID(),
+		CollectionID:    req.GetCollectionID(),
+		PartitionIDs:    req.GetPartitionIDs(),
+		Schema:          req.GetSchema(),
+		Priority:        req.GetPriority(),
+		ForceSyncWarmup: true,
+		ReplicaNumber:   req.GetReplicaNumber(),
+		ResourceGroups:  req.GetResourceGroups(),
+	}
+}
+
+func (s *Server) ensurePrewarmPartitionLoaded(ctx context.Context, req *querypb.PrewarmRequest) error {
+	partitionID := req.GetPartitionIDs()[0]
+	partition := s.meta.GetPartition(ctx, partitionID)
+	if partition == nil {
+		loadReq := newPrewarmLoadPartitionsRequest(req)
+		if err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx, loadReq); err != nil {
+			return err
+		}
+	}
+
+	return s.waitPrewarmPartitionLoaded(ctx, req.GetCollectionID(), partitionID)
+}
+
+func (s *Server) waitPrewarmPartitionLoaded(ctx context.Context, collectionID int64, partitionID int64) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return merr.Wrapf(err, "context error while waiting for prewarm partition loaded, collection=%d, partition=%d", collectionID, partitionID)
+		}
+		if err := meta.GlobalFailedLoadCache.Get(collectionID); err != nil {
+			return merr.Wrap(err, "failed to load partition before prewarm")
+		}
+		partition := s.meta.GetPartition(ctx, partitionID)
+		if partition != nil && partition.LoadPercentage >= 100 {
+			return job.WaitUpdatePartition(ctx, s.targetObserver, collectionID, partitionID)
+		}
+
+		select {
+		case <-ctx.Done():
+			return merr.Wrapf(ctx.Err(), "context error while waiting for prewarm partition loaded, collection=%d, partition=%d", collectionID, partitionID)
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Server) prewarmLoadedSegments(ctx context.Context, req *querypb.PrewarmRequest) error {
+	partitionID := req.GetPartitionIDs()[0]
+	requestedSegments := typeutil.NewUniqueSet(req.GetSegmentIDs()...)
+	nodeSegments := make(map[int64][]int64)
+	for _, segment := range s.dist.SegmentDistManager.GetByFilter(
+		meta.WithCollectionID(req.GetCollectionID()),
+		meta.SegmentDistFilterFunc(func(segment *meta.Segment) bool {
+			if segment.GetPartitionID() != partitionID {
+				return false
+			}
+			return requestedSegments.Len() == 0 || requestedSegments.Contain(segment.GetID())
+		}),
+	) {
+		nodeSegments[segment.Node] = append(nodeSegments[segment.Node], segment.GetID())
+	}
+	if len(nodeSegments) == 0 {
+		return nil
+	}
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	for nodeID, segmentIDs := range nodeSegments {
+		nodeID := nodeID
+		segmentIDs := segmentIDs
+		group.Go(func() error {
+			status, err := s.cluster.Prewarm(groupCtx, nodeID, &querypb.PrewarmRequest{
+				Base:            &commonpb.MsgBase{},
+				DbID:            req.GetDbID(),
+				CollectionID:    req.GetCollectionID(),
+				PartitionIDs:    req.GetPartitionIDs(),
+				Schema:          req.GetSchema(),
+				Namespace:       req.Namespace,
+				SegmentIDs:      segmentIDs,
+				Priority:        req.GetPriority(),
+				ForceSyncWarmup: true,
+			})
+			return merr.CheckRPCCall(status, err)
+		})
+	}
+	return group.Wait()
+}
+
+func (s *Server) clearPrewarmForceSyncWarmup(ctx context.Context, collectionID int64, partitionID int64) error {
+	partition := s.meta.GetPartition(ctx, partitionID)
+	if partition != nil && partition.GetForceSyncWarmup() {
+		partition = partition.Clone()
+		partition.ForceSyncWarmup = false
+		if err := s.meta.PutPartition(ctx, partition); err != nil {
+			return merr.Wrapf(err, "failed to clear prewarm force sync warmup for partition %d", partitionID)
+		}
+	}
+
+	collection := s.meta.GetCollection(ctx, collectionID)
+	if collection == nil || !collection.GetForceSyncWarmup() {
+		return nil
+	}
+
+	for _, partition := range s.meta.GetPartitionsByCollection(ctx, collectionID) {
+		if partition.GetForceSyncWarmup() {
+			return nil
+		}
+	}
+
+	collection = collection.Clone()
+	collection.ForceSyncWarmup = false
+	if err := s.meta.PutCollection(ctx, collection); err != nil {
+		return merr.Wrapf(err, "failed to clear prewarm force sync warmup for collection %d", collectionID)
+	}
+	return nil
 }
 
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {

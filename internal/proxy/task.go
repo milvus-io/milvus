@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -104,6 +105,7 @@ const (
 	LoadCollectionTaskName        = "LoadCollectionTask"
 	ReleaseCollectionTaskName     = "ReleaseCollectionTask"
 	LoadPartitionTaskName         = "LoadPartitionsTask"
+	PrewarmTaskName               = "PrewarmTask"
 	ReleasePartitionTaskName      = "ReleasePartitionsTask"
 	DeleteTaskName                = "DeleteTask"
 	CreateAliasTaskName           = "CreateAliasTask"
@@ -3285,6 +3287,55 @@ func (t *releaseCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+func preparePartitionLoadInfo(ctx context.Context, mixCoord types.MixCoordClient, collectionName string, collID int64, collSchema *schemaInfo, loadFieldNames []string, skipLoadDynamicField bool) ([]int64, map[int64]int64, error) {
+	if err := validateTextStorageV3Enabled(collSchema.CollectionSchema); err != nil {
+		return nil, nil, err
+	}
+
+	loadFields, err := collSchema.GetLoadFieldIDs(loadFieldNames, skipLoadDynamicField)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	indexResponse, err := mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collID,
+		IndexName:    "",
+	})
+	if err == nil {
+		err = merr.Error(indexResponse.GetStatus())
+	}
+	if err != nil {
+		if errors.Is(err, merr.ErrIndexNotFound) {
+			err = merr.WrapErrIndexNotFoundForCollection(collectionName)
+		}
+		return nil, nil, err
+	}
+
+	fieldIndexIDs := make(map[int64]int64)
+	for _, index := range indexResponse.IndexInfos {
+		fieldIndexIDs[index.FieldID] = index.IndexID
+	}
+
+	loadFieldsSet := typeutil.NewSet(loadFields...)
+	unindexedVecFields := make([]string, 0)
+	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
+	for _, field := range allFields {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
+				unindexedVecFields = append(unindexedVecFields, field.GetName())
+			}
+		}
+	}
+
+	if len(unindexedVecFields) != 0 {
+		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
+		mlog.Debug(ctx, errMsg)
+		return nil, nil, merr.WrapErrParameterInvalidMsg("%s", errMsg)
+	}
+
+	return loadFields, fieldIndexIDs, nil
+}
+
 type loadPartitionsTask struct {
 	baseTask
 	Condition
@@ -3375,50 +3426,9 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := validateTextStorageV3Enabled(collSchema.CollectionSchema); err != nil {
-		return err
-	}
-	// prepare load field list
-	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
+	loadFields, fieldIndexIDs, err := preparePartitionLoadInfo(ctx, t.mixCoord, t.GetCollectionName(), collID, collSchema, t.GetLoadFields(), t.GetSkipLoadDynamicField())
 	if err != nil {
 		return err
-	}
-	// check index
-	indexResponse, err := t.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-		CollectionID: collID,
-		IndexName:    "",
-	})
-	if err == nil {
-		err = merr.Error(indexResponse.GetStatus())
-	}
-	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
-		}
-		return err
-	}
-
-	// not support multiple indexes on one field
-	fieldIndexIDs := make(map[int64]int64)
-	for _, index := range indexResponse.IndexInfos {
-		fieldIndexIDs[index.FieldID] = index.IndexID
-	}
-
-	loadFieldsSet := typeutil.NewSet(loadFields...)
-	unindexedVecFields := make([]string, 0)
-	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
-	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
-			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
-				unindexedVecFields = append(unindexedVecFields, field.GetName())
-			}
-		}
-	}
-
-	if len(unindexedVecFields) != 0 {
-		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
-		mlog.Debug(ctx, errMsg)
-		return merr.WrapErrParameterInvalidMsg("%s", errMsg)
 	}
 
 	for _, partitionName := range t.PartitionNames {
@@ -3459,6 +3469,139 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 }
 
 func (t *loadPartitionsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type prewarmTask struct {
+	baseTask
+	Condition
+	*milvuspb.PrewarmRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.PrewarmResponse
+
+	collectionID UniqueID
+}
+
+func (t *prewarmTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *prewarmTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *prewarmTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *prewarmTask) Name() string {
+	return PrewarmTaskName
+}
+
+func (t *prewarmTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *prewarmTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *prewarmTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *prewarmTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *prewarmTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_Undefined
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *prewarmTask) PreExecute(ctx context.Context) error {
+	if err := validateCollectionName(t.GetCollectionName()); err != nil {
+		return err
+	}
+	if t.Namespace == nil {
+		return merr.WrapErrParameterInvalidMsg("namespace is required for prewarm")
+	}
+	return nil
+}
+
+func (t *prewarmTask) GetLoadPriority() commonpb.LoadPriority {
+	priority := strings.ToLower(t.GetPriority())
+	if priority == "" {
+		priority = strings.ToLower(t.GetLoadParams()[LoadPriorityName])
+	}
+	if priority == "low" {
+		return commonpb.LoadPriority_LOW
+	}
+	return commonpb.LoadPriority_HIGH
+}
+
+func (t *prewarmTask) Execute(ctx context.Context) error {
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+	t.collectionID = collID
+
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+	if !namespacePartitionModeEnabled(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg("prewarm only supports namespace.mode=%s", common.NamespaceModePartition)
+	}
+	partitionName, _, err := resolveNamespacePartitionName(collSchema.CollectionSchema, t.Namespace, "")
+	if err != nil {
+		return err
+	}
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.CollectionName, partitionName)
+	if err != nil {
+		return err
+	}
+
+	request := &querypb.PrewarmRequest{
+		Base:           commonpbutil.UpdateMsgBase(t.Base),
+		DbID:           0,
+		CollectionID:   collID,
+		PartitionIDs:   []int64{partitionID},
+		Schema:         collSchema.CollectionSchema,
+		Namespace:      t.Namespace,
+		Priority:       t.GetLoadPriority(),
+		ReplicaNumber:  t.GetReplicaNumber(),
+		ResourceGroups: t.GetResourceGroups(),
+	}
+	mlog.Info(ctx, "send PrewarmRequest to query coordinator",
+		mlog.Int64("collectionID", collID),
+		mlog.Int64("partitionID", partitionID),
+		mlog.String("namespace", t.GetNamespace()),
+		mlog.Int32("priority", int32(request.GetPriority())))
+	prewarmResp, err := t.mixCoord.Prewarm(ctx, request)
+	if err = merr.CheckRPCCall(prewarmResp, err); err != nil {
+		return err
+	}
+	status := prewarmResp.GetStatus()
+	if status == nil {
+		status = merr.Success()
+	}
+	t.result = &milvuspb.PrewarmResponse{
+		Status:    status,
+		TaskID:    prewarmResp.GetTaskID(),
+		Namespace: prewarmResp.Namespace,
+	}
+
+	return nil
+}
+
+func (t *prewarmTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

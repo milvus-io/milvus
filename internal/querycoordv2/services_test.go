@@ -28,7 +28,9 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -40,6 +42,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
@@ -2305,11 +2308,295 @@ func (suite *ServiceSuite) TestManualUpdateCurrentTarget() {
 	})
 }
 
+func TestClearPrewarmForceSyncWarmup(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(9000)
+	partitionA := int64(9001)
+	partitionB := int64(9002)
+
+	store := &catalogmocks.QueryCoordCatalog{}
+	store.Test(t)
+	store.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	store.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
+	store.EXPECT().SavePartition(mock.Anything, mock.Anything).Return(nil).Twice()
+
+	collectionMeta := meta.NewMeta(params.RandomIncrementIDAllocator(), store, session.NewNodeManager())
+	server := &Server{meta: collectionMeta}
+
+	err := collectionMeta.PutCollection(ctx,
+		&meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:    collectionID,
+				ForceSyncWarmup: true,
+			},
+		},
+		&meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID:    collectionID,
+				PartitionID:     partitionA,
+				ForceSyncWarmup: true,
+			},
+		},
+		&meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID:    collectionID,
+				PartitionID:     partitionB,
+				ForceSyncWarmup: true,
+			},
+		},
+	)
+	assert.NoError(t, err)
+
+	err = server.clearPrewarmForceSyncWarmup(ctx, collectionID, partitionA)
+	assert.NoError(t, err)
+	assert.False(t, collectionMeta.GetPartition(ctx, partitionA).GetForceSyncWarmup())
+	assert.True(t, collectionMeta.GetPartition(ctx, partitionB).GetForceSyncWarmup())
+	assert.True(t, collectionMeta.GetCollection(ctx, collectionID).GetForceSyncWarmup())
+
+	err = server.clearPrewarmForceSyncWarmup(ctx, collectionID, partitionB)
+	assert.NoError(t, err)
+	assert.False(t, collectionMeta.GetPartition(ctx, partitionB).GetForceSyncWarmup())
+	assert.False(t, collectionMeta.GetCollection(ctx, collectionID).GetForceSyncWarmup())
+}
+
+type blockingQueryCoordJob struct {
+	*job.BaseJob
+	started chan struct{}
+	release chan struct{}
+}
+
+func newBlockingQueryCoordJob(ctx context.Context, collectionID int64) *blockingQueryCoordJob {
+	return &blockingQueryCoordJob{
+		BaseJob: job.NewBaseJob(ctx, 1, collectionID),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (j *blockingQueryCoordJob) PreExecute() error {
+	return nil
+}
+
+func (j *blockingQueryCoordJob) Execute() error {
+	close(j.started)
+	select {
+	case <-j.release:
+		return nil
+	case <-j.Context().Done():
+		return j.Context().Err()
+	}
+}
+
+func (suite *ServiceSuite) TestPrewarmReturnsTaskBeforeSchedulerJobCompletes() {
+	mockey.PatchConvey("TestPrewarmReturnsTaskBeforeSchedulerJobCompletes", suite.T(), func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		collectionID := int64(9003)
+		partitionID := int64(9004)
+		nodeID := int64(1)
+		segmentID := int64(9005)
+		namespace := "tenant-a"
+		schema := &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		}
+
+		mockey.Mock((*Server).waitPrewarmPartitionLoaded).Return(nil).Build()
+
+		suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+		collection := utils.CreateTestCollection(collectionID, 1)
+		collection.Schema = schema
+		partition := utils.CreateTestPartition(collectionID, partitionID)
+		partition.LoadPercentage = 100
+		suite.Require().NoError(suite.meta.PutCollection(ctx, collection, partition))
+		suite.dist.SegmentDistManager.Update(nodeID, utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 1, "test-channel"))
+
+		blockingJob := newBlockingQueryCoordJob(ctx, collectionID)
+		suite.jobScheduler.Add(blockingJob)
+		select {
+		case <-blockingJob.started:
+		case <-ctx.Done():
+			suite.FailNow("blocking job did not start")
+		}
+
+		suite.cluster.EXPECT().
+			Prewarm(mock.Anything, nodeID, mock.MatchedBy(func(req *querypb.PrewarmRequest) bool {
+				return req.GetCollectionID() == collectionID &&
+					len(req.GetPartitionIDs()) == 1 && req.GetPartitionIDs()[0] == partitionID &&
+					len(req.GetSegmentIDs()) == 1 && req.GetSegmentIDs()[0] == segmentID
+			})).
+			Return(merr.Success(), nil).
+			Once()
+
+		resp, err := suite.server.Prewarm(ctx, &querypb.PrewarmRequest{
+			Base: &commonpb.MsgBase{
+				MsgID: 10001,
+			},
+			Schema:       schema,
+			Namespace:    &namespace,
+			CollectionID: collectionID,
+			PartitionIDs: []int64{partitionID},
+		})
+
+		suite.NoError(err)
+		suite.True(merr.Ok(resp.GetStatus()))
+		suite.Equal("prewarm_10001", resp.GetTaskID())
+
+		describe, err := suite.server.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+			TaskID: resp.GetTaskID(),
+		})
+		suite.NoError(err)
+		suite.True(merr.Ok(describe.GetStatus()))
+		suite.Equal(querypb.PrewarmTaskState_PrewarmTaskStatePending, describe.GetState())
+		suite.EqualValues(0, describe.GetProgress())
+
+		close(blockingJob.release)
+		suite.Eventually(func() bool {
+			describe, err := suite.server.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+				TaskID: resp.GetTaskID(),
+			})
+			return err == nil &&
+				merr.Ok(describe.GetStatus()) &&
+				describe.GetState() == querypb.PrewarmTaskState_PrewarmTaskStateCompleted &&
+				describe.GetProgress() == 100
+		}, 3*time.Second, 50*time.Millisecond)
+	})
+}
+
+func (suite *ServiceSuite) TestDescribePrewarmTaskReportsFailedTask() {
+	ctx := context.Background()
+	taskID := "prewarm_failed"
+	expectedErr := merr.WrapErrServiceInternalMsg("mock prewarm failure")
+
+	suite.server.initPrewarmTaskStore()
+	suite.server.prewarmTasks.create(taskID)
+	suite.server.prewarmTasks.fail(taskID, expectedErr)
+
+	resp, err := suite.server.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+		TaskID: taskID,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp.GetStatus()))
+	suite.Equal(querypb.PrewarmTaskState_PrewarmTaskStateFailed, resp.GetState())
+	suite.EqualValues(100, resp.GetProgress())
+	suite.Contains(resp.GetErrorMessage(), "mock prewarm failure")
+}
+
+func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionUsesDefaultLoadFields() {
+	mockey.PatchConvey("TestPrewarmLoadMissingPartitionUsesDefaultLoadFields", suite.T(), func() {
+		ctx := context.Background()
+		collectionID := int64(9013)
+		partitionID := int64(9014)
+		namespace := "tenant-a"
+		schema := &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		}
+		resourceGroups := []string{"rg1", "rg2"}
+
+		mockey.Mock((*Server).broadcastAlterLoadConfigCollectionV2ForLoadPartitions).Return(nil).Build()
+		mockey.Mock((*Server).waitPrewarmPartitionLoaded).Return(nil).Build()
+
+		req := &querypb.PrewarmRequest{
+			Schema:         schema,
+			Namespace:      &namespace,
+			CollectionID:   collectionID,
+			PartitionIDs:   []int64{partitionID},
+			Priority:       commonpb.LoadPriority_LOW,
+			ReplicaNumber:  3,
+			ResourceGroups: resourceGroups,
+		}
+		loadReq := newPrewarmLoadPartitionsRequest(req)
+
+		err := suite.server.ensurePrewarmPartitionLoaded(ctx, req)
+
+		suite.NoError(err)
+		suite.Equal(collectionID, loadReq.GetCollectionID())
+		suite.Equal([]int64{partitionID}, loadReq.GetPartitionIDs())
+		suite.Empty(loadReq.GetFieldIndexID())
+		suite.Empty(loadReq.GetLoadFields())
+		suite.Equal(commonpb.LoadPriority_LOW, loadReq.GetPriority())
+		suite.EqualValues(3, loadReq.GetReplicaNumber())
+		suite.Equal(resourceGroups, loadReq.GetResourceGroups())
+		suite.True(loadReq.GetForceSyncWarmup())
+	})
+}
+
 func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
 	suite.jobScheduler.Stop()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
+}
+
+func TestPrewarmRequestDoesNotExposeFieldMetadata(t *testing.T) {
+	prewarm := querypb.File_query_coord_proto.Messages().ByName(protoreflect.Name("PrewarmRequest"))
+	require.NotNil(t, prewarm)
+	assert.Nil(t, prewarm.Fields().ByName(protoreflect.Name("field_indexID")))
+	assert.Nil(t, prewarm.Fields().ByName(protoreflect.Name("load_fields")))
+}
+
+func TestValidatePrewarmRequest(t *testing.T) {
+	namespace := "tenant-a"
+	partitionModeSchema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+	}
+
+	t.Run("valid partition namespace", func(t *testing.T) {
+		err := validatePrewarmRequest(&querypb.PrewarmRequest{
+			Schema:       partitionModeSchema,
+			Namespace:    &namespace,
+			PartitionIDs: []int64{10},
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("schema required", func(t *testing.T) {
+		err := validatePrewarmRequest(&querypb.PrewarmRequest{
+			Namespace:    &namespace,
+			PartitionIDs: []int64{10},
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("namespace required when enabled", func(t *testing.T) {
+		err := validatePrewarmRequest(&querypb.PrewarmRequest{
+			Schema:       partitionModeSchema,
+			PartitionIDs: []int64{10},
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("only partition mode supported", func(t *testing.T) {
+		err := validatePrewarmRequest(&querypb.PrewarmRequest{
+			Schema: &schemapb.CollectionSchema{
+				EnableNamespace: true,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+				},
+			},
+			Namespace:    &namespace,
+			PartitionIDs: []int64{10},
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("single partition required", func(t *testing.T) {
+		err := validatePrewarmRequest(&querypb.PrewarmRequest{
+			Schema:       partitionModeSchema,
+			Namespace:    &namespace,
+			PartitionIDs: []int64{10, 11},
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
 }
 
 func TestService(t *testing.T) {

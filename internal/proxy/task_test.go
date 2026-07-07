@@ -4177,6 +4177,79 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 }
 
+func TestPrewarmTask_Execute(t *testing.T) {
+	ctx := context.Background()
+	dbName := funcutil.GenRandomStr()
+	collectionName := funcutil.GenRandomStr()
+	namespace := "ns1"
+	collectionID := UniqueID(100)
+	partitionID := UniqueID(200)
+	vectorFieldID := int64(101)
+
+	schema := &schemapb.CollectionSchema{
+		Name:            collectionName,
+		EnableNamespace: true,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: vectorFieldID, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+			}},
+			{FieldID: 102, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+		},
+	}
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Once()
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(newSchemaInfo(schema), nil).Once()
+	cache.EXPECT().GetPartitionID(mock.Anything, dbName, collectionName, namespace).Return(partitionID, nil).Once()
+
+	originCache := globalMetaCache
+	globalMetaCache = cache
+	t.Cleanup(func() {
+		globalMetaCache = originCache
+	})
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().Prewarm(mock.Anything, mock.MatchedBy(func(req *querypb.PrewarmRequest) bool {
+		return req.GetCollectionID() == collectionID &&
+			proto.Equal(req.GetSchema(), schema) &&
+			req.GetNamespace() == namespace &&
+			assert.ObjectsAreEqual([]int64{partitionID}, req.GetPartitionIDs()) &&
+			req.GetReplicaNumber() == 2 &&
+			req.GetPriority() == commonpb.LoadPriority_LOW
+	})).Return(&querypb.PrewarmResponse{
+		Status:    merr.Success(),
+		TaskID:    "prewarm_10001",
+		Namespace: &namespace,
+	}, nil).Once()
+
+	task := &prewarmTask{
+		PrewarmRequest: &milvuspb.PrewarmRequest{
+			Base:                 commonpbutil.NewMsgBase(),
+			DbName:               dbName,
+			CollectionName:       collectionName,
+			Namespace:            &namespace,
+			ReplicaNumber:        2,
+			LoadFields:           []string{"vector"},
+			SkipLoadDynamicField: true,
+			Priority:             "low",
+			TtlSeconds:           3600,
+		},
+		ctx:      ctx,
+		mixCoord: mixCoord,
+	}
+
+	err := task.Execute(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
+	assert.Equal(t, "prewarm_10001", task.result.GetTaskID())
+	assert.Equal(t, namespace, task.result.GetNamespace())
+	assert.Equal(t, collectionID, task.collectionID)
+}
+
 func TestCreateResourceGroupTask(t *testing.T) {
 	mixc := NewMixCoordMock()
 

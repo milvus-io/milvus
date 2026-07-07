@@ -6,9 +6,7 @@ import (
 	context "context"
 
 	assign "github.com/milvus-io/milvus/internal/querycoordv2/assign"
-
 	meta "github.com/milvus-io/milvus/internal/querycoordv2/meta"
-
 	mock "github.com/stretchr/testify/mock"
 )
 

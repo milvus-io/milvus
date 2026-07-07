@@ -71,6 +71,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 			ExpectedLoadFields:               req.GetLoadFields(),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
+			ExpectedForceSyncWarmup:          req.GetForceSyncWarmup(),
 		},
 	}
 	if err := alterLoadConfigReq.CheckIfLoadPartitionsExecutable(); err != nil {
