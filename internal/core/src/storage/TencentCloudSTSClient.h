@@ -36,6 +36,7 @@ enum class HttpResponseCode;
 }  // namespace Http
 
 namespace Internal {
+class TencentCloudSTSClientTestHelper;
 /**
  * To support retrieving credentials from STS.
  * Note that STS accepts request with protocol of queryxml. Calling GetResource() will trigger
@@ -43,6 +44,8 @@ namespace Internal {
  */
 class AWS_CORE_API TencentCloudSTSCredentialsClient
     : public AWSHttpResourceClient {
+    friend class ::Aws::Internal::TencentCloudSTSClientTestHelper;
+
  public:
     /**
      * Initializes the provider to retrieve credentials from STS when it expires.
@@ -79,6 +82,14 @@ class AWS_CORE_API TencentCloudSTSCredentialsClient
         const STSAssumeRoleWithWebIdentityRequest& request);
 
  private:
+    struct STSParseResult {
+        bool success = false;
+        Aws::Auth::AWSCredentials credentials;
+    };
+
+    static STSParseResult
+    parseSTSResponse(const Aws::String& responseBody);
+
     Aws::String m_endpoint;
 };
 }  // namespace Internal

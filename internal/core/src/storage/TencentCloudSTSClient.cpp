@@ -111,34 +111,90 @@ TencentCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
 
     // Parse credentials
     STSAssumeRoleWithWebIdentityResult result;
-    if (credentialsStr.empty()) {
+    auto parseResult = parseSTSResponse(credentialsStr);
+    if (!parseResult.success) {
+        return result;
+    }
+
+    result.creds = parseResult.credentials;
+    return result;
+}
+
+TencentCloudSTSCredentialsClient::STSParseResult
+TencentCloudSTSCredentialsClient::parseSTSResponse(
+    const Aws::String& responseBody) {
+    STSParseResult result;
+    if (responseBody.empty()) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Get an empty credential from sts");
         return result;
     }
 
-    auto json = Utils::Json::JsonView(credentialsStr);
-    auto rootNode = json.GetObject("Response");
-    if (rootNode.IsNull()) {
+    Aws::Utils::Json::JsonValue jsonValue(responseBody);
+    if (!jsonValue.WasParseSuccessful()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Failed to parse credential result json");
+        return result;
+    }
+
+    auto json = jsonValue.View();
+    if (!json.ValueExists("Response")) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Get Response from credential result failed");
         return result;
     }
+    auto rootNode = json.GetObject("Response");
 
-    auto credentialsNode = rootNode.GetObject("Credentials");
-    if (credentialsNode.IsNull()) {
+    if (!rootNode.ValueExists("Credentials")) {
         AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
                            "Get Credentials from Response failed");
         return result;
     }
-    result.creds.SetAWSAccessKeyId(credentialsNode.GetString("TmpSecretId"));
-    result.creds.SetAWSSecretKey(credentialsNode.GetString("TmpSecretKey"));
-    result.creds.SetSessionToken(credentialsNode.GetString("Token"));
-    result.creds.SetExpiration(Aws::Utils::DateTime(
-        Aws::Utils::StringUtils::Trim(rootNode.GetString("Expiration").c_str())
-            .c_str(),
-        Aws::Utils::DateFormat::ISO_8601));
+    auto credentialsNode = rootNode.GetObject("Credentials");
 
+    if (!rootNode.ValueExists("Expiration")) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Get Expiration from Response failed");
+        return result;
+    }
+    auto expiration =
+        Aws::Utils::StringUtils::Trim(rootNode.GetString("Expiration").c_str());
+    if (expiration.empty()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Get Expiration from Response failed");
+        return result;
+    }
+
+    if (!credentialsNode.ValueExists("TmpSecretId") ||
+        !credentialsNode.ValueExists("TmpSecretKey") ||
+        !credentialsNode.ValueExists("Token")) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Get credential fields from Response failed");
+        return result;
+    }
+
+    auto accessKeyId = credentialsNode.GetString("TmpSecretId");
+    auto secretKey = credentialsNode.GetString("TmpSecretKey");
+    auto sessionToken = credentialsNode.GetString("Token");
+    if (accessKeyId.empty() || secretKey.empty() || sessionToken.empty()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Get credential fields from Response failed");
+        return result;
+    }
+
+    auto parsedExpiration = Aws::Utils::DateTime(
+        expiration.c_str(), Aws::Utils::DateFormat::ISO_8601);
+    if (!parsedExpiration.WasParseSuccessful()) {
+        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
+                           "Failed to parse Expiration from Response");
+        return result;
+    }
+
+    result.credentials.SetAWSAccessKeyId(accessKeyId);
+    result.credentials.SetAWSSecretKey(secretKey);
+    result.credentials.SetSessionToken(sessionToken);
+    result.credentials.SetExpiration(parsedExpiration);
+    result.success = true;
     return result;
 }
 }  // namespace Internal
