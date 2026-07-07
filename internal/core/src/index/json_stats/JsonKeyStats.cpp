@@ -1102,7 +1102,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         segment_id_);
 
     std::unordered_map<FieldId, FieldMeta> field_meta_map;
-    for (const auto& inner_field_id : milvus_field_ids) {
+    for (size_t i = 0; i < milvus_field_ids.size(); ++i) {
+        const auto& inner_field_id = milvus_field_ids[i];
         auto field_name_it = field_id_to_name_map_.find(inner_field_id.get());
         AssertInfo(field_name_it != field_id_to_name_map_.end(),
                    "field id {} not found in json stats field map for "
@@ -1116,7 +1117,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             field_id_,
             GetPrimitiveDataType(shred_field_data_type_map_[field_name]),
             true,
-            std::nullopt);
+            std::nullopt,
+            column_names[i]);
         field_meta_map.insert(std::make_pair(FieldId(inner_field_id.get()),
                                              std::move(field_meta)));
     }
