@@ -558,6 +558,14 @@ ChunkedSegmentSealedImpl::init_storage_v2_pk_index(
         Manager::GetInstance().CreateCacheSlot(std::move(translator));
 }
 
+bool
+ChunkedSegmentSealedImpl::StagedStateCommitter::IsVectorIndexReady(
+    FieldId field_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return get_bit_if_present(staged_state_->index_ready_bitset, field_id) ||
+           get_bit_if_present(staged_state_->binlog_index_bitset, field_id);
+}
+
 void
 ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
@@ -3032,16 +3040,22 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
 }
 
 void
-ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
-                                          FieldId field_id) const {
+ChunkedSegmentSealedImpl::prefetch_chunks_locked(milvus::OpContext* op_ctx,
+                                                 FieldId field_id) const {
     auto snapshot = CapturePublishedState();
-    std::shared_lock lck(mutex_);
     if (auto column = get_column(snapshot->runtime, field_id)) {
         auto num_chunks = column->num_chunks();
         std::vector<int64_t> ids(num_chunks);
         std::iota(ids.begin(), ids.end(), 0);
         column->PrefetchChunks(op_ctx, ids);
     }
+}
+
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
+                                          FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    prefetch_chunks_locked(op_ctx, field_id);
 }
 
 void
@@ -3311,7 +3325,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             "finish_searching_vector_temperate_binlog_index");
     } else if (get_bit(snapshot->index_ready_bitset, field_id)) {
         if (search_info.global_refine_enable_ &&
-            IsIndexRefineEnabled(op_context, field_id)) {
+            IsIndexRefineEnabledLocked(op_context, field_id)) {
             search_info.topk_ = GetEffectiveSearchTopk(search_info);
         }
         AssertInfo(vector_indexings_.is_ready(field_id),
@@ -5932,9 +5946,8 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
 }
 
 bool
-ChunkedSegmentSealedImpl::IsIndexRefineEnabled(milvus::OpContext* op_ctx,
-                                               FieldId field_id) const {
-    std::shared_lock vector_state_lck(mutex_);
+ChunkedSegmentSealedImpl::IsIndexRefineEnabledLocked(milvus::OpContext* op_ctx,
+                                                     FieldId field_id) const {
     if (!vector_indexings_.is_ready(field_id)) {
         return false;
     }
@@ -5944,6 +5957,13 @@ ChunkedSegmentSealedImpl::IsIndexRefineEnabled(milvus::OpContext* op_ctx,
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
     return vec_index != nullptr && vec_index->IsIndexRefineEnabled();
+}
+
+bool
+ChunkedSegmentSealedImpl::IsIndexRefineEnabled(milvus::OpContext* op_ctx,
+                                               FieldId field_id) const {
+    std::shared_lock vector_state_lck(mutex_);
+    return IsIndexRefineEnabledLocked(op_ctx, field_id);
 }
 
 DataType
@@ -6197,7 +6217,11 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             return false;
         }
         // check index exist
-        if (vector_indexings_.is_ready(field_id)) {
+        if (committer != nullptr) {
+            if (committer->IsVectorIndexReady(field_id)) {
+                return false;
+            }
+        } else if (vector_indexings_.is_ready(field_id)) {
             return false;
         }
         return true;
@@ -9338,7 +9362,7 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
         auto cache_index = field_indexing->indexing_;
         SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
     } else {
-        this->prefetch_chunks(op_ctx, field_id);
+        this->prefetch_chunks_locked(op_ctx, field_id);
     }
 }
 }  // namespace milvus::segcore

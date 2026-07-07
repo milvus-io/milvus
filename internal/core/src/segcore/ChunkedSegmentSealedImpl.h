@@ -1371,6 +1371,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx,
         StagedStateCommitter* committer = nullptr);
 
+    bool
+    IsIndexRefineEnabledLocked(milvus::OpContext* op_ctx,
+                               FieldId field_id) const;
+
+    void
+    prefetch_chunks_locked(milvus::OpContext* op_ctx, FieldId field_id) const;
+
     void
     fill_empty_field(const FieldMeta& field_meta,
                      const SchemaPtr& schema_snapshot,
@@ -1451,6 +1458,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             mutator(*runtime_, *staged_state_);
             segment_.NormalizePublishedState(*staged_state_);
         }
+
+        bool
+        IsVectorIndexReady(FieldId field_id);
 
         void
         StageVectorIndexMutationLocked(FieldId field_id,
@@ -2361,6 +2371,56 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         final_delta.published_index_has_raw_data =
             staged_state->published_index_has_raw_data;
         committer.Publish(current, final_delta);
+    }
+
+    template <typename Verifier>
+    void
+    TestStageLoadIndexGenerateInterimThenPublish(
+        LoadIndexInfo& info,
+        bool is_replace,
+        const SchemaPtr& schema_snapshot,
+        std::shared_ptr<RuntimeResourceState> runtime,
+        PublishedSegmentState* staged_state,
+        const std::shared_ptr<const PublishedSegmentState>& current,
+        StateDelta& final_delta,
+        const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
+        int64_t num_rows,
+        milvus::OpContext* op_ctx,
+        Verifier&& verifier) {
+        StagedStateCommitter committer(*this, runtime.get(), staged_state);
+        committer.Commit([&](RuntimeResourceState& staged_runtime,
+                             PublishedSegmentState& staged) {
+            LoadIndex(info,
+                      schema_snapshot,
+                      is_replace,
+                      &staged_runtime,
+                      &staged,
+                      &committer);
+        });
+        auto generated_interim = generate_interim_index(FieldId(info.field_id),
+                                                        num_rows,
+                                                        loaded_column,
+                                                        op_ctx,
+                                                        &committer);
+        verifier(generated_interim);
+        final_delta.runtime = ToConstRuntimeState(std::move(runtime));
+        final_delta.published_index_ready_bitset =
+            staged_state->published_index_ready_bitset.clone();
+        final_delta.published_binlog_index_ready_bitset =
+            staged_state->published_binlog_index_ready_bitset.clone();
+        final_delta.published_index_has_raw_data =
+            staged_state->published_index_has_raw_data;
+        committer.Publish(current, final_delta);
+    }
+
+    bool
+    TestGenerateInterimIndex(
+        FieldId field_id,
+        int64_t num_rows,
+        const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
+        milvus::OpContext* op_ctx = nullptr) {
+        return generate_interim_index(
+            field_id, num_rows, loaded_column, op_ctx, nullptr);
     }
 
     bool

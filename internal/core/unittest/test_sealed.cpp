@@ -4109,6 +4109,112 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
     EXPECT_TRUE(sealed->TestVectorIndexReady(new_vec));
 }
 
+TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "64"}};
+    std::map<std::string, std::string> type_params = {{"dim", "4"}};
+    FieldIndexMeta field_index_meta(
+        vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_indexes = {{vec, field_index_meta}};
+    IndexMetaPtr index_meta =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(field_indexes));
+
+    auto config = SegcoreConfig::default_config();
+    config.set_enable_interim_segment_index(true);
+    config.set_chunk_rows(1024);
+    config.set_dense_vector_intermin_index_type(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC);
+    config.set_nlist(16);
+    config.set_nprobe(16);
+
+    auto dataset = DataGen(schema, 1000);
+    auto data_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* data_sealed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(data_segment.get());
+    ASSERT_NE(data_sealed, nullptr);
+    auto data_runtime = data_sealed->TestCloneMutableRuntimeResourceState();
+    ASSERT_TRUE(data_runtime->fields.count(vec));
+    auto loaded_column = data_runtime->fields.at(vec);
+    auto row_count = dataset.raw_->num_rows();
+
+    auto unstaged_segment = CreateSealedSegment(schema, index_meta, 0, config);
+    auto* unstaged =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(unstaged_segment.get());
+    ASSERT_NE(unstaged, nullptr);
+    ASSERT_TRUE(
+        unstaged->TestGenerateInterimIndex(vec, row_count, loaded_column));
+
+    auto segment = CreateSealedSegment(schema, index_meta, 0, config);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    auto staged_load_info = std::make_shared<const SegmentLoadInfo>(
+        current->load_info->GetProto(), schema);
+    ChunkedSegmentSealedImpl::StateDelta initial_delta;
+    initial_delta.schema = schema;
+    initial_delta.load_info = staged_load_info;
+    initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial_delta.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+
+    LoadIndexInfo load_info;
+    load_info.field_id = vec.get();
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_info.cache_index =
+        CreateTestCacheIndex("staged-real-vector", std::move(indexing));
+    load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
+
+    ChunkedSegmentSealedImpl::StateDelta final_delta;
+    final_delta.schema = schema;
+    final_delta.load_info = staged_load_info;
+    final_delta.commit_ts = current->commit_ts;
+
+    milvus::OpContext op_ctx;
+    ASSERT_NO_THROW(sealed->TestStageLoadIndexGenerateInterimThenPublish(
+        load_info,
+        false,
+        schema,
+        runtime,
+        staged.get(),
+        current,
+        final_delta,
+        loaded_column,
+        row_count,
+        &op_ctx,
+        [&](bool generated_interim) {
+            EXPECT_FALSE(generated_interim);
+            EXPECT_TRUE(GetFieldBit(staged->index_ready_bitset, vec));
+            EXPECT_FALSE(GetFieldBit(staged->binlog_index_bitset, vec));
+            EXPECT_TRUE(staged->published_index_has_raw_data.at(vec));
+        }));
+
+    auto final_state = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(GetFieldBit(final_state->index_ready_bitset, vec));
+    EXPECT_FALSE(GetFieldBit(final_state->binlog_index_bitset, vec));
+    EXPECT_TRUE(final_state->index_has_raw_data.at(vec));
+    EXPECT_TRUE(sealed->TestVectorIndexReady(vec));
+}
+
 TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
