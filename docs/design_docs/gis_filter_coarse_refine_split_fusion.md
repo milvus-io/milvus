@@ -1,78 +1,78 @@
-# GIS 地理过滤优化：粗筛/精排拆分 + 同列融合
+# GIS Geometry Filter Optimization: Coarse/Refine Split + Same-Column Fusion
 
-## 1. 背景与问题
+## 1. Background and Problem
 
-带地理过滤的向量检索（filtered search，过滤含 `ST_INTERSECTS` / `ST_WITHIN` 等几何谓词）存在严重的 CPU 浪费。C++ segcore 的 CPU profile 显示：
+Vector search with geometry filters (filtered search whose expression contains `ST_INTERSECTS` / `ST_WITHIN` / other geometric predicates) wastes a large amount of CPU. A CPU profile of the C++ segcore shows:
 
-- 实际几何相交计算（`GEOSPreparedIntersects` 等）占 CPU **< 1%**。
-- GEOS 几何对象的构造/解析/析构（`Geometry::Geometry` / `~Polygon` / `~LinearRing` / `GeometryFactory`）占 CPU **约 20%**，比向量检索还多。
+- The actual geometric intersection computation (`GEOSPreparedIntersects` etc.) takes **< 1%** of CPU.
+- Constructing/parsing/destructing GEOS geometry objects (`Geometry::Geometry` / `~Polygon` / `~LinearRing` / `GeometryFactory`) takes **~20%** of CPU — more than the vector search itself.
 
-根因：`PhyGISFunctionFilterExpr` 对**每个几何谓词、每一行**都从 WKB 现场构造一个 GEOS 对象、用完销毁。一条查询若有 K 个同列几何谓词，同一行的几何对象就被构造 K 次。`enableGeometryCache` 默认关闭（2.6.5），开启则内存膨胀 5~10 倍（对 bbox 数据尤其不划算），并非通用解。
+Root cause: `PhyGISFunctionFilterExpr` constructs a GEOS object from WKB on the fly — **per geometry predicate, per row** — and destroys it right after use. If a query has K same-column geometry predicates, the same row's geometry is constructed K times. `enableGeometryCache` is off by default (2.6.5); enabling it inflates memory 5–10x (a particularly bad trade for bbox-style data), so it is not a general solution.
 
-### 当前实现的两个问题（已在代码确认）
+### Two concrete issues in the current implementation (confirmed in code)
 
-- **问题 1 — 顺序错**：GIS 整体（coarse 粗筛 + refine 精排）落入 `indexed_expr` 桶（`Expr.cpp` `ReorderConjunctExpr`），在 conjunction 重排里排得很靠前，导致昂贵的精排跟着便宜的粗筛一起被排到标量谓词之前。
-- **问题 2 — 不剪枝**：精排不消费 `bitmap_input`（`GISFunctionFilterExpr.cpp::EvalForIndexSegment`）：`collect_hits` 取整个 coarse 位图，对全部 coarse 候选逐行构造几何并做段级缓存，从不与上游标量谓词的结果求交。
+- **Issue 1 — wrong scheduling order**: the GIS expression as a whole (cheap R-Tree coarse filter + expensive exact refine) falls into the `indexed_expr` bucket (`Expr.cpp` `ReorderConjunctExpr`), which is ordered very early in the conjunction reorder. The expensive refine is therefore dragged along with the cheap coarse filter and runs *before* the scalar predicates.
+- **Issue 2 — no pruning**: the refine step does not consume `bitmap_input` (`GISFunctionFilterExpr.cpp::EvalForIndexSegment`): `collect_hits` takes the entire coarse bitmap, constructs a geometry for every coarse candidate row (with segment-level caching), and never intersects with the upstream scalar predicates' result.
 
-两者叠加 = 无论 `work_model` / `experience` 等标量条件怎么筛，精排都对粗筛命中的所有行逐行构造几何对象。这是核心浪费。
+Combined effect: no matter how selective the scalar conditions (`work_model` / `experience` / ...) are, the refine constructs geometry objects row by row for everything the coarse filter hit. This is the core waste.
 
-## 2. 目标（三者合一）
+## 2. Goals (three in one)
 
-- **拆分**：每个几何列拆出 `Coarse`(R-Tree) 和 `Refine`(精确) 两个独立 tree 节点。
-- **修 bitmap_input**：`Refine` 消费上游 `bitmap_input`，只精算"全部更便宜谓词都通过"的幸存行。
-- **融合**：同一列的多个几何谓词，`Refine` 阶段对每个幸存行只读一次 WKB / 只构造一次 GEOS 对象，套用全部谓词（K→1）。
+- **Split**: for each geometry column, split out `Coarse` (R-Tree) and `Refine` (exact) as two independent tree nodes.
+- **Fix bitmap_input**: `Refine` consumes the upstream `bitmap_input` and only exact-evaluates the rows that survived *all* cheaper predicates.
+- **Fusion**: for multiple geometry predicates on the same column, the `Refine` stage reads the WKB / constructs the GEOS object only once per surviving row and applies all predicates to it (K→1).
 
-## 3. 代数基础（为什么跨 OR 也正确）
+## 3. Algebraic Foundation (why it is also correct across OR)
 
-设几何块 `B = g1 ⊕ ... ⊕ gk`（⊕ 为该块的 AND 或 OR）。`Ri` 为精确谓词，`Ci` 为其 R-Tree 粗筛，满足 `Ci ⊇ Ri`。令 `B_coarse = ⊕ Ci`，`B_refine = ⊕ Ri`，则 `B_coarse ⊇ B_refine`，故：
+Let a geometry block be `B = g1 ⊕ ... ⊕ gk` (⊕ is the block's AND or OR). Let `Ri` be the exact predicate and `Ci` its R-Tree coarse filter, satisfying `Ci ⊇ Ri`. Define `B_coarse = ⊕ Ci` and `B_refine = ⊕ Ri`; then `B_coarse ⊇ B_refine`, hence:
 
 ```
 scalars ∧ B  =  scalars ∧ B_refine  ≡  scalars ∧ B_coarse ∧ B_refine
 ```
 
-于是可把 `B_coarse` 作为额外的 AND 子节点提到最前（便宜、选择性强、剪枝别人），把 `B_refine` 提到最后（昂贵、被所有人剪枝）。AND 块与 OR 块都成立——这是拆分跨 OR 仍正确的依据。
+So `B_coarse` can be hoisted to the very front as an extra AND child (cheap, selective, prunes everyone else), and `B_refine` pushed to the very end (expensive, pruned by everyone else). This holds for both AND blocks and OR blocks — which is why the split remains correct across OR.
 
-## 4. 架构：两个新算子 + 一份共享状态
+## 4. Architecture: Two New Operators + One Shared State
 
 ```cpp
-// 每个 (segment, 几何块) 一份，Coarse 与 Refine 共享
+// One per (segment, geometry block), shared by Coarse and Refine
 struct GISGroupState {
   FieldId field_id;
-  bool    is_and;                 // 块内组合：AND / OR
+  bool    is_and;                 // combination within the block: AND / OR
   struct Pred {
     GISOp            op;
-    Geometry         query_geom;  // 查询常量，构造一次复用
-    PreparedGeometry prepared;    // 预编译一次复用（修掉每 batch 重建）
+    Geometry         query_geom;  // query constant, constructed once and reused
+    PreparedGeometry prepared;    // prepared once and reused (fixes per-batch rebuild)
     bool             has_index;
-    TargetBitmap     coarse;      // 该谓词 R-Tree 结果，算一次
+    TargetBitmap     coarse;      // this predicate's R-Tree result, computed once
   };
   std::vector<Pred> preds;
-  std::shared_ptr<TargetBitmap> coarse_candidates; // B_coarse，Coarse 节点填，缓存一次
+  std::shared_ptr<TargetBitmap> coarse_candidates; // B_coarse, filled by Coarse, cached once
   std::atomic<bool> coarse_done{false};
 };
 
-class PhyGISCoarseConjunctExpr : public SegmentExpr { std::shared_ptr<GISGroupState> st_; }; // -> indexed 桶（早）
-class PhyGISRefineConjunctExpr : public SegmentExpr { std::shared_ptr<GISGroupState> st_; }; // -> heavy 桶（最后）
+class PhyGISCoarseConjunctExpr : public SegmentExpr { std::shared_ptr<GISGroupState> st_; }; // -> indexed bucket (early)
+class PhyGISRefineConjunctExpr : public SegmentExpr { std::shared_ptr<GISGroupState> st_; }; // -> heavy bucket (last)
 ```
 
-## 5. Optimizer 规则（镜像 LIKE 的 `SetLikeIndices` + 运行期建节点）
+## 5. Optimizer Rule (mirrors LIKE's `SetLikeIndices` + builds nodes at run time)
 
-1. 遍历 conjunction 子节点，识别"同一 field 的几何块"：直接的 GIS 叶子（`PhyGISFunctionFilterExpr`），或仅由该 field 的 GIS 谓词构成的 AND/OR 子树（用 ⊕ 记下组合方式）。
-2. 对每个块构造 `GISGroupState`（收集 `preds`、`is_and`，一次性建好 `query_geom` + `prepared`）。
-3. 生成 `Coarse` 与 `Refine` 两节点（共享同一 state），从原 children 移除原始 GIS 节点。
-4. 分桶：`Coarse` → `indexed_expr`（早）；`Refine` → `heavy_conjunct_expr`（最后）。复用现有 reorder 顺序，无需新机制。
-5. 退化：块内含非几何兄弟或复杂嵌套无法纯几何化 → 该块不拆，保留原 `PhyGISFunctionFilterExpr`（正确性优先）。配合查询改写归一成"标量 AND (同列 ST OR 组)"命中率最高。
+1. Walk the conjunction children and recognize "geometry blocks on the same field": either direct GIS leaves (`PhyGISFunctionFilterExpr`), or an AND/OR subtree consisting solely of GIS predicates on that field (record the combination as ⊕).
+2. For each block, build a `GISGroupState` (collect `preds` and `is_and`; construct `query_geom` + `prepared` once up front).
+3. Emit the `Coarse` and `Refine` nodes (sharing the same state) and remove the original GIS nodes from the children.
+4. Bucketing: `Coarse` → `indexed_expr` (early); `Refine` → `heavy_conjunct_expr` (last). Reuses the existing reorder machinery; no new mechanism needed.
+5. Degradation: if a block contains non-geometry siblings, or is nested in a way that cannot be made purely geometric, the block is not split and the original `PhyGISFunctionFilterExpr` is kept (correctness first). Combined with query rewriting that normalizes filters into "scalars AND (same-column ST OR group)", the hit rate is highest.
 
-## 6. Coarse 节点 Eval（段级一次 + 切片）
+## 6. Coarse Node Eval (once per segment + slicing)
 
 ```cpp
 void PhyGISCoarseConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
   auto bs = GetNextBatchSize(); if (bs == 0) { result = nullptr; return; }
-  if (!st_->coarse_done) {                          // 段级，只一次
-    TargetBitmap cand(active_count_, st_->is_and);  // AND -> 全1 / OR -> 全0
+  if (!st_->coarse_done) {                          // per segment, only once
+    TargetBitmap cand(active_count_, st_->is_and);  // AND -> all ones / OR -> all zeros
     for (auto& p : st_->preds) {
-      if (p.has_index) RunRTreeQuery(p);            // 复用现有 idx_ptr->Query(ds)
-      else             p.coarse = TargetBitmap(active_count_, true); // 无索引 -> 全集
+      if (p.has_index) RunRTreeQuery(p);            // reuses existing idx_ptr->Query(ds)
+      else             p.coarse = TargetBitmap(active_count_, true); // no index -> full set
       st_->is_and ? (cand &= p.coarse) : (cand |= p.coarse);
     }
     st_->coarse_candidates = std::make_shared<TargetBitmap>(std::move(cand));
@@ -84,33 +84,33 @@ void PhyGISCoarseConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
 }
 ```
 
-## 7. Refine 节点 Eval（吃 bitmap_input + 逐行一次构造 + 融合）
+## 7. Refine Node Eval (consumes bitmap_input + one construction per row + fusion)
 
 ```cpp
 void PhyGISRefineConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
   auto bs = GetNextBatchSize(); if (bs == 0) { result = nullptr; return; }
   TargetBitmap res(bs, false);
 
-  const auto& pre = ctx.get_bitmap_input();        // == scalars ∧ B_coarse （修复点）
+  const auto& pre = ctx.get_bitmap_input();        // == scalars ∧ B_coarse (the fix)
   TargetBitmap survivors(bs, true);
   if (!pre.empty()) survivors &= pre;
-  survivors &= slice(*st_->coarse_candidates, current_pos_, bs); // 双保险
+  survivors &= slice(*st_->coarse_candidates, current_pos_, bs); // belt and braces
 
   if (!survivors.none()) {
     auto hits = collect_hits(survivors);
     auto* gcache = SimpleGeometryCacheManager::Instance()
                      .GetCache(segment_->get_segment_id(), st_->field_id);
     auto wkb = gcache ? nullptr
-                      : segment_->bulk_subscript(st_->field_id, hits); // 一次批量取
+                      : segment_->bulk_subscript(st_->field_id, hits); // one bulk fetch
     for (size i : hits) {
       const Geometry& left = gcache
-          ? *gcache->GetByOffsetUnsafe(i)           // 缓存开：零构造
-          : Geometry(ctx_, wkb[i]...);              // 缓存关：构造【一次】
-      bool bit = st_->is_and;                       // 一个 left 套全部谓词（融合）
+          ? *gcache->GetByOffsetUnsafe(i)           // cache on: zero construction
+          : Geometry(ctx_, wkb[i]...);              // cache off: construct ONCE
+      bool bit = st_->is_and;                       // apply all predicates to one left (fusion)
       for (auto& p : st_->preds) {
-        bool r = EvalPrepared(p, left);             // within/contains 语义对调，复用现有
+        bool r = EvalPrepared(p, left);             // within/contains semantics swapped, reuses existing code
         bit = st_->is_and ? (bit && r) : (bit || r);
-        if (st_->is_and ^ bit) break;               // 短路
+        if (st_->is_and ^ bit) break;               // short circuit
       }
       res[local(i)] = bit;
     }
@@ -120,35 +120,69 @@ void PhyGISRefineConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
 }
 ```
 
-三处收益同时拿到：吃 `bitmap_input` → 只在"标量全过 ∧ coarse"的幸存行上精算；逐行一次构造 → K 谓词共享 `left`（K→1）；`prepared` 复用 → 查询几何只构造一次。
+All three wins land at once: consuming `bitmap_input` → exact evaluation only on rows that passed "all scalars ∧ coarse"; one construction per row → K predicates share one `left` (K→1); `prepared` reuse → the query geometry is constructed only once.
 
-## 8. 在 conjunction 里的最终形态
+## 8. Final Shape Inside the Conjunction
 
 ```
-input_order_: [ numeric... , indexed(含 B_coarse) , string... , 标量heavy... , heavy(含 B_refine 最后) , compare... ]
+input_order_: [ numeric... , indexed(incl. B_coarse) , string... , heavy scalars... , heavy(B_refine last) , compare... ]
 ```
 
-`bitmap_input` 链：`B_coarse` 早早贡献 → 中间标量继续收窄 → `B_refine` 最后拿到最小集合精算。`CanSkipFollowingExprs` 仍生效（coarse / 标量把结果打成全 0 时，refine 直接跳过）。
+The `bitmap_input` chain: `B_coarse` contributes early → intermediate scalars keep narrowing the set → `B_refine` finally receives the smallest set for exact evaluation. `CanSkipFollowingExprs` still applies (when coarse / scalars zero out the result, refine is skipped entirely).
 
-## 9. 正确性 / 边界
+## 9. Correctness / Edge Cases
 
-- 不变式 `Ci ⊇ Ri`（bbox 相交 ⊇ 精确相交；within 同理保守），现有 refine 已依赖，拆分不破坏。
-- OR 块：用第 3 节恒等式提升 `B_coarse` / `B_refine` 为外层 AND 子节点，合法。
-- `Refine` 对非幸存行返回 false，conjunction 再 AND，无误。
-- within/contains 语义对调：复用现有 `evaluate_geometry_prepared`。
-- null 几何：`GetByOffsetUnsafe` 返回 nullptr → 按 op 取 false。
-- 无 R-Tree 索引：coarse = 全集（不剪枝），refine 仍吃 `bitmap_input` + 融合，收益不失。
-- growing / mmap：沿用现有 `std::string` vs `std::string_view` 分支。
-- 缓存正交：本方案对 bbox 数据缓存关着也很快，不依赖 `enableGeometryCache`。
+- Invariant `Ci ⊇ Ri` (bbox intersection ⊇ exact intersection; within is conservative in the same way): the existing refine already relies on it; the split does not break it.
+- OR blocks: hoisting `B_coarse` / `B_refine` as outer AND children is justified by the identity in Section 3.
+- `Refine` returns false for non-surviving rows; the conjunction ANDs the results again, so no error.
+- within/contains semantics swap: reuses the existing `evaluate_geometry_prepared`.
+- Null geometry: `GetByOffsetUnsafe` returns nullptr → false according to the op.
+- No R-Tree index: coarse = full set (no pruning), but refine still consumes `bitmap_input` and fuses, so the win is not lost.
+- growing / mmap: keeps the existing `std::string` vs `std::string_view` branches.
+- Orthogonal to the cache: this design is fast for bbox data even with the cache off; it does not depend on `enableGeometryCache`.
 
-## 10. 落地分期
+## 10. Delivery Phases
 
-- **P1**：拆分 + bitmap_input 修复（coarse 早 / refine 晚吃 bitmap_input）。单谓词即可见大收益，风险低。
-- **P2**：Refine 同列融合（K→1）+ prepared 复用。
-- **P3**：更通用的嵌套块识别（超出"标量 AND 同列 OR/AND 组"）。
+- **P1**: split + bitmap_input fix (coarse early / refine last, consuming bitmap_input). A large win is already visible with a single predicate; low risk.
+- **P2**: same-column fusion in Refine (K→1) + prepared reuse.
+- **P3**: more general nested-block recognition (beyond "scalars AND same-column OR/AND group").
 
-## 11. 测试与灰度
+## 11. Testing and Rollout
 
-- Feature flag：`queryNode.segcore.enableGISSplitFusion`，默认关，灰度。
-- 等价测试 `GISCoarseRefineExprTest`：与"逐谓词原始 Eval"做全矩阵等价校验（AND/OR、intersects/within/contains、null、index/no-index、growing/sealed/mmap、空 bitmap_input）。
-- Bench：复现多谓词地理查询，验证 `Geometry::Geometry` 占比 20% → 约 0、refine 候选行数下降、p99 从秒级回落。
+- Feature flag: `queryNode.segcore.enableGISSplitFusion`, default off, for gradual rollout.
+- Equivalence tests `GISCoarseRefineExprTest`: full-matrix equivalence against the original per-predicate Eval (AND/OR, intersects/within/contains, null, index/no-index, growing/sealed/mmap, empty bitmap_input).
+- Bench: reproduce multi-predicate geo queries; verify that the `Geometry::Geometry` CPU share drops from ~20% to ~0, the refine candidate row count shrinks, and p99 falls back from seconds.
+
+## 12. Measured Results (2026-07-06)
+
+A/B benchmark on the implementation PR (#50675): same binary and same data, only `enableGISSplitFusion` toggled across restarts, with `enableGeometryCache=false` in **both** modes. Dataset: 1M rows; `geo` holds 64-vertex polygons (construction-heavy, the workload this design targets) with an RTREE index; an `INT64` scalar column controls predicate selectivity; query viewports are sized to hit a controlled fraction of rows. Numbers are p50 of 100 sequential `query(count(*))` iterations (pure filter path).
+
+| case | filter shape | OFF p50 (ms) | ON p50 (ms) | speedup |
+|------|--------------|-------------:|------------:|--------:|
+| control | lone `ST_INTERSECTS` (5% viewport) — never split | 54.1 | 53.7 | 1.01x |
+| pruning 1% | `scalar(1%)` ∧ intersects(5%) | 55.6 | 5.2 | 10.7x |
+| pruning 10% | `scalar(10%)` ∧ intersects(5%) | 55.6 | 10.0 | 5.6x |
+| pruning 50% | `scalar(50%)` ∧ intersects(5%) | 55.1 | 28.8 | 1.9x |
+| fusion OR-2 | `scalar(10%)` ∧ (2-way OR, 5% total) | 57.4 | 9.9 | 5.8x |
+| fusion OR-4 | `scalar(10%)` ∧ (4-way OR, 5% total) | 60.3 | 10.9 | 5.5x |
+| pruning × fusion | `scalar(1%)` ∧ (4-way OR) | 60.6 | 6.0 | 10.1x |
+| AND fusion | `scalar(10%)` ∧ intersects(5%) ∧ within(20%) | 259.0 | 12.2 | 21.2x |
+| large coarse set | `scalar(10%)` ∧ intersects(20% viewport) | 209.0 | 27.4 | 7.6x |
+
+What the numbers confirm, per mechanism:
+
+- **No overhead where the rewrite does not apply**: the control case (a lone GIS predicate never enters `SplitFuseGISConjunct`) is 1.01x.
+- **`bitmap_input` pruning**: OFF is flat (~55 ms) regardless of scalar selectivity — the old refine pays for the whole coarse candidate set; ON scales with the surviving rows (5.2 / 10.0 / 28.8 ms at 1% / 10% / 50%).
+- **K→1 fusion**: a 4-way same-column OR costs the same as a single predicate with the same survivor set (10.9 vs 10.0 ms).
+- **Worst case**: an AND of a 5% and a 20% predicate (250k coarse-candidate constructions for a 5k-row answer) drops from 259 ms to 12 ms.
+- Both sides fit `latency ≈ 2.5 ms + 1.03 µs × (#GEOS constructions)` with constructions = Σ|coarseᵢ| when OFF vs |scalars ∧ B_coarse| when ON — matching the algebra in Section 3.
+- `count(*)` is identical ON vs OFF for all cases. Filtered `search` (topk=100) shows the same pattern end-to-end (4.8–18.6x).
+
+Full setup and discussion: https://github.com/milvus-io/milvus/pull/50675#issuecomment-4899397542
+
+## 13. 2.6 Backport Notes (#50751)
+
+The measurements above were taken on the master implementation (#50675); the backported code is functionally identical except for two deliberate adaptations to the 2.6 baseline:
+
+- **No `EnsurePinnedIndex()` call in the coarse R-Tree query**: on 2.6 the scalar index is pinned eagerly in the `SegmentExpr` constructor (`InitSegmentExpr`), so `pinned_index_` / `num_index_chunk_` are already populated when `Eval` runs; the lazy-pinning helper only exists on master.
+- **`STIsValid` equivalence cases omitted from `GISCoarseRefineExprTest`**: the `STIsValid` GISOp does not exist on 2.6 (`plan.proto` `GISOp` stops at `DWithin = 8`), so the master test cases guarding it cannot be expressed. The `as_groupable_gis` whitelist is backported unchanged and still keeps any non-whitelisted op off the fusion path.
