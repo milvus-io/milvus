@@ -137,6 +137,148 @@ func TestExpr_Term(t *testing.T) {
 	}
 }
 
+// assertNullLiteralRejected checks that the expression is rejected specifically
+// because of the bare-NULL reserved-word guard, i.e. it returns the actionable
+// message rather than the misleading "field NULL not exist" (issue #50882).
+func assertNullLiteralRejected(t *testing.T, helper *typeutil.SchemaHelper, exprStr string) {
+	_, err := ParseExpr(helper, exprStr, nil)
+	if assert.Error(t, err, exprStr) {
+		assert.Contains(t, err.Error(), "NULL literal is not supported in expressions", exprStr)
+	}
+}
+
+func TestExpr_NullLiteral(t *testing.T) {
+	// NULL is not a value literal. It is lexed as a bare identifier, so it must be
+	// rejected wherever it appears in column/value position (issue #50882). The
+	// behavior must be identical whether or not a dynamic field is present: without
+	// one a bare NULL fails a field lookup; with one it would otherwise be silently
+	// mistaken for a dynamic JSON key named "NULL". Use `<field> is null` /
+	// `is not null` to compare against null instead.
+	rejected := []string{
+		// inside an `in [...]` value list (the exact shape from the issue)
+		`Int64Field in [6560, NULL, 6722, -7856, -6757]`,
+		`Int64Field in [null]`,
+		`Int64Field in [NULL]`,
+		`Int64Field not in [1, Null]`,
+		`VarCharField in ["a", null, "b"]`,
+		`(not (not ((Int64Field is not null) and (Int64Field in [1, NULL, 2]))))`,
+		// NULL as the tested column on the left of `in`
+		`NULL in [1, 2]`,
+		// binary comparison, either side
+		`Int64Field == NULL`,
+		`NULL == Int64Field`,
+		`NULL > 5`,
+		`Int64Field != NULL`,
+		// range comparison
+		`1 < NULL < 5`,
+		`Int64Field < NULL`,
+		// logical / unary operands
+		`NULL and Int64Field > 0`,
+		`Int64Field > 0 or NULL`,
+		`not NULL`,
+		// function arguments
+		`array_length(NULL) > 0`,
+		`array_contains(NULL, 1)`,
+		// `is null` / `is not null` with NULL as the target (nonsensical)
+		`NULL is null`,
+		`NULL is not null`,
+		// NULL as a JSON / array subscript base — a separate lookup path
+		// (getColumnInfoFromJSONIdentifier) that bypasses translateIdentifier
+		`NULL["x"] == 1`,
+		`NULL[0] > 1`,
+		// case-insensitive: any casing of the reserved word is rejected
+		`Int64Field == Null`,
+		`Int64Field == nUlL`,
+		`Int64Field == NuLL`,
+	}
+
+	// Valid expressions that must NOT be affected by the guard.
+	validBoth := []string{
+		// the real "is null" predicates the guard points users to
+		`Int64Field is null`,
+		`Int64Field is not null`,
+		`JSONField["a"] is null`,
+		// a JSON key literally named "null" stays reachable via quoting: the base
+		// identifier is the field name, not "null"
+		`JSONField["null"] == 1`,
+		`JSONField['null'] == 1`,
+		// the string literal "null" is a value, not an identifier
+		`VarCharField == "null"`,
+		`VarCharField in ["null", "NULL"]`,
+	}
+	// Only valid when the dynamic field exists.
+	validDynamicOnly := []string{
+		`$meta["null"] == 1`,
+		`A == 1`, // sanity: an arbitrary dynamic key still resolves
+	}
+
+	for _, dynamic := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dynamic=%v", dynamic), func(t *testing.T) {
+			helper, err := typeutil.CreateSchemaHelper(newTestSchema(dynamic))
+			assert.NoError(t, err)
+
+			for _, exprStr := range rejected {
+				assertNullLiteralRejected(t, helper, exprStr)
+			}
+			for _, exprStr := range validBoth {
+				assertValidExpr(t, helper, exprStr)
+			}
+			if dynamic {
+				for _, exprStr := range validDynamicOnly {
+					assertValidExpr(t, helper, exprStr)
+				}
+			}
+		})
+	}
+}
+
+// TestExpr_NullLiteral_LegacyNullField locks the schema-aware side of the
+// bare-NULL guard: "null" only became a create-time keyword together with this
+// guard, so a legacy collection may own a field literally named "null", and the
+// bare identifier is the ONLY syntax that can reference a top-level scalar
+// field (quoting like field["null"] reaches JSON sub-keys only). Such a field
+// must stay queryable; the strict GetFieldFromName check makes it resolve while
+// everything else keeps the reserved-word rejection (see errNullLiteral).
+func TestExpr_NullLiteral_LegacyNullField(t *testing.T) {
+	withNullField := func(dataType schemapb.DataType) *typeutil.SchemaHelper {
+		schema := newTestSchema(true)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 199, Name: "null", Description: "legacy field literally named null", DataType: dataType,
+		})
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		return helper
+	}
+
+	t.Run("scalar field named null", func(t *testing.T) {
+		helper := withNullField(schemapb.DataType_Int64)
+
+		// The bare identifier resolves to the declared field, as before the guard.
+		assertValidExpr(t, helper, `null > 5`)
+		assertValidExpr(t, helper, `null in [1, 2]`)
+		assertValidExpr(t, helper, `Int64Field == null`)
+		// The guard previously rejected these outright; schema-aware turns them
+		// into valid "is the null-named field NULL?" predicates.
+		assertValidExpr(t, helper, `null is null`)
+		assertValidExpr(t, helper, `null is not null`)
+		// Strict lookup is exact-case: a differently-cased NULL does not match the
+		// declared field and keeps the reserved-word rejection (pre-guard it would
+		// have been misparsed as the dynamic JSON key $meta["NULL"]).
+		assertNullLiteralRejected(t, helper, `NULL > 5`)
+		assertNullLiteralRejected(t, helper, `Int64Field == Null`)
+	})
+
+	t.Run("json field named null", func(t *testing.T) {
+		helper := withNullField(schemapb.DataType_JSON)
+
+		// The subscript base resolves via the same schema-aware guard in
+		// getColumnInfoFromJSONIdentifier.
+		assertValidExpr(t, helper, `null["x"] == 1`)
+		assertValidExpr(t, helper, `null["x"] is null`)
+		assertNullLiteralRejected(t, helper, `NULL["x"] == 1`)
+	})
+}
+
 func TestExpr_Call(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
@@ -412,6 +554,60 @@ func TestExpr_RawString(t *testing.T) {
 	jSq, err := CreateSearchPlan(helper, `JSONField[r'\u0041'] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, []string{`\u0041`}, jSq.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+}
+
+// TestExpr_RawString_LikeEscapeModel exercises the LIKE escape model (issue
+// #43864) end-to-end through the raw-string literal r"...". Because a raw string
+// drops the string-literal Unquote layer, a backslash reaches the LIKE pattern
+// layer verbatim, so these read with the same single backslash the C++ canonical
+// matcher (RegexQuery.cpp) uses — no doubled/quadrupled backslashes. Each case
+// asserts the optimized op and the literal operand the executor must match
+// verbatim.
+func TestExpr_RawString_LikeEscapeModel(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	check := func(expr string, wantOp planpb.OpType, wantVal string) {
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan, expr)
+		ur := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.Equal(t, wantOp, ur.GetOp(), expr)
+		assert.Equal(t, wantVal, ur.GetValue().GetStringVal(), expr)
+	}
+
+	// An escaped wildcard is a LITERAL byte in the operand: the optimized op
+	// carries a literal '%'/'_', which the C++ side matches verbatim and must NOT
+	// re-interpret as a wildcard.
+	check(`A like r"a\%bc"`, planpb.OpType_Equal, `a%bc`)
+	check(`A like r"a\_bc"`, planpb.OpType_Equal, `a_bc`)
+	check(`A like r"abc\%%"`, planpb.OpType_PrefixMatch, `abc%`)
+	check(`A like r"%abc\%"`, planpb.OpType_PostfixMatch, `abc%`)
+	check(`A like r"%abc\%%"`, planpb.OpType_InnerMatch, `abc%`)
+
+	// A literal '\%' and an UNescaped '%' coexist: the literal lands in the
+	// operand verbatim, while the bare '%' is the prefix/postfix/inner boundary
+	// the C++ matcher expands to an ANY-length span.
+	check(`A like r"abc\%def%"`, planpb.OpType_PrefixMatch, `abc%def`)
+	check(`A like r"%abc\%def"`, planpb.OpType_PostfixMatch, `abc%def`)
+	check(`A like r"%abc\%def%"`, planpb.OpType_InnerMatch, `abc%def`)
+
+	// A backslash escapes ANY next byte, not only wildcards: r"\a" -> literal "a".
+	check(`A like r"\a"`, planpb.OpType_Equal, `a`)
+
+	// A raw "\\" collapses to one literal backslash at the pattern layer.
+	check(`A like r"a\\b"`, planpb.OpType_Equal, `a\b`)
+	check(`A like r"%a\\b%"`, planpb.OpType_InnerMatch, `a\b`)
+
+	// A dangling trailing backslash cannot be written as a raw string at all — a
+	// raw string may not end in an odd number of backslashes (it would not
+	// terminate). So the unterminated raw form is a parse error, and the literal
+	// trailing-backslash pattern can only be expressed via a normal string, where
+	// it is not optimizable and falls back to OpType_Match (the C++ matcher then
+	// raises ExprInvalid at execution).
+	assertInvalidExpr(t, helper, `A like r"abc\"`)
+	check(`A like "abc\\"`, planpb.OpType_Match, `abc\`)
 }
 
 func TestExpr_RegexMatch(t *testing.T) {
@@ -709,6 +905,138 @@ func TestExpr_TextMatch(t *testing.T) {
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_TextMatchFuzzy(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// the field must enable match first, otherwise fuzzy match is rejected.
+	assertInvalidExpr(t, helper, `text_match_fuzzy(VarCharField, "query", max_edit_distance=1)`)
+	enableMatch(schema)
+
+	for _, v := range []int64{0, 1, 2} {
+		expr := fmt.Sprintf(`text_match_fuzzy(VarCharField, "query", max_edit_distance=%d)`, v)
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "query", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, v, extra[0].GetInt64Val())
+	}
+
+	{
+		// a templated query is filled at plan time and the edit distance survives.
+		expr := `text_match_fuzzy(VarCharField, {q}, max_edit_distance=2)`
+		mv := map[string]*schemapb.TemplateValue{
+			"q": generateTemplateValue(schemapb.DataType_VarChar, "hello"),
+		}
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:       10,
+			MetricType: "L2",
+		}, mv, nil)
+		assert.NoError(t, err, expr)
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "hello", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, int64(2), extra[0].GetInt64Val())
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=3)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max_edit_distance should be in [0, 2]")
+	}
+
+	{
+		// the distance argument is required by the grammar.
+		expr := `text_match_fuzzy(VarCharField, "query")`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=1.5)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=9223372036854775808)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid max_edit_distance value")
+	}
+
+	unsupported := []string{
+		`text_match_fuzzy(not_exist, "query", max_edit_distance=1)`,
+		`text_match_fuzzy(BoolField, "query", max_edit_distance=1)`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_TextMatchFuzzy_SoftKeyword(t *testing.T) {
+	// A wrong option name is rejected: the option name is a soft keyword, so
+	// only "max_edit_distance" (any case) is accepted.
+	{
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `text_match_fuzzy(VarCharField, "query", fuzziness=1)`
+		_, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "expected max_edit_distance")
+	}
+
+	// The option name is case-insensitive.
+	{
+		schema := newTestSchema(true)
+		enableMatch(schema)
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `text_match_fuzzy(VarCharField, "query", MAX_EDIT_DISTANCE=1)`
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 10, MetricType: "L2",
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+	}
+
+	// max_edit_distance is a soft keyword, not a reserved word: a scalar field
+	// literally named "max_edit_distance" stays usable in an ordinary filter
+	// (issue #51058 — hard-keywording it would break such collections).
+	{
+		schema := newTestSchema(false)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 9999, Name: "max_edit_distance", DataType: schemapb.DataType_Int64,
+		})
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+		expr := `max_edit_distance > 1`
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 10, MetricType: "L2",
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
 	}
 }
 

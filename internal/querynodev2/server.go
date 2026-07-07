@@ -350,7 +350,11 @@ func (node *QueryNode) Init() error {
 
 		node.factory.Init(paramtable.Get())
 		// init analyzer options
-		analyzer.InitOptions()
+		if err := analyzer.InitOptions(); err != nil {
+			mlog.Error(node.ctx, "QueryNode init analyzer options failed", mlog.Err(err))
+			initError = err
+			return
+		}
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 		localUsedSize, err := segcore.GetLocalUsedSize(localRootPath)

@@ -926,6 +926,88 @@ func TestValueSerializerNullableDenseVectorUsesBinaryArrow(t *testing.T) {
 	}
 }
 
+func TestValueDeserializerSerializerTextLobRefUsesBinaryArrow(t *testing.T) {
+	const (
+		pkFieldID   FieldID = 100
+		textFieldID FieldID = 101
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "text_lob_ref",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: textFieldID, Name: "content", DataType: schemapb.DataType_Text},
+		},
+	}
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "row_id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "Timestamp", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "content", Type: arrow.BinaryTypes.Binary},
+	}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).Append(11)
+	builder.Field(1).(*array.Int64Builder).Append(101)
+	builder.Field(2).(*array.Int64Builder).Append(1)
+	builder.Field(3).(*array.BinaryBuilder).Append([]byte("lob-ref"))
+
+	record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{
+		common.RowIDField:     0,
+		common.TimeStampField: 1,
+		pkFieldID:             2,
+		textFieldID:           3,
+	})
+	defer record.Release()
+
+	values := make([]*Value, record.Len())
+	err := ValueDeserializerWithSchema(record, values, schema, true)
+	require.NoError(t, err)
+	textValue := values[0].Value.(map[FieldID]interface{})[textFieldID]
+	require.IsType(t, TextLobRef{}, textValue)
+	require.Equal(t, TextLobRef("lob-ref"), textValue)
+
+	rewrittenRecord, err := ValueSerializer(values, schema)
+	require.NoError(t, err)
+	defer rewrittenRecord.Release()
+	textColumn := rewrittenRecord.Column(textFieldID)
+	require.IsType(t, &array.Binary{}, textColumn)
+	require.Equal(t, []byte("lob-ref"), textColumn.(*array.Binary).Value(0))
+}
+
+func TestValueSerializerTextRejectsRawBytes(t *testing.T) {
+	const (
+		pkFieldID   FieldID = 100
+		textFieldID FieldID = 101
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "text_raw_bytes",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: textFieldID, Name: "content", DataType: schemapb.DataType_Text},
+		},
+	}
+	values := []*Value{
+		{
+			PK:        NewInt64PrimaryKey(1),
+			Timestamp: 101,
+			Value: map[FieldID]interface{}{
+				common.RowIDField:     int64(11),
+				common.TimeStampField: int64(101),
+				pkFieldID:             int64(1),
+				textFieldID:           []byte("raw-text-bytes"),
+			},
+		},
+	}
+
+	_, err := ValueSerializer(values, schema)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expected string value")
+}
+
 type nullableDenseVectorSerdeCase struct {
 	name     string
 	dataType schemapb.DataType

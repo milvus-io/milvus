@@ -429,8 +429,37 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 		return nil, err
 	}
 
-	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
+	textRefFields := make(map[FieldID]struct{})
+	for _, f := range allFieldsSchema {
+		types[f.FieldID] = f.DataType
+	}
+	for _, vv := range v {
+		m := vv.Value.(map[FieldID]any)
+		for fid, value := range m {
+			if types[fid] != schemapb.DataType_Text {
+				continue
+			}
+			switch value.(type) {
+			case TextLobRef:
+				textRefFields[fid] = struct{}{}
+			}
+		}
+	}
+	if len(textRefFields) > 0 {
+		fields := make([]arrow.Field, arrowSchema.NumFields())
+		for i := 0; i < arrowSchema.NumFields(); i++ {
+			fields[i] = arrowSchema.Field(i)
+			if i < len(allFieldsSchema) {
+				if _, ok := textRefFields[allFieldsSchema[i].FieldID]; ok {
+					fields[i].Type = arrow.BinaryTypes.Binary
+				}
+			}
+		}
+		arrowSchema = arrow.NewSchema(fields, nil)
+	}
+
+	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
 	for i, f := range allFieldsSchema {
 		if f.DataType == schemapb.DataType_ArrayOfVector {
@@ -439,7 +468,6 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 
 		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowSchema.Field(i).Type)
 		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
-		types[f.FieldID] = f.DataType
 	}
 
 	for _, vv := range v {

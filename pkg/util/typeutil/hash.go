@@ -187,3 +187,9 @@ func RearrangePartitionsForPartitionKey(partitions map[string]int64) ([]string, 
 
 	return partitionNames, partitionIDs, nil
 }
+
+func HashNamespace2Channels(namespace string, shardNames []string) uint32 {
+	numShard := uint32(len(shardNames))
+	hashValue := HashString2Uint32(namespace)
+	return hashValue % numShard
+}

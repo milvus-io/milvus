@@ -2721,6 +2721,56 @@ TEST(InvalidUTF8ConsistencyTest, InvalidContinuationByte) {
         << "RE2/Like must agree on invalid continuation byte";
 }
 
+// ============== Literal-wildcard operand Match Tests ==============
+// The LIKE optimizer (Go side) unescapes "\%" / "\_" into LITERAL bytes when it
+// lowers a pattern to Equal/Prefix/Postfix/InnerMatch, so the operand handed to
+// these executors can itself CONTAIN a '%' or '_'. They must be compared
+// verbatim as bytes — never re-interpreted as wildcards. (issue #43864)
+TEST(LiteralWildcardMatch, OperandContainsLiteralWildcardByte) {
+    using namespace milvus;
+
+    // InnerMatch: operand "abc%" is a literal substring needle.
+    EXPECT_TRUE(InnerMatch("xxabc%yy", "abc%"));
+    EXPECT_FALSE(InnerMatch("xxabcZyy", "abc%"))
+        << "literal '%' in the operand must not act as a wildcard";
+    EXPECT_FALSE(InnerMatch("abcdef", "abc%"));
+
+    // PrefixMatch: operand "abc%" is a literal prefix.
+    EXPECT_TRUE(PrefixMatch("abc%def", "abc%"));
+    EXPECT_FALSE(PrefixMatch("abcXdef", "abc%"));
+
+    // PostfixMatch: operand "abc%" is a literal suffix.
+    EXPECT_TRUE(PostfixMatch("xyzabc%", "abc%"));
+    EXPECT_FALSE(PostfixMatch("xyzabcX", "abc%"));
+
+    // A literal underscore must not act as the single-char wildcard either.
+    EXPECT_TRUE(InnerMatch("aa_bb", "a_b"));
+    EXPECT_FALSE(InnerMatch("aaXbb", "a_b"));
+    EXPECT_TRUE(PrefixMatch("a_bc", "a_b"));
+    EXPECT_FALSE(PrefixMatch("aXbc", "a_b"));
+
+    // Stronger decoys: a literal '%' must not behave like a MULTI-char wildcard
+    // ('.*') either. Each value would match if the operand's '%' were treated
+    // as a wildcard spanning several bytes, but it must stay a literal byte.
+    EXPECT_FALSE(InnerMatch("xxabcZZZZyy", "abc%"));
+    EXPECT_FALSE(PrefixMatch("abcXYZdef", "abc%"));
+    EXPECT_FALSE(PostfixMatch("xyzabcXYZ", "abc%"));
+
+    // The UNescaped '%' boundary — realized as the optimized Prefix/Postfix/
+    // Inner op — DOES match an arbitrarily long span on the wildcard side.
+    // (operand has no literal wildcard; long surroundings prove '%' is '.*').
+    const std::string longx(1000, 'x');
+    const std::string longy(1000, 'y');
+    EXPECT_TRUE(InnerMatch(longx + "abc" + longy, "abc"));  // from "%abc%"
+    EXPECT_TRUE(PrefixMatch("abc" + longy, "abc"));         // from "abc%"
+    EXPECT_TRUE(PostfixMatch(longx + "abc", "abc"));        // from "%abc"
+
+    // Combined: a literal '%' in the operand is matched verbatim while the
+    // wildcard boundary still spans the long surrounding text.
+    EXPECT_TRUE(InnerMatch(longx + "abc%" + longy, "abc%"));
+    EXPECT_FALSE(InnerMatch(longx + "abcZ" + longy, "abc%"));
+}
+
 // ============== NUL-aware Prefix/Postfix/Inner Match Tests ==============
 // Verify that PrefixMatch, PostfixMatch, and InnerMatch use length-aware
 // byte comparison (memcmp) instead of C-string semantics (strncmp),

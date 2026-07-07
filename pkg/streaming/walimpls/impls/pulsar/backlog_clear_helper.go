@@ -134,9 +134,7 @@ func (h *backlogClearHelper) closeConsumer() {
 	if h.reusedConsumer != nil {
 		h.reusedConsumer.Close()
 		h.reusedConsumer = nil
-		h.Logger().Info(context.TODO(),
-
-			"closed the reused consumer")
+		h.Logger().Info(context.TODO(), "closed the reused consumer")
 	}
 }
 

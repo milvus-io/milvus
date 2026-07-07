@@ -72,6 +72,72 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, 1, len(ex.taskCh))
 	})
 
+	t.Run("Test_Slots_NotBlocked_WhenEnqueueWaitsOnFullQueue", func(t *testing.T) {
+		ex := NewExecutor()
+		for i := 0; i < cap(ex.taskCh); i++ {
+			ex.taskCh <- nil
+		}
+
+		enqueueHoldingLock := make(chan struct{})
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(int64(100))
+		mockC.EXPECT().GetSlotUsage().Run(func() {
+			close(enqueueHoldingLock)
+		}).Return(int64(8))
+
+		enqueueDone := make(chan struct{})
+		go func() {
+			defer close(enqueueDone)
+			succeed, err := ex.Enqueue(mockC)
+			assert.True(t, succeed)
+			assert.NoError(t, err)
+		}()
+
+		require.Eventually(t, func() bool {
+			select {
+			case <-enqueueHoldingLock:
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
+
+		slotsDone := make(chan int64, 1)
+		go func() {
+			slotsDone <- ex.Slots()
+		}()
+
+		var slotsBlocked bool
+		select {
+		case slots := <-slotsDone:
+			assert.Equal(t, int64(8), slots)
+		case <-time.After(100 * time.Millisecond):
+			slotsBlocked = true
+		}
+
+		<-ex.taskCh
+		require.Eventually(t, func() bool {
+			select {
+			case <-enqueueDone:
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
+
+		if slotsBlocked {
+			require.Eventually(t, func() bool {
+				select {
+				case <-slotsDone:
+					return true
+				default:
+					return false
+				}
+			}, time.Second, 10*time.Millisecond)
+			require.Fail(t, "Slots blocked while Enqueue waited on a full task queue")
+		}
+	})
+
 	t.Run("Test_Enqueue_DefaultSlotUsage", func(t *testing.T) {
 		testCases := []struct {
 			name              string
@@ -392,6 +458,44 @@ func TestCompactionExecutor(t *testing.T) {
 
 		ex.completeTask(1, nil)
 
+		assert.Equal(t, int64(0), ex.Slots())
+	})
+
+	t.Run("Test_CompleteTask_DoesNotHoldLockDuringCallbacks", func(t *testing.T) {
+		ex := NewExecutor()
+		mockC := NewMockCompactor(t)
+		planID := int64(10)
+		slotUsage := int64(8)
+
+		ex.tasks[planID] = &taskState{
+			compactor: mockC,
+			state:     datapb.CompactionTaskState_executing,
+		}
+		ex.usingSlots = slotUsage
+
+		callbackSlots := make(chan int64, 2)
+		mockC.EXPECT().GetSlotUsage().Return(slotUsage)
+		mockC.EXPECT().Complete().Run(func() {
+			callbackSlots <- ex.Slots()
+		}).Return()
+		mockC.EXPECT().GetStorageConfig().Run(func() {
+			callbackSlots <- ex.Slots()
+		}).Return(nil)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ex.completeTask(planID, &datapb.CompactionPlanResult{PlanID: planID})
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("completeTask blocked while invoking compactor callbacks")
+		}
+
+		require.Equal(t, int64(0), <-callbackSlots)
+		require.Equal(t, int64(0), <-callbackSlots)
 		assert.Equal(t, int64(0), ex.Slots())
 	})
 

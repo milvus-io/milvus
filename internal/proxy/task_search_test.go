@@ -5491,6 +5491,19 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		}
 		return request
 	}
+	newL0FunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain) {
+		request := newRequest()
+		chainPB := l0FunctionChain()
+		request.FunctionChains = []*schemapb.FunctionChain{chainPB}
+		return request, chainPB
+	}
+	newMixedFunctionChainRequest := func() (*milvuspb.SearchRequest, *schemapb.FunctionChain, *schemapb.FunctionChain) {
+		request := newRequest()
+		l0Chain := l0FunctionChain()
+		l2Chain := l2FunctionChain(mapOp("score1", "expr", columnArg("ts")), mapOp("$score", "expr", columnArg("score1"), columnArg("$score")))
+		request.FunctionChains = []*schemapb.FunctionChain{l0Chain, l2Chain}
+		return request, l0Chain, l2Chain
+	}
 	newTask := func(request *milvuspb.SearchRequest) *searchTask {
 		translatedOutputFields, _, _, _, _, err := translateOutputFields(request.GetOutputFields(), schemaInfo, true)
 		require.NoError(t, err)
@@ -5591,6 +5604,44 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+
+	t.Run("ordinary search routes l0 chain to querynode plan", func(t *testing.T) {
+		request, chainPB := newL0FunctionChainRequest()
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		assert.Nil(t, task.rerankMeta)
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(chainPB, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search routes l0 chain and keeps l2 rerank meta", func(t *testing.T) {
+		request, l0Chain, _ := newMixedFunctionChainRequest()
+		task := newTask(request)
+
+		require.NoError(t, task.initSearchRequest(ctx))
+		meta, ok := task.rerankMeta.(*functionChainRerankMeta)
+		require.True(t, ok)
+		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetQuerynodeFunctionChains(), 1)
+		assert.True(t, proto.Equal(l0Chain, plan.GetQuerynodeFunctionChains()[0]))
+	})
+
+	t.Run("ordinary search rejects order by with l0 function chain", func(t *testing.T) {
+		request, _ := newL0FunctionChainRequest()
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: OrderByFieldsKey, Value: "ts:asc"})
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "order_by and function rerank cannot be used together")
 	})
 }
 

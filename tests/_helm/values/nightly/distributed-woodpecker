@@ -97,8 +97,6 @@ extraConfigFiles:
           enabled: true
         storageFormat:
           enabled: true
-      targetVecIndexVersion: 10
-      compaction:
         bumpSchemaVersion:
           enabled: true
       gc:

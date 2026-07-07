@@ -58,6 +58,50 @@ func TestValidateFunctionChainSearchRequest(t *testing.T) {
 	})
 }
 
+func TestSplitFunctionChainsByStage(t *testing.T) {
+	t.Run("split l0 and l2 chains", func(t *testing.T) {
+		l0Chain := l0FunctionChain()
+		l2Chain := l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName)))
+
+		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l0Chain, l2Chain})
+		require.NoError(t, err)
+		assert.Equal(t, []*schemapb.FunctionChain{l2Chain}, l2Chains)
+		assert.Equal(t, []*schemapb.FunctionChain{l0Chain}, querynodeChains)
+	})
+
+	t.Run("l0 chain is shallow routed without op validation", func(t *testing.T) {
+		l0Chain := l0FunctionChain()
+
+		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l0Chain})
+		require.NoError(t, err)
+		assert.Empty(t, l2Chains)
+		assert.Equal(t, []*schemapb.FunctionChain{l0Chain}, querynodeChains)
+	})
+
+	t.Run("nil chain", func(t *testing.T) {
+		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{nil})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function chain[0] is nil")
+	})
+
+	t.Run("duplicate stage", func(t *testing.T) {
+		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{
+			l0FunctionChain(),
+			l0FunctionChain(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "appears more than once")
+	})
+
+	t.Run("l1 is not supported yet", func(t *testing.T) {
+		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{{
+			Stage: schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
+		}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is not supported yet")
+	})
+}
+
 func TestNewFunctionChainRerankMeta(t *testing.T) {
 	schema := newFunctionChainTestSchema()
 
@@ -231,6 +275,13 @@ func newFunctionChainStructTestSchema() *schemaInfo {
 func l2FunctionChain(ops ...*schemapb.FunctionChainOp) *schemapb.FunctionChain {
 	return &schemapb.FunctionChain{
 		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops:   ops,
+	}
+}
+
+func l0FunctionChain(ops ...*schemapb.FunctionChainOp) *schemapb.FunctionChain {
+	return &schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
 		Ops:   ops,
 	}
 }

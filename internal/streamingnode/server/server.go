@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -46,6 +47,10 @@ func (s *Server) init() {
 
 	// init file resource manager
 	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()))
+
+	if err := analyzer.InitOptions(); err != nil {
+		panic(fmt.Sprintf("init analyzer options failed, %+v", err))
+	}
 
 	mlog.Info(context.TODO(), "init query segcore...")
 	if err := initcore.InitQueryNode(context.TODO()); err != nil {

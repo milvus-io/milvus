@@ -871,12 +871,25 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
+
+	forceOverrideHandler := config.NewHandler("watchForceOverrideUserReplicaModeChanges", func(e *config.Event) { w.Trigger() })
+	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, forceOverrideHandler)
 }
 
 // GetInternalReplicasByCollection returns replicas for a collection from internal meta.
 // This method provides access to internal replica information including resource groups.
 func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
 	return s.meta.GetByCollection(ctx, collectionID)
+}
+
+// IsCollectionUserSpecifiedReplicaMode returns whether the collection load config
+// was created from a request with an explicit replica number.
+func (s *Server) IsCollectionUserSpecifiedReplicaMode(ctx context.Context, collectionID int64) bool {
+	if s.meta == nil {
+		return false
+	}
+	collection := s.meta.GetCollection(ctx, collectionID)
+	return collection != nil && collection.UserSpecifiedReplicaMode
 }
 
 // CheckAllReplicasServiceable returns an error if any replica has a non-serviceable

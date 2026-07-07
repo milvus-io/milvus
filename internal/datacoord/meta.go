@@ -1574,7 +1574,7 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 					mlog.Int64("segment binlog row count (correct)", count))
 			}
 			segment.NumOfRows = count
-		} else if cpNumRows > 0 {
+		} else if cpNumRows > 0 && segment.GetStorageVersion() == storage.StorageV3 {
 			// V3 storage: binlogs are empty, use checkpoint's NumOfRows
 			segment.NumOfRows = cpNumRows
 		}

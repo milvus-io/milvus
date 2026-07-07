@@ -1043,6 +1043,21 @@ struct TantivyIndexWrapper {
     }
 
     void
+    fuzzy_match_query(const std::string& query,
+                      uint32_t max_edit_distance,
+                      void* bitset) {
+        auto array = tantivy_fuzzy_match_query(
+            reader_, query.c_str(), max_edit_distance, bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.fuzzy_match_query: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.fuzzy_match_query: invalid result type");
+    }
+
+    void
     ngram_match_query(const std::string& literal,
                       uintptr_t min_gram,
                       uintptr_t max_gram,

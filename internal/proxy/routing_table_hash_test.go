@@ -84,6 +84,8 @@ func TestRepackDeleteMsgByHashPreservesModuloRouting(t *testing.T) {
 		2,
 		"partition",
 		"default",
+		nil,
+		nil,
 	)
 
 	assert.NoError(t, err)
@@ -125,6 +127,8 @@ func TestRepackDeleteMsgByHashReturnsRoutingErrorWithoutChannels(t *testing.T) {
 		2,
 		"partition",
 		"default",
+		nil,
+		nil,
 	)
 
 	assert.ErrorIs(t, err, common.ErrRoutingTableNoValues)

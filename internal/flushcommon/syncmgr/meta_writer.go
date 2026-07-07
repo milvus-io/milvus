@@ -170,10 +170,7 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 
 	insertFieldBinlogs := segment.Binlogs()
 	if len(task.insertBinlogs) > 0 {
-		// Growing-source V3 insert binlogs are column-group skeletons. They
-		// fully describe the current layout, so do not append them to older
-		// skeletons from previous incremental syncs.
-		insertFieldBinlogs = storage.SortFieldBinlogs(task.insertBinlogs)
+		insertFieldBinlogs = append(segment.Binlogs(), storage.SortFieldBinlogs(task.insertBinlogs)...)
 	}
 	statsFieldBinlogs := segment.Statslogs()
 	deltaFieldBinlogs := segment.Deltalogs()

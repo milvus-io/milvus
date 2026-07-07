@@ -114,9 +114,10 @@ type growingSourceProgress struct {
 }
 
 type growingSourcePendingCommittedFlush struct {
-	targetOffset int64
-	manifestPath string
-	bm25Stats    map[int64]*storage.BM25Stats
+	targetOffset  int64
+	manifestPath  string
+	bm25Stats     map[int64]*storage.BM25Stats
+	insertBinlogs map[int64]*datapb.FieldBinlog
 }
 
 // growingFlushSourceDecision is the in-memory result of decideGrowingFlushSource.
@@ -280,6 +281,7 @@ type writeBufferBase struct {
 	growingSourceRetryInterval  time.Duration
 	growingSourceRetryScheduled bool
 	growingSourceRetryTimer     *time.Timer
+	flushSourceModeNotifier     FlushSourceModeNotifier
 	closed                      bool
 
 	// pre build logger
@@ -333,6 +335,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		growingSourceResolver:      growingSourceResolver,
 		growingSourceProgress:      make(map[int64]*growingSourceProgress),
 		growingSourceRetryInterval: growingSourceRetryInterval,
+		flushSourceModeNotifier:    option.flushSourceModeNotifier,
 	}
 
 	wb.logger = mlog.With(mlog.Int64("collectionID", wb.collectionID),
@@ -806,6 +809,7 @@ func (wb *writeBufferBase) recordGrowingSourceProgress(inData *InsertData, start
 		metacache.SetFlushSourceMode(metacache.FlushSourceGrowing),
 		wb.updateGrowingSourceBufferedRows(progress),
 	), metacache.WithSegmentIDs(inData.segmentID))
+	wb.notifyFlushSourceMode(inData.segmentID)
 }
 
 func (wb *writeBufferBase) growingSourceTargetOffset(segmentID int64, rows int64) int64 {
@@ -937,9 +941,10 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 					if err != nil {
 						if growingSourceTask.HasCommittedFlush() && growingSourceTask.CommittedManifestPath() != "" {
 							progress.pendingCommitted = &growingSourcePendingCommittedFlush{
-								targetOffset: growingSourceTask.TargetOffset(),
-								manifestPath: growingSourceTask.CommittedManifestPath(),
-								bm25Stats:    cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
+								targetOffset:  growingSourceTask.TargetOffset(),
+								manifestPath:  growingSourceTask.CommittedManifestPath(),
+								bm25Stats:     cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
+								insertBinlogs: growingSourceTask.CommittedInsertBinlogs(),
 							}
 						}
 						progress.failSync(err)
@@ -1157,10 +1162,25 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64, timetick uint64) *
 				metacache.SetFlushSourceMode(metacache.FlushSourceWriteBuffer),
 				metacache.WithSegmentIDs(segmentID),
 			)
+			wb.notifyFlushSourceMode(segmentID)
 		}
 	}
 
 	return buffer
+}
+
+func (wb *writeBufferBase) notifyFlushSourceMode(segmentID int64) {
+	if wb.flushSourceModeNotifier == nil {
+		return
+	}
+	segment, ok := wb.metaCache.GetSegmentByID(segmentID)
+	if !ok {
+		return
+	}
+	switch mode := segment.FlushSourceMode(); mode {
+	case metacache.FlushSourceWriteBuffer, metacache.FlushSourceGrowing:
+		wb.flushSourceModeNotifier(segmentID, mode)
+	}
 }
 
 func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, map[int64]*storage.BM25Stats, *storage.DeleteData, *schemapb.CollectionSchema, *TimeRange, *msgpb.MsgPosition) {
@@ -1480,7 +1500,7 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			task.WithSource(source)
 		}
 		if pendingCommitted != nil {
-			task.WithCommittedFlush(pendingCommitted.manifestPath, cloneBM25StatsMap(pendingCommitted.bm25Stats))
+			task.WithCommittedFlush(pendingCommitted.manifestPath, cloneBM25StatsMap(pendingCommitted.bm25Stats), pendingCommitted.insertBinlogs)
 		}
 		if segmentInfo.State() == commonpb.SegmentState_Flushing {
 			task.WithFlush()

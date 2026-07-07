@@ -70,6 +70,8 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
 			SchemaManager:      newVersionedSchemaManager(createCollectionMsg.VChannel(), impl.rs),
+			FlushSourceModeNotifier: resource.Resource().SegmentStatsManager().
+				UpdateFlushSourceMode,
 		},
 		msgChan,
 		&datapb.VchannelInfo{
@@ -255,6 +257,8 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
 			SchemaManager:      newVersionedSchemaManager(recoverInfo.GetInfo().GetChannelName(), impl.rs),
+			FlushSourceModeNotifier: resource.Resource().SegmentStatsManager().
+				UpdateFlushSourceMode,
 		},
 		&datapb.ChannelWatchInfo{Vchan: recoverInfo.GetInfo(), Schema: schema},
 		input,

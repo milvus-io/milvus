@@ -53,21 +53,27 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
     return key;
 }
 
-void
+}  // namespace
+
+bool
 ConvertPredicateToFilteredBitset(TargetBitmapView data,
                                  TargetBitmapView valid,
                                  const size_t size) {
     // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
     // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
     // excluded together with FALSE.
+    if (valid.all()) {
+        data.flip();
+        return true;
+    }
+
     data.flip();
     TargetBitmap invalid(valid);
     invalid.flip();
     data.inplace_or(invalid, size);
     valid.set();
+    return false;
 }
-
-}  // namespace
 
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
