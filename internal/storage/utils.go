@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -1709,10 +1710,36 @@ func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msg
 
 	insertRecord := &segcorepb.InsertRecord{
 		NumRows:    int64(msg.NumRows),
-		FieldsData: make([]*schemapb.FieldData, 0),
+		FieldsData: make([]*schemapb.FieldData, 0, len(msg.FieldsData)),
 	}
 
-	insertRecord.FieldsData = append(insertRecord.FieldsData, msg.FieldsData...)
+	// The payload was written under the schema version at WAL-append time. On WAL
+	// replay after schema changes, it may still carry columns of since-dropped
+	// fields, while the growing segment is rebuilt with the current schema and can
+	// never own such columns (segcore hard-asserts on unknown fields). Dropped-field
+	// data is unqueryable by definition, so skip those columns instead of passing
+	// them through.
+	knownFields := typeutil.NewSet[int64]()
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		knownFields.Insert(field.GetFieldID())
+	}
+	var skippedFields []int64
+	for _, fieldData := range msg.FieldsData {
+		if !knownFields.Contain(fieldData.GetFieldId()) {
+			skippedFields = append(skippedFields, fieldData.GetFieldId())
+			continue
+		}
+		insertRecord.FieldsData = append(insertRecord.FieldsData, fieldData)
+	}
+	if len(skippedFields) > 0 {
+		mlog.Warn(context.TODO(), "skip insert payload fields absent from current schema, fields are dropped since the message was written",
+			mlog.FieldCollectionID(msg.GetCollectionID()),
+			mlog.FieldSegmentID(msg.GetSegmentID()),
+			mlog.Int64s("skippedFieldIDs", skippedFields))
+		metrics.QueryNodeSkippedInsertFieldCount.
+			WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(msg.GetCollectionID())).
+			Add(float64(len(skippedFields)))
+	}
 
 	return insertRecord, nil
 }
