@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/function"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -45,8 +46,27 @@ type insertNode struct {
 	functionStore *function.FunctionRunnerLocalStore
 }
 
-func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
-	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
+// verifyPayloadFields checks the payload columns against the message's own era
+// schema. Era-consistent producers (proxy validation plus WAL-append
+// materialization) never emit a column outside the schema the message was
+// written under, so a payload field missing from its era schema can only be a
+// corrupted payload and must not be silently dropped. When no era schema is
+// available (fallback to the current schema), this check is skipped by the
+// caller: an unknown field there is either a since-dropped field skipped by the
+// downstream filter, or left to segcore's own invariant check.
+func (iNode *insertNode) verifyPayloadFields(msg *InsertMsg, eraSchema *schemapb.CollectionSchema, eraFields typeutil.Set[int64]) error {
+	for _, fieldData := range msg.GetFieldsData() {
+		if !eraFields.Contain(fieldData.GetFieldId()) {
+			return merr.WrapErrServiceInternal(fmt.Sprintf(
+				"insert payload of segment %d carries field %d absent from its era schema (version %d), payload is corrupted",
+				msg.SegmentID, fieldData.GetFieldId(), eraSchema.GetVersion()))
+		}
+	}
+	return nil
+}
+
+func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, schemaForMsg *schemapb.CollectionSchema, eraForCreation *schemapb.CollectionSchema) {
+	insertRecord, err := storage.TransferInsertMsgToInsertRecord(schemaForMsg, msg)
 	if err != nil {
 		err = merr.Wrap(err, "failed to get primary keys")
 		mlog.Error(context.TODO(), err.Error(), mlog.Int64("collectionID", iNode.collectionID), mlog.String("channel", iNode.channel))
@@ -61,6 +81,10 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 				Timestamp:   msg.BeginTs(),
 				ChannelName: msg.GetShardName(),
 			},
+			// The first message decides the creation schema of a not-yet-known
+			// growing segment; the fence on schema change guarantees all its
+			// messages share one era.
+			Schema: eraForCreation,
 		}
 		insertDatas[msg.SegmentID] = iData
 	} else {
@@ -72,12 +96,12 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
-	if err := iNode.appendBM25Stats(iData, msg, collection.Schema()); err != nil {
+	if err := iNode.appendBM25Stats(iData, msg, schemaForMsg); err != nil {
 		mlog.Error(context.TODO(), "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 		panic(err)
 	}
 
-	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
+	pks, err := segments.GetPrimaryKeys(msg, schemaForMsg)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to get primary keys from insert message", mlog.Err(err))
 		panic(err)
@@ -114,21 +138,69 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 			panic("insertNode with collection not exist")
 		}
 		schema := collection.Schema()
-		functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
-		if err != nil {
-			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
-			panic(err)
+
+		// The era-schema resolver exists only when this process serves the
+		// channel's WAL (streaming node). The era schema equals the current
+		// schema on the live path and differs only while replaying messages
+		// written before later schema changes.
+		resolver, resolverErr := registry.GetLocalSchemaResolver(iNode.channel)
+
+		// Field-id sets memoized per distinct schema snapshot in this batch.
+		fieldSets := make(map[*schemapb.CollectionSchema]typeutil.Set[int64])
+		getFieldSet := func(s *schemapb.CollectionSchema) typeutil.Set[int64] {
+			set, ok := fieldSets[s]
+			if !ok {
+				set = typeutil.NewSet[int64]()
+				for _, field := range typeutil.GetAllFieldSchemas(s) {
+					set.Insert(field.GetFieldID())
+				}
+				fieldSets[s] = set
+			}
+			return set
 		}
 
 		insertDatas := make(map[UniqueID]*delegator.InsertData)
 		for _, msg := range nodeMsg.insertMsgs {
+			// Interpret each message under the schema of its own era so that
+			// payload verification, function-output fill and segment creation
+			// all share one schema snapshot; fall back to the current schema
+			// when no local schema history is available.
+			schemaForMsg, isEra := schema, false
+			if resolverErr == nil {
+				eraSchema, err := resolver.GetSchema(context.TODO(), iNode.channel, msg.EndTs())
+				if err != nil || eraSchema == nil {
+					mlog.Warn(context.TODO(), "failed to resolve era schema for insert message, fall back to current schema",
+						mlog.String("channel", iNode.channel),
+						mlog.Uint64("timetick", msg.EndTs()),
+						mlog.Err(err))
+				} else {
+					schemaForMsg, isEra = eraSchema, true
+				}
+			}
+			if isEra {
+				if err := iNode.verifyPayloadFields(msg, schemaForMsg, getFieldSet(schemaForMsg)); err != nil {
+					mlog.Error(context.TODO(), "corrupted insert payload detected", mlog.String("channel", iNode.channel), mlog.Err(err))
+					panic(err)
+				}
+			}
+			functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schemaForMsg)
+			if err != nil {
+				mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
+				panic(err)
+			}
 			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
-				if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
+				if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schemaForMsg, msg.InsertRequest); err != nil {
 					mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 					panic(err)
 				}
 			}
-			iNode.addInsertData(insertDatas, msg, collection)
+			// Only a genuinely older era schema is carried to segment creation;
+			// the live path (era == current) keeps the existing creation flow.
+			eraForCreation := schemaForMsg
+			if !isEra || schemaForMsg.GetVersion() == schema.GetVersion() {
+				eraForCreation = nil
+			}
+			iNode.addInsertData(insertDatas, msg, schemaForMsg, eraForCreation)
 		}
 
 		iNode.delegator.ProcessInsert(insertDatas)

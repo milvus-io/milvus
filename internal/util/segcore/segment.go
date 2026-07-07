@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
@@ -51,6 +52,12 @@ type CreateCSegmentRequest struct {
 	SegmentType SegmentType
 	IsSorted    bool
 	LoadInfo    *querypb.SegmentLoadInfo
+	// Schema optionally builds a GROWING segment's columns from this (era)
+	// schema instead of the collection's current schema; used on WAL replay so
+	// replayed payloads always match the segment column set. The segment is
+	// created with segcore schema version 0 so the first query's
+	// LazyCheckSchema upgrades it to the collection's current schema in place.
+	Schema *schemapb.CollectionSchema
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -70,7 +77,29 @@ func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
 func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
 	var status C.CStatus
-	if req.LoadInfo != nil {
+	if req.Schema != nil {
+		if req.SegmentType != SegmentTypeGrowing {
+			return nil, merr.WrapErrServiceInternal("explicit schema is only supported for growing segment creation")
+		}
+		schemaBlob, err := proto.Marshal(req.Schema)
+		if err != nil {
+			return nil, err
+		}
+		var loadInfoBlob []byte
+		if req.LoadInfo != nil {
+			segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+			if loadInfoBlob, err = proto.Marshal(segLoadInfo); err != nil {
+				return nil, err
+			}
+		}
+		var loadInfoPtr *C.uint8_t
+		if len(loadInfoBlob) > 0 {
+			loadInfoPtr = (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0]))
+		}
+		status = C.NewGrowingSegmentWithSchema(req.Collection.rawPointer(), C.int64_t(req.SegmentID), &ptr,
+			(*C.uint8_t)(unsafe.Pointer(&schemaBlob[0])), C.int64_t(len(schemaBlob)), C.uint64_t(0),
+			loadInfoPtr, C.int64_t(len(loadInfoBlob)))
+	} else if req.LoadInfo != nil {
 		segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {

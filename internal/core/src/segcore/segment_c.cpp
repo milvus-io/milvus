@@ -218,6 +218,43 @@ ParseFlushSchema(const void* schema_blob, const int64_t schema_length) {
     return milvus::Schema::ParseFrom(collection_schema);
 }
 
+CStatus
+NewGrowingSegmentWithSchema(CCollection collection,
+                            int64_t segment_id,
+                            CSegmentInterface* newSegment,
+                            const uint8_t* schema_blob,
+                            const int64_t schema_length,
+                            const uint64_t schema_version,
+                            const uint8_t* load_info_blob,
+                            const int64_t load_info_length) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
+        // Build the segment columns from the explicit (era) schema instead of
+        // the collection's current schema; the segment upgrades to newer schema
+        // versions through the regular LazyCheckSchema/Reopen path afterwards.
+        auto schema =
+            ParseReopenSchema(schema_blob, schema_length, schema_version);
+        auto segment = milvus::segcore::CreateGrowingSegment(
+            schema,
+            col->get_index_meta(),
+            segment_id,
+            milvus::segcore::SegcoreConfig::default_config());
+        if (load_info_blob != nullptr && load_info_length > 0) {
+            milvus::proto::segcore::SegmentLoadInfo load_info;
+            auto suc =
+                load_info.ParseFromArray(load_info_blob, load_info_length);
+            AssertInfo(suc, "unmarshal load info failed");
+            segment->SetLoadInfo(std::move(load_info));
+        }
+        *newSegment = segment.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 CFuture*
 AsyncReopenSegment(CTraceContext c_trace,
                    CSegmentInterface c_segment,

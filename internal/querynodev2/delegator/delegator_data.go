@@ -130,6 +130,12 @@ type InsertData struct {
 
 	StartPosition *msgpb.MsgPosition
 	PartitionID   int64
+	// Schema optionally carries the era schema the insert payload was written
+	// under (resolved from the wal recovery storage on replay). When set, a
+	// growing segment created for this data builds its columns from it instead
+	// of the collection's current schema, so the payload always matches the
+	// segment column set. Nil on the live path.
+	Schema *schemapb.CollectionSchema
 }
 
 type DeleteData struct {
@@ -178,6 +184,9 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					DeltaPosition: insertData.StartPosition,
 					Level:         datapb.SegmentLevel_L1,
 				},
+				// nil on the live path; on replay carries the payload's era
+				// schema so the segment columns match the replayed data.
+				segments.WithCreationSchema(insertData.Schema),
 			)
 			if err != nil {
 				log.Error(context.TODO(), "failed to create new segment",

@@ -395,12 +395,30 @@ type LocalSegment struct {
 	fieldJSONStatsMu   sync.RWMutex
 }
 
+// creationOption customizes segcore segment creation.
+type creationOption func(*creationOptions)
+
+type creationOptions struct {
+	schema *schemapb.CollectionSchema
+}
+
+// WithCreationSchema builds a growing segment's columns from the given (era)
+// schema instead of the collection's current schema. Used on WAL replay so the
+// replayed payloads always match the segment column set; the segment upgrades
+// to the collection's current schema through the regular LazyCheckSchema path.
+func WithCreationSchema(schema *schemapb.CollectionSchema) creationOption {
+	return func(o *creationOptions) {
+		o.schema = schema
+	}
+}
+
 func NewSegment(ctx context.Context,
 	collection *Collection,
 	manager SegmentManager,
 	segmentType SegmentType,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
+	opts ...creationOption,
 ) (Segment, error) {
 	/*
 		CStatus
@@ -408,6 +426,10 @@ func NewSegment(ctx context.Context,
 	*/
 	if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
 		return NewL0Segment(collection, segmentType, version, loadInfo)
+	}
+	creationOpts := &creationOptions{}
+	for _, opt := range opts {
+		opt(creationOpts)
 	}
 
 	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
@@ -442,6 +464,7 @@ func NewSegment(ctx context.Context,
 			SegmentType: segmentType,
 			IsSorted:    loadInfo.GetIsSorted(),
 			LoadInfo:    loadInfo,
+			Schema:      creationOpts.schema,
 		})
 		return nil, err
 	}).Await(); err != nil {

@@ -59,6 +59,35 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length);
+
+/**
+ * @brief Create a new growing segment with an explicit schema
+ * Unlike NewSegmentWithLoadInfo, the segment columns are built from the given
+ * schema blob instead of the collection's current schema. Used on WAL replay to
+ * rebuild a growing segment under the schema in effect when its data was
+ * written (its era schema), so replayed payloads always match the column set.
+ *
+ * @param collection: The collection that this segment belongs to (index meta source)
+ * @param segment_id: Unique identifier for this segment
+ * @param newSegment: Output parameter for the created segment interface
+ * @param schema_blob: Serialized CollectionSchema proto the columns are built from
+ * @param schema_length: Length of schema_blob in bytes
+ * @param schema_version: segcore schema version token for the created segment;
+ *        pass a token lower than the collection's current one (e.g. 0) so the
+ *        first query's LazyCheckSchema upgrades the segment schema in place
+ * @param load_info_blob: Serialized load information blob (optional, may be null)
+ * @param load_info_length: Length of load_info_blob in bytes
+ * @return CStatus indicating success or failure
+ */
+CStatus
+NewGrowingSegmentWithSchema(CCollection collection,
+                            int64_t segment_id,
+                            CSegmentInterface* newSegment,
+                            const uint8_t* schema_blob,
+                            const int64_t schema_length,
+                            const uint64_t schema_version,
+                            const uint8_t* load_info_blob,
+                            const int64_t load_info_length);
 /**
  * @brief Dispatch a segment manage load task.
  * This function make segment itself load index & field data according to load info previously set.

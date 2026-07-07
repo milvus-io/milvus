@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
@@ -53,8 +54,13 @@ func RecoverWALFlusher(param *RecoverWALFlusherParam) *WALFlusherImpl {
 		metrics:              newFlusherMetrics(param.ChannelInfo),
 		emptyTimeTickCounter: metrics.WALFlusherEmptyTimeTickFilteredTotal.WithLabelValues(paramtable.GetStringNodeID(), param.ChannelInfo.Name),
 		rateLimitComponent:   param.RateLimitComponent,
+		pchannel:             param.ChannelInfo.Name,
 		RecoveryStorage:      param.RecoveryStorage,
 	}
+	// The recovery storage is already recovered here; expose its persisted schema
+	// history to local consumers (e.g. the embedded querynode pipeline) so replayed
+	// messages can be interpreted under their own era schema.
+	registry.RegisterLocalSchemaResolver(flusher.pchannel, param.RecoveryStorage)
 	go flusher.Execute(param.RecoverySnapshot)
 	return flusher
 }
@@ -68,6 +74,7 @@ type WALFlusherImpl struct {
 	lastDispatchTimeTick uint64 // The last time tick that the message is dispatched.
 	emptyTimeTickCounter prometheus.Counter
 	rateLimitComponent   *rate.WALRateLimitComponent
+	pchannel             string
 	recovery.RecoveryStorage
 }
 
@@ -144,6 +151,10 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 func (impl *WALFlusherImpl) Close() {
 	impl.notifier.Cancel()
 	impl.notifier.BlockUntilFinish()
+
+	// Unregister BEFORE closing the recovery storage so a resolver obtained from
+	// the registry never outlives its backing storage.
+	registry.UnregisterLocalSchemaResolver(impl.pchannel)
 
 	impl.logger.Info(context.TODO(), "wal flusher start to close the recovery storage...")
 	impl.RecoveryStorage.Close()
