@@ -139,6 +139,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                 ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType: {}", op));
         }
+        OrF64Range(bitset, value, op);
         OrU64Range(bitset, U64RangeForValue(value, op));
         OrI64Range(bitset, I64RangeForValue(value, op));
         return bitset;
@@ -165,6 +166,11 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                                          lb_inclusive,
                                          ub_inclusive,
                                          &bitset);
+        OrF64Range(bitset,
+                   lower_bound_value,
+                   lb_inclusive,
+                   upper_bound_value,
+                   ub_inclusive);
         OrU64Range(bitset,
                    U64RangeForBounds(lower_bound_value,
                                      lb_inclusive,
@@ -291,6 +297,77 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                                          true,
                                          true,
                                          &bitset);
+    }
+
+    void
+    OrF64Range(TargetBitmap& bitset, T value, OpType op) {
+        if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
+            auto double_value = static_cast<double>(value);
+            switch (op) {
+                case OpType::LessThan: {
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double{},
+                                                     double_value,
+                                                     true,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     &bitset);
+                } break;
+                case OpType::LessEqual: {
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double{},
+                                                     double_value,
+                                                     true,
+                                                     false,
+                                                     true,
+                                                     false,
+                                                     &bitset);
+                } break;
+                case OpType::GreaterThan: {
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double_value,
+                                                     double{},
+                                                     false,
+                                                     true,
+                                                     false,
+                                                     false,
+                                                     &bitset);
+                } break;
+                case OpType::GreaterEqual: {
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double_value,
+                                                     double{},
+                                                     false,
+                                                     true,
+                                                     true,
+                                                     false,
+                                                     &bitset);
+                } break;
+                default:
+                    ThrowInfo(OpTypeInvalid,
+                              fmt::format("Invalid OperatorType: {}", op));
+            }
+        }
+    }
+
+    void
+    OrF64Range(TargetBitmap& bitset,
+               T lower_bound_value,
+               bool lb_inclusive,
+               T upper_bound_value,
+               bool ub_inclusive) {
+        if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
+            this->wrapper_->json_range_query(
+                json_path_,
+                static_cast<double>(lower_bound_value),
+                static_cast<double>(upper_bound_value),
+                false,
+                false,
+                lb_inclusive,
+                ub_inclusive,
+                &bitset);
+        }
     }
 
     template <typename Predicate>
@@ -628,7 +705,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     static I64Range
     I64RangeForValue(T value, OpType op) {
-        if constexpr (std::is_floating_point_v<T>) {
+        if constexpr (std::is_floating_point_v<T> ||
+                      (std::is_integral_v<T> && std::is_unsigned_v<T> &&
+                       !std::is_same_v<T, bool>)) {
             return DoubleI64RangeForValue(static_cast<double>(value), op);
         } else {
             return std::nullopt;
@@ -640,7 +719,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                       bool lb_inclusive,
                       T upper_bound_value,
                       bool ub_inclusive) {
-        if constexpr (std::is_floating_point_v<T>) {
+        if constexpr (std::is_floating_point_v<T> ||
+                      (std::is_integral_v<T> && std::is_unsigned_v<T> &&
+                       !std::is_same_v<T, bool>)) {
             return DoubleI64RangeForBounds(
                 static_cast<double>(lower_bound_value),
                 lb_inclusive,

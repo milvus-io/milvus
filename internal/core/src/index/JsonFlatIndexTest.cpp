@@ -514,7 +514,7 @@ TEST(JsonFlatIndexUint64Test, TestNumericQueriesIncludeMixedIntegerTerms) {
     EXPECT_FALSE(greater_than_nine[0]);
     EXPECT_FALSE(greater_than_nine[1]);
     EXPECT_TRUE(greater_than_nine[2]);
-    EXPECT_FALSE(greater_than_nine[3]);
+    EXPECT_TRUE(greater_than_nine[3]);
     EXPECT_TRUE(greater_than_nine[4]);
     EXPECT_TRUE(greater_than_nine[5]);
     EXPECT_FALSE(greater_than_nine[6]);
@@ -555,6 +555,31 @@ TEST(JsonFlatIndexUint64Test, TestNumericQueriesIncludeMixedIntegerTerms) {
     EXPECT_FALSE(double_bounded[5]);
     EXPECT_FALSE(double_bounded[6]);
     EXPECT_FALSE(double_bounded[7]);
+
+    auto u64_executor = json_index->create_executor<uint64_t>(json_path);
+    auto u64_greater_than_nine =
+        u64_executor->Range(uint64_t(9), OpType::GreaterThan);
+    ASSERT_EQ(u64_greater_than_nine.size(), 8);
+    EXPECT_FALSE(u64_greater_than_nine[0]);
+    EXPECT_FALSE(u64_greater_than_nine[1]);
+    EXPECT_TRUE(u64_greater_than_nine[2]);
+    EXPECT_TRUE(u64_greater_than_nine[3]);
+    EXPECT_TRUE(u64_greater_than_nine[4]);
+    EXPECT_TRUE(u64_greater_than_nine[5]);
+    EXPECT_FALSE(u64_greater_than_nine[6]);
+    EXPECT_FALSE(u64_greater_than_nine[7]);
+
+    auto u64_bounded =
+        u64_executor->Range(uint64_t(0), true, uint64_t(11), true);
+    ASSERT_EQ(u64_bounded.size(), 8);
+    EXPECT_FALSE(u64_bounded[0]);
+    EXPECT_TRUE(u64_bounded[1]);
+    EXPECT_TRUE(u64_bounded[2]);
+    EXPECT_TRUE(u64_bounded[3]);
+    EXPECT_FALSE(u64_bounded[4]);
+    EXPECT_FALSE(u64_bounded[5]);
+    EXPECT_FALSE(u64_bounded[6]);
+    EXPECT_FALSE(u64_bounded[7]);
 }
 
 TEST_F(JsonFlatIndexTest, TestArrayStringInQuery) {
