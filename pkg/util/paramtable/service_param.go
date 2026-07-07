@@ -698,6 +698,8 @@ type WoodpeckerConfig struct {
 	// client
 	AppendQueueSize         ParamItem `refreshable:"true"`
 	AppendMaxRetries        ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries   ParamItem `refreshable:"true"`
+	AppendMaxBatchBytes     ParamItem `refreshable:"true"`
 	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
 	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
 	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
@@ -718,6 +720,7 @@ type WoodpeckerConfig struct {
 	// logstore
 	SyncMaxInterval                ParamItem `refreshable:"true"`
 	SyncMaxIntervalForLocalStorage ParamItem `refreshable:"true"`
+	SyncMaxIntervalForService      ParamItem `refreshable:"true"`
 	SyncMaxBytes                   ParamItem `refreshable:"true"`
 	SyncMaxEntries                 ParamItem `refreshable:"true"`
 	FlushMaxRetries                ParamItem `refreshable:"true"`
@@ -774,6 +777,24 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AppendMaxRetries.Init(base.mgr)
+
+	p.AppendMaxBatchEntries = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchEntries",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.",
+		Export:       true,
+	}
+	p.AppendMaxBatchEntries.Init(base.mgr)
+
+	p.AppendMaxBatchBytes = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchBytes",
+		Version:      "2.6.0",
+		DefaultValue: "2000000",
+		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB; whichever of maxBatchEntries/maxBatchBytes is hit first bounds the batch. Ignored when maxBatchEntries <= 1.",
+		Export:       true,
+	}
+	p.AppendMaxBatchBytes.Init(base.mgr)
 
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
@@ -902,6 +923,15 @@ Example configuration below:
 		Export:       true,
 	}
 	p.SyncMaxIntervalForLocalStorage.Init(base.mgr)
+
+	p.SyncMaxIntervalForService = ParamItem{
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxIntervalForService",
+		Version:      "2.6.0",
+		DefaultValue: "10ms",
+		Doc:          "Maximum interval between two sync operations for woodpecker service-storage mode (woodpecker.storage.type=service), default is 10 milliseconds. Only takes effect on standalone woodpecker log-store servers (staged-storage writer); it is not consumed by milvus embedded mode. A larger interval coalesces more entries per flush to raise QPS under small-batch high-concurrency writes, at the cost of up to that much extra durability latency. Note this raises the interval from woodpecker's built-in 1ms default, changing the sync cadence for existing service-mode deployments.",
+		Export:       true,
+	}
+	p.SyncMaxIntervalForService.Init(base.mgr)
 
 	p.SyncMaxEntries = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxEntries",
