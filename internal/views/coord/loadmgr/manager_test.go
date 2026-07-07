@@ -13,27 +13,9 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
-
-type fakeReplicaAllocator struct {
-	nodes map[int64][]int64
-}
-
-func (f *fakeReplicaAllocator) AssignNodes(ctx context.Context, cfg *LoadConfig) (*LoadConfig, error) {
-	next := cfg.Clone()
-	for _, replica := range next.Replicas {
-		replica.Nodes = append([]int64{}, f.nodes[replica.ReplicaID]...)
-	}
-	return next, nil
-}
-
-type fakeShardProvider struct {
-	vchannels []string
-}
-
-func (f *fakeShardProvider) VChannels(ctx context.Context, collectionID int64) ([]string, error) {
-	return append([]string{}, f.vchannels...), nil
-}
 
 func newEmptyLoadConfigStore(t *testing.T, catalog *mocks.QueryCoordCatalog) *LoadConfigStore {
 	t.Helper()
@@ -60,6 +42,22 @@ func sampleAlterLoadConfigHeader() *messagespb.AlterLoadConfigMessageHeader {
 	}
 }
 
+func sampleAlterLoadConfigResult() message.BroadcastResultAlterLoadConfigMessageV2 {
+	broadcastMsg := message.NewAlterLoadConfigMessageBuilderV2().
+		WithHeader(sampleAlterLoadConfigHeader()).
+		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
+		WithBroadcast([]string{"v0", "v1", "by-dev-rootcoord-dml" + funcutil.ControlChannelSuffix}).
+		MustBuildBroadcast()
+	return message.BroadcastResultAlterLoadConfigMessageV2{
+		Message: message.MustAsBroadcastAlterLoadConfigMessageV2(broadcastMsg),
+		Results: map[string]*message.AppendResult{
+			"v0": {},
+			"v1": {},
+			"by-dev-rootcoord-dml" + funcutil.ControlChannelSuffix: {},
+		},
+	}
+}
+
 func TestCollectionLoadManager_UpdateLoadConfig(t *testing.T) {
 	catalog := mocks.NewQueryCoordCatalog(t)
 	store := newEmptyLoadConfigStore(t, catalog)
@@ -68,22 +66,19 @@ func TestCollectionLoadManager_UpdateLoadConfig(t *testing.T) {
 	manager := NewCollectionLoadManager(
 		store,
 		func(shardID qviews.ShardID) { ensured = append(ensured, shardID) },
-		&fakeReplicaAllocator{nodes: map[int64][]int64{
-			1000: {1, 2},
-			1001: {3, 4},
-		}},
-		&fakeShardProvider{vchannels: []string{"v0", "v1"}},
 		func(collectionID int64) { notified = append(notified, collectionID) },
 	)
 
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
-	require.NoError(t, manager.UpdateLoadConfig(context.Background(), sampleAlterLoadConfigHeader()))
+	require.NoError(t, manager.UpdateLoadConfig(context.Background(), sampleAlterLoadConfigResult()))
 
 	cfg := store.Snapshot().ConfigsMap()[100]
 	require.NotNil(t, cfg)
-	assert.ElementsMatch(t, []int64{1, 2}, cfg.Replicas[0].Nodes)
+	require.Len(t, cfg.Replicas, 2)
+	assert.Equal(t, int64(1000), cfg.Replicas[0].ReplicaID)
+	assert.Equal(t, "rg1", cfg.Replicas[0].ResourceGroup)
 	assert.ElementsMatch(t, []qviews.ShardID{
 		{ReplicaID: 1000, VChannel: "v0"},
 		{ReplicaID: 1000, VChannel: "v1"},
@@ -96,19 +91,16 @@ func TestCollectionLoadManager_UpdateLoadConfig(t *testing.T) {
 func TestCollectionLoadManager_ReleaseCollectionKeepsRegistryForReconcile(t *testing.T) {
 	catalog := mocks.NewQueryCoordCatalog(t)
 	store := newEmptyLoadConfigStore(t, catalog)
-	var ensured []qviews.ShardID
 	var notified []int64
 	manager := NewCollectionLoadManager(
 		store,
-		func(shardID qviews.ShardID) { ensured = append(ensured, shardID) },
-		&fakeReplicaAllocator{nodes: map[int64][]int64{1000: {1}, 1001: {2}}},
-		&fakeShardProvider{vchannels: []string{"v0"}},
+		func(qviews.ShardID) {},
 		func(collectionID int64) { notified = append(notified, collectionID) },
 	)
 
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	require.NoError(t, manager.UpdateLoadConfig(context.Background(), sampleAlterLoadConfigHeader()))
+	require.NoError(t, manager.UpdateLoadConfig(context.Background(), sampleAlterLoadConfigResult()))
 
 	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(100)).Return(nil).Once()
 	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(100)).Return(nil).Once()
@@ -117,6 +109,5 @@ func TestCollectionLoadManager_ReleaseCollectionKeepsRegistryForReconcile(t *tes
 	}))
 
 	assert.NotContains(t, store.Snapshot().ConfigsMap(), int64(100))
-	assert.NotEmpty(t, ensured, "release keeps actual shard lifecycle to Balancer reconciliation")
 	assert.Equal(t, []int64{100, 100}, notified)
 }

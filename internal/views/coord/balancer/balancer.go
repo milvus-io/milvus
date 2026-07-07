@@ -21,7 +21,7 @@ type Balancer interface {
 }
 
 type snapshotSource interface {
-	Build() *BalancerSnapshot
+	Build(ctx context.Context) *BalancerSnapshot
 }
 
 // DefaultBalancer owns the trigger queue and reconcile loop. Business
@@ -56,13 +56,27 @@ func NewDefaultBalancer(
 	if builder != nil {
 		source = builder
 	}
-	return &DefaultBalancer{
+	balancer := &DefaultBalancer{
 		snapshotBuilder: source,
 		viewRegistry:    registry,
 		policy:          policy,
 		queue:           newTriggerQueue(),
 		tickerInterval:  interval,
 	}
+	if builder != nil {
+		balancer.registerNodeChangedNotifier(builder.nodeProvider)
+	}
+	return balancer
+}
+
+func (b *DefaultBalancer) registerNodeChangedNotifier(provider NodeProvider) {
+	notifier, ok := provider.(NodeChangedNotifier)
+	if !ok {
+		return
+	}
+	notifier.RegisterNodeChangedNotifier(func() {
+		b.Trigger(TriggerScope{NodeChanged: true})
+	})
 }
 
 // Start launches the reconcile loop and enqueues an initial full scan.
@@ -124,7 +138,7 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	if b.snapshotBuilder == nil || b.viewRegistry == nil || b.policy == nil {
 		return nil
 	}
-	snap := b.snapshotBuilder.Build()
+	snap := b.snapshotBuilder.Build(ctx)
 	dirty := b.queue.drain(snap)
 	if len(dirty) == 0 {
 		return nil

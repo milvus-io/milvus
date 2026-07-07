@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -1628,3 +1629,5 @@ func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, r
 	}
 	return s.datacoordServer.GetStreamingNodeQueryViewResources(ctx, req)
 }
+
+func (s *mixCoordImpl) DataViewProvider() balancer.DataViewProvider { return s.datacoordServer.DataViewProvider() }

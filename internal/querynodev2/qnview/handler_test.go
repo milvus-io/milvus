@@ -113,6 +113,12 @@ func newDroppedQNView(nodeID int64, version int64) qviews.QueryViewAtWorkNode {
 	return qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(nodeID))
 }
 
+func newQNViewWithState(nodeID int64, version int64, state viewpb.QueryViewState) qviews.QueryViewAtWorkNode {
+	meta := buildHandlerTestMeta(version)
+	meta.State = state
+	return qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(nodeID))
+}
+
 type reportCollector struct {
 	mu      sync.Mutex
 	reports []qviews.QueryViewAtWorkNode
@@ -205,6 +211,26 @@ func TestQNHandler_ApplyViews_DroppedOnUnknownViewReportsBack(t *testing.T) {
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStateDropped, rc.last().State())
 	assert.Equal(t, 0, mgr.acquiredCount())
+}
+
+func TestQNHandler_ApplyViews_PrioritizesPreparingAndUpInBatch(t *testing.T) {
+	mgr := newMockSegmentManager()
+	h := NewQNQueryViewHandler(mgr)
+
+	var reportStates []qviews.QueryViewState
+	onReport := func(report qviews.QueryViewAtWorkNode) {
+		reportStates = append(reportStates, report.State())
+	}
+
+	h.ApplyViews([]handler.ApplyView{
+		{View: newDroppedQNView(1, 1), OnReport: onReport},
+		{View: newQNViewWithState(1, 2, viewpb.QueryViewState_QueryViewStateUp), OnReport: onReport},
+	})
+
+	require.Equal(t, []qviews.QueryViewState{
+		qviews.QueryViewStateUnrecoverable,
+		qviews.QueryViewStateDropped,
+	}, reportStates)
 }
 
 // ---------------------------------------------------------------------------

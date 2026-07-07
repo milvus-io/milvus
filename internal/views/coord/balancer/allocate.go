@@ -67,7 +67,7 @@ func allocate(
 
 	for _, e := range entries {
 		segInfo := segmentInfoFor(snap, e.segmentID, e.partitionID)
-		nodeID, ok := pickNode(predicted, segInfo, current[e.segmentID], replica.Nodes, snap.Config)
+		nodeID, ok := pickNode(predicted, segInfo, current[e.segmentID], replica.ResourceGroup, snap.Config)
 		if !ok {
 			return nil
 		}
