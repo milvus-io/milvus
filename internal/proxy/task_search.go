@@ -893,18 +893,26 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err := validateFunctionChainSearchRequest(t.request, false); err != nil {
 		return err
 	}
+	var querynodeFunctionChains []*schemapb.FunctionChain
 	if len(t.request.GetFunctionChains()) > 0 {
-		meta, err := newFunctionChainRerankMeta(t.request.GetFunctionChains(), t.schema)
+		l2Chains, qnChains, err := splitFunctionChainsByStage(t.request.GetFunctionChains())
 		if err != nil {
 			return err
 		}
-		t.rerankMeta = meta
+		if len(l2Chains) > 0 {
+			meta, err := newFunctionChainRerankMeta(l2Chains, t.schema)
+			if err != nil {
+				return err
+			}
+			t.rerankMeta = meta
+		}
+		querynodeFunctionChains = qnChains
 	} else if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
 	// order_by and function rerank cannot be used together
-	if len(t.orderByFields) > 0 && t.rerankMeta != nil {
+	if len(t.orderByFields) > 0 && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
 		return merr.WrapErrParameterInvalidMsg("order_by and function rerank cannot be used together: they specify conflicting sort criteria")
 	}
 
@@ -1004,6 +1012,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	plan.QuerynodeFunctionChains = querynodeFunctionChains
 
 	// Propagate agg-path overrides into queryInfo BEFORE plan serialization so
 	// segcore sees the derived topK / groupSize and plural GroupByFieldIds.

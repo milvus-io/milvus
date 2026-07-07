@@ -414,4 +414,5 @@ message PlanNode {
   PlanOption plan_options = 7;
   ScoreOption score_option = 8;
   optional string namespace = 9;
+  repeated schema.FunctionChain querynode_function_chains = 10;
 }

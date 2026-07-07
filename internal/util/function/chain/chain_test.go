@@ -151,11 +151,12 @@ func (s *ChainTestSuite) TestSelectOp() {
 	s.Require().NoError(err)
 	defer result.Release()
 
-	// Verify only selected columns exist
+	// Verify selected non-system columns exist and unselected non-system columns are removed.
+	// System columns are preserved by SelectOp because downstream reduce paths may need them.
 	s.True(result.HasColumn(types.IDFieldName))
+	s.True(result.HasColumn(types.ScoreFieldName))
 	s.True(result.HasColumn("age"))
 	s.False(result.HasColumn("name"))
-	s.False(result.HasColumn(types.ScoreFieldName))
 
 	// Verify data integrity
 	s.Equal(df.NumRows(), result.NumRows())
