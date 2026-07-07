@@ -1956,6 +1956,61 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     text_indexes_[field_id] = std::move(cache_slot);
 }
 
+void
+ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
+                                          SearchResult& results) const {
+    {
+        std::shared_lock lck(mutex_);
+        AssertInfo(plan, "empty plan");
+        auto size = results.distances_.size();
+        AssertInfo(results.seg_offsets_.size() == size,
+                   "Size of result distances is not equal to size of ids");
+
+        auto pk_field_id_opt = schema_->get_primary_field_id();
+        AssertInfo(pk_field_id_opt.has_value(),
+                   "Cannot get primary key offset from schema");
+        auto pk_field_id = pk_field_id_opt.value();
+        auto pk_type = schema_->operator[](pk_field_id).get_data_type();
+        AssertInfo(IsPrimaryKeyDataType(pk_type),
+                   "Primary key field is not INT64 or VARCHAR type");
+        if (pk_type == DataType::VARCHAR) {
+            auto column = get_column(pk_field_id);
+            if (column != nullptr) {
+                Assert(results.primary_keys_.size() == 0);
+                results.primary_keys_.resize(size);
+                results.pk_type_ = pk_type;
+                if (size == 0) {
+                    return;
+                }
+
+                milvus::OpContext op_ctx;
+                // Intentionally bypass bulk_subscript's scalar-index raw-data
+                // routing here: the sealed VARCHAR PK fast path reads the
+                // loaded column directly to avoid DataArray materialization
+                // and index reverse-lookup overhead. Storage-cost accounting
+                // can differ if both index raw data and the column are
+                // resident, but returned PK values are identical.
+                column->BulkRawStringAt(
+                    &op_ctx,
+                    [&results](
+                        std::string_view value, size_t offset, bool is_valid) {
+                        AssertInfo(is_valid, "primary key must not be null");
+                        results.primary_keys_[offset] = std::string(value);
+                    },
+                    results.seg_offsets_.data(),
+                    size);
+                results.search_storage_cost_.scanned_remote_bytes +=
+                    op_ctx.storage_usage.scanned_cold_bytes.load();
+                results.search_storage_cost_.scanned_total_bytes +=
+                    op_ctx.storage_usage.scanned_total_bytes.load();
+                return;
+            }
+        }
+    }
+
+    SegmentInternalInterface::FillPrimaryKeys(plan, results);
+}
+
 std::unique_ptr<DataArray>
 ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                                        FieldId field_id,
