@@ -246,8 +246,24 @@ func (s *globalTaskScheduler) schedule() {
 					s.recordTaskFailure(task)
 					s.pendingTasks.Push(task)
 				case taskcommon.InProgress:
+					// The task was accepted by the worker and is now in flight.
+					// Any accumulated failure count is intentionally kept: reaching
+					// InProgress only means a slot happened to be free, not that the
+					// cause of earlier failures is gone. If the task fails again the
+					// backoff must keep escalating rather than restart from scratch.
+					// The entry is cleared only on a terminal state (here and in
+					// check()).
 					task.SetTaskTime(taskcommon.TimeStart, time.Now())
 					s.runningTasks.Insert(task.GetTaskID(), task)
+				case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+					// CreateTaskOnWorker can drive a task straight to a terminal
+					// state (e.g. missing meta, unhealthy segment, estimation
+					// failure). Such a task leaves the scheduler without ever
+					// entering runningTasks, so check()'s terminal-state cleanup
+					// never runs. Drop the backoff entry here; otherwise it would
+					// leak until datacoord restarts and grow without bound under
+					// the very failure storms this backoff exists to relieve.
+					s.backoffs.Remove(task.GetTaskID())
 				}
 			}
 			return struct{}{}, nil
