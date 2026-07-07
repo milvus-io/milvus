@@ -2,10 +2,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
