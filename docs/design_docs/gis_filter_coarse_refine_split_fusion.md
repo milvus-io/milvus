@@ -41,8 +41,7 @@ struct GISGroupState {
   bool    is_and;                 // combination within the block: AND / OR
   struct Pred {
     GISOp            op;
-    Geometry         query_geom;  // query constant, constructed once and reused
-    PreparedGeometry prepared;    // prepared once and reused (fixes per-batch rebuild)
+    std::string      query_wkt;   // query constant WKT; parsed per batch (below)
     bool             has_index;
     TargetBitmap     coarse;      // this predicate's R-Tree result, computed once
   };
@@ -98,17 +97,24 @@ void PhyGISRefineConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
 
   if (!survivors.none()) {
     auto hits = collect_hits(survivors);
+    // Query geometries + prepared forms are built ONCE PER BATCH on this
+    // thread's GEOS context. GEOS objects are bound to a GEOSContextHandle and
+    // are not shareable across threads, so they cannot be prepared once at
+    // compile time and reused across batches/threads -- per-batch-per-thread is
+    // the finest granularity that is safe. This is still K→1 within the batch.
+    GEOSContextHandle_t qctx = GetThreadLocalGEOSContext();
+    auto [qgeoms, preps] = build_query_geoms(qctx, st_->preds); // once per batch
     auto* gcache = SimpleGeometryCacheManager::Instance()
                      .GetCache(segment_->get_segment_id(), st_->field_id);
     auto wkb = gcache ? nullptr
-                      : segment_->bulk_subscript(st_->field_id, hits); // one bulk fetch
+                      : segment_->bulk_subscript(op_ctx_, st_->field_id, hits); // one bulk fetch
     for (size i : hits) {
       const Geometry& left = gcache
           ? *gcache->GetByOffsetUnsafe(i)           // cache on: zero construction
-          : Geometry(ctx_, wkb[i]...);              // cache off: construct ONCE
+          : Geometry(qctx, wkb[i]...);              // cache off: construct ONCE per row
       bool bit = st_->is_and;                       // apply all predicates to one left (fusion)
-      for (auto& p : st_->preds) {
-        bool r = EvalPrepared(p, left);             // within/contains semantics swapped, reuses existing code
+      for (size j = 0; j < st_->preds.size(); ++j) {
+        bool r = EvalPrepared(st_->preds[j].op, preps[j], qgeoms[j], left); // within/contains swapped, reuses existing code
         bit = st_->is_and ? (bit && r) : (bit || r);
         if (st_->is_and ^ bit) break;               // short circuit
       }
@@ -120,7 +126,7 @@ void PhyGISRefineConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
 }
 ```
 
-All three wins land at once: consuming `bitmap_input` → exact evaluation only on rows that passed "all scalars ∧ coarse"; one construction per row → K predicates share one `left` (K→1); `prepared` reuse → the query geometry is constructed only once.
+All three wins land at once: consuming `bitmap_input` → exact evaluation only on rows that passed "all scalars ∧ coarse"; one construction per row → K predicates share one `left` (K→1); the query geometries + prepared forms are built once per batch (per thread; see the GEOS constraint above) and reused across all surviving rows in that batch.
 
 ## 8. Final Shape Inside the Conjunction
 
