@@ -409,7 +409,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, true, Params.EnableStoppingBalance.GetAsBool())
 
-		assert.Equal(t, 4, Params.ChannelExclusiveNodeFactor.GetAsInt())
+		assert.Equal(t, "ChannelLevelScoreBalancer", Params.Balancer.GetValue())
+		assert.Equal(t, 3, Params.ChannelExclusiveNodeFactor.GetAsInt())
 
 		assert.Equal(t, 200, Params.CollectionObserverInterval.GetAsInt())
 		params.Save("queryCoord.collectionObserverInterval", "100")
