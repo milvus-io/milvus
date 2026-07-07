@@ -436,8 +436,7 @@ func NewSegment(ctx context.Context,
 	var csegment segcore.CSegment
 	if _, err := GetDynamicPool().Submit(func() (any, error) {
 		var err error
-		csegment, err = segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
-			Collection:  collection.ccollection,
+		csegment, err = collection.CreateCSegment(&segcore.CreateCSegmentRequest{
 			SegmentID:   loadInfo.GetSegmentID(),
 			SegmentType: segmentType,
 			IsSorted:    loadInfo.GetIsSorted(),

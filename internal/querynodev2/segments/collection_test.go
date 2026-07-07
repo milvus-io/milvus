@@ -20,16 +20,23 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CollectionManagerSuite struct {
@@ -39,6 +46,8 @@ type CollectionManagerSuite struct {
 
 func (s *CollectionManagerSuite) SetupSuite() {
 	paramtable.Init()
+	initcore.InitLocalChunkManager("CollectionManagerSuite")
+	initcore.InitMmapManager(paramtable.Get(), 1)
 }
 
 func (s *CollectionManagerSuite) SetupTest() {
@@ -48,6 +57,48 @@ func (s *CollectionManagerSuite) SetupTest() {
 		LoadType: querypb.LoadType_LoadCollection,
 	})
 	s.Require().NoError(err)
+}
+
+func (s *CollectionManagerSuite) newSimpleRetrieveRequest(collection *Collection) *querypb.QueryRequest {
+	pkField, err := typeutil.GetPrimaryFieldSchema(collection.Schema())
+	s.Require().NoError(err)
+
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Predicates{
+			Predicates: &planpb.Expr{
+				Expr: &planpb.Expr_TermExpr{
+					TermExpr: &planpb.TermExpr{
+						ColumnInfo: &planpb.ColumnInfo{
+							FieldId:  pkField.GetFieldID(),
+							DataType: pkField.GetDataType(),
+						},
+						Values: []*planpb.GenericValue{
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 1,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		OutputFieldIds: []int64{pkField.GetFieldID()},
+	}
+	planBytes, err := proto.Marshal(planNode)
+	s.Require().NoError(err)
+
+	return &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Retrieve,
+				MsgID:   100,
+			},
+			CollectionID:       collection.ID(),
+			SerializedExprPlan: planBytes,
+			MvccTimestamp:      1000,
+		},
+	}
 }
 
 func (s *CollectionManagerSuite) TestUpdateSchema() {
@@ -324,6 +375,85 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	s.True(found,
 		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
 		newVecFieldID)
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNativeLock() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	schema := proto.Clone(coll.Schema()).(*schemapb.CollectionSchema)
+	indexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	indexMeta.MaxIndexRowCount++
+
+	coll.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		done <- s.cm.PutOrRef(1, schema, indexMeta, &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+	}()
+
+	select {
+	case err := <-done:
+		coll.mu.Unlock()
+		s.Require().NoError(err)
+		s.FailNow("PutOrRef updated index meta while collection native lock was held")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	coll.mu.Unlock()
+	s.Require().NoError(<-done)
+	s.cm.Unref(1, 1)
+}
+
+func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethods() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	searchReqPB, err := mock_segcore.GenQueryRequest(coll.GetCCollection(), nil, 1, 1, coll.ID())
+	s.Require().NoError(err)
+	searchReq, err := coll.NewSearchRequest(searchReqPB, searchReqPB.GetReq().GetPlaceholderGroup())
+	s.Require().NoError(err)
+	searchReq.Delete()
+
+	retrievePlan, err := coll.NewRetrievePlan(s.newSimpleRetrieveRequest(coll))
+	s.Require().NoError(err)
+	retrievePlan.Delete()
+
+	csegment, err := coll.CreateCSegment(&segcore.CreateCSegmentRequest{
+		SegmentID:   1,
+		SegmentType: SegmentTypeSealed,
+	})
+	s.Require().NoError(err)
+	releaser, ok := csegment.(interface{ Release() })
+	s.Require().True(ok)
+	releaser.Release()
+
+	s.NoError(coll.updateIndexMeta(nil))
+}
+
+func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	searchReqPB, err := mock_segcore.GenQueryRequest(coll.GetCCollection(), nil, 1, 1, coll.ID())
+	s.Require().NoError(err)
+	retrieveReq := s.newSimpleRetrieveRequest(coll)
+	indexMeta := mock_segcore.GenTestIndexMeta(1, coll.Schema())
+
+	DeleteCollection(coll)
+
+	_, err = coll.NewSearchRequest(searchReqPB, searchReqPB.GetReq().GetPlaceholderGroup())
+	s.Error(err)
+	_, err = coll.NewRetrievePlan(retrieveReq)
+	s.Error(err)
+	_, err = coll.CreateCSegment(&segcore.CreateCSegmentRequest{
+		SegmentID:   1,
+		SegmentType: SegmentTypeSealed,
+	})
+	s.Error(err)
+	s.Error(coll.updateIndexMeta(indexMeta))
+	s.Error(coll.updateSchema(coll.Schema(), 1))
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersionDomain() {
