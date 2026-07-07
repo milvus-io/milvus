@@ -452,7 +452,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
-		rb.Append(recs[idx.ri], idx.i, idx.i+1)
+		if err := rb.Append(recs[idx.ri], idx.i, idx.i+1); err != nil {
+			return 0, err
+		}
 		// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
 		//	small batch size will cause write performance degradation. To work around this issue, we accumulate
 		//	records and write them in batches. This requires additional memory copy.
