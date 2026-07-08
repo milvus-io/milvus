@@ -105,6 +105,14 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	})
 	assert.Equal(t, int64(2), scheduler.pickNode(leastLoaded, 10))
 
+	// Route by the QuerySlot map key instead of relying on WorkerSlots.NodeID.
+	keyOnly := map[int64]*session.WorkerSlots{
+		10: {AvailableSlots: 20},
+		20: {AvailableSlots: 80},
+	}
+	assert.Equal(t, int64(20), scheduler.pickNode(newNodeSlotHeap(keyOnly), 10))
+	assert.Equal(t, int64(70), keyOnly[20].AvailableSlots)
+
 	// Fallback: no node can fully satisfy the request, pick the most-available
 	// node and drain its slots to 0.
 	noEnough := map[int64]*session.WorkerSlots{
@@ -133,6 +141,19 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 		2: {NodeID: 2, AvailableSlots: 0},
 	})
 	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(empty, 1))
+
+	// Zero-slot cleanup work should still be dispatched even when every node is
+	// exhausted, and it should not consume any slots.
+	zeroSlot := map[int64]*session.WorkerSlots{
+		10: {AvailableSlots: 0},
+		20: {AvailableSlots: 0},
+	}
+	zeroSlotHeap := newNodeSlotHeap(zeroSlot)
+	nodeID = scheduler.pickNode(zeroSlotHeap, 0)
+	assert.True(t, nodeID == int64(10) || nodeID == int64(20))
+	assert.Equal(t, int64(0), zeroSlot[10].AvailableSlots)
+	assert.Equal(t, int64(0), zeroSlot[20].AvailableSlots)
+	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(zeroSlotHeap, 1))
 
 	// Empty cluster.
 	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(newNodeSlotHeap(nil), 1))
@@ -165,6 +186,26 @@ func TestGlobalScheduler_pickNode_Balancing(t *testing.T) {
 
 	// All nodes are now empty: further picks return NullNodeID.
 	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(slotHeap, 1))
+}
+
+func TestGlobalScheduler_pickNode_MixedTaskSizes(t *testing.T) {
+	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+
+	nodes := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+		2: {NodeID: 2, AvailableSlots: 80},
+		3: {NodeID: 3, AvailableSlots: 60},
+	}
+	slotHeap := newNodeSlotHeap(nodes)
+
+	assert.Equal(t, int64(1), scheduler.pickNode(slotHeap, 30))
+	assert.Equal(t, int64(2), scheduler.pickNode(slotHeap, 70))
+	assert.Equal(t, int64(1), scheduler.pickNode(slotHeap, 50))
+	assert.Equal(t, int64(3), scheduler.pickNode(slotHeap, 90))
+
+	assert.Equal(t, int64(20), nodes[1].AvailableSlots)
+	assert.Equal(t, int64(10), nodes[2].AvailableSlots)
+	assert.Equal(t, int64(0), nodes[3].AvailableSlots)
 }
 
 func TestGlobalScheduler_TestSchedule(t *testing.T) {
@@ -258,6 +299,34 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			defer s.mu.RUnlock(1)
 			return stateCounter.Load() >= 2 && s.runningTasks.Len() == 0
 		}, 10*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("zero slot task dispatched when nodes exhausted", func(t *testing.T) {
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+			10: {AvailableSlots: 0},
+			20: {AvailableSlots: 0},
+		}).Once()
+
+		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(1).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+		task.EXPECT().GetTaskSlot().Return(int64(0)).Once()
+
+		var dispatched atomic.Bool
+		task.EXPECT().CreateTaskOnWorker(mock.MatchedBy(func(nodeID int64) bool {
+			return nodeID == 10 || nodeID == 20
+		}), mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+			dispatched.Store(true)
+		}).Once()
+
+		scheduler.Enqueue(task)
+		scheduler.schedule()
+
+		assert.True(t, dispatched.Load())
 	})
 
 	t.Run("normal case", func(t *testing.T) {
