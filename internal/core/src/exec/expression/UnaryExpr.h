@@ -428,29 +428,6 @@ struct UnaryElementFuncForArray {
                     ThrowInfo(OpTypeInvalid,
                               "Match operation only supports string type");
                 }
-            } else if constexpr (op == proto::plan::OpType::RegexMatch) {
-                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    ThrowInfo(OpTypeInvalid,
-                              "RegexMatch operation is not supported for "
-                              "nested Array type");
-                } else if constexpr (std::is_same_v<GetType,
-                                                    std::string_view> ||
-                                     std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
-                    PatternMatchTranslator translator;
-                    auto regex_pattern = translator(val);
-                    RegexMatcher matcher(regex_pattern);
-                    res[i] = matcher(array_data);
-                } else {
-                    ThrowInfo(OpTypeInvalid,
-                              "RegexMatch operation only supports string type");
-                }
             } else {
                 ThrowInfo(OpTypeInvalid,
                           "unsupported op_type:{} for "
