@@ -18,7 +18,6 @@ package replicatestream
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var ErrReplicationRemoved = errors.New("replication removed")
@@ -344,17 +344,22 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 		// Cannot find the target channel, it means that the `current->target` topology edge is removed,
 		// so we need to remove the replicate pchannel and stop replicate.
 		etcdCli := resource.Resource().ETCD()
-		ok, err := meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
+		// Retry transient etcd failures instead of crashing the process; r.ctx is
+		// canceled when the client is closed or when the pchannel is deleted, so
+		// the retry never outlives this replication.
+		var ok bool
+		err := retry.Do(r.ctx, func() error {
+			var err error
+			ok, err = meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
+			return err
+		}, retry.AttemptAlways())
 		if err != nil {
-			logger.Warn(r.ctx, "failed to remove replicate pchannel", mlog.Err(err))
 			// When performing delete operation on etcd, the context may be canceled by the delete event
 			// in cdc controller and then return `context.Canceled` error.
 			// Since the delete event is generated after the delete operation is committed in etcd,
 			// the delete is guaranteed to have succeeded on the server side.
 			// So we can ignore the context canceled error here.
-			if !errors.Is(err, context.Canceled) {
-				panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
-			}
+			logger.Warn(r.ctx, "failed to remove replicate pchannel", mlog.Err(err))
 		}
 		if ok {
 			logger.Info(r.ctx, "handle AlterReplicateConfigMessage done, replicate pchannel removed")
