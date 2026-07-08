@@ -46,17 +46,38 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     AssertInfo(is_build_mode_, "Cannot add geometry in load mode");
 
+    // Index a deterministic placeholder MBR for this row without dropping it.
+    // The R-tree is only a coarse filter (the exact predicate refines it out),
+    // so a placeholder is harmless -- but dropping the row would permanently
+    // desynchronize the index row count from the segment row count, which then
+    // trips the coarse-bitmap bounds guard in EvalForIndexSegment on EVERY
+    // subsequent geometry query against this segment. This mirrors the
+    // empty-geometry handling below.
+    auto index_placeholder_mbr = [&]() {
+        Value val(Box(Point(0, 0), Point(0, 0)), row_offset);
+        values_.push_back(val);
+        rtree_.insert(val);
+    };
+
     // Parse WKB data using GEOS for consistency
     GEOSContextHandle_t ctx = GEOS_init_r();
     if (ctx == nullptr) {
-        LOG_ERROR("Failed to initialize GEOS context for row {}", row_offset);
+        LOG_ERROR(
+            "Failed to initialize GEOS context for row {}; indexing a "
+            "placeholder MBR to keep the index row count consistent",
+            row_offset);
+        index_placeholder_mbr();
         return;
     }
 
     GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
     if (reader == nullptr) {
         GEOS_finish_r(ctx);
-        LOG_ERROR("Failed to create GEOS WKB reader for row {}", row_offset);
+        LOG_ERROR(
+            "Failed to create GEOS WKB reader for row {}; indexing a "
+            "placeholder MBR to keep the index row count consistent",
+            row_offset);
+        index_placeholder_mbr();
         return;
     }
 
@@ -65,7 +86,11 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     if (geom == nullptr) {
         GEOS_finish_r(ctx);
-        LOG_ERROR("Failed to parse WKB data for row {}", row_offset);
+        LOG_ERROR(
+            "Failed to parse WKB data for row {}; indexing a placeholder MBR "
+            "to keep the index row count consistent",
+            row_offset);
+        index_placeholder_mbr();
         return;
     }
 
@@ -257,9 +282,23 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
     candidate_offsets.clear();
 
     // Get bounding box of query geometry. An empty/degenerate query geometry
-    // has no envelope and intersects nothing, so there are no candidates.
+    // has no envelope. For the spatial predicates (Intersects / Within /
+    // Contains / Touches / Overlaps / Crosses) it intersects nothing, so there
+    // are no candidates. ST_Equals is different: an empty query geometry must
+    // still match empty FIELD geometries, which this index stores with a
+    // placeholder MBR (see add_geometry) -- returning zero candidates for
+    // Equals would be a false negative versus the un-indexed data path, where
+    // GEOSEquals(empty, empty) is true. So for Equals, fall back to the full
+    // candidate set and let exact refinement keep only the true matches.
     double minX, minY, maxX, maxY;
     if (!get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY)) {
+        if (op == proto::plan::GISFunctionFilterExpr_GISOp_Equals) {
+            std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
+            candidate_offsets.reserve(rtree_.size());
+            for (const auto& v : rtree_) {
+                candidate_offsets.push_back(v.second);
+            }
+        }
         return;
     }
 
