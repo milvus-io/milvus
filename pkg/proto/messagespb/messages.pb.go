@@ -2048,6 +2048,10 @@ type AlterCollectionMessageUpdates struct {
 	ConsistencyLevel commonpb.ConsistencyLevel         `protobuf:"varint,6,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"` // consistency level should be updated.
 	Properties       []*commonpb.KeyValuePair          `protobuf:"bytes,7,rep,name=properties,proto3" json:"properties,omitempty"`                                                                                // collection properties should be updated.
 	AlterLoadConfig  *AlterLoadConfigOfAlterCollection `protobuf:"bytes,8,opt,name=alter_load_config,json=alterLoadConfig,proto3" json:"alter_load_config,omitempty"`                                             // alter load config of alter collection.
+	// Index meta bound to newly added function-output/vector fields.
+	// Fully materialized (index id/name allocated, params validated) at DDL prepare
+	// stage BEFORE broadcast; applied atomically with the schema in the ack callback.
+	BoundFieldIndexes []*indexpb.FieldIndex `protobuf:"bytes,9,rep,name=bound_field_indexes,json=boundFieldIndexes,proto3" json:"bound_field_indexes,omitempty"`
 }
 
 func (x *AlterCollectionMessageUpdates) Reset() {
@@ -2134,6 +2138,13 @@ func (x *AlterCollectionMessageUpdates) GetProperties() []*commonpb.KeyValuePair
 func (x *AlterCollectionMessageUpdates) GetAlterLoadConfig() *AlterLoadConfigOfAlterCollection {
 	if x != nil {
 		return x.AlterLoadConfig
+	}
+	return nil
+}
+
+func (x *AlterCollectionMessageUpdates) GetBoundFieldIndexes() []*indexpb.FieldIndex {
+	if x != nil {
+		return x.BoundFieldIndexes
 	}
 	return nil
 }
@@ -6870,8 +6881,8 @@ var file_messages_proto_rawDesc = []byte{
 	0x34, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d,
 	0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x43, 0x6f, 0x6c,
 	0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x55, 0x70,
-	0x64, 0x61, 0x74, 0x65, 0x73, 0x52, 0x07, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x73, 0x22, 0xd3,
-	0x03, 0x0a, 0x1d, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69,
+	0x64, 0x61, 0x74, 0x65, 0x73, 0x52, 0x07, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x73, 0x22, 0xa3,
+	0x04, 0x0a, 0x1d, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69,
 	0x6f, 0x6e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x73,
 	0x12, 0x13, 0x0a, 0x05, 0x64, 0x62, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52,
 	0x04, 0x64, 0x62, 0x49, 0x64, 0x12, 0x17, 0x0a, 0x07, 0x64, 0x62, 0x5f, 0x6e, 0x61, 0x6d, 0x65,
@@ -6900,7 +6911,12 @@ var file_messages_proto_rawDesc = []byte{
 	0x65, 0x73, 0x2e, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x4c, 0x6f, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x66,
 	0x69, 0x67, 0x4f, 0x66, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
 	0x69, 0x6f, 0x6e, 0x52, 0x0f, 0x61, 0x6c, 0x74, 0x65, 0x72, 0x4c, 0x6f, 0x61, 0x64, 0x43, 0x6f,
-	0x6e, 0x66, 0x69, 0x67, 0x22, 0x72, 0x0a, 0x20, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x4c, 0x6f, 0x61,
+	0x6e, 0x66, 0x69, 0x67, 0x12, 0x4e, 0x0a, 0x13, 0x62, 0x6f, 0x75, 0x6e, 0x64, 0x5f, 0x66, 0x69,
+	0x65, 0x6c, 0x64, 0x5f, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x65, 0x73, 0x18, 0x09, 0x20, 0x03, 0x28,
+	0x0b, 0x32, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x2e, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x49, 0x6e, 0x64, 0x65,
+	0x78, 0x52, 0x11, 0x62, 0x6f, 0x75, 0x6e, 0x64, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x49, 0x6e, 0x64,
+	0x65, 0x78, 0x65, 0x73, 0x22, 0x72, 0x0a, 0x20, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x4c, 0x6f, 0x61,
 	0x64, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x4f, 0x66, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x43, 0x6f,
 	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x25, 0x0a, 0x0e, 0x72, 0x65, 0x70, 0x6c,
 	0x69, 0x63, 0x61, 0x5f, 0x6e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05,
@@ -7678,14 +7694,14 @@ var file_messages_proto_goTypes = []interface{}{
 	(*fieldmaskpb.FieldMask)(nil),           // 130: google.protobuf.FieldMask
 	(commonpb.ConsistencyLevel)(0),          // 131: milvus.proto.common.ConsistencyLevel
 	(*commonpb.KeyValuePair)(nil),           // 132: milvus.proto.common.KeyValuePair
-	(commonpb.LoadPriority)(0),              // 133: milvus.proto.common.LoadPriority
-	(*milvuspb.UserEntity)(nil),             // 134: milvus.proto.milvus.UserEntity
-	(*internalpb.CredentialInfo)(nil),       // 135: milvus.proto.internal.CredentialInfo
-	(*milvuspb.RoleEntity)(nil),             // 136: milvus.proto.milvus.RoleEntity
-	(*milvuspb.RBACMeta)(nil),               // 137: milvus.proto.milvus.RBACMeta
-	(*milvuspb.GrantEntity)(nil),            // 138: milvus.proto.milvus.GrantEntity
-	(*milvuspb.PrivilegeGroupInfo)(nil),     // 139: milvus.proto.milvus.PrivilegeGroupInfo
-	(*indexpb.FieldIndex)(nil),              // 140: milvus.proto.index.FieldIndex
+	(*indexpb.FieldIndex)(nil),              // 133: milvus.proto.index.FieldIndex
+	(commonpb.LoadPriority)(0),              // 134: milvus.proto.common.LoadPriority
+	(*milvuspb.UserEntity)(nil),             // 135: milvus.proto.milvus.UserEntity
+	(*internalpb.CredentialInfo)(nil),       // 136: milvus.proto.internal.CredentialInfo
+	(*milvuspb.RoleEntity)(nil),             // 137: milvus.proto.milvus.RoleEntity
+	(*milvuspb.RBACMeta)(nil),               // 138: milvus.proto.milvus.RBACMeta
+	(*milvuspb.GrantEntity)(nil),            // 139: milvus.proto.milvus.GrantEntity
+	(*milvuspb.PrivilegeGroupInfo)(nil),     // 140: milvus.proto.milvus.PrivilegeGroupInfo
 	(commonpb.WALName)(0),                   // 141: milvus.proto.common.WALName
 	(commonpb.MsgType)(0),                   // 142: milvus.proto.common.MsgType
 	(*commonpb.MessageID)(nil),              // 143: milvus.proto.common.MessageID
@@ -7707,49 +7723,50 @@ var file_messages_proto_depIdxs = []int32{
 	131, // 11: milvus.proto.messages.AlterCollectionMessageUpdates.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
 	132, // 12: milvus.proto.messages.AlterCollectionMessageUpdates.properties:type_name -> milvus.proto.common.KeyValuePair
 	35,  // 13: milvus.proto.messages.AlterCollectionMessageUpdates.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterCollection
-	38,  // 14: milvus.proto.messages.AlterLoadConfigMessageHeader.load_fields:type_name -> milvus.proto.messages.LoadFieldConfig
-	39,  // 15: milvus.proto.messages.AlterLoadConfigMessageHeader.replicas:type_name -> milvus.proto.messages.LoadReplicaConfig
-	133, // 16: milvus.proto.messages.LoadReplicaConfig.priority:type_name -> milvus.proto.common.LoadPriority
-	132, // 17: milvus.proto.messages.CreateDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
-	132, // 18: milvus.proto.messages.AlterDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
-	46,  // 19: milvus.proto.messages.AlterDatabaseMessageBody.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterDatabase
-	134, // 20: milvus.proto.messages.CreateUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	135, // 21: milvus.proto.messages.CreateUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
-	134, // 22: milvus.proto.messages.AlterUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	135, // 23: milvus.proto.messages.AlterUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
-	136, // 24: milvus.proto.messages.AlterRoleMessageHeader.role_entity:type_name -> milvus.proto.milvus.RoleEntity
-	134, // 25: milvus.proto.messages.RoleBinding.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	136, // 26: milvus.proto.messages.RoleBinding.role_entity:type_name -> milvus.proto.milvus.RoleEntity
-	63,  // 27: milvus.proto.messages.AlterUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
-	63,  // 28: milvus.proto.messages.DropUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
-	137, // 29: milvus.proto.messages.RestoreRBACMessageBody.rbac_meta:type_name -> milvus.proto.milvus.RBACMeta
-	138, // 30: milvus.proto.messages.AlterPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
-	138, // 31: milvus.proto.messages.DropPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
-	139, // 32: milvus.proto.messages.AlterPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
-	139, // 33: milvus.proto.messages.DropPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
-	123, // 34: milvus.proto.messages.AlterResourceGroupMessageHeader.resource_group_configs:type_name -> milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
-	140, // 35: milvus.proto.messages.CreateIndexMessageBody.field_index:type_name -> milvus.proto.index.FieldIndex
-	140, // 36: milvus.proto.messages.AlterIndexMessageBody.field_indexes:type_name -> milvus.proto.index.FieldIndex
-	141, // 37: milvus.proto.messages.AlterWALMessageHeader.target_wal_name:type_name -> milvus.proto.common.WALName
-	124, // 38: milvus.proto.messages.AlterWALMessageHeader.config:type_name -> milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
-	105, // 39: milvus.proto.messages.CacheExpirations.cache_expirations:type_name -> milvus.proto.messages.CacheExpiration
-	106, // 40: milvus.proto.messages.CacheExpiration.legacy_proxy_collection_meta_cache:type_name -> milvus.proto.messages.LegacyProxyCollectionMetaCache
-	142, // 41: milvus.proto.messages.LegacyProxyCollectionMetaCache.msg_type:type_name -> milvus.proto.common.MsgType
-	125, // 42: milvus.proto.messages.RMQMessageLayout.properties:type_name -> milvus.proto.messages.RMQMessageLayout.PropertiesEntry
-	114, // 43: milvus.proto.messages.BroadcastHeader.Resource_keys:type_name -> milvus.proto.messages.ResourceKey
-	143, // 44: milvus.proto.messages.ReplicateHeader.message_id:type_name -> milvus.proto.common.MessageID
-	143, // 45: milvus.proto.messages.ReplicateHeader.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
-	2,   // 46: milvus.proto.messages.ResourceKey.domain:type_name -> milvus.proto.messages.ResourceDomain
-	120, // 47: milvus.proto.messages.BatchUpdateManifestMessageBody.items:type_name -> milvus.proto.messages.BatchUpdateManifestItem
-	121, // 48: milvus.proto.messages.BatchUpdateManifestItem.v2_column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups
-	126, // 49: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry
-	144, // 50: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
-	145, // 51: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry.value:type_name -> milvus.proto.data.FieldBinlog
-	52,  // [52:52] is the sub-list for method output_type
-	52,  // [52:52] is the sub-list for method input_type
-	52,  // [52:52] is the sub-list for extension type_name
-	52,  // [52:52] is the sub-list for extension extendee
-	0,   // [0:52] is the sub-list for field type_name
+	133, // 14: milvus.proto.messages.AlterCollectionMessageUpdates.bound_field_indexes:type_name -> milvus.proto.index.FieldIndex
+	38,  // 15: milvus.proto.messages.AlterLoadConfigMessageHeader.load_fields:type_name -> milvus.proto.messages.LoadFieldConfig
+	39,  // 16: milvus.proto.messages.AlterLoadConfigMessageHeader.replicas:type_name -> milvus.proto.messages.LoadReplicaConfig
+	134, // 17: milvus.proto.messages.LoadReplicaConfig.priority:type_name -> milvus.proto.common.LoadPriority
+	132, // 18: milvus.proto.messages.CreateDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
+	132, // 19: milvus.proto.messages.AlterDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
+	46,  // 20: milvus.proto.messages.AlterDatabaseMessageBody.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterDatabase
+	135, // 21: milvus.proto.messages.CreateUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	136, // 22: milvus.proto.messages.CreateUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
+	135, // 23: milvus.proto.messages.AlterUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	136, // 24: milvus.proto.messages.AlterUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
+	137, // 25: milvus.proto.messages.AlterRoleMessageHeader.role_entity:type_name -> milvus.proto.milvus.RoleEntity
+	135, // 26: milvus.proto.messages.RoleBinding.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	137, // 27: milvus.proto.messages.RoleBinding.role_entity:type_name -> milvus.proto.milvus.RoleEntity
+	63,  // 28: milvus.proto.messages.AlterUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
+	63,  // 29: milvus.proto.messages.DropUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
+	138, // 30: milvus.proto.messages.RestoreRBACMessageBody.rbac_meta:type_name -> milvus.proto.milvus.RBACMeta
+	139, // 31: milvus.proto.messages.AlterPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
+	139, // 32: milvus.proto.messages.DropPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
+	140, // 33: milvus.proto.messages.AlterPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
+	140, // 34: milvus.proto.messages.DropPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
+	123, // 35: milvus.proto.messages.AlterResourceGroupMessageHeader.resource_group_configs:type_name -> milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
+	133, // 36: milvus.proto.messages.CreateIndexMessageBody.field_index:type_name -> milvus.proto.index.FieldIndex
+	133, // 37: milvus.proto.messages.AlterIndexMessageBody.field_indexes:type_name -> milvus.proto.index.FieldIndex
+	141, // 38: milvus.proto.messages.AlterWALMessageHeader.target_wal_name:type_name -> milvus.proto.common.WALName
+	124, // 39: milvus.proto.messages.AlterWALMessageHeader.config:type_name -> milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
+	105, // 40: milvus.proto.messages.CacheExpirations.cache_expirations:type_name -> milvus.proto.messages.CacheExpiration
+	106, // 41: milvus.proto.messages.CacheExpiration.legacy_proxy_collection_meta_cache:type_name -> milvus.proto.messages.LegacyProxyCollectionMetaCache
+	142, // 42: milvus.proto.messages.LegacyProxyCollectionMetaCache.msg_type:type_name -> milvus.proto.common.MsgType
+	125, // 43: milvus.proto.messages.RMQMessageLayout.properties:type_name -> milvus.proto.messages.RMQMessageLayout.PropertiesEntry
+	114, // 44: milvus.proto.messages.BroadcastHeader.Resource_keys:type_name -> milvus.proto.messages.ResourceKey
+	143, // 45: milvus.proto.messages.ReplicateHeader.message_id:type_name -> milvus.proto.common.MessageID
+	143, // 46: milvus.proto.messages.ReplicateHeader.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
+	2,   // 47: milvus.proto.messages.ResourceKey.domain:type_name -> milvus.proto.messages.ResourceDomain
+	120, // 48: milvus.proto.messages.BatchUpdateManifestMessageBody.items:type_name -> milvus.proto.messages.BatchUpdateManifestItem
+	121, // 49: milvus.proto.messages.BatchUpdateManifestItem.v2_column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups
+	126, // 50: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry
+	144, // 51: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
+	145, // 52: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry.value:type_name -> milvus.proto.data.FieldBinlog
+	53,  // [53:53] is the sub-list for method output_type
+	53,  // [53:53] is the sub-list for method input_type
+	53,  // [53:53] is the sub-list for extension type_name
+	53,  // [53:53] is the sub-list for extension extendee
+	0,   // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_messages_proto_init() }

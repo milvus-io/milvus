@@ -298,13 +298,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		UserIndexParams: req.GetUserIndexParams(),
 	}
 	// Validate the index params.
-	if err := ValidateIndexParams(index); err != nil {
+	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
 		return nil, err
 	}
 
-	channels := make([]string, 0, len(coll.GetVirtualChannelNames())+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.GetVirtualChannelNames()...)
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
 			DbId:         coll.GetDbId(),
@@ -316,7 +313,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
-		WithBroadcast(channels).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "CreateIndex fail", mlog.Err(err))
@@ -325,49 +322,9 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	mlog.Info(context.TODO(), "CreateIndex successfully",
 		mlog.String("IndexName", index.IndexName), mlog.Int64("fieldID", index.FieldID),
-		mlog.Int64("IndexID", index.IndexID),
-		mlog.Strings("channels", channels))
+		mlog.Int64("IndexID", index.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
-}
-
-func ValidateIndexParams(index *model.Index) error {
-	if err := CheckDuplidateKey(index.IndexParams, "indexParams"); err != nil {
-		return err
-	}
-	if err := CheckDuplidateKey(index.UserIndexParams, "userIndexParams"); err != nil {
-		return err
-	}
-	if err := CheckDuplidateKey(index.TypeParams, "typeParams"); err != nil {
-		return err
-	}
-	indexType := GetIndexType(index.IndexParams)
-	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
-	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
-	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid mmap index params: %s", err.Error())
-	}
-	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params: %s", err.Error())
-	}
-	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, indexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
-	}
-	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
-	}
-	return nil
-}
-
-func CheckDuplidateKey(kvs []*commonpb.KeyValuePair, tag string) error {
-	keySet := typeutil.NewSet[string]()
-	for _, kv := range kvs {
-		if keySet.Contain(kv.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("duplicate %s key in %s params", kv.GetKey(), tag)
-		}
-		keySet.Insert(kv.GetKey())
-	}
-	return nil
 }
 
 func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
@@ -498,7 +455,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 			index.IndexParams = newIndexParams
 		}
 
-		if err := ValidateIndexParams(index); err != nil {
+		if err := indexparamcheck.ValidateIndexParams(index); err != nil {
 			return merr.Status(err), nil
 		}
 	}

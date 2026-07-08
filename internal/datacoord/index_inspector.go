@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type indexInspector struct {
@@ -193,27 +194,35 @@ func getSegmentBinlogFields(segment *SegmentInfo) map[int64]struct{} {
 }
 
 func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, segmentBinlogFields map[int64]struct{}) bool {
-	_, hasField := segmentBinlogFields[index.FieldID]
-	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) || hasField {
+	if _, hasField := segmentBinlogFields[index.FieldID]; hasField {
 		return true
 	}
-	mlog.Debug(ctx, "function output field has no binlog, skip create index", mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
-	return false
-}
-
-func (i *indexInspector) isFunctionOutputField(collectionID, fieldID int64) bool {
-	collection := i.meta.GetCollection(collectionID)
-	if collection == nil || collection.Schema == nil {
+	// The segment has no binlog for the indexed field. A function-output field
+	// receives its data only through backfill, so building now is doomed; any
+	// other field may proceed. The schema is resolved through the handler
+	// (lazy-loading on cache miss, e.g. right after a datacoord restart) and the
+	// check fails closed: on an unresolvable or inconsistent view, defer to the
+	// next inspection round instead of trusting a stale schema.
+	collection, err := i.handler.GetCollection(ctx, segment.CollectionID)
+	if err != nil || collection == nil || collection.Schema == nil {
+		mlog.Warn(ctx, "cannot resolve collection schema, defer index build",
+			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
 		return false
 	}
 	for _, functionSchema := range collection.Schema.GetFunctions() {
 		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
-			if outputFieldID == fieldID {
-				return true
+			if outputFieldID == index.FieldID {
+				mlog.Debug(ctx, "function output field has no binlog, skip create index", mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
+				return false
 			}
 		}
 	}
-	return false
+	if typeutil.GetFieldByID(collection.Schema, index.FieldID) == nil {
+		mlog.Warn(ctx, "indexed field not found in cached collection schema, defer index build",
+			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
+		return false
+	}
+	return true
 }
 
 func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
