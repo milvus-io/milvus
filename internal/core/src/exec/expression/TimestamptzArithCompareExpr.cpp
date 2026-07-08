@@ -31,23 +31,24 @@ PhyTimestamptzArithCompareExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    result = ExecCompareVisitorImpl<int64_t>(input);
+    result = ExecCompareVisitorImpl<int64_t>(context, input);
 }
 
 template <typename T>
 VectorPtr
-PhyTimestamptzArithCompareExpr::ExecCompareVisitorImpl(OffsetVector* input) {
+PhyTimestamptzArithCompareExpr::ExecCompareVisitorImpl(EvalCtx& context,
+                                                       OffsetVector* input) {
     // We can not use index by transforming ts_col + interval > iso_string to ts_col > iso_string - interval
     // Because year / month interval is not fixed days, it depends on the specific date.
     // So, currently, we only support the data scanning path.
     // In the future, one could add a switch here to check for index availability.
-    return ExecCompareVisitorImplForAll<T>(input);
+    return ExecCompareVisitorImplForAll<T>(context, input);
 }
 
 template <typename T>
 VectorPtr
 PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
-    OffsetVector* input) {
+    EvalCtx& context, OffsetVector* input) {
     if (!arg_inited_) {
         interval_ = expr_->interval_;
         compare_value_.SetValue<T>(expr_->compare_value_);
@@ -95,9 +96,11 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
 
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    const auto& bitmap_input = context.get_bitmap_input();
+    int processed_cursor = 0;
     auto exec_sub_batch =
-        [ arith_op,
-          compare_op ]<FilterType filter_type = FilterType::sequential>(
+        [ arith_op, compare_op, &bitmap_input, &
+          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -106,9 +109,25 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             TargetBitmapView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         const int64_t compare_us = compare_value;
+        bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
-            const int64_t current_ts_us = data[i];
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            const int64_t current_ts_us = data[offset];
             const int op_sign =
                 (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;
             // Floor division to correctly handle pre-epoch (negative) timestamps:
@@ -202,6 +221,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             }
             res[i] = match;
         }
+        processed_cursor += size;
     };
     int64_t processed_size;
     if (has_offset_input_) {

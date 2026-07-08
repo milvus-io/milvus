@@ -1364,6 +1364,16 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
+PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_array_lengths_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    ThrowInfo(ErrorCode::NotImplemented,
+              "chunk array lengths impl not implement for growing segment");
+}
+
 PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
@@ -1453,6 +1463,94 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         std::move(views), std::move(valid_data)};
     return PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+        std::move(content));
+}
+
+PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_vector_array_lengths_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    (void)op_ctx;
+
+    auto& field_meta = schema_->operator[](field_id);
+    AssertInfo(field_meta.get_data_type() == DataType::VECTOR_ARRAY,
+               "chunk_vector_array_lengths_impl only supports VECTOR_ARRAY "
+               "field");
+
+    auto vector_data = insert_record_.get_data<VectorArray>(field_id);
+    auto size_per_chunk = vector_data->get_size_per_chunk();
+    auto active_count = insert_record_.ack_responder_.GetAck();
+    auto start_offset = int64_t{0};
+    auto len = size_per_chunk;
+    if (offset_len.has_value()) {
+        start_offset = offset_len->first;
+        len = offset_len->second;
+    }
+
+    AssertInfo(start_offset >= 0 && start_offset < size_per_chunk,
+               "Retrieve vector array lengths with out-of-bound offset:{}, "
+               "len:{}, wrong",
+               start_offset,
+               len);
+    AssertInfo(len >= 0 && len <= size_per_chunk,
+               "Retrieve vector array lengths with out-of-bound offset:{}, "
+               "len:{}, wrong",
+               start_offset,
+               len);
+    AssertInfo(start_offset + len <= size_per_chunk,
+               "Retrieve vector array lengths with out-of-bound offset:{}, "
+               "len:{}, wrong",
+               start_offset,
+               len);
+
+    auto logical_start = chunk_id * size_per_chunk + start_offset;
+    AssertInfo(logical_start >= 0 && logical_start <= active_count,
+               "Retrieve vector array lengths with out-of-bound offset:{}, "
+               "len:{}, wrong",
+               start_offset,
+               len);
+    if (offset_len.has_value()) {
+        AssertInfo(logical_start + len <= active_count,
+                   "Retrieve vector array lengths with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+    } else {
+        len = std::min(len, active_count - logical_start);
+    }
+
+    std::vector<int64_t> lengths;
+    lengths.reserve(len);
+    FixedVector<bool> valid_data;
+    ThreadSafeValidDataPtr valid_vec_ptr = nullptr;
+    if (field_meta.is_nullable()) {
+        valid_vec_ptr = insert_record_.get_valid_data(field_id);
+        valid_data.reserve(len);
+    }
+
+    for (int64_t i = 0; i < len; ++i) {
+        auto logical_offset = logical_start + i;
+        if (field_meta.is_nullable()) {
+            auto valid = valid_vec_ptr->is_valid(logical_offset);
+            valid_data.push_back(valid);
+            if (!valid) {
+                lengths.emplace_back(0);
+                continue;
+            }
+        }
+
+        auto vector_array = vector_data->get_element(logical_offset);
+        AssertInfo(vector_array != nullptr,
+                   "Cannot find VECTOR_ARRAY data at segment offset {}",
+                   logical_offset);
+        lengths.emplace_back(vector_array->length());
+    }
+
+    std::pair<std::vector<int64_t>, FixedVector<bool>> content{
+        std::move(lengths), std::move(valid_data)};
+    return PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>(
         std::move(content));
 }
 
