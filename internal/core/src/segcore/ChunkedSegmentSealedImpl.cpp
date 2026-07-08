@@ -825,6 +825,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
                 num_rows_.value_or(0));
     }
 
+    request.has_raw_data =
+        milvus::index::IndexFactory::CanUseIndexRawDataForField(
+            field_meta.get_data_type(), request.has_raw_data);
     // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,
     // not here. This avoids unsafe ManualEvictCache on column groups.
     LOG_INFO(

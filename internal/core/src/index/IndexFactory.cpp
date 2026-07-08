@@ -212,6 +212,12 @@ ResolveHybridInternalIndexType(
 
 }  // namespace
 
+bool
+IndexFactory::CanUseIndexRawDataForField(DataType field_type,
+                                         bool has_raw_data) {
+    return has_raw_data && field_type != DataType::ARRAY;
+}
+
 template <typename T>
 ScalarIndexPtr<T>
 IndexFactory::CreatePrimitiveScalarIndex(
@@ -656,6 +662,8 @@ IndexFactory::ScalarIndexLoadResource(
             index_type);
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
+    request.has_raw_data =
+        CanUseIndexRawDataForField(field_type, request.has_raw_data);
     return request;
 }
 
