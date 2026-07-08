@@ -55,7 +55,7 @@ func CloneFunctions(functions []*Function) []*Function {
 	for i, function := range functions {
 		clone[i] = function.Clone()
 	}
-	return functions
+	return clone
 }
 
 func MarshalFunctionModel(function *Function) *schemapb.FunctionSchema {
