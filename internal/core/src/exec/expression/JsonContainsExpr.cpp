@@ -177,7 +177,9 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                     case DataType::INT64: {
                         return ExecArrayContains<int64_t>(context);
                     }
-                    case DataType::FLOAT:
+                    case DataType::FLOAT: {
+                        return ExecArrayContains<float>(context);
+                    }
                     case DataType::DOUBLE: {
                         return ExecArrayContains<double>(context);
                     }
@@ -232,7 +234,9 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                     case DataType::INT64: {
                         return ExecArrayContainsAll<int64_t>(context);
                     }
-                    case DataType::FLOAT:
+                    case DataType::FLOAT: {
+                        return ExecArrayContainsAll<float>(context);
+                    }
                     case DataType::DOUBLE: {
                         return ExecArrayContainsAll<double>(context);
                     }
