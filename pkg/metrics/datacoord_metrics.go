@@ -101,8 +101,13 @@ var (
 
 	// DataCoordSegmentDeltalogFileCount publishes summary-style quantiles
 	// (0.5/0.9/0.99/1.0) of the per-segment deltalog file count over healthy
-	// FLUSHED non-L0 segments (the population hasTooManyDeletions is evaluated
-	// against), recomputed exactly on each metrics refresh round.
+	// FLUSHED non-L0 segments, split by segment_level, recomputed exactly on
+	// each metrics refresh round. The two single-compaction paths that call
+	// hasTooManyDeletions each cover one level (auto-compaction filters to L2,
+	// manual filters to L1), so the distributions are kept per level rather than
+	// blended. It approximates — not exactly equals — the candidate population:
+	// transient/stable candidacy predicates (isCompacting, IsSorted, IsInvisible,
+	// compaction-protected) are not applied here.
 	// Compare against dataCoord.compaction.single.deltalog.maxnum: the 1.0
 	// quantile shows how close the dirtiest segment is to triggering a
 	// delete-driven compaction, while p50/p90 rising toward the threshold
@@ -114,10 +119,11 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "segment_deltalog_file_count",
 			Help: "quantiles (0.5/0.9/0.99/1.0) of deltalog file count over healthy flushed " +
-				"non-L0 segments; compare against dataCoord.compaction.single.deltalog.maxnum",
+				"non-L0 segments, by segment_level; compare against dataCoord.compaction.single.deltalog.maxnum",
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
+			segmentLevelLabelName,
 			quantileLabelName,
 		})
 
@@ -127,11 +133,12 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "segment_deltalog_size",
 			Help: "quantiles (0.5/0.9/0.99/1.0) of accumulated deltalog size in bytes over " +
-				"healthy flushed non-L0 segments; compare against " +
+				"healthy flushed non-L0 segments, by segment_level; compare against " +
 				"dataCoord.compaction.single.deltalog.maxsize (the varchar-PK trigger dimension)",
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
+			segmentLevelLabelName,
 			quantileLabelName,
 		})
 
@@ -141,12 +148,13 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "segment_deleted_rows_ratio",
 			Help: "quantiles (0.5/0.9/0.99/1.0) of deleted-rows/total-rows ratio over healthy " +
-				"flushed non-L0 segments; compare against dataCoord.compaction.single.ratio.threshold. " +
+				"flushed non-L0 segments, by segment_level; compare against dataCoord.compaction.single.ratio.threshold. " +
 				"May exceed 1.0 (deltalog entries count repeated deletes of the same PK); " +
 				"zero-row segments are excluded",
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
+			segmentLevelLabelName,
 			quantileLabelName,
 		})
 

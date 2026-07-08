@@ -41,24 +41,50 @@ var deltalogQuantiles = []struct {
 	{"1.0", 1.0},
 }
 
-// deltalogAggregate collects per-collection deltalog observability stats over
-// healthy FLUSHED non-L0 segments — the population hasTooManyDeletions is
-// evaluated against (growing/sealed segments route deletes to L0 and would
-// pad the distributions with zeros). Three of its accumulation dimensions are
-// mirrored: deltalog file count, accumulated deltalog size, and deleted-rows
-// ratio; zero-row segments are excluded from the ratio distribution (the
-// trigger's own uncapped division would fire on them, but a +Inf sample would
-// poison the gauge). Deltalog files of L0 segments are counted separately
-// over all healthy L0 segments, matching l0_delete_entries_num.
-type deltalogAggregate struct {
-	dbName        string
+// levelDist holds one segment level's mirrored deltalog distributions:
+// deltalog file count, accumulated deltalog size, and deleted-rows ratio.
+type levelDist struct {
 	fileCounts    []float64
 	sizes         []float64
 	deletedRatios []float64
-	l0FileCount   int64
+}
+
+// deltalogAggregate collects per-collection deltalog observability stats over
+// healthy FLUSHED non-L0 segments — the population hasTooManyDeletions is
+// approximately evaluated against (growing/sealed segments route deletes to L0
+// and would pad the distributions with zeros). It only gates on L0 + isFlushed
+// (the caller already guarantees healthy && !importing); the finer candidacy
+// predicates (isCompacting, IsSorted, IsInvisible, compaction-protected) are
+// not applied, so the distributions approximate rather than exactly equal the
+// candidate set. Distributions are kept per segment level (byLevel): the two
+// single-compaction paths that reach hasTooManyDeletions each cover one level
+// (auto-compaction filters to L2, manual to L1), so blending them into one
+// quantile would dilute p50/p90. Zero-row segments are excluded from the ratio
+// distribution (the trigger's own uncapped division would fire on them, but a
+// +Inf sample would poison the gauge). Deltalog files of L0 segments are
+// counted separately over all healthy L0 segments, matching
+// l0_delete_entries_num.
+type deltalogAggregate struct {
+	dbName      string
+	byLevel     map[datapb.SegmentLevel]*levelDist
+	l0FileCount int64
 }
 
 func (a *deltalogAggregate) observe(segment *SegmentInfo) {
+	// L0 uses only the deltalog file count (l0_delete_entries_num companion);
+	// skip the size/deleted-row accumulation the non-L0 path needs.
+	if segment.GetLevel() == datapb.SegmentLevel_L0 {
+		fileCount := 0
+		for _, deltaLogs := range segment.GetDeltalogs() {
+			fileCount += len(deltaLogs.GetBinlogs())
+		}
+		a.l0FileCount += int64(fileCount)
+		return
+	}
+	if !isFlushed(segment) {
+		return
+	}
+
 	fileCount := 0
 	size := int64(0)
 	deletedRows := int64(0)
@@ -70,36 +96,42 @@ func (a *deltalogAggregate) observe(segment *SegmentInfo) {
 		fileCount += len(deltaLogs.GetBinlogs())
 	}
 
-	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		a.l0FileCount += int64(fileCount)
-		return
+	if a.byLevel == nil {
+		a.byLevel = make(map[datapb.SegmentLevel]*levelDist)
 	}
-	if !isFlushed(segment) {
-		return
+	d := a.byLevel[segment.GetLevel()]
+	if d == nil {
+		d = &levelDist{}
+		a.byLevel[segment.GetLevel()] = d
 	}
-
-	a.fileCounts = append(a.fileCounts, float64(fileCount))
-	a.sizes = append(a.sizes, float64(size))
+	d.fileCounts = append(d.fileCounts, float64(fileCount))
+	d.sizes = append(d.sizes, float64(size))
 	if segment.GetNumOfRows() > 0 {
-		a.deletedRatios = append(a.deletedRatios, float64(deletedRows)/float64(segment.GetNumOfRows()))
+		d.deletedRatios = append(d.deletedRatios, float64(deletedRows)/float64(segment.GetNumOfRows()))
 	}
 }
 
-// quantile returns the exact nearest-rank quantile (rank = ceil(q*n)) of
-// values, sorting in place; 0 for an empty slice.
-func quantile(values []float64, q float64) float64 {
+// quantilesInPlace sorts values once and returns the exact nearest-rank
+// (rank = ceil(q*n)) value for each requested quantile; all-zeros for an empty
+// slice. Sorting once (vs once per quantile) shortens the read-lock hold in
+// reportDeltalogMetrics.
+func quantilesInPlace(values []float64, qs []float64) []float64 {
+	out := make([]float64, len(qs))
 	if len(values) == 0 {
-		return 0
+		return out
 	}
 	sort.Float64s(values)
-	idx := int(math.Ceil(q*float64(len(values)))) - 1
-	if idx < 0 {
-		idx = 0
+	for i, q := range qs {
+		idx := int(math.Ceil(q*float64(len(values)))) - 1
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(values) {
+			idx = len(values) - 1
+		}
+		out[i] = values[idx]
 	}
-	if idx >= len(values) {
-		idx = len(values) - 1
-	}
-	return values[idx]
+	return out
 }
 
 var (
@@ -119,12 +151,23 @@ func reportDeltalogMetrics(aggregates map[string]*deltalogAggregate) {
 	deltalogPublishMu.Lock()
 	defer deltalogPublishMu.Unlock()
 
+	qs := make([]float64, len(deltalogQuantiles))
+	for i, p := range deltalogQuantiles {
+		qs[i] = p.q
+	}
+
 	for collectionID, agg := range aggregates {
 		metrics.DataCoordL0DeltalogFileNum.WithLabelValues(agg.dbName, collectionID).Set(float64(agg.l0FileCount))
-		for _, p := range deltalogQuantiles {
-			metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues(agg.dbName, collectionID, p.label).Set(quantile(agg.fileCounts, p.q))
-			metrics.DataCoordSegmentDeltalogSize.WithLabelValues(agg.dbName, collectionID, p.label).Set(quantile(agg.sizes, p.q))
-			metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues(agg.dbName, collectionID, p.label).Set(quantile(agg.deletedRatios, p.q))
+		for level, d := range agg.byLevel {
+			levelStr := level.String()
+			fcQ := quantilesInPlace(d.fileCounts, qs)
+			szQ := quantilesInPlace(d.sizes, qs)
+			drQ := quantilesInPlace(d.deletedRatios, qs)
+			for i, p := range deltalogQuantiles {
+				metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues(agg.dbName, collectionID, levelStr, p.label).Set(fcQ[i])
+				metrics.DataCoordSegmentDeltalogSize.WithLabelValues(agg.dbName, collectionID, levelStr, p.label).Set(szQ[i])
+				metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues(agg.dbName, collectionID, levelStr, p.label).Set(drQ[i])
+			}
 		}
 	}
 	for collectionID := range publishedDeltalogCollections {
