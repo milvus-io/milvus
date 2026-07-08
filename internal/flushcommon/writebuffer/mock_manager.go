@@ -448,14 +448,14 @@ func (_c *MockBufferManager_NotifyCheckpointUpdated_Call) RunAndReturn(run func(
 	return _c
 }
 
-// Register provides a mock function with given fields: channel, _a1, opts
-func (_m *MockBufferManager) Register(channel string, _a1 metacache.MetaCache, opts ...WriteBufferOption) error {
+// Register provides a mock function with given fields: ctx, channel, _a1, opts
+func (_m *MockBufferManager) Register(ctx context.Context, channel string, _a1 metacache.MetaCache, opts ...WriteBufferOption) error {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, channel, _a1)
+	_ca = append(_ca, ctx, channel, _a1)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -464,8 +464,8 @@ func (_m *MockBufferManager) Register(channel string, _a1 metacache.MetaCache, o
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, metacache.MetaCache, ...WriteBufferOption) error); ok {
-		r0 = rf(channel, _a1, opts...)
+	if rf, ok := ret.Get(0).(func(context.Context, string, metacache.MetaCache, ...WriteBufferOption) error); ok {
+		r0 = rf(ctx, channel, _a1, opts...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -479,23 +479,24 @@ type MockBufferManager_Register_Call struct {
 }
 
 // Register is a helper method to define mock.On call
+//   - ctx context.Context
 //   - channel string
 //   - _a1 metacache.MetaCache
 //   - opts ...WriteBufferOption
-func (_e *MockBufferManager_Expecter) Register(channel interface{}, _a1 interface{}, opts ...interface{}) *MockBufferManager_Register_Call {
+func (_e *MockBufferManager_Expecter) Register(ctx interface{}, channel interface{}, _a1 interface{}, opts ...interface{}) *MockBufferManager_Register_Call {
 	return &MockBufferManager_Register_Call{Call: _e.mock.On("Register",
-		append([]interface{}{channel, _a1}, opts...)...)}
+		append([]interface{}{ctx, channel, _a1}, opts...)...)}
 }
 
-func (_c *MockBufferManager_Register_Call) Run(run func(channel string, _a1 metacache.MetaCache, opts ...WriteBufferOption)) *MockBufferManager_Register_Call {
+func (_c *MockBufferManager_Register_Call) Run(run func(ctx context.Context, channel string, _a1 metacache.MetaCache, opts ...WriteBufferOption)) *MockBufferManager_Register_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]WriteBufferOption, len(args)-2)
-		for i, a := range args[2:] {
+		variadicArgs := make([]WriteBufferOption, len(args)-3)
+		for i, a := range args[3:] {
 			if a != nil {
 				variadicArgs[i] = a.(WriteBufferOption)
 			}
 		}
-		run(args[0].(string), args[1].(metacache.MetaCache), variadicArgs...)
+		run(args[0].(context.Context), args[1].(string), args[2].(metacache.MetaCache), variadicArgs...)
 	})
 	return _c
 }
@@ -505,7 +506,7 @@ func (_c *MockBufferManager_Register_Call) Return(_a0 error) *MockBufferManager_
 	return _c
 }
 
-func (_c *MockBufferManager_Register_Call) RunAndReturn(run func(string, metacache.MetaCache, ...WriteBufferOption) error) *MockBufferManager_Register_Call {
+func (_c *MockBufferManager_Register_Call) RunAndReturn(run func(context.Context, string, metacache.MetaCache, ...WriteBufferOption) error) *MockBufferManager_Register_Call {
 	_c.Call.Return(run)
 	return _c
 }

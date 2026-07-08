@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -362,6 +363,44 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.NoError(err)
 		s.MetricsEqual(value, 5856)
 	})
+}
+
+// TestBufferDataAllocRetry is a regression test for issue #50261: a transient
+// ID-allocator failure (a rootcoord/datacoord RPC blip) must be retried instead
+// of crashing the whole flush pipeline host process via panic.
+func (s *L0WriteBufferSuite) TestBufferDataAllocRetry() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+
+	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+		ctx:         context.Background(),
+		idAllocator: s.allocator,
+	})
+	s.Require().NoError(err)
+
+	// AllocOne fails transiently once, then succeeds: the buffer must retry and
+	// recover instead of panicking the whole process.
+	var calls atomic.Int32
+	allocated := int64(tsoutil.ComposeTSByTime(time.Now(), 0))
+	s.allocator.AllocOneF = func() (int64, error) {
+		if calls.Add(1) <= 1 {
+			return 0, merr.WrapErrServiceUnavailable("rootcoord temporarily unavailable")
+		}
+		return allocated, nil
+	}
+
+	pks, _ := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
+	delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+
+	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Maybe()
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+	s.NotPanics(func() {
+		err = wb.BufferData([]*InsertData{}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+	})
+	s.NoError(err)
+	s.GreaterOrEqual(calls.Load(), int32(2), "AllocOne should have been retried past the transient failure")
 }
 
 func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {

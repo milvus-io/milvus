@@ -74,10 +74,10 @@ func (s *ManagerSuite) SetupTest() {
 func (s *ManagerSuite) TestRegister() {
 	manager := s.manager
 
-	err := manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
+	err := manager.Register(context.Background(), s.channelName, s.metacache, WithIDAllocator(s.allocator))
 	s.NoError(err)
 
-	err = manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
+	err = manager.Register(context.Background(), s.channelName, s.metacache, WithIDAllocator(s.allocator))
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrChannelReduplicate)
 }
@@ -225,7 +225,7 @@ func (s *ManagerSuite) TestRemoveChannel() {
 	})
 
 	s.Run("remove_channel", func() {
-		err := manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
+		err := manager.Register(context.Background(), s.channelName, s.metacache, WithIDAllocator(s.allocator))
 		s.Require().NoError(err)
 
 		s.NotPanics(func() {

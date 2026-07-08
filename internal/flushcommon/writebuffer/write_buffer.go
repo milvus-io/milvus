@@ -246,6 +246,7 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncm
 
 // writeBufferBase is the common component for buffering data
 type writeBufferBase struct {
+	ctx          context.Context
 	collectionID int64
 	channelName  string
 
@@ -317,7 +318,12 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		growingSourceRetryInterval = defaultGrowingSourceRetryInterval
 	}
 
+	ctx := option.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	wb := &writeBufferBase{
+		ctx:                        ctx,
 		channelName:                channel,
 		collectionID:               metacache.Collection(),
 		estSizePerRecord:           estSize,
@@ -1009,7 +1015,11 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				growingSourceTask.ReleaseSource()
 			}
-			mlog.Fatal(ctx, "failed to sync data", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
+			// SyncData only returns an error when the sync manager's worker pool
+			// is already closed, i.e. the node is shutting down. Don't crash the
+			// process: unsynced data stays in the WAL and is replayed on restart.
+			mlog.Warn(ctx, "failed to submit sync task, sync manager is closing", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
+			continue
 		}
 		result = append(result, future)
 	}
@@ -1583,15 +1593,16 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	futures := wb.submitDropSyncTasks(ctx, syncTasks)
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		mlog.Error(ctx, "failed to sink write buffer data", mlog.Err(err))
-		// TODO change to remove channel in the future
-		panic(err)
+		// Best-effort final flush while dropping the channel: the collection is
+		// being removed, so a terminal flush failure must not crash the node.
+		mlog.Warn(ctx, "failed to sink write buffer data while dropping channel, continuing", mlog.Err(err))
 	}
+	// DropChannel is a datacoord RPC with bounded retry inside the meta writer.
+	// If it still fails, don't crash: the collection is being dropped and
+	// datacoord reconciles dropped-channel metadata on its own side.
 	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
 	if err != nil {
-		mlog.Error(ctx, "failed to drop channel", mlog.Err(err))
-		// TODO change to remove channel in the future
-		panic(err)
+		mlog.Warn(ctx, "failed to drop channel meta, continuing", mlog.Err(err))
 	}
 }
 
@@ -1617,7 +1628,11 @@ func (wb *writeBufferBase) submitDropSyncTasks(ctx context.Context, syncTasks []
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				growingSourceTask.ReleaseSource()
 			}
-			mlog.Fatal(ctx, "failed to sync segment", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
+			// SyncData only fails when the sync manager is already closed (node
+			// stopping). The channel is being dropped anyway, so log and skip
+			// instead of crashing the whole process.
+			mlog.Warn(ctx, "failed to submit sync task while dropping channel, sync manager is closing", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
+			continue
 		}
 		futures = append(futures, f)
 	}
