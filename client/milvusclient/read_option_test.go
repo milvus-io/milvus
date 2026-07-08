@@ -113,6 +113,21 @@ func (s *SearchOptionSuite) TestWithNamespace() {
 	s.Equal(namespace, hybridReq.GetNamespace())
 }
 
+func (s *SearchOptionSuite) TestQueryOrderByFields() {
+	collName := "query_order_by"
+
+	queryReq, err := NewQueryOption(collName).
+		WithFilter("price > 50").
+		WithLimit(10).
+		WithOrderByFields("price:desc", "name:asc").
+		Request()
+	s.Require().NoError(err)
+
+	queryParams := entity.KvPairsMap(queryReq.GetQueryParams())
+	s.Equal("price:desc,name:asc", queryParams[spOrderByFields])
+	s.Equal("10", queryParams[spLimit])
+}
+
 func (s *SearchOptionSuite) TestPlaceHolder() {
 	type testCase struct {
 		tag         string
