@@ -612,6 +612,11 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto internal_segment =
+                static_cast<milvus::segcore::SegmentInternalInterface*>(
+                    segment);
+            CheckExternalFieldsInLoadedManifest(
+                plan->schema_, internal_segment, plan->access_entries_);
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
