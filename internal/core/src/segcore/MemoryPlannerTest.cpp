@@ -409,12 +409,13 @@ TEST(LoadCellBatchAsync, PushesRawTablesForConsumerFinalize) {
     };
 
     auto channel = std::make_shared<CellReaderChannel>();
-    auto futures = LoadCellBatchAsync(nullptr,
-                                      std::move(specs),
-                                      MakeMockReaderFactory(),
-                                      channel,
-                                      32 * MB,
-                                      milvus::proto::common::LoadPriority::HIGH);
+    auto futures =
+        LoadCellBatchAsync(nullptr,
+                           std::move(specs),
+                           MakeMockReaderFactory(),
+                           channel,
+                           32 * MB,
+                           milvus::proto::common::LoadPriority::HIGH);
 
     int received = 0;
     std::shared_ptr<CellLoadResult> cell_data;
