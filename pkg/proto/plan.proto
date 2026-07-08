@@ -261,7 +261,7 @@ message ElementFilterExpr {
   Expr predicate = 3;
 }
 
-// MatchType defines the type of match operation for struct array queries
+// MatchType defines the type of match operation for MATCH_* queries.
 enum MatchType {
   MatchAll = 0;    // All elements must match the predicate
   MatchAny = 1;    // At least one element matches the predicate
@@ -270,11 +270,31 @@ enum MatchType {
   MatchExact = 4;  // Exactly N elements match the predicate
 }
 
+// MatchColumnInfo locates the target collection of a MATCH_* expression.
+// It supports three kinds of sources, distinguished by data_type:
+//   * ArrayOfStruct  -> struct array field (e.g., MATCH_ALL(structA, $[sub] == x))
+//   * Array          -> plain array field  (e.g., MATCH_ALL(arrA,    $ == x))
+//   * JSON           -> JSON array path    (e.g., MATCH_ALL(jsonA["p"], $ == x))
+message MatchColumnInfo {
+  int64 field_id = 1;                // Target field ID
+  string field_name = 2;             // Target field name (kept for name-based lookup)
+  schema.DataType data_type = 3;     // ArrayOfStruct / Array / JSON, used for dispatch
+  schema.DataType element_type = 4;  // Element scalar type, meaningful for Array
+  repeated string nested_path = 5;   // JSON path segments, meaningful for JSON (e.g., ["object","admins"])
+}
+
 message MatchExpr {
-  string struct_name = 1;      // The struct array field name (e.g., struct_array)
-  Expr predicate = 2;          // The condition expression using $[field] syntax (e.g., $[intField] == 1 && $[strField] == "aaa")
+  // Deprecated legacy locator: the struct array field name. Tag 1 shipped on
+  // the wire with this meaning (struct-array MATCH, #46518), so it must keep
+  // its number and type for rolling-upgrade compatibility. New plans use
+  // `column`; proxies keep writing struct_name so old querynodes can still
+  // resolve struct-array targets, and querynodes fall back to it when
+  // `column` is absent (plan produced by an old proxy).
+  string struct_name = 1 [deprecated = true];
+  Expr predicate = 2;          // The condition expression using $ or $[field] accessors
   MatchType match_type = 3;    // Type of match operation
-  int64 count = 4;             // For MatchLeast/MatchMost: the count parameter (N)
+  int64 count = 4;             // For MatchLeast/MatchMost/MatchExact: the count parameter (N)
+  MatchColumnInfo column = 5;  // Target column locator (supersedes struct_name)
 }
 
 message AlwaysTrueExpr {}

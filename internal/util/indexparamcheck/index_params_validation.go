@@ -60,6 +60,19 @@ func ValidateIndexParams(index *model.Index) error {
 	if err := ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
 	}
+	// "nested_index" is an internal build/load config key (the nested-array
+	// index marker decided by datacoord and echoed by the index worker); index
+	// params are copied verbatim into that config, so a user-supplied value
+	// would bypass the scalar-index-version gate and desynchronize the
+	// persisted marker from the physical index layout.
+	for _, params := range [][]*commonpb.KeyValuePair{index.IndexParams, index.UserIndexParams, index.TypeParams} {
+		for _, kv := range params {
+			if kv.GetKey() == common.NestedIndexKey {
+				return merr.WrapErrParameterInvalidMsg(
+					"%s is a reserved index param and cannot be set", common.NestedIndexKey)
+			}
+		}
+	}
 	return nil
 }
 

@@ -279,6 +279,83 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     }
 }
 
+// json_contains_all(json["a"], []) through the JsonStats exec path: vacuously
+// TRUE only for rows whose path holds a real JSON array (an empty [] counts);
+// a non-array value, a JSON null, a missing path, and a field-level NULL all
+// stay UNKNOWN/false — the same treatment the non-empty ContainsAll stats
+// path applies to such rows.
+TEST(JsonContainsByStatsTest, ContainsAllEmptyListIsNotNullSemantics) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    std::vector<std::string> json_raw_data = {
+        R"({"a": [1, 2]})",    // real array               -> TRUE
+        R"({"a": []})",        // real EMPTY array         -> still TRUE
+        R"({"a": "scalar"})",  // path not an array        -> UNKNOWN
+        R"({"b": [1]})",       // path missing             -> UNKNOWN
+        R"({})",               // path missing             -> UNKNOWN
+        R"({"a": [3]})",       // field-level NULL         -> UNKNOWN
+        R"({"a": null})",      // JSON null at path        -> UNKNOWN
+        R"({"a": {"x": 1}})",  // object, not an array     -> UNKNOWN
+    };
+    std::vector<uint8_t> valid_data{0b11011111};
+
+    const int64_t collection_id = 1201;
+    const int64_t partition_id = 2201;
+    const int64_t segment_id = 3201;
+    const int64_t field_id = json_fid.get();
+    const int64_t build_id = 5201;
+    const int64_t version_id = 1;
+    const std::string root_path = TestLocalPath;
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          root_path,
+                                          collection_id,
+                                          partition_id,
+                                          segment_id,
+                                          field_id,
+                                          build_id,
+                                          version_id,
+                                          &valid_data);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    json_field->FillFieldData(MakeNullableJsonArray(json_raw_data, valid_data));
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    auto expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(
+            json_fid, DataType::JSON, std::vector<std::string>{"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+        true,
+        std::vector<proto::plan::GenericValue>{});
+
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto result = query::ExecuteQueryExpr(
+        plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+
+    ASSERT_EQ(result.size(), json_raw_data.size());
+    EXPECT_TRUE(result[0]);
+    EXPECT_TRUE(result[1]);
+    for (size_t i = 2; i < json_raw_data.size(); ++i) {
+        EXPECT_FALSE(result[i]) << "row " << i;
+    }
+    EXPECT_EQ(result.count(), 2);
+}
+
 TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);

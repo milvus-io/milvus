@@ -214,10 +214,12 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
         }
     }
 
-    if (total_num_rows_ == 0) {
-        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
-    }
-
+    // An all-null / all-empty nested array field legitimately yields zero
+    // elements. Build a valid empty element-level index instead of throwing:
+    // raw array data is retained (HasRawData()==false), so IS NULL /
+    // array_length / MATCH_* still resolve off raw, and the loader can always
+    // rebuild IArrayOffsets. Matches the tolerant InvertedIndexTantivy nested
+    // path, which never throws on zero elements.
     data_.reserve(total_num_rows_);
     // all values are valid for nested index because any given slot in a valid_bitset_ denotes one element in a valid row
     valid_bitset_ = TargetBitmap(total_num_rows_, true);
@@ -369,6 +371,9 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     milvus::fastmem::FastMemcpy(
         &index_size, index_length->data.get(), (size_t)index_length->size);
 
+    // No persisted flag => old non-nested index (nested was never released);
+    // load as row-level so MATCH falls back to brute. Compaction rebuilds nested.
+    is_nested_index_ = false;
     auto is_nested_index = index_binary.GetByName("is_nested_index");
     if (is_nested_index) {
         bool loaded_is_nested_index = false;
@@ -716,7 +721,12 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
     size_t index_size = reader.GetMeta<size_t>("index_length");
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    // OR with the constructor value (a nested-constructed index stays nested
+    // even if the file lacks the flag); default false so a V3 file written
+    // before the nested-array support (no is_nested key) loads as a plain
+    // row-level index instead of asserting.
+    is_nested_index_ =
+        is_nested_index_ || reader.GetMeta<bool>("is_nested", false);
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
@@ -829,38 +839,49 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
         auto offsets_bytes = get_idx_to_offsets_bytes();
 
-        {
-            auto fw = storage::FileWriter(
-                mmap_meta_filepath_,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
+        if (offsets_bytes == 0) {
+            // Empty nested index (all-null / all-empty array field): the
+            // idx_to_offsets entry legitimately has zero bytes and
+            // mmap(len=0) fails with EINVAL. Skip the meta mapping; query
+            // paths see idx_to_offsets_size_ == 0.
+            idx_to_offsets_ptr_ = nullptr;
+            idx_to_offsets_size_ = 0;
+            load_valid_bitset();
+        } else {
+            {
+                auto fw = storage::FileWriter(
+                    mmap_meta_filepath_,
+                    storage::io::GetPriorityFromLoadPriority(load_priority));
 
-            reader.ReadEntryStream(
-                "idx_to_offsets",
-                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
-            fw.Finish();
-        }
+                reader.ReadEntryStream(
+                    "idx_to_offsets",
+                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
+                fw.Finish();
+            }
 
-        mmap_meta_size_ = offsets_bytes;
-        auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
-        mmap_meta_data_ = static_cast<char*>(mmap(NULL,
-                                                  mmap_meta_size_,
-                                                  PROT_READ,
-                                                  MAP_PRIVATE,
-                                                  meta_file.Descriptor(),
-                                                  0));
-        if (mmap_meta_data_ == MAP_FAILED) {
+            mmap_meta_size_ = offsets_bytes;
+            auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
+            mmap_meta_data_ = static_cast<char*>(mmap(NULL,
+                                                      mmap_meta_size_,
+                                                      PROT_READ,
+                                                      MAP_PRIVATE,
+                                                      meta_file.Descriptor(),
+                                                      0));
+            if (mmap_meta_data_ == MAP_FAILED) {
+                meta_file.Close();
+                remove(mmap_meta_filepath_.c_str());
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "failed to mmap meta: {}",
+                          strerror(errno));
+            }
             meta_file.Close();
-            remove(mmap_meta_filepath_.c_str());
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "failed to mmap meta: {}",
-                      strerror(errno));
+
+            idx_to_offsets_ptr_ =
+                reinterpret_cast<const int32_t*>(mmap_meta_data_);
+            idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
+
+            load_valid_bitset();
         }
-        meta_file.Close();
-
-        idx_to_offsets_ptr_ = reinterpret_cast<const int32_t*>(mmap_meta_data_);
-        idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
-
-        load_valid_bitset();
     } else if (reader.HasEntry("idx_to_offsets") &&
                reader.HasEntry("valid_bitset")) {
         // memory path: stream into vector

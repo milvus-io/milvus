@@ -105,8 +105,15 @@ using namespace milvus::cachinglayer;
 // timestamp index). Defined in internal/core/unittest/test_commit_timestamp.cpp.
 class CommitTimestampV2TestAccess;
 
+// Test-only accessor that drives the private FillDefaultValueFields() path to
+// simulate an old sealed segment gaining a scalar ARRAY field via schema
+// evolution (AddField). Defined in
+// internal/core/src/exec/expression/MatchExprTest.cpp.
+class ScalarArrayFillDefaultTestAccess;
+
 class ChunkedSegmentSealedImpl : public SegmentSealed {
     friend class CommitTimestampV2TestAccess;
+    friend class ScalarArrayFillDefaultTestAccess;
 
  public:
     using ParquetStatistics = std::vector<std::shared_ptr<parquet::Statistics>>;

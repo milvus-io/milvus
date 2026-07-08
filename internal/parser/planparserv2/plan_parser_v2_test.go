@@ -48,6 +48,20 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		ElementType: schemapb.DataType_VarChar,
 	})
 
+	fields = append(fields, &schemapb.FieldSchema{
+		FieldID: 135, Name: "scores", IsPrimaryKey: false, Description: "scalar int64 array field",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	})
+
+	// A field literally named "threshold" to exercise the soft-keyword behavior:
+	// `threshold` must be usable as a normal field / template var, not swallowed by
+	// the MATCH_LEAST/MOST/EXACT `threshold=N` syntax.
+	fields = append(fields, &schemapb.FieldSchema{
+		FieldID: 136, Name: "threshold", IsPrimaryKey: false, Description: "field literally named threshold",
+		DataType: schemapb.DataType_Int64,
+	})
+
 	structArrayField := &schemapb.StructArrayFieldSchema{
 		FieldID: 132, Name: "struct_array", Fields: []*schemapb.FieldSchema{
 			{
@@ -3551,7 +3565,7 @@ func TestExpr_Match(t *testing.T) {
 		expr, err := ParseExpr(helper, `MATCH_ALL(struct_array, $[sub_int] > 1)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
-		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetColumn().GetFieldName())
 		assert.Equal(t, planpb.MatchType_MatchAll, expr.GetMatchExpr().GetMatchType())
 		assert.Equal(t, int64(0), expr.GetMatchExpr().GetCount())
 	})
@@ -3560,7 +3574,7 @@ func TestExpr_Match(t *testing.T) {
 		expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_str] == "aaa")`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
-		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetColumn().GetFieldName())
 		assert.Equal(t, planpb.MatchType_MatchAny, expr.GetMatchExpr().GetMatchType())
 		assert.Equal(t, int64(0), expr.GetMatchExpr().GetCount())
 	})
@@ -3569,7 +3583,7 @@ func TestExpr_Match(t *testing.T) {
 		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=3)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
-		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetColumn().GetFieldName())
 		assert.Equal(t, planpb.MatchType_MatchLeast, expr.GetMatchExpr().GetMatchType())
 		assert.Equal(t, int64(3), expr.GetMatchExpr().GetCount())
 	})
@@ -3578,7 +3592,7 @@ func TestExpr_Match(t *testing.T) {
 		expr, err := ParseExpr(helper, `MATCH_MOST(struct_array, $[sub_str] == "aaa", threshold=5)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
-		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetColumn().GetFieldName())
 		assert.Equal(t, planpb.MatchType_MatchMost, expr.GetMatchExpr().GetMatchType())
 		assert.Equal(t, int64(5), expr.GetMatchExpr().GetCount())
 	})
@@ -3587,7 +3601,7 @@ func TestExpr_Match(t *testing.T) {
 		expr, err := ParseExpr(helper, `MATCH_EXACT(struct_array, $[sub_int] == 100, threshold=2)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
-		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetColumn().GetFieldName())
 		assert.Equal(t, planpb.MatchType_MatchExact, expr.GetMatchExpr().GetMatchType())
 		assert.Equal(t, int64(2), expr.GetMatchExpr().GetCount())
 	})
@@ -3631,6 +3645,590 @@ func TestExpr_Match(t *testing.T) {
 	}
 }
 
+func TestScalarArrayMatchAny(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	expr, err := ParseExpr(helper, `MATCH_ANY(scores, $ > 90)`, nil)
+	assert.NoError(t, err)
+
+	matchExpr := expr.GetMatchExpr()
+	assert.NotNil(t, matchExpr)
+	assert.Equal(t, "scores", matchExpr.GetColumn().GetFieldName())
+	assert.Equal(t, planpb.MatchType_MatchAny, matchExpr.GetMatchType())
+	assert.Equal(t, int64(0), matchExpr.GetCount())
+
+	// The predicate's column must be element-level with the array's element type.
+	predicate := matchExpr.GetPredicate()
+	assert.NotNil(t, predicate)
+	ure := predicate.GetUnaryRangeExpr()
+	assert.NotNil(t, ure)
+	columnInfo := ure.GetColumnInfo()
+	assert.NotNil(t, columnInfo)
+	assert.True(t, columnInfo.GetIsElementLevel())
+	assert.Equal(t, schemapb.DataType_Int64, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Int64, columnInfo.GetElementType())
+}
+
+func TestScalarArrayMatchVariants(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// All 5 MATCH variants + element_filter on a scalar array, using the `$` token.
+	validExprs := []string{
+		`MATCH_ANY(scores, $ > 90)`,
+		`MATCH_ALL(scores, $ > 0)`,
+		`MATCH_LEAST(scores, $ > 90, threshold=2)`,
+		`MATCH_MOST(scores, $ < 50, threshold=3)`,
+		`MATCH_EXACT(scores, $ == 100, threshold=1)`,
+		`element_filter(scores, $ > 90)`,
+
+		// range form: requires ElementSelf in Range/ReverseRange grammar rules
+		`MATCH_ANY(scores, 1 < $ < 10)`,
+		`MATCH_ALL(scores, 100 > $ > 0)`,
+
+		// combined predicates and case-insensitivity
+		`MATCH_ANY(scores, $ > 0 && $ < 100)`,
+		`match_any(scores, $ >= 0)`,
+
+		// combined with other expressions
+		`Int64Field > 0 && MATCH_ANY(scores, $ > 90)`,
+
+		// VarChar-element scalar array (StringArrayField, ElementType VarChar)
+		`MATCH_ANY(StringArrayField, $ == "abc")`,
+		`MATCH_ALL(StringArrayField, $ != "")`,
+		`MATCH_ANY(StringArrayField, $ like "prefix%")`,
+		`MATCH_ANY(StringArrayField, "a" < $ < "z")`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+
+	// Negatives.
+	invalidExprs := []string{
+		// $[sub] on a scalar array - scalar elements have no sub-fields
+		`MATCH_ANY(scores, $[sub] > 90)`,
+		`element_filter(scores, $[sub] > 90)`,
+
+		// bare $ outside any match/element_filter context
+		`$ > 90`,
+		`Int64Field > 0 && $ > 90`,
+
+		// nesting not allowed
+		`MATCH_ANY(scores, MATCH_ALL(scores, $ > 0))`,
+		`element_filter(scores, element_filter(scores, $ > 0))`,
+
+		// non-existent field / non-array field, using `$`
+		`MATCH_ANY(non_existent, $ > 90)`,
+		`MATCH_ANY(Int64Field, $ > 90)`,
+
+		// An EXISTING non-array field must be rejected at parse time even when the
+		// predicate does NOT use `$` (otherwise it would only fail later in segcore
+		// as a System error). Covers the parser field-classification path.
+		// (A non-existent name is treated as a struct-array container and validated
+		// later, so it is not asserted here.)
+		`MATCH_ANY(Int64Field, Int64Field > 0)`,
+		`MATCH_ALL(Int64Field, Int64Field > 0)`,
+		`element_filter(Int64Field, Int64Field > 0)`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
+	}
+}
+
+// TestJSONArrayMatchProto verifies the MatchExpr proto produced when the
+// MATCH_* target is a JSON path that resolves to an array-of-scalars leaf:
+// the MatchColumnInfo must carry DataType==JSON, the JSON field name/id and
+// the nested path, while the predicate's `$` accessor resolves to an
+// element-level JSON ColumnInfo at the same nested path.
+func TestJSONArrayMatchProto(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	jsonField, err := helper.GetFieldFromName("JSONField")
+	assert.NoError(t, err)
+
+	t.Run("MatchAny_SinglePath", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > 90)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, "JSONField", matchExpr.GetColumn().GetFieldName())
+		assert.Equal(t, jsonField.GetFieldID(), matchExpr.GetColumn().GetFieldId())
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, []string{"a"}, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchAny, matchExpr.GetMatchType())
+		assert.Equal(t, int64(0), matchExpr.GetCount())
+
+		// The `$` accessor inside the predicate resolves to an element-level
+		// JSON ColumnInfo, anchored at the same field and nested path.
+		ure := matchExpr.GetPredicate().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		ci := ure.GetColumnInfo()
+		assert.True(t, ci.GetIsElementLevel())
+		assert.Equal(t, schemapb.DataType_JSON, ci.GetDataType())
+		assert.Equal(t, jsonField.GetFieldID(), ci.GetFieldId())
+		assert.Equal(t, []string{"a"}, ci.GetNestedPath())
+	})
+
+	t.Run("MatchAll_NestedPath_Compound", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ALL(JSONField["a"]["b"], $ >= 60 && $ < 90)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, []string{"a", "b"}, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchAll, matchExpr.GetMatchType())
+		assert.Equal(t, int64(0), matchExpr.GetCount())
+	})
+
+	t.Run("MatchLeast_Threshold", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(JSONField["a"], $ == 100, threshold=2)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, []string{"a"}, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchLeast, matchExpr.GetMatchType())
+		assert.Equal(t, int64(2), matchExpr.GetCount())
+	})
+
+	t.Run("MatchMost_Threshold", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_MOST(JSONField["a"], $ > 1, threshold=3)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, planpb.MatchType_MatchMost, matchExpr.GetMatchType())
+		assert.Equal(t, int64(3), matchExpr.GetCount())
+	})
+
+	t.Run("MatchExact_Threshold", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_EXACT(JSONField["a"], $ == true, threshold=1)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, planpb.MatchType_MatchExact, matchExpr.GetMatchType())
+		assert.Equal(t, int64(1), matchExpr.GetCount())
+	})
+
+	t.Run("BareJSONField_RootArray", func(t *testing.T) {
+		// A bare JSON field name targets the root array; nested path is empty.
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField, $ == "x")`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, "JSONField", matchExpr.GetColumn().GetFieldName())
+		assert.Equal(t, jsonField.GetFieldID(), matchExpr.GetColumn().GetFieldId())
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Empty(t, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchAny, matchExpr.GetMatchType())
+
+		ci := matchExpr.GetPredicate().GetUnaryRangeExpr().GetColumnInfo()
+		assert.True(t, ci.GetIsElementLevel())
+		assert.Equal(t, schemapb.DataType_JSON, ci.GetDataType())
+		assert.Empty(t, ci.GetNestedPath())
+	})
+
+	t.Run("EmptyElementSet_TypeNeutral", func(t *testing.T) {
+		// `$ in []` / `$ not in []` is a valid, type-neutral shape: segcore
+		// implements type-independent empty-set semantics (empty IN is
+		// definitively false, empty NOT IN its complement). The JSON MATCH_*
+		// literal-type validator must NOT reject it for "no typed literal",
+		// matching row-level JSON (`JSONField["A"] in []`, tested in
+		// TestExpr_Term) and struct-array elements (`MATCH_ANY(struct_array,
+		// $[sub_int] in [])`, tested in TestExpr_StructArrayContainsDesugar).
+		for _, exprStr := range []string{
+			`MATCH_ANY(JSONField["a"], $ in [])`,
+			`MATCH_ALL(JSONField["a"], $ not in [])`,
+			// an empty set combined with a typed comparison still validates.
+			`MATCH_ANY(JSONField["a"], $ > 5 || $ in [])`,
+		} {
+			expr, err := ParseExpr(helper, exprStr, nil)
+			require.NoError(t, err, exprStr)
+			require.NotNil(t, expr.GetMatchExpr(), exprStr)
+		}
+	})
+
+	t.Run("BitwiseElementPredicate", func(t *testing.T) {
+		// A bitwise op on a JSON element (`($ & 1) == 1`) parses to an
+		// element-level BinaryArithOpEvalRange with a BitAnd op; segcore now
+		// implements the bitwise element branch (previously parse-accepted but
+		// execution-rejected).
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["flags"], ($ & 1) == 1)`, nil)
+		require.NoError(t, err)
+		arith := expr.GetMatchExpr().GetPredicate().GetBinaryArithOpEvalRangeExpr()
+		require.NotNil(t, arith)
+		assert.Equal(t, planpb.ArithOpType_BitAnd, arith.GetArithOp())
+		assert.Equal(t, planpb.OpType_Equal, arith.GetOp())
+		ci := arith.GetColumnInfo()
+		assert.True(t, ci.GetIsElementLevel())
+		assert.Equal(t, schemapb.DataType_JSON, ci.GetDataType())
+	})
+}
+
+// TestMatchPredicateShapeRejected locks the MATCH_* predicate-shape guard:
+// segcore evaluates the predicate with ELEMENT offsets, so row-level column
+// references and constant(-folded) predicates inside it must be rejected at
+// parse time (they would be indexed by element offsets -> garbage results or
+// out-of-bounds reads).
+func TestMatchPredicateShapeRejected(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	invalidExprs := []string{
+		// row-level column reference inside the predicate
+		`MATCH_ANY(scores, Int64Field > 5)`,
+		`MATCH_ANY(scores, $ > 0 && Int64Field > 0)`,
+		`MATCH_ALL(struct_array, $[sub_int] > 1 && Int64Field > 0)`,
+		`MATCH_ANY(JSONField["a"], $ > 90 && JSONField["b"] > 5)`,
+		// constant / constant-folded predicates (row-space AlwaysTrue)
+		`MATCH_ANY(scores, $ > 0 || true)`,
+		`MATCH_ANY(scores, true)`,
+		// element-vs-row compare
+		`MATCH_ANY(scores, $ == Int64Field)`,
+	}
+	for _, exprStr := range invalidExprs {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+
+	validExprs := []string{
+		`MATCH_ANY(scores, $ > 0)`,
+		`MATCH_ALL(scores, $ > 0 && $ < 100)`,
+		`MATCH_ANY(struct_array, $[sub_int] > 1 && $[sub_str] == "a")`,
+		`not MATCH_ANY(scores, $ > 0)`,
+	}
+	for _, exprStr := range validExprs {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		assert.NoError(t, err, exprStr)
+		assert.NotNil(t, expr, exprStr)
+	}
+}
+
+// TestJSONArrayMatchVariants exercises the valid/invalid surface of MATCH_* on
+// a JSON-array target across all five operators, compound/range predicates,
+// every scalar element family, and the parser-level negative cases.
+func TestJSONArrayMatchVariants(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	validExprs := []string{
+		// all five operators
+		`MATCH_ANY(JSONField["a"], $ > 90)`,
+		`MATCH_ALL(JSONField["a"], $ >= 60 && $ < 90)`,
+		`MATCH_LEAST(JSONField["a"], $ == 100, threshold=2)`,
+		`MATCH_MOST(JSONField["a"], $ < 50, threshold=3)`,
+		`MATCH_EXACT(JSONField["a"], $ == 100, threshold=1)`,
+
+		// bare JSON field root array
+		`MATCH_ANY(JSONField, $ == "x")`,
+		`MATCH_ANY(JSONField, $ > 1)`,
+
+		// nested path
+		`MATCH_ANY(JSONField["a"]["b"], $ > 5)`,
+
+		// string element family
+		`MATCH_ANY(JSONField["a"], $ == "x" || $ == "y")`,
+		`MATCH_ALL(JSONField["a"], $ != "")`,
+		`MATCH_ANY(JSONField["a"], $ in ["a", "b", "c"])`,
+
+		// numeric family (int widens with float)
+		`MATCH_ANY(JSONField["a"], $ > 5 || $ < 10.5)`,
+		`MATCH_ANY(JSONField["a"], $ > 1.5 && $ < 10)`,
+		`MATCH_ANY(JSONField["a"], $ in [1, 2, 3])`,
+
+		// bool family
+		`MATCH_ANY(JSONField["a"], $ == true)`,
+		`MATCH_ANY(JSONField["a"], $ == true || $ == false)`,
+
+		// compound range predicates
+		`MATCH_ANY(JSONField["a"], $ > 1 && $ < 10)`,
+		`MATCH_ANY(JSONField["a"], 1 < $ < 10)`,
+		`MATCH_ANY(JSONField["a"], $ > "a" && $ < "z")`,
+
+		// combined with other top-level predicates
+		`Int64Field > 0 && MATCH_ANY(JSONField["a"], $ > 90)`,
+		`MATCH_ANY(JSONField["a"], $ > 90) || Int64Field > 0`,
+
+		// case-insensitive function name
+		`match_any(JSONField["a"], $ == "x")`,
+	}
+	for _, e := range validExprs {
+		assertValidExpr(t, helper, e)
+	}
+
+	invalidExprs := []string{
+		// cross-family literals against the same element accessor
+		`MATCH_ANY(JSONField, $ > 1 || $ == "x")`,
+		`MATCH_ANY(JSONField["a"], $ == "x" || $ > 5)`,
+		`MATCH_ANY(JSONField["a"], $ == true || $ == 1)`,
+		`MATCH_ANY(JSONField["a"], $ == true || $ == "x")`,
+		`MATCH_ANY(JSONField["a"], $ in [1, "a"])`,
+
+		// $[sub] sub-field accessor is not valid on a JSON target
+		`MATCH_ANY(JSONField["a"], $[sub] > 90)`,
+		`MATCH_ANY(JSONField, $[color] == "x")`,
+
+		// nested MATCH_* is rejected
+		`MATCH_ANY(JSONField["a"], MATCH_ALL(JSONField["a"], $ > 0))`,
+	}
+	for _, e := range invalidExprs {
+		assertInvalidExpr(t, helper, e)
+	}
+}
+
+// TestExpr_ThresholdSoftKeyword verifies that `threshold` is a soft keyword:
+// it is only special inside the MATCH_LEAST/MOST/EXACT `threshold=N` position,
+// and is otherwise usable as a normal field name / template variable.
+func TestExpr_ThresholdSoftKeyword(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	thresholdField, err := helper.GetFieldFromName("threshold")
+	require.NoError(t, err)
+
+	t.Run("field named threshold parses and resolves", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `threshold > 5`, nil)
+		require.NoError(t, err)
+		ure := expr.GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, thresholdField.GetFieldID(), ure.GetColumnInfo().GetFieldId())
+		assert.Equal(t, schemapb.DataType_Int64, ure.GetColumnInfo().GetDataType())
+		assert.Equal(t, int64(5), ure.GetValue().GetInt64Val())
+	})
+
+	t.Run("threshold usable as template variable", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `threshold > {threshold}`, map[string]*schemapb.TemplateValue{
+			"threshold": generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+		})
+		require.NoError(t, err)
+		ure := expr.GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, thresholdField.GetFieldID(), ure.GetColumnInfo().GetFieldId())
+		assert.Equal(t, int64(7), ure.GetValue().GetInt64Val())
+	})
+
+	t.Run("regression: threshold=N still parses", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=3)`, nil)
+		require.NoError(t, err)
+		me := expr.GetMatchExpr()
+		require.NotNil(t, me)
+		assert.Equal(t, planpb.MatchType_MatchLeast, me.GetMatchType())
+		assert.Equal(t, int64(3), me.GetCount())
+	})
+
+	t.Run("case-insensitive THRESHOLD keyword accepted", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, THRESHOLD=2)`, nil)
+		require.NoError(t, err)
+		me := expr.GetMatchExpr()
+		require.NotNil(t, me)
+		assert.Equal(t, int64(2), me.GetCount())
+	})
+
+	t.Run("wrong keyword rejected with helpful message", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, foo=2)`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected 'threshold'")
+	})
+}
+
+// TestMatchTemplatePlaceholders covers template placeholders inside MATCH_*
+// predicates. For JSON targets the element type is inferred from the concrete
+// template values, which are always available at ParseExpr time: parseExprInner
+// substitutes them via FillExpressionValue before the plan leaves the proxy, so
+// the deferred (post-fill) validation sees real literals.
+func TestMatchTemplatePlaceholders(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	t.Run("json int64 placeholder", func(t *testing.T) {
+		// note: `threshold` is a soft keyword (only special in the MATCH_*
+		// `threshold=N` position), so it can also be used as a template
+		// variable name — see TestExpr_ThresholdSoftKeyword.
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > {min_score})`, map[string]*schemapb.TemplateValue{
+			"min_score": generateTemplateValue(schemapb.DataType_Int64, int64(90)),
+		})
+		require.NoError(t, err)
+		ure := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, int64(90), ure.GetValue().GetInt64Val())
+		assert.True(t, ure.GetColumnInfo().GetIsElementLevel())
+	})
+
+	t.Run("json double placeholder", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ < {v})`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Double, 3.5),
+		})
+		require.NoError(t, err)
+		ure := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, 3.5, ure.GetValue().GetFloatVal())
+	})
+
+	t.Run("json string placeholder", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ == {v})`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_VarChar, "x"),
+		})
+		require.NoError(t, err)
+		ure := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, "x", ure.GetValue().GetStringVal())
+	})
+
+	t.Run("json MATCH_LEAST predicate placeholder", func(t *testing.T) {
+		// The threshold count itself is an IntegerConstant in the grammar and
+		// cannot be templated; only the predicate value can.
+		expr, err := ParseExpr(helper, `MATCH_LEAST(JSONField["a"], $ >= {v}, threshold=2)`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Int64, int64(60)),
+		})
+		require.NoError(t, err)
+		me := expr.GetMatchExpr()
+		require.NotNil(t, me)
+		assert.Equal(t, planpb.MatchType_MatchLeast, me.GetMatchType())
+		assert.Equal(t, int64(2), me.GetCount())
+		assert.Equal(t, int64(60), me.GetPredicate().GetUnaryRangeExpr().GetValue().GetInt64Val())
+	})
+
+	t.Run("json placeholder mixed with literal same family", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ALL(JSONField["a"], $ > {lo} && $ < 100)`, map[string]*schemapb.TemplateValue{
+			"lo": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, expr.GetMatchExpr())
+	})
+
+	t.Run("json cross-family placeholders rejected", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > {a} || $ == {b})`, map[string]*schemapb.TemplateValue{
+			"a": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"b": generateTemplateValue(schemapb.DataType_VarChar, "x"),
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("json placeholder cross-family with literal rejected", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > {a} || $ == "x")`, map[string]*schemapb.TemplateValue{
+			"a": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("json placeholder value missing rejected", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > {min_score})`, nil)
+		assert.Error(t, err)
+
+		_, err = ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > {min_score})`, map[string]*schemapb.TemplateValue{
+			"other": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("json term list placeholder", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ in {list})`, map[string]*schemapb.TemplateValue{
+			"list": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2, 3})),
+		})
+		require.NoError(t, err)
+		term := expr.GetMatchExpr().GetPredicate().GetTermExpr()
+		require.NotNil(t, term)
+		require.Len(t, term.GetValues(), 3)
+		assert.Equal(t, int64(1), term.GetValues()[0].GetInt64Val())
+	})
+
+	t.Run("json term list placeholder empty", func(t *testing.T) {
+		// An empty template list ($ in {list}, list=[]) fills to an explicit
+		// empty element set. It must validate as type-neutral (not be rejected
+		// for "no typed literal") after substitution, matching the literal
+		// `$ in []` path.
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ in {list})`, map[string]*schemapb.TemplateValue{
+			"list": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{})),
+		})
+		require.NoError(t, err)
+		term := expr.GetMatchExpr().GetPredicate().GetTermExpr()
+		require.NotNil(t, term)
+		assert.Empty(t, term.GetValues())
+	})
+
+	t.Run("json term list mixed families rejected", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ in {list})`, map[string]*schemapb.TemplateValue{
+			"list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{
+				Data: &schemapb.TemplateArrayValue_JsonData{
+					JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`1`), []byte(`"a"`)}},
+				},
+			}),
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("json binary range placeholders", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], {lo} < $ < {hi})`, map[string]*schemapb.TemplateValue{
+			"lo": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"hi": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+		})
+		require.NoError(t, err)
+		bre := expr.GetMatchExpr().GetPredicate().GetBinaryRangeExpr()
+		require.NotNil(t, bre)
+		assert.Equal(t, int64(1), bre.GetLowerValue().GetInt64Val())
+		assert.Equal(t, int64(10), bre.GetUpperValue().GetInt64Val())
+	})
+
+	t.Run("json match combined with other template predicate", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `Int64Field > {x} && MATCH_ANY(JSONField["a"], $ > {y})`, map[string]*schemapb.TemplateValue{
+			"x": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+			"y": generateTemplateValue(schemapb.DataType_Int64, int64(9)),
+		})
+		require.NoError(t, err)
+		be := expr.GetBinaryExpr()
+		require.NotNil(t, be)
+		// operand order of && is not guaranteed; locate each side by shape.
+		matchSide, rangeSide := be.GetLeft(), be.GetRight()
+		if matchSide.GetMatchExpr() == nil {
+			matchSide, rangeSide = rangeSide, matchSide
+		}
+		assert.Equal(t, int64(5), rangeSide.GetUnaryRangeExpr().GetValue().GetInt64Val())
+		assert.Equal(t, int64(9), matchSide.GetMatchExpr().GetPredicate().GetUnaryRangeExpr().GetValue().GetInt64Val())
+	})
+
+	t.Run("scalar array placeholder filled", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(scores, $ > {v})`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Int64, int64(50)),
+		})
+		require.NoError(t, err)
+		ure := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, int64(50), ure.GetValue().GetInt64Val())
+	})
+
+	t.Run("struct array placeholder filled", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_int] == {v})`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+		})
+		require.NoError(t, err)
+		ure := expr.GetMatchExpr().GetPredicate().GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, int64(7), ure.GetValue().GetInt64Val())
+	})
+
+	t.Run("scalar array placeholder value missing rejected", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_ANY(scores, $ > {v})`, nil)
+		assert.Error(t, err)
+	})
+}
+
 func TestExpr_ArrayContains(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
@@ -3645,6 +4243,152 @@ func TestExpr_ArrayContains(t *testing.T) {
 	for _, expr := range validExprs {
 		assertValidExpr(t, helper, expr)
 	}
+}
+
+// TestExpr_StructArrayContainsDesugar verifies that the array_contains /
+// array_contains_any / array_contains_all family on a struct-array sub-field
+// is parsed as pure sugar over the MATCH machinery: the produced plan must be
+// proto-identical to the hand-written MATCH_ANY equivalent.
+func TestExpr_StructArrayContainsDesugar(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	assertSamePlan := func(t *testing.T, sugar, match string, templateValues map[string]*schemapb.TemplateValue) {
+		t.Helper()
+		sugared, err := ParseExpr(helper, sugar, templateValues)
+		require.NoError(t, err, sugar)
+		handWritten, err := ParseExpr(helper, match, templateValues)
+		require.NoError(t, err, match)
+		assert.True(t, proto.Equal(handWritten, sugared),
+			"plan mismatch for %q\n  sugared:      %s\n  hand-written: %s", sugar, sugared.String(), handWritten.String())
+	}
+
+	t.Run("desugared plan equals hand-written MATCH_ANY", func(t *testing.T) {
+		cases := []struct {
+			sugar string
+			match string
+		}{
+			// array_contains(sa[f], x) => MATCH_ANY(sa, $[f] == x)
+			{`array_contains(struct_array[sub_int], 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{`ARRAY_CONTAINS(struct_array[sub_int], 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{`json_contains(struct_array[sub_int], 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{`array_contains(struct_array[sub_str], "abc")`, `MATCH_ANY(struct_array, $[sub_str] == "abc")`},
+			// parenthesized target is unwrapped
+			{`array_contains((struct_array[sub_int]), 1)`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			// array_contains_any(sa[f], xs) => MATCH_ANY(sa, $[f] in xs)
+			{`array_contains_any(struct_array[sub_int], [1, 2, 3])`, `MATCH_ANY(struct_array, $[sub_int] in [1, 2, 3])`},
+			{`array_contains_any(struct_array[sub_str], ["a", "b"])`, `MATCH_ANY(struct_array, $[sub_str] in ["a", "b"])`},
+			// array_contains_all(sa[f], xs) => left-assoc AND of one MATCH_ANY per value
+			{`array_contains_all(struct_array[sub_int], [1])`, `MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{
+				`array_contains_all(struct_array[sub_int], [1, 2])`,
+				`MATCH_ANY(struct_array, $[sub_int] == 1) and MATCH_ANY(struct_array, $[sub_int] == 2)`,
+			},
+			{
+				`array_contains_all(struct_array[sub_str], ["a", "b", "c"])`,
+				`MATCH_ANY(struct_array, $[sub_str] == "a") and MATCH_ANY(struct_array, $[sub_str] == "b") and MATCH_ANY(struct_array, $[sub_str] == "c")`,
+			},
+			// negation and logical composition desugar transparently
+			{`not array_contains(struct_array[sub_int], 1)`, `not MATCH_ANY(struct_array, $[sub_int] == 1)`},
+			{
+				`array_contains(struct_array[sub_int], 1) && Int64Field > 0`,
+				`MATCH_ANY(struct_array, $[sub_int] == 1) && Int64Field > 0`,
+			},
+		}
+		for _, c := range cases {
+			assertSamePlan(t, c.sugar, c.match, nil)
+		}
+	})
+
+	t.Run("template placeholders", func(t *testing.T) {
+		vals := map[string]*schemapb.TemplateValue{
+			"v":    generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+			"list": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2})),
+		}
+		assertSamePlan(t, `array_contains(struct_array[sub_int], {v})`, `MATCH_ANY(struct_array, $[sub_int] == {v})`, vals)
+		assertSamePlan(t, `array_contains_any(struct_array[sub_int], {list})`, `MATCH_ANY(struct_array, $[sub_int] in {list})`, vals)
+
+		// contains_all needs the concrete value list at parse time to expand into
+		// per-value MATCH_ANY conjuncts, so a placeholder list is rejected.
+		_, err := ParseExpr(helper, `array_contains_all(struct_array[sub_int], {list})`, vals)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		invalidExprs := []string{
+			// non-existent sub-field / container
+			`array_contains(struct_array[nonexist], 1)`,
+			`array_contains_any(struct_array[nonexist], [1, 2])`,
+			`array_contains_all(struct_array[nonexist], [1, 2])`,
+			`array_contains(nonexist_struct[sub_int], 1)`,
+			// [sub] on a scalar (non-struct) array field
+			`array_contains(ArrayField[sub_int], 1)`,
+			`array_contains_any(ArrayField[sub_int], [1, 2])`,
+			// value type mismatches
+			`array_contains(struct_array[sub_int], "abc")`,
+			`array_contains(struct_array[sub_str], 1)`,
+			`array_contains_any(struct_array[sub_int], ["a", "b"])`,
+			`array_contains_all(struct_array[sub_str], [1, 2])`,
+			`array_contains_any(struct_array[sub_int], [1, "a"])`,
+			// list ops need an explicit list
+			`array_contains_any(struct_array[sub_int], 1)`,
+			`array_contains_all(struct_array[sub_int], 1)`,
+		}
+		for _, e := range invalidExprs {
+			assertInvalidExpr(t, helper, e)
+		}
+	})
+
+	t.Run("empty list contains_any matches empty in-list", func(t *testing.T) {
+		assertSamePlan(t, `array_contains_any(struct_array[sub_int], [])`, `MATCH_ANY(struct_array, $[sub_int] in [])`, nil)
+	})
+
+	t.Run("empty list contains_all desugars to IS NOT NULL on the container", func(t *testing.T) {
+		// contains_all(arr, []) is vacuously true for every REAL array but
+		// UNKNOWN for a NULL row (pg: NULL @> '{}' is NULL, @> is strict) —
+		// i.e. IS NOT NULL semantics, same plan as `struct_array is not null`.
+		expr, err := ParseExpr(helper, `array_contains_all(struct_array[sub_int], [])`, nil)
+		require.NoError(t, err)
+		nullExpr := expr.GetNullExpr()
+		require.NotNil(t, nullExpr)
+		assert.Equal(t, planpb.NullExpr_IsNotNull, nullExpr.GetOp())
+		assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
+	})
+
+	t.Run("template list contains_all on struct sub-field rejected with clear error", func(t *testing.T) {
+		// Documented divergence: the struct desugar expands values at parse
+		// time, so a template placeholder list (filled post-parse) cannot be
+		// supported; scalar/JSON take the runtime JSONContainsExpr path.
+		_, err := ParseExpr(helper, `array_contains_all(struct_array[sub_int], {vals})`, map[string]*schemapb.TemplateValue{
+			"vals": generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2})),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "template placeholder list")
+	})
+}
+
+// TestElementFilterRejectsJSON pins the intentional asymmetry: element_filter
+// requires a physical array column (scalar or struct array) because it works
+// through IArrayOffsets; JSON arrays are parsed per-document at evaluation
+// time and have no element offsets, so JSON users go through
+// MATCH_ANY(json["path"], ...) instead. A grammar/visitor regression here
+// would otherwise silently produce a corrupt plan.
+func TestElementFilterRejectsJSON(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for _, e := range []string{
+		`element_filter(JSONField, $ > 1)`,
+		`element_filter(JSONField["a"], $ > 1)`,
+	} {
+		_, err := ParseExpr(helper, e, nil)
+		assert.Error(t, err, e)
+	}
+	// The MATCH_* equivalent on JSON stays supported.
+	_, err = ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > 1)`, nil)
+	assert.NoError(t, err)
 }
 
 func TestExpr_StructIndexField(t *testing.T) {
@@ -4498,4 +5242,90 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 		_, err := ParseExpr(helper, "\"hello\" and (Int64Field > 50)", nil)
 		assert.Error(t, err)
 	})
+}
+
+// TestElementFilterTemplatePlaceholders ensures template placeholders inside
+// element_filter predicates are actually substituted. VisitElementFilter must
+// propagate the element predicate's IsTemplate onto the wrapper: without it
+// FillExpressionValue early-returns on the non-template wrapper and ships the
+// plan with an unfilled {v} (nil value) — silently, in both the standalone and
+// the `X && element_filter(...)` folded forms.
+func TestElementFilterTemplatePlaceholders(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	t.Run("standalone struct element_filter placeholder", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `element_filter(struct_array, $[sub_int] > {v})`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+		})
+		require.NoError(t, err)
+		ef := expr.GetElementFilterExpr()
+		require.NotNil(t, ef)
+		ure := ef.GetElementExpr().GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, int64(5), ure.GetValue().GetInt64Val())
+	})
+
+	t.Run("AND-folded element_filter placeholder, non-template other conjunct", func(t *testing.T) {
+		// The left conjunct carries no template, so the fold's
+		// IsTemplate=left||right depends entirely on the element_filter
+		// wrapper's own flag — the exact propagation under test.
+		expr, err := ParseExpr(helper, `Int64Field > 0 && element_filter(struct_array, $[sub_int] > {v})`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+		})
+		require.NoError(t, err)
+		ef := expr.GetElementFilterExpr()
+		require.NotNil(t, ef)
+		ure := ef.GetElementExpr().GetUnaryRangeExpr()
+		require.NotNil(t, ure)
+		assert.Equal(t, int64(7), ure.GetValue().GetInt64Val())
+		// The folded-in doc-level predicate must be preserved.
+		require.NotNil(t, ef.GetPredicate().GetUnaryRangeExpr())
+	})
+
+	t.Run("AND-folded element_filter with templates on both sides", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `Int64Field > {w} && element_filter(struct_array, $[sub_int] > {v})`, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Int64, int64(9)),
+			"w": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
+		})
+		require.NoError(t, err)
+		ef := expr.GetElementFilterExpr()
+		require.NotNil(t, ef)
+		assert.Equal(t, int64(9), ef.GetElementExpr().GetUnaryRangeExpr().GetValue().GetInt64Val())
+		assert.Equal(t, int64(3), ef.GetPredicate().GetUnaryRangeExpr().GetValue().GetInt64Val())
+	})
+
+	t.Run("missing template value still errors", func(t *testing.T) {
+		_, err := ParseExpr(helper, `element_filter(struct_array, $[sub_int] > {v})`, nil)
+		assert.Error(t, err)
+	})
+}
+
+// TestMatchExprStructNameDualWrite ensures the deprecated MatchExpr.struct_name
+// locator (wire tag 1) is still written alongside MatchColumnInfo so an old
+// querynode can resolve the target during a rolling upgrade, and mirrors the
+// C++ read-side fallback (ParseMatchExprs uses struct_name when column is
+// absent).
+func TestMatchExprStructNameDualWrite(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		expr string
+		name string
+	}{
+		{`MATCH_ANY(struct_array, $[sub_int] > 1)`, "struct_array"},
+		{`MATCH_ALL(ArrayField, $ > 1)`, "ArrayField"},
+		{`MATCH_ANY(JSONField["a"], $ > 1)`, "JSONField"},
+	} {
+		expr, err := ParseExpr(helper, tc.expr, nil)
+		require.NoError(t, err, tc.expr)
+		me := expr.GetMatchExpr()
+		require.NotNil(t, me, tc.expr)
+		require.NotNil(t, me.GetColumn(), tc.expr)
+		assert.Equal(t, me.GetColumn().GetFieldName(), me.GetStructName(), tc.expr)
+		assert.Equal(t, tc.name, me.GetStructName(), tc.expr)
+	}
 }

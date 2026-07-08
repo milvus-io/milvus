@@ -244,6 +244,23 @@ class Expr : public std::enable_shared_from_this<Expr> {
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
 
+// A numeric value extracted from a JSON array element, preserving the original
+// int64/double type so element-level ($) comparisons match the row-level JSON
+// path (Json::at_numeric): integral elements compare exactly as int64 (no 2^53
+// precision loss), uint64/double elements compare as double. Callers branch on
+// `is_int64` exactly like the row-level *JSONCompare macros do on
+// simdjson::ondemand::number.
+struct JsonNumericElement {
+    bool is_int64{false};
+    int64_t i64{0};
+    double f64{0.0};
+
+    double
+    as_double() const {
+        return is_int64 ? static_cast<double>(i64) : f64;
+    }
+};
+
 /*
  * The expr has only one column.
  */
@@ -946,6 +963,201 @@ class SegmentExpr : public Expr {
         return input->size();
     }
 
+    template <typename ElementType>
+    static bool
+    TryGetJsonElementValue(simdjson::dom::element element, ElementType& value) {
+        if constexpr (std::is_same_v<ElementType, std::string>) {
+            auto val = element.get<std::string_view>();
+            if (val.error()) {
+                return false;
+            }
+            value = std::string(val.value());
+            return true;
+        } else if constexpr (std::is_same_v<ElementType, std::string_view>) {
+            auto val = element.get<std::string_view>();
+            if (val.error()) {
+                return false;
+            }
+            value = val.value();
+            return true;
+        } else if constexpr (std::is_same_v<ElementType, bool>) {
+            auto val = element.get<bool>();
+            if (val.error()) {
+                return false;
+            }
+            value = val.value();
+            return true;
+        } else if constexpr (std::is_floating_point_v<ElementType>) {
+            auto val = element.get<double>();
+            if (val.error()) {
+                return false;
+            }
+            value = static_cast<ElementType>(val.value());
+            return true;
+        } else if constexpr (std::is_integral_v<ElementType>) {
+            auto val = element.get<int64_t>();
+            if (val.error()) {
+                return false;
+            }
+            auto raw = val.value();
+            if (raw < static_cast<int64_t>(
+                          (std::numeric_limits<ElementType>::min)()) ||
+                raw > static_cast<int64_t>(
+                          (std::numeric_limits<ElementType>::max)())) {
+                return false;
+            }
+            value = static_cast<ElementType>(raw);
+            return true;
+        } else {
+            static_assert(sizeof(ElementType) == 0,
+                          "Unsupported JSON element type");
+        }
+    }
+
+    template <typename RowFunc>
+    int64_t
+    VisitJsonRowsByOffsets(OffsetVector* row_offsets, RowFunc row_func) {
+        AssertInfo(row_offsets != nullptr,
+                   "JSON element-level filtering requires row offsets");
+
+        int64_t processed_rows = 0;
+        if (segment_->type() == SegmentType::Sealed) {
+            if (segment_->is_chunked()) {
+                for (size_t i = 0; i < row_offsets->size(); ++i) {
+                    auto row_offset = (*row_offsets)[i];
+                    auto [chunk_id, chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, row_offset);
+                    FixedVector<int32_t> offsets;
+                    offsets.push_back(static_cast<int32_t>(chunk_offset));
+                    auto pw = segment_->get_views_by_offsets<Json>(
+                        op_ctx_, field_id_, chunk_id, offsets);
+                    auto [data_vec, valid_data] = pw.get();
+                    bool row_valid = !valid_data.data() || valid_data[0];
+                    row_func(data_vec[0], row_valid);
+                    ++processed_rows;
+                }
+            } else {
+                auto pw = segment_->get_views_by_offsets<Json>(
+                    op_ctx_, field_id_, 0, *row_offsets);
+                auto [data_vec, valid_data] = pw.get();
+                for (size_t i = 0; i < row_offsets->size(); ++i) {
+                    bool row_valid = !valid_data.data() || valid_data[i];
+                    row_func(data_vec[i], row_valid);
+                    ++processed_rows;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < row_offsets->size(); ++i) {
+                auto row_offset = (*row_offsets)[i];
+                auto chunk_id = row_offset / size_per_chunk_;
+                auto chunk_offset = row_offset % size_per_chunk_;
+                auto pw =
+                    segment_->chunk_data<Json>(op_ctx_, field_id_, chunk_id);
+                auto chunk = pw.get();
+                const Json* data = chunk.data() + chunk_offset;
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += chunk_offset;
+                }
+                bool row_valid = !valid_data || valid_data[0];
+                row_func(*data, row_valid);
+                ++processed_rows;
+            }
+        }
+        return processed_rows;
+    }
+
+    template <typename ElementType>
+    int64_t
+    ExtractJsonElementValues(const Json& json,
+                             bool row_valid,
+                             const std::string& pointer,
+                             FixedVector<ElementType>& values,
+                             FixedVector<bool>& valid_values) {
+        if (!row_valid) {
+            return 0;
+        }
+
+        auto array_res = json.array_at(pointer);
+        if (array_res.error()) {
+            return 0;
+        }
+
+        auto array = array_res.value();
+        values.clear();
+        valid_values.clear();
+
+        for (auto element : array) {
+            ElementType value{};
+            bool valid = TryGetJsonElementValue<ElementType>(element, value);
+            values.push_back(std::move(value));
+            valid_values.push_back(valid);
+        }
+        return values.size();
+    }
+
+    // Extract a JSON array element as a type-preserving numeric value, mirroring
+    // Json::at_numeric(): prefer an exact int64, then uint64 (as double), then
+    // double. A non-numeric element (string/bool/null/missing) yields false
+    // (invalid, i.e. NULL under 3VL) exactly like the row-level path. This is
+    // the element-level counterpart of the row-level at_numeric() read used by
+    // the *JSONCompare macros, and preserves int64 precision beyond 2^53.
+    static bool
+    TryGetJsonNumericElement(simdjson::dom::element element,
+                             JsonNumericElement& out) {
+        auto i = element.get<int64_t>();
+        if (!i.error()) {
+            out.is_int64 = true;
+            out.i64 = i.value();
+            return true;
+        }
+        auto u = element.get<uint64_t>();
+        if (!u.error()) {
+            out.is_int64 = false;
+            out.f64 = static_cast<double>(u.value());
+            return true;
+        }
+        auto d = element.get<double>();
+        if (!d.error()) {
+            out.is_int64 = false;
+            out.f64 = d.value();
+            return true;
+        }
+        return false;
+    }
+
+    // Type-preserving numeric extraction of a JSON array's elements, used by the
+    // element-level ($) paths when the query literal is an int64 so comparisons
+    // stay int64-exact (aligning with the row-level at_numeric path). Elements
+    // that are not numbers are marked invalid (valid_values[i] = false).
+    int64_t
+    ExtractJsonNumericElements(const Json& json,
+                               bool row_valid,
+                               const std::string& pointer,
+                               FixedVector<JsonNumericElement>& values,
+                               FixedVector<bool>& valid_values) {
+        if (!row_valid) {
+            return 0;
+        }
+
+        auto array_res = json.array_at(pointer);
+        if (array_res.error()) {
+            return 0;
+        }
+
+        auto array = array_res.value();
+        values.clear();
+        valid_values.clear();
+
+        for (auto element : array) {
+            JsonNumericElement value{};
+            bool valid = TryGetJsonNumericElement(element, value);
+            values.push_back(value);
+            valid_values.push_back(valid);
+        }
+        return values.size();
+    }
+
     // Process element-level data by element IDs
     // Handles the type mismatch between storage (ArrayView) and element type
     // Currently only implemented for sealed chunked segments
@@ -1322,7 +1534,19 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
-                // Chunk is skipped, mark all elements as false
+                // Chunk is skipped, mark all elements as false.
+                //
+                // NOTE(latent): valid_res=false means UNKNOWN, and MATCH_ALL
+                // excludes UNKNOWN elements from its element count — a row
+                // whose elements were all "skipped" would vacuously match.
+                // This branch is unreachable today because the skip index is
+                // never built for ARRAY fields (no ARRAY case in
+                // SkipIndexStatsBuilder::Build and the load gate in
+                // ChunkedSegmentSealedImpl skips ARRAY), so skip_func always
+                // returns false here. If element-level skip stats are ever
+                // added for arrays, a skipped chunk must instead produce
+                // definite false (valid_res=true) — or MATCH_ALL over a
+                // skipped chunk returns false positives.
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<ArrayView>(
                         op_ctx_, field_id_, i, data_pos, size);
@@ -1823,7 +2047,29 @@ class SegmentExpr : public Expr {
 
                     TargetBitmap valid_res;
                     if (cached_is_nested_index_ && func_returns_row_level) {
+                        // The func already reduced element-level matches to a
+                        // row-level bitset, but a nested index only exposes
+                        // element-level validity (index_ptr->IsNotNull()): a
+                        // NULL row has zero elements and cannot be recovered
+                        // from it. Recover per-row NULL info from the raw field
+                        // (retained by ArrayOffsets at build time) and AND it in
+                        // so NULL rows are excluded exactly as the brute-force
+                        // path does -- otherwise `not array_contains(nullable,
+                        // x)` wrongly includes NULL rows.
                         valid_res = TargetBitmap(active_count_, true);
+                        if (field_type_ == DataType::ARRAY) {
+                            auto array_offsets =
+                                segment_->GetArrayOffsets(field_id_);
+                            if (array_offsets != nullptr) {
+                                const auto* row_valid =
+                                    array_offsets->GetRowValidBitmap();
+                                if (row_valid != nullptr &&
+                                    row_valid->size() ==
+                                        static_cast<size_t>(active_count_)) {
+                                    valid_res &= *row_valid;
+                                }
+                            }
+                        }
                     } else {
                         valid_res = index_ptr->IsNotNull();
                     }

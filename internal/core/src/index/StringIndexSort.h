@@ -63,6 +63,10 @@ class StringIndexSort : public StringIndex {
 
     const bool
     HasRawData() const override {
+        // A nested (array-element) index cannot reconstruct per-row array
+        // structure, and any array-field sort index cannot serve array output
+        // (#51109). Report false so the loader keeps the raw array data (see
+        // ScalarIndexSort::HasRawData for details).
         return !is_nested_index_ && !is_array_field_;
     }
 

@@ -197,6 +197,11 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     auto data_type = field_meta.get_data_type();
 
     std::vector<int32_t> row_to_element_start(row_count + 1);
+    // Retain per-row NULL info so row-level consumers (e.g. array_contains via a
+    // nested index) can exclude NULL rows -- a NULL row has zero elements and is
+    // otherwise indistinguishable from an empty array at element level.
+    TargetBitmap row_valid(row_count, true);
+    bool nullable_seen = false;
 
     auto temp_op_ctx = std::make_unique<OpContext>();
     auto op_ctx_ptr = temp_op_ctx.get();
@@ -215,6 +220,9 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -232,6 +240,9 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -259,6 +270,11 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
+    if (nullable_seen) {
+        result->has_row_valid_ = true;
+        result->row_valid_ = std::move(row_valid);
+        result->resource_size_ += (row_count + 7) / 8;
+    }
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
@@ -279,6 +295,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
     auto data_type = field_meta.get_data_type();
 
     std::vector<int32_t> row_to_element_start(row_count + 1);
+    // See BuildFromSegment: retain per-row NULL info for row-level consumers.
+    TargetBitmap row_valid(row_count, true);
+    bool nullable_seen = false;
 
     auto temp_op_ctx = std::make_unique<OpContext>();
     auto op_ctx_ptr = temp_op_ctx.get();
@@ -297,6 +316,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -314,6 +336,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -341,6 +366,11 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
+    if (nullable_seen) {
+        result->has_row_valid_ = true;
+        result->row_valid_ = std::move(row_valid);
+        result->resource_size_ += (row_count + 7) / 8;
+    }
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;

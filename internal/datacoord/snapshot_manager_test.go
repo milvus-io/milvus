@@ -37,7 +37,9 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -1047,6 +1049,60 @@ func TestSnapshotManager_ListRestoreJobs_FilterByDbID(t *testing.T) {
 }
 
 // --- Test Helper Functions ---
+
+// TestSnapshotManager_CheckNestedArrayIndexVersion covers the restore-side
+// guard: a snapshot carrying nested (element-level) array indexes must not be
+// restored into a querynode pool below the nested-capable version, while
+// legacy row-level snapshots restore regardless of pool version.
+func TestSnapshotManager_CheckNestedArrayIndexVersion(t *testing.T) {
+	nestedSnapshot := &SnapshotData{
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId: 100,
+				IndexFiles: []*indexpb.IndexFilePathInfo{
+					{BuildID: 1, IsNestedIndex: false},
+					{BuildID: 2, IsNestedIndex: true},
+				},
+			},
+		},
+	}
+	legacySnapshot := &SnapshotData{
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:  100,
+				IndexFiles: []*indexpb.IndexFilePathInfo{{BuildID: 1, IsNestedIndex: false}},
+			},
+		},
+	}
+
+	t.Run("nested index rejected below capable version", func(t *testing.T) {
+		vm := NewMockVersionManager(t)
+		vm.On("ResolveScalarIndexVersion").Return(common.MinScalarIndexVersionForNestedArrayIndex - 1)
+		sm := &snapshotManager{indexEngineVersionManager: vm}
+		err := sm.checkNestedArrayIndexVersion(nestedSnapshot)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nested")
+	})
+
+	t.Run("nested index accepted at capable version", func(t *testing.T) {
+		vm := NewMockVersionManager(t)
+		vm.On("ResolveScalarIndexVersion").Return(common.MinScalarIndexVersionForNestedArrayIndex)
+		sm := &snapshotManager{indexEngineVersionManager: vm}
+		assert.NoError(t, sm.checkNestedArrayIndexVersion(nestedSnapshot))
+	})
+
+	t.Run("legacy snapshot accepted below capable version", func(t *testing.T) {
+		vm := NewMockVersionManager(t)
+		vm.On("ResolveScalarIndexVersion").Return(common.MinScalarIndexVersionForNestedArrayIndex - 1)
+		sm := &snapshotManager{indexEngineVersionManager: vm}
+		assert.NoError(t, sm.checkNestedArrayIndexVersion(legacySnapshot))
+	})
+
+	t.Run("nil version manager is a no-op", func(t *testing.T) {
+		sm := &snapshotManager{}
+		assert.NoError(t, sm.checkNestedArrayIndexVersion(nestedSnapshot))
+	})
+}
 
 func TestSnapshotManager_ConvertJobState(t *testing.T) {
 	sm := &snapshotManager{}

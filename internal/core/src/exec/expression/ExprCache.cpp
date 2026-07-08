@@ -386,6 +386,19 @@ ExprResCacheManager::Put(const Key& key, const Value& value) {
             return;
         }
 
+        // Element-level bitmaps (size = element count, produced by the child
+        // predicates of MATCH_*/element_filter over nested array indexes) do
+        // not fit the per-segment fixed-slot disk layout: the slot size is
+        // fixed by the first put, and any size mismatch is treated as a
+        // growing segment — deleting the file and permanently disabling disk
+        // cache for the segment. Keep them memory-cached only. Row-level
+        // bitmaps always have size == active_count on the sealed-only disk
+        // path.
+        if (value.result &&
+            static_cast<int64_t>(value.result->size()) != value.active_count) {
+            return;
+        }
+
         // Frequency admission is mode-independent. Applying it before opening
         // the segment file avoids one-off expressions consuming disk slots and
         // issuing unnecessary pwrite calls.

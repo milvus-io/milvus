@@ -84,6 +84,49 @@ class PhyMatchFilterExpr : public Expr {
     }
 
  private:
+    // Shared element -> row aggregation. Works for any source of ArrayOffsets:
+    //   - plain array / struct array: segment_->GetArrayOffsets(field_id)
+    //   - JSON with path index (future): index-owned ArrayOffsets
+    // The predicate (inputs_[0]) must produce an element-level bitset aligned
+    // with the supplied ArrayOffsets.
+    void
+    EvalWithOffsets(EvalCtx& context,
+                    VectorPtr& result,
+                    std::shared_ptr<const milvus::IArrayOffsets> array_offsets,
+                    FieldId field_id);
+
+    // JSON path entry point. For this checkpoint it dispatches straight to the
+    // brute-force path; the index fast-path is added in a later step.
+    void
+    EvalJson(EvalCtx& context, VectorPtr& result);
+
+    // JSON brute-force: iterate JSON rows one at a time, evaluate the inner
+    // predicate through the normal Eval framework, then aggregate that row's
+    // element-level bitmap with MATCH semantics.
+    void
+    EvalJsonBrute(EvalCtx& context, VectorPtr& result);
+
+    // Three-valued MATCH: mask rows whose ARRAY field value is NULL. For each row
+    // in the batch, clears both the valid bit and the match bit when the field is
+    // NULL. Works for both sealed and growing segments (reads field validity via
+    // segment_->ApplyFieldValidDataByOffsets). No-op for a non-nullable field.
+    // Shared by the scalar-array and struct-array paths.
+    void
+    MaskNullRows(ColumnVector* col_vec,
+                 FieldId field_id,
+                 const OffsetVector* input,
+                 int64_t batch_rows);
+
+    // Three-valued MATCH for JSON: mask rows where the JSON path does NOT resolve
+    // to a real JSON array (field NULL, JSON null at path, missing key, or a
+    // non-array value at the path). Clears both the valid bit and the match bit
+    // for such rows so they are excluded (UNKNOWN), while a genuine empty array
+    // `[]` keeps its vacuous semantics.
+    void
+    MaskJsonNonArrayRows(ColumnVector* col_vec,
+                         const OffsetVector* input,
+                         int64_t batch_rows);
+
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
     int64_t active_count_;
