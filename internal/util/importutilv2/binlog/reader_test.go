@@ -388,7 +388,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
 
-	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, nil, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
@@ -600,18 +600,18 @@ func (suite *ReaderSuite) TestVerify() {
 
 	checkFunc := func() {
 		cm, _ := suite.createMockChunk(schema, insertBinlogs, false)
-		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, nil, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 		suite.Error(err)
 		suite.Nil(reader)
 	}
 
 	// no insert binlogs to import
-	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, nil, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 	suite.Error(err)
 	suite.Nil(reader)
 
 	// too many input paths
-	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, nil, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 	suite.Error(err)
 	suite.Nil(reader)
 
@@ -764,7 +764,7 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 	checkFunc := func(targetSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) {
 		cm := mockChunkFunc(sourceSchema, expectReadBinlogs)
-		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, nil, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 		suite.NoError(err)
 		suite.NotNil(reader)
 
@@ -873,7 +873,7 @@ func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {
 		retryAttempts:  5,
 	}
 
-	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
+	err := r.init([]string{insertPrefix, deltaPrefix}, nil, 0, math.MaxUint64)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, deltaCallCount, "delta log WalkWithPrefix should have retried on transient error")
 }
@@ -910,10 +910,55 @@ func TestDeltaLogListing_NonRetryableErrorFailsFast(t *testing.T) {
 		retryAttempts:  5,
 	}
 
-	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
+	err := r.init([]string{insertPrefix, deltaPrefix}, nil, 0, math.MaxUint64)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrIoPermissionDenied))
 	assert.Equal(t, 1, deltaCallCount, "non-retryable error should not retry")
+}
+
+func TestDeltaLogListing_L0DeltaPrefixesAreWalked(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+
+	insertPrefix := "backup/insert_log/seg/"
+	ownDeltaPrefix := "backup/delta_log/seg/"
+	l0DeltaPrefix := "backup/delta_log/l0seg/"
+
+	cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, true, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			walkFunc(&storage.ChunkObjectInfo{FilePath: insertPrefix + "0/file1"})
+			walkFunc(&storage.ChunkObjectInfo{FilePath: insertPrefix + "1/file1"})
+			return nil
+		}).Once()
+
+	// The segment's own delta prefix (paths[1]) is walked.
+	cm.EXPECT().WalkWithPrefix(mock.Anything, ownDeltaPrefix, true, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			return nil
+		}).Once()
+
+	// The L0 delta prefix, passed separately, must also be walked so its deletes
+	// are applied to the imported data. Both walks return empty, so readDelete is
+	// skipped (len(deltaLogs) == 0) and init returns without reading deltalogs.
+	l0Walked := false
+	cm.EXPECT().WalkWithPrefix(mock.Anything, l0DeltaPrefix, true, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			l0Walked = true
+			return nil
+		}).Once()
+
+	r := &reader{
+		ctx:            ctx,
+		cm:             cm,
+		schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 0}, {FieldID: 1}}},
+		storageVersion: storage.StorageV1,
+		retryAttempts:  5,
+	}
+
+	err := r.init([]string{insertPrefix, ownDeltaPrefix}, []string{l0DeltaPrefix}, 0, math.MaxUint64)
+	assert.NoError(t, err)
+	assert.True(t, l0Walked, "L0 delta prefix should be walked so its deletes are applied during import")
 }
 
 func TestMultiReadWithRetry_NonRetryableError(t *testing.T) {

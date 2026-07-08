@@ -20,11 +20,13 @@ import (
 	"context"
 	"io"
 	"math"
+	"runtime"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -62,6 +64,7 @@ func NewReader(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	storageVersion int64,
 	paths []string,
+	l0DeltaPrefixes []string,
 	tsStart,
 	tsEnd uint64,
 	bufferSize int,
@@ -88,14 +91,14 @@ func NewReader(ctx context.Context,
 		importEz:       importEz,
 		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 	}
-	err := r.init(paths, tsStart, tsEnd)
+	err := r.init(paths, l0DeltaPrefixes, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
+func (r *reader) init(paths []string, l0DeltaPrefixes []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
@@ -154,20 +157,34 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
 	})
 
-	if len(paths) < 2 {
+	// Delta prefixes to apply as deletes during import: the segment's own delta
+	// (paths[1], optional) plus any L0 (delete-only) segment deltalog prefixes.
+	// All are merged into deleteData by primary key, so deleted rows are dropped
+	// on read and the produced segment carries no residual deletes.
+	deltaPrefixes := make([]string, 0, 1+len(l0DeltaPrefixes))
+	if len(paths) >= 2 {
+		deltaPrefixes = append(deltaPrefixes, paths[1])
+	}
+	deltaPrefixes = append(deltaPrefixes, l0DeltaPrefixes...)
+	if len(deltaPrefixes) == 0 {
 		return nil
 	}
+
 	var deltaLogs []string
-	err = importcommon.WalkWithPrefixRetry(r.ctx, r.cm, paths[1], true, r.retryAttempts,
-		func() {
-			deltaLogs = nil
-		},
-		func(chunkInfo *storage.ChunkObjectInfo) bool {
-			deltaLogs = append(deltaLogs, chunkInfo.FilePath)
-			return true
-		})
-	if err != nil {
-		return err
+	for _, prefix := range deltaPrefixes {
+		var prefixLogs []string
+		err = importcommon.WalkWithPrefixRetry(r.ctx, r.cm, prefix, true, r.retryAttempts,
+			func() {
+				prefixLogs = nil
+			},
+			func(chunkInfo *storage.ChunkObjectInfo) bool {
+				prefixLogs = append(prefixLogs, chunkInfo.FilePath)
+				return true
+			})
+		if err != nil {
+			return err
+		}
+		deltaLogs = append(deltaLogs, prefixLogs...)
 	}
 	if len(deltaLogs) == 0 {
 		return nil
@@ -247,30 +264,42 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 		return tempData, nil
 	}
 
-	for _, path := range deltaLogs {
-		// try v1 first
-		tempData, errv1 := readInternal(path, v1opts)
-		if errv1 != nil {
-			// try v2 if v1 failed
-			tempData, errv2 := readInternal(path, v2opts)
-			if errv2 != nil {
-				return nil, errv2
-			}
-			// Merge v2 results into deleteData
-			for pk, ts := range tempData {
-				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
-					continue
+	// Load deltalog files concurrently. A binlog import may read many deltalog
+	// files (the segment's own delta plus any L0 delta prefixes), and each read
+	// is an independent object-storage round trip. Merging is by max timestamp
+	// per pk, which is order-independent, so parallel reads are safe.
+	partials := make([]map[any]typeutil.Timestamp, len(deltaLogs))
+	g, _ := errgroup.WithContext(r.ctx)
+	limit := runtime.GOMAXPROCS(0)
+	if limit < 1 {
+		limit = 1
+	}
+	g.SetLimit(limit)
+	for i, path := range deltaLogs {
+		g.Go(func() error {
+			// try v1 first, fall back to v2
+			tempData, errv1 := readInternal(path, v1opts)
+			if errv1 != nil {
+				var errv2 error
+				tempData, errv2 = readInternal(path, v2opts)
+				if errv2 != nil {
+					return errv2
 				}
-				deleteData[pk] = ts
 			}
-		} else {
-			// Merge v1 results into deleteData
-			for pk, ts := range tempData {
-				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
-					continue
-				}
-				deleteData[pk] = ts
+			partials[i] = tempData
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	for _, tempData := range partials {
+		for pk, ts := range tempData {
+			if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
+				continue
 			}
+			deleteData[pk] = ts
 		}
 	}
 	return deleteData, nil

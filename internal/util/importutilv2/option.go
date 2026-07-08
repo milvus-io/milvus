@@ -57,6 +57,14 @@ const (
 	// L0Import indicates whether to import l0 segments only.
 	L0Import = "l0_import"
 
+	// L0DeltaPaths is a comma-separated list of L0 (delete-only) segment
+	// deltalog prefixes to apply during a binlog import. Instead of restoring
+	// them as separate L0 segments, their deletes are applied to the imported
+	// data by primary key so that deleted rows are dropped and no L0 segment is
+	// produced (equivalent to running an L0 compaction on the restore side).
+	// Empty when not set.
+	L0DeltaPaths = "l0_delta_paths"
+
 	// StorageVersion indicates the storage version to use for import.
 	// Type: int64
 	// storage v2: 2
@@ -138,6 +146,27 @@ func IsL0Import(options Options) bool {
 		return false
 	}
 	return true
+}
+
+// GetL0DeltaPaths returns the L0 deltalog prefixes to apply during a binlog
+// import (see the L0DeltaPaths option). Returns nil when the option is absent
+// or empty. Blank entries are skipped.
+func GetL0DeltaPaths(options Options) []string {
+	value, err := funcutil.GetAttrByKeyFromRepeatedKV(L0DeltaPaths, options)
+	if err != nil || len(value) == 0 {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	prefixes := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			prefixes = append(prefixes, p)
+		}
+	}
+	if len(prefixes) == 0 {
+		return nil
+	}
+	return prefixes
 }
 
 func GetStorageVersion(options Options) (int64, error) {
