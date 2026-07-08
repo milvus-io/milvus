@@ -251,3 +251,5 @@ replace (
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20250318084424-114f4050c3a6
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
+
+replace github.com/milvus-io/milvus-proto/go-api/v3 => C:/Users/ayush/OneDrive/Desktop/milvus-proto/milvus-proto/go-api

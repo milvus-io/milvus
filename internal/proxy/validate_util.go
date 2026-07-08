@@ -156,6 +156,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			if err := v.checkJSONFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_Decimal:
+			if err := v.checkDecimalFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 			if err := v.checkIntegerFieldData(field, fieldSchema); err != nil {
 				return err
@@ -559,6 +563,12 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			if err != nil {
 				return err
 			}
+
+		case *schemapb.ScalarField_BytesData:
+			sd.BytesData.Data, err = fillWithNullValueImpl(sd.BytesData.Data, field.GetValidData())
+			if err != nil {
+				return err
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
@@ -743,6 +753,24 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
 			}
 			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValueWkbBytes, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_BytesData:
+			if len(field.GetValidData()) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
+			}
+			defaultValue := fieldSchema.GetDefaultValue().GetBytesData()
+			precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+			if err != nil {
+				return err
+			}
+			if err := parameterutil.ValidateDecimalString(string(defaultValue), precision, scale); err != nil {
+				return err
+			}
+			sd.BytesData.Data, err = fillWithDefaultValueImpl(sd.BytesData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
 			}
@@ -996,6 +1024,25 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 					field.GetFieldName(), paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64())
 				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
 			}
+		}
+	}
+	return nil
+}
+
+func (v *validateUtil) checkDecimalFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	decimalArr := field.GetScalars().GetBytesData().GetData()
+	if decimalArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+		msg := fmt.Sprintf("decimal field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need decimal array", "got nil", msg)
+	}
+
+	precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+	if err != nil {
+		return err
+	}
+	for _, b := range decimalArr {
+		if err := parameterutil.ValidateDecimalString(string(b), precision, scale); err != nil {
+			return err
 		}
 	}
 	return nil

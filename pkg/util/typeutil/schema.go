@@ -273,6 +273,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		for _, str := range column.GetScalars().GetGeometryData().GetData() {
 			res += len(str)
 		}
+	case schemapb.DataType_Decimal:
+		for _, b := range column.GetScalars().GetBytesData().GetData() {
+			res += len(b)
+		}
 	default:
 		panic("Unknown data type:" + column.Type.String())
 	}
@@ -729,6 +733,11 @@ func IsArrayType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Array
 }
 
+// IsDecimalType returns true if input is a fixed-point exact numeric type, otherwise false
+func IsDecimalType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Decimal
+}
+
 // IsFloatingType returns true if input is a floating type, otherwise false
 func IsFloatingType(dataType schemapb.DataType) bool {
 	switch dataType {
@@ -785,7 +794,7 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
-	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType)
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType) || IsDecimalType(dataType)
 }
 
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce

@@ -347,6 +347,11 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 			msg := fmt.Sprintf("ArrayOfVector is only supported in struct array field, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
+		if fieldSchema.GetDataType() == schemapb.DataType_Decimal {
+			if _, _, err := parameterutil.GetPrecisionAndScale(fieldSchema); err != nil {
+				return err
+			}
+		}
 		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
 			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
@@ -427,10 +432,20 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 					}
 				}
 			case *schemapb.ValueField_BytesData:
-				if dtype != schemapb.DataType_JSON {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_SJON")
+				if dtype != schemapb.DataType_JSON && dtype != schemapb.DataType_Decimal {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_JSON")
 				}
 				defVal := fieldSchema.GetDefaultValue().GetBytesData()
+				if dtype == schemapb.DataType_Decimal {
+					precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+					if err != nil {
+						return err
+					}
+					if err := parameterutil.ValidateDecimalString(string(defVal), precision, scale); err != nil {
+						return err
+					}
+					break
+				}
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(defVal, &jsonData); err != nil {
 					mlog.Info(context.TODO(), "invalid default json value, milvus only support json map",
