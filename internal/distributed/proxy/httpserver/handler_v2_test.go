@@ -2064,6 +2064,272 @@ func TestCreateCollection(t *testing.T) {
 	})
 }
 
+func TestCreateCollectionQuickVectorFieldType(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	path := versionalV2(CollectionCategory, CreateAction)
+
+	t.Run("reject invalid vector field type", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"vectorFieldType": "InvalidVectorType"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Equal(t, "vectorFieldType can only be [FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector], default: FloatVector: invalid parameter[expected=FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector][actual=InvalidVectorType]", returnBody.Message)
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+
+	t.Run("reject sparse vector dimension", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"vectorFieldType": "SparseFloatVector"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "dimension should not be specified for SparseFloatVector quick create")
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+
+	invalidMetricCases := []struct {
+		name        string
+		body        string
+		expectedMsg string
+	}{
+		{
+			name: "reject binary vector invalid metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "COSINE",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: COSINE",
+		},
+		{
+			name: "reject sparse float vector invalid metric",
+			body: `{
+				"collectionName": "book",
+				"metricType": "COSINE",
+				"vectorFieldType": "SparseFloatVector"
+			}`,
+			expectedMsg: "only IP&BM25 is the supported metric type for sparse index",
+		},
+		{
+			name: "reject sparse float vector bm25 metric",
+			body: `{
+				"collectionName": "book",
+				"metricType": "BM25",
+				"vectorFieldType": "SparseFloatVector"
+			}`,
+			expectedMsg: "only BM25 Function output field support BM25 metric type",
+		},
+	}
+	for _, testcase := range invalidMetricCases {
+		t.Run(testcase.name, func(t *testing.T) {
+			proxy := &externalCollectionRESTProxy{}
+			testEngine := initHTTPServerV2(proxy, false)
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(testcase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, int32(1100), returnBody.Code)
+			assert.Contains(t, returnBody.Message, testcase.expectedMsg)
+			assert.Nil(t, proxy.createReq)
+			assert.Empty(t, proxy.createIndexReqs)
+		})
+	}
+
+	testcases := []struct {
+		name             string
+		body             string
+		expectedType     schemapb.DataType
+		expectedDimParam bool
+		expectedMetric   string
+	}{
+		{
+			name: "binary vector default metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedType:     schemapb.DataType_BinaryVector,
+			expectedDimParam: true,
+			expectedMetric:   paramtable.BinaryVectorDefaultMetricType,
+		},
+		{
+			name: "float16 vector",
+			body: `{
+				"collectionName": "book",
+				"dimension": 4,
+				"vectorFieldType": "Float16Vector"
+			}`,
+			expectedType:     schemapb.DataType_Float16Vector,
+			expectedDimParam: true,
+			expectedMetric:   DefaultMetricType,
+		},
+		{
+			name: "bfloat16 vector",
+			body: `{
+				"collectionName": "book",
+				"dimension": 4,
+				"vectorFieldType": "BFloat16Vector"
+			}`,
+			expectedType:     schemapb.DataType_BFloat16Vector,
+			expectedDimParam: true,
+			expectedMetric:   DefaultMetricType,
+		},
+		{
+			name: "sparse float vector default metric",
+			body: `{
+				"collectionName": "book",
+				"vectorFieldType": "SparseFloatVector"
+			}`,
+			expectedType:     schemapb.DataType_SparseFloatVector,
+			expectedDimParam: false,
+			expectedMetric:   paramtable.SparseFloatVectorDefaultMetricType,
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			proxy := &externalCollectionRESTProxy{}
+			testEngine := initHTTPServerV2(proxy, false)
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(testcase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.NoError(t, err)
+			assert.Equal(t, int32(0), returnBody.Code)
+			require.NotNil(t, proxy.createReq)
+
+			collSchema := &schemapb.CollectionSchema{}
+			require.NoError(t, proto.Unmarshal(proxy.createReq.GetSchema(), collSchema))
+			require.Len(t, collSchema.GetFields(), 2)
+			vectorField := collSchema.GetFields()[1]
+			assert.Equal(t, testcase.expectedType, vectorField.GetDataType())
+
+			dimFound := false
+			for _, typeParam := range vectorField.GetTypeParams() {
+				if typeParam.GetKey() == Dim {
+					dimFound = true
+				}
+			}
+			assert.Equal(t, testcase.expectedDimParam, dimFound)
+
+			require.Len(t, proxy.createIndexReqs, 1)
+			indexReq := proxy.createIndexReqs[0]
+			assert.Equal(t, DefaultVectorFieldName, indexReq.GetFieldName())
+			assert.Equal(t, DefaultVectorFieldName, indexReq.GetIndexName())
+			require.Len(t, indexReq.GetExtraParams(), 1)
+			assert.Equal(t, common.MetricTypeKey, indexReq.GetExtraParams()[0].GetKey())
+			assert.Equal(t, testcase.expectedMetric, indexReq.GetExtraParams()[0].GetValue())
+		})
+	}
+}
+
+func TestCreateCollectionTopLevelConsistencyLevel(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	path := versionalV2(CollectionCategory, CreateAction)
+
+	t.Run("reject invalid top-level consistency level", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"consistencyLevel": "Invalid"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "consistencyLevel can only be")
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+
+	t.Run("accept valid top-level consistency level", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"consistencyLevel": "Strong"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), returnBody.Code)
+		require.NotNil(t, proxy.createReq)
+		assert.Equal(t, commonpb.ConsistencyLevel_Strong, proxy.createReq.GetConsistencyLevel())
+		require.Len(t, proxy.createIndexReqs, 1)
+	})
+
+	t.Run("reject conflicting consistency levels", func(t *testing.T) {
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 4,
+			"consistencyLevel": "Strong",
+			"params": {"consistencyLevel": "Bounded"}
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1100), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "top-level consistencyLevel conflicts with params.consistencyLevel")
+		assert.Nil(t, proxy.createReq)
+		assert.Empty(t, proxy.createIndexReqs)
+	})
+}
+
 func TestCreateCollectionStructArrayDuplicateName(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -2110,6 +2376,7 @@ func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 type externalCollectionRESTProxy struct {
 	mockProxyComponent
 	createReq                  *milvuspb.CreateCollectionRequest
+	createIndexReqs            []*milvuspb.CreateIndexRequest
 	describeResp               *milvuspb.DescribeCollectionResponse
 	refreshReq                 *milvuspb.RefreshExternalCollectionRequest
 	listReq                    *milvuspb.ListRefreshExternalCollectionJobsRequest
@@ -2122,6 +2389,11 @@ type externalCollectionRESTProxy struct {
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	m.createReq = request
+	return commonSuccessStatus, nil
+}
+
+func (m *externalCollectionRESTProxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+	m.createIndexReqs = append(m.createIndexReqs, request)
 	return commonSuccessStatus, nil
 }
 
