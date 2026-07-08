@@ -30,12 +30,11 @@ const (
 )
 
 var (
-	// FeatureReportTotal records throttled Go-side feature reports.
-	FeatureReportTotal = prometheus.NewCounterVec(
+	featureReportTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Name:      "feature_report_total",
-			Help:      "Count of throttled feature reports.",
+			Help:      "Count of feature reports emitted.",
 		},
 		[]string{featureLabelName, sourceLabelName},
 	)
@@ -102,7 +101,7 @@ func (r *FeatureReporter) recordAt(now time.Time) bool {
 			return false
 		}
 		if r.nextAllowedNanos.CompareAndSwap(old, nextNanos) {
-			FeatureReportTotal.WithLabelValues(r.name, featureReportSourceGo).Inc()
+			featureReportTotal.WithLabelValues(r.name, featureReportSourceGo).Inc()
 			return true
 		}
 	}
