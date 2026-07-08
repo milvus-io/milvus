@@ -644,20 +644,33 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		segmentID, err := segmentIDFromPath(gc.option.cli.RootPath(), chunkInfo.FilePath)
 		if err != nil {
 			// Try V3 path format: insert_log/{coll}/{part}/{seg}/...
-			// V3 orphan files are managed by loon (milvus-storage), skip them.
-			if v3SegID, parseErr := parseV3SegmentID(gc.option.cli.RootPath(), chunkInfo.FilePath); parseErr == nil {
-				v3Seg := gc.meta.GetSegment(ctx, v3SegID)
-				if v3Seg == nil || v3Seg.GetStorageVersion() == storage.StorageV3 {
-					// V3 segment file or orphan V3 file — skip, managed by loon
+			v3SegID, parseErr := parseV3SegmentID(gc.option.cli.RootPath(), chunkInfo.FilePath)
+			if parseErr != nil {
+				unexpectedFailure.Inc()
+				logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
+					mlog.String("filePath", chunkInfo.FilePath),
+					mlog.Err(err))
+				return true
+			}
+			if v3Seg := gc.meta.GetSegment(ctx, v3SegID); v3Seg != nil {
+				if v3Seg.GetStorageVersion() == storage.StorageV3 {
+					// registered V3 segment file — skip, live files are managed by
+					// loon and dropped V3 segments are recycled with the whole
+					// basePath by recycleDroppedSegments
 					valid++
 					return true
 				}
+				unexpectedFailure.Inc()
+				logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
+					mlog.String("filePath", chunkInfo.FilePath),
+					mlog.Err(err))
+				return true
 			}
-			unexpectedFailure.Inc()
-			logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
-				mlog.String("filePath", chunkInfo.FilePath),
-				mlog.Err(err))
-			return true
+			// Orphan V3 file: its segment was never registered in meta, e.g.
+			// output uploaded by a failed sort/mix compaction attempt (issue
+			// #50962). Nothing manages it, so recycle it like V1/V2 orphans:
+			// fall through to the shared checker/removal path below.
+			segmentID = v3SegID
 		}
 
 		segment := gc.meta.GetSegment(ctx, segmentID)
