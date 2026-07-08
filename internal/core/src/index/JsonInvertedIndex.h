@@ -133,6 +133,15 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         return cast_type_;
     }
 
+    const TargetBitmap
+    IsNull() override;
+
+    TargetBitmap
+    IsNotNull() override;
+
+    const TargetBitmap
+    NotIn(size_t n, const T* values) override;
+
     BinarySet
     Serialize(const Config& config) override {
         std::shared_lock<folly::SharedMutex> lock(this->mutex_);
@@ -188,6 +197,9 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         std::vector<std::string>& index_files) override final;
 
  private:
+    TargetBitmap
+    ComparableValueBitset();
+
     std::string nested_path_;
     JsonInvertedIndexParseErrorRecorder error_recorder_;
     JsonCastType cast_type_;

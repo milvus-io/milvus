@@ -1033,7 +1033,8 @@ class SegmentExpr : public Expr {
 
     template <typename IndexInnerType>
     IndexPtrResult<IndexInnerType>
-    GetIndexPtrForChunk(size_t chunk_id) {
+    GetIndexPtrForChunk(size_t chunk_id,
+                        bool use_comparable_value_mask = true) {
         using Index = index::ScalarIndex<IndexInnerType>;
         IndexPtrResult<IndexInnerType> result{nullptr, nullptr};
 
@@ -1049,7 +1050,8 @@ class SegmentExpr : public Expr {
                 auto index_path = json_flat_index->GetNestedPath();
                 result.executor =
                     json_flat_index->template create_executor<IndexInnerType>(
-                        pointer.substr(index_path.size()), false);
+                        pointer.substr(index_path.size()),
+                        use_comparable_value_mask);
                 result.index_ptr = result.executor.get();
             } else {
                 auto json_index = const_cast<index::IndexBase*>(json_pw.get());
@@ -1333,7 +1335,8 @@ class SegmentExpr : public Expr {
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
-                auto index_result = GetIndexPtrForChunk<IndexInnerType>(i);
+                auto index_result =
+                    GetIndexPtrForChunk<IndexInnerType>(i, false);
                 Index* index_ptr = index_result.index_ptr;
 
                 auto execute_sub_batch = [](Index* index_ptr) {
