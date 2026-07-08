@@ -92,9 +92,10 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(
+		meta.EXPECT().GetAvailableCollectionCount(
 			mock.Anything,
-		).Return(map[int64][]int64{1: {1, 2}})
+			util.DefaultDBID,
+		).Return(2, 2, true)
 
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil)
@@ -130,7 +131,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{util.DefaultDBID: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 
 		// test reach limit
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
@@ -188,7 +189,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil)
 
@@ -223,7 +224,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.RootCoordCfg.MaxGeneralCapacity.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(1)
@@ -250,7 +251,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNumPerDB.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{
 				Name: "db1",
@@ -2037,11 +2038,10 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(model.NewDefaultDatabase(nil), nil)
-	meta.On("ListAllAvailCollections",
+	meta.On("GetAvailableCollectionCount",
 		mock.Anything,
-	).Return(map[int64][]int64{
-		util.DefaultDBID: {1, 2},
-	}, nil)
+		util.DefaultDBID,
+	).Return(2, 2, true)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
@@ -2132,9 +2132,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			Name: "foo",
 			ID:   1,
 		}, nil).Twice()
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
-			util.DefaultDBID: {1, 2},
-		}).Once()
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
@@ -2184,9 +2182,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			Name: "foo",
 			ID:   1,
 		}, nil).Twice()
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
-			util.DefaultDBID: {1, 2},
-		}).Once()
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		defer cleanTestEnv()
 
@@ -2230,9 +2226,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			Name: "foo",
 			ID:   1,
 		}, nil).Twice()
-		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
-			util.DefaultDBID: {1, 2},
-		}).Once()
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
@@ -2295,11 +2289,10 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(model.NewDefaultDatabase(nil), nil)
-	meta.On("ListAllAvailCollections",
+	meta.On("GetAvailableCollectionCount",
 		mock.Anything,
-	).Return(map[int64][]int64{
-		util.DefaultDBID: {1, 2},
-	}, nil)
+		util.DefaultDBID,
+	).Return(2, 2, true)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
 	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))

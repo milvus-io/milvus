@@ -120,6 +120,7 @@ type IMetaTable interface {
 	TruncateCollection(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error
 	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
+	GetAvailableCollectionCount(ctx context.Context, dbID int64) (dbCount int, totalCount int, dbExists bool)
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
@@ -177,7 +178,9 @@ type MetaTable struct {
 	fileResourceRefCnt    map[int64]int                           // file resource id -> reference count
 	fileResourceVersion   uint64
 
-	generalCnt int // sum of product of partition number and shard number
+	generalCnt                   int // sum of product of partition number and shard number
+	availableCollectionCount     int
+	availableCollectionCountByDB map[int64]int
 
 	// collections *collectionDb
 	names   *nameDb
@@ -308,6 +311,8 @@ func (mt *MetaTable) reload() error {
 			mt.aliases.insert(dbName, alias.Name, alias.CollectionID)
 		}
 	}
+
+	mt.rebuildAvailableCollectionCountLocked()
 
 	mlog.Info(mt.ctx, "rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
@@ -443,6 +448,10 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	mt.names.createDbIfNotExist(dbName)
 	mt.aliases.createDbIfNotExist(dbName)
 	mt.dbName2Meta[dbName] = db
+	if mt.availableCollectionCountByDB == nil {
+		mt.availableCollectionCountByDB = make(map[int64]int)
+	}
+	mt.availableCollectionCountByDB[db.ID] = 0
 
 	mlog.Info(ctx, "create database", mlog.String("db", dbName), mlog.Uint64("ts", ts))
 	return nil
@@ -501,6 +510,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	mt.names.dropDb(dbName)
 	mt.aliases.dropDb(dbName)
 	delete(mt.dbName2Meta, dbName)
+	delete(mt.availableCollectionCountByDB, db.ID)
 
 	metrics.RootCoordNumOfDatabases.Dec()
 	mlog.Info(ctx, "drop database", mlog.String("db", dbName), mlog.Uint64("ts", ts))
@@ -575,6 +585,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
+	mt.increaseAvailableCollectionCountLocked(coll.DBID)
 	// Build partition name index for the new collection
 	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
 	for _, partition := range coll.Partitions {
@@ -633,7 +644,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		mlog.String("state", clone.State.String()),
 	)
 
-	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
+	db, err := mt.getDatabaseByIDInternal(ctx, normalizeCollectionDBID(coll.DBID), typeutil.MaxTimestamp)
 	if err != nil {
 		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
 	}
@@ -641,6 +652,9 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	pn := coll.GetPartitionNum(true)
 
 	mt.generalCnt -= pn * int(coll.ShardsNum)
+	if coll.Available() {
+		mt.decreaseAvailableCollectionCountLocked(coll.DBID)
+	}
 	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
 	metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
@@ -926,6 +940,8 @@ func (mt *MetaTable) GetCollectionByIDWithMaxTs(ctx context.Context, collectionI
 	return mt.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
 }
 
+// ListAllAvailCollections returns available collection IDs grouped by database.
+// Use GetAvailableCollectionCount for max-count checks that only need counts.
 func (mt *MetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]int64 {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
@@ -1093,6 +1109,9 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 
 	mt.names.remove(oldColl.DBName, oldColl.Name)
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
+	if dbChanged && oldColl.Available() && newColl.Available() {
+		mt.moveAvailableCollectionCountLocked(oldColl.DBID, newColl.DBID)
+	}
 	mt.collID2Meta[header.CollectionId] = newColl
 	mlog.Info(ctx, "alter collection finished",
 		mlog.String("oldDBName", oldColl.DBName),
@@ -1674,6 +1693,65 @@ func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
 	defer mt.ddLock.RUnlock()
 
 	return mt.generalCnt
+}
+
+func normalizeCollectionDBID(dbID int64) int64 {
+	if dbID == util.NonDBID {
+		return util.DefaultDBID
+	}
+	return dbID
+}
+
+func (mt *MetaTable) rebuildAvailableCollectionCountLocked() {
+	mt.availableCollectionCount = 0
+	mt.availableCollectionCountByDB = make(map[int64]int, len(mt.dbName2Meta))
+	for _, db := range mt.dbName2Meta {
+		mt.availableCollectionCountByDB[db.ID] = 0
+	}
+	for _, coll := range mt.collID2Meta {
+		if !coll.Available() {
+			continue
+		}
+		mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	}
+}
+
+func (mt *MetaTable) increaseAvailableCollectionCountLocked(dbID int64) {
+	if mt.availableCollectionCountByDB == nil {
+		mt.availableCollectionCountByDB = make(map[int64]int)
+	}
+	dbID = normalizeCollectionDBID(dbID)
+	mt.availableCollectionCountByDB[dbID]++
+	mt.availableCollectionCount++
+}
+
+func (mt *MetaTable) decreaseAvailableCollectionCountLocked(dbID int64) {
+	dbID = normalizeCollectionDBID(dbID)
+	if mt.availableCollectionCountByDB[dbID] > 0 {
+		mt.availableCollectionCountByDB[dbID]--
+		if mt.availableCollectionCount > 0 {
+			mt.availableCollectionCount--
+		}
+	}
+}
+
+func (mt *MetaTable) moveAvailableCollectionCountLocked(fromDBID int64, toDBID int64) {
+	fromDBID = normalizeCollectionDBID(fromDBID)
+	toDBID = normalizeCollectionDBID(toDBID)
+	if fromDBID == toDBID {
+		return
+	}
+	mt.decreaseAvailableCollectionCountLocked(fromDBID)
+	mt.increaseAvailableCollectionCountLocked(toDBID)
+}
+
+func (mt *MetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (dbCount int, totalCount int, dbExists bool) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	dbID = normalizeCollectionDBID(dbID)
+	dbCount, dbExists = mt.availableCollectionCountByDB[dbID]
+	return dbCount, mt.availableCollectionCount, dbExists
 }
 
 func (mt *MetaTable) InitCredential(ctx context.Context) error {
