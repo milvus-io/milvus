@@ -192,6 +192,13 @@ class ChunkedColumnGroup {
         return memory_size;
     }
 
+#ifdef MILVUS_UNIT_TEST
+    CacheWarmupPolicy
+    TestCacheWarmupPolicy() const {
+        return slot_->meta()->cache_warmup_policy;
+    }
+#endif
+
  protected:
     mutable std::shared_ptr<CacheSlot<GroupChunk>> slot_;
     size_t num_chunks_{0};
@@ -296,6 +303,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     DataByteSize() const override {
         return group_->memory_size();
     }
+
+#ifdef MILVUS_UNIT_TEST
+    CacheWarmupPolicy
+    TestCacheWarmupPolicy() const {
+        return group_->TestCacheWarmupPolicy();
+    }
+#endif
 
     int64_t
     chunk_row_nums(int64_t chunk_id) const override {

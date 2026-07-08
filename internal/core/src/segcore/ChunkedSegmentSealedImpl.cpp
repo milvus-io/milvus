@@ -1937,9 +1937,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                 eager_fields.push_back(field_id);
                 continue;
             }
-            auto [has_warmup, warmup_str] = schema_snapshot->WarmupPolicy(
-                field_id, field_is_vector, /*is_index=*/false);
-            auto resolved = getCacheWarmupPolicy(has_warmup ? warmup_str : "",
+            auto warmup_str = resolve_field_data_warmup_policy(
+                field_id, segment_load_info, schema_snapshot);
+            auto resolved = getCacheWarmupPolicy(warmup_str,
                                                  field_is_vector,
                                                  /*is_index=*/false,
                                                  /*in_load_list=*/true);
@@ -2104,6 +2104,27 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
 }
 
 namespace {
+
+// A column group or field-binlog group may contain multiple fields but has only
+// one translator warmup policy. Accumulate per-field policies into the most
+// aggressive group policy: sync > async > disable. Empty means no field has
+// provided an explicit warmup setting yet, so downstream logic may still fall
+// back to global config.
+void
+AccumulateWarmupPolicyForGroup(const std::string& policy,
+                               std::string& aggregated_warmup_policy) {
+    if (policy.empty()) {
+        return;
+    }
+
+    if (policy == "sync") {
+        aggregated_warmup_policy = "sync";
+    } else if (policy == "async" && aggregated_warmup_policy != "sync") {
+        aggregated_warmup_policy = "async";
+    } else if (policy == "disable" && aggregated_warmup_policy.empty()) {
+        aggregated_warmup_policy = "disable";
+    }
+}
 
 struct FileMetadataLoadResult {
     milvus_storage::RowGroupMetadataVector row_group_meta;
@@ -2301,6 +2322,17 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+        std::string warmup_policy = info.warmup_policy;
+        if (warmup_policy.empty()) {
+            std::string aggregated_warmup_policy;
+            for (auto field_id : milvus_field_ids) {
+                AccumulateWarmupPolicyForGroup(
+                    resolve_field_data_warmup_policy(
+                        field_id, segment_load_info, schema_snapshot),
+                    aggregated_warmup_policy);
+            }
+            warmup_policy = aggregated_warmup_policy;
+        }
 
         std::vector<FieldId> fields_for_stats;
         if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
@@ -2333,7 +2365,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
                 load_info.load_priority,
-                info.warmup_policy);
+                warmup_policy);
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -2368,7 +2400,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                         std::move(ts), num_rows, runtime);
                 } else {
                     init_storage_v2_timestamp_index(
-                        column, num_rows, info.warmup_policy, runtime);
+                        column, num_rows, warmup_policy, runtime);
                 }
                 if (runtime == nullptr) {
                     PublishSystemFieldStateLocked();
@@ -2644,6 +2676,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             auto field_meta = schema_snapshot->operator[](field_id);
+            auto warmup_policy =
+                resolve_field_data_warmup_policy(field_id,
+                                                 segment_load_info,
+                                                 schema_snapshot,
+                                                 info.warmup_policy);
             std::unique_ptr<Translator<milvus::Chunk>> translator =
                 std::make_unique<storagev1translator::ChunkTranslator>(
                     this->get_segment_id(),
@@ -2653,7 +2690,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     info.enable_mmap,
                     mmap_config.GetMmapPopulate(),
                     load_info.load_priority,
-                    info.warmup_policy);
+                    warmup_policy);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -6189,6 +6226,88 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
     bitset_chunk |= mask;
 }
 
+std::string
+ChunkedSegmentSealedImpl::resolve_field_data_warmup_policy(
+    FieldId field_id,
+    const SegmentLoadInfo& segment_load_info,
+    const SchemaPtr& schema_snapshot,
+    const std::string& explicit_warmup_policy) const {
+    // System fields do not carry user-field warmup settings and are not
+    // represented in user-field bitsets. They should not affect group warmup
+    // aggregation.
+    if (SystemProperty::Instance().IsSystem(field_id)) {
+        return explicit_warmup_policy;
+    }
+
+    // "Has index" here means an index is usable now:
+    // - SegmentLoadInfo covers DataCoord-built index files loaded with segment
+    //   metadata.
+    // - published_state_.binlog_index_bitset covers interim indexes already
+    //   generated from raw binlog data.
+    // Do not predict whether an interim index may be generated later. Before an
+    // index exists, raw vector data is the search-critical representation and
+    // follows vector-index warmup.
+    bool has_index = segment_load_info.HasIndexInfo(field_id);
+    if (!has_index) {
+        auto snapshot = CapturePublishedState();
+        has_index = snapshot != nullptr &&
+                    get_bit_if_present(snapshot->binlog_index_bitset, field_id);
+    }
+
+    const auto& field_meta = schema_snapshot->operator[](field_id);
+    auto is_vector = IsVectorDataType(field_meta.get_data_type());
+
+    // explicit_warmup_policy is the field-data override carried by the current
+    // load request. It is normally authoritative. The only exception is vector
+    // raw data without a usable index: QueryCoord may have propagated
+    // warmup.vectorField=disable into the field TypeParams, but in this state
+    // the raw vector column is effectively the index/search path and must use
+    // vector-index warmup instead.
+    if (!explicit_warmup_policy.empty() && (!is_vector || has_index)) {
+        return explicit_warmup_policy;
+    }
+
+    if (is_vector && !has_index) {
+        auto [has_index_warmup, index_warmup_policy] =
+            schema_snapshot->CollectionWarmupPolicy(/*is_vector=*/true,
+                                                    /*is_index=*/true);
+        if (has_index_warmup) {
+            return index_warmup_policy;
+        }
+
+        switch (milvus::cachinglayer::Manager::GetInstance()
+                    .getVectorIndexCacheWarmupPolicy()) {
+            case CacheWarmupPolicy::CacheWarmupPolicy_Sync:
+                return "sync";
+            case CacheWarmupPolicy::CacheWarmupPolicy_Async:
+                return "async";
+            case CacheWarmupPolicy::CacheWarmupPolicy_Disable:
+                return "disable";
+            default:
+                return "";
+        }
+    }
+
+    auto [has_field_warmup, field_warmup_policy] =
+        schema_snapshot->WarmupPolicy(field_id, is_vector, /*is_index=*/false);
+    return has_field_warmup ? field_warmup_policy : "";
+}
+
+std::string
+ChunkedSegmentSealedImpl::resolve_field_data_group_warmup_policy(
+    const std::unordered_map<FieldId, FieldMeta>& field_metas,
+    const SegmentLoadInfo& segment_load_info,
+    const SchemaPtr& schema_snapshot) const {
+    std::string aggregated_warmup_policy;
+    for (const auto& field_meta_pair : field_metas) {
+        AccumulateWarmupPolicyForGroup(
+            resolve_field_data_warmup_policy(
+                field_meta_pair.first, segment_load_info, schema_snapshot),
+            aggregated_warmup_policy);
+    }
+    return aggregated_warmup_policy;
+}
+
 bool
 ChunkedSegmentSealedImpl::generate_interim_index(
     const FieldId field_id,
@@ -6765,8 +6884,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.fields_to_fill_default.empty()) {
-        FillDefaultValueFields(
-            diff.fields_to_fill_default, schema_snapshot, committer);
+        FillDefaultValueFields(diff.fields_to_fill_default,
+                               segment_load_info,
+                               schema_snapshot,
+                               committer);
     }
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
@@ -7042,9 +7163,11 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
 }
 
 void
-ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta,
-                                           const SchemaPtr& schema_snapshot,
-                                           RuntimeResourceState& runtime) {
+ChunkedSegmentSealedImpl::fill_empty_field(
+    const FieldMeta& field_meta,
+    const SchemaPtr& schema_snapshot,
+    const SegmentLoadInfo& segment_load_info,
+    RuntimeResourceState& runtime) {
     auto field_id = field_meta.get_id();
     auto data_type = field_meta.get_data_type();
     LOG_INFO(
@@ -7066,18 +7189,14 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta,
             ->GetRootPath();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto load_info_snapshot = CaptureLoadInfoSnapshot();
-    auto field_data_info =
-        FieldDataInfo(field_id.get(),
-                      size,
-                      mmap_dir_path,
-                      false,
-                      load_info_snapshot->GetInsertChannel());
+    auto field_data_info = FieldDataInfo(field_id.get(),
+                                         size,
+                                         mmap_dir_path,
+                                         false,
+                                         segment_load_info.GetInsertChannel());
 
-    auto [field_has_warmup, field_warmup_policy] =
-        schema_snapshot->WarmupPolicy(
-            field_id, IsVectorDataType(data_type), /*is_index=*/false);
-    std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
+    auto warmup_policy = resolve_field_data_warmup_policy(
+        field_id, segment_load_info, schema_snapshot);
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(),
@@ -7097,16 +7216,6 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta,
         field_meta.get_data_type(),
         field_id.get(),
         id_);
-}
-
-void
-ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
-    auto runtime = CloneMutableRuntimeResourceState();
-    fill_empty_field(field_meta, CaptureSchemaSnapshot(), *runtime);
-    EnsureArrayOffsetsForStructField(
-        field_meta, num_rows_.value_or(0), *runtime);
-    PublishFieldDataReadyLocked(field_meta.get_id(),
-                                ToConstRuntimeState(std::move(runtime)));
 }
 
 void
@@ -7133,6 +7242,7 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
 void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids,
+    const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     RuntimeResourceState* runtime,
     PublishedSegmentState* staged_state) {
@@ -7160,7 +7270,8 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             continue;
         }
         const auto& field_meta = schema_snapshot->operator[](field_id);
-        fill_empty_field(field_meta, schema_snapshot, *target_runtime);
+        fill_empty_field(
+            field_meta, schema_snapshot, segment_load_info, *target_runtime);
         EnsureArrayOffsetsForStructField(
             field_meta, num_rows_.value_or(0), *target_runtime);
         filled_fields.push_back(field_id);
@@ -7181,15 +7292,17 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
 void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids) {
-    FillDefaultValueFields(field_ids, CaptureSchemaSnapshot(), nullptr);
+    auto snapshot = CapturePublishedState();
+    FillDefaultValueFields(
+        field_ids, *snapshot->load_info, snapshot->schema, nullptr);
 }
 
 void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids,
+    const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     StagedStateCommitter& committer) {
-    auto snapshot = CapturePublishedState();
     const auto* staged_state = committer.staged_state();
 
     std::vector<std::pair<FieldMeta, std::shared_ptr<ChunkedColumnInterface>>>
@@ -7231,20 +7344,15 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         int64_t size = num_rows_.value();
         AssertInfo(size > 0,
                    "Chunked Sealed segment must have more than 0 row");
-        auto load_info_snapshot = staged_state->load_info != nullptr
-                                      ? staged_state->load_info
-                                      : snapshot->load_info;
         auto field_data_info =
             FieldDataInfo(field_id.get(),
                           size,
                           mmap_dir_path,
                           false,
-                          load_info_snapshot->GetInsertChannel());
+                          segment_load_info.GetInsertChannel());
 
-        auto [field_has_warmup, field_warmup_policy] =
-            schema_snapshot->WarmupPolicy(
-                field_id, IsVectorDataType(data_type), /*is_index=*/false);
-        std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
+        auto warmup_policy = resolve_field_data_warmup_policy(
+            field_id, segment_load_info, schema_snapshot);
         std::unique_ptr<Translator<milvus::Chunk>> translator =
             std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
                 get_segment_id(),
@@ -7569,17 +7677,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+    auto aggregated_warmup_policy = resolve_field_data_group_warmup_policy(
+        field_metas, segment_load_info, schema_snapshot);
 
     // assumption: vector field occupies whole column group
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
-    bool has_warmup_setting = false;
-    std::string aggregated_warmup_policy = "disable";
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
         }
+
         // if field has mmap setting, use it
         // - mmap setting at collection level, then all field are the same
         // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
@@ -7587,24 +7696,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
-
-        // if field has warmup setting, use it
-        // - warmup setting at collection level, uses appropriate key based on field type
-        // - warmup setting at field level, use the most aggressive policy (sync > async > disable)
-        // Note: this is for field data loading, not index (is_index = false)
-        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
-        auto [field_has_warmup, field_warmup_policy] =
-            schema_snapshot->WarmupPolicy(
-                field_id, field_is_vector, /*is_index=*/false);
-        if (field_has_warmup) {
-            has_warmup_setting = true;
-            if (field_warmup_policy == "sync") {
-                aggregated_warmup_policy = "sync";
-            } else if (field_warmup_policy == "async" &&
-                       aggregated_warmup_policy != "sync") {
-                aggregated_warmup_policy = "async";
-            }
-        }
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -7649,8 +7740,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     // Determine warmup policy: use per-field settings if any,
     // otherwise pass empty string to fall back to global config
-    std::string warmup_policy =
-        has_warmup_setting ? aggregated_warmup_policy : "";
+    std::string warmup_policy = aggregated_warmup_policy;
 
     // Multiple lazy entries can share the same column-group index (one per
     // field), so the translator cache key must be disambiguated by the
@@ -7741,12 +7831,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+    auto aggregated_warmup_policy = resolve_field_data_group_warmup_policy(
+        field_metas, segment_load_info, schema_snapshot);
 
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
-    bool has_warmup_setting = false;
-    std::string aggregated_warmup_policy = "disable";
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -7755,20 +7845,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
-
-        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
-        auto [field_has_warmup, field_warmup_policy] =
-            schema_snapshot->WarmupPolicy(
-                field_id, field_is_vector, /*is_index=*/false);
-        if (field_has_warmup) {
-            has_warmup_setting = true;
-            if (field_warmup_policy == "sync") {
-                aggregated_warmup_policy = "sync";
-            } else if (field_warmup_policy == "async" &&
-                       aggregated_warmup_policy != "sync") {
-                aggregated_warmup_policy = "async";
-            }
-        }
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -7806,8 +7882,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             .GetChunkManager()
             ->GetRootPath();
 
-    std::string warmup_policy =
-        has_warmup_setting ? aggregated_warmup_policy : "";
+    std::string warmup_policy = aggregated_warmup_policy;
 
     std::string cache_key_suffix;
     if (!eager_load) {
@@ -8094,8 +8169,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         bool mmap_enabled = false;
         bool is_vector = false;
 
-        bool has_warmup_setting = false;
-        std::string aggregated_warmup_policy = "disable";
+        std::string aggregated_warmup_policy;
         for (const auto& child_field_id : fields_to_load) {
             auto& field_meta = schema_snapshot->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
@@ -8122,20 +8196,10 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                 index_has_raw_data = false;
             }
 
-            auto [field_has_warmup, field_warmup_policy] =
-                schema_snapshot->WarmupPolicy(
-                    child_field_id,
-                    IsVectorDataType(field_meta.get_data_type()),
-                    /*is_index=*/false);
-            if (field_has_warmup) {
-                has_warmup_setting = true;
-                if (field_warmup_policy == "sync") {
-                    aggregated_warmup_policy = "sync";
-                } else if (field_warmup_policy == "async" &&
-                           aggregated_warmup_policy != "sync") {
-                    aggregated_warmup_policy = "async";
-                }
-            }
+            AccumulateWarmupPolicyForGroup(
+                resolve_field_data_warmup_policy(
+                    child_field_id, segment_load_info, schema_snapshot),
+                aggregated_warmup_policy);
         }
 
         auto group_id = field_binlog.fieldid();
@@ -8184,8 +8248,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
 
         // Determine group warmup policy: use per-field settings if any,
         // otherwise fall back to global warmup policy
-        field_binlog_info.warmup_policy =
-            has_warmup_setting ? aggregated_warmup_policy : "";
+        field_binlog_info.warmup_policy = aggregated_warmup_policy;
 
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;

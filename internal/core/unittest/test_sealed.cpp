@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <limits>
@@ -63,6 +64,7 @@
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
 #include "knowhere/version.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
@@ -103,6 +105,126 @@ GetFieldBit(const BitsetType& bitset, FieldId field_id) {
     AssertInfo(pos >= 0, "invalid field id");
     return bitset[pos];
 }
+
+constexpr int64_t kWarmupPkFieldId = START_USER_FIELDID;
+constexpr int64_t kWarmupVectorFieldId = START_USER_FIELDID + 1;
+
+void
+AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
+                  const std::string& key,
+                  const std::string& value) {
+    auto* prop = schema_proto.add_properties();
+    prop->set_key(key);
+    prop->set_value(value);
+}
+
+SchemaPtr
+CreateWarmupPolicySchema(bool include_vector) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(kWarmupPkFieldId);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    if (include_vector) {
+        auto* vector_field = schema_proto.add_fields();
+        vector_field->set_fieldid(kWarmupVectorFieldId);
+        vector_field->set_name("vec");
+        vector_field->set_data_type(
+            milvus::proto::schema::DataType::FloatVector);
+        auto* dim = vector_field->add_type_params();
+        dim->set_key("dim");
+        dim->set_value("4");
+    }
+
+    AddWarmupProperty(schema_proto, "warmup.vectorField", "sync");
+    AddWarmupProperty(schema_proto, "warmup.vectorIndex", "disable");
+    auto schema = Schema::ParseFrom(schema_proto);
+    schema->set_schema_version(include_vector ? 200 : 100);
+    return schema;
+}
+
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+MakeWarmupTestColumnGroups() {
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->columns.emplace_back(std::to_string(kWarmupVectorFieldId));
+    column_groups->emplace_back(std::move(column_group));
+    return column_groups;
+}
+
+class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
+ public:
+    size_t
+    total_number_of_chunks() const override {
+        return 1;
+    }
+
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>& row_indices) override {
+        return std::vector<int64_t>(row_indices.size(), 0);
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t) override {
+        return arrow::Status::NotImplemented("warmup test chunk reader");
+    }
+
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>&, size_t) override {
+        return arrow::Status::NotImplemented("warmup test chunk reader");
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_size() override {
+        return std::vector<uint64_t>{1};
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        return std::vector<uint64_t>{1};
+    }
+};
+
+class WarmupTestReader : public milvus_storage::api::Reader {
+ public:
+    explicit WarmupTestReader(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups)
+        : column_groups_(std::move(column_groups)) {
+    }
+
+    std::shared_ptr<milvus_storage::api::ColumnGroups>
+    get_column_groups() const override {
+        return column_groups_;
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatchReader>>
+    get_record_batch_reader(const std::string&) const override {
+        return arrow::Status::NotImplemented("warmup test reader");
+    }
+
+    arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>
+    get_chunk_reader(int64_t, const std::shared_ptr<std::vector<std::string>>&)
+        const override {
+        return std::make_unique<WarmupTestChunkReader>();
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Table>>
+    take(const std::vector<int64_t>&,
+         size_t,
+         const std::shared_ptr<std::vector<std::string>>&) override {
+        return arrow::Status::NotImplemented("warmup test reader");
+    }
+
+    void
+    set_keyretriever(
+        const std::function<std::string(const std::string&)>&) override {
+    }
+
+ private:
+    std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+};
 
 class CancellationObservingIndexTranslator
     : public cachinglayer::Translator<index::IndexBase> {
@@ -4366,6 +4488,70 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
     EXPECT_TRUE(GetFieldBit(final_state->index_ready_bitset, new_vec));
     EXPECT_TRUE(final_state->index_has_raw_data.at(new_vec));
     EXPECT_TRUE(sealed->TestVectorIndexReady(new_vec));
+}
+
+TEST(SealedSegmentCowState,
+     WarmupResolverHandlesAddedVectorAbsentFromPublishedBitset) {
+    auto old_schema = CreateWarmupPolicySchema(/*include_vector=*/false);
+    auto new_schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(old_schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(current, nullptr);
+    ASSERT_LE(current->binlog_index_bitset.size(), 1);
+    ASSERT_FALSE(current->schema->get_fields().count(vec));
+
+    SegmentLoadInfo staged_load_info(current->load_info->GetProto(),
+                                     new_schema);
+    auto [has_field_warmup, field_warmup_policy] =
+        new_schema->WarmupPolicy(vec, /*is_vector=*/true, /*is_index=*/false);
+    ASSERT_TRUE(has_field_warmup);
+    ASSERT_EQ(field_warmup_policy, "sync");
+
+    std::string resolved;
+    ASSERT_NO_THROW(resolved = sealed->TestResolveFieldDataWarmupPolicy(
+                        vec, staged_load_info, new_schema));
+    EXPECT_EQ(resolved, "disable");
+}
+
+TEST(SealedSegmentCowState,
+     StagedStorageV2ColumnGroupUsesVectorIndexWarmupForNoIndexVector) {
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1006);
+    load_proto.set_num_of_rows(1);
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    ASSERT_EQ(sealed->TestResolveFieldDataGroupWarmupPolicy(
+                  {vec}, segment_load_info, schema),
+              "disable");
+
+    auto column_groups = MakeWarmupTestColumnGroups();
+    auto reader = std::make_shared<WarmupTestReader>(column_groups);
+    auto column = sealed->TestStageLoadColumnGroupWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        /*index=*/0,
+        {vec},
+        segment_load_info,
+        schema,
+        std::move(reader),
+        /*eager_load=*/true);
+
+    auto proxy_column = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+    ASSERT_NE(proxy_column, nullptr);
+    EXPECT_EQ(proxy_column->TestCacheWarmupPolicy(),
+              CacheWarmupPolicy::CacheWarmupPolicy_Disable);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
