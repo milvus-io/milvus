@@ -4931,11 +4931,16 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     if (!cfg.GetScalarIndexEnableMmap()) {
         // build text index in ram.
+        // Sealed interim index: no background merge — finish() ends with an
+        // explicit merge-all, and a racing policy merge (which finish()'s
+        // NoMergePolicy cannot cancel once started) would reintroduce the
+        // "segments could not be found in the SegmentManager" failure.
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
             unique_id.c_str(),
             "milvus_tokenizer",
-            field_meta.get_analyzer_params().c_str());
+            field_meta.get_analyzer_params().c_str(),
+            /*enable_background_merge=*/false);
     } else {
         // build text index using mmap.
         index = std::make_unique<index::TextMatchIndex>(
