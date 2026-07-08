@@ -157,6 +157,15 @@ func TestWpRetentionTruncateRead(t *testing.T) {
 	// (woodpecker rolls by flushed byte size, not timing), so the seek-forward sub-tests
 	// can reach both the within-segment and cross-segment adjustment branches.
 	require.NoError(t, pt.Save(pt.WoodpeckerCfg.SegmentRollingMaxSize.Key, "4096"))
+	// Restore the globals we mutated so this test does not leak config into others
+	// (e.g. under -shuffle=on, or a test added after this one): a stale 4KB rolling /
+	// local-storage config and a RootPath pointing at an already-deleted t.TempDir().
+	t.Cleanup(func() {
+		pt.Reset(pt.WoodpeckerCfg.RetentionTTL.Key)
+		pt.Reset(pt.WoodpeckerCfg.StorageType.Key)
+		pt.Reset(pt.WoodpeckerCfg.RootPath.Key)
+		pt.Reset(pt.WoodpeckerCfg.SegmentRollingMaxSize.Key)
+	})
 
 	o, err := (&builderImpl{}).Build()
 	require.NoError(t, err)
@@ -324,7 +333,7 @@ func readExpectWpIDs(t *testing.T, ctx context.Context, w walimpls.WALImpls, nam
 		case msg, ok := <-s.Chan():
 			require.Truef(t, ok, "%s: scanner channel closed early at message %d/%d", name, i, len(expected))
 			require.NotNil(t, msg)
-			assert.Truef(t, msg.MessageID().EQ(want), "%s: message %d/%d got %v want %v", name, i, len(expected), msg.MessageID(), want)
+			require.Truef(t, msg.MessageID().EQ(want), "%s: message %d/%d got %v want %v", name, i, len(expected), msg.MessageID(), want)
 		case <-time.After(30 * time.Second):
 			t.Fatalf("%s: timed out waiting for message %d/%d", name, i, len(expected))
 		}
@@ -347,6 +356,10 @@ func assertWpNoMessage(t *testing.T, ctx context.Context, w walimpls.WALImpls, n
 		if ok {
 			t.Fatalf("%s: expected no message but got %v", name, msg.MessageID())
 		}
+		// ok == false means the scanner channel was closed, i.e. the scanner goroutine
+		// finished/errored rather than staying parked. Fail here too, otherwise a dead
+		// scanner would masquerade as the intended "parked reader delivers nothing".
+		t.Fatalf("%s: scanner channel closed; expected a parked reader, not a finished/errored scanner", name)
 	case <-time.After(d):
 	}
 }
