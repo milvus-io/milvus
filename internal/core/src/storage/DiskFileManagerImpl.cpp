@@ -442,7 +442,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 
     for (int64_t i = 0; i < remote_files.size(); ++i) {
         futures.push_back(pool.Submit(
-            [&](const std::string& file,
+            [local_chunk_manager](
+                const std::string& file,
                 const int64_t offset,
                 const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
                 auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
@@ -454,13 +455,14 @@ DiskFileManagerImpl::AddBatchIndexFiles(
             remote_file_sizes[i]));
     }
 
-    // hold index data util upload index file done
-    std::vector<std::shared_ptr<uint8_t[]>> index_datas;
+    // hold index data util upload index file done.
+    // WaitAllFutures drains every task before rethrowing, so a failed read
+    // cannot unwind this frame while remaining tasks are still running.
+    auto index_datas = WaitAllFutures(std::move(futures));
     std::vector<const uint8_t*> data_slices;
-    for (auto& future : futures) {
-        auto res = future.get();
-        index_datas.emplace_back(res);
-        data_slices.emplace_back(res.get());
+    data_slices.reserve(index_datas.size());
+    for (auto& index_data : index_datas) {
+        data_slices.emplace_back(index_data.get());
     }
 
     std::map<std::string, int64_t> res;

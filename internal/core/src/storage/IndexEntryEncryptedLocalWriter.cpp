@@ -17,12 +17,15 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 
 #include <fcntl.h>
+#include <folly/ScopeGuard.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
 #include <utility>
 #include <vector>
+
+#include "storage/Util.h"
 
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -128,6 +131,11 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
     size_t remaining = size;
     uint32_t crc = 0;
 
+    // Encryption tasks capture `this`; on error the caller destroys the
+    // writer, so finish them before unwinding (see #46958).
+    auto drain_on_unwind =
+        folly::makeGuard([&pending]() { DrainFutures(pending); });
+
     while (remaining > 0 || !pending.empty()) {
         // Fill the sliding window: read one slice from fd and submit encryption
         while (pending.size() < W && remaining > 0) {
@@ -170,6 +178,11 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
     size_t remaining = size;
     size_t read_offset = 0;
     uint32_t crc = 0;
+
+    // Encryption tasks capture `this`; on error the caller destroys the
+    // writer, so finish them before unwinding (see #46958).
+    auto drain_on_unwind =
+        folly::makeGuard([&pending]() { DrainFutures(pending); });
 
     while (remaining > 0 || !pending.empty()) {
         while (pending.size() < W && remaining > 0) {
