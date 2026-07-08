@@ -59,6 +59,7 @@ const (
 	IteratorField        = "iterator"
 	CollectionID         = "collection_id"
 	GroupByFieldKey      = "group_by_field"
+	GroupByFieldsKey     = "group_by_fields"
 	GroupSizeKey         = "group_size"
 	StrictGroupSize      = "strict_group_size"
 	JSONPath             = "json_path"
