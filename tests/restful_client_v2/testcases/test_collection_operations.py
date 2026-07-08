@@ -921,6 +921,9 @@ class TestCreateCollectionNegative(TestBase):
         "vector_field_type,dimension,metric_type,expected_message",
         [
             ("BinaryVector", 8, "COSINE", "binary vector index does not support metric type: COSINE"),
+            ("BinaryVector", 8, "SUBSTRUCTURE", "binary vector index does not support metric type: SUBSTRUCTURE"),
+            ("BinaryVector", 8, "SUPERSTRUCTURE", "binary vector index does not support metric type: SUPERSTRUCTURE"),
+            ("BinaryVector", 8, "MHJACCARD", "binary vector index does not support metric type: MHJACCARD"),
             ("SparseFloatVector", None, "COSINE", "only IP&BM25 is the supported metric type for sparse index"),
             ("SparseFloatVector", None, "BM25", "only BM25 Function output field support BM25 metric type"),
         ],
