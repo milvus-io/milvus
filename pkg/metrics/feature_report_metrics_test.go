@@ -31,11 +31,11 @@ func resetFeatureReportForTest(t *testing.T) {
 	t.Helper()
 
 	oldInterval := featureReportInterval
-	FeatureReportTotal.Reset()
+	featureReportTotal.Reset()
 	resetFeatureReporters()
 
 	t.Cleanup(func() {
-		FeatureReportTotal.Reset()
+		featureReportTotal.Reset()
 		resetFeatureReporters()
 		featureReportInterval = oldInterval
 	})
@@ -64,7 +64,7 @@ func TestFeatureReporterThrottle(t *testing.T) {
 	assert.True(t, FeatureHybridSearch.recordAt(now.Add(time.Hour)))
 
 	assert.Equal(t, 2.0, testutil.ToFloat64(
-		FeatureReportTotal.WithLabelValues(FeatureHybridSearch.Name(), featureReportSourceGo),
+		featureReportTotal.WithLabelValues(FeatureHybridSearch.Name(), featureReportSourceGo),
 	))
 }
 
@@ -73,7 +73,7 @@ func TestFeatureReporterNilReporter(t *testing.T) {
 
 	var reporter *FeatureReporter
 	assert.False(t, reporter.Record())
-	assert.Equal(t, 0, testutil.CollectAndCount(FeatureReportTotal))
+	assert.Equal(t, 0, testutil.CollectAndCount(featureReportTotal))
 }
 
 func TestFeatureReporterConcurrentCalls(t *testing.T) {
@@ -97,6 +97,6 @@ func TestFeatureReporterConcurrentCalls(t *testing.T) {
 
 	assert.Equal(t, int64(1), reported.Load())
 	assert.Equal(t, 1.0, testutil.ToFloat64(
-		FeatureReportTotal.WithLabelValues(FeatureBulkImport.Name(), featureReportSourceGo),
+		featureReportTotal.WithLabelValues(FeatureBulkImport.Name(), featureReportSourceGo),
 	))
 }
