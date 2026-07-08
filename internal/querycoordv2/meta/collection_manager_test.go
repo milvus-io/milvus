@@ -677,8 +677,10 @@ func (suite *CollectionManagerSuite) releaseAll() {
 }
 
 func (suite *CollectionManagerSuite) clearMemory() {
-	suite.mgr.collections = make(map[int64]*Collection)
-	suite.mgr.partitions = make(map[int64]*Partition)
+	// CollectionManager's in-memory caches are unexported and now live in the
+	// shared pkg package, so reset state by reconstructing the manager over the
+	// same catalog (Recover reloads from the kv store afterwards).
+	suite.mgr = NewCollectionManager(suite.catalog)
 }
 
 func TestCollectionManager(t *testing.T) {
