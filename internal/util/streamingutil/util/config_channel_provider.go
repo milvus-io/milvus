@@ -1,7 +1,10 @@
 package util
 
 import (
+	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -21,12 +24,14 @@ type ConfigChannelProvider struct {
 	ch              chan []string
 	trigger         chan struct{}
 	handler         config.EventHandler
+	statsReady      <-chan struct{}
+	getPChannels    func() []string
 }
 
-// NewConfigChannelProvider creates a ConfigChannelProvider that reads the
-// current set of topics from configuration and watches for config changes
-// to detect any newly added topics.
-func NewConfigChannelProvider() *ConfigChannelProvider {
+// NewConfigChannelProviderWithPChannelStatsManager creates a ConfigChannelProvider
+// that reads channel names from configuration and also discovers pchannels
+// recovered from collection metadata.
+func NewConfigChannelProviderWithPChannelStatsManager[T interface{ PChannels() []string }](statsFuture *syncutil.Future[T]) *ConfigChannelProvider {
 	currentTopics := GetAllTopicsFromConfiguration()
 	initial := currentTopics.Collect()
 	sort.Strings(initial)
@@ -37,6 +42,10 @@ func NewConfigChannelProvider() *ConfigChannelProvider {
 		initialChannels: initial,
 		ch:              make(chan []string),
 		trigger:         make(chan struct{}, 1),
+	}
+	p.statsReady = statsFuture.Done()
+	p.getPChannels = func() []string {
+		return statsFuture.Get().PChannels()
 	}
 	p.handler = config.NewHandler("config_channel_provider", func(event *config.Event) {
 		// Non-blocking send to coalesce rapid config changes.
@@ -72,18 +81,32 @@ func (p *ConfigChannelProvider) Close() {
 // background is the single goroutine that processes config change triggers.
 func (p *ConfigChannelProvider) background() {
 	defer p.notifier.Finish(struct{}{})
+	statsReady := p.statsReady
 	for {
 		select {
 		case <-p.trigger:
-			p.onConfigChange()
+			p.onConfigChanged()
+		case <-statsReady:
+			statsReady = nil
+			p.onPChannelStatsReady()
 		case <-p.notifier.Context().Done():
 			return
 		}
 	}
 }
 
-func (p *ConfigChannelProvider) onConfigChange() {
-	current := GetAllTopicsFromConfiguration()
+func (p *ConfigChannelProvider) onConfigChanged() {
+	p.notifyNewChannels(GetAllTopicsFromConfiguration(), "ConfigChannelProvider detected new channels")
+}
+
+func (p *ConfigChannelProvider) onPChannelStatsReady() {
+	p.notifyNewChannels(
+		getAllTopicsFromConfigurationAndPChannels(p.getPChannels()),
+		"ConfigChannelProvider detected new channels from pchannel stats",
+	)
+}
+
+func (p *ConfigChannelProvider) notifyNewChannels(current typeutil.Set[string], logMessage string) {
 	var newChannels []string
 	current.Range(func(name string) bool {
 		if !p.known.Contain(name) {
@@ -94,11 +117,50 @@ func (p *ConfigChannelProvider) onConfigChange() {
 	})
 	if len(newChannels) > 0 {
 		sort.Strings(newChannels)
-		log.Info("ConfigChannelProvider detected new channels",
-			zap.Strings("newChannels", newChannels))
+		log.Info(logMessage, zap.Strings("newChannels", newChannels))
 		select {
 		case p.ch <- newChannels:
 		case <-p.notifier.Context().Done():
 		}
 	}
+}
+
+func getAllTopicsFromConfigurationAndPChannels(pchannels []string) typeutil.Set[string] {
+	current := GetAllTopicsFromConfiguration()
+	if paramtable.Get().CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
+		for _, pchannel := range pchannels {
+			if !current.Contain(pchannel) {
+				log.Warn("skip pchannel not in pre-created topic list",
+					zap.String("pchannel", pchannel))
+			}
+		}
+		return current
+	}
+
+	prefix := paramtable.Get().CommonCfg.RootCoordDml.GetValue()
+	for _, pchannel := range pchannels {
+		if idx, ok := parseConfiguredDMLChannelIndex(pchannel, prefix); ok {
+			for i := 0; i <= idx; i++ {
+				current.Insert(fmt.Sprintf("%s_%d", prefix, i))
+			}
+			continue
+		}
+		current.Insert(pchannel)
+	}
+	return current
+}
+
+func parseConfiguredDMLChannelIndex(pchannel string, prefix string) (int, bool) {
+	suffix, ok := strings.CutPrefix(pchannel, prefix+"_")
+	if !ok || suffix == "" {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(suffix)
+	if err != nil {
+		return 0, false
+	}
+	if idx < 0 || fmt.Sprintf("%s_%d", prefix, idx) != pchannel {
+		return 0, false
+	}
+	return idx, true
 }
