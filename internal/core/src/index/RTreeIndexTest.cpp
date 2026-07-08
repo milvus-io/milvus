@@ -328,8 +328,13 @@ TEST_F(RTreeIndexTest, Build_WithInvalidWKB_Upload_Load) {
     milvus::tracer::TraceContext trace_ctx;
     rtree_load.LoadUnified(cfg);
 
-    // Only 2 valid points should be present
-    ASSERT_EQ(rtree_load.Count(), 2);
+    // All 3 rows must be present: the row whose WKB fails to parse is indexed
+    // with a placeholder MBR rather than dropped. Dropping it would leave the
+    // index row count permanently short of the segment row count, which then
+    // trips the growing coarse-bitmap bounds check on every subsequent
+    // geometry query. The R-tree is only a coarse filter -- exact refinement
+    // still filters the placeholder row out of any result.
+    ASSERT_EQ(rtree_load.Count(), 3);
 }
 
 TEST_F(RTreeIndexTest, Build_VariousGeometries) {

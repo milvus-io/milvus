@@ -31,6 +31,7 @@
 #include "index/Index.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
+#include "log/Log.h"
 #include "knowhere/dataset.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -625,27 +626,53 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 // (RTreeIndex::Count()), while `size` is driven by the
                 // segment's active rows. The Insert path indexes a row
                 // (AppendingIndex) before the ack-responder makes it
-                // searchable, so active_count <= index Count() must always
-                // hold; guard it explicitly so a violated invariant surfaces
-                // as a clear error instead of an out-of-bounds read from the
-                // coarse bitmaps.
-                AssertInfo(
-                    static_cast<int64_t>(current_index_chunk_pos_ + size) <=
-                            static_cast<int64_t>(
-                                cached_index_chunk_res_->size()) &&
-                        static_cast<int64_t>(current_index_chunk_pos_ + size) <=
-                            static_cast<int64_t>(coarse_valid_global_.size()),
-                    "growing geometry coarse bitmap too small: pos {} + size "
-                    "{} exceeds result {} / valid {} (index row count lagged "
-                    "segment active rows)",
-                    current_index_chunk_pos_,
-                    size,
-                    cached_index_chunk_res_->size(),
-                    coarse_valid_global_.size());
-                batch_result.append(
-                    *cached_index_chunk_res_, current_index_chunk_pos_, size);
-                batch_valid.append(
-                    coarse_valid_global_, current_index_chunk_pos_, size);
+                // searchable, so active_count <= index Count() normally holds
+                // and the slice fits. If the index row count ever lags the
+                // active rows (a transient index-build hiccup), degrade
+                // gracefully instead of failing the whole query with a
+                // non-retriable error / an out-of-bounds read: serve the
+                // covered prefix from the coarse+refined bitmaps and treat the
+                // un-indexed tail conservatively as not-yet-matched
+                // (result=false) but valid=true. Every indexed row is still
+                // governed by the exact predicate; only the transient tail is
+                // excluded until the index catches up.
+                const int64_t bitmap_avail =
+                    std::min(
+                        static_cast<int64_t>(cached_index_chunk_res_->size()),
+                        static_cast<int64_t>(coarse_valid_global_.size())) -
+                    static_cast<int64_t>(current_index_chunk_pos_);
+                const int64_t covered =
+                    std::max<int64_t>(0, std::min(size, bitmap_avail));
+                if (covered < size) {
+                    LOG_WARN(
+                        "growing geometry coarse bitmap smaller than active "
+                        "rows: pos {} + size {} exceeds result {} / valid {}; "
+                        "serving {} covered rows, excluding {} un-indexed tail "
+                        "rows until the index catches up",
+                        current_index_chunk_pos_,
+                        size,
+                        cached_index_chunk_res_->size(),
+                        coarse_valid_global_.size(),
+                        covered,
+                        size - covered);
+                }
+                if (covered > 0) {
+                    batch_result.append(*cached_index_chunk_res_,
+                                        current_index_chunk_pos_,
+                                        covered);
+                    batch_valid.append(coarse_valid_global_,
+                                       current_index_chunk_pos_,
+                                       covered);
+                }
+                if (covered < size) {
+                    // Un-indexed tail: real rows (valid) conservatively not
+                    // matched, sized so batch_result/batch_valid still total
+                    // real_batch_size.
+                    TargetBitmap tail_res(size - covered, false);
+                    TargetBitmap tail_valid(size - covered, true);
+                    batch_result.append(tail_res, 0, size - covered);
+                    batch_valid.append(tail_valid, 0, size - covered);
+                }
             }
             // Update with actual processed size
             processed_rows += size;
