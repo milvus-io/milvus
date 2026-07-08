@@ -1125,8 +1125,9 @@ func TestRowBasedTransferInsertMsgToInsertRecord(t *testing.T) {
 	schema, _, _ := genAllFieldsSchema(dim, false)
 	msg, _, _ := genRowBasedInsertMsg(numRows, dim)
 
-	_, err := TransferInsertMsgToInsertRecord(schema, msg)
+	_, skippedFields, err := TransferInsertMsgToInsertRecord(schema, msg)
 	assert.NoError(t, err)
+	assert.Nil(t, skippedFields)
 }
 
 func TestColumnBasedTransferInsertMsgToInsertRecordSkipDroppedField(t *testing.T) {
@@ -1154,13 +1155,14 @@ func TestColumnBasedTransferInsertMsgToInsertRecordSkipDroppedField(t *testing.T
 		},
 	})
 
-	record, err := TransferInsertMsgToInsertRecord(schema, msg)
+	record, skippedFields, err := TransferInsertMsgToInsertRecord(schema, msg)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(numRows), record.GetNumRows())
 	fieldIDs := lo.Map(record.GetFieldsData(), func(fd *schemapb.FieldData, _ int) int64 {
 		return fd.GetFieldId()
 	})
 	assert.ElementsMatch(t, []int64{100, 101}, fieldIDs)
+	assert.Equal(t, []int64{158}, skippedFields)
 }
 
 func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
@@ -1584,7 +1586,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "compact")
 
-			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			_, _, err = TransferInsertMsgToInsertRecord(schema, msg)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "compact")
 		})
@@ -1692,7 +1694,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorPartialRowData(t *
 			_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
 			require.Error(t, err)
 
-			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			_, _, err = TransferInsertMsgToInsertRecord(schema, msg)
 			require.Error(t, err)
 		})
 	}

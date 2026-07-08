@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -1694,18 +1693,25 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 	return insertRecord, nil
 }
 
-func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) (*segcorepb.InsertRecord, error) {
+// TransferInsertMsgToInsertRecord converts an insert message into a segcore
+// insert record under the given schema. Payload columns of fields absent from
+// the schema are skipped and their field IDs returned, so the caller decides
+// how to surface the drop (log/metric) with its own context. Only the
+// column-based branch applies this filtering: the legacy row-based format
+// predates schema change and cannot carry since-dropped fields.
+func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) (*segcorepb.InsertRecord, []int64, error) {
 	if msg.IsRowBased() {
 		insertData, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return TransferInsertDataToInsertRecord(insertData)
+		insertRecord, err := TransferInsertDataToInsertRecord(insertData)
+		return insertRecord, nil, err
 	}
 
 	// column base insert msg
 	if err := validateColumnBasedInsertMsgNullableVectors(schema, msg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	insertRecord := &segcorepb.InsertRecord{
@@ -1731,17 +1737,8 @@ func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msg
 		}
 		insertRecord.FieldsData = append(insertRecord.FieldsData, fieldData)
 	}
-	if len(skippedFields) > 0 {
-		mlog.Warn(context.TODO(), "skip insert payload fields absent from current schema, fields are dropped since the message was written",
-			mlog.FieldCollectionID(msg.GetCollectionID()),
-			mlog.FieldSegmentID(msg.GetSegmentID()),
-			mlog.Int64s("skippedFieldIDs", skippedFields))
-		metrics.QueryNodeSkippedInsertFieldCount.
-			WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(msg.GetCollectionID())).
-			Add(float64(len(skippedFields)))
-	}
 
-	return insertRecord, nil
+	return insertRecord, skippedFields, nil
 }
 
 func Min(a, b int64) int64 {
