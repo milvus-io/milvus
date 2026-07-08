@@ -23,6 +23,9 @@ extern "C" {
 typedef void* CTokenizer;
 
 CStatus
+set_tokenizer_option(const char* params);
+
+CStatus
 create_tokenizer(const char* params, CTokenizer* tokenizer);
 
 CStatus

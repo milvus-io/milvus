@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -41,6 +42,10 @@ func (s *Server) init() {
 
 	// init all service.
 	s.initService()
+
+	if err := analyzer.InitOptions(); err != nil {
+		panic(fmt.Sprintf("init analyzer options failed, %+v", err))
+	}
 
 	log.Info("init query segcore...")
 	if err := initcore.InitQueryNode(context.TODO()); err != nil {

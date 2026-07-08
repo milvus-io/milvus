@@ -20,6 +20,16 @@
 using Map = std::map<std::string, std::string>;
 
 CStatus
+set_tokenizer_option(const char* params) {
+    try {
+        milvus::tantivy::set_tokenizer_options(params);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 create_tokenizer(const char* params, CTokenizer* tokenizer) {
     try {
         auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
