@@ -416,7 +416,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     // Build with enough rows to produce large null_offset and
     // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
     // - invalid row   -> null_offset + non_exist_offset (8 bytes per entry)
-    // - {"b": 1}      -> non_exist_offset only (key "a" doesn't exist)
+    // - {"b": 1}      -> null_offset + non_exist_offset (key "a" doesn't
+    //                    exist, so the typed comparison value is invalid)
     // - {"a": 1.0}    -> valid data (neither offset)
     // 20 invalid + 20 missing-path rows make both files slice reliably.
     constexpr int kInvalidRows = 20;
@@ -518,7 +519,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, kInvalidRows * sizeof(size_t));
+        EXPECT_EQ(result.size_,
+                  (kInvalidRows + kMissingPathRows) * sizeof(size_t));
     }
 
     // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---

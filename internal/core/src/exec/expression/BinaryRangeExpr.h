@@ -32,6 +32,7 @@
 #include "bitset/common.h"
 #include "cachinglayer/CacheSlot.h"
 #include "common/Array.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
@@ -208,6 +209,8 @@ struct BinaryRangeElementFuncForArray {
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
+        AssertInfo(index >= 0,
+                   "array element range predicate requires nested path");
         for (size_t i = 0; i < n; ++i) {
             if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
                 continue;
@@ -220,33 +223,19 @@ struct BinaryRangeElementFuncForArray {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (index >= src[offset].length()) {
+                res[i] = false;
+                valid_res[i] = false;
+                continue;
+            }
+            auto value = src[offset].get_data<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value < val2;
             } else if constexpr (!lower_inclusive && upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value <= val2;
             } else {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value < val2;
             }
         }

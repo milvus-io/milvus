@@ -805,7 +805,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
     def test_regex_array_element_negation(self):
         """
         target: verify !~ on ARRAY<VARCHAR> element paths
-        expected: tags[0] !~ "^release" -> [3,4,6,7], out-of-range !~ includes all rows
+        expected: tags[0] !~ "^release" -> [3,4,6,7], out-of-range !~ is UNKNOWN and excluded
         """
         client, collection_name = self._shared_collection()
 
@@ -815,7 +815,7 @@ class TestRegexFilterFieldAccess(RegexFilterSharedWideBase):
 
         res = client.query(collection_name, filter='tags[10] !~ ".*"', output_fields=["id"])
         result = sorted([r["id"] for r in res])
-        assert result == [1, 2, 3, 4, 5, 6, 7], f"out-of-range !~: expected all rows, got {result}"
+        assert result == [], f"out-of-range !~: expected [], got {result}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_regex_dynamic_json_field_paths(self):

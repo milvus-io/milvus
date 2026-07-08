@@ -485,6 +485,18 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
+    pub fn json_term_query_u64(
+        &self,
+        json_path: &str,
+        term: u64,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+        json_term.append_type_and_fast_value(term);
+        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
+        self.search(&q, bitset)
+    }
+
     pub fn json_term_query_f64(
         &self,
         json_path: &str,
@@ -532,6 +544,29 @@ impl IndexReaderWrapper {
             return terms
                 .iter()
                 .try_for_each(|&term| self.json_term_query_i64(json_path, term, bitset));
+        }
+        let term_vec: Vec<_> = terms
+            .iter()
+            .map(|&t| {
+                let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+                json_term.append_type_and_fast_value(t);
+                json_term
+            })
+            .collect();
+        let q = TermSetQuery::new(term_vec);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_terms_query_u64(
+        &self,
+        json_path: &str,
+        terms: &[u64],
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        if terms.len() < JSON_BATCH_THRESHOLD {
+            return terms
+                .iter()
+                .try_for_each(|&term| self.json_term_query_u64(json_path, term, bitset));
         }
         let term_vec: Vec<_> = terms
             .iter()
