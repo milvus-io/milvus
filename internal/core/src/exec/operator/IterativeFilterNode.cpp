@@ -64,7 +64,11 @@ PhyIterativeFilterNode::PhyIterativeFilterNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // This operator reads only the data bits of the predicate output, so
+    // UNKNOWN rows are excluded exactly like FALSE — a null-rejecting
+    // consumer.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     const auto& exprs = exprs_->exprs();
     for (const auto& expr : exprs) {
         is_native_supported_ =
@@ -186,6 +190,11 @@ PhyIterativeFilterNode::GetOutput() {
         }
         Assert(bitset.size() == need_process_rows_);
         Assert(valid_bitset.size() == need_process_rows_);
+        // Rows are included below on the data bit alone, so fold UNKNOWN
+        // into FALSE explicitly (data &= valid) instead of relying on the
+        // convention that UNKNOWN rows carry data=0. This is what makes
+        // this operator a null-rejecting consumer by construction.
+        bitset.inplace_and(valid_bitset, need_process_rows_);
     }
     if (search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
@@ -294,6 +303,11 @@ PhyIterativeFilterNode::GetOutput() {
                     auto col_vec_size = col_vec->size();
                     TargetBitmapView bitsetview(col_vec->GetRawData(),
                                                 col_vec_size);
+                    // Fold UNKNOWN into FALSE explicitly (data &= valid):
+                    // rows are included below on the data bit alone.
+                    TargetBitmapView validview(col_vec->GetValidRawData(),
+                                               col_vec_size);
+                    bitsetview.inplace_and(validview, col_vec_size);
 
                     if (element_level) {
                         Assert(bitsetview.size() == doc_offsets.size());
