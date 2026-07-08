@@ -261,28 +261,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand ==
+                        BinaryArithRangeJSONCompare(json_v + right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand ==
+                        BinaryArithRangeJSONCompare(json_v - right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand ==
+                        BinaryArithRangeJSONCompare(json_v * right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand ==
+                        BinaryArithRangeJSONCompare(json_v / right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) == val);
+                            safe_mod(json_v, right_operand) == val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -331,21 +331,6 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                                                               val);
                         break;
                     }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) & int64_t(right_operand)) != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) | int64_t(right_operand)) != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) ^ int64_t(right_operand)) != val);
-                        break;
-                    }
                     default:
                         ThrowInfo(
                             OpTypeInvalid,
@@ -358,28 +343,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::GreaterThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand >
+                        BinaryArithRangeJSONCompare(json_v + right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand >
+                        BinaryArithRangeJSONCompare(json_v - right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand >
+                        BinaryArithRangeJSONCompare(json_v * right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand >
+                        BinaryArithRangeJSONCompare(json_v / right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) > val);
+                            safe_mod(json_v, right_operand) > val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -399,28 +384,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::GreaterEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand >=
+                        BinaryArithRangeJSONCompare(json_v + right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand >=
+                        BinaryArithRangeJSONCompare(json_v - right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand >=
+                        BinaryArithRangeJSONCompare(json_v * right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand >=
+                        BinaryArithRangeJSONCompare(json_v / right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) >= val);
+                            safe_mod(json_v, right_operand) >= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -440,28 +425,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::LessThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand <
+                        BinaryArithRangeJSONCompare(json_v + right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand <
+                        BinaryArithRangeJSONCompare(json_v - right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand <
+                        BinaryArithRangeJSONCompare(json_v * right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand <
+                        BinaryArithRangeJSONCompare(json_v / right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) < val);
+                            safe_mod(json_v, right_operand) < val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -481,28 +466,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::LessEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand <=
+                        BinaryArithRangeJSONCompare(json_v + right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand <=
+                        BinaryArithRangeJSONCompare(json_v - right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand <=
+                        BinaryArithRangeJSONCompare(json_v * right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand <=
+                        BinaryArithRangeJSONCompare(json_v / right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) <= val);
+                            safe_mod(json_v, right_operand) <= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
