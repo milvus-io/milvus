@@ -4356,6 +4356,39 @@ TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {
     EXPECT_FALSE(GetFieldBit(after->field_data_ready_bitset, payload));
 }
 
+TEST(SealedSegmentCowState, JsonStatsLivesInRuntimeSnapshot) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto json = schema->AddDebugField("payload", DataType::JSON);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->LoadJsonStats(json, nullptr);
+
+    auto after_load = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(after_load, nullptr);
+    ASSERT_NE(after_load->runtime, nullptr);
+    ASSERT_EQ(after_load->runtime->json_stats.count(json), 1);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    ASSERT_EQ(runtime->json_stats.count(json), 1);
+    runtime->json_stats.erase(json);
+
+    ChunkedSegmentSealedImpl::StateDelta delta;
+    delta.schema = after_load->schema;
+    delta.load_info = after_load->load_info;
+    delta.runtime = sealed->TestFreezeRuntimeResourceState(std::move(runtime));
+    delta.commit_ts = after_load->commit_ts;
+
+    auto next = sealed->TestBuildNextPublishedState(after_load, delta);
+    ASSERT_NE(next, nullptr);
+    ASSERT_NE(next->runtime, nullptr);
+    EXPECT_EQ(next->runtime->json_stats.count(json), 0);
+}
+
 TEST(SealedSegmentCowState, ExternalSyntheticFieldsUseStagedLoadInfoRows) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
