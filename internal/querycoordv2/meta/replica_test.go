@@ -232,6 +232,8 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 func (suite *ReplicaSuite) TestChannelExclusiveMode() {
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "4")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
 
 	r := newReplica(&querypb.Replica{
 		ID:            1,
@@ -548,6 +550,33 @@ func (suite *ReplicaSuite) TestShouldEnableChannelExclusiveMode() {
 	channelInfos = map[string]*querypb.ChannelNodeInfo{
 		"channel1": {},
 		"channel2": {},
+	}
+	suite.False(mutableReplica.shouldEnableChannelExclusiveMode(channelInfos))
+}
+
+func (suite *ReplicaSuite) TestShouldEnableChannelExclusiveModeDefaultRequiresThreeNodesPerChannel() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+	paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
+
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		Nodes:         []int64{1, 2, 3, 4, 5, 6, 7, 8},
+	})
+	mutableReplica := r.CopyForWrite()
+
+	channelInfos := map[string]*querypb.ChannelNodeInfo{
+		"channel1": {},
+		"channel2": {},
+	}
+	suite.True(mutableReplica.shouldEnableChannelExclusiveMode(channelInfos))
+
+	channelInfos = map[string]*querypb.ChannelNodeInfo{
+		"channel1": {},
+		"channel2": {},
+		"channel3": {},
 	}
 	suite.False(mutableReplica.shouldEnableChannelExclusiveMode(channelInfos))
 }

@@ -175,6 +175,7 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 	suite.Len(replicas, 0)
 
 	mgr.idAllocator = suite.idAllocator
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ScoreBasedBalancerName)
 	replicas, err = mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	for _, replica := range replicas {
