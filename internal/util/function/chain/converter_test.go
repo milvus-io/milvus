@@ -2461,6 +2461,57 @@ func (s *ConverterSuite) TestFromSearchResultData_UnsupportedIDType() {
 	s.Contains(err.Error(), "unsupported ID type")
 }
 
+// Zero-hit results reach the proxy as Ids=&schemapb.IDs{} with the IdField
+// oneof unset (e.g. querynode emptySearchResultData, single-channel reduce
+// passthrough). Such a shell carries no IDs and must take the same empty
+// path as Ids == nil instead of failing with "unsupported ID type" (#50969).
+func (s *ConverterSuite) TestFromSearchResultData_EmptyIDsZeroRows() {
+	for name, ids := range map[string]*schemapb.IDs{
+		"nil ids":             nil,
+		"shell without oneof": {}, // IDs with no IdField set
+	} {
+		for _, topks := range [][]int64{{0}, {0, 0}} {
+			resultData := &schemapb.SearchResultData{
+				NumQueries: int64(len(topks)),
+				TopK:       10,
+				Topks:      topks,
+				Scores:     []float32{},
+				Ids:        ids,
+				FieldsData: []*schemapb.FieldData{},
+			}
+
+			df, err := FromSearchResultData(resultData, s.pool, nil)
+			s.Require().NoError(err, name)
+			s.Equal(int64(0), df.NumRows(), name)
+			s.True(df.HasColumn(types.IDFieldName), name)
+			idType, ok := df.FieldType(types.IDFieldName)
+			s.True(ok, name)
+			s.Equal(schemapb.DataType_Int64, idType, name)
+			s.True(df.HasColumn(types.ScoreFieldName), name)
+			df.Release()
+		}
+	}
+}
+
+// Ids == nil with rows present is tolerated: the DataFrame is built without
+// an $id column (aggregation-style results carry no IDs). Pins the
+// pre-existing passthrough so it is not accidentally turned into an error.
+func (s *ConverterSuite) TestFromSearchResultData_NilIDsWithRows() {
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       2,
+		Topks:      []int64{2},
+		Scores:     []float32{0.9, 0.8},
+	}
+
+	df, err := FromSearchResultData(resultData, s.pool, nil)
+	s.Require().NoError(err)
+	defer df.Release()
+	s.Equal(int64(2), df.NumRows())
+	s.False(df.HasColumn(types.IDFieldName))
+	s.True(df.HasColumn(types.ScoreFieldName))
+}
+
 // =============================================================================
 // exportFieldData unsupported type
 // =============================================================================
