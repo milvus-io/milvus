@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestConfigChannelProvider_GetInitialChannels(t *testing.T) {
 	paramtable.Init()
-	provider := NewConfigChannelProvider()
+	provider := newTestConfigChannelProvider()
 	defer provider.Close()
 
 	initial := provider.GetInitialChannels()
@@ -29,7 +31,7 @@ func TestConfigChannelProvider_DetectsNewChannels(t *testing.T) {
 	paramtable.Init()
 
 	originalNum := paramtable.Get().RootCoordCfg.DmlChannelNum.GetValue()
-	provider := NewConfigChannelProvider()
+	provider := newTestConfigChannelProvider()
 	defer provider.Close()
 
 	initial := provider.GetInitialChannels()
@@ -47,11 +49,41 @@ func TestConfigChannelProvider_DetectsNewChannels(t *testing.T) {
 	}
 }
 
+func TestConfigChannelProvider_DetectsChannelsFromPChannelStats(t *testing.T) {
+	paramtable.Init()
+
+	originalNum := paramtable.Get().RootCoordCfg.DmlChannelNum.GetValue()
+	originalDML := paramtable.Get().CommonCfg.RootCoordDml.GetValue()
+	paramtable.Get().Save(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "2")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	defer paramtable.Get().Save(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, originalNum)
+	defer paramtable.Get().Save(paramtable.Get().CommonCfg.RootCoordDml.Key, originalDML)
+
+	statsFuture := syncutil.NewFuture[*testPChannelStats]()
+	provider := NewConfigChannelProviderWithPChannelStatsManager(statsFuture)
+	defer provider.Close()
+
+	prefix := paramtable.Get().CommonCfg.RootCoordDml.GetValue()
+	statsFuture.Set(&testPChannelStats{
+		pchannels: []string{fmt.Sprintf("%s_3", prefix)},
+	})
+
+	select {
+	case newChannels := <-provider.NewIncomingChannels():
+		require.ElementsMatch(t, []string{
+			fmt.Sprintf("%s_2", prefix),
+			fmt.Sprintf("%s_3", prefix),
+		}, newChannels)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pchannel stats notification")
+	}
+}
+
 func TestConfigChannelProvider_NoDuplicates(t *testing.T) {
 	paramtable.Init()
 
 	originalNum := paramtable.Get().RootCoordCfg.DmlChannelNum.GetValue()
-	provider := NewConfigChannelProvider()
+	provider := newTestConfigChannelProvider()
 	defer provider.Close()
 
 	// Trigger a config change with the same value, should not produce new channels.
@@ -67,7 +99,7 @@ func TestConfigChannelProvider_NoDuplicates(t *testing.T) {
 
 func TestConfigChannelProvider_CloseStopsWatching(t *testing.T) {
 	paramtable.Init()
-	provider := NewConfigChannelProvider()
+	provider := newTestConfigChannelProvider()
 	provider.Close()
 
 	_, ok := <-provider.NewIncomingChannels()
@@ -78,7 +110,7 @@ func TestConfigChannelProvider_CloseUnblocksInFlightSend(t *testing.T) {
 	paramtable.Init()
 
 	originalNum := paramtable.Get().RootCoordCfg.DmlChannelNum.GetValue()
-	provider := NewConfigChannelProvider()
+	provider := newTestConfigChannelProvider()
 
 	initial := provider.GetInitialChannels()
 	initialCount := len(initial)
@@ -107,4 +139,57 @@ func TestConfigChannelProvider_CloseUnblocksInFlightSend(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close() deadlocked while background goroutine was blocked on channel send")
 	}
+}
+
+func TestGetAllTopicsFromConfigurationAndPChannelsKeepsNonDMLChannels(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "1")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	defer paramtable.Get().Reset(paramtable.Get().RootCoordCfg.DmlChannelNum.Key)
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.RootCoordDml.Key)
+
+	channels := getAllTopicsFromConfigurationAndPChannels([]string{"custom-pchannel"})
+
+	assert.True(t, channels.Contain("custom-pchannel"))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_0", paramtable.Get().CommonCfg.RootCoordDml.GetValue())))
+}
+
+func TestGetAllTopicsFromConfigurationAndPChannelsKeepsNonCanonicalDMLNames(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "1")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	defer paramtable.Get().Reset(paramtable.Get().RootCoordCfg.DmlChannelNum.Key)
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.RootCoordDml.Key)
+
+	prefix := paramtable.Get().CommonCfg.RootCoordDml.GetValue()
+	channels := getAllTopicsFromConfigurationAndPChannels([]string{
+		fmt.Sprintf("%s_3", prefix),
+		fmt.Sprintf("%s_-1", prefix),
+		fmt.Sprintf("%s_007", prefix),
+		fmt.Sprintf("%s_+7", prefix),
+	})
+
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_0", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_1", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_2", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_3", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_-1", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_007", prefix)))
+	assert.True(t, channels.Contain(fmt.Sprintf("%s_+7", prefix)))
+	assert.False(t, channels.Contain(fmt.Sprintf("%s_4", prefix)))
+	assert.False(t, channels.Contain(fmt.Sprintf("%s_7", prefix)))
+}
+
+type testPChannelStats struct {
+	pchannels []string
+}
+
+func (s *testPChannelStats) PChannels() []string {
+	return append([]string(nil), s.pchannels...)
+}
+
+func newTestConfigChannelProvider() *ConfigChannelProvider {
+	statsFuture := syncutil.NewFuture[*testPChannelStats]()
+	statsFuture.Set(&testPChannelStats{})
+	return NewConfigChannelProviderWithPChannelStatsManager(statsFuture)
 }

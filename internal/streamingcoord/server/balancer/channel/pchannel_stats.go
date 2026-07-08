@@ -35,6 +35,21 @@ func (pm *PchannelStatsManager) WatchAtChannelCountChanged() *syncutil.Versioned
 	return pm.n.Listen(syncutil.VersionedListenAtEarliest)
 }
 
+// PChannels returns pchannels that currently have vchannels.
+func (pm *PchannelStatsManager) PChannels() []string {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	pchannels := make([]string, 0, len(pm.stats))
+	for id, stat := range pm.stats {
+		if stat.VChannelCount() == 0 {
+			continue
+		}
+		pchannels = append(pchannels, id.Name)
+	}
+	return pchannels
+}
+
 // GetPChannelStats returns the stats of the pchannel.
 func (pm *PchannelStatsManager) GetPChannelStats(channelID ChannelID) *pchannelStats {
 	pm.mu.Lock()
