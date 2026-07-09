@@ -2059,10 +2059,22 @@ func defaultMetricTypeForQuickCreate(dataType schemapb.DataType) string {
 	}
 }
 
+func binaryMetricTypesForQuickCreate() []string {
+	binaryIndexType := paramtable.Get().AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()[common.IndexTypeKey]
+	switch binaryIndexType {
+	case "BIN_FLAT":
+		return indexparamcheck.BinIDMapMetrics
+	case "BIN_IVF_FLAT", "":
+		return indexparamcheck.BinIvfMetrics
+	default:
+		return indexparamcheck.BinIvfMetrics
+	}
+}
+
 func validateMetricTypeForQuickCreate(dataType schemapb.DataType, metricType string) error {
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
-		if !funcutil.SliceContain(indexparamcheck.BinaryVectorMetrics, metricType) {
+		if !funcutil.SliceContain(binaryMetricTypesForQuickCreate(), metricType) {
 			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType)
 		}
 	case schemapb.DataType_SparseFloatVector:

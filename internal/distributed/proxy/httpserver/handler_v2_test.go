@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -2064,6 +2065,49 @@ func TestCreateCollection(t *testing.T) {
 	})
 }
 
+func TestBinaryMetricTypesForQuickCreate(t *testing.T) {
+	params := paramtable.Get()
+	key := params.AutoIndexConfig.BinaryIndexParams.Key
+
+	testcases := []struct {
+		name     string
+		config   string
+		expected []string
+	}{
+		{
+			name:     "bin ivf flat uses ivf binary metrics",
+			config:   `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIvfMetrics,
+		},
+		{
+			name:     "missing index type falls back to ivf binary metrics",
+			config:   `{"metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIvfMetrics,
+		},
+		{
+			name:     "unknown index type falls back to ivf binary metrics",
+			config:   `{"index_type": "UNKNOWN", "metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIvfMetrics,
+		},
+		{
+			name:     "bin flat uses id map binary metrics",
+			config:   `{"index_type": "BIN_FLAT", "metric_type": "HAMMING"}`,
+			expected: indexparamcheck.BinIDMapMetrics,
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			params.Save(key, testcase.config)
+			t.Cleanup(func() {
+				params.Reset(key)
+			})
+
+			assert.ElementsMatch(t, testcase.expected, binaryMetricTypesForQuickCreate())
+		})
+	}
+}
+
 func TestCreateCollectionQuickVectorFieldType(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -2129,6 +2173,36 @@ func TestCreateCollectionQuickVectorFieldType(t *testing.T) {
 			expectedMsg: "binary vector index does not support metric type: COSINE",
 		},
 		{
+			name: "reject binary vector substructure metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "SUBSTRUCTURE",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: SUBSTRUCTURE",
+		},
+		{
+			name: "reject binary vector superstructure metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "SUPERSTRUCTURE",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: SUPERSTRUCTURE",
+		},
+		{
+			name: "reject binary vector mhjaccard metric",
+			body: `{
+				"collectionName": "book",
+				"dimension": 8,
+				"metricType": "MHJACCARD",
+				"vectorFieldType": "BinaryVector"
+			}`,
+			expectedMsg: "binary vector index does not support metric type: MHJACCARD",
+		},
+		{
 			name: "reject sparse float vector invalid metric",
 			body: `{
 				"collectionName": "book",
@@ -2165,6 +2239,33 @@ func TestCreateCollectionQuickVectorFieldType(t *testing.T) {
 			assert.Empty(t, proxy.createIndexReqs)
 		})
 	}
+
+	t.Run("binary vector metric follows configured binary auto index", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key, `{"index_type": "BIN_FLAT", "metric_type": "HAMMING"}`)
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.BinaryIndexParams.Key)
+
+		proxy := &externalCollectionRESTProxy{}
+		testEngine := initHTTPServerV2(proxy, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{
+			"collectionName": "book",
+			"dimension": 8,
+			"metricType": "SUBSTRUCTURE",
+			"vectorFieldType": "BinaryVector"
+		}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), returnBody.Code)
+		require.NotNil(t, proxy.createReq)
+		require.Len(t, proxy.createIndexReqs, 1)
+		require.Len(t, proxy.createIndexReqs[0].GetExtraParams(), 1)
+		assert.Equal(t, common.MetricTypeKey, proxy.createIndexReqs[0].GetExtraParams()[0].GetKey())
+		assert.Equal(t, "SUBSTRUCTURE", proxy.createIndexReqs[0].GetExtraParams()[0].GetValue())
+	})
 
 	testcases := []struct {
 		name             string
