@@ -130,86 +130,43 @@ func (s *statsInspectorSuite) SetupTest() {
 
 	s.mt = &meta{
 		collections: collections,
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				10: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           10,
-						CollectionID: 1,
-						PartitionID:  2,
-						IsSorted:     false,
-						State:        commonpb.SegmentState_Flushed,
-						NumOfRows:    1000,
-						MaxRowNum:    2000,
-						Level:        2,
-					},
-				},
-				20: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           20,
-						CollectionID: 1,
-						PartitionID:  2,
-						IsSorted:     true,
-						State:        commonpb.SegmentState_Flushed,
-						NumOfRows:    1000,
-						MaxRowNum:    2000,
-						Level:        2,
-					},
-				},
-				30: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           30,
-						CollectionID: 1,
-						PartitionID:  2,
-						State:        commonpb.SegmentState_Flushing,
-						NumOfRows:    1000,
-						MaxRowNum:    2000,
-						Level:        2,
-					},
+		segments: newTestCachedSegmentsInfo(map[UniqueID]*SegmentInfo{
+			10: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           10,
+					CollectionID: 1,
+					PartitionID:  2,
+					IsSorted:     false,
+					State:        commonpb.SegmentState_Flushed,
+					NumOfRows:    1000,
+					MaxRowNum:    2000,
+					Level:        2,
 				},
 			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					1: {
-						10: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:           10,
-								CollectionID: 1,
-								PartitionID:  2,
-								IsSorted:     false,
-								State:        commonpb.SegmentState_Flushed,
-								NumOfRows:    1000,
-								MaxRowNum:    2000,
-								Level:        2,
-							},
-						},
-						20: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:           20,
-								CollectionID: 1,
-								PartitionID:  2,
-								IsSorted:     true,
-								State:        commonpb.SegmentState_Flushed,
-								NumOfRows:    1000,
-								MaxRowNum:    2000,
-								Level:        2,
-							},
-						},
-						30: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:           30,
-								CollectionID: 1,
-								PartitionID:  2,
-								State:        commonpb.SegmentState_Flushing,
-								NumOfRows:    1000,
-								MaxRowNum:    2000,
-								Level:        2,
-							},
-						},
-					},
+			20: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           20,
+					CollectionID: 1,
+					PartitionID:  2,
+					IsSorted:     true,
+					State:        commonpb.SegmentState_Flushed,
+					NumOfRows:    1000,
+					MaxRowNum:    2000,
+					Level:        2,
 				},
 			},
-		},
+			30: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           30,
+					CollectionID: 1,
+					PartitionID:  2,
+					State:        commonpb.SegmentState_Flushing,
+					NumOfRows:    1000,
+					MaxRowNum:    2000,
+					Level:        2,
+				},
+			},
+		}),
 		statsTaskMeta: &statsTaskMeta{
 			ctx:             s.ctx,
 			catalog:         s.catalog,
@@ -276,7 +233,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 	segmentID := UniqueID(200)
-	s.mt.segments.segments[segmentID] = &SegmentInfo{
+	s.mt.segments.SetSegment(segmentID, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            segmentID,
 			CollectionID:  2,
@@ -288,7 +245,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 			MaxRowNum:     2000,
 			Level:         2,
 		},
-	}
+	}, 0)
 
 	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_Sort, true, nil)
 	s.NoError(err)
@@ -348,7 +305,7 @@ func (s *statsInspectorSuite) TestDropStatsTask() {
 
 func (s *statsInspectorSuite) TestTriggerTextStatsTask() {
 	// Set up a sorted segment without text index
-	segment := s.mt.segments.segments[20]
+	segment := s.mt.segments.GetSegment(20)
 	segment.IsSorted = true
 	segment.TextStatsLogs = nil
 
@@ -374,10 +331,7 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskExternalCollection() {
 			Level:         2,
 		},
 	}
-	s.mt.segments.segments[segmentID] = seg
-	s.mt.segments.secondaryIndexes.coll2Segments[2] = map[UniqueID]*SegmentInfo{
-		segmentID: seg,
-	}
+	s.mt.segments.SetSegment(segmentID, seg, 0)
 
 	s.inspector.triggerTextStatsTask()
 
@@ -440,7 +394,7 @@ func (s *statsInspectorSuite) TestReloadFromMeta() {
 
 func (s *statsInspectorSuite) TestNeedDoTextIndex() {
 	// Test case when text index is needed
-	segment := s.mt.segments.segments[20]
+	segment := s.mt.segments.GetSegment(20)
 	segment.IsSorted = true
 	result := needDoTextIndex(segment, []int64{101}, false)
 	s.True(result, "Segment should need text index")

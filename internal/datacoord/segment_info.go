@@ -65,6 +65,9 @@ type SegmentInfo struct {
 	// recomputed lazily on the first GetEarliestTs() call after clone.
 	earliestTs      atomic.Uint64
 	lastWrittenTime time.Time
+
+	pendingL0ManifestUpdates []*l0ManifestUpdate
+	pendingMutationErr       error
 }
 
 func (s *SegmentInfo) GetResidualSegmentSize() int64 {
@@ -378,6 +381,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
 	}
+	cloned.deltaRowcount.Store(-1)
 	for _, opt := range opts {
 		opt(cloned)
 	}

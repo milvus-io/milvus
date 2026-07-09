@@ -155,22 +155,11 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: newChannelCps(),
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: {
-					SegmentInfo: segInfo,
-				},
+		segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+			1: {
+				SegmentInfo: segInfo,
 			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					collectionID: {
-						1: {
-							SegmentInfo: segInfo,
-						},
-					},
-				},
-			},
-		},
+		}),
 		indexMeta: &indexMeta{
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			indexes:        map[UniqueID]map[UniqueID]*model.Index{},
@@ -546,24 +535,11 @@ func Test_compactionTrigger_force(t *testing.T) {
 				&meta{
 					catalog:    catalog,
 					channelCPs: newChannelCps(),
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: seg1,
-							2: seg2,
-							3: seg3,
-						},
-						secondaryIndexes: segmentInfoIndexes{
-							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-								2: {
-									seg1.GetID(): seg1,
-									seg2.GetID(): seg2,
-								},
-								1111: {
-									seg3.GetID(): seg3,
-								},
-							},
-						},
-					},
+					segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+						1: seg1,
+						2: seg2,
+						3: seg3,
+					}),
 					indexMeta:   im,
 					collections: collections,
 				},
@@ -679,13 +655,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 		t.Run(tt.name+" with DiskANN index", func(t *testing.T) {
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
 				// Collection 1000 means it has DiskANN index
-				delete(tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()], segment.GetID())
 				segment.CollectionID = 1000
-				_, ok := tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()]
-				if !ok {
-					tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()] = make(map[UniqueID]*SegmentInfo)
-				}
-				tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()][segment.GetID()] = segment
+				tt.fields.meta.segments.SetSegment(segment.GetID(), segment, 0)
 			}
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
@@ -791,12 +762,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		compactTime  *compactTime
 	}
 	vecFieldID := int64(201)
-	segmentInfos := &SegmentsInfo{
-		segments: make(map[UniqueID]*SegmentInfo),
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: make(map[UniqueID]map[UniqueID]*SegmentInfo),
-		},
-	}
+	segmentInfos := NewCachedSegmentsInfo()
 
 	indexMeta := newSegmentIndexMeta(nil)
 	indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{
@@ -822,7 +788,6 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		},
 	}
 
-	segmentInfos.secondaryIndexes.coll2Segments[2] = make(map[UniqueID]*SegmentInfo)
 	nSegments := 50
 	for i := UniqueID(0); i < UniqueID(nSegments); i++ {
 		info := &SegmentInfo{
@@ -865,8 +830,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segmentInfos.segments[i] = info
-		segmentInfos.secondaryIndexes.coll2Segments[2][i] = info
+		segmentInfos.SetSegment(i, info, 0)
 	}
 
 	mock0Allocator := newMockAllocator(t)
@@ -1064,57 +1028,55 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 					// 4 segment
 					channelCPs: newChannelCps(),
 
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             1,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      200,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
-											},
+					segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:             1,
+								CollectionID:   2,
+								PartitionID:    1,
+								LastExpireTime: 100,
+								NumOfRows:      200,
+								MaxRowNum:      300,
+								InsertChannel:  "ch1",
+								State:          commonpb.SegmentState_Flushed,
+								Binlogs: []*datapb.FieldBinlog{
+									{
+										Binlogs: []*datapb.Binlog{
+											{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 										},
 									},
 								},
-								lastFlushTime: time.Now(),
 							},
-							2: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             2,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      200,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1, MemorySize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog2"},
-											},
-										},
-									},
-								},
-								lastFlushTime: time.Now(),
-							},
+							lastFlushTime: time.Now(),
 						},
-					},
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:             2,
+								CollectionID:   2,
+								PartitionID:    1,
+								LastExpireTime: 100,
+								NumOfRows:      200,
+								MaxRowNum:      300,
+								InsertChannel:  "ch1",
+								State:          commonpb.SegmentState_Flushed,
+								Binlogs: []*datapb.FieldBinlog{
+									{
+										Binlogs: []*datapb.Binlog{
+											{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1, MemorySize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
+										},
+									},
+								},
+								Deltalogs: []*datapb.FieldBinlog{
+									{
+										Binlogs: []*datapb.Binlog{
+											{EntriesNum: 5, LogPath: "deltalog2"},
+										},
+									},
+								},
+							},
+							lastFlushTime: time.Now(),
+						},
+					}),
 					collections: collections,
 				},
 				mock0Allocator,
@@ -1186,31 +1148,17 @@ func mockSegment(segID, rows, deleteRows, sizeInMB int64) *datapb.SegmentInfo {
 	}
 }
 
-func mockSegmentsInfo(sizeInMB ...int64) *SegmentsInfo {
-	segments := make(map[int64]*SegmentInfo, len(sizeInMB))
-	collectionID := int64(2)
-	channel := "ch1"
-	coll2Segments := make(map[UniqueID]map[UniqueID]*SegmentInfo)
-	coll2Segments[collectionID] = make(map[UniqueID]*SegmentInfo)
-	channel2Segments := make(map[string]map[UniqueID]*SegmentInfo)
-	channel2Segments[channel] = make(map[UniqueID]*SegmentInfo)
+func mockSegmentsInfo(sizeInMB ...int64) *CachedSegmentsInfo {
+	result := NewCachedSegmentsInfo()
 	for i, size := range sizeInMB {
 		segId := int64(i + 1)
 		info := &SegmentInfo{
 			SegmentInfo:   mockSegment(segId, size, 1, size),
 			lastFlushTime: time.Now().Add(-100 * time.Minute),
 		}
-		segments[segId] = info
-		coll2Segments[collectionID][segId] = info
-		channel2Segments[channel][segId] = info
+		result.SetSegment(segId, info, 0)
 	}
-	return &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments:    coll2Segments,
-			channel2Segments: channel2Segments,
-		},
-	}
+	return result
 }
 
 // Test compaction with prioritized candi
@@ -1512,13 +1460,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 		compactTime  *compactTime
 	}
 
-	segmentInfos := &SegmentsInfo{
-		segments: make(map[UniqueID]*SegmentInfo),
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments:    map[UniqueID]map[UniqueID]*SegmentInfo{2: {}},
-			channel2Segments: map[string]map[UniqueID]*SegmentInfo{"ch1": {}},
-		},
-	}
+	segmentInfos := NewCachedSegmentsInfo()
 
 	size := []int64{
 		510, 500, 480, 300, 250, 200, 128, 128, 128, 127,
@@ -1589,9 +1531,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segmentInfos.segments[i] = info
-		segmentInfos.secondaryIndexes.coll2Segments[2][i] = info
-		segmentInfos.secondaryIndexes.channel2Segments["ch1"][i] = info
+		segmentInfos.SetSegment(i, info, 0)
 	}
 
 	mock0Allocator := newMockAllocator(t)
@@ -2112,7 +2052,7 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 	schema := newTestSchema()
 	schema.Version = 5
 	mt := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		indexMeta:   newSegmentIndexMeta(nil),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
@@ -2138,7 +2078,7 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 			MaxRowNum:     100,
 			SchemaVersion: item.schemaVersion,
 			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{EntriesNum: 10, MemorySize: 1}}}},
-		}})
+		}}, 0)
 	}
 
 	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: mt}
@@ -2187,7 +2127,7 @@ func Test_TirggerCompaction_WaitResult(t *testing.T) {
 	}()
 	m := &meta{
 		channelCPs: newChannelCps(),
-		segments:   NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:   NewCachedSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	got := newCompactionTrigger(m, &compactionInspector{}, newMockAllocator(t),
 		&ServerHandler{
@@ -2418,38 +2358,14 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.meta = &meta{
 		channelCPs: newChannelCps(),
 		catalog:    catalog,
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: seg1,
-				2: seg2,
-				3: seg3,
-				4: seg4,
-				5: seg5,
-				6: seg6,
-			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					s.collectionID: {
-						1: seg1,
-						2: seg2,
-						3: seg3,
-						4: seg4,
-						5: seg5,
-						6: seg6,
-					},
-				},
-				channel2Segments: map[string]map[UniqueID]*SegmentInfo{
-					s.channel: {
-						1: seg1,
-						2: seg2,
-						3: seg3,
-						4: seg4,
-						5: seg5,
-						6: seg6,
-					},
-				},
-			},
-		},
+		segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+			1: seg1,
+			2: seg2,
+			3: seg3,
+			4: seg4,
+			5: seg5,
+			6: seg6,
+		}),
 		indexMeta:   im,
 		collections: collections,
 	}
@@ -2590,7 +2506,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 
 		const mb = 1024 * 1024
-		s.meta.segments.segments[1].Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		s.meta.segments.GetSegment(1).Binlogs[0].Binlogs[0].MemorySize = 250 * mb
 
 		tr := s.tr
 		handler := NewNMockHandler(s.T())
@@ -2935,20 +2851,10 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				meta: &meta{
 					catalog:    catalog,
 					channelCPs: newChannelCps(),
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: seg1,
-							2: seg2,
-						},
-						secondaryIndexes: segmentInfoIndexes{
-							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-								2: {
-									seg1.GetID(): seg1,
-									seg2.GetID(): seg2,
-								},
-							},
-						},
-					},
+					segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+						1: seg1,
+						2: seg2,
+					}),
 					indexMeta: &indexMeta{
 						segmentIndexes: segIndexes,
 						indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -3229,22 +3135,11 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 				meta: &meta{
 					catalog:    catalog,
 					channelCPs: newChannelCps(),
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: seg1,
-							2: seg2,
-							3: seg3,
-						},
-						secondaryIndexes: segmentInfoIndexes{
-							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-								2: {
-									seg1.GetID(): seg1,
-									seg2.GetID(): seg2,
-									seg3.GetID(): seg3,
-								},
-							},
-						},
-					},
+					segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+						1: seg1,
+						2: seg2,
+						3: seg3,
+					}),
 					indexMeta: &indexMeta{
 						segmentIndexes: segIndexes,
 						indexes: map[UniqueID]map[UniqueID]*model.Index{

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -162,7 +163,11 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 		if segmentBinlogFields == nil {
 			segmentBinlogFields = getSegmentBinlogFields(segment)
 		}
-		if !i.canCreateIndexForSegment(ctx, segment, index, segmentBinlogFields) {
+		canCreate, err := i.canCreateIndexForSegment(ctx, segment, index, segmentBinlogFields)
+		if err != nil {
+			return err
+		}
+		if !canCreate {
 			continue
 		}
 		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
@@ -192,13 +197,21 @@ func getSegmentBinlogFields(segment *SegmentInfo) map[int64]struct{} {
 	return result
 }
 
-func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, segmentBinlogFields map[int64]struct{}) bool {
+func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, segmentBinlogFields map[int64]struct{}) (bool, error) {
 	_, hasField := segmentBinlogFields[index.FieldID]
-	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) || hasField {
-		return true
+	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) {
+		return true, nil
 	}
-	mlog.Debug(ctx, "function output field has no binlog, skip create index", mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
-	return false
+	if !hasField {
+		mlog.Debug(ctx, "function output field has no binlog, skip create index", mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
+		return false, nil
+	}
+	if index.MinSchemaVersion > 0 && segment.GetSchemaVersion() < index.MinSchemaVersion {
+		return false, merr.WrapErrServiceNotReadyMsg(
+			"segment schema version %d is behind index min schema version %d for segment %d",
+			segment.GetSchemaVersion(), index.MinSchemaVersion, segment.GetID())
+	}
+	return true, nil
 }
 
 func (i *indexInspector) isFunctionOutputField(collectionID, fieldID int64) bool {

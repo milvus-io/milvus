@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -215,11 +216,13 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	}
 	segments := genSegmentsForMeta(s.testLabel)
 	s.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		ctx:            context.TODO(),
+		segments:       NewCachedSegmentsInfo(),
+		segmentPersist: newTestSegmentPersist(),
+		collections:    typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 	s.meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
@@ -408,7 +411,11 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(200*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
+		expectedSize := int64(100 * 1024 * 1024)
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex("DISKANN") {
+			expectedSize = int64(200 * 1024 * 1024)
+		}
+		s.Equal(expectedSize, getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
 	})
 
 	s.Run("HNSW & DISKANN", func() {

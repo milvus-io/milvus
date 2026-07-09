@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -302,22 +303,36 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 	})
 }
 
-func (suite *UtilSuite) TestMergeFieldBinlogsPreservesColumnGroupMetadata() {
-	current := []*datapb.FieldBinlog{{
-		FieldID: 102,
-		Binlogs: []*datapb.Binlog{{LogID: 1}},
-	}}
-	newLogs := []*datapb.FieldBinlog{{
-		FieldID:     102,
-		ChildFields: []int64{102, 103},
-		Format:      "parquet",
-		Binlogs:     []*datapb.Binlog{{LogID: 2}},
-	}}
+// allBinlogs adapts a legacy bool-returning proto mutator to a SegmentOperator
+// and declares only binlog families changed by the mutator for side-prefix rewrite.
+func allBinlogs(fn func(*datapb.SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		before := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
+		ok := fn(s.SegmentInfo)
+		if !ok {
+			return BinlogIncrement{}, false
+		}
+		inc := BinlogIncrement{}
+		if !proto.Equal(&datapb.SegmentInfo{Binlogs: before.GetBinlogs()}, &datapb.SegmentInfo{Binlogs: s.GetBinlogs()}) {
+			inc.Binlogs = s.Binlogs
+		}
+		if !proto.Equal(&datapb.SegmentInfo{Statslogs: before.GetStatslogs()}, &datapb.SegmentInfo{Statslogs: s.GetStatslogs()}) {
+			inc.Statslogs = s.Statslogs
+		}
+		if !proto.Equal(&datapb.SegmentInfo{Deltalogs: before.GetDeltalogs()}, &datapb.SegmentInfo{Deltalogs: s.GetDeltalogs()}) {
+			inc.Deltalogs = s.Deltalogs
+		}
+		if !proto.Equal(&datapb.SegmentInfo{Bm25Statslogs: before.GetBm25Statslogs()}, &datapb.SegmentInfo{Bm25Statslogs: s.GetBm25Statslogs()}) {
+			inc.Bm25Statslogs = s.Bm25Statslogs
+		}
+		return inc, true
+	}
+}
 
-	result := mergeFieldBinlogs(current, newLogs)
-
-	suite.Len(result, 1)
-	suite.Equal([]int64{102, 103}, result[0].GetChildFields())
-	suite.Equal("parquet", result[0].GetFormat())
-	suite.Len(result[0].GetBinlogs(), 2)
+// stateOnlyOp adapts a legacy bool-returning SegmentOperator closure to the
+// new (BinlogIncrement, bool) signature for tests that never mutate binlogs.
+func stateOnlyOp(fn func(*SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		return BinlogIncrement{}, fn(s)
+	}
 }

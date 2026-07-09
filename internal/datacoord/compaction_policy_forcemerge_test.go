@@ -40,10 +40,10 @@ func (s *ForceMergeCompactionPolicySuite) SetupTest() {
 	meta, err := newMemoryMeta(s.T())
 	s.Require().NoError(err)
 	for id, segment := range segments {
-		if segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetState() == commonpb.SegmentState_Flushed {
+		if segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1 {
 			segment.IsSorted = true
 		}
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
@@ -411,7 +411,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AlignsTargetS
 		newSegment(13, datapb.SegmentLevel_L2, true, false, false),
 		newSegment(14, datapb.SegmentLevel_L1, true, false, true),
 	} {
-		meta.segments.SetSegment(segment.GetID(), segment)
+		meta.segments.SetSegment(segment.GetID(), segment, 0)
 	}
 
 	coll := &collectionInfo{

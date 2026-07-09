@@ -72,7 +72,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	broker := broker2.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	s.NoError(err)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, s.alloc, meta)
@@ -220,10 +220,6 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 			s.Equal(true, segment.GetIsImporting())
 		}
 	}
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	// AlterSegments is no longer called from checkIndexBuildingJob (unsetSegmentImporting removed);
-	// the upstream checkImportingJob path may still invoke it. Loosen to .Maybe().
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	targetSegmentIDs := make([]int64, 0)
 	for _, t := range importTasks {
@@ -594,7 +590,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, alloc, meta)
@@ -734,10 +730,6 @@ func TestImportCheckerCompaction(t *testing.T) {
 	mlog.Info(context.TODO(), "job importing")
 
 	// check importing
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	// AlterSegments was previously driven by unsetSegmentImporting (removed in 2PC);
-	// the remaining segment writes in this flow may or may not hit it.
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
