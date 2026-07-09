@@ -83,6 +83,24 @@ func TestAnalyzer(t *testing.T) {
 		assert.Equal(t, len(tokens), 3)
 	}
 
+	// use char_filter before tokenizer.
+	{
+		m := `{"char_filter": [{"type": "mapping", "mappings": ["& => and"]}], "tokenizer": "standard", "filter": ["lowercase"]}`
+		analyzer, err := NewAnalyzer(m, "")
+		require.NoError(t, err)
+		defer analyzer.Destroy()
+
+		tokenStream := analyzer.NewTokenStream("A&B")
+		defer tokenStream.Destroy()
+
+		require.True(t, tokenStream.Advance())
+		token := tokenStream.DetailedToken()
+		assert.Equal(t, "aandb", token.GetToken())
+		assert.Equal(t, int64(0), token.GetStartOffset())
+		assert.Equal(t, int64(3), token.GetEndOffset())
+		assert.False(t, tokenStream.Advance())
+	}
+
 	// jieba tokenizer.
 	{
 		m := "{\"tokenizer\": \"jieba\"}"
@@ -174,6 +192,28 @@ func TestValidateAnalyzer(t *testing.T) {
 	// invalid tokenizer
 	{
 		m := "{\"tokenizer\": \"invalid\"}"
+		_, err := ValidateAnalyzer(m, "")
+		assert.Error(t, err)
+	}
+
+	// valid char_filter
+	{
+		m := `{"char_filter": [{"type": "mapping", "mappings": ["& => and"]}], "tokenizer": "standard"}`
+		ids, err := ValidateAnalyzer(m, "")
+		assert.NoError(t, err)
+		assert.Equal(t, len(ids), 0)
+	}
+
+	// unsupported char_filter type
+	{
+		m := `{"char_filter": [{"type": "unsupported"}], "tokenizer": "standard"}`
+		_, err := ValidateAnalyzer(m, "")
+		assert.Error(t, err)
+	}
+
+	// char_filter is not supported with build-in analyzer type in the first version.
+	{
+		m := `{"type": "standard", "char_filter": []}`
 		_, err := ValidateAnalyzer(m, "")
 		assert.Error(t, err)
 	}
