@@ -2591,7 +2591,8 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         schema = _build_basic_schema(self, client, url_a, ext_spec=ext_spec)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
-        self.index_and_load(client, coll)
+        self.add_vector_index(client, coll, "embedding", "FLAT", "L2")
+        self.load_collection(client, coll)
         assert self.query_count(client, coll) == nb
 
         self.release_collection(client, coll)

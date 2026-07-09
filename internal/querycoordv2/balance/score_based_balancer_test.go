@@ -1054,6 +1054,164 @@ func (suite *ScoreBasedBalancerTestSuite) getCollectionBalancePlans(balancer *Sc
 	return segmentPlans, channelPlans
 }
 
+func (suite *ScoreBasedBalancerTestSuite) setupNamespacePartitionShardBalance(
+	ctx context.Context,
+	collectionID int64,
+	replicaID int64,
+	nodes []int64,
+	shards []string,
+	segments []*datapb.SegmentInfo,
+) *meta.Replica {
+	collection := utils.CreateTestCollection(collectionID, int32(1))
+	collection.LoadPercentage = 100
+	collection.Status = querypb.LoadStatus_Loaded
+	collection.Schema = utils.CreateTestSchema()
+	collection.Schema.Properties = []*commonpb.KeyValuePair{
+		{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+	}
+	suite.meta.PutCollection(ctx, collection)
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
+
+	vchannels := lo.Map(shards, func(shard string, _ int) *datapb.VchannelInfo {
+		return &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  shard,
+		}
+	})
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
+
+	replica := utils.CreateTestReplica(replicaID, collectionID, nodes)
+	suite.meta.Put(ctx, replica)
+	suite.balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+
+	for _, node := range nodes {
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+			Version:  common.Version,
+		})
+		nodeInfo.SetState(session.NodeStateNormal)
+		suite.balancer.nodeManager.Add(nodeInfo)
+		suite.meta.HandleNodeUp(ctx, node)
+	}
+	utils.RecoverAllCollection(suite.meta)
+	return replica
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardBalanceDoesNotFallback() {
+	ctx := context.Background()
+	collectionID := int64(1001)
+	replicaID := int64(1)
+	shard := "by-dev-rootcoord-dml_0_1001v0"
+	segments := []*datapb.SegmentInfo{
+		{ID: 1, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard, NumOfRows: 10},
+		{ID: 2, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard, NumOfRows: 10},
+		{ID: 3, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard, NumOfRows: 10},
+	}
+	suite.setupNamespacePartitionShardBalance(ctx, collectionID, replicaID, []int64{1, 2}, []string{shard}, segments)
+	suite.balancer.dist.SegmentDistManager.Update(1,
+		&meta.Segment{SegmentInfo: segments[0], Node: 1},
+		&meta.Segment{SegmentInfo: segments[1], Node: 1},
+		&meta.Segment{SegmentInfo: segments[2], Node: 1},
+	)
+
+	segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, collectionID)
+	suite.Empty(segmentPlans)
+	suite.Empty(channelPlans)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardBalanceMovesChannelFirst() {
+	ctx := context.Background()
+	collectionID := int64(1002)
+	replicaID := int64(1)
+	shard := "by-dev-rootcoord-dml_0_1002v0"
+	segments := []*datapb.SegmentInfo{
+		{ID: 10, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard, NumOfRows: 10},
+	}
+	suite.setupNamespacePartitionShardBalance(ctx, collectionID, replicaID, []int64{1, 2}, []string{shard}, segments)
+	suite.balancer.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: shard},
+		Node:         1,
+		View:         &meta.LeaderView{ID: 1, CollectionID: collectionID, Channel: shard},
+	})
+	suite.balancer.dist.SegmentDistManager.Update(1, &meta.Segment{SegmentInfo: segments[0], Node: 1})
+
+	segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, collectionID)
+	suite.Empty(segmentPlans)
+	assertChannelAssignPlanElementMatch(&suite.Suite, []assign.ChannelAssignPlan{
+		{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: shard}}, From: 1, To: 2, Replica: newReplicaDefaultRG(replicaID)},
+	}, channelPlans)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardBalanceMovesAllShardSegmentsToSameNode() {
+	ctx := context.Background()
+	collectionID := int64(1003)
+	replicaID := int64(1)
+	shard := "by-dev-rootcoord-dml_0_1003v0"
+	segments := []*datapb.SegmentInfo{
+		{ID: 20, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard, NumOfRows: 10},
+		{ID: 21, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard, NumOfRows: 10},
+	}
+	suite.setupNamespacePartitionShardBalance(ctx, collectionID, replicaID, []int64{1, 2}, []string{shard}, segments)
+	suite.balancer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: shard},
+		Node:         2,
+		View:         &meta.LeaderView{ID: 2, CollectionID: collectionID, Channel: shard},
+	})
+	suite.balancer.dist.SegmentDistManager.Update(1,
+		&meta.Segment{SegmentInfo: segments[0], Node: 1},
+		&meta.Segment{SegmentInfo: segments[1], Node: 1},
+	)
+
+	segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, collectionID)
+	suite.Empty(channelPlans)
+	assertSegmentAssignPlanElementMatch(&suite.Suite, []assign.SegmentAssignPlan{
+		{Segment: &meta.Segment{SegmentInfo: segments[0]}, From: 1, To: 2, Replica: newReplicaDefaultRG(replicaID)},
+		{Segment: &meta.Segment{SegmentInfo: segments[1]}, From: 1, To: 2, Replica: newReplicaDefaultRG(replicaID)},
+	}, segmentPlans)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardBalanceProjectsInflightShardMoves() {
+	ctx := context.Background()
+	collectionID := int64(1004)
+	replicaID := int64(1)
+	shard1 := "by-dev-rootcoord-dml_0_1004v0"
+	shard2 := "by-dev-rootcoord-dml_1_1004v1"
+	segments := []*datapb.SegmentInfo{
+		{ID: 30, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard1, NumOfRows: 10},
+		{ID: 31, CollectionID: collectionID, PartitionID: collectionID, InsertChannel: shard2, NumOfRows: 10},
+	}
+	replica := suite.setupNamespacePartitionShardBalance(ctx, collectionID, replicaID, []int64{1, 2, 3}, []string{shard1, shard2}, segments)
+	suite.balancer.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: shard1},
+		Node:         1,
+		View:         &meta.LeaderView{ID: 1, CollectionID: collectionID, Channel: shard1},
+	})
+	suite.balancer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: shard2},
+		Node:         2,
+		View:         &meta.LeaderView{ID: 2, CollectionID: collectionID, Channel: shard2},
+	})
+
+	scheduler := task.NewScheduler(ctx, suite.meta, suite.balancer.dist, suite.balancer.targetMgr, nil, nil, suite.balancer.nodeManager)
+	moveShard2, err := task.NewChannelTask(ctx, time.Minute, task.WrapIDSource(0), collectionID, replica,
+		task.NewChannelAction(3, task.ActionTypeGrow, shard2),
+		task.NewChannelAction(2, task.ActionTypeReduce, shard2),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(scheduler.Add(moveShard2))
+	suite.balancer.scheduler = scheduler
+
+	segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, collectionID)
+	suite.Empty(segmentPlans)
+	assertChannelAssignPlanElementMatch(&suite.Suite, []assign.ChannelAssignPlan{
+		{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: shard1}}, From: 1, To: 2, Replica: newReplicaDefaultRG(replicaID)},
+	}, channelPlans)
+}
+
 func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	ctx := context.Background()
 	nodes := []int64{1, 2, 3}
