@@ -47,6 +47,7 @@ const (
 	spGroupBy         = `group_by_field`
 	spGroupSize       = `group_size`
 	spStrictGroupSize = `strict_group_size`
+	spOrderByFields   = `order_by_fields`
 )
 
 type SearchOption interface {
@@ -700,6 +701,17 @@ func (opt *queryOption) WithLimit(limit int) *queryOption {
 		opt.queryParams = make(map[string]string)
 	}
 	opt.queryParams[spLimit] = strconv.Itoa(limit)
+	return opt
+}
+
+// WithOrderByFields sorts query results by the given scalar fields.
+// Each spec is "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
+// The server requires an explicit limit when order-by fields are set.
+func (opt *queryOption) WithOrderByFields(fields ...string) *queryOption {
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
+	opt.queryParams[spOrderByFields] = strings.Join(fields, ",")
 	return opt
 }
 
