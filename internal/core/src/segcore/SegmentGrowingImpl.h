@@ -776,6 +776,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     CreateTextIndexes();
 
+    std::unique_ptr<index::TextMatchIndex>
+    BuildTextIndexForMeta(const FieldMeta& field_meta);
+
     /**
      * @brief Initialize TEXT LOB spillover files for each TEXT field
      *
