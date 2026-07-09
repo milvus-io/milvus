@@ -87,6 +87,80 @@ client.search(
   - element-level to row-level is invalid
 - The first version should not expose a separate `candidate_k` parameter. It would separate the k value from its field and make the API harder to read.
 
+### API Alternative: Search With a Plan
+
+The better canonical API for Milvus's broader search-engine direction is "search with a plan". Cascade search can be expressed as a two-stage pipeline where the first stage retrieves candidates and the second stage reranks those candidates.
+
+This is larger than the v1 cascade scope, so it should be treated as an API alternative and a future advanced surface, not as a blocker for the first implementation. The v1 `search_params["cascade"]["refine"]` shape can later lower to the same internal plan.
+
+Conceptual Python shape:
+
+```python
+client.search(
+    collection_name="docs",
+    plan={
+        "pipeline": [
+            {
+                "op": "retrieve",
+                "name": "coarse",
+                "field": "dense_1024",
+                "data": dense_query,
+                "limit": 10000,
+                "metric_type": "COSINE",
+                "params": {
+                    "ef": 128,
+                },
+            },
+            {
+                "op": "rerank",
+                "name": "refine",
+                "from": "coarse",
+                "field": "emb_list_128",
+                "data": refine_query,
+                "limit": 10,
+                "metric_type": "COSINE",
+                "params": {
+                    "mode": "exact",
+                },
+            },
+        ],
+    },
+    output_fields=["title", "url"],
+)
+```
+
+PyMilvus could also expose a typed builder instead of requiring users to write raw dictionaries:
+
+```python
+plan = SearchPlan.pipeline(
+    Retrieve(
+        name="coarse",
+        field="dense_1024",
+        data=dense_query,
+        limit=10000,
+        metric_type="COSINE",
+        params={"ef": 128},
+    ),
+    Rerank(
+        name="refine",
+        from_="coarse",
+        field="emb_list_128",
+        data=refine_query,
+        limit=10,
+        metric_type="COSINE",
+        params={"mode": "exact"},
+    ),
+)
+
+client.search(
+    collection_name="docs",
+    plan=plan,
+    output_fields=["title", "url"],
+)
+```
+
+The plan API scales better to future combinations such as hybrid retrieval, rank fusion, function scoring, order-by, aggregation, and multi-stage reranking. Its tradeoff is that it introduces a larger public API and validation model. For cascade v1, the existing `search()` API with `cascade.refine` keeps the first feature small while leaving room for the plan API later.
+
 ### Supported Field Combinations
 
 Cascade search is not specific to embedding lists. The coarse and refine fields may be any supported searchable field types, as long as the field pair is different and the refine field can score a supplied candidate set.
