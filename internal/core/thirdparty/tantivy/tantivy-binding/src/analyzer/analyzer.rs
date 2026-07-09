@@ -1,10 +1,14 @@
-use log::warn;
 use serde_json as json;
 use std::collections::HashMap;
 use tantivy::tokenizer::*;
 
 use super::options::{get_global_file_resource_helper, FileResourcePathHelper};
-use super::{build_in_analyzer::*, filter::*, tokenizers::get_builder_with_tokenizer};
+use super::{
+    build_in_analyzer::*,
+    char_filter::build_char_filters,
+    filter::*,
+    tokenizers::{get_builder_with_tokenizer, CharFilterTokenizer},
+};
 use crate::analyzer::filter::{create_filter, get_stop_words_list, get_string_list};
 use crate::error::Result;
 use crate::error::TantivyBindingError;
@@ -74,6 +78,7 @@ impl<'a> AnalyzerBuilder<'a> {
         for (key, value) in self.params {
             match key.as_str() {
                 "tokenizer" => {}
+                "char_filter" => {}
                 "filter" => {
                     // build with filter if filter param exist
                     builder = self.build_filter(builder, value)?;
@@ -121,6 +126,11 @@ impl<'a> AnalyzerBuilder<'a> {
         // build base build-in analyzer
         match self.params.get("type") {
             Some(type_) => {
+                if self.params.contains_key("char_filter") {
+                    return Err(TantivyBindingError::InvalidArgument(
+                        "char_filter cannot be used with build-in analyzer type".to_string(),
+                    ));
+                }
                 if !type_.is_string() {
                     return Err(TantivyBindingError::InternalError(format!(
                         "analyzer type should be string"
@@ -151,6 +161,15 @@ impl<'a> AnalyzerBuilder<'a> {
             &mut self.helper,
             create_analyzer_by_json,
         )?;
+
+        if let Some(char_filter_params) = self.params.get("char_filter") {
+            let char_filters = build_char_filters(char_filter_params)?;
+            if !char_filters.is_empty() {
+                builder =
+                    TextAnalyzer::builder(CharFilterTokenizer::new(char_filters, builder.build()))
+                        .dynamic();
+            }
+        }
 
         // build and check other options
         builder = self.build_option(builder)?;
@@ -209,6 +228,7 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
 #[cfg(test)]
 mod tests {
     use crate::analyzer::analyzer::create_analyzer;
+    use tantivy::tokenizer::TokenStream;
 
     #[test]
     fn test_standard_analyzer() {
@@ -219,6 +239,81 @@ mod tests {
 
         let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+    }
+
+    #[test]
+    fn test_analyzer_with_empty_char_filter() {
+        let params = r#"{
+            "char_filter": [],
+            "tokenizer": "standard",
+            "filter": ["lowercase"]
+        }"#;
+
+        let analyzer = create_analyzer(params, "");
+        assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
+
+        let mut analyzer = analyzer.unwrap();
+        let mut stream = analyzer.token_stream("MILVUS");
+        assert!(stream.advance());
+
+        let token = stream.token();
+        assert_eq!(token.text, "milvus");
+        assert_eq!(token.offset_from, 0);
+        assert_eq!(token.offset_to, 6);
+        assert!(!stream.advance());
+    }
+
+    #[test]
+    fn test_analyzer_with_mapping_char_filter() {
+        let params = r#"{
+            "char_filter": [
+                {
+                    "type": "mapping",
+                    "mappings": ["&=>and"]
+                }
+            ],
+            "tokenizer": "standard",
+            "filter": ["lowercase"]
+        }"#;
+
+        let analyzer = create_analyzer(params, "");
+        assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
+
+        let mut analyzer = analyzer.unwrap();
+        let mut stream = analyzer.token_stream("A&B");
+        assert!(stream.advance());
+
+        let token = stream.token();
+        assert_eq!(token.text, "aandb");
+        assert_eq!(token.offset_from, 0);
+        assert_eq!(token.offset_to, 3);
+        assert!(!stream.advance());
+    }
+
+    #[test]
+    fn test_analyzer_rejects_unsupported_char_filter() {
+        let params = r#"{
+            "char_filter": [
+                {
+                    "type": "unsupported"
+                }
+            ],
+            "tokenizer": "standard"
+        }"#;
+
+        let analyzer = create_analyzer(params, "");
+        assert!(analyzer.is_err());
+    }
+
+    #[test]
+    fn test_char_filter_rejects_build_in_analyzer() {
+        let params = r#"{
+            "type": "standard",
+            "char_filter": []
+        }"#;
+
+        let analyzer = create_analyzer(params, "");
+        assert!(analyzer.is_err());
     }
 
     #[test]
