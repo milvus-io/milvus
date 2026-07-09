@@ -130,6 +130,7 @@ func cloneStructArrayFields(fields []*schemapb.StructArrayFieldSchema) []*schema
 				IsPartitionKey:   subField.IsPartitionKey,
 				IsClusteringKey:  subField.IsClusteringKey,
 				Nullable:         subField.Nullable,
+				ElementNullable:  subField.ElementNullable,
 				IsFunctionOutput: subField.IsFunctionOutput,
 			}
 		}

@@ -1734,6 +1734,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			DefaultValue:     field.DefaultValue,
 			ElementType:      field.ElementType,
 			Nullable:         field.Nullable,
+			ElementNullable:  field.ElementNullable,
 			IsFunctionOutput: field.IsFunctionOutput,
 			ExternalField:    field.GetExternalField(),
 		}

@@ -237,6 +237,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 				return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
 			}
 			for i := start; i < end; i++ {
+				if fixedArray.IsNull(int(i)) {
+					vb.AppendNull()
+					continue
+				}
 				val := fixedArray.Value(int(i))
 				vb.Append(val)
 				totalSize += uint64(len(val))

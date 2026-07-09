@@ -682,3 +682,38 @@ func TestNewFieldData_NullableArrayOfVector(t *testing.T) {
 	assert.NotNil(t, vafd.ValidData)
 	assert.Equal(t, int64(4), vafd.Dim)
 }
+
+func TestNewFieldData_ElementNullableArrayPayloads(t *testing.T) {
+	arraySchema := &schemapb.FieldSchema{
+		FieldID:         100,
+		Name:            "arr",
+		DataType:        schemapb.DataType_Array,
+		ElementType:     schemapb.DataType_Int64,
+		ElementNullable: true,
+	}
+	fd, err := NewFieldData(schemapb.DataType_Array, arraySchema, 10)
+	require.NoError(t, err)
+
+	arrayData, ok := fd.(*ArrayFieldData)
+	require.True(t, ok)
+	assert.True(t, arrayData.ElementNullable)
+	assert.NotNil(t, arrayData.NullableData)
+	assert.Nil(t, arrayData.Data)
+
+	vectorArraySchema := &schemapb.FieldSchema{
+		FieldID:         101,
+		Name:            "vec_arr",
+		DataType:        schemapb.DataType_ArrayOfVector,
+		ElementType:     schemapb.DataType_FloatVector,
+		ElementNullable: true,
+		TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+	}
+	fd, err = NewFieldData(schemapb.DataType_ArrayOfVector, vectorArraySchema, 10)
+	require.NoError(t, err)
+
+	vectorArrayData, ok := fd.(*VectorArrayFieldData)
+	require.True(t, ok)
+	assert.True(t, vectorArrayData.ElementNullable)
+	assert.NotNil(t, vectorArrayData.NullableData)
+	assert.Nil(t, vectorArrayData.Data)
+}
