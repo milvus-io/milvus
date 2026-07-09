@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1118,6 +1119,29 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	}
 	if plan.HasFunction() {
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
+			return err
+		}
+	}
+
+	// Validate the bound index params against the new field, mirroring the
+	// create_index path (index name rules, checker existence, data-type
+	// compatibility, train params, dimension filling). Validation-only: the
+	// request keeps the user's original params so the persisted UserIndexParams
+	// match the create_index convention; rootcoord independently derives the
+	// normalized IndexParams at prepare.
+	if plan.Kind == schemautil.AlterSchemaAddFunctionField {
+		if err := validateIndexName(plan.IndexName); err != nil {
+			return err
+		}
+		if err := indexparamcheck.ValidateIndexParamsSize(plan.IndexExtraParams...); err != nil {
+			return err
+		}
+		indexParamsMap, err := indexparamcheck.PrepareFunctionOutputIndexParams(
+			plan.Function.GetType(), plan.Field.GetName(), plan.IndexExtraParams)
+		if err != nil {
+			return err
+		}
+		if err := checkTrain(ctx, plan.Field, indexParamsMap); err != nil {
 			return err
 		}
 	}

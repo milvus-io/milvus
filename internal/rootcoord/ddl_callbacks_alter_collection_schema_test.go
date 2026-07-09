@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -30,16 +31,23 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/tso"
+	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -64,7 +72,13 @@ func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName str
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-						{FieldSchema: outputFieldSchema},
+						{
+							FieldSchema: outputFieldSchema,
+							ExtraParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+								{Key: common.MetricTypeKey, Value: "BM25"},
+							},
+						},
 					},
 					FuncSchema: []*schemapb.FunctionSchema{functionSchema},
 				},
@@ -416,13 +430,27 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 						{Name: "fn_dup_field", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"field1"}, OutputFieldNames: []string{"field1"}},
 					},
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-						{FieldSchema: &schemapb.FieldSchema{Name: "field1", DataType: schemapb.DataType_SparseFloatVector}},
+						{
+							FieldSchema: &schemapb.FieldSchema{Name: "field1", DataType: schemapb.DataType_SparseFloatVector},
+							ExtraParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+								{Key: common.MetricTypeKey, Value: "BM25"},
+							},
+						},
 					},
 				},
 			},
 		},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
+	// case 7.1: vector function output field without bound index params is rejected.
+	noIndexReq := buildAlterSchemaReq(dbName, collectionName, "field1", "sparse_no_index", "fn_no_index")
+	noIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = nil
+	resp, err = core.AlterCollectionSchema(ctx, noIndexReq)
+	noIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, noIndexErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, noIndexErr, "index params are required")
 
 	// case 8: output field points to an existing field while FieldInfos adds a different field
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -462,12 +490,39 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
 
+	// case 7.2: AUTOINDEX is not accepted as the bound index type in V1
+	// (rejected at rootcoord prepare, after function validation passes).
+	autoIndexReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_auto_index", "fn_auto_index")
+	autoIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+	}
+	resp, err = core.AlterCollectionSchema(ctx, autoIndexReq)
+	autoIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, autoIndexErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, autoIndexErr, "explicit index_type is required")
+
+	// case 7.3: an index type without a registered checker is rejected at prepare —
+	// it would otherwise be persisted via the ack callback and never build.
+	unknownIndexReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_unknown_index", "fn_unknown_index")
+	unknownIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "NOT_A_REAL_INDEX"},
+		{Key: common.MetricTypeKey, Value: "BM25"},
+	}
+	resp, err = core.AlterCollectionSchema(ctx, unknownIndexReq)
+	unknownIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, unknownIndexErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, unknownIndexErr, "invalid index type")
+
 	// happy path: add binary vector output field + MinHash function.
 	minHashReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "binary_minhash_output", "minhash_fn")
 	minHashFieldSchema := minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema()
 	minHashFieldSchema.DataType = schemapb.DataType_BinaryVector
 	minHashFieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{Key: common.DimKey, Value: "4096"},
+	}
+	minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+		{Key: common.MetricTypeKey, Value: "MHJACCARD"},
 	}
 	minHashFunction := minHashReq.GetAction().GetAddRequest().GetFuncSchema()[0]
 	minHashFunction.Type = schemapb.FunctionType_MinHash
@@ -480,6 +535,27 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	resp, err = core.AlterCollectionSchema(ctx, minHashReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
+
+	// The bound index meta must have been applied through the CreateIndex ack
+	// callback within the same DDL, fully materialized at prepare time.
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	var minHashFieldID int64
+	for _, field := range coll.Fields {
+		if field.Name == "binary_minhash_output" {
+			minHashFieldID = field.FieldID
+		}
+	}
+	require.Positive(t, minHashFieldID)
+	boundIndexes := recordedBoundIndexes()
+	require.Len(t, boundIndexes, 1)
+	boundIndexInfo := boundIndexes[0].GetIndexInfo()
+	require.Equal(t, "binary_minhash_output", boundIndexInfo.GetIndexName())
+	require.Equal(t, minHashFieldID, boundIndexInfo.GetFieldID())
+	require.Positive(t, boundIndexInfo.GetIndexID())
+	boundIndexParams := funcutil.KeyValuePair2Map(boundIndexInfo.GetIndexParams())
+	require.Equal(t, "MINHASH_LSH", boundIndexParams[common.IndexTypeKey])
+	require.Equal(t, "MHJACCARD", boundIndexParams[common.MetricTypeKey])
 
 	minHashBadArityReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "minhash_bad_arity", "minhash_bad_arity_fn")
 	minHashBadArityReq.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
@@ -1343,4 +1419,239 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+}
+
+func newBoundIndexTestPlan() (*model.Collection, *schemautil.AlterSchemaAddPlan) {
+	coll := &model.Collection{CollectionID: 1, DBID: 1, Name: "coll"}
+	plan := &schemautil.AlterSchemaAddPlan{
+		Kind: schemautil.AlterSchemaAddFunctionField,
+		Field: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "sparse",
+			DataType: schemapb.DataType_SparseFloatVector,
+		},
+		Function: &schemapb.FunctionSchema{Name: "bm25_fn", Type: schemapb.FunctionType_BM25},
+		IndexExtraParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		},
+	}
+	return coll, plan
+}
+
+func withNoIndexMixCoord(t *testing.T) *imocks.MixCoord {
+	mixc := imocks.NewMixCoord(t)
+	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
+		&indexpb.DescribeIndexResponse{Status: merr.Status(merr.WrapErrIndexNotFound("sparse"))}, nil,
+	).Maybe()
+	return mixc
+}
+
+func withOkTso(t *testing.T) tso.Allocator {
+	alloc := mocktso.NewAllocator(t)
+	alloc.EXPECT().GenerateTSO(mock.Anything).Return(uint64(100), nil).Maybe()
+	return alloc
+}
+
+func TestPrepareBoundFieldIndex(t *testing.T) {
+	t.Run("happy path materializes replay-deterministic index", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		info := fieldIndex.GetIndexInfo()
+		require.Equal(t, int64(101), info.GetFieldID())
+		require.Equal(t, "sparse", info.GetIndexName())
+		require.Positive(t, info.GetIndexID())
+		params := funcutil.KeyValuePair2Map(info.GetIndexParams())
+		require.Equal(t, "SPARSE_INVERTED_INDEX", params[common.IndexTypeKey])
+		require.Equal(t, "1.2", params["bm25_k1"])
+		// UserIndexParams keep the user's ORIGINAL params (create_index
+		// convention), so a later create_index with identical params is
+		// treated as idempotent instead of a distinct index.
+		require.Equal(t, plan.IndexExtraParams, info.GetUserIndexParams())
+	})
+
+	t.Run("index name conflict rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
+			&indexpb.DescribeIndexResponse{
+				Status:     merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{{FieldID: 100, IndexID: 1, IndexName: "sparse"}},
+			}, nil,
+		)
+		c := newTestCore(withMixCoord(mixc), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "already exists")
+	})
+
+	t.Run("describe index transient error rejects the DDL", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, errors.New("rpc unavailable"))
+		c := newTestCore(withMixCoord(mixc), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to list existing indexes")
+	})
+
+	t.Run("index id allocation failure", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withInvalidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to allocate index id")
+	})
+
+	t.Run("incompatible index type for field data type rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		// SPARSE index on a binary vector field: must be rejected pre-broadcast.
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+	})
+
+	t.Run("dimension mismatch rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+			{Key: common.DimKey, Value: "1024"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "dimension mismatch")
+	})
+
+	t.Run("bogus warmup policy rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = append(plan.IndexExtraParams, &commonpb.KeyValuePair{
+			Key: common.WarmupKey, Value: "bogus",
+		})
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "warmup")
+	})
+
+	t.Run("malformed index name rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexName = "1bad-name"
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "Invalid index name")
+	})
+
+	t.Run("oversized index params rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = append(plan.IndexExtraParams, &commonpb.KeyValuePair{
+			Key:   "huge",
+			Value: strings.Repeat("x", paramtable.Get().ProxyCfg.MaxIndexParamsSize.GetAsInt()+1),
+		})
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "exceeds limit")
+	})
+
+	t.Run("tso allocation failure", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		alloc := mocktso.NewAllocator(t)
+		alloc.EXPECT().GenerateTSO(mock.Anything).Return(uint64(0), errors.New("tso unavailable"))
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(alloc))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to allocate timestamp")
+	})
+}
+
+func TestApplyBoundFieldIndexesInline(t *testing.T) {
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
+	streaming.SetWALForTest(wal)
+
+	boundFieldIndex := &indexpb.FieldIndex{
+		IndexInfo: &indexpb.IndexInfo{
+			CollectionID: 1,
+			FieldID:      101,
+			IndexID:      201,
+			IndexName:    "sparse",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+			},
+		},
+	}
+
+	buildResult := func(bound []*indexpb.FieldIndex) message.BroadcastResultAlterCollectionMessageV2 {
+		raw := message.NewAlterCollectionMessageBuilderV2().
+			WithHeader(&messagespb.AlterCollectionMessageHeader{
+				DbId:         1,
+				CollectionId: 1,
+			}).
+			WithBody(&messagespb.AlterCollectionMessageBody{
+				Updates: &messagespb.AlterCollectionMessageUpdates{
+					BoundFieldIndexes: bound,
+				},
+			}).
+			WithBroadcast([]string{funcutil.GetControlChannel("by-dev-rootcoord-dml_0")}).
+			MustBuildBroadcast()
+		msg := message.MustAsBroadcastAlterCollectionMessageV2(raw.WithBroadcastID(1))
+		return message.BroadcastResultAlterCollectionMessageV2{
+			Message: msg,
+			Results: map[string]*message.AppendResult{},
+		}
+	}
+
+	t.Run("no bound indexes short circuits", func(t *testing.T) {
+		registry.ResetRegistration()
+		cb := &DDLCallback{Core: newTestCore()}
+		require.NoError(t, cb.applyBoundFieldIndexesInline(context.Background(), buildResult(nil)))
+	})
+
+	t.Run("dispatches synthetic create index message", func(t *testing.T) {
+		registry.ResetRegistration()
+		var applied []*indexpb.FieldIndex
+		registry.RegisterCreateIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+			applied = append(applied, result.Message.MustBody().GetFieldIndex())
+			return nil
+		})
+		cb := &DDLCallback{Core: newTestCore()}
+		require.NoError(t, cb.applyBoundFieldIndexesInline(context.Background(), buildResult([]*indexpb.FieldIndex{boundFieldIndex})))
+		require.Len(t, applied, 1)
+		require.Equal(t, int64(201), applied[0].GetIndexInfo().GetIndexID())
+		require.Equal(t, "sparse", applied[0].GetIndexInfo().GetIndexName())
+	})
+
+	t.Run("dispatch failure propagates so the ack callback retries", func(t *testing.T) {
+		registry.ResetRegistration()
+		registry.RegisterCreateIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+			return errors.New("catalog write failed")
+		})
+		cb := &DDLCallback{Core: newTestCore()}
+		err := cb.applyBoundFieldIndexesInline(context.Background(), buildResult([]*indexpb.FieldIndex{boundFieldIndex}))
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to apply bound field index")
+	})
 }

@@ -6,7 +6,16 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import AnnSearchRequest, DataType, FieldSchema, Function, FunctionType, RRFRanker, WeightedRanker
+from pymilvus import (
+    AnnSearchRequest,
+    DataType,
+    FieldSchema,
+    Function,
+    FunctionType,
+    MilvusException,
+    RRFRanker,
+    WeightedRanker,
+)
 from utils.util_log import test_log as log
 
 
@@ -101,7 +110,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=120)
         client.load_collection(collection_name)
 
-        # Step 1: Execute add_function_field.
+        # Step 1: Execute add_function_field with the bound sparse index params.
         sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
         bm25_function = Function(
             name="bm25_fn",
@@ -109,17 +118,16 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         # Step 2: Verify the new output field and function are visible in collection schema.
         desc = client.describe_collection(collection_name)
         assert "sparse" in [field["name"] for field in desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in desc.get("functions", [])]
 
-        # Step 3: Explicitly create sparse index for the added BM25 output field.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params)
+        # Step 3: The bound sparse index is created atomically by add_function_field; wait for build.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=180)
 
         # Step 4: Load collection after sparse index is ready.
@@ -192,13 +200,13 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_add_bm25_function_field_no_auto_index(self):
+    def test_add_bm25_function_field_creates_bound_index(self):
         """
-        TC-02: add_function_field does not auto-create index.
+        TC-02: add_function_field atomically creates the bound index meta.
 
-        target: verify schema evolution and index management boundary
-        method: add BM25 function field, search before index, then create index and search again
-        expected: add_function_field does not create index implicitly; BM25 search works after explicit index/load
+        target: verify the bound index meta is created together with the schema change
+        method: add BM25 function field with bound index params, then describe the index right away
+        expected: describe_index shows the bound SPARSE_INVERTED_INDEX immediately; BM25 search works after load
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -228,7 +236,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=120)
         client.load_collection(collection_name)
 
-        # Step 1: Execute add_function_field.
+        # Step 1: Execute add_function_field with the bound sparse index params.
         sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
         bm25_function = Function(
             name="bm25_fn",
@@ -236,41 +244,26 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         desc = client.describe_collection(collection_name)
         assert "sparse" in [field["name"] for field in desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in desc.get("functions", [])]
 
-        # Expected: add_function_field should not create sparse index implicitly.
-        assert client.describe_index(collection_name, index_name="sparse") is None
+        # Step 2: The bound index meta is created atomically with the schema change,
+        # so describe_index shows it right after add_function_field returns.
+        bound_index_info = client.describe_index(collection_name, index_name="sparse")
+        assert bound_index_info is not None
+        assert bound_index_info["index_type"] == "SPARSE_INVERTED_INDEX"
 
-        # Step 2: Search on anns_field="sparse" before creating sparse index.
-        # Expected: no crash; field-not-loaded, no-index, empty result, or equivalent behavior is acceptable.
-        search_res, is_succ = self.search(
-            client,
-            collection_name,
-            data=["alpha"],
-            anns_field="sparse",
-            limit=5,
-            output_fields=["id"],
-            check_task=CheckTasks.check_nothing,
-        )
-        if is_succ:
-            assert len(search_res[0]) == 0
-        else:
-            err = str(search_res).lower()
-            assert any(token in err for token in ["sparse", "index", "load", "loaded", "not exist", "not found"]), err
-
-        # Step 3: Create sparse index and load collection.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params)
+        # Step 3: Wait for the bound index build and load collection.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=180)
         client.load_collection(collection_name)
 
-        # Step 4: Search again and wait until BM25 search becomes ready.
-        # Expected: BM25 search succeeds after explicit index creation and load.
+        # Step 4: Search and wait until BM25 search becomes ready.
+        # Expected: BM25 search succeeds through the bound index after load.
         search_timeout = 30
         poll_interval = 1
         poll_start = time.time()
@@ -352,7 +345,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         ]
         client.insert(collection_name=collection_name, data=growing_rows)
 
-        # Step 4: Execute add_function_field while pre-add growing rows exist.
+        # Step 4: Execute add_function_field with bound sparse index params while pre-add growing rows exist.
         sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
         bm25_function = Function(
             name="bm25_fn",
@@ -360,16 +353,15 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         desc = client.describe_collection(collection_name)
         assert "sparse" in [field["name"] for field in desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in desc.get("functions", [])]
 
-        # Step 5: Create sparse index and load collection.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params)
+        # Step 5: Wait for the bound sparse index build and load collection.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=30)
         client.load_collection(collection_name)
 
@@ -454,7 +446,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert "bm25_fn" not in [func["name"] for func in before_desc.get("functions", [])]
         assert int(before_desc["properties"]["max_field_id"]) == before_max_field_id
 
-        # Step 2: Execute add_function_field.
+        # Step 2: Execute add_function_field with the bound sparse index params.
         sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
         bm25_function = Function(
             name="bm25_fn",
@@ -462,7 +454,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         # Step 3: Describe collection again and verify metadata has been updated.
         after_desc = client.describe_collection(collection_name)
@@ -714,6 +708,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             ),
         ]
 
+        # Valid bound index params so the field/function validation error stays the trigger.
+        invalid_case_index_params = client.prepare_index_params()
+        invalid_case_index_params.add_index(field_name="", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+
         for case_name, field_schema, function, error in invalid_cases:
             # Step 2: Each invalid request must fail clearly.
             self.add_function_field(
@@ -721,6 +719,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                 collection_name,
                 field_schema,
                 function,
+                index_params=invalid_case_index_params,
                 check_task=CheckTasks.err_res,
                 check_items=error,
             )
@@ -731,6 +730,61 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             assert [field["name"] for field in after_desc["fields"]] == before_field_names, case_name
             assert [func["name"] for func in after_desc.get("functions", [])] == before_function_names, case_name
             assert after_desc["properties"]["max_field_id"] == before_max_field_id, case_name
+
+        # Step 3.5: Bound index params negative matrix.
+        bound_params_field = FieldSchema(name="sparse_bound_neg", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        bound_params_function = Function(
+            name="bm25_bound_neg",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse_bound_neg"],
+        )
+
+        # Case a: empty IndexParams is rejected client-side with ParamError.
+        self.add_function_field(
+            client,
+            collection_name,
+            bound_params_field,
+            bound_params_function,
+            index_params=client.prepare_index_params(),
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 1,
+                ct.err_msg: "index_params must contain exactly one index for the function output field",
+            },
+        )
+
+        # Case b: AUTOINDEX index_type is rejected; the bound index requires an explicit index_type.
+        autoindex_params = client.prepare_index_params()
+        autoindex_params.add_index(field_name="sparse_bound_neg", index_type="AUTOINDEX", metric_type="BM25")
+        self.add_function_field(
+            client,
+            collection_name,
+            bound_params_field,
+            bound_params_function,
+            index_params=autoindex_params,
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 1100,
+                ct.err_msg: "an explicit index_type is required for the bound index of function output field",
+            },
+        )
+
+        # Case c: the server mandates bound index params for vector function output fields;
+        # a raw alter_collection_schema without index params must be rejected.
+        with pytest.raises(MilvusException, match="index params are required"):
+            client._get_connection().alter_collection_schema(
+                collection_name=collection_name,
+                field_schema=bound_params_field,
+                func=bound_params_function,
+            )
+
+        # Bound index params failures must not partially mutate schema either.
+        after_desc = client.describe_collection(collection_name)
+        assert after_desc["schema_version"] == before_schema_version
+        assert [field["name"] for field in after_desc["fields"]] == before_field_names
+        assert [func["name"] for func in after_desc.get("functions", [])] == before_function_names
+        assert after_desc["properties"]["max_field_id"] == before_max_field_id
 
         # Step 4: Non-existent collection should fail and not affect the original collection.
         sparse_field = FieldSchema(name="sparse_missing_collection", dtype=DataType.SPARSE_FLOAT_VECTOR)
@@ -745,6 +799,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             f"{collection_name}_missing",
             sparse_field,
             bm25_function,
+            index_params=invalid_case_index_params,
             check_task=CheckTasks.err_res,
             check_items={ct.err_code: 100, ct.err_msg: "can't find collection"},
         )
@@ -791,6 +846,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                 input_field_names=["text"],
                 output_field_names=["sparse_duplicate_function"],
             ),
+            index_params=invalid_case_index_params,
             check_task=CheckTasks.err_res,
             check_items={ct.err_code: 1100, ct.err_msg: "duplicate function name: bm25_fn"},
         )
@@ -812,7 +868,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         desc = client.describe_collection(collection_name)
         assert "sparse" in [field["name"] for field in desc["fields"]]
@@ -856,11 +914,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=180)
         self.release_collection(client, collection_name)
         client.load_collection(collection_name)
@@ -1006,7 +1063,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=120)
         client.load_collection(collection_name)
 
-        # Step 3: Execute add_function_field.
+        # Step 3: Execute add_function_field with the bound sparse index params.
         sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
         bm25_function = Function(
             name="bm25_fn",
@@ -1014,12 +1071,11 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        # Step 4: Create sparse BM25 index and reload collection.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=30)
+        # Step 4: Wait for the bound sparse index build and reload collection.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=30)
         self.release_collection(client, collection_name)
         client.load_collection(collection_name)
@@ -1166,11 +1222,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=180)
         client.load_collection(collection_name)
 
@@ -1307,7 +1362,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=120)
         client.load_collection(collection_name)
 
-        # Step 1: add_function_field adds bm25_fn and sparse.
+        # Step 1: add_function_field adds bm25_fn and sparse with the bound sparse index.
         sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
         bm25_function = Function(
             name="bm25_fn",
@@ -1315,7 +1370,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         desc = client.describe_collection(collection_name)
         fields = {field["name"]: field for field in desc["fields"]}
@@ -1324,9 +1381,6 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert "bm25_fn" in functions
         old_sparse_field_id = fields["sparse"]["field_id"]
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=60)
         self.release_collection(client, collection_name)
         client.load_collection(collection_name)
@@ -1412,7 +1466,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         desc = client.describe_collection(collection_name)
         fields = {field["name"]: field for field in desc["fields"]}
@@ -1421,9 +1477,6 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert "bm25_fn" in functions
         assert fields["sparse"]["field_id"] > old_sparse_field_id
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=60)
         self.release_collection(client, collection_name)
         client.load_collection(collection_name)
@@ -1487,7 +1540,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert "sparse" not in [field["name"] for field in alias_desc["fields"]]
         assert "bm25_fn" not in [func["name"] for func in alias_desc.get("functions", [])]
 
-        # Step 2: Execute add_function_field through collection name.
+        # Step 2: Execute add_function_field through collection name with the bound sparse index.
         sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
         bm25_function = Function(
             name="bm25_fn",
@@ -1495,16 +1548,15 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        # Step 3: Verify alias describe/create_index/load/search observes the new schema.
+        # Step 3: Verify alias describe/load/search observes the new schema and bound index.
         alias_desc = client.describe_collection(alias_name)
         assert "sparse" in [field["name"] for field in alias_desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in alias_desc.get("functions", [])]
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(alias_name, index_params, timeout=60)
         assert self.wait_for_index_ready(client, alias_name, index_name="sparse", timeout=60)
         client.load_collection(alias_name)
 
@@ -1562,15 +1614,14 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(reverse_alias_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(reverse_alias_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         reverse_desc = client.describe_collection(reverse_collection_name)
         assert "sparse" in [field["name"] for field in reverse_desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in reverse_desc.get("functions", [])]
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(reverse_collection_name, index_params, timeout=60)
         assert self.wait_for_index_ready(client, reverse_collection_name, index_name="sparse", timeout=60)
         client.load_collection(reverse_collection_name)
 
@@ -1655,12 +1706,11 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        # Step 5: Create sparse BM25 index and load the added function output field.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
+        # Step 5: Wait for the bound sparse index build and load the added function output field.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=60)
         self.release_collection(client, collection_name)
         client.load_collection(collection_name)
@@ -1764,16 +1814,15 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         desc = client.describe_collection(collection_name)
         assert "sparse" in [field["name"] for field in desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in desc.get("functions", [])]
 
-        # Step 4: Create sparse BM25 index for the added output field.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
+        # Step 4: Wait for the bound sparse index build of the added output field.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=60)
 
         # Step 5: Do not call load_collection/release_collection here.
@@ -1872,12 +1921,13 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse_added"],
         )
-        client.add_function_field(bm25_collection_name, sparse_added, bm25_added_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse_added", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(
+            bm25_collection_name, sparse_added, bm25_added_function, index_params=bound_index_params
+        )
 
-        # Step 6 and Step 7: Create index for added output and wait for backfill/search convergence.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse_added", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(bm25_collection_name, index_params, timeout=60)
+        # Step 6 and Step 7: Wait for the bound index build and backfill/search convergence.
         assert self.wait_for_index_ready(client, bm25_collection_name, index_name="sparse_added", timeout=60)
 
         # Step 8 and Step 9: Search added output and compare topK id order and distances when present.
@@ -2013,17 +2063,18 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             output_field_names=["mh_added"],
             params=minhash_params,
         )
-        client.add_function_field(minhash_collection_name, mh_added, minhash_added_function)
-
-        # Step 6 and Step 7: Create index for added MinHash output and wait for backfill/search convergence.
-        index_params = client.prepare_index_params()
-        index_params.add_index(
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(
             field_name="mh_added",
             index_type="MINHASH_LSH",
             metric_type="MHJACCARD",
             params={"mh_lsh_band": 8},
         )
-        client.create_index(minhash_collection_name, index_params, timeout=60)
+        client.add_function_field(
+            minhash_collection_name, mh_added, minhash_added_function, index_params=bound_index_params
+        )
+
+        # Step 6 and Step 7: Wait for the bound MinHash index build and backfill/search convergence.
         assert self.wait_for_index_ready(client, minhash_collection_name, index_name="mh_added", timeout=60)
 
         # Step 8 and Step 9: Search added output and compare topK id order and distances when present.
@@ -2143,7 +2194,11 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["title"],
             output_field_names=["sparse_title"],
         )
-        client.add_function_field(collection_name, sparse_title, title_function)
+        title_bound_index_params = client.prepare_index_params()
+        title_bound_index_params.add_index(
+            field_name="sparse_title", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
+        )
+        client.add_function_field(collection_name, sparse_title, title_function, index_params=title_bound_index_params)
 
         # Step 3: Add body -> sparse_body.
         sparse_body = FieldSchema(name="sparse_body", dtype=DataType.SPARSE_FLOAT_VECTOR)
@@ -2153,7 +2208,11 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["body"],
             output_field_names=["sparse_body"],
         )
-        client.add_function_field(collection_name, sparse_body, body_function)
+        body_bound_index_params = client.prepare_index_params()
+        body_bound_index_params.add_index(
+            field_name="sparse_body", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
+        )
+        client.add_function_field(collection_name, sparse_body, body_function, index_params=body_bound_index_params)
 
         desc = client.describe_collection(collection_name)
         field_names = [field["name"] for field in desc["fields"]]
@@ -2163,11 +2222,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert "bm25_title_fn" in function_names
         assert "bm25_body_fn" in function_names
 
-        # Step 4: Create indexes for both added BM25 output fields.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse_title", index_type="AUTOINDEX", metric_type="BM25")
-        index_params.add_index(field_name="sparse_body", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
+        # Step 4: Wait for the bound index builds of both added BM25 output fields.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse_title", timeout=60)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse_body", timeout=60)
 
@@ -2309,7 +2364,13 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["standard_text"],
             output_field_names=["sparse_standard"],
         )
-        client.add_function_field(collection_name, sparse_standard, standard_function)
+        standard_bound_index_params = client.prepare_index_params()
+        standard_bound_index_params.add_index(
+            field_name="sparse_standard", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
+        )
+        client.add_function_field(
+            collection_name, sparse_standard, standard_function, index_params=standard_bound_index_params
+        )
 
         sparse_filtered = FieldSchema(name="sparse_filtered", dtype=DataType.SPARSE_FLOAT_VECTOR)
         filtered_function = Function(
@@ -2318,7 +2379,13 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["filtered_text"],
             output_field_names=["sparse_filtered"],
         )
-        client.add_function_field(collection_name, sparse_filtered, filtered_function)
+        filtered_bound_index_params = client.prepare_index_params()
+        filtered_bound_index_params.add_index(
+            field_name="sparse_filtered", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
+        )
+        client.add_function_field(
+            collection_name, sparse_filtered, filtered_function, index_params=filtered_bound_index_params
+        )
 
         after_add_desc = client.describe_collection(collection_name)
         field_names = [field["name"] for field in after_add_desc["fields"]]
@@ -2330,11 +2397,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert analyzer_params_from_desc(after_add_desc, "standard_text") == standard_analyzer_params
         assert analyzer_params_from_desc(after_add_desc, "filtered_text") == filtered_analyzer_params
 
-        # Step 3: Create indexes and verify analyzer-specific BM25 behavior.
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse_standard", index_type="AUTOINDEX", metric_type="BM25")
-        index_params.add_index(field_name="sparse_filtered", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
+        # Step 3: Wait for the bound index builds and verify analyzer-specific BM25 behavior.
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse_standard", timeout=60)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse_filtered", timeout=60)
 
@@ -2485,11 +2548,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=120)
 
         self.release_collection(client, collection_name)
@@ -2593,11 +2655,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=120)
 
         self.release_collection(client, collection_name)
@@ -2744,15 +2805,14 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         after_add_desc = client.describe_collection(collection_name)
         text_field_after = next(field for field in after_add_desc["fields"] if field["name"] == "text")
         assert json.loads(text_field_after["params"]["multi_analyzer_params"]) == multi_analyzer_params
 
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params, timeout=60)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=120)
 
         self.release_collection(client, collection_name)
@@ -2839,7 +2899,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(bm25_collection_name, bm25_field, bm25_function)
+        bm25_bound_index_params = client.prepare_index_params()
+        bm25_bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(bm25_collection_name, bm25_field, bm25_function, index_params=bm25_bound_index_params)
 
         bm25_desc = client.describe_collection(bm25_collection_name)
         assert "sparse" in [field["name"] for field in bm25_desc["fields"]]
@@ -2872,7 +2934,11 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             output_field_names=["mh"],
             params={"num_hashes": minhash_num_hashes, "shingle_size": 3},
         )
-        client.add_function_field(minhash_collection_name, minhash_field, minhash_function)
+        minhash_bound_index_params = client.prepare_index_params()
+        minhash_bound_index_params.add_index(field_name="mh", index_type="MINHASH_LSH", metric_type="MHJACCARD")
+        client.add_function_field(
+            minhash_collection_name, minhash_field, minhash_function, index_params=minhash_bound_index_params
+        )
 
         minhash_desc = client.describe_collection(minhash_collection_name)
         assert "mh" in [field["name"] for field in minhash_desc["fields"]]
@@ -2938,12 +3004,17 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             ),
         ]
 
+        # Valid bound index params so the unsupported-function-type error stays the trigger.
+        unsupported_case_index_params = client.prepare_index_params()
+        unsupported_case_index_params.add_index(field_name="", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+
         for case_name, field_schema, function, function_type_value in unsupported_cases:
             self.add_function_field(
                 client,
                 unsupported_collection_name,
                 field_schema,
                 function,
+                index_params=unsupported_case_index_params,
                 check_task=CheckTasks.err_res,
                 check_items={
                     ct.err_code: 1,
@@ -3046,20 +3117,19 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             output_field_names=["mh"],
             params={"num_hashes": num_hashes, "shingle_size": 5},
         )
-        client.add_function_field(collection_name, mh_field, mh_function)
-
-        desc = client.describe_collection(collection_name)
-        assert "mh" in [field["name"] for field in desc["fields"]]
-        assert "minhash_params_backfill_fn" in [func["name"] for func in desc.get("functions", [])]
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(
             field_name="mh",
             index_type="MINHASH_LSH",
             metric_type="MHJACCARD",
             params={"mh_lsh_band": 8},
         )
-        client.create_index(collection_name, index_params, timeout=60)
+        client.add_function_field(collection_name, mh_field, mh_function, index_params=bound_index_params)
+
+        desc = client.describe_collection(collection_name)
+        assert "mh" in [field["name"] for field in desc["fields"]]
+        assert "minhash_params_backfill_fn" in [func["name"] for func in desc.get("functions", [])]
+
         assert self.wait_for_index_ready(client, collection_name, index_name="mh", timeout=120)
 
         self.release_collection(client, collection_name)
@@ -3133,11 +3203,14 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             output_field_names=["mh"],
             params={"num_hashes": 16, "shingle_size": 3},
         )
+        mismatch_bound_index_params = client.prepare_index_params()
+        mismatch_bound_index_params.add_index(field_name="mh", index_type="MINHASH_LSH", metric_type="MHJACCARD")
         self.add_function_field(
             client,
             mismatch_collection_name,
             mismatch_field,
             mismatch_function,
+            index_params=mismatch_bound_index_params,
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
@@ -3160,11 +3233,16 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             output_field_names=["mh_bad_shingle"],
             params={"num_hashes": 16, "shingle_size": 0},
         )
+        bad_shingle_bound_index_params = client.prepare_index_params()
+        bad_shingle_bound_index_params.add_index(
+            field_name="mh_bad_shingle", index_type="MINHASH_LSH", metric_type="MHJACCARD"
+        )
         self.add_function_field(
             client,
             mismatch_collection_name,
             bad_shingle_field,
             bad_shingle_function,
+            index_params=bad_shingle_bound_index_params,
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
@@ -3233,11 +3311,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
-
-        sparse_index = client.prepare_index_params()
-        sparse_index.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, sparse_index, timeout=180)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=240)
         sparse_index_info = client.describe_index(collection_name, index_name="sparse")
@@ -3346,11 +3422,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             input_field_names=["text"],
             output_field_names=["sparse"],
         )
-        client.add_function_field(collection_name, sparse_field, bm25_function)
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
 
-        sparse_index = client.prepare_index_params()
-        sparse_index.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
-        client.create_index(collection_name, sparse_index, timeout=180)
         assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=240)
 
         post_add_rows = [
