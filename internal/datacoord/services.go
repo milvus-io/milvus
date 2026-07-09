@@ -1890,6 +1890,18 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 
+	// Reject L0 import when disabled (default). Restoring L0 (delete-only) segments
+	// is incompatible with commit_timestamp (2PC / replication imports), where it
+	// silently breaks delete semantics. Backups should have their L0 deletes folded
+	// into per-segment deltalogs beforehand; set dataCoord.import.l0ImportDisabled=false
+	// to re-enable the legacy behavior.
+	if importutilv2.IsL0Import(in.GetOptions()) && Params.DataCoordCfg.L0ImportDisabled.GetAsBool() {
+		resp.Status = merr.Status(merr.WrapErrImportFailed("l0 import is disabled " +
+			"(dataCoord.import.l0ImportDisabled=true); fold L0 deletes into data segment deltalogs " +
+			"before restore, or set the config to false to re-enable the legacy L0 import"))
+		return resp, nil
+	}
+
 	// Use the incoming JobID if provided (backward compat: old proxy allocates jobID
 	// before sending broadcast RPC, which is forwarded here with the original jobID).
 	// Otherwise allocate a new one.

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ================================
@@ -86,6 +87,29 @@ func (s *ImportServicesSuite) TestImportV2_InvalidTimeoutReturnsError() {
 	s.NoError(err)
 	s.NotNil(resp)
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+}
+
+func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
+	paramtable.Init()
+	ctx := context.Background()
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// l0ImportDisabled defaults to true, so an l0_import request must be rejected
+	// before reaching allocation (allocator is nil here, proving the early reject).
+	req := &internalpb.ImportRequestInternal{
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: "l0_import", Value: "true"},
+		},
+	}
+
+	resp, err := server.ImportV2(ctx, req)
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	s.Contains(resp.GetStatus().GetReason(), "l0 import is disabled")
 }
 
 func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
