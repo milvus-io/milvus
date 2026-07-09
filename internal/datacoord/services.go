@@ -530,15 +530,14 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 				return resp, nil
 			}
 
-			// We should retrieve the deltalog of all child segments,
-			// but due to the compaction constraint based on indexed segment, there will be at most two generations.
-			allChildrenDeltalogs, err := s.handler.GetDeltaLogFromCompactTo(ctx, id)
-			if err != nil {
+			// Fallback loading keeps the parent segment identity, but the delete
+			// sources produced by compact-to descendants must be overlaid on the
+			// cloned response so QueryNode can filter rows deleted after compaction.
+			clonedInfo := info.Clone()
+			if err := s.appendCompactToDeleteSources(ctx, clonedInfo, id); err != nil {
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
-			clonedInfo := info.Clone()
-			clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, allChildrenDeltalogs...)
 			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
 			infos = append(infos, clonedInfo.SegmentInfo)
 		} else {
@@ -560,6 +559,39 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	resp.Infos = infos
 	resp.ChannelCheckpoint = channelCPs
 	return resp, nil
+}
+
+// appendCompactToDeleteSources mutates clonedInfo with delete sources from all
+// compact-to descendants of segmentID. Manifest-backed descendants stay as
+// manifest paths; legacy descendants contribute decompressed deltalog entries.
+func (s *Server) appendCompactToDeleteSources(ctx context.Context, clonedInfo *SegmentInfo, segmentID UniqueID) error {
+	children, ok := s.meta.GetCompactionTo(segmentID)
+	if !ok {
+		mlog.Warn(ctx, "failed to get segment, this may have been cleaned",
+			mlog.Int64("segmentID", segmentID))
+		return merr.WrapErrSegmentNotFound(segmentID)
+	}
+
+	for _, child := range children {
+		// Keep each child delete source in its native representation. QueryNode
+		// merges both manifest-backed and legacy delete data during segment load.
+		if child.GetManifestPath() != "" {
+			clonedInfo.ChildManifestPaths = append(clonedInfo.ChildManifestPaths, child.GetManifestPath())
+		} else {
+			clonedChild := child.Clone()
+			if err := binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs()); err != nil {
+				mlog.Warn(ctx, "failed to decompress delta binlog",
+					mlog.Int64("segmentID", clonedChild.GetID()), mlog.Err(err))
+				return err
+			}
+			clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, clonedChild.GetDeltalogs()...)
+		}
+
+		if err := s.appendCompactToDeleteSources(ctx, clonedInfo, child.GetID()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SaveBinlogPaths updates segment related binlog path
