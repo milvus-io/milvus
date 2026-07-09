@@ -514,6 +514,7 @@ class AIService:
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")
+        self.minimax_key = os.getenv("MINIMAX_API_KEY")
 
         # Has API key if any key is set OR local claude is available
         self.has_api_key = bool(
@@ -521,6 +522,7 @@ class AIService:
             or self.gemini_key
             or self.anthropic_key
             or self.openai_key
+            or self.minimax_key
         )
 
     @staticmethod
@@ -561,7 +563,7 @@ class AIService:
             raise Exception(
                 "No AI available. Please either:\n"
                 "  - Install Claude Code CLI (https://claude.com/code), or\n"
-                "  - Set one of: GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY"
+                "  - Set one of: GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, MINIMAX_API_KEY"
             )
 
         prompt = self._build_commit_prompt(truncated_diff, files, stats)
@@ -572,7 +574,7 @@ class AIService:
                 return self._call_claude_cli(prompt)
             except Exception as e:
                 print_warning(f"Claude CLI failed: {e}")
-                if self.gemini_key or self.anthropic_key or self.openai_key:
+                if self.gemini_key or self.anthropic_key or self.openai_key or self.minimax_key:
                     print_info("Falling back to API providers...")
                 else:
                     raise
@@ -583,7 +585,7 @@ class AIService:
                 return self._call_gemini(prompt)
             except Exception as e:
                 print_warning(f"Gemini API failed: {e}")
-                if self.anthropic_key or self.openai_key:
+                if self.anthropic_key or self.openai_key or self.minimax_key:
                     print_info("Falling back to other AI providers...")
                 else:
                     raise
@@ -594,14 +596,22 @@ class AIService:
                 return self._call_claude(prompt)
             except Exception as e:
                 print_warning(f"Claude API failed: {e}")
-                if self.openai_key:
-                    print_info("Falling back to OpenAI...")
+                if self.openai_key or self.minimax_key:
+                    print_info("Falling back to other AI providers...")
                 else:
                     raise
 
-        # Fall back to OpenAI
+        # Fall back to OpenAI-compatible providers
         if self.openai_key:
-            return self._call_openai(prompt)
+            try:
+                return self._call_openai(prompt)
+            except Exception as e:
+                print_warning(f"OpenAI API failed: {e}")
+                if not self.minimax_key:
+                    raise
+
+        if self.minimax_key:
+            return self._call_minimax(prompt)
 
         raise Exception("All AI API calls failed")
 
@@ -723,6 +733,36 @@ Ensure title is concise and ≤80 characters.
             raise Exception(f"OpenAI API HTTP {e.code}: {error_body}")
         except Exception as e:
             raise Exception(f"OpenAI API error: {e}")
+
+    def _call_minimax(self, prompt: str) -> Dict[str, str]:
+        """Call MiniMax API using its OpenAI-compatible chat completions endpoint"""
+        url = "https://api.minimax.io/v1/chat/completions"
+
+        data = {
+            "model": "MiniMax-M3",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+        }
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(data).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.minimax_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                content = result["choices"][0]["message"]["content"]
+                return self._parse_ai_response(content)
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8")
+            raise Exception(f"MiniMax API HTTP {e.code}: {error_body}")
+        except Exception as e:
+            raise Exception(f"MiniMax API error: {e}")
 
     def _call_gemini(self, prompt: str) -> Dict[str, str]:
         """Call Google Gemini API"""
@@ -860,7 +900,7 @@ Ensure title is concise and ≤80 characters.
                 return self._call_ai_for_issue(prompt)
             except Exception as e:
                 print_warning(f"Claude CLI failed: {e}")
-                if not (self.gemini_key or self.anthropic_key or self.openai_key):
+                if not (self.gemini_key or self.anthropic_key or self.openai_key or self.minimax_key):
                     raise
 
         if self.gemini_key:
@@ -868,7 +908,7 @@ Ensure title is concise and ≤80 characters.
                 return self._call_ai_for_issue(prompt, "gemini")
             except Exception as e:
                 print_warning(f"Gemini API failed: {e}")
-                if not (self.anthropic_key or self.openai_key):
+                if not (self.anthropic_key or self.openai_key or self.minimax_key):
                     raise
 
         if self.anthropic_key:
@@ -876,11 +916,19 @@ Ensure title is concise and ≤80 characters.
                 return self._call_ai_for_issue(prompt, "claude")
             except Exception as e:
                 print_warning(f"Claude API failed: {e}")
-                if not self.openai_key:
+                if not (self.openai_key or self.minimax_key):
                     raise
 
         if self.openai_key:
-            return self._call_ai_for_issue(prompt, "openai")
+            try:
+                return self._call_ai_for_issue(prompt, "openai")
+            except Exception as e:
+                print_warning(f"OpenAI API failed: {e}")
+                if not self.minimax_key:
+                    raise
+
+        if self.minimax_key:
+            return self._call_ai_for_issue(prompt, "minimax")
 
         raise Exception("All AI API calls failed")
 
@@ -992,6 +1040,24 @@ Use markdown formatting in the body where appropriate.
                 data=json.dumps(data).encode("utf-8"),
                 headers={
                     "Authorization": f"Bearer {self.openai_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                content = result["choices"][0]["message"]["content"]
+        elif provider == "minimax":
+            url = "https://api.minimax.io/v1/chat/completions"
+            data = {
+                "model": "MiniMax-M3",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(data).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self.minimax_key}",
                     "Content-Type": "application/json",
                 },
             )
@@ -1116,6 +1182,25 @@ Keep the response concise and actionable. Focus on the most important conflicts 
                     data=json.dumps(data).encode("utf-8"),
                     headers={
                         "Authorization": f"Bearer {self.openai_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    return result["choices"][0]["message"]["content"]
+
+            if self.minimax_key:
+                url = "https://api.minimax.io/v1/chat/completions"
+                data = {
+                    "model": "MiniMax-M3",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(data).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {self.minimax_key}",
                         "Content-Type": "application/json",
                     },
                 )
@@ -1348,6 +1433,28 @@ Keep concerns and suggestions concise and actionable.
                     content = result["choices"][0]["message"]["content"]
             except Exception as e:
                 errors.append(f"OpenAI: {e}")
+
+        if content is None and self.minimax_key:
+            try:
+                url = "https://api.minimax.io/v1/chat/completions"
+                data = {
+                    "model": "MiniMax-M3",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(data).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {self.minimax_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    content = result["choices"][0]["message"]["content"]
+            except Exception as e:
+                errors.append(f"MiniMax: {e}")
 
         if content is None:
             error_details = "; ".join(errors) if errors else "No providers configured"

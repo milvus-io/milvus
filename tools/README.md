@@ -39,6 +39,9 @@
 
    # OpenAI API
    export OPENAI_API_KEY=sk-...
+
+   # MiniMax API
+   export MINIMAX_API_KEY=your-minimax-key
    ```
 
    Add to `~/.bashrc` or `~/.zshrc` for persistence:
@@ -278,7 +281,7 @@ git config --global user.email "your.email@example.com"
 ```
 
 **API rate limit:**
-Wait and retry, or switch to another AI provider (Gemini ↔ Claude ↔ OpenAI)
+Wait and retry, or switch to another AI provider (Gemini ↔ Claude ↔ OpenAI ↔ MiniMax)
 
 **Format tools not found:**
 Ensure you're in the Milvus repository root, or skip formatting step
@@ -289,7 +292,8 @@ Ensure you're in the Milvus repository root, or skip formatting step
 2. **Gemini API** (if `GEMINI_API_KEY` set)
 3. **Claude API** (if `ANTHROPIC_API_KEY` set)
 4. **OpenAI API** (if `OPENAI_API_KEY` set)
-5. **Manual Input** (if no AI available)
+5. **MiniMax API** (if `MINIMAX_API_KEY` set)
+6. **Manual Input** (if no AI available)
 
 ### Contributing
 
