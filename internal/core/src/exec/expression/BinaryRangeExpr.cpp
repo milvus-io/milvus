@@ -806,6 +806,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             ValueType val1,
             ValueType val2,
             int index) {
+        AssertInfo(index >= 0,
+                   "array element range predicate requires nested path");
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {

@@ -319,18 +319,19 @@ struct UnaryElementFunc {
     }
 };
 
-#define UnaryArrayCompare(cmp)                                          \
-    do {                                                                \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {    \
-            res[i] = false;                                             \
-        } else {                                                        \
-            if (index >= src[i].length()) {                             \
-                res[i] = false;                                         \
-                continue;                                               \
-            }                                                           \
-            auto array_data = src[i].template get_data<GetType>(index); \
-            res[i] = (cmp);                                             \
-        }                                                               \
+#define UnaryArrayCompare(cmp)                                               \
+    do {                                                                     \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
+            res[i] = false;                                                  \
+        } else {                                                             \
+            if (index >= src[offset].length()) {                             \
+                res[i] = false;                                              \
+                valid_res[i] = false;                                        \
+                continue;                                                    \
+            }                                                                \
+            auto array_data = src[offset].template get_data<GetType>(index); \
+            res[i] = (cmp);                                                  \
+        }                                                                    \
     } while (false)
 
 template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
@@ -350,6 +351,10 @@ struct UnaryElementFuncForArray {
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
+        if constexpr (!std::is_same_v<GetType, proto::plan::Array>) {
+            AssertInfo(index >= 0,
+                       "array element predicate requires nested path");
+        }
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -368,6 +373,7 @@ struct UnaryElementFuncForArray {
                 } else {
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -380,6 +386,7 @@ struct UnaryElementFuncForArray {
                 } else {
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -400,10 +407,15 @@ struct UnaryElementFuncForArray {
                 UnaryArrayCompare(milvus::query::Match(array_data, val, op));
             } else if constexpr (op == proto::plan::OpType::Match) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = false;
-                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation is not supported for nested "
+                              "Array type");
+                } else if constexpr (std::is_same_v<GetType,
+                                                    std::string_view> ||
+                                     std::is_same_v<GetType, std::string>) {
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     PatternMatchTranslator translator;
@@ -412,6 +424,9 @@ struct UnaryElementFuncForArray {
                     auto array_data =
                         src[offset].template get_data<GetType>(index);
                     res[i] = matcher(array_data);
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation only supports string type");
                 }
             } else {
                 ThrowInfo(OpTypeInvalid,

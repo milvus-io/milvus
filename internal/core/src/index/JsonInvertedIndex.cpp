@@ -15,8 +15,10 @@
 #include <exception>
 #include <fcntl.h>
 #include <list>
+#include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 
@@ -103,6 +105,56 @@ JsonInvertedIndex<T>::Exists() {
         fill_bitset();
     }
 
+    return bitset;
+}
+
+template <typename T>
+TargetBitmap
+JsonInvertedIndex<T>::ComparableValueBitset() {
+    TargetBitmap bitset(this->Count());
+    if constexpr (std::is_same_v<T, bool>) {
+        bool values[] = {false, true};
+        this->wrapper_->terms_query(values, 2, &bitset);
+    } else if constexpr (std::is_arithmetic_v<T>) {
+        this->wrapper_->range_query(std::numeric_limits<T>::lowest(),
+                                    std::numeric_limits<T>::max(),
+                                    true,
+                                    true,
+                                    &bitset);
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        this->wrapper_->prefix_query("", &bitset);
+    } else {
+        bitset = InvertedIndexTantivy<T>::IsNotNull();
+    }
+    return bitset;
+}
+
+template <typename T>
+TargetBitmap
+JsonInvertedIndex<T>::IsNotNull() {
+    if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+        return InvertedIndexTantivy<T>::IsNotNull();
+    }
+    return ComparableValueBitset();
+}
+
+template <typename T>
+const TargetBitmap
+JsonInvertedIndex<T>::IsNull() {
+    auto bitset = IsNotNull();
+    bitset.flip();
+    return bitset;
+}
+
+template <typename T>
+const TargetBitmap
+JsonInvertedIndex<T>::NotIn(size_t n, const T* values) {
+    if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+        return InvertedIndexTantivy<T>::NotIn(n, values);
+    }
+    auto bitset = InvertedIndexTantivy<T>::In(n, values);
+    bitset.flip();
+    bitset &= IsNotNull();
     return bitset;
 }
 

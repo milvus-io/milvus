@@ -365,6 +365,21 @@ func TestRewrite_Range_Array_Index_Different_NoMerge(t *testing.T) {
 	require.True(t, seenLower)
 }
 
+func TestRewrite_Range_ArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	for _, exprStr := range []string{
+		`ArrayInt[0] > 100 and ArrayInt[0] < 50`,
+		`not (ArrayInt[0] > 100 and ArrayInt[0] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "indexed array must not fold to valid false when the index can be out of range: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed array under NOT must not fold to valid true when the index can be out of range: %s", exprStr)
+	}
+}
+
 // Test invalid BinaryRangeExpr: lower > upper → false
 func TestRewrite_Range_AND_InvalidRange_LowerGreaterThanUpper(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)

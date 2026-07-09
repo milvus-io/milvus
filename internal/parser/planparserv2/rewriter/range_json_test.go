@@ -69,6 +69,23 @@ func TestRewrite_JSON_NestedPath_Nullable_ContradictionsKeepPredicate(t *testing
 	}
 }
 
+func TestRewrite_JSON_NestedPath_NonNullable_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	for _, exprStr := range []string{
+		`JSONField["age"] in [1] and JSONField["age"] == 2`,
+		`JSONField["age"] > 100 and JSONField["age"] < 50`,
+		`not (JSONField["age"] in [1] and JSONField["age"] == 2)`,
+		`not (JSONField["age"] > 100 and JSONField["age"] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "JSON path must not fold to valid false when the path can be missing: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "JSON path under NOT must not fold to valid true when the path can be missing: %s", exprStr)
+	}
+}
+
 func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteBlocked(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 
