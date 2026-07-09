@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -534,18 +533,11 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
-	var analyzerExtraInfo string
-	if len(st.req.GetFileResources()) > 0 {
-		err := fileresource.GlobalFileManager.Download(ctx, st.cm, st.req.GetFileResources()...)
-		if err != nil {
-			return err
-		}
-		defer fileresource.GlobalFileManager.Release(st.req.GetFileResources()...)
-		analyzerExtraInfo, err = analyzer.BuildExtraResourceInfo(st.req.GetStorageConfig().GetRootPath(), st.req.GetFileResources())
-		if err != nil {
-			return err
-		}
+	analyzerExtraInfo, releaseFileResources, err := fileresource.Prepare(ctx, st.cm, st.req.GetFileResources())
+	if err != nil {
+		return err
 	}
+	defer releaseFileResources()
 
 	for _, field := range st.req.GetSchema().GetFields() {
 		field := field

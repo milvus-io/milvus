@@ -34,11 +34,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -46,6 +48,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestQueryNodeInitFileResourceManagerUsesLocalMode(t *testing.T) {
+	oldInit := initQueryNodeFileResourceManager
+	defer func() {
+		initQueryNodeFileResourceManager = oldInit
+		fileresource.ResetLocalModeForTest()
+	}()
+
+	fileresource.SetLocalMode(fileresource.RefMode)
+	mockChunkManager := mocks.NewChunkManager(t)
+	var gotStorage storage.ChunkManager
+	var gotMode fileresource.Mode
+	initQueryNodeFileResourceManager = func(chunkManager storage.ChunkManager, mode fileresource.Mode) error {
+		gotStorage = chunkManager
+		gotMode = mode
+		return nil
+	}
+
+	node := &QueryNode{chunkManager: mockChunkManager}
+	assert.NoError(t, node.initFileResourceManager())
+	assert.Equal(t, mockChunkManager, gotStorage)
+	assert.Equal(t, fileresource.RefMode, gotMode)
+}
 
 type QueryNodeSuite struct {
 	suite.Suite

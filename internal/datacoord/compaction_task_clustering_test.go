@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {
@@ -400,8 +401,13 @@ func (s *ClusteringCompactionTaskSuite) newNamespaceClusteringTask(enableNamespa
 // and CurrentScalarIndexVersion (issue #50145, PR #50140).
 func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFileResourcesInRefMode() {
 	pt := paramtable.Get()
+	oldRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.DataCoordRole)
 	pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
-	defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+	defer func() {
+		paramtable.SetRole(oldRole)
+		pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+	}()
 
 	expectedResources := []*internalpb.FileResourceInfo{
 		{Id: 7, Name: "dict", Path: "dict.jieba"},
@@ -428,6 +434,14 @@ func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFile
 		s.Empty(plan.GetFileResources(),
 			"non-namespace clustering does not build text index inline, so no FileResources are fetched")
 		s.Equal(int32(42), plan.GetCurrentScalarIndexVersion())
+	})
+
+	s.Run("standalone_ref_resolves_to_sync", func() {
+		paramtable.SetRole(typeutil.StandaloneRole)
+		task := s.newNamespaceClusteringTask(true, []int64{7})
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Empty(plan.GetFileResources())
 	})
 }
 

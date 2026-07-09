@@ -362,10 +362,14 @@ type commonConfig struct {
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
 	ClusterID              ParamItem `refreshable:"false"`
 
-	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
-	SearchRequeryPolicy       ParamItem `refreshable:"true"`
-	QNFileResourceMode        ParamItem `refreshable:"true"`
-	DNFileResourceMode        ParamItem `refreshable:"true"`
+	HybridSearchRequeryPolicy   ParamItem `refreshable:"true"`
+	SearchRequeryPolicy         ParamItem `refreshable:"true"`
+	QNFileResourceMode          ParamItem `refreshable:"true"`
+	DNFileResourceMode          ParamItem `refreshable:"true"`
+	PNFileResourceMode          ParamItem `refreshable:"true"`
+	FileResourceSyncIdleTimeout ParamItem `refreshable:"true"`
+	FileResourceSyncMaxDuration ParamItem `refreshable:"true"`
+	FileResourceMaxFileSize     ParamItem `refreshable:"true"`
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
@@ -1513,6 +1517,50 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.DNFileResourceMode.Init(base.mgr)
+
+	p.PNFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.proxyNode",
+		Version:      "3.0.0",
+		DefaultValue: "sync",
+		Doc:          "File resource mode for proxy node, options: [sync, close]. Default is sync.",
+		Export:       true,
+	}
+	p.PNFileResourceMode.Init(base.mgr)
+
+	p.FileResourceSyncIdleTimeout = ParamItem{
+		Key:          "common.fileResource.sync.idleTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "2m",
+		Doc:          "Cancel a file resource sync attempt if no download progress is made for this duration.",
+		Export:       true,
+	}
+	p.FileResourceSyncIdleTimeout.Init(base.mgr)
+
+	p.FileResourceSyncMaxDuration = ParamItem{
+		Key:          "common.fileResource.sync.maxDuration",
+		Version:      "3.0.0",
+		DefaultValue: "1h",
+		Doc:          "Maximum duration of one file resource sync attempt. Failed attempts are retried by the observer.",
+		Export:       true,
+	}
+	p.FileResourceSyncMaxDuration.Init(base.mgr)
+
+	p.FileResourceMaxFileSize = ParamItem{
+		Key:          "common.fileResource.maxFileSize",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "Maximum size of one file resource. Supports byte values and k/m/g suffixes. Zero means unlimited.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if strings.HasPrefix(strings.TrimSpace(v), "-") {
+				mlog.Warn(context.TODO(), "common.fileResource.maxFileSize must not be negative, disabling the limit",
+					mlog.String("configured", v))
+				return "0"
+			}
+			return v
+		},
+	}
+	p.FileResourceMaxFileSize.Init(base.mgr)
 
 	p.GroupByMaxGroups = ParamItem{
 		Key:          "common.groupBy.maxGroups",

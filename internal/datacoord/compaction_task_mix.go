@@ -372,7 +372,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 
 	// set analyzer resource for text match index if use ref mode.
 	// Both SortCompaction and MixCompaction build text indexes inline and need the analyzer resources.
-	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
+	if fileresource.GetDataNodeMode() == fileresource.RefMode &&
 		(taskProto.GetType() == datapb.CompactionType_SortCompaction || taskProto.GetType() == datapb.CompactionType_MixCompaction) &&
 		len(taskSchema.GetFileResourceIds()) > 0 {
 		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)

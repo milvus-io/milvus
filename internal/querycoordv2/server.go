@@ -751,6 +751,12 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 	// Therefore, manual status checking of all nodes in resource manager is needed.
 	s.meta.CheckNodesInResourceGroup(s.ctx)
 
+	// Rewatch reconciles a full snapshot without emitting individual add events.
+	// Notify once so QueryNodes discovered during the watch gap receive file resources.
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.Notify()
+	}
+
 	return nil
 }
 

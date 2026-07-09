@@ -73,6 +73,16 @@ import (
 
 const maxOperationsPerTxn = int64(64)
 
+type testFileResourceObserver struct {
+	notifyCount int
+}
+
+func (o *testFileResourceObserver) InitDataCoord(session.NodeManager) {}
+
+func (o *testFileResourceObserver) Notify() {
+	o.notifyCount++
+}
+
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	rand.Seed(time.Now().UnixNano())
@@ -2478,8 +2488,10 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 		},
 	}
 
+	observer := &testFileResourceObserver{}
 	server := &Server{
-		ctx: context.Background(),
+		ctx:                  context.Background(),
+		fileResourceObserver: observer,
 	}
 
 	// Create actual implementations
@@ -2491,6 +2503,7 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 
 	err := server.rewatchDataNodes(sessions)
 	assert.NoError(t, err)
+	assert.Equal(t, 1, observer.notifyCount)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 }
 
@@ -2499,8 +2512,10 @@ func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {
 	mockSemverParse := mockey.Mock(semver.Parse).Return(semver.Version{}, nil).Build()
 	defer mockSemverParse.UnPatch()
 
+	observer := &testFileResourceObserver{}
 	server := &Server{
-		ctx: context.Background(),
+		ctx:                  context.Background(),
+		fileResourceObserver: observer,
 	}
 
 	// Create actual implementations
@@ -2512,6 +2527,7 @@ func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {
 
 	err := server.rewatchDataNodes(map[string]*sessionutil.Session{})
 	assert.NoError(t, err)
+	assert.Equal(t, 1, observer.notifyCount)
 }
 
 func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
@@ -2529,8 +2545,10 @@ func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
 		},
 	}
 
+	observer := &testFileResourceObserver{}
 	server := &Server{
-		ctx: context.Background(),
+		ctx:                  context.Background(),
+		fileResourceObserver: observer,
 	}
 
 	// Create actual implementations
@@ -2541,6 +2559,7 @@ func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
 	err := server.rewatchDataNodes(sessions)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster startup failed")
+	assert.Equal(t, 0, observer.notifyCount)
 }
 
 func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVersionGate(t *testing.T) {

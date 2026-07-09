@@ -86,6 +86,17 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.LoadTransientBudgetBytes.Key, "67108864")
 		assert.Equal(t, int64(67108864), Params.LoadTransientBudgetBytes.GetAsInt64())
 
+		defer params.Reset(Params.FileResourceMaxFileSize.Key)
+		assert.Equal(t, int64(0), Params.FileResourceMaxFileSize.GetAsSize())
+		params.Save(Params.FileResourceMaxFileSize.Key, "512m")
+		assert.Equal(t, int64(512*1024*1024), Params.FileResourceMaxFileSize.GetAsSize())
+		params.Save(Params.FileResourceMaxFileSize.Key, "4g")
+		assert.Equal(t, int64(4*1024*1024*1024), Params.FileResourceMaxFileSize.GetAsSize())
+		params.Save(Params.FileResourceMaxFileSize.Key, "-1")
+		assert.Equal(t, int64(0), Params.FileResourceMaxFileSize.GetAsSize())
+		params.Save(Params.FileResourceMaxFileSize.Key, "invalid")
+		assert.Equal(t, int64(0), Params.FileResourceMaxFileSize.GetAsSize())
+
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 		params.Save(Params.ArrowReaderHoleSizeLimitBytes.Key, "1048576")

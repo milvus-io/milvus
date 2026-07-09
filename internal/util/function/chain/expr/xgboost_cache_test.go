@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func testXGBoostResource(id int64, name string) *fileresource.ResolvedFileResource {
@@ -35,6 +36,30 @@ func testXGBoostResource(id int64, name string) *fileresource.ResolvedFileResour
 		Path:      fmt.Sprintf("/remote/%s-%d.ubj", name, id),
 		LocalPath: fmt.Sprintf("/local/%d/%s.ubj", id, name),
 	}
+}
+
+func TestXGBoostModelCacheResourceReadiness(t *testing.T) {
+	cache := newXGBoostModelCache(nil, nil)
+
+	t.Run("not ready", func(t *testing.T) {
+		cache.checkFileResourceReady = func() error {
+			return merr.WrapErrServiceUnavailableMsg("file resource snapshot is not ready")
+		}
+		_, err := cache.resolveResource("rank_model")
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	})
+
+	t.Run("ready but missing", func(t *testing.T) {
+		cache.checkFileResourceReady = func() error { return nil }
+		_, err := cache.resolveResource("rank_model")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("checker missing", func(t *testing.T) {
+		cache.checkFileResourceReady = nil
+		_, err := cache.resolveResource("rank_model")
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
 }
 
 func TestXGBoostModelCacheResourceIndex(t *testing.T) {
@@ -55,9 +80,6 @@ func TestXGBoostModelCacheResourceIndex(t *testing.T) {
 	resolvedAgain, err := cache.resolveResource("rank_model")
 	require.NoError(t, err)
 	assert.Equal(t, resource.LocalPath, resolvedAgain.LocalPath)
-
-	_, err = cache.resolveResource("missing")
-	assert.Error(t, err)
 }
 
 func TestXGBoostModelCacheResourceIndexIgnoresNonUBJ(t *testing.T) {

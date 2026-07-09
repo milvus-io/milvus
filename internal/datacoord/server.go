@@ -570,6 +570,9 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 		mlog.Warn(s.ctx, "DataCoord failed to add datanode", mlog.Err(err))
 		return err
 	}
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.Notify()
+	}
 	return nil
 }
 

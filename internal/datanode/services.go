@@ -977,7 +977,7 @@ func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.Sync
 		return merr.Status(merr.ErrServiceNotReady), nil
 	}
 
-	err := fileresource.Sync(req.GetVersion(), req.GetResources())
+	err := fileresource.Sync(ctx, req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}

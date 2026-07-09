@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -222,7 +221,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 
 		resources := []*internalpb.FileResourceInfo{}
 		var err error
-		if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) && len(collection.Schema.GetFileResourceIds()) > 0 {
+		if fileresource.GetDataNodeMode() == fileresource.RefMode && len(collection.Schema.GetFileResourceIds()) > 0 {
 			resources, err = si.mt.GetFileResources(si.ctx, collection.Schema.GetFileResourceIds()...)
 			if err != nil {
 				mlog.Warn(si.ctx, "get file resources for collection failed, wait for retry", mlog.FieldCollectionID(collection.ID), mlog.Err(err))

@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
@@ -19,8 +20,9 @@ import (
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+var initStreamingNodeFileResourceManager func(storage.ChunkManager, fileresource.Mode) error = fileresource.InitManager
 
 // Server is the streamingnode server.
 type Server struct {
@@ -36,6 +38,11 @@ type Server struct {
 	walManager walmanager.Manager
 }
 
+func (s *Server) initFileResourceManager(chunkManager storage.ChunkManager) error {
+	fileMode := fileresource.GetLocalMode(fileresource.GetQueryNodeMode())
+	return initStreamingNodeFileResourceManager(chunkManager, fileMode)
+}
+
 // Init initializes the streamingnode server.
 func (s *Server) init() {
 	mlog.Info(context.TODO(), "init streamingnode server...")
@@ -46,7 +53,9 @@ func (s *Server) init() {
 	s.initService()
 
 	// init file resource manager
-	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()))
+	if err := s.initFileResourceManager(resource.Resource().ChunkManager()); err != nil {
+		panic(fmt.Sprintf("init file resource manager failed, %+v", err))
+	}
 
 	if err := analyzer.InitOptions(); err != nil {
 		panic(fmt.Sprintf("init analyzer options failed, %+v", err))

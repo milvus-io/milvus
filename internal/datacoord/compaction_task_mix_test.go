@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMixCompactionTaskSuite(t *testing.T) {
@@ -77,8 +78,13 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 // default tokenization → silent search regressions.
 func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResourcesInRefMode() {
 	pt := paramtable.Get()
+	oldRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.DataCoordRole)
 	pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
-	defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+	defer func() {
+		paramtable.SetRole(oldRole)
+		pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+	}()
 
 	channel := "Ch-1"
 	binLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
@@ -90,7 +96,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResourcesInRe
 			State:         commonpb.SegmentState_Flushed,
 			Binlogs:       binLogs,
 		}}
-	}).Once()
+	}).Twice()
 
 	expectedResources := []*internalpb.FileResourceInfo{
 		{Id: 7, Name: "dict", Path: "dict.jieba"},
@@ -111,13 +117,18 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResourcesInRe
 		},
 	}, nil, s.mockMeta, newMockVersionManager())
 	alloc := allocator.NewMockAllocator(s.T())
-	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
+	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Twice()
 	task.allocator = alloc
 
 	plan, err := task.BuildCompactionRequest()
 	s.Require().NoError(err)
 	s.Equal(expectedResources, plan.GetFileResources(),
 		"FileResources must flow through for MixCompaction plans (issue #50145, PR #50140)")
+
+	paramtable.SetRole(typeutil.StandaloneRole)
+	plan, err = task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	s.Empty(plan.GetFileResources(), "standalone resolves data node ref mode to sync")
 }
 
 func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {

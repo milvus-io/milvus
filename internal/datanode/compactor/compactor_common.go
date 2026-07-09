@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
@@ -109,18 +108,11 @@ func createTextIndex(ctx context.Context,
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
-	var analyzerExtraInfo string
-	if len(plan.GetFileResources()) > 0 {
-		err := fileresource.GlobalFileManager.Download(ctx, cm, plan.GetFileResources()...)
-		if err != nil {
-			return nil, err
-		}
-		defer fileresource.GlobalFileManager.Release(plan.GetFileResources()...)
-		analyzerExtraInfo, err = analyzer.BuildExtraResourceInfo(compactionParams.StorageConfig.GetRootPath(), plan.GetFileResources())
-		if err != nil {
-			return nil, err
-		}
+	analyzerExtraInfo, releaseFileResources, err := fileresource.Prepare(ctx, cm, plan.GetFileResources())
+	if err != nil {
+		return nil, err
 	}
+	defer releaseFileResources()
 
 	for _, field := range plan.GetSchema().GetFields() {
 		field := field

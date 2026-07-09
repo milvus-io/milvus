@@ -38,12 +38,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
@@ -63,6 +65,11 @@ var _ types.DataNode = (*DataNode)(nil)
 
 // Params from config.yaml
 var Params *paramtable.ComponentParam = paramtable.Get()
+
+var (
+	initDataNodeFileResourceManager         func(storage.ChunkManager, fileresource.Mode) error = fileresource.InitManager
+	createDataNodeFileResourceStorageConfig func() *indexpb.StorageConfig                       = compaction.CreateStorageConfig
+)
 
 // DataNode communicates with outside services and unioun all
 // services in datanode package.
@@ -178,6 +185,26 @@ func (node *DataNode) GetNodeID() int64 {
 	return paramtable.GetNodeID()
 }
 
+func (node *DataNode) initFileResourceManager(log *mlog.Logger) error {
+	fileMode := fileresource.GetLocalMode(fileresource.GetDataNodeMode())
+	if fileMode != fileresource.SyncMode {
+		return initDataNodeFileResourceManager(nil, fileMode)
+	}
+
+	storageConfig := createDataNodeFileResourceStorageConfig()
+	if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {
+		log.Info(node.ctx, "No storage address configured in yaml, file resource sync mode is disabled")
+		return initDataNodeFileResourceManager(nil, fileresource.CloseMode)
+	}
+
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, storageConfig)
+	if err != nil {
+		log.Error(node.ctx, "Init chunk manager for file resource manager failed", mlog.Err(err))
+		return err
+	}
+	return initDataNodeFileResourceManager(cm, fileMode)
+}
+
 func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
@@ -196,23 +223,9 @@ func (node *DataNode) Init() error {
 		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
 
-		fileMode := fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue())
-		if fileMode == fileresource.SyncMode {
-			storageConfig := compaction.CreateStorageConfig()
-			if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {
-				log.Info(node.ctx, "No storage address configured in yaml, file resource sync mode is disabled")
-				fileresource.InitManager(nil, fileresource.CloseMode)
-			} else {
-				cm, err := node.storageFactory.NewChunkManager(node.ctx, storageConfig)
-				if err != nil {
-					log.Error(node.ctx, "Init chunk manager for file resource manager failed", mlog.Err(err))
-					initError = err
-					return
-				}
-				fileresource.InitManager(cm, fileMode)
-			}
-		} else {
-			fileresource.InitManager(nil, fileMode)
+		if err := node.initFileResourceManager(log); err != nil {
+			initError = err
+			return
 		}
 
 		node.importTaskMgr = importv2.NewTaskManager()

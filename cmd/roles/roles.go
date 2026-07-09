@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -171,6 +172,17 @@ func NewMilvusRoles() *MilvusRoles {
 		closed: make(chan struct{}),
 	}
 	return mr
+}
+
+func (mr *MilvusRoles) resolveLocalFileResourceMode() fileresource.Mode {
+	mode := fileresource.ResolveLocalMode(fileresource.LocalRoles{
+		QueryNode:     mr.EnableQueryNode,
+		DataNode:      mr.EnableDataNode,
+		Proxy:         mr.EnableProxy,
+		StreamingNode: mr.EnableStreamingNode,
+	})
+	fileresource.SetLocalMode(mode)
+	return mode
 }
 
 func (mr *MilvusRoles) printLDPreLoad() {
@@ -413,6 +425,14 @@ func (mr *MilvusRoles) Run() {
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
+
+	localFileResourceMode := mr.resolveLocalFileResourceMode()
+	mlog.Info(context.TODO(), "resolved local file resource mode",
+		mlog.String("mode", localFileResourceMode.String()),
+		mlog.Bool("queryNode", mr.EnableQueryNode),
+		mlog.Bool("dataNode", mr.EnableDataNode),
+		mlog.Bool("proxy", mr.EnableProxy),
+		mlog.Bool("streamingNode", mr.EnableStreamingNode))
 
 	// Persist immutable configurations at startup, such as mqType paramItem
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {

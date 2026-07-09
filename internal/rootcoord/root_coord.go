@@ -182,6 +182,7 @@ type Core struct {
 type FileResourceObserver interface {
 	CheckAllQnReady() error
 	InitMeta(meta IMetaTable)
+	InitProxyManager(manager proxyutil.ProxyClientManagerInterface)
 	Notify()
 	Sync() error
 }
@@ -498,9 +499,10 @@ func (c *Core) initInternal() error {
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
 		c.proxyClientManager.SetProxyClients,
+		c.notifyFileResourceObserverOnProxySnapshot,
 	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient, c.notifyFileResourceObserverOnProxyAdd)
+	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient, c.notifyFileResourceObserverOnProxyDel)
 	mlog.Info(context.TODO(), "init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
@@ -535,9 +537,28 @@ func (c *Core) initInternal() error {
 	// init file resource observer
 	if c.fileResourceObserver != nil {
 		c.fileResourceObserver.InitMeta(c.meta)
+		c.fileResourceObserver.InitProxyManager(c.proxyClientManager)
 	}
 	mlog.Info(context.TODO(), "init rootcoord done", mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.String("Address", c.address))
 	return nil
+}
+
+func (c *Core) notifyFileResourceObserverOnProxyAdd(*sessionutil.Session) {
+	c.notifyFileResourceObserver()
+}
+
+func (c *Core) notifyFileResourceObserverOnProxySnapshot([]*sessionutil.Session) {
+	c.notifyFileResourceObserver()
+}
+
+func (c *Core) notifyFileResourceObserverOnProxyDel(*sessionutil.Session) {
+	c.notifyFileResourceObserver()
+}
+
+func (c *Core) notifyFileResourceObserver() {
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
 }
 
 func (c *Core) registerMetricsRequest() {
@@ -3078,6 +3099,19 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 		return merr.Status(err), nil
 	} else if !exist {
 		return merr.Status(merr.WrapErrParameterInvalidMsg("file resource path not exist")), nil
+	}
+
+	maxFileSize := paramtable.Get().CommonCfg.FileResourceMaxFileSize.GetAsSize()
+	if maxFileSize > 0 {
+		fileSize, err := c.storage.Size(ctx, req.GetPath())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if fileSize > maxFileSize {
+			return merr.Status(merr.WrapErrParameterTooLarge(
+				fmt.Sprintf("file resource %q size %d exceeds maximum %d", req.GetPath(), fileSize, maxFileSize),
+			)), nil
+		}
 	}
 
 	id, err := c.tsoAllocator.GenerateTSO(1)

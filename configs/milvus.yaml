@@ -1153,6 +1153,11 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+      proxyNode: sync # File resource mode for proxy node, options: [sync, close]. Default is sync.
+    sync:
+      idleTimeout: 2m # Cancel a file resource sync attempt if no download progress is made for this duration.
+      maxDuration: 1h # Maximum duration of one file resource sync attempt. Failed attempts are retried by the observer.
+    maxFileSize: 0 # Maximum size of one file resource. Supports byte values and k/m/g suffixes. Zero means unlimited.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 

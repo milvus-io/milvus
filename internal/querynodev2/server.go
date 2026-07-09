@@ -151,6 +151,13 @@ type QueryNode struct {
 	binlogSaver segments.BinlogSaver
 }
 
+var initQueryNodeFileResourceManager func(storage.ChunkManager, fileresource.Mode) error = fileresource.InitManager
+
+func (node *QueryNode) initFileResourceManager() error {
+	fileMode := fileresource.GetLocalMode(fileresource.GetQueryNodeMode())
+	return initQueryNodeFileResourceManager(node.chunkManager, fileMode)
+}
+
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx, cancel := context.WithCancel(ctx)
@@ -412,7 +419,10 @@ func (node *QueryNode) Init() error {
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
 
-		fileresource.InitManager(node.chunkManager, fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()))
+		if err := node.initFileResourceManager(); err != nil {
+			initError = err
+			return
+		}
 
 		err = initcore.InitQueryNode(node.ctx)
 		if err != nil {

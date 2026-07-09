@@ -372,7 +372,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	// Namespace-enabled clustering compaction is routed to the namespace compactor on the
 	// DataNode, which builds the text index inline and needs the analyzer resources.
 	taskSchema := taskProto.GetSchema()
-	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
+	if fileresource.GetDataNodeMode() == fileresource.RefMode &&
 		taskSchema.GetEnableNamespace() &&
 		len(taskSchema.GetFileResourceIds()) > 0 {
 		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)

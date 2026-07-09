@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -31,6 +32,7 @@ import (
 	qcsession "github.com/milvus-io/milvus/internal/querycoordv2/session"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -65,6 +67,38 @@ func (s *FileResourceObserverSuite) TestNewFileResourceObserver() {
 	s.NotNil(observer.distribution)
 	s.NotNil(observer.notifyCh)
 	s.NotNil(observer.closeCh)
+}
+
+func (s *FileResourceObserverSuite) TestStandaloneEffectiveMode() {
+	params := paramtable.Get()
+	oldRole := paramtable.GetRole()
+	defer paramtable.SetRole(oldRole)
+	defer params.CommonCfg.QNFileResourceMode.SwapTempValue("sync")
+	defer params.CommonCfg.DNFileResourceMode.SwapTempValue("sync")
+	defer params.CommonCfg.PNFileResourceMode.SwapTempValue("sync")
+	paramtable.SetRole(typeutil.StandaloneRole)
+
+	s.Run("mixed modes resolve to sync", func() {
+		params.CommonCfg.QNFileResourceMode.SwapTempValue("close")
+		params.CommonCfg.DNFileResourceMode.SwapTempValue("ref")
+		params.CommonCfg.PNFileResourceMode.SwapTempValue("close")
+
+		observer := NewFileResourceObserver(s.ctx)
+		s.Equal(fileresource.SyncMode, observer.qnMode)
+		s.Equal(fileresource.SyncMode, observer.dnMode)
+		s.Equal(fileresource.SyncMode, observer.pnMode)
+	})
+
+	s.Run("all close remains close", func() {
+		params.CommonCfg.QNFileResourceMode.SwapTempValue("close")
+		params.CommonCfg.DNFileResourceMode.SwapTempValue("close")
+		params.CommonCfg.PNFileResourceMode.SwapTempValue("close")
+
+		observer := NewFileResourceObserver(s.ctx)
+		s.Equal(fileresource.CloseMode, observer.qnMode)
+		s.Equal(fileresource.CloseMode, observer.dnMode)
+		s.Equal(fileresource.CloseMode, observer.pnMode)
+	})
 }
 
 func (s *FileResourceObserverSuite) TestStartStop() {
@@ -110,6 +144,27 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		observer.Start()
 		observer.Stop()
 	})
+
+	s.Run("start_with_proxy_sync_mode", func() {
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			notifyCh:     make(chan struct{}, 1),
+			closeCh:      make(chan struct{}),
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			pnMode:       fileresource.SyncMode,
+			proxies:      proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator),
+		}
+
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0)).Maybe()
+		observer.meta = mockMeta
+
+		observer.Start()
+		time.Sleep(50 * time.Millisecond)
+		observer.Stop()
+	})
 }
 
 func (s *FileResourceObserverSuite) TestNotify() {
@@ -130,11 +185,23 @@ func (s *FileResourceObserverSuite) TestNotify() {
 }
 
 func (s *FileResourceObserverSuite) TestCheckNodeSynced() {
+	s.Run("sync_disabled", func() {
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			pnMode:       fileresource.CloseMode,
+		}
+		s.True(observer.CheckNodeSynced(1))
+	})
+
 	s.Run("meta_not_ready", func() {
 		observer := &FileResourceObserver{
 			ctx:          s.ctx,
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         nil,
+			qnMode:       fileresource.SyncMode,
 		}
 		s.False(observer.CheckNodeSynced(1))
 	})
@@ -147,6 +214,7 @@ func (s *FileResourceObserverSuite) TestCheckNodeSynced() {
 			ctx:          s.ctx,
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         mockMeta,
+			qnMode:       fileresource.SyncMode,
 		}
 		s.True(observer.CheckNodeSynced(1))
 	})
@@ -161,6 +229,7 @@ func (s *FileResourceObserverSuite) TestCheckNodeSynced() {
 			ctx:          s.ctx,
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         mockMeta,
+			qnMode:       fileresource.SyncMode,
 		}
 		s.False(observer.CheckNodeSynced(1))
 	})
@@ -175,6 +244,23 @@ func (s *FileResourceObserverSuite) TestCheckNodeSynced() {
 			ctx:          s.ctx,
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         mockMeta,
+			qnMode:       fileresource.SyncMode,
+		}
+		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, Version: 1})
+		s.True(observer.CheckNodeSynced(1))
+	})
+
+	s.Run("has_resources_node_synced_previous_version", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{
+			{Name: "test"},
+		}, uint64(2))
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.SyncMode,
 		}
 		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, Version: 1})
 		s.True(observer.CheckNodeSynced(1))
@@ -188,75 +274,93 @@ func (s *FileResourceObserverSuite) TestCheckAllQnReady() {
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         nil,
 		}
-		err := observer.CheckAllQnReady()
-		s.Error(err)
+		s.Error(observer.CheckAllQnReady())
 	})
 
 	s.Run("no_resources", func() {
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
 		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
-
 		observer := &FileResourceObserver{
 			ctx:          s.ctx,
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         mockMeta,
+			qnMode:       fileresource.SyncMode,
 		}
-		err := observer.CheckAllQnReady()
-		s.NoError(err)
+		s.NoError(observer.CheckAllQnReady())
 	})
 
-	s.Run("all_query_nodes_synced", func() {
+	s.Run("query_node_sync_disabled", func() {
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{
-			{Name: "test"},
-		}, uint64(2))
-
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(1))
 		observer := &FileResourceObserver{
 			ctx:          s.ctx,
 			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
 			meta:         mockMeta,
+			qnMode:       fileresource.CloseMode,
+		}
+		s.NoError(observer.CheckAllQnReady())
+	})
+
+	s.Run("query_node_manager_not_ready", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(1))
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnMode:       fileresource.SyncMode,
+		}
+		s.Error(observer.CheckAllQnReady())
+	})
+
+	s.Run("live_query_node_missing", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnManager:    qnManager,
+			qnMode:       fileresource.SyncMode,
+		}
+		s.Error(observer.CheckAllQnReady())
+	})
+
+	s.Run("live_query_node_stale", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnManager:    qnManager,
+			qnMode:       fileresource.SyncMode,
+		}
+		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: QueryNode, Version: 1})
+		s.Error(observer.CheckAllQnReady())
+	})
+
+	s.Run("all_live_query_nodes_synced", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(2))
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 2}))
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnManager:    qnManager,
+			qnMode:       fileresource.SyncMode,
 		}
 		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: QueryNode, Version: 2})
 		observer.distribution.Insert(2, &NodeInfo{NodeID: 2, NodeType: QueryNode, Version: 3})
-
-		err := observer.CheckAllQnReady()
-		s.NoError(err)
-	})
-
-	s.Run("some_query_nodes_not_synced", func() {
-		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{
-			{Name: "test"},
-		}, uint64(5))
-
-		observer := &FileResourceObserver{
-			ctx:          s.ctx,
-			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
-			meta:         mockMeta,
-		}
-		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: QueryNode, Version: 5})
-		observer.distribution.Insert(2, &NodeInfo{NodeID: 2, NodeType: QueryNode, Version: 3}) // not synced
-
-		err := observer.CheckAllQnReady()
-		s.Error(err)
-	})
-
-	s.Run("data_nodes_not_checked", func() {
-		mockMeta := mockrootcoord.NewIMetaTable(s.T())
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{
-			{Name: "test"},
-		}, uint64(5))
-
-		observer := &FileResourceObserver{
-			ctx:          s.ctx,
-			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
-			meta:         mockMeta,
-		}
-		// DataNode with old version should not cause error
-		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: DataNode, Version: 1})
-
-		err := observer.CheckAllQnReady()
-		s.NoError(err)
+		observer.distribution.Insert(3, &NodeInfo{NodeID: 3, NodeType: QueryNode, Version: 1})
+		s.NoError(observer.CheckAllQnReady())
 	})
 }
 
@@ -373,6 +477,39 @@ func (s *FileResourceObserverSuite) TestSync() {
 		s.Error(err)
 	})
 
+	s.Run("mixture sync targets configured role once", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1))
+
+		mockDNClient := mocks.NewMockDataNodeClient(s.T())
+		mockDNClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		mockDNManager := dcsession.NewMockNodeManager(s.T())
+		mockDNManager.EXPECT().GetClientIDs().Return([]int64{100})
+		mockDNManager.EXPECT().GetClient(int64(100)).Return(mockDNClient, nil)
+
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 100}))
+		mockCluster := qcsession.NewMockCluster(s.T())
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			qnManager:    qnManager,
+			cluster:      mockCluster,
+			dnManager:    mockDNManager,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.SyncMode,
+		}
+
+		require.NoError(s.T(), observer.Sync())
+		info, ok := observer.distribution.Get(100)
+		require.True(s.T(), ok)
+		require.Equal(s.T(), DataNode, info.NodeType)
+		require.Equal(s.T(), uint64(1), info.Version)
+	})
+
 	s.Run("sync_data_nodes_success", func() {
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
 		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
@@ -425,6 +562,64 @@ func (s *FileResourceObserverSuite) TestSync() {
 
 		err := observer.Sync()
 		s.Error(err)
+	})
+
+	s.Run("sync_proxy_nodes_success", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1))
+
+		mockProxyClient := mocks.NewMockProxyClient(s.T())
+		mockProxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+		proxyManager := proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+		proxyManager.GetProxyClients().Insert(200, mockProxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			proxies:      proxyManager,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			pnMode:       fileresource.SyncMode,
+		}
+
+		err := observer.Sync()
+		s.NoError(err)
+
+		info, ok := observer.distribution.Get(200)
+		s.True(ok)
+		s.Equal(int64(200), info.NodeID)
+		s.Equal(ProxyNode, info.NodeType)
+		s.Equal(uint64(1), info.Version)
+	})
+
+	s.Run("sync_proxy_nodes_ignores_unimplemented", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1))
+
+		mockProxyClient := mocks.NewMockProxyClient(s.T())
+		mockProxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented)
+
+		proxyManager := proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+		proxyManager.GetProxyClients().Insert(200, mockProxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			proxies:      proxyManager,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			pnMode:       fileresource.SyncMode,
+		}
+
+		err := observer.Sync()
+		s.NoError(err)
+		_, ok := observer.distribution.Get(200)
+		s.False(ok)
 	})
 
 	s.Run("cleanup_removed_nodes", func() {
@@ -481,32 +676,105 @@ func (s *FileResourceObserverSuite) TestInit() {
 		observer.InitDataCoord(mockDNManager)
 		s.Equal(mockDNManager, observer.dnManager)
 	})
+
+	s.Run("init_proxy_manager", func() {
+		observer := &FileResourceObserver{ctx: s.ctx}
+		proxyManager := proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+		observer.InitProxyManager(proxyManager)
+		s.Equal(proxyManager, observer.proxies)
+	})
 }
 
-func (s *FileResourceObserverSuite) TestRetryNotify() {
-	observer := &FileResourceObserver{
-		ctx:          s.ctx,
-		distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
-		notifyCh:     make(chan struct{}, 1),
-		closeCh:      make(chan struct{}),
-	}
+func (s *FileResourceObserverSuite) TestSyncContextDeadline() {
+	oldMaxDuration := paramtable.Get().CommonCfg.FileResourceSyncMaxDuration.SwapTempValue("20ms")
+	defer paramtable.Get().CommonCfg.FileResourceSyncMaxDuration.SwapTempValue(oldMaxDuration)
 
-	// Clear channel first
-	select {
-	case <-observer.notifyCh:
-	default:
-	}
+	mockMeta := mockrootcoord.NewIMetaTable(s.T())
+	mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(1))
+	mockCluster := qcsession.NewMockCluster(s.T())
+	mockCluster.EXPECT().SyncFileResource(mock.Anything, int64(1), mock.Anything).
+		RunAndReturn(func(ctx context.Context, _ int64, _ *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	qnManager := qcsession.NewNodeManager()
+	qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+	observer := NewFileResourceObserver(s.ctx)
+	defer observer.Stop()
+	observer.meta = mockMeta
+	observer.qnManager = qnManager
+	observer.cluster = mockCluster
+	observer.qnMode = fileresource.SyncMode
+	observer.dnMode = fileresource.CloseMode
+	observer.pnMode = fileresource.CloseMode
 
-	// RetryNotify should eventually notify
-	observer.RetryNotify()
+	started := time.Now()
+	err := observer.Sync()
+	s.ErrorIs(err, context.DeadlineExceeded)
+	s.Less(time.Since(started), time.Second)
+}
 
-	// Wait for the retry (3 seconds delay in RetryNotify)
-	select {
-	case <-observer.notifyCh:
-		// Success
-	case <-time.After(5 * time.Second):
-		s.Fail("RetryNotify did not send notification")
-	}
+func (s *FileResourceObserverSuite) TestSyncLoopRetryAndPeriodicReconcile() {
+	s.Run("retry_after_failure", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(1)).Maybe()
+
+		mockCluster := qcsession.NewMockCluster(s.T())
+		mockCluster.EXPECT().SyncFileResource(mock.Anything, int64(1), mock.Anything).
+			Return(nil, errors.New("rpc error")).Once()
+		mockCluster.EXPECT().SyncFileResource(mock.Anything, int64(1), mock.Anything).
+			Return(merr.Success(), nil).Once()
+
+		qnManager := qcsession.NewNodeManager()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+		observer := NewFileResourceObserver(s.ctx)
+		observer.meta = mockMeta
+		observer.qnManager = qnManager
+		observer.cluster = mockCluster
+		observer.qnMode = fileresource.SyncMode
+		observer.dnMode = fileresource.CloseMode
+		observer.pnMode = fileresource.CloseMode
+		observer.retryInterval = 10 * time.Millisecond
+		observer.reconcileInterval = time.Hour
+		observer.Start()
+		defer observer.Stop()
+
+		s.Eventually(func() bool {
+			info, ok := observer.distribution.Get(1)
+			return ok && info.Version == 1
+		}, time.Second, 10*time.Millisecond)
+	})
+
+	s.Run("periodic_reconcile", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{Name: "test"}}, uint64(1)).Maybe()
+		mockCluster := qcsession.NewMockCluster(s.T())
+		qnManager := qcsession.NewNodeManager()
+
+		observer := NewFileResourceObserver(s.ctx)
+		observer.meta = mockMeta
+		observer.qnManager = qnManager
+		observer.cluster = mockCluster
+		observer.qnMode = fileresource.SyncMode
+		observer.dnMode = fileresource.CloseMode
+		observer.pnMode = fileresource.CloseMode
+		observer.retryInterval = time.Hour
+		observer.reconcileInterval = 20 * time.Millisecond
+		observer.Start()
+		defer observer.Stop()
+
+		s.Eventually(func() bool {
+			return len(observer.notifyCh) == 0
+		}, time.Second, 10*time.Millisecond)
+
+		mockCluster.EXPECT().SyncFileResource(mock.Anything, int64(1), mock.Anything).Return(merr.Success(), nil).Once()
+		qnManager.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+
+		s.Eventually(func() bool {
+			info, ok := observer.distribution.Get(1)
+			return ok && info.Version == 1
+		}, time.Second, 10*time.Millisecond)
+	})
 }
 
 func TestFileResourceObserverSuite(t *testing.T) {

@@ -47,9 +47,10 @@ type (
 		models map[string]*cachedXGBoostModel
 		sf     conc.Singleflight[*cachedXGBoostModel]
 
-		loader        xgboostModelLoader
-		closer        xgboostModelCloser
-		onModelStored func()
+		loader                 xgboostModelLoader
+		closer                 xgboostModelCloser
+		checkFileResourceReady func() error
+		onModelStored          func()
 	}
 
 	cachedXGBoostModel struct {
@@ -83,9 +84,10 @@ func init() {
 
 func newXGBoostModelCache(loader xgboostModelLoader, closer xgboostModelCloser) *xgboostModelCache {
 	cache := &xgboostModelCache{
-		models: make(map[string]*cachedXGBoostModel),
-		loader: loader,
-		closer: closer,
+		models:                 make(map[string]*cachedXGBoostModel),
+		loader:                 loader,
+		closer:                 closer,
+		checkFileResourceReady: fileresource.CheckReady,
 	}
 	cache.resources.Store(map[string]*fileresource.ResolvedFileResource{})
 	return cache
@@ -128,6 +130,12 @@ func (c *xgboostModelCache) resolveResource(name string) (*fileresource.Resolved
 	resources, _ := c.resources.Load().(map[string]*fileresource.ResolvedFileResource)
 	resource, ok := resources[name]
 	if !ok || resource == nil {
+		if c.checkFileResourceReady == nil {
+			return nil, merr.WrapErrServiceInternalMsg("xgboost: file resource readiness checker is nil")
+		}
+		if err := c.checkFileResourceReady(); err != nil {
+			return nil, err
+		}
 		return nil, merr.WrapErrParameterInvalidMsg("xgboost: file resource %q not found", name)
 	}
 	resolved := *resource

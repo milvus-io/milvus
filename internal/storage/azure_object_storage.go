@@ -46,6 +46,7 @@ func newAzureObjectStorageWithConfig(ctx context.Context, c *objectstorage.Confi
 // BlobReader is implemented because Azure's stream body does not have ReadAt and Seek interfaces.
 // BlobReader is not concurrency safe.
 type BlobReader struct {
+	ctx             context.Context
 	client          *blockblob.Client
 	position        int64
 	body            io.ReadCloser
@@ -53,20 +54,18 @@ type BlobReader struct {
 	needResetStream bool
 }
 
-func NewBlobReader(client *blockblob.Client, offset int64) (*BlobReader, error) {
-	return &BlobReader{client: client, position: offset, needResetStream: true}, nil
+func NewBlobReader(ctx context.Context, client *blockblob.Client, offset int64) (*BlobReader, error) {
+	return &BlobReader{ctx: ctx, client: client, position: offset, needResetStream: true}, nil
 }
 
 func (b *BlobReader) Read(p []byte) (n int, err error) {
-	ctx := context.TODO()
-
 	if b.needResetStream {
 		opts := &azblob.DownloadStreamOptions{
 			Range: blob.HTTPRange{
 				Offset: b.position,
 			},
 		}
-		object, err := b.client.DownloadStream(ctx, opts)
+		object, err := b.client.DownloadStream(b.ctx, opts)
 		if err != nil {
 			return 0, err
 		}
@@ -133,7 +132,7 @@ func (b *BlobReader) Size() (int64, error) {
 }
 
 func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
-	return NewBlobReader(AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName), offset)
+	return NewBlobReader(ctx, AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName), offset)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
