@@ -334,6 +334,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
             array_offsets_map;
         std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings;
+        std::unordered_map<FieldId, SealedIndexingEntryPtr> vector_indexings;
+        std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
+            vec_binlog_config;
         std::unordered_set<FieldId> ngram_fields;
         std::unordered_map<
             FieldId,
@@ -1251,7 +1254,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     ValidResult
     FilterVectorValidOffsetsFromIndex(milvus::OpContext* op_ctx,
-                                      FieldId field_id,
+                                      const SealedIndexingEntry& entry,
                                       const int64_t* seg_offsets,
                                       int64_t count) const;
 
@@ -1336,8 +1339,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         StagedStateCommitter* committer = nullptr);
 
     bool
-    IsIndexRefineEnabledLocked(milvus::OpContext* op_ctx,
-                               FieldId field_id) const;
+    IsIndexRefineEnabledLocked(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const std::shared_ptr<const RuntimeResourceState>& runtime) const;
 
     void
     prefetch_chunks_locked(milvus::OpContext* op_ctx, FieldId field_id) const;
@@ -1379,6 +1384,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     std::shared_ptr<const TimestampData>
     CaptureTimestampSnapshot() const;
+
+    static SealedIndexingEntryPtr
+    BuildVectorIndexEntry(const MetricType& metric_type,
+                          index::CacheIndexBasePtr indexing);
+
+    static bool
+    RuntimeVectorIndexReady(const RuntimeResourceState* runtime,
+                            FieldId field_id);
+
+    static SealedIndexingEntryPtr
+    GetVectorIndexing(
+        const std::shared_ptr<const RuntimeResourceState>& runtime,
+        FieldId field_id);
+
+    static void
+    DropVectorIndexing(RuntimeResourceState& runtime, FieldId field_id);
+
+    static void
+    ClearVectorIndexings(RuntimeResourceState& runtime);
 
     std::shared_ptr<PublishedSegmentState>
     BuildNextPublishedState(
@@ -1431,26 +1455,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                        const MetricType& metric_type,
                                        index::CacheIndexBasePtr indexing,
                                        bool drop_existing) {
-            vector_index_mutations_.push_back(VectorIndexMutation{
-                field_id,
-                metric_type,
-                std::move(indexing),
-                nullptr,
-                drop_existing,
-                false,
-            });
+            if (drop_existing) {
+                DropVectorIndexing(*runtime_, field_id);
+                runtime_->vec_binlog_config.erase(field_id);
+            }
+            runtime_->vector_indexings[field_id] =
+                BuildVectorIndexEntry(metric_type, std::move(indexing));
         }
 
         void
         StageVectorIndexDropLocked(FieldId field_id) {
-            vector_index_mutations_.push_back(VectorIndexMutation{
-                field_id,
-                MetricType{},
-                nullptr,
-                nullptr,
-                true,
-                false,
-            });
+            DropVectorIndexing(*runtime_, field_id);
+            runtime_->vec_binlog_config.erase(field_id);
         }
 
         void
@@ -1459,56 +1475,24 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             const MetricType& metric_type,
             index::CacheIndexBasePtr indexing,
             std::unique_ptr<VecIndexConfig> binlog_config) {
-            vector_index_mutations_.push_back(VectorIndexMutation{
-                field_id,
-                metric_type,
-                std::move(indexing),
-                std::move(binlog_config),
-                false,
-                true,
-            });
+            runtime_->vector_indexings[field_id] =
+                BuildVectorIndexEntry(metric_type, std::move(indexing));
+            runtime_->vec_binlog_config[field_id] =
+                std::shared_ptr<const VecIndexConfig>(std::move(binlog_config));
         }
 
         void
         Publish(const std::shared_ptr<const PublishedSegmentState>& current,
                 const StateDelta& delta) {
             std::lock_guard<std::mutex> lock(mutex_);
-            std::unique_lock<std::shared_mutex> segment_lock(segment_.mutex_);
-            for (auto& mutation : vector_index_mutations_) {
-                if (mutation.drop_existing) {
-                    segment_.vector_indexings_.drop_field_indexing(
-                        mutation.field_id);
-                }
-                if (mutation.indexing != nullptr) {
-                    segment_.vector_indexings_.append_field_indexing(
-                        mutation.field_id,
-                        mutation.metric_type,
-                        std::move(mutation.indexing));
-                }
-                if (mutation.update_binlog_config) {
-                    segment_.vec_binlog_config_[mutation.field_id] =
-                        std::move(mutation.binlog_config);
-                }
-            }
-            vector_index_mutations_.clear();
             segment_.PublishState(
                 segment_.BuildNextPublishedState(current, delta));
         }
 
      private:
-        struct VectorIndexMutation {
-            FieldId field_id;
-            MetricType metric_type;
-            index::CacheIndexBasePtr indexing;
-            std::unique_ptr<VecIndexConfig> binlog_config;
-            bool drop_existing;
-            bool update_binlog_config;
-        };
-
         ChunkedSegmentSealedImpl& segment_;
         RuntimeResourceState* runtime_;
         PublishedSegmentState* staged_state_;
-        std::vector<VectorIndexMutation> vector_index_mutations_;
         std::mutex mutex_;
     };
 
@@ -1696,7 +1680,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const RuntimeResourceState>& runtime = nullptr);
 
     void
-    PublishBinlogIndexReadyLocked(FieldId field_id, bool has_raw_data);
+    PublishBinlogIndexReadyLocked(
+        FieldId field_id,
+        bool has_raw_data,
+        const std::shared_ptr<const RuntimeResourceState>& runtime = nullptr);
 
     void
     PublishVectorIndexFactsLocked(FieldId field_id,
@@ -2168,8 +2155,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // scalar field index
     folly::Synchronized<std::unordered_map<FieldId, index::CacheIndexBasePtr>>
         scalar_indexings_;
-    // vector field index
-    SealedIndexingRecord vector_indexings_;
 
     // inserted fields data and row_ids, timestamps
     InsertRecord<true> insert_record_;
@@ -2214,8 +2199,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // only useful in binlog
     IndexMetaPtr col_index_meta_;
     SegcoreConfig segcore_config_;
-    std::unordered_map<FieldId, std::unique_ptr<VecIndexConfig>>
-        vec_binlog_config_;
 
     SegmentStats stats_{};
 
@@ -2406,8 +2389,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     TestVectorIndexReady(FieldId field_id) const {
-        std::shared_lock lck(mutex_);
-        return vector_indexings_.is_ready(field_id);
+        auto runtime = CaptureRuntimeResourceState();
+        return GetVectorIndexing(runtime, field_id) != nullptr;
     }
 
     void
