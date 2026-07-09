@@ -2318,8 +2318,8 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 func Test_ParseGuaranteeTs(t *testing.T) {
 	strongTs := typeutil.Timestamp(0)
 	boundedTs := typeutil.Timestamp(2)
-	tsNow := tsoutil.GetCurrentTime()
-	tsMax := tsoutil.GetCurrentTime()
+	tsNow := tsoutil.ComposeTSByTime(time.Now())
+	tsMax := tsoutil.ComposeTSByTime(time.Now())
 
 	assert.Equal(t, tsMax, parseGuaranteeTs(strongTs, tsMax))
 	ratio := Params.CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
@@ -2336,8 +2336,8 @@ func Test_ParseGuaranteeTsFromConsistency(t *testing.T) {
 
 	tsDefault := typeutil.Timestamp(0)
 	tsEventually := typeutil.Timestamp(1)
-	tsNow := tsoutil.GetCurrentTime()
-	tsMax := tsoutil.GetCurrentTime()
+	tsNow := tsoutil.ComposeTSByTime(time.Now())
+	tsMax := tsoutil.ComposeTSByTime(time.Now())
 
 	assert.Equal(t, tsMax, parseGuaranteeTsFromConsistency(tsDefault, tsMax, strong))
 	ratio := Params.CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)

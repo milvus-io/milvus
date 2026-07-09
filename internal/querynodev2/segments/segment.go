@@ -55,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -1273,85 +1272,6 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 		mlog.Warn(ctx, "load index failed", mlog.Err(err))
 	}
 	return err
-}
-
-func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper, basePath string) error {
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-	defer s.ptrLock.Unpin()
-
-	if !paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
-		mlog.Warn(ctx, "load json key index failed, json key stats is not enabled")
-		return nil
-	}
-
-	// for compatibility, we only support load data format version equal to the current data format version
-	// if the data format version is less than the current version, wait for trigger a stats task again
-	if jsonKeyStats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
-		mlog.Warn(ctx, "load json key index failed dataformat invalid", mlog.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), mlog.Int64("field id", jsonKeyStats.GetFieldID()), mlog.Any("json key logs", jsonKeyStats))
-		return nil
-	}
-	mlog.Info(ctx, "load json key index", mlog.Int64("field id", jsonKeyStats.GetFieldID()), mlog.Any("json key logs", jsonKeyStats))
-	s.fieldJSONStatsMu.RLock()
-	_, loaded := s.fieldJSONStats[jsonKeyStats.GetFieldID()]
-	s.fieldJSONStatsMu.RUnlock()
-	if loaded {
-		mlog.Warn(ctx, "JsonKeyIndexStats already loaded", mlog.Int64("field id", jsonKeyStats.GetFieldID()), mlog.Any("json key logs", jsonKeyStats))
-		return nil
-	}
-
-	f, err := schemaHelper.GetFieldFromID(jsonKeyStats.GetFieldID())
-	if err != nil {
-		return err
-	}
-
-	// JSON key stats should based on scala field's warmup policy
-	warmupPolicy := getScalarDataWarmupPolicy(f)
-
-	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
-		FieldID:      jsonKeyStats.GetFieldID(),
-		Version:      jsonKeyStats.GetVersion(),
-		BuildID:      jsonKeyStats.GetBuildID(),
-		Files:        jsonKeyStats.GetFiles(),
-		Schema:       f,
-		CollectionID: s.Collection(),
-		PartitionID:  s.Partition(),
-		LoadPriority: s.loadInfo.Load().GetPriority(),
-		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
-		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
-		StatsSize:    jsonKeyStats.GetLogSize(),
-		WarmupPolicy: warmupPolicy,
-		BasePath:     basePath,
-	}
-
-	marshaled, err := proto.Marshal(cgoProto)
-	if err != nil {
-		return err
-	}
-
-	guard := segcore.NewCancellationGuard(ctx)
-	defer guard.Close()
-
-	var status C.CStatus
-	_, _ = GetLoadPool().Submit(func() (any, error) {
-		traceCtx := ParseCTraceContext(ctx)
-		status = C.LoadJsonKeyIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)), (C.CLoadCancellationSource)(guard.Source()))
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "Load JsonKeyStats failed"); err != nil {
-		return err
-	}
-	s.fieldJSONStatsMu.Lock()
-	s.fieldJSONStats[jsonKeyStats.GetFieldID()] = &querypb.JsonStatsInfo{
-		FieldID:           jsonKeyStats.GetFieldID(),
-		DataFormatVersion: jsonKeyStats.GetJsonKeyStatsDataFormat(),
-		BuildID:           jsonKeyStats.GetBuildID(),
-		VersionID:         jsonKeyStats.GetVersion(),
-	}
-	s.fieldJSONStatsMu.Unlock()
-	return nil
 }
 
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {

@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -28,8 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -128,6 +131,18 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 
+	// Materialize the bound index meta for the new function output field BEFORE the
+	// broadcast, so the WAL message carries a complete, replay-deterministic index
+	// definition and the ack callback stays a pure idempotent apply.
+	var boundFieldIndexes []*indexpb.FieldIndex
+	if plan.Kind == schemautil.AlterSchemaAddFunctionField {
+		fieldIndex, err := c.prepareBoundFieldIndex(ctx, coll, plan)
+		if err != nil {
+			return err
+		}
+		boundFieldIndexes = append(boundFieldIndexes, fieldIndex)
+	}
+
 	// Broadcast.
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -148,8 +163,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema:     schema,
-				Properties: properties,
+				Schema:            schema,
+				Properties:        properties,
+				BoundFieldIndexes: boundFieldIndexes,
 			},
 		}).
 		WithBroadcast(channels).
@@ -158,6 +174,91 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		return err
 	}
 	return nil
+}
+
+// prepareBoundFieldIndex materializes the index meta bound to the newly added
+// function-output field, strictly BEFORE the DDL broadcast: index id/name are
+// allocated here and serialized into the WAL message so that the ack-callback
+// apply is a pure idempotent write (a replayed callback rebuilds the identical
+// index), and every input-dependent rejection happens before anything commits.
+func (c *Core) prepareBoundFieldIndex(ctx context.Context, coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) (*indexpb.FieldIndex, error) {
+	indexParamsMap, err := indexparamcheck.PrepareFunctionOutputIndexParams(
+		plan.Function.GetType(), plan.Field.GetName(), plan.IndexExtraParams)
+	if err != nil {
+		return nil, err
+	}
+	// The index type must have a registered checker — an unknown type would pass
+	// structural validation, get persisted via the ack callback, and then never
+	// build. Proxy already rejects this, but the check must live pre-broadcast
+	// for callers that reach rootcoord directly.
+	indexType := indexParamsMap[common.IndexTypeKey]
+	if checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType); err != nil || indexparamcheck.IsHYBRIDChecker(checker) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"invalid index type %s for the bound index of function output field %q",
+			indexType, plan.Field.GetName())
+	}
+	// Full field-aware validation (params size, dimension fill+match, data-type
+	// compatibility, train params), identical to the create_index path — an index
+	// that cannot build must never be persisted through the ack callback.
+	if err := indexparamcheck.ValidateFieldIndexParams(plan.Field, indexParamsMap); err != nil {
+		return nil, err
+	}
+
+	indexName := plan.IndexName
+	if indexName == "" {
+		indexName = plan.Field.GetName()
+	}
+	// Name-format rule, same as the proxy path — enforced here too for callers
+	// that reach rootcoord directly.
+	if err := indexparamcheck.ValidateIndexName(indexName); err != nil {
+		return nil, err
+	}
+	// Reject index-name conflicts with existing indexes (the field itself is new,
+	// so only cross-field name collisions are possible).
+	resp, err := c.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: coll.CollectionID,
+	})
+	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+		if !merr.ErrIndexNotFound.Is(err) {
+			return nil, merr.Wrap(err, "failed to list existing indexes for bound index preparation")
+		}
+	} else {
+		for _, info := range resp.GetIndexInfos() {
+			if info.GetIndexName() == indexName {
+				return nil, merr.WrapErrParameterInvalidMsg("index name %s already exists in collection", indexName)
+			}
+		}
+	}
+
+	indexID, err := c.idAllocator.AllocOne()
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to allocate index id for bound index")
+	}
+	createTime, err := c.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to allocate timestamp for bound index")
+	}
+
+	indexParams := funcutil.Map2KeyValuePair(indexParamsMap)
+	// Field type params minus per-field mmap/warmup keys, mirroring datacoord CreateIndex.
+	typeParams := lo.Filter(plan.Field.GetTypeParams(), func(kv *commonpb.KeyValuePair, _ int) bool {
+		return kv.GetKey() != common.MmapEnabledKey && kv.GetKey() != common.WarmupKey
+	})
+	index := &model.Index{
+		CollectionID:    coll.CollectionID,
+		FieldID:         plan.Field.GetFieldID(),
+		IndexID:         indexID,
+		IndexName:       indexName,
+		TypeParams:      typeParams,
+		IndexParams:     indexParams,
+		CreateTime:      createTime,
+		IsAutoIndex:     false,
+		UserIndexParams: plan.IndexExtraParams,
+	}
+	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
+		return nil, err
+	}
+	return model.MarshalIndexModel(index), nil
 }
 
 func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) error {

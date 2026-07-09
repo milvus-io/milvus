@@ -234,7 +234,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 
 	v := &Value{
 		PK:        NewVarCharPrimaryKey("0"),
-		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 		Value:     genRowWithBM25(0),
 	}
 	rec, err := ValueSerializer([]*Value{v}, s.schema)
@@ -460,7 +460,7 @@ func (s *PackedBinlogRecordSuite) TestV3StatsWrittenUnderBasePath() {
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),

@@ -146,7 +146,7 @@ func (s *SyncTaskSuite) getDeleteBuffer() *storage.DeleteData {
 	buf := &storage.DeleteData{}
 	for i := 0; i < 10; i++ {
 		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		ts := tsoutil.ComposeTSByTime(time.Now(), 0)
+		ts := tsoutil.ComposeTSByTime(time.Now())
 		buf.Append(pk, ts)
 	}
 	return buf

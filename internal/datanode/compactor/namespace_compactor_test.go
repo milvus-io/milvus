@@ -91,7 +91,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		for j := 0; j < rows; j++ {
 			v := map[int64]interface{}{
 				common.RowIDField:     int64(j),
-				common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+				common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 				100:                   int64(j),
 				101:                   int64(j),
 			}

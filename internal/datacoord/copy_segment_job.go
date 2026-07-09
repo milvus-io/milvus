@@ -69,7 +69,7 @@ func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAc
 			// Set cleanup ts based on copy segment task retention
 			dur := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
 			cleanupTime := time.Now().Add(dur)
-			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
+			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime)
 			job.(*copySegmentJob).CleanupTs = cleanupTs
 			mlog.Info(context.TODO(), "set copy segment job cleanup ts",
 				mlog.FieldJobID(job.GetJobId()),

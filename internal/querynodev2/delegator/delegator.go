@@ -1139,7 +1139,7 @@ func (sd *shardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
 		// If the empty timetick is filtered, the load operation will be blocked.
 		// We want the delegator to catch up the streaming data, and load done as soon as possible,
 		// so we always return the current time as the latest required mvcc timestamp.
-		return tsoutil.GetCurrentTime()
+		return tsoutil.ComposeTSByTime(time.Now())
 	}
 	return sd.latestRequiredMVCCTimeTick.Load()
 }

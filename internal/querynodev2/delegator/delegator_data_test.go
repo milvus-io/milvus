@@ -187,7 +187,7 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 	}, &querypb.LoadMetaInfo{
 		LoadType:        querypb.LoadType_LoadCollection,
 		PartitionIDs:    []int64{1001, 1002},
-		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0),
+		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now()),
 	})
 }
 
@@ -221,7 +221,7 @@ func (s *DelegatorDataSuite) genTextCollection() {
 	}, nil, &querypb.LoadMetaInfo{
 		LoadType:        querypb.LoadType_LoadCollection,
 		PartitionIDs:    []int64{1001},
-		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0),
+		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now()),
 	})
 }
 
@@ -258,7 +258,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 			InputFieldIds:  []int64{102},
 			OutputFieldIds: []int64{101},
 		}},
-	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
+	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)

@@ -27,9 +27,17 @@ func TestWALLifetime(t *testing.T) {
 		resource.OptMixCoordClient(fMixcoord),
 	)
 
+	// Gate the term-11 open so the background task cannot converge while the
+	// canceled-context assertions below run: the waiters must actually wait
+	// (and observe the cancellation) instead of racing with the background
+	// convergence.
+	term11OpenGate := make(chan struct{})
 	opener := mock_wal.NewMockOpener(t)
 	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
+			if oo.Channel.Term == 11 {
+				<-term11OpenGate
+			}
 			l := mock_wal.NewMockWAL(t)
 			l.EXPECT().Channel().Return(oo.Channel)
 			l.EXPECT().Close().Return()
@@ -100,6 +108,9 @@ func TestWALLifetime(t *testing.T) {
 
 	err = wlt.Remove(ctx, 11)
 	assert.ErrorIs(t, err, context.Canceled)
+
+	// Release the background convergence of term 11.
+	close(term11OpenGate)
 
 	err = wlt.Open(context.Background(), types.PChannelInfo{
 		Name: channel,

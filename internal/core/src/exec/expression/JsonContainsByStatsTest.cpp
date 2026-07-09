@@ -229,7 +229,10 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
                                           field_id,
                                           build_id,
                                           version_id);
-    segment->LoadJsonStats(json_fid, stats);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
 
     // Load raw field data into sealed segment for execution
     std::vector<milvus::Json> jsons;
@@ -312,7 +315,10 @@ TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
                                           build_id,
                                           version_id,
                                           &valid_data);
-    segment->LoadJsonStats(json_fid, stats);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
 
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);

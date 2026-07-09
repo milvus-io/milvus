@@ -100,7 +100,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 			Vchannels:    []string{"ch0"},
 			State:        internalpb.ImportJobState_Pending,
 			TimeoutTs:    1000,
-			CleanupTs:    tsoutil.GetCurrentTime(),
+			CleanupTs:    tsoutil.ComposeTSByTime(time.Now()),
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{
@@ -615,8 +615,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 			ReadyVchannels: []string{"ch0"},
 			Vchannels:      []string{"ch0", "ch1"},
 			State:          internalpb.ImportJobState_Pending,
-			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
-			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
+			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{
@@ -663,8 +663,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 			ReadyVchannels: []string{"ch1"},
 			Vchannels:      []string{"ch0", "ch1"},
 			State:          internalpb.ImportJobState_Pending,
-			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
-			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
+			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{

@@ -283,6 +283,37 @@ ProcessFuturesInOrder(std::vector<std::future<T>>& futures,
     }
 }
 
+// Best-effort drain for cleanup paths (catch blocks / scope guards): wait for
+// every still-valid future and swallow its exception, so that background
+// tasks referencing the caller's stack state finish before the caller
+// unwinds (see #46958). Unlike WaitAllFutures, this never throws — use it
+// when another exception is already propagating.
+template <typename FutureContainer>
+void
+DrainFutures(FutureContainer& futures) noexcept {
+    for (auto& future : futures) {
+        if (!future.valid()) {
+            continue;
+        }
+        try {
+            future.get();
+        } catch (...) {
+        }
+    }
+}
+
+template <typename T>
+void
+DrainFuture(std::future<T>& future) noexcept {
+    if (!future.valid()) {
+        return;
+    }
+    try {
+        future.get();
+    } catch (...) {
+    }
+}
+
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,

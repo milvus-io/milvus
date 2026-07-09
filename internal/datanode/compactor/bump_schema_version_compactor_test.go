@@ -424,7 +424,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithFie
 	for i := 0; i < 3; i++ {
 		value := map[int64]interface{}{
 			common.RowIDField:     segID + int64(i),
-			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			common.TimeStampField: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			100:                   segID + int64(i),
 			101:                   "test string " + string(rune('0'+i)),
 		}
@@ -433,7 +433,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) initSegBufferForSchemaBumpWithFie
 		}
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(segID + int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     value,
 		}
 		err = multiSegWriter.WriteValue(&v)
@@ -472,6 +472,130 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionSu
 				"V3 schema bump insert binlog (fieldID=%d) must have non-zero LogID", materializedOutputFieldID)
 		}
 	}
+}
+
+// buildTextLOBTask builds a minimal schema-bump task whose schema optionally has a
+// DataType_Text field (the LOB-carrying input of a BM25 function). Only plan +
+// compactionParams are needed to exercise the LOB wiring (the cgo manifest helpers
+// are mocked in the tests below), so no chunk manager is required.
+func (s *BumpSchemaVersionCompactionTaskSuite) buildTextLOBTask(withTextField bool) *bumpSchemaVersionCompactionTask {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}
+	schema := &schemapb.CollectionSchema{Name: "text_lob_bump", Fields: fields}
+	if withTextField {
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			&schemapb.FieldSchema{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		)
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name: "bm25", Id: 100, Type: schemapb.FunctionType_BM25,
+			InputFieldNames: []string{"text"}, InputFieldIds: []int64{101},
+			OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{102},
+		}}
+	}
+	plan := &datapb.CompactionPlan{
+		PlanID:    999,
+		Type:      datapb.CompactionType_BumpSchemaVersionCompaction,
+		Schema:    schema,
+		TotalRows: 3,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+			CollectionID: 1, PartitionID: 1, SegmentID: 100,
+			StorageVersion: storage.StorageV3, Manifest: "manifest",
+		}},
+	}
+	params := compaction.GenParams()
+	params.StorageVersion = storage.StorageV3
+	return &bumpSchemaVersionCompactionTask{
+		ctx:              context.Background(),
+		plan:             plan,
+		compactionParams: params,
+	}
+}
+
+// TestInitLOBCompactionContextTextFieldReuseAll: a schema-bump on a segment with a
+// TEXT field forces REUSE_ALL for that field (never REWRITE_ALL), so its existing
+// LOB data is carried by reference.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextTextFieldReuseAll() {
+	task := s.buildTextLOBTask(true)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 3, ValidRows: 3}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Require().NotNil(task.lobContext)
+	s.True(task.lobContext.HasReuseAllFields(), "TEXT field must be forced REUSE_ALL for schema bump")
+	s.True(task.lobContext.IsReuseAll(101))
+}
+
+// TestInitLOBCompactionContextInlineTextReuseAll: even with NO LOB files (inline
+// TEXT < threshold), the forced strategy still produces a REUSE_ALL decision, so
+// the writer is told WithTextRefsAsBinary (HasReuseAllFields true) and the inline
+// bytes are preserved.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextInlineTextReuseAll() {
+	task := s.buildTextLOBTask(true)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{}, nil, // no LOB files -> inline TEXT
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Require().NotNil(task.lobContext)
+	s.True(task.lobContext.HasReuseAllFields(), "inline TEXT must still force REUSE_ALL so WithTextRefsAsBinary is applied")
+}
+
+// TestInitLOBCompactionContextNoTextFieldNoop: schemas without a TEXT field skip
+// the LOB path entirely (lobContext stays nil).
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextNoTextFieldNoop() {
+	task := s.buildTextLOBTask(false)
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Nil(task.lobContext, "no TEXT field -> lobContext stays nil (no-op)")
+}
+
+// TestApplyLOBCompactionMergesRefsIntoManifest: the output manifest is updated with
+// the merged LOB references (REUSE_ALL).
+func (s *BumpSchemaVersionCompactionTaskSuite) TestApplyLOBCompactionMergesRefsIntoManifest() {
+	task := s.buildTextLOBTask(true)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 3, ValidRows: 3}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+	s.Require().NoError(task.initLOBCompactionContext(context.Background()))
+	s.Require().True(task.lobContext.HasReuseAllFields())
+
+	// Capture the chained manifest value inside the closure at call time rather than
+	// storing the argument map and reading it back after applyLOBCompaction returns:
+	// holding the map reference and indexing it later trips the runtime "concurrent
+	// map read and map write" detector under -race.
+	var gotChainedManifest string
+	applyPatch := mockey.Mock(compaction.ApplyLobCompactionToManifests).To(
+		func(_ *compaction.LOBCompactionContext, outputManifests map[int64]string, _ *indexpb.StorageConfig) (map[int64]string, error) {
+			gotChainedManifest = outputManifests[200]
+			return map[int64]string{200: "merged-manifest"}, nil
+		}).Build()
+	defer applyPatch.UnPatch()
+
+	out := &datapb.CompactionSegment{SegmentID: 200, Manifest: "orig-manifest"}
+	err := task.applyLOBCompaction(context.Background(), out)
+	s.NoError(err)
+	s.Equal("merged-manifest", out.GetManifest(), "output manifest must be updated with merged LOB refs")
+	s.Equal("orig-manifest", gotChainedManifest, "merge must chain on the segment's current manifest")
+}
+
+// TestApplyLOBCompactionNilContextNoop: no LOB context (e.g. no TEXT fields) -> the
+// output manifest is left unchanged.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestApplyLOBCompactionNilContextNoop() {
+	task := s.buildTextLOBTask(true) // no init -> lobContext nil
+	out := &datapb.CompactionSegment{SegmentID: 200, Manifest: "orig-manifest"}
+	err := task.applyLOBCompaction(context.Background(), out)
+	s.NoError(err)
+	s.Equal("orig-manifest", out.GetManifest())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteDropsExpirQuantilesWhenTTLFieldRemoved() {
@@ -624,10 +748,106 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats(
 	s.Contains(segment.GetManifest(), "with-text-stats")
 }
 
+// TestFullRewriteFillsMissingNullableTextAsBinary is the real-cgo regression for the
+// datanode crash-loop reported on PR #51125: adding a nullable TEXT field and then
+// dropping any field routes to runFullSchemaRewrite, where the new TEXT column is
+// absent from the source segment. The packed writer types TEXT columns as binary
+// (WithTextRefsAsBinary), so the materializer must backfill the missing TEXT column
+// as a binary null array; a utf8 fill makes array.NewRecord panic and crash-loops the
+// datanode. Unlike the mocked-writer tests, this drives the actual packed writer so
+// the fill type is exercised end to end.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteFillsMissingNullableTextAsBinary() {
+	const newTextFieldID = int64(104)
+	// Target schema gains a nullable TEXT field absent from the source segment.
+	// enable_match is intentionally omitted so createTextIndex skips it and the test
+	// exercises only the record-write path where the panic occurred.
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newTextFieldID,
+		Name:     "note",
+		DataType: schemapb.DataType_Text,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "65535"},
+		},
+	})
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+
+	// Source segment carries a dropped field (103) -> droppedFieldIDs>0 -> full rewrite.
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+
+	// The backfilled TEXT column must be materialized into the rewritten segment (as a
+	// binary null column), either as a top-level field or a column-group child.
+	found := false
+	for _, fb := range segment.GetInsertLogs() {
+		if fb.GetFieldID() == newTextFieldID {
+			found = true
+			break
+		}
+		for _, cf := range fb.GetChildFields() {
+			if cf == newTextFieldID {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	s.True(found, "missing nullable TEXT field must be backfilled into the rewritten segment")
+}
+
+// TestFullRewriteMergesLOBRefsBeforeBuildingTextIndex guards the ordering fixed for
+// liliu-z's review. createTextIndex reads the TEXT column through the output segment's
+// manifest, so applyLOBCompaction -- which merges the carried source LOB file references
+// into that manifest -- must run BEFORE createTextIndex. Otherwise the text-match index
+// for an out-of-line (>=64KB) TEXT field is built against a manifest that does not yet
+// list the LOB files, silently missing that data. Mirrors sort/mix. We stamp the manifest
+// on LOB apply and assert createTextIndex observes the stamped (LOB-merged) manifest; the
+// old order (createTextIndex first) fails this assertion.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMergesLOBRefsBeforeBuildingTextIndex() {
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	const lobStamp = "-lob-merged"
+	applyPatch := mockey.Mock((*bumpSchemaVersionCompactionTask).applyLOBCompaction).
+		To(func(_ *bumpSchemaVersionCompactionTask, _ context.Context, seg *datapb.CompactionSegment) error {
+			seg.Manifest = seg.GetManifest() + lobStamp
+			return nil
+		}).Build()
+	defer applyPatch.UnPatch()
+
+	var manifestAtTextIndex string
+	textIndexPatch := mockey.Mock(createTextIndex).
+		To(func(_ context.Context, _ storage.ChunkManager, _ *datapb.CompactionPlan, _ compaction.Params,
+			_ int64, _ int64, _ int64, _ int64, _ int64, seg *datapb.CompactionSegment,
+		) (map[int64]*datapb.TextIndexStats, error) {
+			manifestAtTextIndex = seg.GetManifest()
+			return map[int64]*datapb.TextIndexStats{}, nil
+		}).Build()
+	defer textIndexPatch.UnPatch()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Contains(manifestAtTextIndex, lobStamp,
+		"applyLOBCompaction must run before createTextIndex so the text-match index is built "+
+			"against a manifest that already references the carried LOB files")
+}
+
 func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsDeletedAndExpiredRows() {
 	currentTime := getMilvusBirthday().Add(time.Hour)
-	insertTs := tsoutil.ComposeTSByTime(currentTime, 0)
-	oldTs := tsoutil.ComposeTSByTime(currentTime.Add(-2*time.Minute), 0)
+	insertTs := tsoutil.ComposeTSByTime(currentTime)
+	oldTs := tsoutil.ComposeTSByTime(currentTime.Add(-2 * time.Minute))
 	expiredByTTLField := currentTime.Add(-time.Minute).UnixMicro()
 	keptTTLField := currentTime.Add(time.Hour).UnixMicro()
 	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
@@ -645,7 +865,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsD
 		},
 		len: 5,
 	}
-	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second))
 	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{int64(2): deleteTs}, int64(time.Minute), currentTime, 0)
 
 	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true, nil)

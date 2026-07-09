@@ -5438,7 +5438,7 @@ func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
 func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T) {
 	ctx := context.Background()
 	startTime := time.Date(2026, time.May, 20, 12, 0, 0, 0, time.UTC).Unix()
-	expectedCreateTS := tsoutil.ComposeTSByTime(time.Unix(startTime, 0), 7)
+	expectedCreateTS := tsoutil.ComposeTSByTimeWithLogical(time.Unix(startTime, 0), 7)
 
 	t.Run("mix", func(t *testing.T) {
 		meta := newCompactionCreateTsTestMeta(

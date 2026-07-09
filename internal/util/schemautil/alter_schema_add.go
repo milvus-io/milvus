@@ -17,9 +17,11 @@
 package schemautil
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type AlterSchemaAddKind int
@@ -34,6 +36,12 @@ type AlterSchemaAddPlan struct {
 	Kind     AlterSchemaAddKind
 	Field    *schemapb.FieldSchema
 	Function *schemapb.FunctionSchema
+	// Index meta bound to the newly added field, parsed from
+	// FieldInfo.index_name/extra_params. Mandatory for vector-type function
+	// output fields so that bump-schema-version compaction results are never
+	// blocked on a missing vector index.
+	IndexName        string
+	IndexExtraParams []*commonpb.KeyValuePair
 }
 
 func (p *AlterSchemaAddPlan) HasField() bool {
@@ -59,12 +67,16 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	}
 
 	var field *schemapb.FieldSchema
+	var indexName string
+	var indexExtraParams []*commonpb.KeyValuePair
 	if len(fieldInfos) == 1 {
 		fieldInfo := fieldInfos[0]
 		if fieldInfo == nil || fieldInfo.GetFieldSchema() == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("fieldSchema is nil in fieldInfos")
 		}
 		field = fieldInfo.GetFieldSchema()
+		indexName = fieldInfo.GetIndexName()
+		indexExtraParams = fieldInfo.GetExtraParams()
 	}
 
 	var function *schemapb.FunctionSchema
@@ -77,7 +89,13 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 
 	switch {
 	case field != nil && function != nil:
-		return &AlterSchemaAddPlan{Kind: AlterSchemaAddFunctionField, Field: field, Function: function}, nil
+		return &AlterSchemaAddPlan{
+			Kind:             AlterSchemaAddFunctionField,
+			Field:            field,
+			Function:         function,
+			IndexName:        indexName,
+			IndexExtraParams: indexExtraParams,
+		}, nil
 	case field != nil:
 		return &AlterSchemaAddPlan{Kind: AlterSchemaAddField, Field: field}, nil
 	case function != nil:
@@ -111,6 +129,17 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 				"function output field %q must be the newly-added field %q",
 				function.GetOutputFieldNames()[0],
 				plan.Field.GetName(),
+			)
+		}
+		// A vector output field MUST come with bound index params: without an index
+		// meta, bump-schema-version compaction results can never pass the
+		// indexed-visibility check and the whole backfill pipeline silently stalls.
+		if typeutil.IsVectorType(plan.Field.GetDataType()) && len(plan.IndexExtraParams) == 0 {
+			return merr.WrapErrParameterInvalidMsg(
+				"index params are required when adding function output field %q of vector type %s: "+
+					"provide index_type/metric_type (and params) in field_info.extra_params",
+				plan.Field.GetName(),
+				plan.Field.GetDataType().String(),
 			)
 		}
 		return nil

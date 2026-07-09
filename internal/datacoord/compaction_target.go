@@ -20,6 +20,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -376,7 +377,7 @@ func compactionTargetStateUpdate(target *compactionTarget, state datapb.TargetSt
 		if target.GetState() == state && target.GetInactivatedAtTS() != 0 {
 			return target.GetInactivatedAtTS(), false
 		}
-		return tsoutil.GetCurrentTime(), true
+		return tsoutil.ComposeTSByTime(time.Now()), true
 	}
 	if target.GetState() == state && target.GetInactivatedAtTS() == 0 {
 		return 0, false
@@ -386,7 +387,7 @@ func compactionTargetStateUpdate(target *compactionTarget, state datapb.TargetSt
 
 func compactionTargetInactivatedAtTS(state datapb.TargetState) uint64 {
 	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
-		return tsoutil.GetCurrentTime()
+		return tsoutil.ComposeTSByTime(time.Now())
 	}
 	return 0
 }

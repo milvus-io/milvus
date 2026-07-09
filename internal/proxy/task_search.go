@@ -322,7 +322,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.IsIterator = t.isIterator
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
-		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline)
 	}
 
 	// Set username of this search request for feature like task scheduling.
@@ -333,7 +333,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if collectionInfo.collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
-		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
 			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
