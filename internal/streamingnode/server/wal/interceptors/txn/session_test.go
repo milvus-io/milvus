@@ -166,9 +166,9 @@ func TestManager(t *testing.T) {
 func TestManagerRecoverAndFailAll(t *testing.T) {
 	resource.InitForTest(t)
 	now := time.Now()
-	beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now, 0), 10*time.Millisecond)
-	beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTime(now, 1), 10*time.Millisecond)
-	beginMsg3 := newImmutableBeginTxnMessageWithVChannel("v1", 3, tsoutil.ComposeTSByTime(now, 2), 10*time.Millisecond)
+	beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now), 10*time.Millisecond)
+	beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTimeWithLogical(now, 1), 10*time.Millisecond)
+	beginMsg3 := newImmutableBeginTxnMessageWithVChannel("v1", 3, tsoutil.ComposeTSByTimeWithLogical(now, 2), 10*time.Millisecond)
 	builders := map[message.TxnID]*message.ImmutableTxnMessageBuilder{
 		message.TxnID(1): message.NewImmutableTxnMessageBuilder(beginMsg1),
 		message.TxnID(2): message.NewImmutableTxnMessageBuilder(beginMsg2),
@@ -180,7 +180,7 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 		WithHeader(&message.InsertMessageHeader{}).
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().
-		WithTimeTick(tsoutil.ComposeTSByTime(now, 3)).
+		WithTimeTick(tsoutil.ComposeTSByTimeWithLogical(now, 3)).
 		WithLastConfirmedUseMessageID().
 		WithTxnContext(message.TxnContext{
 			TxnID:     message.TxnID(1),
@@ -306,8 +306,8 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 	t.Run("RollbackWithRecoveredSessions", func(t *testing.T) {
 		// Create a manager with recovered sessions
 		now := time.Now()
-		beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now, 0), 10*time.Minute)
-		beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTime(now, 1), 10*time.Minute)
+		beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now), 10*time.Minute)
+		beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTimeWithLogical(now, 1), 10*time.Minute)
 
 		builders := map[message.TxnID]*message.ImmutableTxnMessageBuilder{
 			message.TxnID(1): message.NewImmutableTxnMessageBuilder(beginMsg1),

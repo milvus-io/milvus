@@ -1357,13 +1357,13 @@ func TestShouldDropChannel(t *testing.T) {
 	myRoot := &myRootCoord{}
 	myRoot.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
 		Status:    merr.Success(),
-		Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+		Timestamp: tsoutil.ComposeTSByTime(time.Now()),
 		Count:     1,
 	}, nil)
 
 	myRoot.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
 		Status: merr.Success(),
-		ID:     int64(tsoutil.ComposeTSByTime(time.Now(), 0)),
+		ID:     int64(tsoutil.ComposeTSByTime(time.Now())),
 		Count:  1,
 	}, nil)
 

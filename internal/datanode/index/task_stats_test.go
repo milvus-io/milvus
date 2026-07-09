@@ -80,7 +80,7 @@ func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
 
 	v := storage.Value{
 		PK:        storage.NewInt64PrimaryKey(magic),
-		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 		Value:     genRowWithBM25(magic),
 	}
 	err = segWriter.Write(&v)
@@ -288,7 +288,7 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),

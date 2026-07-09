@@ -172,7 +172,7 @@ func (s *DelegatorSuite) SetupTest() {
 		},
 	}, &querypb.LoadMetaInfo{
 		PartitionIDs:    s.partitionIDs,
-		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0),
+		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now()),
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
@@ -220,7 +220,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101, 103}, // invalid output field
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Error(err)
@@ -259,7 +259,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101},
 			}},
-		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
 		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
@@ -2854,7 +2854,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		assert.True(t, sd.CatchingUpStreamingData())
 
 		// Update tsafe with a recent timestamp (lag < 5s)
-		recentTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+		recentTs := tsoutil.ComposeTSByTime(time.Now())
 		sd.UpdateTSafe(recentTs)
 
 		// Should now be caught up
@@ -2878,7 +2878,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		assert.True(t, sd.CatchingUpStreamingData())
 
 		// Update tsafe with an old timestamp (lag > 5s)
-		oldTs := tsoutil.ComposeTSByTime(time.Now().Add(-10*time.Second), 0)
+		oldTs := tsoutil.ComposeTSByTime(time.Now().Add(-10 * time.Second))
 		sd.UpdateTSafe(oldTs)
 
 		// Should still be catching up
@@ -2902,7 +2902,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		assert.True(t, sd.CatchingUpStreamingData())
 
 		// Update tsafe with a recent timestamp
-		recentTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+		recentTs := tsoutil.ComposeTSByTime(time.Now())
 		sd.UpdateTSafe(recentTs)
 
 		// Should still be catching up (threshold disabled)
@@ -2955,7 +2955,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 
 	s.Run("alloc function failed", func() {
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
 		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Require().NoError(err)
@@ -2985,7 +2985,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 	s.Run("init function ", func() {
 		minHashFunctionSchema.OutputFieldIds = []int64{101}
 		manager := segments.NewManager()
-		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
 		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)

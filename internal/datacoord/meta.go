@@ -2347,7 +2347,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			Statslogs:           seg.GetField2StatslogPaths(),
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
-			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
+			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
 			Level:               datapb.SegmentLevel_L2,
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
@@ -2453,7 +2453,7 @@ func (m *meta) completeMixCompactionMutation(
 
 				CreatedByCompaction: true,
 				CompactionFrom:      compactFromSegIDs,
-				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
+				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
 				Level:               datapb.SegmentLevel_L1,
 				StorageVersion:      compactToSegment.GetStorageVersion(),
 				StartPosition:       startPos,
