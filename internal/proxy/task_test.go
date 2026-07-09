@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -3538,18 +3539,20 @@ func Test_createIndexTask_getIndexedFieldAndFunction(t *testing.T) {
 }
 
 func Test_fillDimension(t *testing.T) {
+	// fillDimension moved to indexparamcheck.FillDimension (shared with the
+	// add-function-field bound-index path); coverage kept here for the proxy flow.
 	t.Run("scalar", func(t *testing.T) {
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int64,
 		}
-		assert.NoError(t, fillDimension(f, nil))
+		assert.NoError(t, indexparamcheck.FillDimension(f, nil))
 	})
 
 	t.Run("no dim in schema", func(t *testing.T) {
 		f := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_FloatVector,
 		}
-		assert.Error(t, fillDimension(f, nil))
+		assert.Error(t, indexparamcheck.FillDimension(f, nil))
 	})
 
 	t.Run("dimension mismatch", func(t *testing.T) {
@@ -3562,7 +3565,7 @@ func Test_fillDimension(t *testing.T) {
 				},
 			},
 		}
-		assert.Error(t, fillDimension(f, map[string]string{common.DimKey: "8"}))
+		assert.Error(t, indexparamcheck.FillDimension(f, map[string]string{common.DimKey: "8"}))
 	})
 
 	t.Run("normal", func(t *testing.T) {
@@ -3576,7 +3579,7 @@ func Test_fillDimension(t *testing.T) {
 			},
 		}
 		m := map[string]string{}
-		assert.NoError(t, fillDimension(f, m))
+		assert.NoError(t, indexparamcheck.FillDimension(f, m))
 		assert.Equal(t, "128", m[common.DimKey])
 	})
 }
@@ -7687,7 +7690,13 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-							{FieldSchema: proto.Clone(sparseOutputField).(*schemapb.FieldSchema)},
+							{
+								FieldSchema: proto.Clone(sparseOutputField).(*schemapb.FieldSchema),
+								ExtraParams: []*commonpb.KeyValuePair{
+									{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+									{Key: common.MetricTypeKey, Value: "BM25"},
+								},
+							},
 						},
 						FuncSchema: []*schemapb.FunctionSchema{proto.Clone(functionSchema).(*schemapb.FunctionSchema)},
 					},
@@ -7995,6 +8004,10 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 				{Key: common.DimKey, Value: "4096"},
 			},
 		}
+		addRequest.FieldInfos[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+		}
 		functionSchema := proto.Clone(addRequest.GetFuncSchema()[0]).(*schemapb.FunctionSchema)
 		functionSchema.Name = "minhash_func"
 		functionSchema.Type = schemapb.FunctionType_MinHash
@@ -8067,6 +8080,28 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		task := buildTask(buildValidRequest(), oldSchema)
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute rejects invalid bound index name", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].IndexName = "1bad-index-name"
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "Invalid index name")
+	})
+
+	t.Run("PreExecute keeps the user's original index params in the request", func(t *testing.T) {
+		req := buildValidRequest()
+		original := proto.Clone(req.GetAction().GetAddRequest().GetFieldInfos()[0]).(*milvuspb.AlterCollectionSchemaRequest_FieldInfo)
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+		// Validation-only: no normalization write-back, so the persisted
+		// UserIndexParams stay aligned with the create_index convention and a
+		// later create_index with identical params remains idempotent.
+		assert.True(t, proto.Equal(original, req.GetAction().GetAddRequest().GetFieldInfos()[0]))
 	})
 
 	t.Run("Execute leaves function output marker to RootCoord", func(t *testing.T) {

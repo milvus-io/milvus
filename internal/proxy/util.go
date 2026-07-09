@@ -1789,32 +1789,8 @@ func validCharInIndexName(c byte) bool {
 }
 
 func validateIndexName(indexName string) error {
-	indexName = strings.TrimSpace(indexName)
-
-	if indexName == "" {
-		return nil
-	}
-	invalidMsg := "Invalid index name: " + indexName + ". "
-	if len(indexName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		msg := invalidMsg + "The length of a index name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
-		return merr.WrapErrParameterInvalidMsg("%s", msg)
-	}
-
-	firstChar := indexName[0]
-	if firstChar != '_' && !isAlpha(firstChar) {
-		msg := invalidMsg + "The first character of a index name must be an underscore or letter."
-		return merr.WrapErrParameterInvalidMsg("%s", msg)
-	}
-
-	indexNameSize := len(indexName)
-	for i := 1; i < indexNameSize; i++ {
-		c := indexName[i]
-		if !validCharInIndexName(c) {
-			msg := invalidMsg + "Index name can only contain numbers, letters, and underscores."
-			return merr.WrapErrParameterInvalidMsg("%s", msg)
-		}
-	}
-	return nil
+	// Shared with rootcoord's bound-index prepare (indexparamcheck).
+	return indexparamcheck.ValidateIndexName(indexName)
 }
 
 func isCollectionLoaded(ctx context.Context, mc types.MixCoordClient, collID int64) (bool, error) {

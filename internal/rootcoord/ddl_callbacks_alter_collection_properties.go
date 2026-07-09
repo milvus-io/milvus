@@ -441,6 +441,18 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		}
 		return merr.Wrap(err, "failed to alter collection")
 	}
+	// Refresh datacoord's cached collection schema BEFORE the bound index meta
+	// becomes visible: creating the index signals the index inspector, whose
+	// function-output-field guard reads that cached schema — on a stale view it
+	// would schedule doomed builds on segments that have no binlog for the new
+	// field yet. The schema push depends only on rootcoord meta (updated above),
+	// never on index meta, so this order is always safe.
+	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
+		return merr.Wrap(err, "failed to broadcast altered collection")
+	}
+	if err := c.applyBoundFieldIndexesInline(ctx, result); err != nil {
+		return err
+	}
 	if body.Updates.AlterLoadConfig != nil {
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 			CollectionIDs:  []int64{header.CollectionId},
@@ -461,9 +473,6 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	if err := c.cascadeDropFieldIndexesInline(ctx, result); err != nil {
 		return err
 	}
-	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
-		return merr.Wrap(err, "failed to broadcast altered collection")
-	}
 
 	// If the collection was renamed or moved to a different DB, grants were migrated
 	// in MetaTable.AlterCollection. Refresh the RBAC policy cache on all proxies so
@@ -480,6 +489,54 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	}
 
 	return c.ExpireCaches(ctx, header)
+}
+
+// applyBoundFieldIndexesInline creates the index meta bound to a newly added
+// function-output field by inlining the CreateIndex ack callback, same pattern as
+// cascadeDropFieldIndexesInline. The FieldIndex was fully materialized (id/name
+// allocated, params validated) at DDL prepare time, so this is a pure idempotent
+// apply: a replayed callback rebuilds the identical synthetic message. Cannot use
+// the CreateIndex RPC here because it would deadlock on the resource key lock.
+// The synthetic message is never appended to the WAL; it only routes the apply
+// through the registry to datacoord's createIndexV2AckCallback.
+func (c *DDLCallback) applyBoundFieldIndexesInline(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	header := result.Message.Header()
+	boundFieldIndexes := result.Message.MustBody().GetUpdates().GetBoundFieldIndexes()
+	if len(boundFieldIndexes) == 0 {
+		return nil
+	}
+
+	controlChannelResult := result.GetControlChannelResult()
+	for _, fieldIndex := range boundFieldIndexes {
+		indexInfo := fieldIndex.GetIndexInfo()
+		mlog.Info(ctx, "applying bound field index of alter collection schema",
+			mlog.FieldMessage(result.Message),
+			mlog.FieldFieldID(indexInfo.GetFieldID()),
+			mlog.String("indexName", indexInfo.GetIndexName()),
+			mlog.FieldIndexID(indexInfo.GetIndexID()),
+		)
+		createIndexMsg := message.NewCreateIndexMessageBuilderV2().
+			WithHeader(&message.CreateIndexMessageHeader{
+				DbId:         header.DbId,
+				CollectionId: header.CollectionId,
+				FieldId:      indexInfo.GetFieldID(),
+				IndexId:      indexInfo.GetIndexID(),
+				IndexName:    indexInfo.GetIndexName(),
+			}).
+			WithBody(&message.CreateIndexMessageBody{
+				FieldIndex: fieldIndex,
+			}).
+			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			MustBuildBroadcast().
+			WithBroadcastID(result.Message.BroadcastHeader().BroadcastID)
+
+		if err := registry.CallMessageAckCallback(ctx, createIndexMsg, map[string]*message.AppendResult{
+			streaming.WAL().ControlChannel(): controlChannelResult,
+		}); err != nil {
+			return merr.Wrap(err, "failed to apply bound field index")
+		}
+	}
+	return nil
 }
 
 // cascadeDropFieldIndexesInline drops indexes on dropped fields by inlining the

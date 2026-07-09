@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -77,6 +78,31 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UnixNano())
 	code := m.Run()
 	os.Exit(code)
+}
+
+// testBoundIndexRecorder captures FieldIndexes applied through the fake
+// CreateIndexV2 ack callback so DDL tests can assert on bound-index creation.
+var testBoundIndexRecorder = struct {
+	mu      sync.Mutex
+	indexes []*indexpb.FieldIndex
+}{}
+
+func resetRecordedBoundIndexes() {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	testBoundIndexRecorder.indexes = nil
+}
+
+func recordBoundIndex(fieldIndex *indexpb.FieldIndex) {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	testBoundIndexRecorder.indexes = append(testBoundIndexRecorder.indexes, fieldIndex)
+}
+
+func recordedBoundIndexes() []*indexpb.FieldIndex {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	return append([]*indexpb.FieldIndex(nil), testBoundIndexRecorder.indexes...)
 }
 
 func initStreamingSystemAndCore(t *testing.T) *Core {
@@ -108,6 +134,11 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	// TODO: we should merge all coordinator code into one package unit,
 	// so these mock code can be replaced with the real code.
 	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
+		return nil
+	})
+	resetRecordedBoundIndexes()
+	registry.RegisterCreateIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+		recordBoundIndex(result.Message.MustBody().GetFieldIndex())
 		return nil
 	})
 	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {

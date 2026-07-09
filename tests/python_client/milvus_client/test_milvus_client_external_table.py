@@ -2936,11 +2936,18 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             ct.err_code: 1100,
             ct.err_msg: "alter collection schema operation is not supported for external collection",
         }
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(
+            field_name="bm25_sparse",
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25",
+        )
         self.add_function_field(
             client,
             collection_name=coll,
             field_schema=bm25_field,
             func=bm25_function,
+            index_params=bound_index_params,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
