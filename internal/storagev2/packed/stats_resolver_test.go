@@ -321,8 +321,19 @@ func TestStatsResolverManifest(t *testing.T) {
 		assert.Equal(t, bm25Path, paths[200][0])
 	})
 
-	t.Run("TextAndJSONIndexStatsWithBasePaths returns relative json stats", func(t *testing.T) {
+	t.Run("TextAndJSONIndexStatsWithBasePaths hides json stats without metadata placeholder", func(t *testing.T) {
 		result := resolver.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+
+		assert.Empty(t, result.JSONKeyStats)
+		assert.Empty(t, result.JSONBasePaths)
+	})
+
+	t.Run("TextAndJSONIndexStatsWithBasePaths returns json stats with metadata placeholder", func(t *testing.T) {
+		resolverWithPlaceholder := NewStatsResolver(newManifest, storageConfig).WithJSONKeyStats(map[int64]*datapb.JsonKeyStats{
+			300: {FieldID: 300, Version: 7, BuildID: 7000, JsonKeyStatsDataFormat: 3},
+		})
+		result := resolverWithPlaceholder.TextAndJSONIndexStatsWithBasePaths()
 		require.NoError(t, result.Err())
 
 		require.Contains(t, result.JSONKeyStats, int64(300))
