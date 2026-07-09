@@ -128,7 +128,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              rmq.NewRmqID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
@@ -813,7 +813,7 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 		alloc := newMockTsoAllocator()
 		count := uint32(10)
 		current := time.Now()
-		ts := tsoutil.ComposeTSByTime(current.Add(time.Second), 1)
+		ts := tsoutil.ComposeTSByTimeWithLogical(current.Add(time.Second), 1)
 		alloc.GenerateTSOF = func(count uint32) (uint64, error) {
 			// end ts
 			return ts, nil
@@ -826,7 +826,7 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 			withTsoAllocator(alloc))
 		resp, err := c.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 			Count:          count,
-			BlockTimestamp: tsoutil.ComposeTSByTime(current.Add(time.Second), 0),
+			BlockTimestamp: tsoutil.ComposeTSByTime(current.Add(time.Second)),
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -1532,8 +1532,8 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	}, nil
 	// }
 
-	// querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0)
-	// datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Minute), 0)
+	// querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Minute))
+	// datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2 * time.Minute))
 
 	// dcClient := mocks.NewMixCoord(t)
 	// dcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getDataCoordMetricsFunc(datanodeTT))

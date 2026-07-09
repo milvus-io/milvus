@@ -444,7 +444,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		for _, c := range ttCases {
 			paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, fmt.Sprintf("%f", c.maxTtDelay.Seconds()))
-			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
+			fgTs := tsoutil.ComposeTSByTime(c.fgTt)
 			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 				1: {
 					Fgm: metricsinfo.FlowGraphMetric{
@@ -454,7 +454,7 @@ func TestQuotaCenter(t *testing.T) {
 					},
 				},
 			}
-			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
+			curTs := tsoutil.ComposeTSByTime(c.curTt)
 			factors := quotaCenter.getTimeTickDelayFactor(curTs)
 			for _, factor := range factors {
 				assert.True(t, math.Abs(factor-c.expectedFactor) < 0.01)
@@ -501,8 +501,8 @@ func TestQuotaCenter(t *testing.T) {
 		alloc := newMockTsoAllocator()
 		quotaCenter.tsoAllocator = alloc
 		for _, c := range ttCases {
-			minTS := tsoutil.ComposeTSByTime(time.Now(), 0)
-			hackCurTs := tsoutil.ComposeTSByTime(time.Now().Add(c.delay), 0)
+			minTS := tsoutil.ComposeTSByTime(time.Now())
+			hackCurTs := tsoutil.ComposeTSByTime(time.Now().Add(c.delay))
 			alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
 				return hackCurTs, nil
 			}
@@ -1327,7 +1327,7 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 	err := quotaCenter.collectMetrics()
 	s.Require().NoError(err)
 
-	quotaCenter.getTimeTickDelayFactor(tsoutil.ComposeTSByTime(time.Now(), 0))
+	quotaCenter.getTimeTickDelayFactor(tsoutil.ComposeTSByTime(time.Now()))
 
 	s.CollectCntEqual(metrics.RootCoordTtDelay, 4)
 
@@ -1368,7 +1368,7 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 	err = quotaCenter.collectMetrics()
 	s.Require().NoError(err)
 
-	quotaCenter.getTimeTickDelayFactor(tsoutil.ComposeTSByTime(time.Now(), 0))
+	quotaCenter.getTimeTickDelayFactor(tsoutil.ComposeTSByTime(time.Now()))
 	s.CollectCntEqual(metrics.RootCoordTtDelay, 2)
 }
 

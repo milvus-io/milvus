@@ -733,9 +733,9 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 	}()
 
 	now := time.Now()
-	recentTs := tsoutil.ComposeTSByTime(now.Add(500*time.Millisecond), 0)
-	staleTs := tsoutil.ComposeTSByTime(now.Add(2*time.Second), 0)
-	startTs := tsoutil.ComposeTSByTime(now, 0)
+	recentTs := tsoutil.ComposeTSByTime(now.Add(500 * time.Millisecond))
+	staleTs := tsoutil.ComposeTSByTime(now.Add(2 * time.Second))
+	startTs := tsoutil.ComposeTSByTime(now)
 
 	s.Run("pending_flush", func() {
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1001, &growingSourceProgress{

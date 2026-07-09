@@ -173,7 +173,7 @@ func (s *dataCoordSuite) TestUpdateChannelCheckpoint() {
 	checkpoint := &msgpb.MsgPosition{
 		ChannelName: channelName,
 		MsgID:       []byte{1, 2, 3},
-		Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
+		Timestamp:   tsoutil.ComposeTSByTime(time.Now()),
 	}
 
 	s.Run("normal_case", func() {

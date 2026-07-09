@@ -379,7 +379,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			return nil
 		}
 
-		ct, err := getCompactTime(tsoutil.ComposeTSByTime(time.Now(), 0), coll)
+		ct, err := getCompactTime(tsoutil.ComposeTSByTime(time.Now()), coll)
 		if err != nil {
 			log.Warn(context.TODO(), "get compact time failed, skip to handle compaction")
 			return err

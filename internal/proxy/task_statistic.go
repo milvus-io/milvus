@@ -127,7 +127,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 
 	deadline, ok := g.TraceCtx().Deadline()
 	if ok {
-		g.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		g.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline)
 	}
 
 	// check if collection/partitions are loaded into query node
