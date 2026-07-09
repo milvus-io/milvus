@@ -255,10 +255,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
                       info_proto) override;
 
-    void
-    LoadJsonStats(FieldId field_id,
-                  std::shared_ptr<index::JsonKeyStats> stats) override;
-
     std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
@@ -2455,6 +2451,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto runtime = CloneRuntimeResourceState(current->runtime);
         runtime->text_lob_paths[field_id] = std::move(lob_base_path);
         next->runtime = ToConstRuntimeState(std::move(runtime));
+        PublishState(std::move(next));
+    }
+
+    void
+    SetJsonStatsForTesting(FieldId field_id,
+                           std::shared_ptr<index::JsonKeyStats> stats) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto next = ClonePublishedState(current);
+        auto runtime = CloneRuntimeResourceState(current->runtime);
+        runtime->json_stats[field_id] = std::move(stats);
+        next->runtime = ToConstRuntimeState(std::move(runtime));
+        NormalizePublishedState(*next);
         PublishState(std::move(next));
     }
 

@@ -1596,15 +1596,6 @@ ChunkedSegmentSealedImpl::PublishRuntimeStateLocked(
             current->schema, current->load_info, runtime, current->commit_ts)));
 }
 
-void
-ChunkedSegmentSealedImpl::LoadJsonStats(
-    FieldId field_id, std::shared_ptr<index::JsonKeyStats> stats) {
-    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    auto runtime = CloneMutableRuntimeResourceState();
-    runtime->json_stats[field_id] = std::move(stats);
-    PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
-}
-
 std::shared_ptr<index::JsonKeyStats>
 ChunkedSegmentSealedImpl::GetJsonStats(milvus::OpContext* op_ctx,
                                        FieldId field_id) const {

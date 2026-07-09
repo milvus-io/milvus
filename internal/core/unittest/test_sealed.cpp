@@ -4366,21 +4366,33 @@ TEST(SealedSegmentCowState, JsonStatsLivesInRuntimeSnapshot) {
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
-    sealed->LoadJsonStats(json, nullptr);
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto load_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    load_runtime->json_stats[json] = nullptr;
 
-    auto after_load = sealed->TestGetPublishedStateSnapshot();
+    ChunkedSegmentSealedImpl::StateDelta load_delta;
+    load_delta.schema = current->schema;
+    load_delta.load_info = current->load_info;
+    load_delta.runtime =
+        sealed->TestFreezeRuntimeResourceState(std::move(load_runtime));
+    load_delta.commit_ts = current->commit_ts;
+
+    auto after_load = sealed->TestBuildNextPublishedState(current, load_delta);
     ASSERT_NE(after_load, nullptr);
     ASSERT_NE(after_load->runtime, nullptr);
     ASSERT_EQ(after_load->runtime->json_stats.count(json), 1);
 
-    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
-    ASSERT_EQ(runtime->json_stats.count(json), 1);
-    runtime->json_stats.erase(json);
+    auto drop_runtime =
+        std::make_shared<ChunkedSegmentSealedImpl::RuntimeResourceState>(
+            *after_load->runtime);
+    ASSERT_EQ(drop_runtime->json_stats.count(json), 1);
+    drop_runtime->json_stats.erase(json);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
     delta.schema = after_load->schema;
     delta.load_info = after_load->load_info;
-    delta.runtime = sealed->TestFreezeRuntimeResourceState(std::move(runtime));
+    delta.runtime =
+        sealed->TestFreezeRuntimeResourceState(std::move(drop_runtime));
     delta.commit_ts = after_load->commit_ts;
 
     auto next = sealed->TestBuildNextPublishedState(after_load, delta);
