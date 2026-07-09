@@ -249,13 +249,6 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info);
 
 CStatus
-LoadJsonKeyIndex(CTraceContext c_trace,
-                 CSegmentInterface c_segment,
-                 const uint8_t* serialied_load_json_key_index_info,
-                 const uint64_t len,
-                 CLoadCancellationSource source);
-
-CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,
                        int64_t field_id,
                        int64_t num_rows,
