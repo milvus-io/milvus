@@ -784,12 +784,28 @@ class SegmentLoadInfo {
      * @return Shared pointer to ColumnGroups, nullptr if manifest is empty
      *
      * The cache is populated on first access. Callers are responsible for
-     * serializing concurrent first-time calls on the same instance; in
-     * ChunkedSegmentSealedImpl this is guaranteed by `reopen_mutex_` since
-     * GetColumnGroups is only invoked from Load/Reopen/SetLoadInfo chains.
+     * serializing concurrent first-time calls on the same instance.
+     * ChunkedSegmentSealedImpl publishes loaded manifest snapshots only after
+     * this cache is initialized, so query paths only read the cached value via
+     * HasManifestColumn.
      */
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups() const;
+
+    // Checks the already cached manifest column groups. It intentionally does
+    // not parse the manifest on demand because query paths call this method.
+    [[nodiscard]] bool
+    HasManifestColumn(const std::string& column_name) const;
+
+    // Reuses manifest column groups when another load info points at the same
+    // manifest path.
+    void
+    InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source) {
+        if (source.HasManifestPath() &&
+            source.GetManifestPath() == GetManifestPath()) {
+            column_groups_ = source.column_groups_;
+        }
+    }
 
     /**
      * @brief Pre-populate the column group cache without parsing a manifest

@@ -11,6 +11,8 @@
 
 #include "PlanProto.h"
 
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/message.h>
 #include <google/protobuf/text_format.h>
 #include <algorithm>
 #include <cstddef>
@@ -241,6 +243,101 @@ getAggregateOpName(planpb::AggregateOp op) {
 }
 
 namespace {
+
+// Adds a non-zero field id once while preserving first-seen order.
+void
+AddAccessFieldID(std::vector<FieldId>& field_ids, int64_t field_id) {
+    if (field_id == 0) {
+        return;
+    }
+    auto it = std::find_if(
+        field_ids.begin(), field_ids.end(), [field_id](FieldId id) {
+            return id.get() == field_id;
+        });
+    if (it == field_ids.end()) {
+        field_ids.emplace_back(FieldId(field_id));
+    }
+}
+
+// Walks a plan proto tree and records every ColumnInfo field reference.
+void
+CollectColumnInfoFieldIDs(const google::protobuf::Message& message,
+                          std::vector<FieldId>& field_ids) {
+    if (message.GetDescriptor() == proto::plan::ColumnInfo::descriptor()) {
+        const auto& column_info =
+            static_cast<const proto::plan::ColumnInfo&>(message);
+        AddAccessFieldID(field_ids, column_info.field_id());
+        return;
+    }
+
+    const auto* descriptor = message.GetDescriptor();
+    const auto* reflection = message.GetReflection();
+    for (int i = 0; i < descriptor->field_count(); ++i) {
+        const auto* field = descriptor->field(i);
+        if (field->cpp_type() !=
+            google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+            continue;
+        }
+        if (field->is_repeated()) {
+            auto size = reflection->FieldSize(message, field);
+            for (int j = 0; j < size; ++j) {
+                CollectColumnInfoFieldIDs(
+                    reflection->GetRepeatedMessage(message, field, j),
+                    field_ids);
+            }
+            continue;
+        }
+        if (reflection->HasField(message, field)) {
+            CollectColumnInfoFieldIDs(reflection->GetMessage(message, field),
+                                      field_ids);
+        }
+    }
+}
+
+// Builds the unified field-reference list used by external manifest checks.
+std::vector<FieldId>
+CollectAccessFieldIDs(const proto::plan::PlanNode& plan_node_proto) {
+    std::vector<FieldId> field_ids;
+    auto add_field_id = [&](int64_t field_id) {
+        AddAccessFieldID(field_ids, field_id);
+    };
+    // This list is consumed by the external-collection manifest guard. It is
+    // deliberately a field-reference list, not a data/index-readiness list:
+    // external output can be served by take(), while predicates/group-by/etc.
+    // may use loaded columns or indexes. Both only need the current loaded
+    // manifest to contain the referenced external column.
+    if (plan_node_proto.has_vector_anns()) {
+        const auto& vector_anns = plan_node_proto.vector_anns();
+        add_field_id(vector_anns.field_id());
+        if (vector_anns.has_query_info()) {
+            const auto& query_info = vector_anns.query_info();
+            add_field_id(query_info.query_field_id());
+            add_field_id(query_info.group_by_field_id());
+            for (auto field_id : query_info.group_by_field_ids()) {
+                add_field_id(field_id);
+            }
+        }
+    }
+
+    if (plan_node_proto.has_query()) {
+        const auto& query = plan_node_proto.query();
+        for (auto field_id : query.group_by_field_ids()) {
+            add_field_id(field_id);
+        }
+        for (const auto& aggregate : query.aggregates()) {
+            add_field_id(aggregate.field_id());
+        }
+        for (const auto& order_by : query.order_by_fields()) {
+            add_field_id(order_by.field_id());
+        }
+    }
+
+    CollectColumnInfoFieldIDs(plan_node_proto, field_ids);
+    for (auto field_id : plan_node_proto.output_field_ids()) {
+        add_field_id(field_id);
+    }
+    return field_ids;
+}
 
 // Helper function to process group_by fields
 void
@@ -865,6 +962,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     auto plan_node = PlanNodeFromProto(plan_node_proto);
     plan->plan_node_ = std::move(plan_node);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
+    plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
     ExtractedPlanInfo extra_info(schema->get_field_id_bitset_size());
     extra_info.add_involved_field(plan->plan_node_->search_info_.field_id_);
     plan->extra_info_opt_ = std::move(extra_info);
@@ -889,6 +987,7 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
 
     retrieve_plan->plan_node_ = std::move(plan_node);
+    retrieve_plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
     for (auto field_id_raw : plan_node_proto.output_field_ids()) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);
