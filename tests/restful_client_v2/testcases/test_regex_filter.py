@@ -1,5 +1,3 @@
-import time
-
 import pytest
 from base.testbase import TestBase
 from utils.constant import CaseLabel
@@ -143,11 +141,21 @@ def _regex_rows():
     ]
 
 
-@pytest.mark.tags(CaseLabel.L0)
 class TestRegexFilter(TestBase):
-    def _create_regex_collection(self):
-        name = gen_collection_name()
-        self.name = name
+    def setup_class(self):
+        self.collection_name = self.__class__.__name__ + gen_collection_name()
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_shared_regex_collection(self, request, init_class_config):
+        collection_client, vector_client = self._class_scope_clients()
+
+        def teardown():
+            collection_client.collection_drop({"collectionName": self.collection_name})
+
+        request.addfinalizer(teardown)
+        self._create_regex_collection(self.collection_name, collection_client, vector_client)
+
+    def _create_regex_collection(self, name, collection_client, vector_client):
         payload = {
             "collectionName": name,
             "schema": {
@@ -176,17 +184,18 @@ class TestRegexFilter(TestBase):
             },
             "indexParams": [{"fieldName": "vec", "indexName": "vec_index", "metricType": "L2"}],
         }
-        rsp = self.collection_client.collection_create(payload)
+        rsp = collection_client.collection_create(payload)
         assert rsp["code"] == 0, rsp
-        self.collection_client.wait_load_completed(name, timeout=60)
+        collection_client.wait_load_completed(name, timeout=60)
 
         rows = _regex_rows()
-        rsp = self.vector_client.vector_insert({"collectionName": name, "data": rows})
+        rsp = vector_client.vector_insert({"collectionName": name, "data": rows})
         assert rsp["code"] == 0, rsp
         assert rsp["data"]["insertCount"] == len(rows)
-        self.collection_client.flush(name)
-        time.sleep(1)
-        return name
+        collection_client.flush(name)
+
+    def _shared_collection(self):
+        return self.collection_name
 
     def _query_ids(self, name, filter_expr, timeout=1):
         rsp = self.vector_client.vector_query(
@@ -196,13 +205,14 @@ class TestRegexFilter(TestBase):
         assert rsp["code"] == 0, rsp
         return sorted(row["id"] for row in rsp.get("data", []))
 
+    @pytest.mark.tags(CaseLabel.L0)
     def test_regex_query_basic_semantics(self):
         """
         target: verify REST query supports core regex =~ semantics
         method: query VarChar field with substring, anchors, classes, dot-newline, and empty pattern
         expected: returned ids match PyMilvus regex filter semantics
         """
-        name = self._create_regex_collection()
+        name = self._shared_collection()
 
         cases = [
             ('text =~ "timeout"', [1]),
@@ -220,13 +230,14 @@ class TestRegexFilter(TestBase):
         for filter_expr, expected in cases:
             assert self._query_ids(name, filter_expr) == expected
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_query_negation_and_boolean_expression(self):
         """
         target: verify REST query supports !~, not(=~), and boolean combinations
         method: compare negated regex and combined scalar predicates
         expected: !~ is equivalent to not(=~) and boolean precedence is respected
         """
-        name = self._create_regex_collection()
+        name = self._shared_collection()
 
         assert self._query_ids(name, 'text !~ "^DEBUG"') == [1, 2, 4, 5, 6, 7]
         assert self._query_ids(name, 'not (text =~ "^DEBUG")') == [1, 2, 4, 5, 6, 7]
@@ -234,13 +245,14 @@ class TestRegexFilter(TestBase):
         assert self._query_ids(name, 'text =~ "(?i)error" and id > 1') == [4]
         assert self._query_ids(name, 'text =~ "^WARN" or text =~ "^DEBUG"') == [2, 3]
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_query_json_array_and_nullable_paths(self):
         """
         target: verify REST query supports regex on JSON paths, Array<Varchar> elements, and nullable fields
         method: query JSON string paths, array element paths, and nullable VarChar with =~ and !~
         expected: string paths match, non-string/missing paths return empty, null values are excluded unless explicit
         """
-        name = self._create_regex_collection()
+        name = self._shared_collection()
 
         assert self._query_ids(name, r'metadata["version"] =~ "^v[0-9]+\.[0-9]+$"') == [1, 2, 3, 5, 7]
         assert self._query_ids(name, 'metadata["nested"]["x"] =~ "^abc$"') == [1]
@@ -258,13 +270,14 @@ class TestRegexFilter(TestBase):
         assert self._query_ids(name, 'email !~ "gmail"') == [2, 3, 7]
         assert self._query_ids(name, 'email !~ "gmail" or email is null') == [2, 3, 4, 7]
 
+    @pytest.mark.tags(CaseLabel.L0)
     def test_regex_search_filter(self):
         """
         target: verify REST vector search supports regex filters
         method: run unfiltered search then filtered search with regex on url field
         expected: filtered search only returns ids with /api/v[0-9]+/users urls
         """
-        name = self._create_regex_collection()
+        name = self._shared_collection()
 
         unfiltered = self.vector_client.vector_search(
             {
@@ -294,26 +307,30 @@ class TestRegexFilter(TestBase):
         assert {row["id"] for row in filtered["data"]} == {1, 3, 5}
         assert all(row["url"].startswith("/api/v") for row in filtered["data"])
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_delete_filter(self):
         """
         target: verify REST delete supports regex filters
         method: delete rows where text starts with DEBUG, then query remaining ids
         expected: id 3 is removed and other rows remain visible
         """
-        name = self._create_regex_collection()
+        name = gen_collection_name()
+        self.name = name
+        self._create_regex_collection(name, self.collection_client, self.vector_client)
 
         rsp = self.vector_client.vector_delete({"collectionName": name, "filter": 'text =~ "^DEBUG"'})
         assert rsp["code"] == 0, rsp
 
         assert self._query_ids(name, "id > 0") == [1, 2, 4, 5, 6, 7]
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_regex_invalid_expressions(self):
         """
         target: verify REST rejects invalid regex expressions
         method: send invalid pattern, unsupported field type, direct array field, and non-string RHS
         expected: each request fails with a clear validation error
         """
-        name = self._create_regex_collection()
+        name = self._shared_collection()
 
         cases = [
             ('text =~ "(unclosed"', "missing closing"),

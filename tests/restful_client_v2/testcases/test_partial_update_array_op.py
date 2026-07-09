@@ -1,13 +1,9 @@
-import time
-
 import pytest
 from base.testbase import TestBase
-from pymilvus import Collection
 from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
 
 
-@pytest.mark.tags(CaseLabel.L0)
 class TestPartialUpdateArrayOp(TestBase):
     def _create_array_collection(self):
         name = gen_collection_name()
@@ -58,8 +54,7 @@ class TestPartialUpdateArrayOp(TestBase):
         ]
         rsp = self.vector_client.vector_insert({"collectionName": name, "data": rows})
         assert rsp["code"] == 0, rsp
-        Collection(name).flush()
-        time.sleep(1)
+        self.collection_client.flush(name)
 
     def _query_rows(self, name):
         rsp = self.vector_client.vector_query(
@@ -91,6 +86,7 @@ class TestPartialUpdateArrayOp(TestBase):
                 return typed_data["data"]
         return value
 
+    @pytest.mark.tags(CaseLabel.L0)
     def test_partial_update_array_append(self):
         """
         target: verify REST upsert fieldOps ARRAY_APPEND appends array payloads
@@ -114,6 +110,7 @@ class TestPartialUpdateArrayOp(TestBase):
         assert rows[1]["tags"] == [10, 20, 10, 30, 40]
         assert rows[0]["name"] == "row_0"
 
+    @pytest.mark.tags(CaseLabel.L0)
     def test_partial_update_array_remove(self):
         """
         target: verify REST upsert fieldOps ARRAY_REMOVE removes matching array elements
@@ -136,6 +133,7 @@ class TestPartialUpdateArrayOp(TestBase):
         assert rows[1]["tags"] == [20, 30]
         assert rows[1]["labels"] == ["x", "y"]
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_partial_update_array_multiple_field_ops(self):
         """
         target: verify REST upsert accepts multiple array fieldOps in one request
@@ -162,6 +160,7 @@ class TestPartialUpdateArrayOp(TestBase):
         assert rows[0]["labels"] == ["b"]
         assert rows[0]["name"] == "row_0"
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_partial_update_array_op_rejects_non_array_field(self):
         """
         target: verify REST rejects ARRAY_APPEND on a non-Array field
