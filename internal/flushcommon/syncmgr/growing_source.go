@@ -71,10 +71,16 @@ type GrowingFlushConfig struct {
 }
 
 type GrowingFlushResult struct {
-	ManifestPath           string
-	NumRows                int64
-	TimestampFrom          uint64
-	TimestampTo            uint64
+	ManifestPath  string
+	NumRows       int64
+	TimestampFrom uint64
+	TimestampTo   uint64
+	// FlushedFieldIDs is the authoritative set of columns the flush actually
+	// wrote. It may be a subset of the flush schema: non-materialized
+	// function-output columns are skipped (backfilled later by bump-schema
+	// compaction). All binlog meta must be derived from this set, never from
+	// the schema.
+	FlushedFieldIDs        []int64
 	ColumnGroupMemorySizes map[int64]int64
 	FieldNullCounts        map[int64]int64
 	BM25Stats              map[int64]*storage.BM25Stats
@@ -839,6 +845,24 @@ func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, r
 	logIDByGroup := make(map[int64]int64, len(columnGroups))
 	for i, columnGroup := range columnGroups {
 		logIDByGroup[columnGroup.GroupID] = logIDs[i]
+	}
+	// result.FlushedFieldIDs is the authoritative set of columns actually
+	// written; the flush skips non-materialized function-output columns, so
+	// the binlog meta must be trimmed to it. A group left empty is dropped.
+	if len(result.FlushedFieldIDs) > 0 {
+		flushedSet := typeutil.NewSet(result.FlushedFieldIDs...)
+		flushedGroups := make([]storagecommon.ColumnGroup, 0, len(columnGroups))
+		for _, columnGroup := range columnGroups {
+			flushedFields := lo.Filter(columnGroup.Fields, func(fieldID int64, _ int) bool {
+				return flushedSet.Contain(fieldID)
+			})
+			if len(flushedFields) == 0 {
+				continue
+			}
+			columnGroup.Fields = flushedFields
+			flushedGroups = append(flushedGroups, columnGroup)
+		}
+		columnGroups = flushedGroups
 	}
 	for _, columnGroup := range columnGroups {
 		if _, ok := result.ColumnGroupMemorySizes[columnGroup.GroupID]; !ok {

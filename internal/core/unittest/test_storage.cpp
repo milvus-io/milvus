@@ -219,6 +219,155 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
     cleanup();
 }
 
+// A growing segment born while a function output field was absent from the
+// schema (add/drop-function churn) never materializes that column —
+// Reopen/FillAbsentFields skip function outputs by design. Flushing with a
+// newer schema that carries the field must skip the column instead of
+// hitting the insert_record assert (issue #51117).
+TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
+    std::string test_dir =
+        "/tmp/flush_skip_fn_output_" +
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_dir);
+    auto cleanup = [&]() {
+        if (std::filesystem::exists(test_dir)) {
+            std::filesystem::remove_all(test_dir);
+        }
+    };
+
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_name("flush_skip_fn_output");
+    // Real flush schemas always carry the RowID/Timestamp system fields;
+    // the flush validates the Timestamp column was exported.
+    auto* row_id_field = schema_proto.add_fields();
+    row_id_field->set_fieldid(0);
+    row_id_field->set_name("RowID");
+    row_id_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    auto* ts_field = schema_proto.add_fields();
+    ts_field->set_fieldid(1);
+    ts_field->set_name("Timestamp");
+    ts_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto segment_schema = Schema::ParseFrom(schema_proto);
+    auto segment = CreateGrowingSegment(segment_schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            pks.data(), nullptr, N, (*segment_schema)[FieldId(100)])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    // Flush schema carries a function output field the segment never
+    // materialized.
+    auto flush_proto = schema_proto;
+    auto* fn_output = flush_proto.add_fields();
+    fn_output->set_fieldid(101);
+    fn_output->set_name("fn_sparse");
+    fn_output->set_data_type(
+        milvus::proto::schema::DataType::SparseFloatVector);
+    fn_output->set_is_function_output(true);
+    std::string schema_blob = flush_proto.SerializeAsString();
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir + "/collection/partition/segment_fn";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.schema_blob = schema_blob.data();
+    config.schema_length = static_cast<int64_t>(schema_blob.size());
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+    for (size_t i = 0; i < result.num_field_stats; ++i) {
+        EXPECT_NE(result.field_ids[i], 101);
+    }
+
+    FreeFlushResult(&result);
+    cleanup();
+}
+
+// A missing non-function-output column is an invariant violation (regular
+// fields are materialized by the ctor/Reopen): the flush must fail with a
+// clean error instead of the segcore assert.
+TEST_F(StorageTest, FlushGrowingSegmentMissingRegularFieldFails) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_name("flush_missing_regular_field");
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto segment_schema = Schema::ParseFrom(schema_proto);
+    auto segment = CreateGrowingSegment(segment_schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            pks.data(), nullptr, N, (*segment_schema)[FieldId(100)])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    auto flush_proto = schema_proto;
+    auto* extra = flush_proto.add_fields();
+    extra->set_fieldid(101);
+    extra->set_name("late_added");
+    extra->set_data_type(milvus::proto::schema::DataType::VarChar);
+    extra->set_nullable(true);
+    auto* param = extra->add_type_params();
+    param->set_key("max_length");
+    param->set_value("64");
+    std::string schema_blob = flush_proto.SerializeAsString();
+
+    CFlushConfig config{};
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.schema_blob = schema_blob.data();
+    config.schema_length = static_cast<int64_t>(schema_blob.size());
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_NE(status.error_code, Success);
+    std::string msg = status.error_msg == nullptr ? "" : status.error_msg;
+    EXPECT_NE(msg.find("has no field data in growing segment"),
+              std::string::npos)
+        << msg;
+
+    FreeErrorStatus(status);
+    FreeFlushResult(&result);
+}
+
 TEST_F(StorageTest, GetLocalUsedSize) {
     int64_t size = 0;
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();

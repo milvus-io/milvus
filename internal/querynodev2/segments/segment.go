@@ -1851,6 +1851,13 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 			fieldNullCounts[fieldID] = int64(nullCounts[i])
 		}
 	}
+	flushedFieldIDs := make([]int64, 0, int(cResult.num_flushed_fields))
+	if cResult.num_flushed_fields > 0 {
+		ids := unsafe.Slice(cResult.flushed_field_ids, int(cResult.num_flushed_fields))
+		for i := 0; i < int(cResult.num_flushed_fields); i++ {
+			flushedFieldIDs = append(flushedFieldIDs, int64(ids[i]))
+		}
+	}
 	columnGroupMemorySizes := make(map[int64]int64, int(cResult.num_column_groups))
 	if cResult.num_column_groups > 0 {
 		columnGroupIDs := unsafe.Slice(cResult.column_group_ids, int(cResult.num_column_groups))
@@ -1879,6 +1886,7 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		NumRows:                int64(cResult.num_rows),
 		TimestampFrom:          uint64(cResult.timestamp_from),
 		TimestampTo:            uint64(cResult.timestamp_to),
+		FlushedFieldIDs:        flushedFieldIDs,
 		ColumnGroupMemorySizes: columnGroupMemorySizes,
 		FieldNullCounts:        fieldNullCounts,
 		BM25Stats:              bm25Stats,

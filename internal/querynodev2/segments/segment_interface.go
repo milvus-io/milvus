@@ -203,9 +203,12 @@ type FlushResult struct {
 	// via packed.UnmarshalManifestPath when needed.
 	ManifestPath string
 	// Number of rows flushed
-	NumRows                int64
-	TimestampFrom          uint64
-	TimestampTo            uint64
+	NumRows       int64
+	TimestampFrom uint64
+	TimestampTo   uint64
+	// FlushedFieldIDs is the authoritative set of columns the flush actually
+	// wrote; non-materialized function-output columns are skipped and absent.
+	FlushedFieldIDs        []int64
 	ColumnGroupMemorySizes map[int64]int64
 	FieldNullCounts        map[int64]int64
 	BM25Stats              map[int64]*storage.BM25Stats

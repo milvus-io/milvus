@@ -573,6 +573,7 @@ func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, star
 		NumRows:                result.NumRows,
 		TimestampFrom:          result.TimestampFrom,
 		TimestampTo:            result.TimestampTo,
+		FlushedFieldIDs:        result.FlushedFieldIDs,
 		ColumnGroupMemorySizes: result.ColumnGroupMemorySizes,
 		FieldNullCounts:        result.FieldNullCounts,
 		BM25Stats:              result.BM25Stats,

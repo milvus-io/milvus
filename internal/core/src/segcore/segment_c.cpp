@@ -1812,6 +1812,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         result->field_ids = nullptr;
         result->field_null_counts = nullptr;
         result->num_field_stats = 0;
+        result->flushed_field_ids = nullptr;
+        result->num_flushed_fields = 0;
         result->column_group_ids = nullptr;
         result->column_group_memory_sizes = nullptr;
         result->num_column_groups = 0;
@@ -1896,6 +1898,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // to ensure deterministic column order matching the reader's expected order.
         std::vector<FieldInfo> field_infos;
         std::vector<std::shared_ptr<arrow::Field>> arrow_fields;
+        // Function-output columns skipped below; the column-group accounting
+        // loop must tolerate their absence as well.
+        std::unordered_set<int64_t> skipped_function_outputs;
 
         for (const auto& field_id : schema.get_field_ids()) {
             if (!allowed_field_ids.empty() &&
@@ -1913,6 +1918,29 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             } else if (field_id == TimestampFieldID) {
                 vec_base = &insert_record.timestamps_;
             } else {
+                if (!insert_record.is_data_exist(field_id)) {
+                    // Segments born before the field was (re-)added never
+                    // materialize function-output columns (Reopen skips them
+                    // by design) — skip and let compaction backfill. Other
+                    // fields must exist once schema is synced to segment
+                    // level (#50704): error, not assert, to avoid
+                    // crash-looping the node.
+                    if (schema.is_function_output(field_id)) {
+                        LOG_INFO(
+                            "skip non-materialized function output field {} "
+                            "when flushing growing segment {}",
+                            field_id.get(),
+                            growing_segment->get_segment_id());
+                        skipped_function_outputs.insert(field_id.get());
+                        continue;
+                    }
+                    return milvus::FailureCStatus(
+                        milvus::UnexpectedError,
+                        fmt::format("non-function-output field {} has no "
+                                    "field data in growing segment {}",
+                                    field_id.get(),
+                                    growing_segment->get_segment_id()));
+                }
                 vec_base = insert_record.get_data_base(field_id);
                 if (!vec_base) {
                     LOG_ERROR("no data base for field {} of segment {}",
@@ -2001,6 +2029,20 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         if (field_infos.empty()) {
             return milvus::FailureCStatus(milvus::UnexpectedError,
                                           "no fields to flush");
+        }
+
+        // Publish the authoritative flushed-column set directly from
+        // field_infos; Go binlog meta must be derived from this.
+        result->flushed_field_ids =
+            static_cast<int64_t*>(malloc(sizeof(int64_t) * field_infos.size()));
+        if (!result->flushed_field_ids) {
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "failed to allocate flushed field ids");
+        }
+        result->num_flushed_fields = field_infos.size();
+        for (size_t i = 0; i < field_infos.size(); i++) {
+            result->flushed_field_ids[i] = field_infos[i].field_id.get();
         }
 
         auto arrow_schema = arrow::schema(arrow_fields);
@@ -2238,6 +2280,11 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 for (size_t j = 0; j < field_count; j++) {
                     auto field_id =
                         config->column_group_field_ids[field_offset + j];
+                    if (skipped_function_outputs.count(field_id) > 0) {
+                        // Column intentionally not flushed; contributes no
+                        // size and must not fail the accounting.
+                        continue;
+                    }
                     auto size_it = field_uncompressed_sizes.find(field_id);
                     if (size_it == field_uncompressed_sizes.end()) {
                         return milvus::FailureCStatus(
@@ -2416,6 +2463,10 @@ FreeFlushResult(CFlushResult* result) {
     if (result && result->field_null_counts) {
         free(result->field_null_counts);
         result->field_null_counts = nullptr;
+    }
+    if (result && result->flushed_field_ids) {
+        free(result->flushed_field_ids);
+        result->flushed_field_ids = nullptr;
     }
     if (result && result->column_group_ids) {
         free(result->column_group_ids);

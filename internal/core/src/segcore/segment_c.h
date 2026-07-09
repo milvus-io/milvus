@@ -339,7 +339,11 @@ typedef struct CFlushResult {
     int64_t* field_ids;          // field ids for per-field flush summaries
     int64_t* field_null_counts;  // null count per field
     size_t num_field_stats;      // number of field summary entries
-    int64_t* column_group_ids;   // column group ids for binlog summaries
+    int64_t*
+        flushed_field_ids;  // exact set of columns actually written; skipped
+                            // non-materialized function outputs are absent
+    size_t num_flushed_fields;  // number of entries in flushed_field_ids
+    int64_t* column_group_ids;  // column group ids for binlog summaries
     int64_t*
         column_group_memory_sizes;  // uncompressed Arrow data size per column group
     size_t num_column_groups;       // number of column group summary entries
