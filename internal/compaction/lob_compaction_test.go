@@ -77,6 +77,14 @@ func TestGetForcedStrategy_AllTypes(t *testing.T) {
 			sourceCount: 1, targetCount: 1,
 			wantStrategy: 0, wantForced: false,
 		},
+		{
+			// schema-bump is 1->1 and never changes existing TEXT LOB data, so it
+			// must force REUSE_ALL (never fall through to hole-ratio REWRITE_ALL).
+			name:        "schema bump compaction",
+			compType:    datapb.CompactionType_BumpSchemaVersionCompaction,
+			sourceCount: 1, targetCount: 1,
+			wantStrategy: LOBStrategyReuseAll, wantForced: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
