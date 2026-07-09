@@ -80,6 +80,11 @@ client.search(
 - `cascade.refine.limit <= top_level.limit`.
 - `cascade.refine.anns_field != top_level.anns_field`.
 - Both fields must be loaded and searchable.
+- If either stage uses an ArrayOfVector or Struct vector sub-field, both stages must use the same candidate scope:
+  - row-level to row-level is valid
+  - element-level to element-level is valid only when the element identity is the same
+  - row-level to element-level is invalid
+  - element-level to row-level is invalid
 - The first version should not expose a separate `candidate_k` parameter. It would separate the k value from its field and make the API harder to read.
 
 ### Supported Field Combinations
@@ -96,6 +101,77 @@ Examples:
 | Dense vector | Sparse vector | Dense recall, sparse relevance refine |
 
 For refine, the default execution mode should be candidate-restricted exact scoring. If the refine field has an ANN index, Milvus should not implement refine by running ANN with an `id in [...]` filter, because that recreates the original performance problem.
+
+### Row-Level and Element-Level Scope
+
+Cascade search must preserve one candidate identity across both stages.
+
+For row-level search, the candidate identity is a row. This includes normal vector fields, row-level embedding-list search, sparse vector fields, and full-text fields.
+
+For element-level search on Struct array vector sub-fields, the candidate identity is an element inside a row. Element-level cascade is valid only when both stages produce the same element identity, such as two vector sub-fields under the same parent Struct array field. In that case, the internal candidate address should include the parent row offset plus the element index.
+
+Mixed scope is rejected. Milvus should not run a row-level coarse stage followed by an element-level refine stage, or an element-level coarse stage followed by a row-level refine stage. Those requests need an explicit collapse or expansion policy, which is outside cascade v1.
+
+## Feature Compatibility
+
+Cascade v1 composes only two ranking stages:
+
+```text
+coarse retrieval -> global coarse reduce -> candidate-restricted refine -> final reduce
+```
+
+Features that define the read view or restrict the search universe are inherited. Features that add cursoring, grouping, aggregation, ordering, or another reranking layer are not accepted in v1 unless this document defines their semantics.
+
+### Supported in V1
+
+| Feature | Behavior |
+|---------|----------|
+| Scalar filter / expr template values | Apply to phase 1. Phase 2 only refines rows or elements that survived phase 1, so the filter remains satisfied. |
+| Partition names / partition-key isolation | Apply to phase 1 candidate generation; phase 2 only touches selected candidates from those partitions. |
+| Consistency / guarantee timestamp / travel timestamp | One cascade request uses one read snapshot. Phase-2 candidate addresses must validate segment version or snapshot. |
+| `ignore_growing` | If true, phase 1 produces no growing-segment candidates. If false, candidate leases must cover growing and sealed candidates. |
+| Output fields | Materialize only after final refine top-k is known. |
+| Analyzer / BM25 params | Each stage owns the params for its own searchable field. |
+| `round_decimal` | Apply to final refine scores. Coarse scores are internal candidate-generation scores. |
+
+### Supported With Explicit Semantics
+
+| Feature | V1 Semantics |
+|---------|--------------|
+| `offset` | Treat as final-page offset. The top-level coarse `limit` remains `large_k`; the refine stage must produce at least `offset + final_limit` before final slicing. Do not support a separate coarse offset. |
+| Range search | Support only on the coarse stage. Range constraints define the coarse candidate pool before global top `large_k`. Refine-stage range constraints are not part of v1. |
+| ArrayOfVector / embedding-list search | Support row-level to row-level and element-level to element-level only. Reject mixed row/element scope. |
+
+### Not in V1, Future Support
+
+These features need a clear post-refine or multi-stage semantic model before they are accepted with cascade.
+
+| Feature | Future Semantics |
+|---------|------------------|
+| Function score / function chains / boost / decay / model rerank | `coarse -> refine -> function rerank`, with separate candidate limits for refine and final output. |
+| Order by | `coarse -> refine -> materialize order fields -> order_by -> final slice`. This changes "top by refine score" semantics, so it should be explicit. |
+| Search aggregation | `coarse -> refine -> aggregate over refined pool`, with documented approximation over the refined candidate set. |
+| Group by / multi-field group by | `coarse -> refine -> group by refined rows`, with over-fetch rules for group coverage. |
+| Hybrid search and rank fusion | Requires a general search plan model. It should not be hidden inside `search_params.cascade` v1. |
+| Search iterator / search_iter_v2 | Requires a cascade cursor that owns phase state and segment leases across batches. |
+| Highlighter | Needs a rule for which stage supplies highlight text and how full-text cascade stages interact with highlight queries. |
+| Refine-stage range search | Needs a clear definition for short result sets and whether final `small_k` is a hard count or distance-bounded result count. |
+
+### Not Planned to Support
+
+These combinations conflict with cascade v1 semantics and should be rejected by design.
+
+| Feature / Combination | Reason |
+|-----------------------|--------|
+| Same coarse and refine field | Cascade requires two different fields. A single field should use normal search. |
+| Row-level stage followed by element-level stage | The candidate identity changes from row to element without an explicit expansion policy. |
+| Element-level stage followed by row-level stage | The candidate identity changes from element to row without an explicit collapse policy. |
+| Element-level stages from different Struct array parents | Element indices do not refer to the same logical element identity. |
+| Segment-local cascade as user-visible semantics | It amplifies refine work by segment count and does not mean global coarse top `large_k` followed by refine. |
+| Refine implemented as ANN plus `id in [...]` | This recreates the performance problem cascade is meant to remove. |
+| Coarse-stage offset | Skipping coarse candidates before refine makes recall semantics hard to reason about. Offset is only a final-result operation. |
+| `reduce_stop_for_best` or other early-stop shortcuts before phase 2 | Cascade requires complete global phase-1 reduce before phase 2 can start. |
+| Iterative filter hint as an independent cascade option | It changes search/filter execution strategy and conflicts with the candidate-address protocol unless redesigned as part of cascade execution. |
 
 ## Query Semantics
 
@@ -285,8 +361,11 @@ Proxy should validate:
 - `top_level.limit > 0`.
 - `refine.limit > 0`.
 - `refine.limit <= top_level.limit`.
+- row-level and element-level candidate scopes are not mixed.
+- element-level cascade fields share the same element identity.
 - query count is compatible between coarse data and refine data.
 - refine params request candidate-restricted scoring, not filtered ANN.
+- rejected feature combinations listed in the compatibility matrix are absent.
 
 QueryNode should validate:
 
@@ -345,8 +424,14 @@ Integration tests:
 
 - dense vector coarse + dense vector refine
 - dense vector coarse + vector-array refine
+- row-level embedding-list coarse + row-level vector refine
+- element-level Struct vector coarse + element-level Struct vector refine with the same parent Struct array field
+- reject row-level coarse + element-level refine
+- reject element-level coarse + row-level refine
+- reject element-level fields from different Struct array parents
 - sparse or full-text coarse + dense refine, if the field type is enabled in the test environment
 - verify strict global semantics by comparing with an offline two-call implementation: global coarse top `large_k`, then exact refine over that exact candidate set
+- reject iterator, group-by, hybrid, function rerank, aggregation, order_by, highlighter, iterative filter, and reduce shortcut combinations in v1
 - verify released or compacted segments do not produce incorrect results under a lease
 
 Performance tests:
