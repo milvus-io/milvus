@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type FunctionTaskSuite struct {
@@ -38,6 +39,60 @@ type FunctionTaskSuite struct {
 
 func TestFunctionTask(t *testing.T) {
 	suite.Run(t, new(FunctionTaskSuite))
+}
+
+// TestAddFunctionRequiresStorageV3Gate guards the add_function_field V3 gate (issue #51167):
+// adding a function must be rejected unless StorageV3 (useLoonFFI), the schema-bump compaction
+// (bumpSchemaVersion.enabled), and the storage-version upgrade compaction (storageVersion.enabled)
+// are all on, so the new function output is actually backfilled into pre-existing segments.
+func (f *FunctionTaskSuite) TestAddFunctionRequiresStorageV3Gate() {
+	useLoon := paramtable.Get().CommonCfg.UseLoonFFI.Key
+	bumpEnabled := paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key
+	svEnabled := paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key
+	defer paramtable.Get().Reset(useLoon)
+	defer paramtable.Get().Reset(bumpEnabled)
+	defer paramtable.Get().Reset(svEnabled)
+
+	// useLoonFFI off -> reject
+	paramtable.Get().Save(useLoon, "false")
+	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "StorageV3")
+
+	// useLoonFFI on but bumpSchemaVersion.enabled off -> reject
+	paramtable.Get().Save(useLoon, "true")
+	paramtable.Get().Save(bumpEnabled, "false")
+	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "bumpSchemaVersion.enabled")
+
+	// bumpSchemaVersion on but storageVersion.enabled off -> reject
+	paramtable.Get().Save(bumpEnabled, "true")
+	paramtable.Get().Save(svEnabled, "false")
+	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "storageVersion.enabled")
+
+	// all on -> pass
+	paramtable.Get().Save(svEnabled, "true")
+	f.NoError(validateAddFunctionRequiresStorageV3())
+}
+
+// TestValidateAddFunctionInputNotText guards the reject of a BM25/MinHash function whose
+// input is a TEXT field (issue #51167): its output cannot be backfilled into existing
+// segments (stringInputsFromRecord hard-fails on the binary LOB column), so add-function
+// must fail fast. VarChar input stays allowed; non-materialized function types are ignored.
+func (f *FunctionTaskSuite) TestValidateAddFunctionInputNotText() {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "varchar_in", DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, Name: "text_in", DataType: schemapb.DataType_Text},
+	}}
+	fn := func(t schemapb.FunctionType, input string) *schemapb.FunctionSchema {
+		return &schemapb.FunctionSchema{Name: "fn", Type: t, InputFieldNames: []string{input}}
+	}
+
+	// TEXT input rejected for BM25 and MinHash
+	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
+	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
+	// VarChar input allowed
+	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
+	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
+	// non-materialized function type (e.g. TextEmbedding) is out of scope -> allowed even with TEXT input
+	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
 }
 
 func (f *FunctionTaskSuite) TestFunctionOnType() {
@@ -87,6 +142,13 @@ func (f *FunctionTaskSuite) TestFunctionOnType() {
 
 func (f *FunctionTaskSuite) TestAddCollectionFunctionTaskPreExecute() {
 	ctx := context.Background()
+	// Adding a function requires StorageV3 + schema-bump/storage-version compaction enabled
+	// (see validateAddFunctionRequiresStorageV3). storageVersion.enabled defaults true;
+	// bumpSchemaVersion.enabled defaults false, so it must be set explicitly.
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key)
 	{
 		mixc := mocks.NewMockMixCoordClient(f.T())
 		req := &milvuspb.AddCollectionFunctionRequest{

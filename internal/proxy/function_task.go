@@ -100,12 +100,18 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
 		return merr.WrapErrParameterInvalidMsg("currently does not support adding BM25 function")
 	}
+	if err := validateAddFunctionRequiresStorageV3(); err != nil {
+		return err
+	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		mlog.Error(t.ctx, "AddCollectionTask, get collection info failed",
 			mlog.String("dbName", t.GetDbName()),
 			mlog.String("collectionName", t.GetCollectionName()),
 			mlog.Err(err))
+		return err
+	}
+	if err := validateAddFunctionInputNotText(coll.schema.CollectionSchema, t.FunctionSchema); err != nil {
 		return err
 	}
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)

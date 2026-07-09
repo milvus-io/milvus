@@ -7602,6 +7602,13 @@ func TestValidateAddFieldRequest(t *testing.T) {
 }
 
 func TestAlterCollectionSchemaTask(t *testing.T) {
+	// Add-function cases require StorageV3 + schema-bump/storage-version compaction enabled
+	// (validateAddFunctionRequiresStorageV3). storageVersion.enabled defaults true;
+	// bumpSchemaVersion.enabled defaults false, so it must be set explicitly.
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key)
 	rc := NewMixCoordMock()
 	ctx := context.Background()
 	prefix := "TestAlterCollectionSchemaTask"
