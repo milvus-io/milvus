@@ -146,20 +146,24 @@ func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
 }
 
 // isReplicatingClusterNow reports whether this cluster is currently part of a CDC
-// replication topology. Any lookup error is treated as "not replicating" so callers
-// fall back to non-replicate behavior (no rollback broadcast). This differs from
-// validateImportReplication, which propagates the balancer error to block import
-// admission; here a transient balancer error must not strand a GC decision.
-func (s *Server) isReplicatingClusterNow(ctx context.Context) bool {
+// replication topology. A non-nil error means the status could not be determined (e.g. a
+// transient balancer error, or OnShutdownError while streamingcoord is stopping before
+// datacoord); the caller must treat that as indeterminate rather than "not replicating",
+// because at GC time a false "not replicating" would irreversibly drop a replicating job
+// without releasing the peer. A nil assignment is an unambiguous "not replicating".
+func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
-		return false
+		return false, err
 	}
 	assignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil || assignment == nil {
-		return false
+	if err != nil {
+		return false, err
 	}
-	return isReplicatingCluster(assignment.ReplicateConfiguration)
+	if assignment == nil {
+		return false, nil
+	}
+	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
 }
 
 // broadcastImport broadcasts the import message to all vchannels.

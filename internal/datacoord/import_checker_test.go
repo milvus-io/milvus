@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -549,7 +550,7 @@ func (s *ImportCheckerSuite) TestCheckGCReplicateSourceBroadcastsRollback() {
 		rollbackCalls++
 		return rollbackErr
 	}
-	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) bool { return true }
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) { return true, nil }
 
 	// First tick: broadcast fails → job retained (tasks already removed), rollback attempted.
 	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
@@ -572,7 +573,7 @@ func (s *ImportCheckerSuite) TestCheckGCReplicateNotPrimaryProceeds() {
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
 	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error { return broadcaster.ErrNotPrimary }
-	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) bool { return true }
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) { return true, nil }
 
 	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
@@ -590,10 +591,54 @@ func (s *ImportCheckerSuite) TestCheckGCNonReplicatingSkipsRollback() {
 		rollbackCalls++
 		return nil
 	}
-	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) bool { return false }
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) { return false, nil }
 
 	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, rollbackCalls)
+	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
+}
+
+// When the replication status cannot be determined (e.g. a transient balancer error during
+// shutdown), GC must NOT drop the job: a false "not replicating" would strand a replicating
+// peer with no recovery path. The job is retained and no rollback is broadcast.
+func (s *ImportCheckerSuite) TestCheckGCReplicateIndeterminateRetainsJob() {
+	s.setupGCReadyFailedJob()
+	// The task-cleanup loop runs before the replication gate, so the task is removed
+	// even though the job itself is retained; DropImportJob must NOT be called.
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
+
+	rollbackCalls := 0
+	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+		rollbackCalls++
+		return nil
+	}
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) {
+		return false, errors.New("balancer not ready")
+	}
+
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(0, rollbackCalls)
+	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
+}
+
+// A permanent rollback error (e.g. the collection was dropped → ErrCollectionNotFound) must
+// NOT be retried forever, which would leak the job's metadata. The job is GC'd instead.
+func (s *ImportCheckerSuite) TestCheckGCReplicatePermanentRollbackErrRemovesJob() {
+	s.setupGCReadyFailedJob()
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	rollbackCalls := 0
+	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+		rollbackCalls++
+		return merr.WrapErrCollectionNotFound(job.GetCollectionID())
+	}
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) { return true, nil }
+
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(1, rollbackCalls)
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
 

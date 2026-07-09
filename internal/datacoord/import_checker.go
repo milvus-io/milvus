@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -52,9 +53,11 @@ type importCheckerHooks struct {
 	commitImport func(ctx context.Context, job ImportJob) error
 	// rollbackImport broadcasts a RollbackImport WAL message. nil disables GC self-heal.
 	rollbackImport func(ctx context.Context, job ImportJob) error
-	// isReplicatingCluster reports whether this cluster is currently replicating. nil is
-	// treated as "not replicating" (GC self-heal disabled).
-	isReplicatingCluster func(ctx context.Context) bool
+	// isReplicatingCluster reports whether this cluster is currently replicating. A
+	// non-nil error means the status is indeterminate (e.g. a transient balancer error
+	// during shutdown) and the caller must not make an irreversible GC decision. nil hook
+	// is treated as "not replicating" (GC self-heal disabled).
+	isReplicatingCluster func(ctx context.Context) (bool, error)
 }
 
 type importChecker struct {
@@ -619,18 +622,33 @@ func (c *importChecker) checkGC(job ImportJob) {
 		// In a CDC replicating cluster, a failed 2PC source import must release the
 		// peer cluster's replicated Uncommitted job before we drop it — otherwise the
 		// peer is stranded with invisible imported segments and no recovery path, since
-		// source GC never touches the peer. Broadcast the RollbackImport first; if it
-		// fails transiently, keep the job and retry on the next GC tick. Removal of the
-		// job is itself the idempotency guard: once gone we never re-broadcast. A standby
-		// (not the replication primary) gets ErrNotPrimary and is allowed to proceed.
+		// source GC never touches the peer. Removal of the job is itself the idempotency
+		// guard: once gone we never re-broadcast. Auto-commit jobs have no 2PC peer to
+		// release, so they skip the gate entirely.
 		if c.hooks.rollbackImport != nil && c.hooks.isReplicatingCluster != nil &&
-			job.GetState() == internalpb.ImportJobState_Failed &&
-			c.hooks.isReplicatingCluster(c.ctx) {
-			if err := c.hooks.rollbackImport(c.ctx, job); err != nil && !errors.Is(err, broadcaster.ErrNotPrimary) {
-				log.Warn(c.ctx, "failed to broadcast rollback before GC of failed replicate import job, will retry", mlog.Err(err))
+			job.GetState() == internalpb.ImportJobState_Failed && !job.GetAutoCommit() {
+			replicating, err := c.hooks.isReplicatingCluster(c.ctx)
+			switch {
+			case err != nil:
+				// Indeterminate replication status (e.g. a transient balancer error during
+				// shutdown, when streamingcoord stops before datacoord). Removing the job now
+				// could strand a replicating peer's Uncommitted job with no recovery path,
+				// which is irreversible — a false "not replicating" costs nothing but a retry,
+				// so keep the job and re-evaluate on the next GC tick.
+				log.Warn(c.ctx, "cannot determine replication status before GC of failed import job, will retry", mlog.Err(err))
 				return
+			case replicating:
+				// Broadcast the RollbackImport to release the peer. A transient error keeps
+				// the job to retry next tick; a permanent error (standby ErrNotPrimary, or the
+				// collection was dropped — itself a replicated DDL, so the peer fails its own
+				// job independently) falls through to GC, since retrying it forever would leak
+				// the job's metadata.
+				if err := c.hooks.rollbackImport(c.ctx, job); err != nil && !isPermanentRollbackErr(err) {
+					log.Warn(c.ctx, "failed to broadcast rollback before GC of failed replicate import job, will retry", mlog.Err(err))
+					return
+				}
+				log.Info(c.ctx, "proceeding with GC of failed replicate import job after rollback attempt")
 			}
-			log.Info(c.ctx, "broadcast rollback to release peer before GC of failed replicate import job")
 		}
 		err := c.importMeta.RemoveJob(c.ctx, job.GetJobID())
 		if err != nil {
@@ -639,4 +657,18 @@ func (c *importChecker) checkGC(job ImportJob) {
 		}
 		log.Info(c.ctx, "import job removed")
 	}
+}
+
+// isPermanentRollbackErr reports whether a RollbackImport broadcast error is permanent,
+// i.e. retrying it can never succeed, so the failed job should still be GC'd rather than
+// retried forever (which would leak its metadata). Everything else is treated as transient
+// and retried on the next GC tick — misclassifying a transient error as permanent would
+// drop a replicating job without releasing the peer, which is irreversible.
+func isPermanentRollbackErr(err error) bool {
+	// ErrNotPrimary: this cluster is a replication standby, not the primary that owns the
+	// broadcast; its own failed job is independent and safe to drop.
+	// ErrCollectionNotFound: the collection was dropped. DropCollection is itself a
+	// replicated DDL, so the peer marks its own import job Failed independently — there is
+	// no peer left to release, and the broadcast can never succeed.
+	return errors.Is(err, broadcaster.ErrNotPrimary) || errors.Is(err, merr.ErrCollectionNotFound)
 }
