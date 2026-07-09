@@ -31,6 +31,7 @@ import (
 	qcsession "github.com/milvus-io/milvus/internal/querycoordv2/session"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -108,6 +109,27 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		}
 
 		observer.Start()
+		observer.Stop()
+	})
+
+	s.Run("start_with_proxy_sync_mode", func() {
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			notifyCh:     make(chan struct{}, 1),
+			closeCh:      make(chan struct{}),
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			pnMode:       fileresource.SyncMode,
+			proxies:      proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator),
+		}
+
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0)).Maybe()
+		observer.meta = mockMeta
+
+		observer.Start()
+		time.Sleep(50 * time.Millisecond)
 		observer.Stop()
 	})
 }
@@ -254,6 +276,23 @@ func (s *FileResourceObserverSuite) TestCheckAllQnReady() {
 		}
 		// DataNode with old version should not cause error
 		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: DataNode, Version: 1})
+
+		err := observer.CheckAllQnReady()
+		s.NoError(err)
+	})
+
+	s.Run("proxy_nodes_not_checked", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{
+			{Name: "test"},
+		}, uint64(5))
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+		}
+		observer.distribution.Insert(1, &NodeInfo{NodeID: 1, NodeType: ProxyNode, Version: 3})
 
 		err := observer.CheckAllQnReady()
 		s.NoError(err)
@@ -427,6 +466,64 @@ func (s *FileResourceObserverSuite) TestSync() {
 		s.Error(err)
 	})
 
+	s.Run("sync_proxy_nodes_success", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1))
+
+		mockProxyClient := mocks.NewMockProxyClient(s.T())
+		mockProxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+		proxyManager := proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+		proxyManager.GetProxyClients().Insert(200, mockProxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			proxies:      proxyManager,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			pnMode:       fileresource.SyncMode,
+		}
+
+		err := observer.Sync()
+		s.NoError(err)
+
+		info, ok := observer.distribution.Get(200)
+		s.True(ok)
+		s.Equal(int64(200), info.NodeID)
+		s.Equal(ProxyNode, info.NodeType)
+		s.Equal(uint64(1), info.Version)
+	})
+
+	s.Run("sync_proxy_nodes_ignores_unimplemented", func() {
+		mockMeta := mockrootcoord.NewIMetaTable(s.T())
+		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1))
+
+		mockProxyClient := mocks.NewMockProxyClient(s.T())
+		mockProxyClient.EXPECT().SyncFileResource(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented)
+
+		proxyManager := proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+		proxyManager.GetProxyClients().Insert(200, mockProxyClient)
+
+		observer := &FileResourceObserver{
+			ctx:          s.ctx,
+			distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+			meta:         mockMeta,
+			proxies:      proxyManager,
+			qnMode:       fileresource.CloseMode,
+			dnMode:       fileresource.CloseMode,
+			pnMode:       fileresource.SyncMode,
+		}
+
+		err := observer.Sync()
+		s.NoError(err)
+		_, ok := observer.distribution.Get(200)
+		s.False(ok)
+	})
+
 	s.Run("cleanup_removed_nodes", func() {
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
 		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
@@ -480,6 +577,13 @@ func (s *FileResourceObserverSuite) TestInit() {
 		mockDNManager := dcsession.NewMockNodeManager(s.T())
 		observer.InitDataCoord(mockDNManager)
 		s.Equal(mockDNManager, observer.dnManager)
+	})
+
+	s.Run("init_proxy_manager", func() {
+		observer := &FileResourceObserver{ctx: s.ctx}
+		proxyManager := proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+		observer.InitProxyManager(proxyManager)
+		s.Equal(proxyManager, observer.proxies)
 	})
 }
 

@@ -182,6 +182,7 @@ type Core struct {
 type FileResourceObserver interface {
 	CheckAllQnReady() error
 	InitMeta(meta IMetaTable)
+	InitProxyManager(manager proxyutil.ProxyClientManagerInterface)
 	Notify()
 	Sync() error
 }
@@ -498,8 +499,9 @@ func (c *Core) initInternal() error {
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
 		c.proxyClientManager.SetProxyClients,
+		c.notifyFileResourceObserverOnProxySnapshot,
 	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient, c.notifyFileResourceObserverOnProxyAdd)
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	mlog.Info(context.TODO(), "init proxy manager done")
 
@@ -535,9 +537,24 @@ func (c *Core) initInternal() error {
 	// init file resource observer
 	if c.fileResourceObserver != nil {
 		c.fileResourceObserver.InitMeta(c.meta)
+		c.fileResourceObserver.InitProxyManager(c.proxyClientManager)
 	}
 	mlog.Info(context.TODO(), "init rootcoord done", mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.String("Address", c.address))
 	return nil
+}
+
+func (c *Core) notifyFileResourceObserverOnProxyAdd(*sessionutil.Session) {
+	c.notifyFileResourceObserver()
+}
+
+func (c *Core) notifyFileResourceObserverOnProxySnapshot([]*sessionutil.Session) {
+	c.notifyFileResourceObserver()
+}
+
+func (c *Core) notifyFileResourceObserver() {
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.Notify()
+	}
 }
 
 func (c *Core) registerMetricsRequest() {

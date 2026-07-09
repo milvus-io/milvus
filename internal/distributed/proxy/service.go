@@ -1256,6 +1256,11 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 	return s.proxy.ListFileResources(ctx, req)
 }
 
+// SyncFileResource syncs file resources to proxy.
+func (s *Server) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return s.proxy.SyncFileResource(ctx, req)
+}
+
 // UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
 func (s *Server) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) (*commonpb.Status, error) {
 	return s.proxy.UpdateReplicateConfiguration(ctx, req)
