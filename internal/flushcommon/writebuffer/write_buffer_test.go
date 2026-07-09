@@ -71,11 +71,57 @@ func (s *WriteBufferSuite) SetupTest() {
 func (s *WriteBufferSuite) TestHasSegment() {
 	segmentID := int64(1001)
 
+	s.wb.useGrowingSourceFlush = false
 	s.False(s.wb.HasSegment(segmentID))
 
 	s.wb.getOrCreateBuffer(segmentID, 0)
 
 	s.True(s.wb.HasSegment(segmentID))
+}
+
+func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
+	segmentID := int64(1001)
+	var notifiedSegmentID int64
+	var notifiedMode metacache.FlushSourceMode
+	s.wb.flushSourceModeNotifier = func(segmentID int64, mode metacache.FlushSourceMode) {
+		notifiedSegmentID = segmentID
+		notifiedMode = mode
+	}
+
+	s.Run("write_buffer_mode", func() {
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil)
+		metacache.SetFlushSourceMode(metacache.FlushSourceWriteBuffer)(segment)
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Once()
+		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+
+		s.wb.useGrowingSourceFlush = true
+		s.wb.getOrCreateBuffer(segmentID, 0)
+		s.Equal(segmentID, notifiedSegmentID)
+		s.Equal(metacache.FlushSourceWriteBuffer, notifiedMode)
+	})
+
+	s.Run("growing_mode", func() {
+		segmentID := int64(1002)
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil)
+		notifiedSegmentID = 0
+		notifiedMode = metacache.FlushSourceUnknown
+		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Once()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Once()
+		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+
+		s.wb.recordGrowingSourceProgress(&InsertData{
+			segmentID:   segmentID,
+			partitionID: 10,
+			rowNum:      3,
+		}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 1, 3)
+		s.Equal(segmentID, notifiedSegmentID)
+		s.Equal(metacache.FlushSourceGrowing, notifiedMode)
+	})
 }
 
 func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {

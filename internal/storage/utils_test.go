@@ -1125,8 +1125,44 @@ func TestRowBasedTransferInsertMsgToInsertRecord(t *testing.T) {
 	schema, _, _ := genAllFieldsSchema(dim, false)
 	msg, _, _ := genRowBasedInsertMsg(numRows, dim)
 
-	_, err := TransferInsertMsgToInsertRecord(schema, msg)
+	_, skippedFields, err := TransferInsertMsgToInsertRecord(schema, msg)
 	assert.NoError(t, err)
+	assert.Nil(t, skippedFields)
+}
+
+func TestColumnBasedTransferInsertMsgToInsertRecordSkipDroppedField(t *testing.T) {
+	// Simulate WAL replay after drop-field: the payload still carries the column of
+	// a since-dropped field, which must be skipped instead of forwarded to segcore.
+	schema := &schemapb.CollectionSchema{
+		Name: "test_skip_dropped_field",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64},
+		},
+	}
+	numRows := 4
+	msg, _, _ := genColumnBasedInsertMsg(schema, numRows, 8)
+	msg.FieldsData = append(msg.FieldsData, &schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldName: "dropped",
+		FieldId:   158,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{"a", "b", "c", "d"}},
+				},
+			},
+		},
+	})
+
+	record, skippedFields, err := TransferInsertMsgToInsertRecord(schema, msg)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(numRows), record.GetNumRows())
+	fieldIDs := lo.Map(record.GetFieldsData(), func(fd *schemapb.FieldData, _ int) int64 {
+		return fd.GetFieldId()
+	})
+	assert.ElementsMatch(t, []int64{100, 101}, fieldIDs)
+	assert.Equal(t, []int64{158}, skippedFields)
 }
 
 func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
@@ -1550,7 +1586,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "compact")
 
-			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			_, _, err = TransferInsertMsgToInsertRecord(schema, msg)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "compact")
 		})
@@ -1658,7 +1694,7 @@ func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorPartialRowData(t *
 			_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
 			require.Error(t, err)
 
-			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			_, _, err = TransferInsertMsgToInsertRecord(schema, msg)
 			require.Error(t, err)
 		})
 	}

@@ -163,10 +163,10 @@ class DeletedRecord {
                 // are correctly rejected — the row's data only becomes visible
                 // at commit_ts.
                 Timestamp insert_ts = 0;
-                if (!insert_record_->timestamps_.empty()) {
-                    insert_ts = insert_record_->timestamps_[row_id];
-                } else if (get_insert_timestamp_func_) {
+                if (get_insert_timestamp_func_) {
                     insert_ts = get_insert_timestamp_func_(row_id);
+                } else if (!insert_record_->timestamps_.empty()) {
+                    insert_ts = insert_record_->timestamps_[row_id];
                 }
                 if (insert_ts != 0 && delete_ts <= insert_ts) {
                     return;

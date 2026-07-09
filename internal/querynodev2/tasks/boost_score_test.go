@@ -43,26 +43,8 @@ import (
 )
 
 func TestBoostScoreColumn(t *testing.T) {
-	require.Equal(t, "$boost_score_0", boostScoreColumn(0))
-	require.Equal(t, "$boost_score_3", boostScoreColumn(3))
-}
-
-func TestBoostReduceColumnsKeepsReduceColumnsOnly(t *testing.T) {
-	groupCol := groupByColumnName(100)
-	cols := []string{
-		types.IDFieldName,
-		boostScoreColumn(0),
-		types.ScoreFieldName,
-		functionScoreColumn,
-		types.SegOffsetFieldName,
-		elementIndicesCol,
-		groupCol,
-		"user_field",
-	}
-
-	require.Equal(t,
-		[]string{types.IDFieldName, types.ScoreFieldName, types.SegOffsetFieldName, elementIndicesCol, groupCol},
-		boostReduceColumns(cols))
+	require.Equal(t, "boost_score_0", boostScoreColumn(0))
+	require.Equal(t, "boost_score_3", boostScoreColumn(3))
 }
 
 func withBoostScoreCheckedAllocator(t *testing.T) {
@@ -106,6 +88,36 @@ func makeBoostScoreTestDF(t *testing.T, ids []int64, scores []float32, offsets [
 	require.NoError(t, builder.AddColumnFromChunks(types.ScoreFieldName, scoreChunks))
 	require.NoError(t, builder.AddColumnFromChunks(types.SegOffsetFieldName, offsetChunks))
 	return builder.Build()
+}
+
+func addBoostScorePruningColumns(t *testing.T, df *chain.DataFrame) (*chain.DataFrame, string) {
+	builder := chain.NewDataFrameBuilder()
+	builder.SetChunkSizes(df.ChunkSizes())
+	require.NoError(t, builder.AddColumnFrom(df, types.IDFieldName))
+	require.NoError(t, builder.AddColumnFrom(df, types.ScoreFieldName))
+	require.NoError(t, builder.AddColumnFrom(df, types.SegOffsetFieldName))
+
+	elementIndicesBuilder := array.NewInt32Builder(defaultAllocator)
+	elementIndicesBuilder.AppendValues([]int32{0, 1, 2}, nil)
+	elementIndicesArr := elementIndicesBuilder.NewArray()
+	elementIndicesBuilder.Release()
+	require.NoError(t, builder.AddColumnFromChunks(elementIndicesCol, []arrow.Array{elementIndicesArr}))
+
+	groupByCol := groupByColumnName(100)
+	groupByBuilder := array.NewInt64Builder(defaultAllocator)
+	groupByBuilder.AppendValues([]int64{1000, 2000, 3000}, nil)
+	groupByArr := groupByBuilder.NewArray()
+	groupByBuilder.Release()
+	require.NoError(t, builder.AddColumnFromChunks(groupByCol, []arrow.Array{groupByArr}))
+
+	userFieldBuilder := array.NewInt64Builder(defaultAllocator)
+	userFieldBuilder.AppendValues([]int64{7, 8, 9}, nil)
+	userFieldArr := userFieldBuilder.NewArray()
+	userFieldBuilder.Release()
+	require.NoError(t, builder.AddColumnFromChunks("user_field", []arrow.Array{userFieldArr}))
+
+	df.Release()
+	return builder.Build(), groupByCol
 }
 
 func makeBoostScoreTestTask(t *testing.T, plan *planpb.PlanNode) *SearchTask {
@@ -207,7 +219,7 @@ func TestBuildBoostScoreChainSkipsFunctionCombineForSingleScorer(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	result, err := boostChain.Execute(df)
+	result, err := boostChain.ExecuteWithOptions(context.Background(), chain.ExecuteOptions{EnableColumnPruning: true}, df)
 	require.NoError(t, err)
 	defer result.Release()
 
@@ -241,7 +253,7 @@ func TestBuildBoostScoreChainCombinesMultipleScorers(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	result, err := boostChain.Execute(df)
+	result, err := boostChain.ExecuteWithOptions(context.Background(), chain.ExecuteOptions{EnableColumnPruning: true}, df)
 	require.NoError(t, err)
 	defer result.Release()
 
@@ -252,7 +264,7 @@ func TestBuildBoostScoreChainCombinesMultipleScorers(t *testing.T) {
 	require.InDelta(t, 2.5, scores.Value(0), 1e-6)
 }
 
-func TestApplyBoostScoresSingleScorerCombinesAndSorts(t *testing.T) {
+func TestApplyBoostScoresPrunesTempsAndPreservesReduceSystemColumns(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
 	oldFactory := boostScoreRunnerFactory
@@ -268,6 +280,7 @@ func TestApplyBoostScoresSingleScorerCombinesAndSorts(t *testing.T) {
 		[]int64{10, 20, 30},
 		[]int64{3},
 	)
+	df, groupByCol := addBoostScorePruningColumns(t, df)
 	segDFs := []*chain.DataFrame{df}
 
 	task := makeBoostScoreTestTask(t, &planpb.PlanNode{
@@ -283,6 +296,14 @@ func TestApplyBoostScoresSingleScorerCombinesAndSorts(t *testing.T) {
 	result := segDFs[0]
 	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
 	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	require.False(t, result.HasColumn(boostScoreColumn(0)))
+	require.False(t, result.HasColumn(functionScoreColumn))
+	require.False(t, result.HasColumn("user_field"))
+	require.True(t, result.HasColumn(types.IDFieldName))
+	require.True(t, result.HasColumn(types.ScoreFieldName))
+	require.True(t, result.HasColumn(types.SegOffsetFieldName))
+	require.True(t, result.HasColumn(elementIndicesCol))
+	require.True(t, result.HasColumn(groupByCol))
 	require.Equal(t, int64(2), ids.Value(0))
 	require.InDelta(t, 2.0, scores.Value(0), 1e-6)
 	require.Equal(t, int64(3), ids.Value(1))

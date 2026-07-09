@@ -70,10 +70,12 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	// Get cluster-level configuration
 	clusterReplicaNum := Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt()
 	clusterResourceGroups := Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	forceOverrideUserReplicaMode := Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool()
 
 	logger.Info(ctx, "checking replica load config compliance",
 		mlog.Int("clusterReplicaNum", clusterReplicaNum),
-		mlog.Strings("clusterResourceGroups", clusterResourceGroups))
+		mlog.Strings("clusterResourceGroups", clusterResourceGroups),
+		mlog.Bool("forceOverrideUserReplicaMode", forceOverrideUserReplicaMode))
 
 	// Use ShowLoadCollections to get all loaded collections
 	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
@@ -87,12 +89,14 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 
 	// Check each collection
 	for _, collectionID := range showResp.GetCollectionIDs() {
+		skipClusterLevelConfigChecks := !forceOverrideUserReplicaMode && s.queryCoordServer.IsCollectionUserSpecifiedReplicaMode(ctx, collectionID)
+
 		// Get internal replicas from QueryCoord meta which contains StreamingResourceGroup field
 		internalReplicas := s.queryCoordServer.GetInternalReplicasByCollection(ctx, collectionID)
 
 		// Check replica count matches exactly — the replica meta must already reflect
 		// the configured count before we inspect serviceability/leaks.
-		if clusterReplicaNum > 0 && len(internalReplicas) != clusterReplicaNum {
+		if !skipClusterLevelConfigChecks && clusterReplicaNum > 0 && len(internalReplicas) != clusterReplicaNum {
 			reason := fmt.Sprintf("collection %d: replica count mismatch (expected %d, actual %d)",
 				collectionID, clusterReplicaNum, len(internalReplicas))
 			logger.Info(ctx, "collection replica count does not match cluster requirement", mlog.String("reason", reason))
@@ -100,7 +104,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 			return
 		}
 
-		if len(clusterResourceGroups) > 0 {
+		if !skipClusterLevelConfigChecks && len(clusterResourceGroups) > 0 {
 			// Check resource groups - collect actual RGs from replicas
 			actualRGs := []string{}
 			for _, replica := range internalReplicas {

@@ -2086,9 +2086,10 @@ class SegmentExpr : public Expr {
 
                 if (json_flat_index) {
                     auto index_path = json_flat_index->GetNestedPath();
-                    executor = json_flat_index
-                                   ->template create_executor<IndexInnerType>(
-                                       pointer.substr(index_path.size()));
+                    executor =
+                        json_flat_index
+                            ->template create_executor<IndexInnerType>(
+                                pointer.substr(index_path.size()), false);
                     index_ptr = executor.get();
                 } else {
                     auto json_index =

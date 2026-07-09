@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -54,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -525,7 +527,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
@@ -534,6 +536,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		return authErr
 	}
 
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 
@@ -542,10 +545,11 @@ func checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface
 	if !ok || username.(string) == "" {
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		return authErr
 	}
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 
@@ -563,6 +567,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		if err != nil {
 			return nil, err
 		}
+		ctx = ginCtx.Request.Context()
 	}
 	if checkLimit {
 		_, err := CheckLimiter(ctx, req, pxy)
@@ -2043,6 +2048,82 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	return resp, err
 }
 
+func defaultMetricTypeForQuickCreate(dataType schemapb.DataType) string {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		return paramtable.BinaryVectorDefaultMetricType
+	case schemapb.DataType_SparseFloatVector:
+		return paramtable.SparseFloatVectorDefaultMetricType
+	default:
+		return DefaultMetricType
+	}
+}
+
+func binaryMetricTypesForQuickCreate() []string {
+	binaryIndexType := paramtable.Get().AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()[common.IndexTypeKey]
+	switch binaryIndexType {
+	case "BIN_FLAT":
+		return indexparamcheck.BinIDMapMetrics
+	case "BIN_IVF_FLAT", "":
+		return indexparamcheck.BinIvfMetrics
+	default:
+		return indexparamcheck.BinIvfMetrics
+	}
+}
+
+func validateMetricTypeForQuickCreate(dataType schemapb.DataType, metricType string) error {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		if !funcutil.SliceContain(binaryMetricTypesForQuickCreate(), metricType) {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType)
+		}
+	case schemapb.DataType_SparseFloatVector:
+		if !funcutil.SliceContain(indexparamcheck.SparseFloatVectorMetrics, metricType) {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only IP&BM25 is the supported metric type for sparse index")
+		}
+		if metricType == metric.BM25 {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only BM25 Function output field support BM25 metric type")
+		}
+	default:
+		if !funcutil.SliceContain(indexparamcheck.FloatVectorMetrics, metricType) {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "float vector index does not support metric type: "+metricType)
+		}
+	}
+	return nil
+}
+
+func consistencyLevelForCreateCollection(httpReq *CollectionReq) (commonpb.ConsistencyLevel, error) {
+	consistencyLevel := commonpb.ConsistencyLevel_Bounded
+	paramConsistencyLevel, hasParamConsistencyLevel := httpReq.Params["consistencyLevel"]
+	paramConsistencyLevelStr := ""
+	if hasParamConsistencyLevel {
+		paramConsistencyLevelStr = fmt.Sprintf("%s", paramConsistencyLevel)
+	}
+
+	if httpReq.ConsistencyLevel != "" && hasParamConsistencyLevel && httpReq.ConsistencyLevel != paramConsistencyLevelStr {
+		return consistencyLevel, merr.WrapErrParameterInvalid("same consistencyLevel", paramConsistencyLevel,
+			"top-level consistencyLevel conflicts with params.consistencyLevel")
+	}
+
+	consistencyLevelStr := httpReq.ConsistencyLevel
+	var actualConsistencyLevel interface{} = httpReq.ConsistencyLevel
+	if consistencyLevelStr == "" && hasParamConsistencyLevel {
+		consistencyLevelStr = paramConsistencyLevelStr
+		actualConsistencyLevel = paramConsistencyLevel
+	}
+
+	if consistencyLevelStr == "" {
+		return consistencyLevel, nil
+	}
+
+	if level, ok := commonpb.ConsistencyLevel_value[consistencyLevelStr]; ok {
+		return commonpb.ConsistencyLevel(level), nil
+	}
+
+	return consistencyLevel, merr.WrapErrParameterInvalid("Strong, Session, Bounded, Eventually, Customized", actualConsistencyLevel,
+		"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
+}
+
 func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionReq)
 	req := &milvuspb.CreateCollectionRequest{
@@ -2067,6 +2148,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	var err error
 	fieldNames := map[string]bool{}
 	partitionsNum := int64(-1)
+	quickCreateVectorDataType := schemapb.DataType_FloatVector
 	if len(httpReq.Schema.Fields) == 0 {
 		if httpReq.GetExternalSource() != "" || httpReq.GetExternalSpec() != "" {
 			err := merr.WrapErrParameterInvalid("schema.fields", "empty schema fields",
@@ -2089,9 +2171,53 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			return nil, err
 		}
 
-		if httpReq.Dimension == 0 {
+		switch httpReq.VectorFieldType {
+		case "", "FloatVector":
+			httpReq.VectorFieldType = "FloatVector"
+		case "BinaryVector":
+			quickCreateVectorDataType = schemapb.DataType_BinaryVector
+		case "Float16Vector":
+			quickCreateVectorDataType = schemapb.DataType_Float16Vector
+		case "BFloat16Vector":
+			quickCreateVectorDataType = schemapb.DataType_BFloat16Vector
+		case "SparseFloatVector":
+			quickCreateVectorDataType = schemapb.DataType_SparseFloatVector
+		default:
+			err := merr.WrapErrParameterInvalid("FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector", httpReq.VectorFieldType,
+				"vectorFieldType can only be [FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector], default: FloatVector")
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+
+		if quickCreateVectorDataType == schemapb.DataType_SparseFloatVector && httpReq.Dimension != 0 {
+			err := merr.WrapErrParameterInvalid(int32(0), httpReq.Dimension,
+				"dimension should not be specified for SparseFloatVector quick create")
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+
+		if quickCreateVectorDataType != schemapb.DataType_SparseFloatVector && httpReq.Dimension == 0 {
 			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
 				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		if len(httpReq.MetricType) == 0 {
+			httpReq.MetricType = defaultMetricTypeForQuickCreate(quickCreateVectorDataType)
+		}
+		if err := validateMetricTypeForQuickCreate(quickCreateVectorDataType, httpReq.MetricType); err != nil {
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
@@ -2139,6 +2265,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				return nil, err
 			}
 		}
+		vectorTypeParams := []*commonpb.KeyValuePair{}
+		if quickCreateVectorDataType != schemapb.DataType_SparseFloatVector {
+			vectorTypeParams = append(vectorTypeParams, &commonpb.KeyValuePair{
+				Key:   Dim,
+				Value: strconv.FormatInt(int64(httpReq.Dimension), 10),
+			})
+		}
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
 			Name: httpReq.CollectionName,
 			Fields: []*schemapb.FieldSchema{
@@ -2154,14 +2287,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 					FieldID:      common.StartOfUserFieldID + 1,
 					Name:         httpReq.VectorFieldName,
 					IsPrimaryKey: false,
-					DataType:     schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   Dim,
-							Value: strconv.FormatInt(int64(httpReq.Dimension), 10),
-						},
-					},
-					AutoID: DisableAutoID,
+					DataType:     quickCreateVectorDataType,
+					TypeParams:   vectorTypeParams,
+					AutoID:       DisableAutoID,
 				},
 			},
 			EnableDynamicField: enableDynamic,
@@ -2311,20 +2439,14 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	}
 	req.ShardsNum = shardsNum
 
-	consistencyLevel := commonpb.ConsistencyLevel_Bounded
-	if _, ok := httpReq.Params["consistencyLevel"]; ok {
-		if level, ok := commonpb.ConsistencyLevel_value[fmt.Sprintf("%s", httpReq.Params["consistencyLevel"])]; ok {
-			consistencyLevel = commonpb.ConsistencyLevel(level)
-		} else {
-			err := merr.WrapErrParameterInvalid("Strong, Session, Bounded, Eventually, Customized", httpReq.Params["consistencyLevel"],
-				"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
-			mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(err),
-				HTTPReturnMessage: err.Error(),
-			})
-			return nil, err
-		}
+	consistencyLevel, err := consistencyLevelForCreateCollection(httpReq)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
 	}
 	req.ConsistencyLevel = consistencyLevel
 
@@ -2401,9 +2523,6 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		return resp, err
 	}
 	if len(httpReq.Schema.Fields) == 0 {
-		if len(httpReq.MetricType) == 0 {
-			httpReq.MetricType = DefaultMetricType
-		}
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
 			CollectionName: httpReq.CollectionName,
@@ -3415,6 +3534,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		if err != nil {
 			return nil, err
 		}
+		ctx = c.Request.Context()
 	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
@@ -3668,6 +3788,7 @@ func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
 		return nil, err
 	}
+	ctx = c.Request.Context()
 	req := &datapb.CommitImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
 		JobId: jobID,
@@ -3714,6 +3835,7 @@ func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq 
 	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
 		return nil, err
 	}
+	ctx = c.Request.Context()
 	req := &datapb.AbortImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
 		JobId: jobID,

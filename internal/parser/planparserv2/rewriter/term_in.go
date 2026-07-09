@@ -185,7 +185,7 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		}
 		// If multiple different equals present, AND implies contradiction unless identical.
 		if len(eqUnique) > 1 {
-			if hasNullableFieldSemantics(g.col) {
+			if !canFoldBoolDomainToConstant(g.col) {
 				continue
 			}
 			for _, ti := range g.termIdxs {
@@ -207,7 +207,7 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 				break
 			}
 		}
-		if !inSet && hasNullableFieldSemantics(g.col) {
+		if !inSet && !canFoldBoolDomainToConstant(g.col) {
 			continue
 		}
 		for _, ti := range g.termIdxs {
@@ -380,7 +380,7 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		filtered := filterValuesByRange(effectiveDataType(g.col), termVals, g.lower, g.lowerInc, g.upper, g.upperInc)
-		if len(filtered) == 0 && hasNullableFieldSemantics(g.col) {
+		if len(filtered) == 0 && !canFoldBoolDomainToConstant(g.col) {
 			continue
 		}
 		used[g.termIdx] = true
@@ -508,7 +508,7 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 				inter = append(inter, v)
 			}
 		}
-		if len(inter) == 0 && hasNullableFieldSemantics(g.col) {
+		if len(inter) == 0 && !canFoldBoolDomainToConstant(g.col) {
 			continue
 		}
 		for _, i := range g.idxs {
@@ -587,7 +587,7 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 				filtered = append(filtered, tv)
 			}
 		}
-		if len(filtered) == 0 && hasNullableFieldSemantics(g.col) {
+		if len(filtered) == 0 && !canFoldBoolDomainToConstant(g.col) {
 			continue
 		}
 		used[g.termIdx] = true
@@ -668,7 +668,7 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 		}
 		if containsAny {
-			if !canFoldInNotEqualTautologyToTrue(g.col) {
+			if !canFoldBoolDomainToConstant(g.col) {
 				continue
 			}
 			used[g.termIdx] = true

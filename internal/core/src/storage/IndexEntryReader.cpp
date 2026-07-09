@@ -121,6 +121,8 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
     return cipher_len + 2 * plain_len;
 }
 
+constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
+
 void
 DrainFutures(std::vector<std::future<void>>& futures,
              std::exception_ptr& first_error) {
@@ -522,6 +524,31 @@ IndexEntryReader::VerifyCrc32c(uint32_t expected,
                Crc32cToHex(actual));
 }
 
+size_t
+IndexEntryReader::DownloadRangeCount(uint64_t size) {
+    if (size == 0) {
+        return 0;
+    }
+    return static_cast<size_t>((size - 1) / kEntryDownloadRangeSize + 1);
+}
+
+size_t
+IndexEntryReader::DownloadTaskCount(const EntryMeta& meta) {
+    if (meta.encrypted) {
+        return meta.enc.slices.size();
+    }
+    return DownloadRangeCount(meta.plain.size);
+}
+
+size_t
+IndexEntryReader::StreamDownloadTaskCount(const EntryMeta& meta) {
+    if (meta.encrypted) {
+        return meta.enc.slices.size();
+    }
+    return PlainStreamSliceCount(meta.plain.size,
+                                 DefaultEntryStreamSliceSize());
+}
+
 Entry
 IndexEntryReader::ReadEntry(const std::string& name) {
     CheckCancelled("IndexEntryReader::ReadEntry");
@@ -555,9 +582,7 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     Entry result;
     result.data.resize(pm.size);
 
-    constexpr size_t kRangeSize = 16 * 1024 * 1024;
-
-    if (pm.size <= kRangeSize) {
+    if (pm.size <= kEntryDownloadRangeSize) {
         size_t n = input_->ReadAt(
             result.data.data(), MILVUS_V3_MAGIC_SIZE + pm.offset, pm.size);
         CheckCancelled("IndexEntryReader::ReadPlainEntry");
@@ -574,28 +599,32 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     size_t remaining = pm.size;
     size_t offset = 0;
 
-    while (remaining > 0) {
-        size_t len = std::min(remaining, kRangeSize);
-        size_t this_offset = offset;
-
-        futures.push_back(pool.Submit(
-            [this, dest, this_offset, len, &pm, cancellation_token]() {
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadPlainEntry");
-                size_t n = input_->ReadAt(
-                    dest + this_offset,
-                    MILVUS_V3_MAGIC_SIZE + pm.offset + this_offset,
-                    len);
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadPlainEntry");
-                AssertInfo(n == len, "Failed to read entry data range");
-            }));
-
-        remaining -= len;
-        offset += len;
-    }
-
     std::exception_ptr first_error = nullptr;
+    try {
+        futures.reserve(DownloadRangeCount(pm.size));
+        while (remaining > 0) {
+            size_t len = std::min(remaining, kEntryDownloadRangeSize);
+            size_t this_offset = offset;
+
+            futures.push_back(pool.Submit(
+                [this, dest, this_offset, len, &pm, cancellation_token]() {
+                    ThrowIfCancelled(cancellation_token,
+                                     "IndexEntryReader::ReadPlainEntry");
+                    size_t n = input_->ReadAt(
+                        dest + this_offset,
+                        MILVUS_V3_MAGIC_SIZE + pm.offset + this_offset,
+                        len);
+                    ThrowIfCancelled(cancellation_token,
+                                     "IndexEntryReader::ReadPlainEntry");
+                    AssertInfo(n == len, "Failed to read entry data range");
+                }));
+
+            remaining -= len;
+            offset += len;
+        }
+    } catch (...) {
+        first_error = std::current_exception();
+    }
     DrainFutures(futures, first_error);
     if (first_error) {
         std::rethrow_exception(first_error);
@@ -622,41 +651,46 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
     std::vector<std::future<void>> futures;
     size_t cur_output_offset = 0;
 
-    for (const auto& slice : em.slices) {
-        size_t this_output_offset = cur_output_offset;
-        size_t remaining = em.original_size - cur_output_offset;
-        size_t plain_len = std::min(remaining, slice_size_);
-        cur_output_offset += plain_len;
-
-        futures.push_back(pool.Submit([this,
-                                       slice,
-                                       dest,
-                                       this_output_offset,
-                                       plain_len,
-                                       cancellation_token]() {
-            ThrowIfCancelled(cancellation_token,
-                             "IndexEntryReader::ReadEncryptedEntry");
-            std::vector<uint8_t> cipher(slice.size);
-            size_t n = input_->ReadAt(
-                cipher.data(), MILVUS_V3_MAGIC_SIZE + slice.offset, slice.size);
-            ThrowIfCancelled(cancellation_token,
-                             "IndexEntryReader::ReadEncryptedEntry");
-            AssertInfo(n == slice.size, "Failed to read encrypted slice");
-
-            auto dec =
-                cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
-            auto plain = dec->Decrypt(cipher.data(), cipher.size());
-
-            AssertInfo(plain.size() == plain_len,
-                       "Decrypted size mismatch: expected {}, got {}",
-                       plain_len,
-                       plain.size());
-            milvus::fastmem::FastMemcpy(
-                dest + this_output_offset, plain.data(), plain.size());
-        }));
-    }
-
     std::exception_ptr first_error = nullptr;
+    try {
+        futures.reserve(em.slices.size());
+        for (const auto& slice : em.slices) {
+            size_t this_output_offset = cur_output_offset;
+            size_t remaining = em.original_size - cur_output_offset;
+            size_t plain_len = std::min(remaining, slice_size_);
+            cur_output_offset += plain_len;
+
+            futures.push_back(pool.Submit([this,
+                                           slice,
+                                           dest,
+                                           this_output_offset,
+                                           plain_len,
+                                           cancellation_token]() {
+                ThrowIfCancelled(cancellation_token,
+                                 "IndexEntryReader::ReadEncryptedEntry");
+                std::vector<uint8_t> cipher(slice.size);
+                size_t n = input_->ReadAt(cipher.data(),
+                                          MILVUS_V3_MAGIC_SIZE + slice.offset,
+                                          slice.size);
+                ThrowIfCancelled(cancellation_token,
+                                 "IndexEntryReader::ReadEncryptedEntry");
+                AssertInfo(n == slice.size, "Failed to read encrypted slice");
+
+                auto dec =
+                    cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+                auto plain = dec->Decrypt(cipher.data(), cipher.size());
+
+                AssertInfo(plain.size() == plain_len,
+                           "Decrypted size mismatch: expected {}, got {}",
+                           plain_len,
+                           plain.size());
+                milvus::fastmem::FastMemcpy(
+                    dest + this_output_offset, plain.data(), plain.size());
+            }));
+        }
+    } catch (...) {
+        first_error = std::current_exception();
+    }
     DrainFutures(futures, first_error);
     if (first_error) {
         std::rethrow_exception(first_error);
@@ -674,7 +708,6 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
                                        const std::string& local_path,
                                        const EntryMeta& meta) {
     CheckCancelled("IndexEntryReader::PrepareEntryDownload");
-    constexpr size_t kRangeSize = 16 * 1024 * 1024;
 
     int fd = ::open(local_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     AssertInfo(fd != -1, "Failed to create file: {}", local_path);
@@ -694,7 +727,7 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
                        strerror(errno));
         } else {
             state.expected_crc = meta.plain.crc32;
-            size_t num_ranges = (meta.plain.size + kRangeSize - 1) / kRangeSize;
+            size_t num_ranges = DownloadRangeCount(meta.plain.size);
             state.range_crcs.resize(num_ranges);
         }
     } catch (...) {
@@ -710,9 +743,9 @@ IndexEntryReader::SubmitEntryDownloadTasks(
     const EntryMeta& meta,
     EntryDownloadState& state,
     std::vector<std::future<void>>& futures) {
-    constexpr size_t kRangeSize = 16 * 1024 * 1024;
     auto& pool = ThreadPools::GetThreadPool(priority_);
     auto cancellation_token = cancellation_token_;
+    futures.reserve(futures.size() + DownloadTaskCount(meta));
 
     if (meta.encrypted) {
         const auto& em = meta.enc;
@@ -771,7 +804,7 @@ IndexEntryReader::SubmitEntryDownloadTasks(
         size_t range_idx = 0;
 
         while (remaining > 0) {
-            size_t len = std::min(remaining, kRangeSize);
+            size_t len = std::min(remaining, kEntryDownloadRangeSize);
             size_t this_file_offset = file_offset;
             size_t this_src_offset = src_offset;
             size_t this_range_idx = range_idx;
@@ -872,6 +905,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
     auto input = input_;
     auto* writer = state.writer.get();
     auto cancellation_token = cancellation_token_;
+    futures.reserve(futures.size() + StreamDownloadTaskCount(meta));
 
     if (meta.encrypted) {
         const auto& em = meta.enc;
@@ -1004,8 +1038,9 @@ IndexEntryReader::ReadEntryToFile(const std::string& name,
     const auto& meta = it->second;
 
     auto state = PrepareEntryDownload(name, local_path, meta);
+    std::vector<std::future<void>> futures;
     try {
-        std::vector<std::future<void>> futures;
+        futures.reserve(DownloadTaskCount(meta));
         SubmitEntryDownloadTasks(meta, state, futures);
 
         std::exception_ptr first_error = nullptr;
@@ -1016,10 +1051,13 @@ IndexEntryReader::ReadEntryToFile(const std::string& name,
 
         FinalizeEntryDownload(state);
     } catch (...) {
+        std::exception_ptr first_error = std::current_exception();
+        DrainFutures(futures, first_error);
         if (state.fd != -1) {
             ::close(state.fd);
+            state.fd = -1;
         }
-        throw;
+        std::rethrow_exception(first_error);
     }
 }
 
@@ -1045,15 +1083,18 @@ IndexEntryReader::ReadEntriesToFiles(
         }
     };
 
+    std::vector<std::future<void>> all_futures;
     try {
+        size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             auto it = entry_index_.find(name);
             AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
             states.push_back(PrepareEntryDownload(name, path, it->second));
+            total_task_count += DownloadTaskCount(it->second);
         }
 
         // Submit ALL tasks for ALL entries at once (avoids thread pool deadlock)
-        std::vector<std::future<void>> all_futures;
+        all_futures.reserve(total_task_count);
         for (size_t i = 0; i < name_path_pairs.size(); i++) {
             const auto& meta = entry_index_.at(name_path_pairs[i].first);
             SubmitEntryDownloadTasks(meta, states[i], all_futures);
@@ -1071,8 +1112,10 @@ IndexEntryReader::ReadEntriesToFiles(
             FinalizeEntryDownload(state);
         }
     } catch (...) {
+        std::exception_ptr first_error = std::current_exception();
+        DrainFutures(all_futures, first_error);
         close_all_fds();
-        throw;
+        std::rethrow_exception(first_error);
     }
 }
 
@@ -1103,13 +1146,16 @@ IndexEntryReader::ReadEntriesStreamToFiles(
     std::vector<std::future<void>> all_futures;
 
     try {
+        size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             auto it = entry_index_.find(name);
             AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
             states.push_back(PrepareEntryStreamDownload(
                 name, path, it->second, write_priority));
+            total_task_count += StreamDownloadTaskCount(it->second);
         }
 
+        all_futures.reserve(total_task_count);
         for (size_t i = 0; i < name_path_pairs.size(); i++) {
             const auto& meta = entry_index_.at(name_path_pairs[i].first);
             SubmitEntryStreamDownloadTasks(meta, states[i], all_futures);

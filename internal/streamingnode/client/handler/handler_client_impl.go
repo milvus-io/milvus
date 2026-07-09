@@ -77,7 +77,7 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "replicate checkpoint"))
 	cp, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, status.NewInvalidArgument("replicate checkpoint can only be read for RW channel")
+			return nil, status.NewInner("replicate checkpoint can only be read for RW channel")
 		}
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
@@ -114,7 +114,7 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "salvage checkpoint"))
 	cps, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, status.NewInvalidArgument("salvage checkpoint can only be read for RW channel")
+			return nil, status.NewInner("salvage checkpoint can only be read for RW channel")
 		}
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
@@ -217,7 +217,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.String("handler", "producer"))
 	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, status.NewInvalidArgument("producer can only be created for RW channel")
+			return nil, status.NewInner("producer can only be created for RW channel")
 		}
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)

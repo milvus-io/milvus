@@ -107,6 +107,17 @@ var (
 			collectionIDLabelName,
 		})
 
+	QueryNodeSkippedInsertFieldCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "skipped_insert_field_count",
+			Help:      "count of insert payload field columns skipped because the field is absent from the current schema, e.g. dropped fields carried by messages replayed from WAL",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
 	QueryNodeNumPartitions = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -991,6 +1002,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeConsumeCounter)
 	registry.MustRegister(QueryNodeExecuteCounter)
 	registry.MustRegister(QueryNodeConsumerMsgCount)
+	registry.MustRegister(QueryNodeSkippedInsertFieldCount)
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
 	registry.MustRegister(QueryNodeMsgDispatcherTtLag)
 	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
@@ -1050,6 +1062,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	}
 	QueryNodeConsumerMsgCount.DeletePartialMatch(labels)
+	QueryNodeSkippedInsertFieldCount.DeletePartialMatch(labels)
 	QueryNodeConsumeTimeTickLag.DeletePartialMatch(labels)
 	QueryNodeNumEntities.DeletePartialMatch(labels)
 	QueryNodeEntitiesSize.DeletePartialMatch(labels)

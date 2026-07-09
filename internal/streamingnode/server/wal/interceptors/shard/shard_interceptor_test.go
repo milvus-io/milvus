@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -476,10 +477,11 @@ func TestShardInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
 
-	// Unexpected error from the schema version check must be propagated as-is.
+	// Unexpected error from the schema version check must stop producer retry.
 	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(insertHdrMatcher).Return(int32(-1), mockErr).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
 	assert.Nil(t, msgID)
 
 	msg = message.NewDeleteMessageBuilderV1().

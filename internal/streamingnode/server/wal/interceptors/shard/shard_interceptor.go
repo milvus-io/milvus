@@ -174,7 +174,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
-		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
+		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
 	}
 	schemaVersion = correctSchemaVersion
 	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
@@ -182,7 +182,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			mlog.Int64("collectionID", header.GetCollectionId()),
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
-		return nil, status.NewInner("failed to materialize function fields before WAL append: %s", err.Error())
+		return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {

@@ -32,6 +32,8 @@
 
 namespace milvus {
 
+class ChunkedColumnInterface;
+
 class IArrayOffsets {
  public:
     virtual ~IArrayOffsets() = default;
@@ -156,6 +158,11 @@ class ArrayOffsetsSealed : public IArrayOffsets {
 
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
+
+    static std::shared_ptr<ArrayOffsetsSealed>
+    BuildFromColumn(const ChunkedColumnInterface& column,
+                    const FieldMeta& field_meta,
+                    int64_t row_count);
 
  private:
     const std::vector<int32_t> row_to_element_start_;

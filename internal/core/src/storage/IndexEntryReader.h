@@ -211,6 +211,12 @@ class IndexEntryReader {
                              EntryDownloadState& state,
                              std::vector<std::future<void>>& futures);
 
+    static size_t
+    DownloadRangeCount(uint64_t size);
+
+    static size_t
+    DownloadTaskCount(const EntryMeta& meta);
+
     // Verify CRC and close file descriptor
     void
     FinalizeEntryDownload(EntryDownloadState& state);
@@ -225,6 +231,9 @@ class IndexEntryReader {
     SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
                                    EntryStreamDownloadState& state,
                                    std::vector<std::future<void>>& futures);
+
+    static size_t
+    StreamDownloadTaskCount(const EntryMeta& meta);
 
     void
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);

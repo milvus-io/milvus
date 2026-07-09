@@ -40,6 +40,7 @@
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
 #include "common/ArrayOffsets.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
@@ -1417,6 +1418,43 @@ TEST(ScalarIndexSortArrayNestedTest, NestedBuildByteSizeAndQuery) {
     EXPECT_TRUE(in30[4]);
 
     boost::filesystem::remove_all(root_path);
+}
+
+TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {
+    auto numeric_root_path =
+        fmt::format("{}/stlsort_array_has_raw_data", TestLocalPath);
+    auto numeric_ctx = MakeNestedCtx(
+        numeric_root_path, proto::schema::DataType::Int32, true, 3121);
+    auto numeric_index =
+        std::make_unique<index::ScalarIndexSort<int32_t>>(numeric_ctx, true);
+    EXPECT_TRUE(numeric_index->IsNestedIndex());
+    EXPECT_FALSE(numeric_index->HasRawData());
+    auto numeric_index_from_schema =
+        std::make_unique<index::ScalarIndexSort<int32_t>>(numeric_ctx, false);
+    EXPECT_FALSE(numeric_index_from_schema->IsNestedIndex());
+    EXPECT_FALSE(numeric_index_from_schema->HasRawData());
+
+    auto string_root_path =
+        fmt::format("{}/stringsort_array_has_raw_data", TestLocalPath);
+    auto string_ctx = MakeNestedCtx(
+        string_root_path, proto::schema::DataType::VarChar, true, 3122);
+    auto string_index =
+        std::make_unique<index::StringIndexSort>(string_ctx, true);
+    EXPECT_TRUE(string_index->IsNestedIndex());
+    EXPECT_FALSE(string_index->HasRawData());
+    auto string_index_from_schema =
+        std::make_unique<index::StringIndexSort>(string_ctx, false);
+    EXPECT_FALSE(string_index_from_schema->IsNestedIndex());
+    EXPECT_FALSE(string_index_from_schema->HasRawData());
+
+    std::map<std::string, std::string> index_params{
+        {index::INDEX_TYPE, index::ASCENDING_SORT}};
+    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+        DataType::ARRAY, 0, 1024, index_params, false, 10);
+    EXPECT_FALSE(request.has_raw_data);
+
+    boost::filesystem::remove_all(numeric_root_path);
+    boost::filesystem::remove_all(string_root_path);
 }
 
 // Bug #4: ArrayOffsetsSealed::BuildAllZeros is used in the add-field /

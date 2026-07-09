@@ -452,7 +452,7 @@ queryCoord:
   autoHandoff: true
   autoBalance: true # Switch value to control if to automatically balance the memory usage among query nodes by distributing segment loading and releasing operations evenly.
   autoBalanceChannel: true # Enable auto balance channel
-  balancer: ScoreBasedBalancer # auto balancer used for segments on queryNodes
+  balancer: ChannelLevelScoreBalancer # auto balancer used for segments on queryNodes
   globalRowCountFactor: 0.1 # the weight used when balancing segments among queryNodes
   scoreUnbalanceTolerationFactor: 0.05 # the least value for unbalanced extent between from and to nodes when doing balance
   reverseUnBalanceTolerationFactor: 1.3 # the largest value for unbalanced extent between from and to nodes after doing balance
@@ -497,7 +497,7 @@ queryCoord:
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   enableStoppingBalance: true # whether enable stopping balance
   stoppingBalanceAssignPolicy: ScoreBased # assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased
-  channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
+  channelExclusiveNodeFactor: 3 # minimum RW QueryNode count per channel required to enable channel exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
   channelTaskCapFraction: 0.3 # fraction of total task execution capacity reserved for channel tasks per node (0.0-1.0)
@@ -814,6 +814,8 @@ dataCoord:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
   enableActiveStandby: false
+  taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
+  taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config

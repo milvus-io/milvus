@@ -96,6 +96,44 @@ struct ChunkManagerWrapper {
     std::unordered_set<std::string> written_;
 };
 
+std::unique_ptr<index::JsonFlatIndex>
+BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data) {
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(101);
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+    file_manager_ctx.fieldDataMeta.field_id = 101;
+
+    index::CreateIndexInfo json_index_info;
+    json_index_info.index_type = index::INVERTED_INDEX_TYPE;
+    json_index_info.json_cast_type = JsonCastType::FromString("JSON");
+    json_index_info.json_path = "";
+    auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        json_index_info, file_manager_ctx);
+    auto json_index = std::unique_ptr<index::JsonFlatIndex>(
+        static_cast<index::JsonFlatIndex*>(index.release()));
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_data.size());
+    for (const auto& json_str : json_data) {
+        jsons.emplace_back(simdjson::padded_string(json_str));
+    }
+    json_field->add_json_data(jsons);
+
+    auto* valid_data = json_field->ValidData();
+    std::fill(valid_data,
+              valid_data + json_field->ValidDataSize(),
+              static_cast<uint8_t>(0xFF));
+
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
+    return json_index;
+}
+
 class JsonFlatIndexTest : public ::testing::Test {
  protected:
     void
@@ -238,6 +276,35 @@ TEST_F(JsonFlatIndexTest, TestExistsQuery) {
     ASSERT_TRUE(result[0]);   // Alice
     ASSERT_FALSE(result[1]);  // null
     ASSERT_FALSE(result[2]);  // not exist
+}
+
+TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
+    auto json_flat_index =
+        dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
+    ASSERT_NE(json_flat_index, nullptr);
+
+    std::string json_path = "/profile/name/preferred_name";
+    auto comparable_executor =
+        json_flat_index->create_executor<std::string>(json_path);
+    auto comparable_mask = comparable_executor->IsNotNull();
+    ASSERT_EQ(comparable_mask.size(), json_data_.size());
+    ASSERT_TRUE(comparable_mask[0]);
+    ASSERT_FALSE(comparable_mask[1]);
+    ASSERT_FALSE(comparable_mask[2]);
+
+    auto field_valid_executor =
+        json_flat_index->create_executor<std::string>(json_path, false);
+    auto field_valid_mask = field_valid_executor->IsNotNull();
+    ASSERT_EQ(field_valid_mask.size(), json_data_.size());
+    ASSERT_TRUE(field_valid_mask[0]);
+    ASSERT_TRUE(field_valid_mask[1]);
+    ASSERT_TRUE(field_valid_mask[2]);
+
+    auto field_null_mask = field_valid_executor->IsNull();
+    ASSERT_EQ(field_null_mask.size(), json_data_.size());
+    ASSERT_FALSE(field_null_mask[0]);
+    ASSERT_FALSE(field_null_mask[1]);
+    ASSERT_FALSE(field_null_mask[2]);
 }
 
 TEST_F(JsonFlatIndexTest, TestNotInQuery) {
@@ -421,6 +488,129 @@ TEST_F(JsonFlatIndexTest, TestInt64RangeQuery) {
     ASSERT_FALSE(ge_result[0]);  // 1001 < 1002
     ASSERT_TRUE(ge_result[1]);   // 1002 >= 1002
     ASSERT_TRUE(ge_result[2]);   // 1003 >= 1002
+}
+
+TEST(JsonFlatIndexUint64Test, TestNumericQueriesIncludeMixedIntegerTerms) {
+    auto json_index = BuildInMemoryJsonFlatIndex({
+        R"({"a": -10})",
+        R"({"a": 1})",
+        R"({"a": 10})",
+        R"({"a": 10.5})",
+        R"({"a": 9223372036854775808})",
+        R"({"a": 18446744073709551615})",
+        R"({"a": "1"})",
+        R"({})",
+    });
+
+    std::string json_path = "/a";
+    auto int_executor = json_index->create_executor<int64_t>(json_path);
+    auto comparable_mask = int_executor->IsNotNull();
+    ASSERT_EQ(comparable_mask.size(), 8);
+    EXPECT_TRUE(comparable_mask[0]);
+    EXPECT_TRUE(comparable_mask[1]);
+    EXPECT_TRUE(comparable_mask[2]);
+    EXPECT_TRUE(comparable_mask[3]);
+    EXPECT_TRUE(comparable_mask[4]);
+    EXPECT_TRUE(comparable_mask[5]);
+    EXPECT_FALSE(comparable_mask[6]);
+    EXPECT_FALSE(comparable_mask[7]);
+
+    int64_t one = 1;
+    auto not_one = int_executor->NotIn(1, &one);
+    ASSERT_EQ(not_one.size(), 8);
+    EXPECT_TRUE(not_one[0]);
+    EXPECT_FALSE(not_one[1]);
+    EXPECT_TRUE(not_one[2]);
+    EXPECT_TRUE(not_one[3]);
+    EXPECT_TRUE(not_one[4]);
+    EXPECT_TRUE(not_one[5]);
+    EXPECT_FALSE(not_one[6]);
+    EXPECT_FALSE(not_one[7]);
+
+    int64_t max_int64 = std::numeric_limits<int64_t>::max();
+    auto not_max_int64 = int_executor->NotIn(1, &max_int64);
+    ASSERT_EQ(not_max_int64.size(), 8);
+    EXPECT_TRUE(not_max_int64[0]);
+    EXPECT_TRUE(not_max_int64[1]);
+    EXPECT_TRUE(not_max_int64[2]);
+    EXPECT_TRUE(not_max_int64[3]);
+    EXPECT_FALSE(not_max_int64[4]);
+    EXPECT_TRUE(not_max_int64[5]);
+    EXPECT_FALSE(not_max_int64[6]);
+    EXPECT_FALSE(not_max_int64[7]);
+
+    auto greater_than_nine =
+        int_executor->Range(int64_t(9), OpType::GreaterThan);
+    ASSERT_EQ(greater_than_nine.size(), 8);
+    EXPECT_FALSE(greater_than_nine[0]);
+    EXPECT_FALSE(greater_than_nine[1]);
+    EXPECT_TRUE(greater_than_nine[2]);
+    EXPECT_TRUE(greater_than_nine[3]);
+    EXPECT_TRUE(greater_than_nine[4]);
+    EXPECT_TRUE(greater_than_nine[5]);
+    EXPECT_FALSE(greater_than_nine[6]);
+    EXPECT_FALSE(greater_than_nine[7]);
+
+    auto bounded = int_executor->Range(int64_t(0), true, int64_t(9), true);
+    ASSERT_EQ(bounded.size(), 8);
+    EXPECT_FALSE(bounded[0]);
+    EXPECT_TRUE(bounded[1]);
+    EXPECT_FALSE(bounded[2]);
+    EXPECT_FALSE(bounded[3]);
+    EXPECT_FALSE(bounded[4]);
+    EXPECT_FALSE(bounded[5]);
+    EXPECT_FALSE(bounded[6]);
+    EXPECT_FALSE(bounded[7]);
+
+    auto double_executor = json_index->create_executor<double>(json_path);
+    auto double_range =
+        double_executor->Range(double(9.5), OpType::GreaterThan);
+    ASSERT_EQ(double_range.size(), 8);
+    EXPECT_FALSE(double_range[0]);
+    EXPECT_FALSE(double_range[1]);
+    EXPECT_TRUE(double_range[2]);
+    EXPECT_TRUE(double_range[3]);
+    EXPECT_TRUE(double_range[4]);
+    EXPECT_TRUE(double_range[5]);
+    EXPECT_FALSE(double_range[6]);
+    EXPECT_FALSE(double_range[7]);
+
+    auto double_bounded =
+        double_executor->Range(double(-10.5), false, double(10), true);
+    ASSERT_EQ(double_bounded.size(), 8);
+    EXPECT_TRUE(double_bounded[0]);
+    EXPECT_TRUE(double_bounded[1]);
+    EXPECT_TRUE(double_bounded[2]);
+    EXPECT_FALSE(double_bounded[3]);
+    EXPECT_FALSE(double_bounded[4]);
+    EXPECT_FALSE(double_bounded[5]);
+    EXPECT_FALSE(double_bounded[6]);
+    EXPECT_FALSE(double_bounded[7]);
+
+    auto u64_executor = json_index->create_executor<uint64_t>(json_path);
+    auto u64_greater_than_nine =
+        u64_executor->Range(uint64_t(9), OpType::GreaterThan);
+    ASSERT_EQ(u64_greater_than_nine.size(), 8);
+    EXPECT_FALSE(u64_greater_than_nine[0]);
+    EXPECT_FALSE(u64_greater_than_nine[1]);
+    EXPECT_TRUE(u64_greater_than_nine[2]);
+    EXPECT_TRUE(u64_greater_than_nine[3]);
+    EXPECT_TRUE(u64_greater_than_nine[4]);
+    EXPECT_TRUE(u64_greater_than_nine[5]);
+    EXPECT_FALSE(u64_greater_than_nine[6]);
+    EXPECT_FALSE(u64_greater_than_nine[7]);
+
+    auto u64_bounded =
+        u64_executor->Range(uint64_t(0), true, uint64_t(11), true);
+    ASSERT_EQ(u64_bounded.size(), 8);
+    EXPECT_FALSE(u64_bounded[0]);
+    EXPECT_TRUE(u64_bounded[1]);
+    EXPECT_TRUE(u64_bounded[2]);
+    EXPECT_TRUE(u64_bounded[3]);
+    EXPECT_FALSE(u64_bounded[4]);
+    EXPECT_FALSE(u64_bounded[5]);
+    EXPECT_FALSE(u64_bounded[6]);
+    EXPECT_FALSE(u64_bounded[7]);
 }
 
 TEST_F(JsonFlatIndexTest, TestArrayStringInQuery) {
@@ -653,6 +843,37 @@ TEST_F(JsonFlatIndexExprTest, TestUnaryExpr) {
     EXPECT_TRUE(final[8]);
     EXPECT_TRUE(final[10]);
     EXPECT_TRUE(final[12]);
+}
+
+TEST_F(JsonFlatIndexExprTest, TestComparisonUnknowns) {
+    proto::plan::GenericValue value;
+    value.set_int64_val(1);
+    auto not_equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::NotEqual,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       not_equal_expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 1);
+    EXPECT_TRUE(final[2]);
+
+    auto greater_than_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::GreaterThan,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto not_greater_than_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, greater_than_expr);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  not_greater_than_expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 2);
+    EXPECT_TRUE(final[0]);
+    EXPECT_TRUE(final[13]);
 }
 
 TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {

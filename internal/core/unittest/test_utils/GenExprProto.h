@@ -12,12 +12,14 @@
 #pragma once
 
 #include <memory>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
 #include "common/Consts.h"
 #include "expr/ITypeExpr.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Utils.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 
@@ -25,6 +27,22 @@ namespace milvus::test {
 
 template <typename T>
 inline constexpr bool always_false = false;
+
+inline ColumnVectorPtr
+GetColumnVectorForTest(const VectorPtr& result) {
+    if (auto convert_vector =
+            std::dynamic_pointer_cast<milvus::ColumnVector>(result)) {
+        return convert_vector;
+    }
+
+    if (result != nullptr &&
+        std::string_view(typeid(*result).name()) ==
+            std::string_view(typeid(milvus::ColumnVector).name())) {
+        return std::static_pointer_cast<milvus::ColumnVector>(result);
+    }
+
+    return milvus::exec::GetColumnVector(result);
+}
 
 inline auto
 GenColumnInfo(
@@ -169,8 +187,9 @@ gen_filter_res(milvus::plan::PlanNode* plan_node,
     milvus::exec::EvalCtx eval_ctx(exec_context.get(), offsets);
     exprs_->Eval(0, 1, true, eval_ctx, results_);
 
-    auto col_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(results_[0]);
-    return col_vec;
+    AssertInfo(results_.size() == 1 && results_[0] != nullptr,
+               "gen_filter_res expects exactly one non-null result");
+    return GetColumnVectorForTest(results_[0]);
 }
 
 }  // namespace milvus::test

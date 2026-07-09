@@ -233,7 +233,8 @@ template <typename T>
 knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
                                    const knowhere::Json& conf,
-                                   const milvus::BitsetView& bitset) const {
+                                   const milvus::BitsetView& bitset,
+                                   milvus::OpContext* op_context) const {
     auto make_empty_iterators = [](int64_t num_queries) {
         std::vector<knowhere::IndexNode::IteratorPtr> iterators;
         iterators.reserve(num_queries);
@@ -283,7 +284,7 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
         }
         return make_empty_iterators(num_queries);
     }
-    return this->index_.AnnIterator(dataset, conf, bitset, false);
+    return this->index_.AnnIterator(dataset, conf, bitset, false, op_context);
 }
 
 template <typename T>

@@ -8,6 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -37,10 +38,12 @@ type StatsManager struct {
 	mu                         sync.Mutex
 	cfg                        statsConfig
 	totalStats                 *aggregatedMetrics
+	totalFlushSize             uint64
 	pchannelStats              map[string]*aggregatedMetrics
 	vchannelStats              map[string]*aggregatedMetrics
-	segmentStats               map[int64]*SegmentStats       // map[SegmentID]SegmentStats
-	segmentIndex               map[int64]SegmentBelongs      // map[SegmentID]channels
+	segmentStats               map[int64]*SegmentStats  // map[SegmentID]SegmentStats
+	segmentIndex               map[int64]SegmentBelongs // map[SegmentID]channels
+	segmentFlushSourceModes    map[int64]metacache.FlushSourceMode
 	pchannelIndex              map[string]map[int64]struct{} // map[PChannel]SegmentID
 	growingL1SegmentsByChannel map[channelKey]map[int64]struct{}
 	segmentDeletePressures     map[int64]deletePressure // map[SegmentID]aggregated delete pressure
@@ -78,6 +81,7 @@ func NewStatsManager() *StatsManager {
 		vchannelStats:              make(map[string]*aggregatedMetrics),
 		segmentStats:               make(map[int64]*SegmentStats),
 		segmentIndex:               make(map[int64]SegmentBelongs),
+		segmentFlushSourceModes:    make(map[int64]metacache.FlushSourceMode),
 		pchannelIndex:              make(map[string]map[int64]struct{}),
 		growingL1SegmentsByChannel: make(map[channelKey]map[int64]struct{}),
 		segmentDeletePressures:     make(map[int64]deletePressure),
@@ -85,6 +89,7 @@ func NewStatsManager() *StatsManager {
 		metricHelper:               newMetricsHelper(),
 	}
 	m.worker = newSealWorker(m)
+	m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
 	go m.worker.loop()
 	return m
 }
@@ -163,6 +168,9 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 	if _, ok := m.segmentStats[segmentID]; ok {
 		panic(fmt.Sprintf("register a segment %d that already exist, critical bug", segmentID))
 	}
+	if stats.RuntimeFlushSize == 0 {
+		stats.RuntimeFlushSize = stats.Modified.BinarySize
+	}
 
 	m.segmentStats[segmentID] = stats
 	m.segmentIndex[segmentID] = belongs
@@ -178,6 +186,8 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 		m.growingL1SegmentsByChannel[key][segmentID] = struct{}{}
 	}
 	m.totalStats.Collect(stats.Level, stats.Modified)
+	m.totalFlushSize = utils.SaturatingAddUint64(m.totalFlushSize, stats.FlushSize())
+	m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
 	if _, ok := m.pchannelStats[belongs.PChannel]; !ok {
 		m.pchannelStats[belongs.PChannel] = newAggregatedMetrics()
 	}
@@ -194,12 +204,12 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 // AllocRows alloc number of rows on current segment.
 // AllocRows will check if the segment has enough space to insert.
 // Must be called after RegisterGrowingSegment and before UnregisterGrowingSegment.
-func (m *StatsManager) AllocRows(segmentID int64, insert ModifiedMetrics) error {
+func (m *StatsManager) AllocRows(segmentID int64, insert ModifiedMetrics, runtimeFlushSize ...uint64) error {
 	if insert.Rows == 0 || insert.BinarySize == 0 {
 		panic(fmt.Sprintf("insert rows or binary size cannot be 0, rows: %d, binary: %d", insert.Rows, insert.BinarySize))
 	}
 
-	shouldBeSealed, err := m.allocRows(segmentID, insert)
+	shouldBeSealed, err := m.allocRows(segmentID, insert, normalizeRuntimeFlushSize(insert, runtimeFlushSize...))
 	if shouldBeSealed {
 		m.worker.NotifySealSegment(segmentID, policy.PolicyCapacity())
 	}
@@ -210,8 +220,15 @@ func (m *StatsManager) AllocRows(segmentID int64, insert ModifiedMetrics) error 
 	return nil
 }
 
+func normalizeRuntimeFlushSize(insert ModifiedMetrics, runtimeFlushSize ...uint64) uint64 {
+	if len(runtimeFlushSize) == 0 || runtimeFlushSize[0] < insert.BinarySize {
+		return insert.BinarySize
+	}
+	return runtimeFlushSize[0]
+}
+
 // allocRows allocates number of rows on current segment.
-func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics) (bool, error) {
+func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics, runtimeFlushSize uint64) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -225,6 +242,12 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics) (bool,
 
 	// update the total stats if inserted.
 	if inserted {
+		if m.segmentFlushSourceModes[segmentID] == metacache.FlushSourceWriteBuffer {
+			runtimeFlushSize = insert.BinarySize
+		}
+		stat.AllocRuntimeFlushSize(runtimeFlushSize)
+		m.totalFlushSize = utils.SaturatingAddUint64(m.totalFlushSize, runtimeFlushSize)
+		m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
 		m.totalStats.Collect(stat.Level, insert)
 		if _, ok := m.pchannelStats[info.PChannel]; !ok {
 			m.pchannelStats[info.PChannel] = newAggregatedMetrics()
@@ -242,6 +265,37 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics) (bool,
 		return false, ErrTooLargeInsert
 	}
 	return stat.ShouldBeSealed(), ErrNotEnoughSpace
+}
+
+// UpdateFlushSourceMode records the segment-level sticky flush source chosen by writebuffer.
+func (m *StatsManager) UpdateFlushSourceMode(segmentID int64, mode metacache.FlushSourceMode) {
+	if mode != metacache.FlushSourceWriteBuffer && mode != metacache.FlushSourceGrowing {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stat, ok := m.segmentStats[segmentID]
+	if !ok {
+		return
+	}
+	current := m.segmentFlushSourceModes[segmentID]
+	if current != metacache.FlushSourceUnknown && current != mode {
+		return
+	}
+	m.segmentFlushSourceModes[segmentID] = mode
+	if mode == metacache.FlushSourceWriteBuffer {
+		oldFlushSize := stat.FlushSize()
+		stat.RuntimeFlushSize = stat.Modified.BinarySize
+		newFlushSize := stat.FlushSize()
+		if oldFlushSize > newFlushSize {
+			m.totalFlushSize = utils.SaturatingSubUint64(m.totalFlushSize, oldFlushSize-newFlushSize)
+		} else if newFlushSize > oldFlushSize {
+			m.totalFlushSize = utils.SaturatingAddUint64(m.totalFlushSize, newFlushSize-oldFlushSize)
+		}
+		m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
+	}
 }
 
 // RecordDelete records local delete metrics on matching growing L1 segments.
@@ -269,7 +323,7 @@ func (m *StatsManager) RecordDelete(pchannel string, vchannel string, timeTick u
 // notifyIfTotalGrowingBytesOverHWM notifies if the total bytes is over the high water mark.
 func (m *StatsManager) notifyIfTotalGrowingBytesOverHWM() {
 	m.mu.Lock()
-	size := m.totalStats.Total().BinarySize
+	size := m.totalFlushSize
 	notify := size > uint64(m.cfg.growingBytesHWM)
 	m.mu.Unlock()
 
@@ -344,8 +398,11 @@ func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 	stats := m.segmentStats[segmentID]
 
 	m.totalStats.Subtract(stats.Level, stats.Modified)
+	m.totalFlushSize = utils.SaturatingSubUint64(m.totalFlushSize, stats.FlushSize())
+	m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
 	delete(m.segmentStats, segmentID)
 	delete(m.segmentIndex, segmentID)
+	delete(m.segmentFlushSourceModes, segmentID)
 	delete(m.segmentDeletePressures, segmentID)
 	if stats.Level == datapb.SegmentLevel_L1 {
 		key := channelKey{pchannel: info.PChannel, vchannel: info.VChannel}
@@ -470,7 +527,7 @@ func (m *StatsManager) reachBlockingL0Threshold(rows uint64, bytes uint64) bool 
 // selectSegmentsUntilLessThanLWM selects segments until the total size is less than the threshold.
 func (m *StatsManager) selectSegmentsUntilLessThanLWM() []int64 {
 	m.mu.Lock()
-	restSpace := int64(m.totalStats.Total().BinarySize) - m.cfg.growingBytesLWM
+	restSpace := utils.SaturatingUint64ToInt64(m.totalFlushSize) - m.cfg.growingBytesLWM
 	m.mu.Unlock()
 
 	if restSpace <= 0 {
@@ -497,10 +554,11 @@ func (m *StatsManager) createStatsSlice() []segmentWithBinarySize {
 
 	stats := make([]segmentWithBinarySize, 0, len(m.segmentStats))
 	for id, stat := range m.segmentStats {
-		if stat.Modified.BinarySize > 0 {
+		flushSize := stat.FlushSize()
+		if flushSize > 0 {
 			stats = append(stats, segmentWithBinarySize{
 				segmentID:  id,
-				binarySize: stat.Modified.BinarySize,
+				binarySize: flushSize,
 			})
 		}
 	}

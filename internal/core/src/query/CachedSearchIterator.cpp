@@ -39,7 +39,8 @@ CachedSearchIterator::CachedSearchIterator(
     const milvus::index::VectorIndex& index,
     const knowhere::DataSetPtr& query_ds,
     const SearchInfo& search_info,
-    const BitsetView& bitset) {
+    const BitsetView& bitset,
+    milvus::OpContext* op_context) {
     if (query_ds == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
@@ -66,7 +67,7 @@ CachedSearchIterator::CachedSearchIterator(
         search_info, batch_size_, index.GetMetricType(), search_json);
 
     auto expected_iterators =
-        index.VectorIterators(query_ds, search_json, bitset);
+        index.VectorIterators(query_ds, search_json, bitset, op_context);
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {

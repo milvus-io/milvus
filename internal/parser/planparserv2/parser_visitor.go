@@ -56,12 +56,43 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 	return ctx.Expr().Accept(v)
 }
 
+// errNullLiteral rejects a bare `null`/`NULL` used as an identifier. `NULL` is
+// lexed as an ordinary identifier (it is not a grammar token), so a literal NULL
+// where a column is expected — inside an `in [...]` list, a comparison/range
+// operand, a function argument (`array_length(NULL)`), an `is null` target, a
+// JSON/array subscript base (`NULL["x"]`), etc. — reaches a field lookup. Without
+// a dynamic field it fails an opaque "field NULL not exist"; with a dynamic field
+// it is silently mistaken for a JSON key named NULL. Treat bare `null`/`NULL` as a
+// reserved word (issue #50882).
+//
+// The guard is schema-aware for backward compatibility: "null" only became a
+// create-time keyword in this change, so a legacy collection may own a field
+// literally named "null", and the bare identifier is the only syntax that can
+// reference a top-level scalar field. A strict GetFieldFromName (NOT the
+// DefaultJSON variant, whose dynamic-field fallback is exactly what produced
+// the original misparse) decides: a real declared field resolves as before,
+// anything else is rejected. A JSON key literally named "null" additionally
+// stays reachable via quoting, e.g. `field["null"]` / `$meta["null"]`, whose
+// base identifier is the field name, not "null".
+func errNullLiteral() error {
+	return merr.WrapErrParameterInvalidMsg(
+		"NULL literal is not supported in expressions; use '<field> is null' or '<field> is not null' instead")
+}
+
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
 	return v.translateIdentifierWithText(identifier, false)
 }
 
 func (v *ParserVisitor) translateIdentifierWithText(identifier string, allowText bool) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
+	if strings.EqualFold(identifier, "null") {
+		// Schema-aware: honor a legacy declared field literally named "null";
+		// strict lookup so a dynamic-field collection still rejects
+		// bare-null-as-JSON-key. See errNullLiteral.
+		if _, err := v.schema.GetFieldFromName(identifier); err != nil {
+			return nil, errNullLiteral()
+		}
+	}
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
@@ -875,27 +906,38 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 	}
 }
 
-func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	identifier := ctx.Identifier().GetText()
+// parseTextMatchOperand runs the shared prologue of the text_match /
+// text_match_fuzzy / phrase_match visitors: resolve the field, require a
+// text-match-enabled string column, and parse the query literal or template.
+func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parser.IExprContext, opName string, argName string) (*planpb.ColumnInfo, *planpb.GenericValue, string, bool, error) {
 	column, err := v.translateIdentifierWithText(identifier, true)
 	if err != nil {
-		return err
+		return nil, nil, "", false, err
 	}
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
-		return merr.WrapErrQueryPlanMsg("text match operation on non-string is unsupported")
+		return nil, nil, "", false, merr.WrapErrQueryPlanMsg("%s operation on non-string is unsupported", opName)
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
+		return nil, nil, "", false, merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
 	}
-
-	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(), "text_match query")
+	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(queryExpr, argName)
 	if err != nil {
-		return err
+		return nil, nil, "", false, err
 	}
 	var value *planpb.GenericValue
 	if !isTemplate {
 		value = NewString(queryText)
+	}
+	return columnInfo, value, placeholder, isTemplate, nil
+}
+
+func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
+	identifier := ctx.Identifier().GetText()
+	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
+		identifier, ctx.Expr(), "text match", "text_match query")
+	if err != nil {
+		return err
 	}
 
 	// Handle optional min_should_match parameter
@@ -929,6 +971,50 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	}
 }
 
+func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) interface{} {
+	identifier := ctx.Identifier(0).GetText()
+	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
+		identifier, ctx.Expr(), "text match fuzzy", "text_match_fuzzy query")
+	if err != nil {
+		return err
+	}
+
+	// The option name is a soft keyword (a plain identifier) so that a scalar
+	// field literally named "max_edit_distance" is still usable elsewhere in a
+	// filter; only accept the expected option name here.
+	optionName := ctx.Identifier(1).GetText()
+	if !strings.EqualFold(optionName, "max_edit_distance") {
+		return merr.WrapErrParameterInvalidMsg(
+			"invalid option %q for text_match_fuzzy, expected max_edit_distance", optionName)
+	}
+
+	// tantivy's fuzzy automaton only supports an edit distance of 0, 1 or 2.
+	distanceText := ctx.IntegerConstant().GetText()
+	maxEditDistance, err := strconv.ParseInt(distanceText, 0, 64)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid max_edit_distance value: %s", distanceText)
+	}
+	if maxEditDistance < 0 || maxEditDistance > 2 {
+		return merr.WrapErrParameterInvalidMsg("max_edit_distance should be in [0, 2], got %d", maxEditDistance)
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo:           columnInfo,
+					Op:                   planpb.OpType_TextMatchFuzzy,
+					Value:                value,
+					TemplateVariableName: placeholder,
+					ExtraValues:          []*planpb.GenericValue{NewInt(maxEditDistance)},
+				},
+			},
+			IsTemplate: isTemplate,
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext) interface{} {
 	// Parse the integer constant for minimum_should_match
 	integerConstant := ctx.IntegerConstant().GetText()
@@ -951,26 +1037,10 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
 	identifier := ctx.Identifier().GetText()
-	column, err := v.translateIdentifierWithText(identifier, true)
+	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
+		identifier, ctx.Expr(0), "phrase match", "phrase_match query")
 	if err != nil {
 		return err
-	}
-
-	columnInfo := toColumnInfo(column)
-	if !typeutil.IsStringType(column.dataType) {
-		return merr.WrapErrQueryPlanMsg("phrase match operation on non-string is unsupported")
-	}
-	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
-	}
-
-	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(0), "phrase_match query")
-	if err != nil {
-		return err
-	}
-	var value *planpb.GenericValue
-	if !isTemplate {
-		value = NewString(queryText)
 	}
 	var slop int64 = 0
 	if ctx.Expr(1) != nil {
@@ -993,7 +1063,7 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo:           toColumnInfo(column),
+					ColumnInfo:           columnInfo,
 					Op:                   planpb.OpType_PhraseMatch,
 					Value:                value,
 					TemplateVariableName: placeholder,
@@ -1911,6 +1981,15 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	// the field name and normal (non-raw) keys individually below instead.
 	rawFieldName := strings.Split(identifier, "[")[0]
 	fieldName := decodeUnicode(rawFieldName)
+	// Reject a bare `null`/`NULL` base (e.g. `NULL["x"]`, `NULL[0]`) here too —
+	// this lookup bypasses translateIdentifierWithText. Schema-aware like the
+	// guard there: a legacy field literally named "null" resolves. See
+	// errNullLiteral.
+	if strings.EqualFold(fieldName, "null") {
+		if _, err := v.schema.GetFieldFromName(fieldName); err != nil {
+			return nil, errNullLiteral()
+		}
+	}
 	nestedPath := make([]string, 0)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
 	if err != nil {

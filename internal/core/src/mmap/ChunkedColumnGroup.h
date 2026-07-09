@@ -623,9 +623,14 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         } else {
             auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
             auto ca = group_->GetGroupChunks(op_ctx, cids);
+            std::vector<std::shared_ptr<Chunk>> chunks(num_chunks());
             for (int64_t i = 0; i < count; i++) {
-                auto* group_chunk = ca->get_cell_of(cids[i]);
-                auto chunk = group_chunk->GetChunk(field_id_);
+                auto cid = cids[i];
+                auto& chunk = chunks[cid];
+                if (chunk == nullptr) {
+                    auto* group_chunk = ca->get_cell_of(cid);
+                    chunk = group_chunk->GetChunk(field_id_);
+                }
                 auto valid = chunk->isValid(offsets_in_chunk[i]);
                 auto value = static_cast<StringChunk*>(chunk.get())
                                  ->

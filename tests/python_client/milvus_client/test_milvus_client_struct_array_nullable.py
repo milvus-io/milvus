@@ -2296,6 +2296,113 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_create_struct_array_field_with_vector_diskann_parent_output(self):
+        """
+        target: test sealed nullable struct array parent output when vector sub-field uses DISKANN
+        method: create a nullable struct array with a vector sub-field, flush enough rows for DISKANN, then query
+            id-only and id + parent struct array with the same MATCH_ANY filter
+        expected: both queries succeed and parent struct array output matches source rows
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_diskann_output")
+        client = self._client()
+
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
+
+        profile_schema = gen_struct_schema(self, client)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        profile_schema.add_field(VECTOR_SUBFIELD, VECTOR_SUBFIELD_TYPE, dim=VECTOR_DIM)
+        schema.add_field(
+            STRUCT_FIELD,
+            datatype=STRUCT_TYPE,
+            element_type=STRUCT_ELEMENT_TYPE,
+            struct_schema=profile_schema,
+            max_capacity=STRUCT_MAX_CAPACITY,
+            nullable=True,
+        )
+
+        res, _ = self.create_collection(client, collection_name, schema=schema)
+
+        missing_profile_row = {PK_FIELD: 0, VECTOR_FIELD: gen_vector(0), TAG_FIELD: "missing_profile"}
+        empty_profile_row = {
+            PK_FIELD: 1,
+            VECTOR_FIELD: gen_vector(1),
+            TAG_FIELD: "empty_profile",
+            STRUCT_FIELD: [],
+        }
+        non_empty_rows = [
+            {
+                PK_FIELD: 2,
+                VECTOR_FIELD: gen_vector(2),
+                TAG_FIELD: "present_profile_2",
+                STRUCT_FIELD: gen_profile(2),
+            },
+            {
+                PK_FIELD: 3,
+                VECTOR_FIELD: gen_vector(3),
+                TAG_FIELD: "present_profile_3",
+                STRUCT_FIELD: gen_profile(3),
+            },
+        ]
+        control_rows = [missing_profile_row, empty_profile_row, *non_empty_rows]
+        filler_rows = gen_vector_index_filler_rows(
+            10000,
+            self.min_index_sealed_rows - len(control_rows),
+            "sealed_diskann_output_filler",
+            vector_dim=VECTOR_DIM,
+        )
+        sealed_rows = control_rows + filler_rows
+        res, _ = self.insert(client, collection_name, sealed_rows)
+        assert res["insert_count"] == len(sealed_rows)
+
+        res, _ = self.flush(client, collection_name)
+
+        index_params = gen_index_params(self, client)
+        index_params.add_index(
+            field_name=VECTOR_FIELD,
+            index_type=NORMAL_VECTOR_INDEX_TYPE,
+            metric_type=NORMAL_VECTOR_METRIC_TYPE,
+        )
+        index_params.add_index(
+            field_name=STRUCT_VECTOR_FIELD,
+            index_type=STRUCT_VECTOR_DISKANN_INDEX_TYPE,
+            metric_type=STRUCT_VECTOR_DISKANN_METRIC_TYPE,
+            params=STRUCT_VECTOR_DISKANN_INDEX_PARAMS,
+        )
+        res, _ = self.create_index(client, collection_name, index_params)
+        assert self.wait_for_index_ready(client, collection_name, STRUCT_VECTOR_FIELD, timeout=300)
+
+        res, _ = self.load_collection(client, collection_name)
+
+        source_by_id = {row[PK_FIELD]: row for row in non_empty_rows}
+        filter_expr = f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 0)"
+        id_only_results, _ = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=[PK_FIELD],
+            limit=len(source_by_id),
+        )
+        assert {row[PK_FIELD] for row in id_only_results} == set(source_by_id)
+        assert all(set(row) == {PK_FIELD} for row in id_only_results)
+
+        parent_results, _ = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
+            limit=len(source_by_id),
+        )
+        assert {row[PK_FIELD] for row in parent_results} == set(source_by_id)
+        for row in parent_results:
+            expected = source_by_id[row[PK_FIELD]]
+            assert row[TAG_FIELD] == expected[TAG_FIELD]
+            assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_single_element_after_empty_sealed_output(self):
         """
         target: test sealed segment output for a nullable struct array vector sub-field after an empty row

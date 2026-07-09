@@ -23,6 +23,7 @@ enum OpType {
   PhraseMatch = 14; // phrase match
   InnerMatch = 15; // substring (e.g., "%value%")
   RegexMatch = 16; // regex substring match (e.g., =~ "pattern")
+  TextMatchFuzzy = 17; // text match within a max edit distance
 };
 
 enum ArithOpType {
@@ -413,4 +414,5 @@ message PlanNode {
   PlanOption plan_options = 7;
   ScoreOption score_option = 8;
   optional string namespace = 9;
+  repeated schema.FunctionChain querynode_function_chains = 10;
 }

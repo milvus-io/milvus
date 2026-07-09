@@ -312,7 +312,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecRangeVisitorImplArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    result = ExecRangeVisitorImplArray<double>(context);
+                    switch (expr_->column_.element_type_) {
+                        case DataType::FLOAT:
+                            result = ExecRangeVisitorImplArray<float>(context);
+                            break;
+                        case DataType::DOUBLE:
+                            result = ExecRangeVisitorImplArray<double>(context);
+                            break;
+                        default:
+                            ThrowInfo(DataTypeInvalid,
+                                      "floating point value is not supported "
+                                      "for array element type: {}",
+                                      expr_->column_.element_type_);
+                    }
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
                     result = ExecRangeVisitorImplArray<std::string>(context);
@@ -1391,8 +1403,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
-    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
-        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+    if (IsTextIndexOpType(expr_->op_type_)) {
         if (has_offset_input_) {
             ThrowInfo(
                 OpTypeInvalid,
@@ -1881,10 +1892,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 
 void
 PhyUnaryRangeFilterExpr::DetermineExecPath() {
-    // TextMatch/PhraseMatch use a separate text index path (segment_->GetTextIndex()),
-    // not the pinned_index_ scalar index path.
-    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
-        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+    // TextMatch/PhraseMatch/TextMatchFuzzy use a separate text index path
+    // (segment_->GetTextIndex()), not the pinned_index_ scalar index path.
+    if (IsTextIndexOpType(expr_->op_type_)) {
         exec_path_ = ExprExecPath::TextIndex;
         return;
     }
@@ -2010,6 +2020,28 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             GetValueFromProto<int64_t>(expr_->extra_values_[0]));
     }
 
+    uint32_t max_edit_distance = 0;
+    if (op_type == proto::plan::OpType::TextMatchFuzzy) {
+        // max_edit_distance is required for text_match_fuzzy and rides in the
+        // first extra value; a missing value means a malformed plan.
+        if (expr_->extra_values_.empty()) {
+            throw SegcoreError(
+                ErrorCode::InvalidParameter,
+                "max_edit_distance is required for text_match_fuzzy");
+        }
+        int64_t distance = GetValueFromProto<int64_t>(expr_->extra_values_[0]);
+        // tantivy's fuzzy automaton only supports an edit distance of 0, 1 or 2.
+        // The parser already enforces this; re-check here in case of a raw proto.
+        if (distance < 0 || distance > 2) {
+            throw SegcoreError(
+                ErrorCode::InvalidParameter,
+                fmt::format("max_edit_distance {} is invalid in fuzzy match "
+                            "query. Should be within [0, 2].",
+                            distance));
+        }
+        max_edit_distance = static_cast<uint32_t>(distance);
+    }
+
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -2029,6 +2061,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                     res = index->MatchQuery(query, min_should_match);
                 } else if (op_type == proto::plan::OpType::PhraseMatch) {
                     res = index->PhraseMatchQuery(query, slop);
+                } else if (op_type == proto::plan::OpType::TextMatchFuzzy) {
+                    res = index->FuzzyMatchQuery(query, max_edit_distance);
                 } else {
                     ThrowInfo(OpTypeInvalid,
                               "unsupported operator type for match query: {}",

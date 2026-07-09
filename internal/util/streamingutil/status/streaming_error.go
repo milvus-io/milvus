@@ -56,6 +56,7 @@ func (e *StreamingError) IsSkippedOperation() bool {
 // Stop resuming retry and report to user.
 func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
+		e.IsInvalidArgument() ||
 		e.IsReplicateViolation() ||
 		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
 }
@@ -89,6 +90,11 @@ func (e *StreamingError) IsResourceAcquired() bool {
 // IsSchemaVersionMismatch returns true if the error is caused by schema version mismatch.
 func (e *StreamingError) IsSchemaVersionMismatch() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH
+}
+
+// IsInvalidArgument returns true if the error is caused by invalid argument.
+func (e *StreamingError) IsInvalidArgument() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT
 }
 
 // IsOnShutdown returns true if the error is caused by on shutdown.

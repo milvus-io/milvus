@@ -145,7 +145,9 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
 bool
 SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
     if (load_index_info.load_resource_request.has_value()) {
-        return load_index_info.load_resource_request->has_raw_data;
+        return milvus::index::IndexFactory::CanUseIndexRawDataForField(
+            load_index_info.field_type,
+            load_index_info.load_resource_request->has_raw_data);
     } else {
         auto request =
             milvus::index::IndexFactory::GetInstance().IndexLoadResource(
@@ -157,7 +159,8 @@ SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
                 load_index_info.enable_mmap,
                 load_index_info.num_rows,
                 load_index_info.dim);
-        return request.has_raw_data;
+        return milvus::index::IndexFactory::CanUseIndexRawDataForField(
+            load_index_info.field_type, request.has_raw_data);
     }
 }
 

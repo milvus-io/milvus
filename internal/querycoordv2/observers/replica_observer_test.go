@@ -52,7 +52,7 @@ type ReplicaObserverSuite struct {
 	// dependency
 	meta      *meta.Meta
 	distMgr   *meta.DistributionManager
-	targetMgr *meta.MockTargetManager
+	targetMgr meta.TargetManagerInterface
 
 	nodeMgr  *session.NodeManager
 	observer *ReplicaObserver
@@ -60,6 +60,25 @@ type ReplicaObserverSuite struct {
 	collectionID int64
 	partitionID  int64
 	ctx          context.Context
+}
+
+type replicaObserverTargetManager struct {
+	meta.TargetManagerInterface
+	collectionID int64
+}
+
+func (m *replicaObserverTargetManager) GetDmChannelsByCollection(ctx context.Context, collectionID int64, scope meta.TargetScope) map[string]*meta.DmChannel {
+	if collectionID != m.collectionID {
+		return nil
+	}
+	return map[string]*meta.DmChannel{
+		"test-insert-channel1": {
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: m.collectionID,
+				ChannelName:  "test-insert-channel1",
+			},
+		},
+	}
 }
 
 func (suite *ReplicaObserverSuite) SetupSuite() {
@@ -92,11 +111,11 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
-	suite.targetMgr = meta.NewMockTargetManager(suite.T())
-	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
-	suite.observer.Start()
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
+	suite.targetMgr = &replicaObserverTargetManager{collectionID: suite.collectionID}
+	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
+	suite.observer.Start()
 }
 
 func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
@@ -139,7 +158,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
-	}, nil, commonpb.LoadPriority_LOW)
+	}, []string{"test-insert-channel1"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.Equal(2, len(replicas))
 
@@ -255,7 +274,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
-	}, nil, commonpb.LoadPriority_LOW)
+	}, []string{"test-insert-channel1"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.Equal(2, len(replicas))
 

@@ -15,6 +15,7 @@ type AssignSegmentRequest struct {
 	CollectionID          int64
 	PartitionID           int64
 	ModifiedMetrics       stats.ModifiedMetrics
+	RuntimeFlushSize      uint64
 	TimeTick              uint64
 	TxnSession            TxnSession
 	SchemaVersion         int32
@@ -143,6 +144,7 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	if info := m.collections[req.CollectionID]; info != nil {
 		req.SchemaVersion = info.SchemaVersion()
 		req.UseGrowingSourceFlush = info.UseGrowingSourceFlush()
+		req.RuntimeFlushSize = info.RuntimeFlushSize(req.ModifiedMetrics)
 	}
 
 	result, err := pm.AssignSegment(req)
