@@ -175,6 +175,7 @@ type MetaTable struct {
 	fileResourceName2Meta map[string]*internalpb.FileResourceInfo // file resource name -> file resource meta
 	fileResourceID2Meta   map[int64]*internalpb.FileResourceInfo  // file resource id -> file resource meta
 	fileResourceRefCnt    map[int64]int                           // file resource id -> reference count
+	fileResourceRefHolds  map[int64]map[int64]int                 // collection id -> file resource id -> pending alter reservation count
 	fileResourceVersion   uint64
 
 	generalCnt int // sum of product of partition number and shard number
@@ -209,6 +210,7 @@ func (mt *MetaTable) reload() error {
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
 	mt.partitionName2ID = make(map[int64]map[string]int64)
 	mt.fileResourceRefCnt = make(map[int64]int)
+	mt.fileResourceRefHolds = make(map[int64]map[int64]int)
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
@@ -1071,6 +1073,14 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		}
 	}
 	newColl.UpdateTimestamp = result.GetMaxTimeTick()
+	var addedFileResourceIds []int64
+	var removedFileResourceIds []int64
+	if fieldModify {
+		addedFileResourceIds, removedFileResourceIds = diffFileResourceIDs(oldColl.FileResourceIds, newColl.FileResourceIds)
+		if err := mt.validateAddedFileResourceRefsLocked(newColl.CollectionID, addedFileResourceIds); err != nil {
+			return err
+		}
+	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if !dbChanged {
@@ -1089,6 +1099,10 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 				mlog.String("oldDBName", oldColl.DBName), mlog.String("oldName", oldColl.Name),
 				mlog.String("newDBName", newColl.DBName), mlog.String("newName", newColl.Name), mlog.Err(err))
 		}
+	}
+
+	if fieldModify {
+		mt.applyAlterCollectionFileResourceRefCntLocked(ctx, oldColl.CollectionID, addedFileResourceIds, removedFileResourceIds)
 	}
 
 	mt.names.remove(oldColl.DBName, oldColl.Name)
@@ -2467,12 +2481,17 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
 }
 
-// IncFileResourceRefCnt increments refCnt for file resources, binding them to a
-// collection being created. Under ddLock, atomic with RemoveFileResource.
+// IncFileResourceRefCnt increments refCnt for file resources, reserving them for
+// a pending collection schema change. Under ddLock, atomic with
+// RemoveFileResource.
 // Returns error if any resource ID does not exist.
 func (mt *MetaTable) IncFileResourceRefCnt(ids []int64) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
+	return mt.incFileResourceRefCntLocked(ids)
+}
+
+func (mt *MetaTable) incFileResourceRefCntLocked(ids []int64) error {
 	for _, id := range ids {
 		if _, ok := mt.fileResourceID2Meta[id]; !ok {
 			return merr.WrapErrParameterInvalidMsg("file resource %d not found", id)
@@ -2499,18 +2518,29 @@ func (mt *MetaTable) DecFileResourceRefCnt(ids []int64) {
 }
 
 // RecoverFileResourceRefCnt re-increments refCnt for file resources referenced by
-// pending CreateCollection broadcast tasks whose collections have not yet been
-// persisted. Called during startup before rootcoord becomes Healthy.
+// pending schema broadcast tasks. CreateCollection tasks may not have persisted
+// their collections yet; AlterCollection tasks may reference resources that are
+// not in the persisted collection schema yet. Called during startup before
+// rootcoord becomes Healthy.
 func (mt *MetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]int64) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	for collID, resourceIds := range pendingCollections {
-		if _, exists := mt.collID2Meta[collID]; exists {
-			continue // collection already persisted, reload already counted it
+		existingResourceIDs := map[int64]struct{}{}
+		if coll, exists := mt.collID2Meta[collID]; exists {
+			for _, id := range coll.FileResourceIds {
+				existingResourceIDs[id] = struct{}{}
+			}
 		}
 		for _, id := range resourceIds {
+			if _, exists := existingResourceIDs[id]; exists {
+				continue
+			}
 			if _, ok := mt.fileResourceID2Meta[id]; ok {
 				mt.fileResourceRefCnt[id]++
+				if _, collectionExists := mt.collID2Meta[collID]; collectionExists {
+					mt.recordFileResourceRefHoldLocked(collID, []int64{id})
+				}
 			} else {
 				mlog.Warn(context.TODO(), "RecoverFileResourceRefCnt: pending task references missing file resource",
 					mlog.Int64("collectionID", collID), mlog.Int64("resourceID", id))

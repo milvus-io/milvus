@@ -151,7 +151,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Su
 		return msg != nil
 	})).Return(&types.BroadcastAppendResult{}, nil)
 
-	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.NoError(err)
 }
 
@@ -169,7 +169,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Ge
 	// Mock meta calls to return error
 	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(nil, errors.New("cache expire error"))
 
-	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.Error(err)
 	suite.Contains(err.Error(), "cache expire error")
 }
@@ -192,7 +192,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 	// Mock broadcaster to return error
 	suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(nil, errors.New("broadcast error"))
 
-	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.Error(err)
 	suite.Contains(err.Error(), "broadcast error")
 }
