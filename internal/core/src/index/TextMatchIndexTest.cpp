@@ -348,7 +348,8 @@ TEST(TextMatch, FuzzyIndex) {
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                          "unique_id",
                                          "milvus_tokenizer",
-                                         "{}");
+                                         "{}",
+                                         false);
     index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddTextSealed("football, basketball, pingpang", true, 0);
     index->AddTextSealed("", false, 1);
