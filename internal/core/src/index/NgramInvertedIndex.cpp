@@ -58,6 +58,11 @@ const JsonCastType JSON_CAST_TYPE = JsonCastType::FromString("VARCHAR");
 const JsonCastFunction JSON_CAST_FUNCTION =
     JsonCastFunction::FromString("unknown");
 
+inline size_t
+Utf8LiteralLength(const std::string& literal) {
+    return Utf8CharCount(literal.data(), literal.size());
+}
+
 // for string/varchar type
 NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
                                        const NgramParams& params)
@@ -307,7 +312,8 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  exec::SegmentExpr* segment) {
     tracer::AutoSpan span(
         "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
-    if (literal.length() < min_gram_) {
+    auto literal_char_count = Utf8LiteralLength(literal);
+    if (literal_char_count < min_gram_) {
         return std::nullopt;
     }
 
@@ -317,10 +323,10 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::InnerMatch: {
             span.GetSpan()->SetAttribute("op_type", "InnerMatch");
             span.GetSpan()->SetAttribute("query_literal_length",
-                                         static_cast<int>(literal.length()));
+                                         static_cast<int>(literal_char_count));
             span.GetSpan()->SetAttribute("min_gram", min_gram_);
             span.GetSpan()->SetAttribute("max_gram", max_gram_);
-            bool need_post_filter = literal.length() > max_gram_;
+            bool need_post_filter = literal_char_count > max_gram_;
 
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
@@ -347,7 +353,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::PrefixMatch: {
             span.GetSpan()->SetAttribute("op_type", "PrefixMatch");
             span.GetSpan()->SetAttribute("query_literal_length",
-                                         static_cast<int>(literal.length()));
+                                         static_cast<int>(literal_char_count));
             span.GetSpan()->SetAttribute("min_gram", min_gram_);
             span.GetSpan()->SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {
@@ -380,7 +386,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::PostfixMatch: {
             span.GetSpan()->SetAttribute("op_type", "PostfixMatch");
             span.GetSpan()->SetAttribute("query_literal_length",
-                                         static_cast<int>(literal.length()));
+                                         static_cast<int>(literal_char_count));
             span.GetSpan()->SetAttribute("min_gram", min_gram_);
             span.GetSpan()->SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {
@@ -508,14 +514,14 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
                                exec::SegmentExpr* segment) {
     if (auto root_span = tracer::GetRootSpan()) {
         root_span->SetAttribute("match_query_literal_length",
-                                static_cast<int>(literal.length()));
+                                static_cast<int>(Utf8LiteralLength(literal)));
         root_span->SetAttribute("match_query_min_gram", min_gram_);
         root_span->SetAttribute("match_query_max_gram", max_gram_);
     }
     TargetBitmap bitset(static_cast<size_t>(Count()), true);
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
-        if (l.length() < min_gram_) {
+        if (Utf8LiteralLength(l) < min_gram_) {
             return std::nullopt;
         }
         TargetBitmap tmp_bitset(static_cast<size_t>(Count()), false);
