@@ -653,11 +653,18 @@ func (rm *ResourceManager) handleNodeDown(ctx context.Context, node int64) {
 
 	// for stopping query node becomes offline, node change won't be triggered,
 	// cause when it becomes stopping, it already remove from resource manager
-	// then `unassignNode` will do nothing
-	rgName, err := rm.unassignNode(ctx, node)
-
-	// trigger node changes, expected to remove ro node from replica immediately
-	rm.nodeChangedNotifier.NotifyAll()
+	// then `stageUnassignNode` will do nothing
+	staging := newRGStaging()
+	rgName, err := rm.stageUnassignNode(ctx, staging, node)
+	if err == nil {
+		err = rm.commitStaging(ctx, staging)
+	}
+	if err != nil {
+		// commitStaging notifies node changes on successful commit; keep the
+		// notification on the no-op/failure path as well, expected to remove
+		// ro node from replica immediately.
+		rm.nodeChangedNotifier.NotifyAll()
+	}
 	mlog.Info(context.TODO(), "HandleNodeDown: remove node from resource group",
 		mlog.String("rgName", rgName),
 		mlog.Int64("node", node),
@@ -673,7 +680,11 @@ func (rm *ResourceManager) HandleNodeStopping(ctx context.Context, node int64) {
 
 func (rm *ResourceManager) handleNodeStopping(ctx context.Context, node int64) {
 	rm.incomingNode.Remove(node)
-	rgName, err := rm.unassignNode(ctx, node)
+	staging := newRGStaging()
+	rgName, err := rm.stageUnassignNode(ctx, staging, node)
+	if err == nil {
+		err = rm.commitStaging(ctx, staging)
+	}
 	mlog.Info(context.TODO(), "HandleNodeStopping: remove node from resource group",
 		mlog.String("rgName", rgName),
 		mlog.Int64("node", node),
@@ -729,22 +740,32 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(ctx context.Context, rgName 
 }
 
 // recoverMissingNodeRG recover resource group by transfer node from other resource group.
+// All transfers are staged in memory first and persisted by a single batch commit.
 func (rm *ResourceManager) recoverMissingNodeRG(ctx context.Context, rgName string) error {
-	for rm.groups[rgName].MissingNumOfNodes() > 0 {
-		targetRG := rm.groups[rgName]
-		node, sourceRG := rm.selectNodeForMissingRecover(targetRG)
+	staging := newRGStaging()
+	for staging.get(rm, rgName).MissingNumOfNodes() > 0 {
+		targetRG := staging.get(rm, rgName)
+		node, sourceRG := rm.selectNodeForMissingRecover(staging, targetRG)
 		if sourceRG == nil {
 			mlog.Warn(context.TODO(), "fail to select source resource group", mlog.String("rgName", targetRG.GetName()))
+			// commit the staged transfers before returning, partial recovery is still progress.
+			if err := rm.commitStaging(ctx, staging); err != nil {
+				return err
+			}
 			return errNodeNotEnough
 		}
 
-		err := rm.transferNode(ctx, targetRG.GetName(), node)
+		err := rm.stageTransferNode(ctx, staging, targetRG.GetName(), node)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to recover missing node by transfer node from other resource group",
 				mlog.String("sourceRG", sourceRG.GetName()),
 				mlog.String("targetRG", targetRG.GetName()),
 				mlog.Int64("nodeID", node),
 				mlog.Err(err))
+			// commit the staged transfers before returning, partial recovery is still progress.
+			if cerr := rm.commitStaging(ctx, staging); cerr != nil {
+				return cerr
+			}
 			return err
 		}
 		mlog.Info(context.TODO(), "recover missing node by transfer node from other resource group",
@@ -753,12 +774,12 @@ func (rm *ResourceManager) recoverMissingNodeRG(ctx context.Context, rgName stri
 			mlog.Int64("nodeID", node),
 		)
 	}
-	return nil
+	return rm.commitStaging(ctx, staging)
 }
 
-// selectNodeForMissingRecover selects a node for missing recovery.
+// selectNodeForMissingRecover selects a node for missing recovery under the staged view.
 // It takes a target ResourceGroup and returns the selected node's ID and the source ResourceGroup with highest priority.
-func (rm *ResourceManager) selectNodeForMissingRecover(targetRG *ResourceGroup) (int64, *ResourceGroup) {
+func (rm *ResourceManager) selectNodeForMissingRecover(staging *rgStaging, targetRG *ResourceGroup) (int64, *ResourceGroup) {
 	computeRGPriority := func(rg *ResourceGroup) int {
 		// If the ResourceGroup has redundant nodes,  boost it's priority its priority 1000,000.
 		if rg.RedundantNumOfNodes() > 0 {
@@ -776,12 +797,12 @@ func (rm *ResourceManager) selectNodeForMissingRecover(targetRG *ResourceGroup) 
 	var sourceRG *ResourceGroup
 	candidateNode := int64(-1)
 
-	for _, rg := range rm.groups {
+	rm.rangeGroupsWithStaging(staging, func(rg *ResourceGroup) bool {
 		if rg.GetName() == targetRG.GetName() {
-			continue
+			return true
 		}
 		if rg.OversizedNumOfNodes() <= 0 {
-			continue
+			return true
 		}
 
 		priority := computeRGPriority(rg)
@@ -790,35 +811,46 @@ func (rm *ResourceManager) selectNodeForMissingRecover(targetRG *ResourceGroup) 
 			node := rg.SelectNodeForRG(targetRG)
 			// If no such node is found, skip the current resource group.
 			if node == -1 {
-				continue
+				return true
 			}
 
 			sourceRG = rg
 			candidateNode = node
 			maxPriority = priority
 		}
-	}
+		return true
+	})
 
 	return candidateNode, sourceRG
 }
 
 // recoverRedundantNodeRG recover resource group by transfer node to other resource group.
+// All transfers are staged in memory first and persisted by a single batch commit.
 func (rm *ResourceManager) recoverRedundantNodeRG(ctx context.Context, rgName string) error {
-	for rm.groups[rgName].RedundantNumOfNodes() > 0 {
-		sourceRG := rm.groups[rgName]
-		node, targetRG := rm.selectNodeForRedundantRecover(sourceRG)
+	staging := newRGStaging()
+	for staging.get(rm, rgName).RedundantNumOfNodes() > 0 {
+		sourceRG := staging.get(rm, rgName)
+		node, targetRG := rm.selectNodeForRedundantRecover(staging, sourceRG)
 		if node == -1 {
 			mlog.Info(context.TODO(), "failed to select redundant recover target resource group, please check resource group configuration if as expected.",
 				mlog.String("rgName", sourceRG.GetName()))
+			// commit the staged transfers before returning, partial recovery is still progress.
+			if err := rm.commitStaging(ctx, staging); err != nil {
+				return err
+			}
 			return merr.WrapErrServiceInternalMsg("all resource group reach limits")
 		}
 
-		if err := rm.transferNode(ctx, targetRG.GetName(), node); err != nil {
+		if err := rm.stageTransferNode(ctx, staging, targetRG.GetName(), node); err != nil {
 			mlog.Warn(context.TODO(), "failed to recover redundant node by transfer node to other resource group",
 				mlog.String("sourceRG", sourceRG.GetName()),
 				mlog.String("targetRG", targetRG.GetName()),
 				mlog.Int64("nodeID", node),
 				mlog.Err(err))
+			// commit the staged transfers before returning, partial recovery is still progress.
+			if cerr := rm.commitStaging(ctx, staging); cerr != nil {
+				return cerr
+			}
 			return err
 		}
 		mlog.Info(context.TODO(), "recover redundant node by transfer node to other resource group",
@@ -827,12 +859,12 @@ func (rm *ResourceManager) recoverRedundantNodeRG(ctx context.Context, rgName st
 			mlog.Int64("nodeID", node),
 		)
 	}
-	return nil
+	return rm.commitStaging(ctx, staging)
 }
 
-// selectNodeForRedundantRecover selects a node for redundant recovery.
+// selectNodeForRedundantRecover selects a node for redundant recovery under the staged view.
 // It takes a source ResourceGroup and returns the selected node's ID and the target ResourceGroup with highest priority.
-func (rm *ResourceManager) selectNodeForRedundantRecover(sourceRG *ResourceGroup) (int64, *ResourceGroup) {
+func (rm *ResourceManager) selectNodeForRedundantRecover(staging *rgStaging, sourceRG *ResourceGroup) (int64, *ResourceGroup) {
 	// computeRGPriority calculates the priority of a ResourceGroup based on certain conditions.
 	computeRGPriority := func(rg *ResourceGroup) int {
 		// If the ResourceGroup is missing nodes, boost it's priority by 1,000,000.
@@ -850,13 +882,13 @@ func (rm *ResourceManager) selectNodeForRedundantRecover(sourceRG *ResourceGroup
 	maxPriority := 0
 	var targetRG *ResourceGroup
 	candidateNode := int64(-1)
-	for _, rg := range rm.groups {
+	rm.rangeGroupsWithStaging(staging, func(rg *ResourceGroup) bool {
 		if rg.GetName() == sourceRG.GetName() {
-			continue
+			return true
 		}
 
 		if rg.ReachLimitNumOfNodes() <= 0 {
-			continue
+			return true
 		}
 
 		// Calculate the priority of the current resource group.
@@ -866,17 +898,18 @@ func (rm *ResourceManager) selectNodeForRedundantRecover(sourceRG *ResourceGroup
 			node := sourceRG.SelectNodeForRG(rg)
 			// If no such node is found, skip the current resource group.
 			if node == -1 {
-				continue
+				return true
 			}
 			candidateNode = node
 			targetRG = rg
 			maxPriority = priority
 		}
-	}
+		return true
+	})
 
 	// Finally, always transfer the node to the default resource group if no other target resource group is found.
 	if targetRG == nil && sourceRG.GetName() != DefaultResourceGroupName {
-		targetRG = rm.groups[DefaultResourceGroupName]
+		targetRG = staging.get(rm, DefaultResourceGroupName)
 		if sourceRG != nil {
 			candidateNode = sourceRG.SelectNodeForRG(targetRG)
 		}
@@ -898,8 +931,14 @@ func (rm *ResourceManager) assignIncomingNodeWithNodeCheck(ctx context.Context, 
 		return "", merr.WrapErrServiceInternalMsg("node has been stopped")
 	}
 
-	rgName, err := rm.assignIncomingNode(ctx, nodeInfo)
+	// stage all modification (rg creation and node transfer) triggered by the
+	// incoming node and persist them by a single batch commit.
+	staging := newRGStaging()
+	rgName, err := rm.assignIncomingNode(ctx, staging, nodeInfo)
 	if err != nil {
+		return "", err
+	}
+	if err := rm.commitStaging(ctx, staging); err != nil {
 		return "", err
 	}
 	// node assignment is finished, remove the node from incoming node set.
@@ -908,11 +947,13 @@ func (rm *ResourceManager) assignIncomingNodeWithNodeCheck(ctx context.Context, 
 }
 
 // assignIncomingNode assign node to resource group.
-func (rm *ResourceManager) assignIncomingNode(ctx context.Context, nodeInfo *session.NodeInfo) (string, error) {
+// All modification is staged into the given staging overlay, the caller is
+// responsible for committing it.
+func (rm *ResourceManager) assignIncomingNode(ctx context.Context, staging *rgStaging, nodeInfo *session.NodeInfo) (string, error) {
 	node := nodeInfo.ID()
 
 	// If node already assign to rg.
-	rg := rm.getResourceGroupByNodeID(node)
+	rg := rm.getResourceGroupByNodeIDWithStaging(staging, node)
 	if rg != nil {
 		mlog.Info(context.TODO(), "HandleNodeUp: node already assign to resource group",
 			mlog.String("rgName", rg.GetName()),
@@ -921,55 +962,60 @@ func (rm *ResourceManager) assignIncomingNode(ctx context.Context, nodeInfo *ses
 		return rg.GetName(), nil
 	}
 
-	if err := rm.createResourceGroupIfNotExists(ctx, nodeInfo); err != nil {
+	if err := rm.stageCreateResourceGroupIfNotExists(ctx, staging, nodeInfo); err != nil {
 		return "", err
 	}
 
 	// select a resource group to assign incoming node.
-	rg = rm.mustSelectAssignIncomingNodeTargetRG(nodeInfo)
-	if err := rm.transferNode(ctx, rg.GetName(), node); err != nil {
+	rg = rm.mustSelectAssignIncomingNodeTargetRG(staging, nodeInfo)
+	if err := rm.stageTransferNode(ctx, staging, rg.GetName(), node); err != nil {
 		return "", merr.Wrap(err, "at finally assign to default resource group")
 	}
 	return rg.GetName(), nil
 }
 
-// createResourceGroupIfNotExists create resource group if not exists.
-func (rm *ResourceManager) createResourceGroupIfNotExists(ctx context.Context, nodeInfo *session.NodeInfo) error {
+// stageCreateResourceGroupIfNotExists stage the creation of the resource group
+// declared in the node session if it does not exist yet.
+// It performs the same config validation as updateResourceGroups before staging;
+// rgChangedNotifier is fired by commitStaging once the creation is persisted.
+func (rm *ResourceManager) stageCreateResourceGroupIfNotExists(ctx context.Context, staging *rgStaging, nodeInfo *session.NodeInfo) error {
 	rgName := nodeInfo.ResourceGroupName()
 	nodeID := nodeInfo.ID()
 	if rgName == "" {
 		return nil
 	}
-	if _, ok := rm.groups[rgName]; ok {
+	if staging.get(rm, rgName) != nil {
 		return nil
 	}
-	if err := rm.updateResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
-		rgName: {
-			Requests: &rgpb.ResourceGroupLimit{
-				NodeNum: 0,
-			},
-			Limits: &rgpb.ResourceGroupLimit{
-				NodeNum: defaultResourceGroupCapacity,
-			},
+	cfg := &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 0,
 		},
-	}); err != nil {
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: defaultResourceGroupCapacity,
+		},
+	}
+	if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
 		mlog.Warn(context.TODO(), "failed to create resource group from session of new incoming node", mlog.String("rgName", rgName), mlog.Int64("nodeID", nodeID), mlog.Err(err))
 		return err
 	}
-	mlog.Info(context.TODO(), "create resource group from session of new incoming node", mlog.String("rgName", rgName), mlog.Int64("nodeID", nodeID))
+	staging.put(NewResourceGroup(rgName, cfg, rm.nodeMgr))
+	staging.rgCreated = true
+	mlog.Info(context.TODO(), "stage create resource group from session of new incoming node", mlog.String("rgName", rgName), mlog.Int64("nodeID", nodeID))
 	return nil
 }
 
-// mustSelectAssignIncomingNodeTargetRG select resource group for assign incoming node.
-func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(nodeInfo *session.NodeInfo) *ResourceGroup {
+// mustSelectAssignIncomingNodeTargetRG select resource group for assign incoming node under the staged view.
+func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(staging *rgStaging, nodeInfo *session.NodeInfo) *ResourceGroup {
 	if nodeInfo.ResourceGroupName() != "" {
-		// rg will be created if not exists by createResourceGroupIfNotExists
-		return rm.groups[nodeInfo.ResourceGroupName()]
+		// rg will be staged if not exists by stageCreateResourceGroupIfNotExists
+		return staging.get(rm, nodeInfo.ResourceGroupName())
 	}
 
 	nodeID := nodeInfo.ID()
 	// First, Assign it to rg with the most missing nodes at high priority.
 	if rg := rm.findMaxRGWithGivenFilter(
+		staging,
 		func(rg *ResourceGroup) bool {
 			return rg.MissingNumOfNodes() > 0 && rg.AcceptNode(nodeID)
 		},
@@ -982,6 +1028,7 @@ func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(nodeInfo *sessio
 
 	// Second, assign it to rg do not reach limit.
 	if rg := rm.findMaxRGWithGivenFilter(
+		staging,
 		func(rg *ResourceGroup) bool {
 			return rg.ReachLimitNumOfNodes() > 0 && rg.AcceptNode(nodeID)
 		},
@@ -993,36 +1040,105 @@ func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(nodeInfo *sessio
 	}
 
 	// Finally, add node to default rg.
-	return rm.groups[DefaultResourceGroupName]
+	return staging.get(rm, DefaultResourceGroupName)
 }
 
-// findMaxRGWithGivenFilter find resource group with given filter and return the max one.
+// findMaxRGWithGivenFilter find resource group with given filter under the staged view and return the max one.
 // not efficient, but it's ok for low nodes and low resource group.
-func (rm *ResourceManager) findMaxRGWithGivenFilter(filter func(rg *ResourceGroup) bool, attr func(rg *ResourceGroup) int) *ResourceGroup {
+func (rm *ResourceManager) findMaxRGWithGivenFilter(staging *rgStaging, filter func(rg *ResourceGroup) bool, attr func(rg *ResourceGroup) int) *ResourceGroup {
 	var maxRG *ResourceGroup
-	for _, rg := range rm.groups {
+	rm.rangeGroupsWithStaging(staging, func(rg *ResourceGroup) bool {
 		if filter == nil || filter(rg) {
 			if maxRG == nil || attr(rg) > attr(maxRG) {
 				maxRG = rg
 			}
 		}
-	}
+		return true
+	})
 	return maxRG
 }
 
-// transferNode transfer given node to given resource group.
-// if given node is assigned in given resource group, do nothing.
+// rgStaging is an uncommitted overlay over ResourceManager.groups.
+// stageTransferNode/stageUnassignNode only modify this overlay, so a chain of
+// node movements can be persisted by a single batch SaveResourceGroup call in
+// commitStaging. Before commit, neither catalog nor in-memory state is touched.
+type rgStaging struct {
+	groups    map[string]*ResourceGroup // staged view of modified resource groups.
+	dirty     []string                  // staged resource group names in first-staged order.
+	rgCreated bool                      // a new resource group is staged, rgChangedNotifier fires on commit.
+}
+
+func newRGStaging() *rgStaging {
+	return &rgStaging{groups: make(map[string]*ResourceGroup)}
+}
+
+// get returns the staged version of the resource group if present, otherwise the committed one.
+func (s *rgStaging) get(rm *ResourceManager, rgName string) *ResourceGroup {
+	if rg, ok := s.groups[rgName]; ok {
+		return rg
+	}
+	return rm.groups[rgName]
+}
+
+// put stages a modified resource group into the overlay.
+func (s *rgStaging) put(rg *ResourceGroup) {
+	if _, ok := s.groups[rg.GetName()]; !ok {
+		s.dirty = append(s.dirty, rg.GetName())
+	}
+	s.groups[rg.GetName()] = rg
+}
+
+// rangeGroupsWithStaging iterates over the union view of committed and staged resource groups.
+func (rm *ResourceManager) rangeGroupsWithStaging(staging *rgStaging, f func(rg *ResourceGroup) bool) {
+	for rgName, rg := range rm.groups {
+		if staged, ok := staging.groups[rgName]; ok {
+			rg = staged
+		}
+		if !f(rg) {
+			return
+		}
+	}
+	// staged-only (newly created) resource groups.
+	for rgName, rg := range staging.groups {
+		if _, ok := rm.groups[rgName]; ok {
+			continue
+		}
+		if !f(rg) {
+			return
+		}
+	}
+}
+
+// getResourceGroupByNodeIDWithStaging get resource group by node id under the staged view.
+func (rm *ResourceManager) getResourceGroupByNodeIDWithStaging(staging *rgStaging, node int64) *ResourceGroup {
+	// staged resource groups win: the node may have been moved by a staged-but-uncommitted change.
+	for _, rgName := range staging.dirty {
+		if staging.groups[rgName].ContainNode(node) {
+			return staging.groups[rgName]
+		}
+	}
+	if rgName, ok := rm.nodeIDMap[node]; ok {
+		if _, staged := staging.groups[rgName]; staged {
+			// the resource group is staged but no longer contains the node,
+			// so the node has been unassigned in staging.
+			return nil
+		}
+		return rm.groups[rgName]
+	}
+	return nil
+}
+
+// stageTransferNode stage a transfer of the given node to the given resource group.
+// if given node is assigned in given resource group (under the staged view), do nothing.
 // if given node is assigned to other resource group, it will be unassigned first.
-func (rm *ResourceManager) transferNode(ctx context.Context, rgName string, node int64) error {
-	if rm.groups[rgName] == nil {
+func (rm *ResourceManager) stageTransferNode(ctx context.Context, staging *rgStaging, rgName string, node int64) error {
+	if staging.get(rm, rgName) == nil {
 		return merr.WrapErrResourceGroupNotFound(rgName)
 	}
 
-	updates := make([]*querypb.ResourceGroup, 0, 2)
-	modifiedRG := make([]*ResourceGroup, 0, 2)
 	originalRG := "_"
 	// Check if node is already assign to rg.
-	if rg := rm.getResourceGroupByNodeID(node); rg != nil {
+	if rg := rm.getResourceGroupByNodeIDWithStaging(staging, node); rg != nil {
 		if rg.GetName() == rgName {
 			// node is already assign to rg.
 			mlog.Info(context.TODO(), "node already assign to resource group",
@@ -1031,78 +1147,87 @@ func (rm *ResourceManager) transferNode(ctx context.Context, rgName string, node
 			)
 			return nil
 		}
-		// Apply update.
+		// Stage the unassignment from the original resource group.
 		mrg := rg.CopyForWrite()
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
-
-		updates = append(updates, rg.GetMeta())
-		modifiedRG = append(modifiedRG, rg)
+		staging.put(rg)
 		originalRG = rg.GetName()
 	}
 
-	// assign the node to rg.
-	mrg := rm.groups[rgName].CopyForWrite()
+	// Stage the assignment to the target resource group.
+	mrg := staging.get(rm, rgName).CopyForWrite()
 	mrg.AssignNode(node)
-	rg := mrg.ToResourceGroup()
-	updates = append(updates, rg.GetMeta())
-	modifiedRG = append(modifiedRG, rg)
+	staging.put(mrg.ToResourceGroup())
 
-	// Commit updates to meta storage.
-	if err := rm.catalog.SaveResourceGroup(ctx, updates...); err != nil {
-		mlog.Warn(context.TODO(), "failed to transfer node to resource group",
-			mlog.String("rgName", rgName),
-			mlog.String("originalRG", originalRG),
+	mlog.Info(context.TODO(), "stage node transfer to resource group",
+		mlog.String("rgName", rgName),
+		mlog.String("originalRG", originalRG),
+		mlog.Int64("node", node),
+	)
+	return nil
+}
+
+// stageUnassignNode stage the removal of a node from the resource group it
+// belongs to (under the staged view).
+func (rm *ResourceManager) stageUnassignNode(ctx context.Context, staging *rgStaging, node int64) (string, error) {
+	if rg := rm.getResourceGroupByNodeIDWithStaging(staging, node); rg != nil {
+		mrg := rg.CopyForWrite()
+		mrg.UnassignNode(node)
+		rg := mrg.ToResourceGroup()
+		staging.put(rg)
+
+		mlog.Info(context.TODO(), "stage unassign node from resource group",
+			mlog.String("rgName", rg.GetName()),
 			mlog.Int64("node", node),
+		)
+		return rg.GetName(), nil
+	}
+
+	return "", merr.WrapErrNodeNotFound(node, "not found in any resource group")
+}
+
+// commitStaging persist all staged resource groups by a single batch SaveResourceGroup
+// call, then commit them into memory in staged order and notify listeners once.
+// On failure neither catalog nor memory is modified, so the in-memory state never
+// diverges from the persisted one and the whole batch can be retried by the caller.
+func (rm *ResourceManager) commitStaging(ctx context.Context, staging *rgStaging) error {
+	if len(staging.dirty) == 0 {
+		return nil
+	}
+
+	updates := make([]*querypb.ResourceGroup, 0, len(staging.dirty))
+	for _, rgName := range staging.dirty {
+		updates = append(updates, staging.groups[rgName].GetMeta())
+	}
+	if err := rm.catalog.SaveResourceGroup(ctx, updates...); err != nil {
+		mlog.Warn(context.TODO(), "failed to save staged resource groups",
+			mlog.Strings("rgNames", staging.dirty),
 			mlog.Err(err),
 		)
 		return merr.WrapErrResourceGroupServiceUnAvailable()
 	}
 
 	// Commit updates to memory.
-	for _, rg := range modifiedRG {
-		rm.setupInMemResourceGroup(rg)
+	for _, rgName := range staging.dirty {
+		rm.setupInMemResourceGroup(staging.groups[rgName])
 	}
-	mlog.Info(context.TODO(), "transfer node to resource group",
-		mlog.String("rgName", rgName),
-		mlog.String("originalRG", originalRG),
-		mlog.Int64("node", node),
+	mlog.Info(context.TODO(), "commit staged resource groups",
+		mlog.Strings("rgNames", staging.dirty),
 	)
 
+	if staging.rgCreated {
+		// notify that resource group has been changed.
+		rm.rgChangedNotifier.NotifyAll()
+	}
 	// notify that node distribution has been changed.
 	rm.nodeChangedNotifier.NotifyAll()
+
+	// reset the overlay so that a reused staging never commits twice.
+	staging.groups = make(map[string]*ResourceGroup)
+	staging.dirty = nil
+	staging.rgCreated = false
 	return nil
-}
-
-// unassignNode remove a node from resource group where it belongs to.
-func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string, error) {
-	if rg := rm.getResourceGroupByNodeID(node); rg != nil {
-		mrg := rg.CopyForWrite()
-		mrg.UnassignNode(node)
-		rg := mrg.ToResourceGroup()
-
-		if err := rm.catalog.SaveResourceGroup(ctx, rg.GetMeta()); err != nil {
-			mlog.Fatal(context.TODO(), "unassign node from resource group",
-				mlog.String("rgName", rg.GetName()),
-				mlog.Int64("node", node),
-				mlog.Err(err),
-			)
-			return "", err
-		}
-
-		// Commit updates to memory.
-		rm.setupInMemResourceGroup(rg)
-		mlog.Info(context.TODO(), "unassign node from resource group",
-			mlog.String("rgName", rg.GetName()),
-			mlog.Int64("node", node),
-		)
-
-		// notify that node distribution has been changed.
-		rm.nodeChangedNotifier.NotifyAll()
-		return rg.GetName(), nil
-	}
-
-	return "", merr.WrapErrNodeNotFound(node, "not found in any resource group")
 }
 
 // validateResourceGroupConfig validate resource group config.
