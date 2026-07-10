@@ -899,6 +899,7 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
     state->ngram_fields = current->ngram_fields;
     state->ngram_indexings = current->ngram_indexings;
     state->text_lob_paths = current->text_lob_paths;
+    state->json_stats = current->json_stats;
     state->reader = current->reader;
     state->timestamps = current->timestamps;
     state->timestamp_index = current->timestamp_index;
@@ -1149,6 +1150,7 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     runtime->ngram_fields = current.ngram_fields;
     runtime->ngram_indexings = current.ngram_indexings;
     runtime->text_lob_paths = current.text_lob_paths;
+    runtime->json_stats = current.json_stats;
     runtime->reader = current.reader;
     runtime->timestamps = current.timestamps;
     runtime->timestamp_index = current.timestamp_index;
@@ -1592,6 +1594,20 @@ ChunkedSegmentSealedImpl::PublishRuntimeStateLocked(
         current,
         MakeStateDelta(
             current->schema, current->load_info, runtime, current->commit_ts)));
+}
+
+std::shared_ptr<index::JsonKeyStats>
+ChunkedSegmentSealedImpl::GetJsonStats(milvus::OpContext* op_ctx,
+                                       FieldId field_id) const {
+    auto runtime = CaptureRuntimeResourceState();
+    if (runtime == nullptr) {
+        return nullptr;
+    }
+    auto iter = runtime->json_stats.find(field_id);
+    if (iter == runtime->json_stats.end()) {
+        return nullptr;
+    }
+    return iter->second;
 }
 
 void
@@ -5231,15 +5247,16 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     build_guard.Commit(std::move(cache_slot));
 }
 
-void
-ChunkedSegmentSealedImpl::LoadJsonKeyIndex(
+std::shared_ptr<index::JsonKeyStats>
+ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
     milvus::OpContext* op_ctx,
-    std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo> info_proto) {
+    const std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>&
+        info_proto) {
     auto field_id = milvus::FieldId(info_proto->fieldid());
     CheckCancellation(op_ctx,
                       id_,
                       field_id.get(),
-                      "ChunkedSegmentSealedImpl::LoadJsonKeyIndex()");
+                      "ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex()");
 
     if (!JSON_KEY_STATS_ENABLED.load()) {
         LOG_WARN(
@@ -5249,7 +5266,7 @@ ChunkedSegmentSealedImpl::LoadJsonKeyIndex(
             info_proto->fieldid(),
             info_proto->buildid(),
             info_proto->version());
-        return;
+        return nullptr;
     }
 
     LOG_INFO(
@@ -5327,7 +5344,6 @@ ChunkedSegmentSealedImpl::LoadJsonKeyIndex(
         throw;
     }
 
-    LoadJsonStats(field_id, std::move(index));
     LOG_INFO(
         "load json key stats success, segment:{}, field:{}, build:{}, "
         "version:{}",
@@ -5335,6 +5351,7 @@ ChunkedSegmentSealedImpl::LoadJsonKeyIndex(
         info_proto->fieldid(),
         info_proto->buildid(),
         info_proto->version());
+    return index;
 }
 
 void
@@ -5343,23 +5360,22 @@ ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
     const std::unordered_map<
         FieldId,
         std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>& infos,
-    const SchemaPtr& schema_snapshot) {
+    const SchemaPtr& schema_snapshot,
+    StagedStateCommitter& committer) {
     for (const auto& [field_id, info_proto] : infos) {
         AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
                    "field {} not found in schema when loading json stats",
                    field_id.get());
-        LoadJsonKeyIndex(op_ctx, info_proto);
+        auto index = BuildJsonKeyStatsIndex(op_ctx, info_proto);
+        if (index == nullptr) {
+            continue;
+        }
+        committer.Commit(
+            [field_id, index = std::move(index)](
+                RuntimeResourceState& runtime, PublishedSegmentState&) mutable {
+                runtime.json_stats[field_id] = std::move(index);
+            });
     }
-}
-
-void
-ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
-    milvus::OpContext* op_ctx,
-    const std::unordered_map<
-        FieldId,
-        std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>&
-        infos) {
-    LoadBatchJsonKeyIndexes(op_ctx, infos, CaptureSchemaSnapshot());
 }
 
 void
@@ -5923,6 +5939,17 @@ ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id) const {
     }
     return snapshot->load_info != nullptr &&
            snapshot->load_info->IsFieldFilledWithDefault(field_id);
+}
+
+// Checks the cached loaded manifest instead of field-data/index bitsets.
+bool
+ChunkedSegmentSealedImpl::HasColumnInLoadedManifest(
+    const std::string& column_name) const {
+    auto load_info = CaptureLoadInfoSnapshot();
+    if (load_info == nullptr || !load_info->HasManifestPath()) {
+        return true;
+    }
+    return load_info->HasManifestColumn(column_name);
 }
 
 std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
@@ -6793,11 +6820,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.json_stats_to_load.empty()) {
         LoadBatchJsonKeyIndexes(
-            op_ctx, diff.json_stats_to_load, schema_snapshot);
+            op_ctx, diff.json_stats_to_load, schema_snapshot, committer);
     }
     if (!diff.json_stats_to_replace.empty()) {
         LoadBatchJsonKeyIndexes(
-            op_ctx, diff.json_stats_to_replace, schema_snapshot);
+            op_ctx, diff.json_stats_to_replace, schema_snapshot, committer);
     }
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
@@ -6859,7 +6886,10 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
             LOG_INFO("drop json key stats, segment:{}, field:{}",
                      id_,
                      field_id.get());
-            RemoveJsonStats(field_id);
+            committer.Commit([field_id](RuntimeResourceState& runtime,
+                                        PublishedSegmentState&) {
+                runtime.json_stats.erase(field_id);
+            });
         }
     }
 
@@ -6908,6 +6938,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(current->load_info->GetProto(), sch);
+    new_local.InheritCachedColumnGroupsFrom(*current->load_info);
     for (auto fid : current->load_info->GetCreatedTextIndexes()) {
         new_local.SetTextIndexCreated(fid);
     }
@@ -6915,6 +6946,12 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
+    // Populate manifest cache before publishing; readers do not take
+    // reopen_mutex_.
+    if (new_local.HasManifestPath() && sch->is_external_collection()) {
+        CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
+        (void)new_local.GetColumnGroups();
+    }
     LOG_INFO(
         "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
 
@@ -6974,6 +7011,7 @@ ChunkedSegmentSealedImpl::Reopen(
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
+    new_local.InheritCachedColumnGroupsFrom(*current->load_info);
     for (auto fid : current->load_info->GetCreatedTextIndexes()) {
         new_local.SetTextIndexCreated(fid);
     }
@@ -6981,6 +7019,13 @@ ChunkedSegmentSealedImpl::Reopen(
     auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
+    // Populate manifest cache before publishing; readers do not take
+    // reopen_mutex_.
+    if (new_local.HasManifestPath() &&
+        target_schema->is_external_collection()) {
+        CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
+        (void)new_local.GetColumnGroups();
+    }
     LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
 
     auto next_runtime = CloneMutableRuntimeResourceState();
@@ -7369,6 +7414,8 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
         std::unique_lock lck(mutex_);
         commit_ts_ = commit_ts;
     }
+    // Do not parse manifest here: Load() must be able to observe a
+    // pre-cancelled OpContext before any storage/manifest IO happens.
     auto published = std::make_shared<const SegmentLoadInfo>(
         std::move(load_info), schema_snapshot);
     PublishState(BuildNextPublishedState(
@@ -7384,51 +7431,6 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
         published->GetStorageVersion(),
         published->GetUseTakeForOutput(),
         commit_ts);
-}
-
-void
-ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
-    LOG_INFO(
-        "Loading segment {} field data with manifest {}", id_, manifest_path);
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
-
-    auto snapshot = CapturePublishedState();
-    auto column_groups = snapshot->load_info->GetColumnGroups();
-    auto schema_snapshot = snapshot->schema;
-    auto segment_load_info = snapshot->load_info;
-    auto arrow_schema = schema_snapshot->ConvertToLoonArrowSchema(
-        /*text_lob_as_binary=*/true);
-    auto runtime = CloneMutableRuntimeResourceState();
-    runtime->reader = std::shared_ptr<milvus_storage::api::Reader>(
-        milvus_storage::api::Reader::create(
-            column_groups, arrow_schema, nullptr, *properties)
-            .release());
-
-    std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
-    for (int i = 0; i < column_groups->size(); ++i) {
-        auto column_group = column_groups->at(i);
-        std::vector<FieldId> milvus_field_ids;
-        for (auto& column : column_group->columns) {
-            auto field_id = std::stoll(column);
-            milvus_field_ids.emplace_back(field_id);
-        }
-        cg_field_ids.emplace_back(i, std::move(milvus_field_ids));
-    }
-
-    LoadColumnGroups(column_groups,
-                     properties,
-                     cg_field_ids,
-                     *segment_load_info,
-                     schema_snapshot,
-                     true,
-                     nullptr,
-                     false,
-                     runtime.get());
-
-    // initialize LOB paths for TEXT fields inside staged runtime
-    InitTextLobPaths(manifest_path, schema_snapshot, runtime.get());
-    PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
 }
 
 void

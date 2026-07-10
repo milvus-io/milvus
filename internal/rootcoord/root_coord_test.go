@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -77,6 +78,31 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UnixNano())
 	code := m.Run()
 	os.Exit(code)
+}
+
+// testBoundIndexRecorder captures FieldIndexes applied through the fake
+// CreateIndexV2 ack callback so DDL tests can assert on bound-index creation.
+var testBoundIndexRecorder = struct {
+	mu      sync.Mutex
+	indexes []*indexpb.FieldIndex
+}{}
+
+func resetRecordedBoundIndexes() {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	testBoundIndexRecorder.indexes = nil
+}
+
+func recordBoundIndex(fieldIndex *indexpb.FieldIndex) {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	testBoundIndexRecorder.indexes = append(testBoundIndexRecorder.indexes, fieldIndex)
+}
+
+func recordedBoundIndexes() []*indexpb.FieldIndex {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	return append([]*indexpb.FieldIndex(nil), testBoundIndexRecorder.indexes...)
 }
 
 func initStreamingSystemAndCore(t *testing.T) *Core {
@@ -110,6 +136,11 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 		return nil
 	})
+	resetRecordedBoundIndexes()
+	registry.RegisterCreateIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+		recordBoundIndex(result.Message.MustBody().GetFieldIndex())
+		return nil
+	})
 	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
 		return nil
 	})
@@ -128,7 +159,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              rmq.NewRmqID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
@@ -813,7 +844,7 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 		alloc := newMockTsoAllocator()
 		count := uint32(10)
 		current := time.Now()
-		ts := tsoutil.ComposeTSByTime(current.Add(time.Second), 1)
+		ts := tsoutil.ComposeTSByTimeWithLogical(current.Add(time.Second), 1)
 		alloc.GenerateTSOF = func(count uint32) (uint64, error) {
 			// end ts
 			return ts, nil
@@ -826,7 +857,7 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 			withTsoAllocator(alloc))
 		resp, err := c.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 			Count:          count,
-			BlockTimestamp: tsoutil.ComposeTSByTime(current.Add(time.Second), 0),
+			BlockTimestamp: tsoutil.ComposeTSByTime(current.Add(time.Second)),
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -1532,8 +1563,8 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	}, nil
 	// }
 
-	// querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0)
-	// datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Minute), 0)
+	// querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Minute))
+	// datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2 * time.Minute))
 
 	// dcClient := mocks.NewMixCoord(t)
 	// dcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getDataCoordMetricsFunc(datanodeTT))

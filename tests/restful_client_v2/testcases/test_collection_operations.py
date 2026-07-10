@@ -82,6 +82,45 @@ class TestCreateCollection(TestBase):
         for index in rsp["data"]["indexes"]:
             assert index["metricType"] == metric_type
 
+    @pytest.mark.parametrize(
+        "vector_field_type,dimension,expected_metric",
+        [
+            ("Float16Vector", 4, "COSINE"),
+            ("BFloat16Vector", 4, "COSINE"),
+            ("BinaryVector", 8, "HAMMING"),
+            ("SparseFloatVector", None, "IP"),
+        ],
+    )
+    def test_create_collection_quick_setup_vector_field_type_default_metric(
+        self, vector_field_type, dimension, expected_metric
+    ):
+        """
+        target: test quick create collection with vectorFieldType and default metricType
+        method: create collection with BinaryVector/SparseFloatVector without metricType
+        expected: create collection succeeds with compatible default index metric
+        """
+        name = gen_collection_name()
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "vectorFieldType": vector_field_type,
+        }
+        if dimension is not None:
+            payload["dimension"] = dimension
+
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp["code"] == 0
+
+        rsp = client.collection_describe(name)
+        assert rsp["code"] == 0
+        assert rsp["data"]["collectionName"] == name
+        vector_fields = [field for field in rsp["data"]["fields"] if field["name"] == "vector"]
+        assert len(vector_fields) == 1
+        assert vector_fields[0]["type"] == vector_field_type
+        assert len(rsp["data"]["indexes"]) == 1
+        assert rsp["data"]["indexes"][0]["metricType"] == expected_metric
+
     @pytest.mark.parametrize("enable_dynamic_field", [False, "False", "0"])
     @pytest.mark.parametrize("request_shards_num", [2, "2"])
     @pytest.mark.parametrize("request_ttl_seconds", [360, "360"])
@@ -810,6 +849,109 @@ class TestCreateCollectionNegative(TestBase):
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
         assert rsp["code"] == 1801
+
+    def test_create_collection_quick_setup_with_invalid_vector_field_type(self):
+        """
+        target: test quick create collection with invalid vectorFieldType
+        method: create collection with invalid vectorFieldType
+        expected: create collection failed with right error message
+        """
+        name = gen_collection_name()
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": 4,
+            "metricType": "L2",
+            "idType": "Int64",
+            "autoID": True,
+            "vectorFieldType": "InvalidVectorType",
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp["code"] == 1100
+        assert "vectorFieldType can only be" in rsp["message"]
+
+        rsp = client.collection_list()
+        assert name not in rsp["data"]
+
+    def test_create_collection_quick_setup_with_invalid_consistency_level(self):
+        """
+        target: test quick create collection with invalid top-level consistencyLevel
+        method: create collection with invalid consistencyLevel
+        expected: create collection failed with right error message
+        """
+        name = gen_collection_name()
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": 4,
+            "consistencyLevel": "Invalid",
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        url = f"{client.endpoint}/v2/vectordb/collections/create"
+        rsp = client.post(url, headers=client.update_headers(), data=payload).json()
+        assert rsp["code"] == 1100
+        assert "consistencyLevel can only be" in rsp["message"]
+
+        rsp = client.collection_list()
+        assert name not in rsp["data"]
+
+    def test_create_collection_quick_setup_sparse_vector_with_dimension(self):
+        """
+        target: test quick create collection with SparseFloatVector and dimension
+        method: create collection with SparseFloatVector and dimension
+        expected: create collection failed with right error message
+        """
+        name = gen_collection_name()
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": 4,
+            "vectorFieldType": "SparseFloatVector",
+        }
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp["code"] == 1100
+        assert "dimension should not be specified for SparseFloatVector quick create" in rsp["message"]
+
+        rsp = client.collection_list()
+        assert name not in rsp["data"]
+
+    @pytest.mark.parametrize(
+        "vector_field_type,dimension,metric_type,expected_message",
+        [
+            ("BinaryVector", 8, "COSINE", "binary vector index does not support metric type: COSINE"),
+            ("BinaryVector", 8, "SUBSTRUCTURE", "binary vector index does not support metric type: SUBSTRUCTURE"),
+            ("BinaryVector", 8, "SUPERSTRUCTURE", "binary vector index does not support metric type: SUPERSTRUCTURE"),
+            ("BinaryVector", 8, "MHJACCARD", "binary vector index does not support metric type: MHJACCARD"),
+            ("SparseFloatVector", None, "COSINE", "only IP&BM25 is the supported metric type for sparse index"),
+            ("SparseFloatVector", None, "BM25", "only BM25 Function output field support BM25 metric type"),
+        ],
+    )
+    def test_create_collection_quick_setup_vector_field_type_invalid_metric(
+        self, vector_field_type, dimension, metric_type, expected_message
+    ):
+        """
+        target: test quick create collection with vectorFieldType and invalid metricType
+        method: create collection with BinaryVector/SparseFloatVector and incompatible metricType
+        expected: create collection failed before collection is created
+        """
+        name = gen_collection_name()
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "metricType": metric_type,
+            "vectorFieldType": vector_field_type,
+        }
+        if dimension is not None:
+            payload["dimension"] = dimension
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp["code"] == 1100
+        assert expected_message in rsp["message"]
+
+        rsp = client.collection_list()
+        assert name not in rsp["data"]
 
     @pytest.mark.parametrize(
         "name", [" ", "test_collection_" * 100, "test collection", "test/collection", r"test\collection"]

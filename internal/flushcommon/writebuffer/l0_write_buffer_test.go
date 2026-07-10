@@ -176,7 +176,7 @@ func (s *L0WriteBufferSuite) SetupSuite() {
 }
 
 func (s *L0WriteBufferSuite) composeInsertMsg(segmentID int64, rowCount int, dim int, pkType schemapb.DataType) ([]int64, *msgstream.InsertMsg) {
-	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTime(time.Now(), int64(idx))) })
+	tss := lo.RepeatBy(rowCount, func(idx int) int64 { return int64(tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx))) })
 	vectors := lo.RepeatBy(rowCount, func(_ int) []float32 {
 		return lo.RepeatBy(dim, func(_ int) float32 { return rand.Float32() })
 	})
@@ -296,7 +296,7 @@ func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstre
 	delMsg := &msgstream.DeleteMsg{
 		DeleteRequest: &msgpb.DeleteRequest{
 			PrimaryKeys: storage.ParsePrimaryKeys2IDs(pks),
-			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTime(time.Now(), int64(idx)+1) }),
+			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx)+1) }),
 		},
 	}
 	return delMsg
@@ -308,7 +308,7 @@ func (s *L0WriteBufferSuite) SetupTest() {
 	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.collSchema).Maybe()
 	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
 	s.allocator = allocator.NewMockGIDAllocator()
-	s.allocator.AllocOneF = func() (int64, error) { return int64(tsoutil.ComposeTSByTime(time.Now(), 0)), nil }
+	s.allocator.AllocOneF = func() (int64, error) { return int64(tsoutil.ComposeTSByTime(time.Now())), nil }
 }
 
 func (s *L0WriteBufferSuite) newTextMetaCache(schema *schemapb.CollectionSchema) *metacache.MockMetaCache {

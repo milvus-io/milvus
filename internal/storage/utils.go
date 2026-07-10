@@ -1693,28 +1693,52 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 	return insertRecord, nil
 }
 
-func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) (*segcorepb.InsertRecord, error) {
+// TransferInsertMsgToInsertRecord converts an insert message into a segcore
+// insert record under the given schema. Payload columns of fields absent from
+// the schema are skipped and their field IDs returned, so the caller decides
+// how to surface the drop (log/metric) with its own context. Only the
+// column-based branch applies this filtering: the legacy row-based format
+// predates schema change and cannot carry since-dropped fields.
+func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) (*segcorepb.InsertRecord, []int64, error) {
 	if msg.IsRowBased() {
 		insertData, err := RowBasedInsertMsgToInsertData(msg, schema, false)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return TransferInsertDataToInsertRecord(insertData)
+		insertRecord, err := TransferInsertDataToInsertRecord(insertData)
+		return insertRecord, nil, err
 	}
 
 	// column base insert msg
 	if err := validateColumnBasedInsertMsgNullableVectors(schema, msg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	insertRecord := &segcorepb.InsertRecord{
 		NumRows:    int64(msg.NumRows),
-		FieldsData: make([]*schemapb.FieldData, 0),
+		FieldsData: make([]*schemapb.FieldData, 0, len(msg.FieldsData)),
 	}
 
-	insertRecord.FieldsData = append(insertRecord.FieldsData, msg.FieldsData...)
+	// The payload was written under the schema version at WAL-append time. On WAL
+	// replay after schema changes, it may still carry columns of since-dropped
+	// fields, while the growing segment is rebuilt with the current schema and can
+	// never own such columns (segcore hard-asserts on unknown fields). Dropped-field
+	// data is unqueryable by definition, so skip those columns instead of passing
+	// them through.
+	knownFields := typeutil.NewSet[int64]()
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		knownFields.Insert(field.GetFieldID())
+	}
+	var skippedFields []int64
+	for _, fieldData := range msg.FieldsData {
+		if !knownFields.Contain(fieldData.GetFieldId()) {
+			skippedFields = append(skippedFields, fieldData.GetFieldId())
+			continue
+		}
+		insertRecord.FieldsData = append(insertRecord.FieldsData, fieldData)
+	}
 
-	return insertRecord, nil
+	return insertRecord, skippedFields, nil
 }
 
 func Min(a, b int64) int64 {

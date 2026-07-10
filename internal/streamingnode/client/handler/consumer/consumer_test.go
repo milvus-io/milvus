@@ -177,7 +177,7 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 }
 
 func newConsumeResponse(id message.MessageID, msg message.MutableMessage) *streamingpb.ConsumeResponse {
-	msg.WithTimeTick(tsoutil.GetCurrentTime())
+	msg.WithTimeTick(tsoutil.ComposeTSByTime(time.Now()))
 	msg.WithLastConfirmed(walimplstest.NewTestMessageID(0))
 	immutableMsg := msg.IntoImmutableMessage(id)
 	return &streamingpb.ConsumeResponse{
