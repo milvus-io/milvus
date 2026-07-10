@@ -2247,6 +2247,20 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    bool
+    PinnedJsonIndexIsFlat() const {
+        return field_type_ == DataType::JSON && !pinned_index_.empty() &&
+               dynamic_cast<const index::JsonFlatIndex*>(
+                   pinned_index_[0].get()) != nullptr;
+    }
+
+    static bool
+    IsInt64SafeForJsonDoubleIndex(int64_t value) {
+        constexpr int64_t kFirstNonInjectiveInteger = int64_t{1} << 53;
+        return value > -kFirstNonInjectiveInteger &&
+               value < kFirstNonInjectiveInteger;
+    }
+
  public:
     bool
     CanUseNestedIndex() const override {

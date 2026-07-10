@@ -261,12 +261,24 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-            // we create double index for json int64 field for now
-            using GetType =
-                std::conditional_t<std::is_same_v<ValueType, int64_t>,
-                                   double,
-                                   ValueType>;
-            return ExecVisitorImplForIndex<GetType>();
+            if constexpr (std::is_same_v<ValueType, int64_t>) {
+                const auto has_unsafe_literal = std::any_of(
+                    expr_->vals_.begin(),
+                    expr_->vals_.end(),
+                    [this](const auto& val) {
+                        return val.has_int64_val() &&
+                               !IsInt64SafeForJsonDoubleIndex(val.int64_val());
+                    });
+                if (has_unsafe_literal) {
+                    return ExecTermJsonFieldInVariable<int64_t>(context);
+                }
+                if (PinnedJsonIndexIsFlat()) {
+                    return ExecVisitorImplForIndex<int64_t>();
+                }
+                return ExecVisitorImplForIndex<double>();
+            } else {
+                return ExecVisitorImplForIndex<ValueType>();
+            }
         } else {
             return ExecTermJsonFieldInVariable<ValueType>(context);
         }
@@ -951,6 +963,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
+    if (field_type_ == DataType::JSON && args->values_.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
     auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -984,6 +1002,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         return func(index_ptr, vals.size(), (bool*)vals.data());
     };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
+    if (field_type_ == DataType::JSON && args->values_.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
     auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);
     return res;
 }

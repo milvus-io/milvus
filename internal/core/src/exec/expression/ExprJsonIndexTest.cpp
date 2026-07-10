@@ -214,6 +214,317 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     EXPECT_EQ(final.count(), N - expect_count);
 }
 
+TEST(JsonIndexTest, EmptyJsonInIsDeterministicForEveryRow) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("BOOL"),
+            .json_path = "/a",
+        },
+        file_manager_ctx);
+    auto json_index = std::unique_ptr<index::JsonInvertedIndex<bool>>(
+        static_cast<index::JsonInvertedIndex<bool>*>(inv_index.release()));
+
+    const std::vector<std::string> json_strs = {R"({"a": true})",
+                                                R"({"a": "abc"})",
+                                                R"({"b": false})",
+                                                R"({"a": null})",
+                                                R"({})",
+                                                R"({"a": false})"};
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    auto* valid_data = json_field->ValidData();
+    std::fill(valid_data,
+              valid_data + json_field->ValidDataSize(),
+              static_cast<uint8_t>(0));
+    valid_data[0] = 0b00011111;
+
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
+
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, "BOOL"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("empty_json_in", std::move(json_index));
+    seg->LoadIndex(load_index_info);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{},
+        false);
+    auto check = [&](const expr::TypedExprPtr& filter_expr,
+                     bool expected_result) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        auto result = milvus::test::gen_filter_res(
+            plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_TRUE(valid_view[i]) << "row " << i;
+            EXPECT_EQ(result_view[i], expected_result) << "row " << i;
+        }
+    };
+
+    check(term_expr, false);
+    check(std::make_shared<expr::LogicalUnaryExpr>(
+              expr::LogicalUnaryExpr::OpType::LogicalNot, term_expr),
+          true);
+}
+
+TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("DOUBLE"),
+            .json_path = "/a",
+        },
+        file_manager_ctx);
+    auto json_index = std::unique_ptr<index::JsonInvertedIndex<double>>(
+        static_cast<index::JsonInvertedIndex<double>*>(inv_index.release()));
+
+    const std::vector<std::string> json_strs = {R"({"a": 9007199254740992})",
+                                                R"({"a": 9007199254740993})",
+                                                R"({"a": 9007199254740994})"};
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
+
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("large_int64", std::move(json_index));
+    seg->LoadIndex(load_index_info);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(9007199254740993LL);
+    auto equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::Equal,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, equal_expr);
+    auto result = milvus::test::gen_filter_res(
+        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    TargetBitmapView result_view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    for (size_t i = 0; i < result->size(); ++i) {
+        EXPECT_TRUE(valid_view[i]);
+    }
+    EXPECT_FALSE(result_view[0]);
+    EXPECT_TRUE(result_view[1]);
+    EXPECT_FALSE(result_view[2]);
+
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{value},
+        false);
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    result = milvus::test::gen_filter_res(
+        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_FALSE(result_view[0]);
+    EXPECT_TRUE(result_view[1]);
+    EXPECT_FALSE(result_view[2]);
+
+    auto greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::GreaterThan,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  greater_expr);
+    result = milvus::test::gen_filter_res(
+        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_FALSE(result_view[0]);
+    EXPECT_FALSE(result_view[1]);
+    EXPECT_TRUE(result_view[2]);
+
+    auto between_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        value,
+        value,
+        true,
+        true);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  between_expr);
+    result = milvus::test::gen_filter_res(
+        plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_FALSE(result_view[0]);
+    EXPECT_TRUE(result_view[1]);
+    EXPECT_FALSE(result_view[2]);
+}
+
+TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto seg = CreateSealedSegment(schema);
+
+    const std::vector<std::string> json_strs = {R"({"a": 9007199254740992})",
+                                                R"({"a": 9007199254740993})",
+                                                R"({"a": 9007199254740994})",
+                                                R"({"a": "abc"})",
+                                                R"({})",
+                                                R"({"a": null})",
+                                                R"({"a": 9007199254740993})"};
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    auto* valid_data = json_field->ValidData();
+    std::fill(valid_data,
+              valid_data + json_field->ValidDataSize(),
+              static_cast<uint8_t>(0));
+    valid_data[0] = 0b00111111;
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    };
+    auto check = [](const ColumnVectorPtr& result,
+                    const std::vector<bool>& expected_result,
+                    const std::vector<bool>& expected_valid) {
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
+            if (expected_valid[i]) {
+                EXPECT_EQ(result_view[i], expected_result[i]) << "row " << i;
+            }
+        }
+    };
+
+    auto empty_term = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{},
+        false);
+    check(evaluate(empty_term),
+          std::vector<bool>(json_strs.size(), false),
+          std::vector<bool>(json_strs.size(), true));
+    check(evaluate(std::make_shared<expr::LogicalUnaryExpr>(
+              expr::LogicalUnaryExpr::OpType::LogicalNot, empty_term)),
+          std::vector<bool>(json_strs.size(), true),
+          std::vector<bool>(json_strs.size(), true));
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(9007199254740993LL);
+    const std::vector<bool> numeric_valid = {
+        true, true, true, false, false, false, false};
+    auto equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::Equal,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    check(evaluate(equal_expr),
+          {false, true, false, false, false, false, false},
+          numeric_valid);
+
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{value},
+        false);
+    check(evaluate(term_expr),
+          {false, true, false, false, false, false, false},
+          numeric_valid);
+
+    auto greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::GreaterThan,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    check(evaluate(greater_expr),
+          {false, false, true, false, false, false, false},
+          numeric_valid);
+
+    auto between_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        value,
+        value,
+        true,
+        true);
+    check(evaluate(between_expr),
+          {false, true, false, false, false, false, false},
+          numeric_valid);
+}
+
 TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(

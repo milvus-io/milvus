@@ -790,6 +790,9 @@ class JsonFlatIndexExprTest : public ::testing::Test {
             R"({"a": 1, "b": 2})",
             R"({})",
             R"(null)",
+            R"({"a": 9007199254740992})",
+            R"({"a": 9007199254740993})",
+            R"({"a": 9007199254740994})",
         };
 
         auto json_index_path = "";
@@ -1039,8 +1042,11 @@ TEST_F(JsonFlatIndexExprTest, TestComparisonUnknowns) {
                                                        not_equal_expr);
     auto final = query::ExecuteQueryExpr(
         plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
-    EXPECT_EQ(final.count(), 1);
+    EXPECT_EQ(final.count(), 4);
     EXPECT_TRUE(final[2]);
+    EXPECT_TRUE(final[16]);
+    EXPECT_TRUE(final[17]);
+    EXPECT_TRUE(final[18]);
 
     auto greater_than_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
@@ -1058,6 +1064,108 @@ TEST_F(JsonFlatIndexExprTest, TestComparisonUnknowns) {
     EXPECT_TRUE(final[13]);
 }
 
+TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
+    proto::plan::GenericValue value;
+    value.set_int64_val(9007199254740993LL);
+
+    auto equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::Equal,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, equal_expr);
+    auto result = gen_filter_res(
+        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    TargetBitmapView result_view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view[16]);
+    EXPECT_TRUE(valid_view[17]);
+    EXPECT_TRUE(valid_view[18]);
+    EXPECT_FALSE(result_view[16]);
+    EXPECT_TRUE(result_view[17]);
+    EXPECT_FALSE(result_view[18]);
+
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{value},
+        false);
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    result = gen_filter_res(
+        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view[16]);
+    EXPECT_TRUE(valid_view[17]);
+    EXPECT_TRUE(valid_view[18]);
+    EXPECT_FALSE(result_view[16]);
+    EXPECT_TRUE(result_view[17]);
+    EXPECT_FALSE(result_view[18]);
+
+    auto greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::GreaterThan,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  greater_expr);
+    result = gen_filter_res(
+        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view[16]);
+    EXPECT_TRUE(valid_view[17]);
+    EXPECT_TRUE(valid_view[18]);
+    EXPECT_FALSE(result_view[16]);
+    EXPECT_FALSE(result_view[17]);
+    EXPECT_TRUE(result_view[18]);
+
+    auto between_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        value,
+        value,
+        true,
+        true);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  between_expr);
+    result = gen_filter_res(
+        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view[16]);
+    EXPECT_TRUE(valid_view[17]);
+    EXPECT_TRUE(valid_view[18]);
+    EXPECT_FALSE(result_view[16]);
+    EXPECT_TRUE(result_view[17]);
+    EXPECT_FALSE(result_view[18]);
+}
+
+TEST_F(JsonFlatIndexExprTest, EmptyJsonInIsDeterministicForEveryRow) {
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{},
+        false);
+    auto check = [&](const expr::TypedExprPtr& filter_expr,
+                     bool expected_result) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        auto result = gen_filter_res(
+            plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_TRUE(valid_view[i]) << "row " << i;
+            EXPECT_EQ(result_view[i], expected_result) << "row " << i;
+        }
+    };
+
+    check(term_expr, false);
+    check(std::make_shared<expr::LogicalUnaryExpr>(
+              expr::LogicalUnaryExpr::OpType::LogicalNot, term_expr),
+          true);
+}
+
 TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {
     auto expr = std::make_shared<expr::ExistsExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {""}));
@@ -1065,7 +1173,7 @@ TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     auto final = query::ExecuteQueryExpr(
         plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
-    EXPECT_EQ(final.count(), 12);
+    EXPECT_EQ(final.count(), 15);
     EXPECT_FALSE(final[5]);
     EXPECT_FALSE(final[7]);
     EXPECT_FALSE(final[14]);
