@@ -464,6 +464,10 @@ message SegmentInfo {
   // timestamps to commit_timestamp, then clears this field back to 0. L0 delete
   // compaction is excluded because it only compacts delete logs.
   uint64 commit_timestamp = 36;
+  // child_manifest_paths is a load-time delete overlay for compaction fallback.
+  // It is populated only on cloned SegmentInfo responses from GetSegmentInfo
+  // with includeUnHealthy=true.
+  repeated string child_manifest_paths = 37;
 }
 
 message SegmentStartPosition {
