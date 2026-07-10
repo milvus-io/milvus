@@ -1812,7 +1812,17 @@ class SegmentExpr : public Expr {
 
                     TargetBitmap valid_res;
                     if (cached_is_nested_index_ && func_returns_row_level) {
-                        valid_res = TargetBitmap(active_count_, true);
+                        // For JSON flat index with array subscripts, preserve UNKNOWN
+                        // status (three-valued logic) by using the comparable value
+                        // mask instead of marking all rows as valid. This ensures we
+                        // distinguish between FALSE (predicate evaluated but result is
+                        // false) and UNKNOWN (array element doesn't exist).
+                        if (field_type_ == DataType::JSON &&
+                            PathContainsInteger(nested_path_)) {
+                            valid_res = index_ptr->IsNotNull();
+                        } else {
+                            valid_res = TargetBitmap(active_count_, true);
+                        }
                     } else {
                         valid_res = index_ptr->IsNotNull();
                     }

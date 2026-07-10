@@ -889,4 +889,40 @@ TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {
     EXPECT_FALSE(final[14]);
     EXPECT_FALSE(final[15]);
 }
+
+// Test that scalar predicates on JSON array elements preserve UNKNOWN status
+// (three-valued logic) via JSON flat index. When an array subscript is used
+// (e.g., /array[0] > 5), accessing an out-of-bounds element should return
+// UNKNOWN (valid_res=false), not FALSE.
+TEST_F(JsonFlatIndexTest, TestArrayElementPredicateUnknown) {
+    auto json_flat_index =
+        dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
+    ASSERT_NE(json_flat_index, nullptr);
+
+    // Test range predicate on array element at index 0
+    // Element 0: [95, 85, 87] - all > 80, so result[i] should be true and valid
+    std::string json_path = "/profile/scores/0";
+    auto executor = json_flat_index->create_executor<int64_t>(json_path);
+
+    auto result = executor->Range(int64_t(80), OpType::GreaterThan);
+    ASSERT_EQ(result.size(), json_data_.size());
+    // All three have scores[0] > 80: Alice=95, Bob=85, Charlie=87
+    ASSERT_TRUE(result[0]);
+    ASSERT_TRUE(result[1]);
+    ASSERT_TRUE(result[2]);
+
+    // Test range predicate on array element at index 2
+    // Element 2: [92, --, 89] - only Alice and Charlie have it
+    json_path = "/profile/scores/2";
+    executor = json_flat_index->create_executor<int64_t>(json_path);
+
+    result = executor->Range(int64_t(90), OpType::GreaterThan);
+    ASSERT_EQ(result.size(), json_data_.size());
+    // Alice has scores[2]=92 > 90 (true)
+    // Bob doesn't have scores[2] (should be UNKNOWN, treated as false in bitmap)
+    // Charlie has scores[2]=89 not > 90 (false)
+    ASSERT_TRUE(result[0]);    // 92 > 90
+    ASSERT_FALSE(result[1]);   // scores[2] doesn't exist (UNKNOWN)
+    ASSERT_FALSE(result[2]);   // 89 not > 90
+}
 }  // namespace milvus::test
