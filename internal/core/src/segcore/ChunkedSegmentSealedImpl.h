@@ -1398,11 +1398,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const RuntimeResourceState>& runtime,
         FieldId field_id);
 
-    static void
-    DropVectorIndexing(RuntimeResourceState& runtime, FieldId field_id);
+    static SealedIndexingEntryPtr
+    EraseVectorIndexing(RuntimeResourceState& runtime, FieldId field_id);
 
     static void
-    ClearVectorIndexings(RuntimeResourceState& runtime);
+    DropVectorIndexing(RuntimeResourceState& runtime, FieldId field_id);
 
     std::shared_ptr<PublishedSegmentState>
     BuildNextPublishedState(
@@ -1456,7 +1456,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                        index::CacheIndexBasePtr indexing,
                                        bool drop_existing) {
             if (drop_existing) {
-                DropVectorIndexing(*runtime_, field_id);
+                RetireVectorIndexingLocked(field_id);
                 runtime_->vec_binlog_config.erase(field_id);
             }
             runtime_->vector_indexings[field_id] =
@@ -1465,7 +1465,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
         void
         StageVectorIndexDropLocked(FieldId field_id) {
-            DropVectorIndexing(*runtime_, field_id);
+            RetireVectorIndexingLocked(field_id);
             runtime_->vec_binlog_config.erase(field_id);
         }
 
@@ -1484,15 +1484,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         void
         Publish(const std::shared_ptr<const PublishedSegmentState>& current,
                 const StateDelta& delta) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            segment_.PublishState(
-                segment_.BuildNextPublishedState(current, delta));
+            std::vector<SealedIndexingEntryPtr> retired_indexings;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                segment_.PublishState(
+                    segment_.BuildNextPublishedState(current, delta));
+                retired_indexings.swap(retired_vector_indexings_);
+            }
+            for (auto& entry : retired_indexings) {
+                if (entry != nullptr && entry->indexing_ != nullptr) {
+                    entry->indexing_->CancelWarmup();
+                }
+            }
         }
 
      private:
+        void
+        RetireVectorIndexingLocked(FieldId field_id) {
+            auto entry = EraseVectorIndexing(*runtime_, field_id);
+            if (entry != nullptr) {
+                retired_vector_indexings_.push_back(std::move(entry));
+            }
+        }
+
         ChunkedSegmentSealedImpl& segment_;
         RuntimeResourceState* runtime_;
         PublishedSegmentState* staged_state_;
+        std::vector<SealedIndexingEntryPtr> retired_vector_indexings_;
         std::mutex mutex_;
     };
 
@@ -1868,49 +1886,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         bool eager_load,
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false,
-        RuntimeResourceState* runtime = nullptr);
-
-    void
-    LoadColumnGroups(
-        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
-        const SegmentLoadInfo& segment_load_info,
-        const SchemaPtr& schema_snapshot,
-        bool eager_load,
         milvus::OpContext* op_ctx,
         bool is_replace,
         StagedStateCommitter& committer);
 
+    // Load external collection column groups from staged segment load info.
     void
-    LoadColumnGroups(
-        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
-        bool eager_load,
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false);
-
-    void
-    LoadColumnGroups(const std::string& manifest_path,
-                     const SegmentLoadInfo& segment_load_info,
-                     const SchemaPtr& schema_snapshot,
-                     milvus::OpContext* op_ctx = nullptr,
-                     RuntimeResourceState* runtime = nullptr);
-
-    // Load column groups from a manifest file path (for external collections)
-    void
-    LoadColumnGroups(const std::string& manifest_path,
-                     const SegmentLoadInfo& segment_load_info,
+    LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
                      const SchemaPtr& schema_snapshot,
                      milvus::OpContext* op_ctx,
                      StagedStateCommitter& committer);
-
-    void
-    LoadColumnGroups(const std::string& manifest_path,
-                     milvus::OpContext* op_ctx = nullptr);
 
     void
     LoadColumnGroup(

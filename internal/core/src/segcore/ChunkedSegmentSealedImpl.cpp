@@ -991,27 +991,25 @@ ChunkedSegmentSealedImpl::GetVectorIndexing(
     return it != runtime->vector_indexings.end() ? it->second : nullptr;
 }
 
-void
-ChunkedSegmentSealedImpl::DropVectorIndexing(RuntimeResourceState& runtime,
-                                             FieldId field_id) {
+SealedIndexingEntryPtr
+ChunkedSegmentSealedImpl::EraseVectorIndexing(RuntimeResourceState& runtime,
+                                              FieldId field_id) {
     auto it = runtime.vector_indexings.find(field_id);
-    if (it != runtime.vector_indexings.end()) {
-        if (it->second != nullptr && it->second->indexing_ != nullptr) {
-            it->second->indexing_->CancelWarmup();
-        }
-        runtime.vector_indexings.erase(it);
+    if (it == runtime.vector_indexings.end()) {
+        return nullptr;
     }
+    auto entry = std::move(it->second);
+    runtime.vector_indexings.erase(it);
+    return entry;
 }
 
 void
-ChunkedSegmentSealedImpl::ClearVectorIndexings(RuntimeResourceState& runtime) {
-    for (auto& [_, entry] : runtime.vector_indexings) {
-        if (entry != nullptr && entry->indexing_ != nullptr) {
-            entry->indexing_->CancelWarmup();
-        }
+ChunkedSegmentSealedImpl::DropVectorIndexing(RuntimeResourceState& runtime,
+                                             FieldId field_id) {
+    auto entry = EraseVectorIndexing(runtime, field_id);
+    if (entry != nullptr && entry->indexing_ != nullptr) {
+        entry->indexing_->CancelWarmup();
     }
-    runtime.vector_indexings.clear();
-    runtime.vec_binlog_config.clear();
 }
 
 std::shared_ptr<ChunkedSegmentSealedImpl::PublishedSegmentState>
@@ -1799,198 +1797,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
 }
 
 void
-ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
-                                           milvus::OpContext* op_ctx) {
-    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    auto snapshot = CapturePublishedState();
-    auto runtime = CloneMutableRuntimeResourceState();
-    LoadColumnGroups(manifest_path,
-                     *snapshot->load_info,
-                     snapshot->schema,
-                     op_ctx,
-                     runtime.get());
-    PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
-}
-
-void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
-    const std::string& manifest_path,
-    const SegmentLoadInfo& segment_load_info,
-    const SchemaPtr& schema_snapshot,
-    milvus::OpContext* op_ctx,
-    RuntimeResourceState* runtime) {
-    AssertInfo(runtime != nullptr,
-               "runtime must not be null when loading manifest column groups "
-               "for segment {}",
-               id_);
-    auto load_cg_start = std::chrono::high_resolution_clock::now();
-    CheckCancellation(
-        op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups()");
-    auto properties = std::make_shared<milvus_storage::api::Properties>(
-        *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-             .GetProperties());
-    auto column_groups = segment_load_info.GetColumnGroups();
-
-    // External collections: inject extfs.{collectionID}.* derived from
-    // external_source and external_spec only. InjectExternalSpecProperties zero-
-    // initializes every extfs field so nothing is inherited from the
-    // cluster's internal fs.* baseline — credentials and endpoint come
-    // exclusively from spec.extfs (see refactor: [ExternalTable] isolate
-    // extfs namespace from fs.* baseline). milvus_storage routes each file
-    // URI to the matching extfs alias by (bucket, address); file URIs in
-    // the Iceberg manifest live under external_source, so the alias always
-    // matches.
-    if (schema_snapshot->is_external_collection()) {
-        InjectExternalSpecProperties(*properties,
-                                     segment_load_info.GetCollectionID(),
-                                     schema_snapshot->get_external_source(),
-                                     schema_snapshot->get_external_spec());
-    }
-
-    // Schemaless reader for external collections: pass nullptr schema and
-    // let the Reader derive types from file metadata (Parquet footer).
-    // FillFieldData handles Parquet-native → Milvus type conversion.
-    //
-    // This overload is reached only via
-    // ApplyLoadDiff when load_external_manifest is set, which in turn is
-    // gated on is_external_collection() — see SegmentLoadInfo.cpp where the
-    // flag is assigned. The non-external path uses LoadColumnGroups(
-    // column_groups, ...) and never enters here.
-    auto needed_columns = schema_snapshot->GetExternalColumnNames();
-    // reader_mutex_ guards reader_ against concurrent use in ExecuteTake.
-    // Reopen reaches this function with mutex_ already released (see Reopen
-    // for the rationale), so without this lock a concurrent ExecuteTake can
-    // observe a mid-assigned shared_ptr or drop the old Reader's refcount
-    // while another thread is still calling take() on it. Initial load is
-    // uncontended (segment not yet ready), so the extra lock is free.
-    runtime->reader = std::shared_ptr<milvus_storage::api::Reader>(
-        milvus_storage::api::Reader::create(column_groups,
-                                            /*arrow_schema=*/nullptr,
-                                            needed_columns,
-                                            *properties)
-            .release());
-
-    auto reader_create_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - load_cg_start)
-            .count();
-    LOG_INFO(
-        "[LoadColumnGroups] segment {} reader created in {}ms, {} column "
-        "groups",
-        id_,
-        reader_create_ms,
-        column_groups->size());
-
-    // Pre-resolve field IDs for each column group, then reuse the
-    // standard LoadColumnGroup overload.
-    std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
-    cg_field_ids.reserve(column_groups->size());
-    for (size_t i = 0; i < column_groups->size(); ++i) {
-        auto cg = column_groups->at(i);
-        std::vector<FieldId> field_ids;
-        field_ids.reserve(cg->columns.size());
-        for (auto& column : cg->columns) {
-            field_ids.emplace_back(
-                schema_snapshot->ResolveColumnFieldId(column));
-        }
-        cg_field_ids.emplace_back(static_cast<int>(i), std::move(field_ids));
-    }
-
-    // Split each column group's fields into eager (warmup=sync/async) and
-    // lazy (warmup=disable) subsets, so that each subset creates its own
-    // ChunkReader with column projection.  This avoids downloading all
-    // columns from S3 when only a subset needs eager warming.
-    struct FieldGroupTask {
-        int cg_index;
-        std::vector<FieldId> field_ids;
-        bool eager_load;
-    };
-    std::vector<FieldGroupTask> tasks;
-
-    for (const auto& pair : cg_field_ids) {
-        auto cg_index = pair.first;
-        const auto& all_fields = pair.second;
-
-        std::vector<FieldId> eager_fields;
-        std::vector<FieldId> lazy_fields;
-
-        for (const auto& field_id : all_fields) {
-            const auto& field_meta = (*schema_snapshot)[field_id];
-            bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
-            const auto pk_field_id = schema_snapshot->get_primary_field_id();
-            if (pk_field_id.has_value() &&
-                pk_field_id.value().get() == field_id.get() &&
-                schema_snapshot->IsExternalDataField(field_id)) {
-                eager_fields.push_back(field_id);
-                continue;
-            }
-            auto [has_warmup, warmup_str] = schema_snapshot->WarmupPolicy(
-                field_id, field_is_vector, /*is_index=*/false);
-            // Resolve effective warmup using global config as fallback
-            auto resolved = getCacheWarmupPolicy(has_warmup ? warmup_str : "",
-                                                 field_is_vector,
-                                                 /*is_index=*/false,
-                                                 /*in_load_list=*/true);
-            if (resolved != CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
-                eager_fields.push_back(field_id);
-            } else {
-                lazy_fields.push_back(field_id);
-            }
-        }
-
-        if (!eager_fields.empty()) {
-            tasks.push_back({cg_index, std::move(eager_fields), true});
-        }
-        // Lazy fields are emitted one-per-field so that each creates its
-        // own single-column projected ChunkReader. Accessing one lazy
-        // field (e.g. caption) will not co-load sibling lazy fields
-        // (e.g. vector), avoiding unnecessary S3 downloads.
-        for (const auto& fid : lazy_fields) {
-            tasks.push_back({cg_index, {fid}, false});
-        }
-        LOG_INFO(
-            "[LoadColumnGroups] segment {} cg {} fields={} eager_fields={} "
-            "lazy_fields={}",
-            get_segment_id(),
-            cg_index,
-            FormatFieldIds(all_fields),
-            FormatFieldIds(eager_fields),
-            FormatFieldIds(lazy_fields));
-    }
-
-    LOG_INFO(
-        "[LoadColumnGroups] segment {} external table: {} tasks from {} column "
-        "groups",
-        get_segment_id(),
-        tasks.size(),
-        cg_field_ids.size());
-
-    for (const auto& task : tasks) {
-        CheckCancellation(op_ctx,
-                          id_,
-                          task.cg_index,
-                          "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-        LoadColumnGroup(column_groups,
-                        properties,
-                        task.cg_index,
-                        task.field_ids,
-                        segment_load_info,
-                        schema_snapshot,
-                        task.eager_load,
-                        op_ctx,
-                        /*is_replace=*/false,
-                        runtime);
-    }
-
-    if (schema_snapshot->is_external_collection()) {
-        SynthesizeExternalSystemFields(
-            segment_load_info, schema_snapshot, runtime);
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::LoadColumnGroups(
-    const std::string& manifest_path,
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     milvus::OpContext* op_ctx,
@@ -6776,11 +6583,7 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (diff.load_external_manifest) {
-        LoadColumnGroups(segment_load_info.GetManifestPath(),
-                         segment_load_info,
-                         schema_snapshot,
-                         op_ctx,
-                         committer);
+        LoadColumnGroups(segment_load_info, schema_snapshot, op_ctx, committer);
     } else {
         bool has_cg_changes = !diff.column_groups_to_load.empty() ||
                               !diff.column_groups_to_replace.empty() ||
@@ -7594,109 +7397,6 @@ ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path,
                      lob_path);
         }
     });
-}
-
-void
-ChunkedSegmentSealedImpl::LoadColumnGroups(
-    const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
-    bool eager_load,
-    milvus::OpContext* op_ctx,
-    bool is_replace) {
-    auto snapshot = CapturePublishedState();
-    if (snapshot->schema->is_external_collection()) {
-        auto runtime = CloneMutableRuntimeResourceState();
-        LoadColumnGroups(column_groups,
-                         properties,
-                         cg_field_ids,
-                         *snapshot->load_info,
-                         snapshot->schema,
-                         eager_load,
-                         op_ctx,
-                         is_replace,
-                         runtime.get());
-        PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
-        return;
-    }
-    LoadColumnGroups(column_groups,
-                     properties,
-                     cg_field_ids,
-                     *snapshot->load_info,
-                     snapshot->schema,
-                     eager_load,
-                     op_ctx,
-                     is_replace,
-                     nullptr);
-}
-
-void
-ChunkedSegmentSealedImpl::LoadColumnGroups(
-    const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
-    const SegmentLoadInfo& segment_load_info,
-    const SchemaPtr& schema_snapshot,
-    bool eager_load,
-    milvus::OpContext* op_ctx,
-    bool is_replace,
-    RuntimeResourceState* runtime) {
-    if (runtime != nullptr) {
-        for (const auto& pair : cg_field_ids) {
-            auto cg_index = pair.first;
-            const auto& field_ids = pair.second;
-            CheckCancellation(op_ctx,
-                              id_,
-                              cg_index,
-                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-            LoadColumnGroup(column_groups,
-                            properties,
-                            cg_index,
-                            field_ids,
-                            segment_load_info,
-                            schema_snapshot,
-                            eager_load,
-                            op_ctx,
-                            is_replace,
-                            runtime);
-        }
-        return;
-    }
-
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<void>> load_group_futures;
-    for (const auto& pair : cg_field_ids) {
-        auto cg_index = pair.first;
-        const auto& field_ids = pair.second;
-        auto future = pool.Submit([this,
-                                   column_groups,
-                                   properties,
-                                   cg_index,
-                                   field_ids,
-                                   &segment_load_info,
-                                   schema_snapshot,
-                                   eager_load,
-                                   op_ctx,
-                                   is_replace]() {
-            CheckCancellation(op_ctx,
-                              id_,
-                              cg_index,
-                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
-            LoadColumnGroup(column_groups,
-                            properties,
-                            cg_index,
-                            field_ids,
-                            segment_load_info,
-                            schema_snapshot,
-                            eager_load,
-                            op_ctx,
-                            is_replace,
-                            nullptr);
-        });
-        load_group_futures.emplace_back(std::move(future));
-    }
-
-    storage::WaitAllFutures(load_group_futures);
 }
 
 void
