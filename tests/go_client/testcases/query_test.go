@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -1289,4 +1290,79 @@ func TestRunAnalyzer(t *testing.T) {
 	for i, text := range []string{"doc"} {
 		require.Equal(t, text, tokens[0].Tokens[i].Text)
 	}
+}
+
+// test query with order by fields
+func TestQueryOrderBy(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// The default query path already returns rows in pk-ascending order, so ordering
+	// by the pk cannot tell "order_by applied" from "order_by ignored". Use a scalar
+	// field holding a permutation of 0..nb-1 that is non-monotonic in the pk, so both
+	// asc and desc results differ from the default order.
+	collName := common.GenRandomString("query_order_by", 6)
+	scoreField := "score"
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithField(entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName(scoreField).WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	nb := 200
+	pks := make([]int64, nb)
+	scores := make([]int64, nb)
+	for i := 0; i < nb; i++ {
+		pks[i] = int64(i)
+		scores[i] = int64((i*7 + 3) % nb) // gcd(7, nb)=1 -> permutation, non-monotonic in pk
+	}
+	vecColumn := hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithDim(common.DefaultDim))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName,
+		column.NewColumnInt64(common.DefaultInt64FieldName, pks),
+		column.NewColumnInt64(scoreField, scores),
+		vecColumn))
+	common.CheckErr(t, err, true)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, flushTask.Await(ctx), true)
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.L2)))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, idxTask.Await(ctx), true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	expr := fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)
+
+	// order by score asc (direction defaults to asc)
+	ascRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(expr).WithLimit(nb).
+		WithOutputFields(scoreField).WithConsistencyLevel(entity.ClStrong).
+		WithOrderByFields(scoreField))
+	common.CheckErr(t, err, true)
+	ascScores := ascRes.GetColumn(scoreField).(*column.ColumnInt64).Data()
+	require.Len(t, ascScores, nb)
+	for i := 0; i < nb; i++ {
+		require.EqualValues(t, i, ascScores[i])
+	}
+
+	// order by score desc
+	descRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(expr).WithLimit(nb).
+		WithOutputFields(scoreField).WithConsistencyLevel(entity.ClStrong).
+		WithOrderByFields(scoreField+":desc"))
+	common.CheckErr(t, err, true)
+	descScores := descRes.GetColumn(scoreField).(*column.ColumnInt64).Data()
+	require.Len(t, descScores, nb)
+	for i := 0; i < nb; i++ {
+		require.EqualValues(t, nb-1-i, descScores[i])
+	}
+
+	// order by without limit is rejected
+	_, err = mc.Query(ctx, client.NewQueryOption(collName).WithFilter(expr).
+		WithOrderByFields(scoreField+":desc"))
+	common.CheckErr(t, err, false, "ORDER BY requires explicit limit")
 }
