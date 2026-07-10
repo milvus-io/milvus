@@ -180,6 +180,10 @@ type shardDelegator struct {
 	// streaming data catch-up state
 	catchingUpStreamingData *atomic.Bool
 
+	// skipStreamingForExternalTable is true for read-only external table collections.
+	// Such collections do not need DML stream replay before becoming searchable.
+	skipStreamingForExternalTable bool
+
 	// latest required mvcc timestamp for the delegator
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
@@ -471,11 +475,16 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	)
 
 	partialResultRequiredDataRatio := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
-	// wait tsafe
+	// Resolve the MVCC timestamp used by this search.
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	var tSafe uint64
 	var err error
-	if partialResultRequiredDataRatio >= 1.0 {
+	if sd.skipStreamingForExternalTable {
+		// External collections read a materialized snapshot instead of the WAL.
+		// Use the full MVCC range even when partial search skips tSafe waiting, so
+		// a stale channel checkpoint does not hide snapshot rows or deltalog deletes.
+		tSafe = typeutil.MaxTimestamp
+	} else if partialResultRequiredDataRatio >= 1.0 {
 		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	} else {
 		// partial search enabled, could ignore streaming data
@@ -491,8 +500,9 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
-	// use tsafe as mvcc timestamp if request not provide it
-	if req.GetReq().GetMvccTimestamp() == 0 {
+	// External reads always use the full snapshot MVCC timestamp. Normal reads
+	// use tSafe only when the request does not provide an MVCC timestamp.
+	if sd.skipStreamingForExternalTable || req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
 	}
 
@@ -621,8 +631,9 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		return err
 	}
 
-	// use tsafe as mvcc timestamp if request not provide it
-	if req.GetReq().GetMvccTimestamp() == 0 {
+	// External reads always use the full snapshot MVCC timestamp. Normal reads
+	// use tSafe only when the request does not provide an MVCC timestamp.
+	if sd.skipStreamingForExternalTable || req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
 	}
 
@@ -711,8 +722,9 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		return nil, err
 	}
 
-	// use tsafe as mvcc timestamp if request not provide it
-	if req.GetReq().GetMvccTimestamp() == 0 {
+	// External reads always use the full snapshot MVCC timestamp. Normal reads
+	// use tSafe only when the request does not provide an MVCC timestamp.
+	if sd.skipStreamingForExternalTable || req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
 	}
 
@@ -1041,6 +1053,9 @@ func (sd *shardDelegator) speedupGuranteeTS(
 	mvccTS uint64,
 	isIterator bool,
 ) uint64 {
+	if sd.skipStreamingForExternalTable {
+		return guaranteeTS
+	}
 	// because the mvcc speed up will make the guarantee timestamp smaller.
 	// and the update latest required mvcc timestamp and mvcc speed up are executed concurrently.
 	// so we update the latest required mvcc timestamp first, then the mvcc speed up will not affect the latest required mvcc timestamp.
@@ -1062,6 +1077,13 @@ func (sd *shardDelegator) speedupGuranteeTS(
 
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
 func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, error) {
+	if sd.skipStreamingForExternalTable {
+		// External collection data is materialized by refresh/load manifests,
+		// not by this WAL. Use a full snapshot timestamp so low guarantee
+		// placeholders such as Eventually(1) do not hide loaded deltalog deletes.
+		return typeutil.MaxTimestamp, nil
+	}
+
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
 	defer sp.End()
 	log := sd.getLogger(ctx)
@@ -1134,6 +1156,12 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 
 // GetLatestRequiredMVCCTimeTick returns the latest required mvcc timestamp for the delegator.
 func (sd *shardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
+	if sd.skipStreamingForExternalTable {
+		// External reads do not require WAL tSafe advancement. Returning zero
+		// prevents the empty-timetick slowdowner from treating read timestamps
+		// as a WAL catch-up target.
+		return 0
+	}
 	if sd.catchingUpStreamingData.Load() {
 		// delegator need to catch up the streaming data when startup,
 		// If the empty timetick is filtered, the load operation will be blocked.
@@ -1474,6 +1502,13 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
 
+	skipStreamingForExternalTable := typeutil.IsExternalCollection(collection.Schema())
+	catchingUpStreamingData := !skipStreamingForExternalTable
+	if skipStreamingForExternalTable {
+		log.Info(ctx, "skip streaming data catchup for read-only external collection",
+			mlog.Time("initialTSafe", tsoutil.PhysicalTime(startTs)))
+	}
+
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
 	log.Info(ctx, "Init delete cache with list delete buffer", mlog.Int64("sizePerBlock", sizePerBlock), mlog.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
@@ -1503,17 +1538,18 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		distribution:      NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{paramtable.GetStringNodeID(), channel}),
-		latestTsafe:                atomic.NewUint64(startTs),
-		loader:                     loader,
-		queryHook:                  queryHook,
-		chunkManager:               chunkManager,
-		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
-		excludedSegments:           excludedSegments,
-		l0ForwardPolicy:            policy,
-		postLoadSem:                postLoadSem,
-		postLoadConfigHandler:      postLoadConfigHandler,
-		catchingUpStreamingData:    atomic.NewBool(true),
-		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		latestTsafe:                   atomic.NewUint64(startTs),
+		loader:                        loader,
+		queryHook:                     queryHook,
+		chunkManager:                  chunkManager,
+		partitionStats:                make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		excludedSegments:              excludedSegments,
+		l0ForwardPolicy:               policy,
+		postLoadSem:                   postLoadSem,
+		postLoadConfigHandler:         postLoadConfigHandler,
+		catchingUpStreamingData:       atomic.NewBool(catchingUpStreamingData),
+		skipStreamingForExternalTable: skipStreamingForExternalTable,
+		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
 	}
 
 	functionState, err := buildFunctionRuntimeState(collection.Schema())
