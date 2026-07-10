@@ -243,36 +243,44 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 			mlog.String("resourceGroup", config.GetResourceGroupName()),
 		)
 	}
-	if err := m.put(ctx, params.CollectionID, replicas...); err != nil {
-		return nil, merr.Wrap(err, "failed to put replicas")
-	}
-	if err := m.removeRedundantReplicas(ctx, params); err != nil {
-		return nil, merr.Wrap(err, "failed to remove redundant replicas")
-	}
-	return replicas, nil
-}
-
-// removeRedundantReplicas removes redundant replicas that is not in the new replica config.
-func (m *ReplicaManager) removeRedundantReplicas(ctx context.Context, params SpawnWithReplicaConfigParams) error {
-	existedReplicas, ok := m.coll2Replicas.Get(params.CollectionID)
-	if !ok {
-		return nil
-	}
-	toRemoveReplicas := make([]int64, 0)
-	for _, replica := range existedReplicas {
-		found := false
-		replicaID := replica.GetID()
-		for _, channel := range params.Configs {
-			if channel.GetReplicaId() == replicaID {
-				found = true
-				break
+	// Pre-compute the redundant replicas that are not in the new replica config.
+	// All newly spawned replica IDs come from params.Configs, so computing this
+	// before persistence is equivalent to computing it after.
+	toRemove := make([]int64, 0)
+	if existedReplicas, ok := m.coll2Replicas.Get(params.CollectionID); ok {
+		configIDs := typeutil.NewUniqueSet()
+		for _, config := range params.Configs {
+			configIDs.Insert(config.GetReplicaId())
+		}
+		for _, replica := range existedReplicas {
+			if !configIDs.Contain(replica.GetID()) {
+				toRemove = append(toRemove, replica.GetID())
 			}
 		}
-		if !found {
-			toRemoveReplicas = append(toRemoveReplicas, replicaID)
-		}
 	}
-	return m.removeReplicas(ctx, params.CollectionID, toRemoveReplicas...)
+
+	// Persist the spawned replicas and release the redundant ones in one
+	// compound catalog call; on failure the in-memory state is left untouched
+	// and the error propagates to the caller for retry.
+	replicaPBs := make([]*querypb.Replica, 0, len(replicas))
+	for _, replica := range replicas {
+		replicaPBs = append(replicaPBs, replica.replicaPB)
+	}
+	if err := m.catalog.SaveAndReleaseReplicas(ctx, params.CollectionID, replicaPBs, toRemove); err != nil {
+		return nil, merr.Wrap(err, "failed to save and release replicas")
+	}
+
+	m.putReplicasInMemory(params.CollectionID, replicas...)
+	if len(toRemove) > 0 {
+		for _, replicaID := range toRemove {
+			if replica, ok := m.flatReplicas.Get(replicaID); ok {
+				metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+				metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
+			}
+		}
+		m.removeReplicasInMemory(params.CollectionID, toRemove...)
+	}
+	return replicas, nil
 }
 
 // AllocateReplicaID allocates a replica ID.
