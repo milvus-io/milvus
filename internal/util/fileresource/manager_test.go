@@ -174,6 +174,59 @@ func (suite *SyncManagerSuite) TestSync_ReaderError() {
 	suite.ErrorIs(err, io.ErrUnexpectedEOF)
 }
 
+func (suite *SyncManagerSuite) TestSync_NotifyListener() {
+	listener := &mockFileResourceListener{}
+	RegisterListener("test", listener)
+	defer UnregisterListener("test")
+
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 1, Name: "test.file", Path: "/storage/test.file"},
+	}
+	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil)
+
+	err := suite.manager.Sync(1, resources)
+	suite.Require().NoError(err)
+
+	suite.Require().Len(listener.events, 1)
+	event := listener.events[0]
+	suite.Equal(uint64(1), event.Version)
+	suite.Require().Len(event.Resources, 1)
+	suite.Equal(int64(1), event.Resources[0].ID)
+	suite.Equal("test.file", event.Resources[0].Name)
+	suite.Equal("/storage/test.file", event.Resources[0].Path)
+	suite.Equal(path.Join(suite.tempDir, "1", "test.file"), event.Resources[0].LocalPath)
+}
+
+func (suite *SyncManagerSuite) TestSync_UpdateAndRemoveNotifyListener() {
+	listener := &mockFileResourceListener{}
+	RegisterListener("test", listener)
+	defer UnregisterListener("test")
+
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 1, Name: "test.file", Path: "/storage/test.file"},
+	}
+	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil)
+	suite.Require().NoError(suite.manager.Sync(1, resources))
+
+	updated := []*internalpb.FileResourceInfo{
+		{Id: 2, Name: "test.file", Path: "/storage/test_v2.file"},
+	}
+	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test_v2.file").Return(newMockReader("test content v2"), nil)
+	suite.Require().NoError(suite.manager.Sync(2, updated))
+
+	suite.Require().Len(listener.events, 2)
+	suite.Require().Len(listener.events[1].Resources, 1)
+	suite.Equal(int64(2), listener.events[1].Resources[0].ID)
+	suite.Equal("/storage/test_v2.file", listener.events[1].Resources[0].Path)
+	suite.Equal(path.Join(suite.tempDir, "2", "test_v2.file"), listener.events[1].Resources[0].LocalPath)
+	suite.NoDirExists(path.Join(suite.tempDir, "1"))
+
+	suite.Require().NoError(suite.manager.Sync(3, nil))
+	suite.Require().Len(listener.events, 3)
+	suite.Empty(listener.events[2].Resources)
+	suite.NoDirExists(path.Join(suite.tempDir, "2"))
+}
+
 func (suite *SyncManagerSuite) TestMode() {
 	mode := suite.manager.Mode()
 	suite.Equal(SyncMode, mode)
@@ -181,6 +234,16 @@ func (suite *SyncManagerSuite) TestMode() {
 
 func TestSyncManagerSuite(t *testing.T) {
 	suite.Run(t, new(SyncManagerSuite))
+}
+
+type mockFileResourceListener struct {
+	events []SyncEvent
+	err    error
+}
+
+func (m *mockFileResourceListener) OnFileResourceSync(event SyncEvent) error {
+	m.events = append(m.events, event)
+	return m.err
 }
 
 // RefManagerSuite tests RefManager
@@ -298,6 +361,7 @@ func (suite *GlobalFunctionsSuite) SetupTest() {
 	// Reset global state
 	GlobalFileManager = nil
 	once = sync.Once{}
+	listeners = make(map[string]Listener)
 }
 
 func (suite *GlobalFunctionsSuite) TestInitManager() {

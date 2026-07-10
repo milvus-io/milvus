@@ -42,6 +42,8 @@ import (
 var (
 	GlobalFileManager Manager
 	once              sync.Once
+	listeners         = make(map[string]Listener)
+	listenerMu        sync.RWMutex
 )
 
 func InitManager(storage storage.ChunkManager, mode Mode) {
@@ -58,6 +60,36 @@ func Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	}
 
 	return GlobalFileManager.Sync(version, resourceList)
+}
+
+func RegisterListener(name string, listener Listener) {
+	listenerMu.Lock()
+	defer listenerMu.Unlock()
+	listeners[name] = listener
+}
+
+func UnregisterListener(name string) {
+	listenerMu.Lock()
+	defer listenerMu.Unlock()
+	delete(listeners, name)
+}
+
+func notifyListeners(event SyncEvent) {
+	listenerMu.RLock()
+	cloned := make(map[string]Listener, len(listeners))
+	for name, listener := range listeners {
+		cloned[name] = listener
+	}
+	listenerMu.RUnlock()
+
+	for name, listener := range cloned {
+		if listener == nil {
+			continue
+		}
+		if err := listener.OnFileResourceSync(event); err != nil {
+			mlog.Warn(context.TODO(), "file resource sync listener failed", mlog.String("listener", name), mlog.Err(err))
+		}
+	}
 }
 
 // Manager manage file resource
@@ -125,18 +157,26 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 	}
 
 	newResourceMap := make(map[string]int64)
+	resolvedResources := make([]*ResolvedFileResource, 0, len(resourceList))
 	removes := []int64{}
 	ctx := context.Background()
 	for _, resource := range resourceList {
 		newResourceMap[resource.GetName()] = resource.GetId()
+		localResourcePath := path.Join(m.localPath, fmt.Sprint(resource.GetId()))
+		localFilePath := path.Join(localResourcePath, path.Base(resource.GetPath()))
 		if id, ok := m.resourceMap[resource.GetName()]; ok {
 			if id == resource.GetId() {
+				resolvedResources = append(resolvedResources, &ResolvedFileResource{
+					ID:        resource.GetId(),
+					Name:      resource.GetName(),
+					Path:      resource.GetPath(),
+					LocalPath: localFilePath,
+				})
 				continue
 			}
 		}
 
 		// download new resource
-		localResourcePath := path.Join(m.localPath, fmt.Sprint(resource.GetId()))
 
 		// remove old file if exist
 		err := os.RemoveAll(localResourcePath)
@@ -157,8 +197,7 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 			}
 			defer reader.Close()
 
-			fileName := path.Join(localResourcePath, path.Base(resource.GetPath()))
-			file, err := os.Create(fileName)
+			file, err := os.Create(localFilePath)
 			if err != nil {
 				return err
 			}
@@ -168,11 +207,17 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 				mlog.Info(context.TODO(), "download resource failed", mlog.String("path", resource.GetPath()), mlog.Err(err))
 				return err
 			}
-			mlog.Info(context.TODO(), "sync file to local", mlog.String("name", fileName), mlog.Int64("id", resource.GetId()))
+			mlog.Info(context.TODO(), "sync file to local", mlog.String("name", localFilePath), mlog.Int64("id", resource.GetId()))
 			return nil
 		}(); err != nil {
 			return err
 		}
+		resolvedResources = append(resolvedResources, &ResolvedFileResource{
+			ID:        resource.GetId(),
+			Name:      resource.GetName(),
+			Path:      resource.GetPath(),
+			LocalPath: localFilePath,
+		})
 	}
 
 	for name, id := range m.resourceMap {
@@ -195,7 +240,11 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 	}
 	m.resourceMap = newResourceMap
 	m.version.Store(version)
-	return analyzer.UpdateGlobalResourceInfo(newResourceMap)
+	if err := analyzer.UpdateGlobalResourceInfo(newResourceMap); err != nil {
+		return err
+	}
+	notifyListeners(SyncEvent{Version: version, Resources: resolvedResources})
+	return nil
 }
 
 func (m *SyncManager) Mode() Mode { return SyncMode }
