@@ -35,6 +35,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprCache.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -837,6 +838,10 @@ class JsonFlatIndexExprTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
+
         json_data_ = {
             R"({"a": 1.0})",
             R"({"a": "abc"})",
@@ -919,6 +924,9 @@ class JsonFlatIndexExprTest : public ::testing::Test {
 
     void
     TearDown() override {
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
     }
 
     FieldId json_fid_;
@@ -931,6 +939,10 @@ class JsonFlatIndexContainsExprTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
+
         json_data_ = {
             R"({"a": [1, 2]})",
             R"({"a": [2]})",
@@ -1002,6 +1014,13 @@ class JsonFlatIndexContainsExprTest : public ::testing::Test {
         auto load_info = PrepareSingleFieldInsertBinlog(
             1, 1, 1, json_fid_.get(), {json_field_}, cm);
         segment_->LoadFieldData(load_info);
+    }
+
+    void
+    TearDown() override {
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
     }
 
     ColumnVectorPtr
@@ -1076,6 +1095,28 @@ TEST_F(JsonFlatIndexContainsExprTest, UsesExactPathThreeValuedValidity) {
         expected_valid);
 }
 
+TEST_F(JsonFlatIndexContainsExprTest,
+       ReusesExactPathValidityAcrossLiteralsAndOperators) {
+    auto& cache = exec::ExprResCacheManager::Instance();
+    exec::CacheConfig config;
+    config.mode = exec::CacheMode::Memory;
+    config.mem_max_bytes = 1 << 20;
+    config.compression_enabled = true;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(cache.SetConfig(config));
+    exec::ExprResCacheManager::SetEnabled(true);
+
+    Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1});
+    EXPECT_EQ(cache.GetEntryCount(), 2);
+
+    Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {2});
+    EXPECT_EQ(cache.GetEntryCount(), 3);
+
+    Evaluate(proto::plan::JSONContainsExpr_JSONOp_ContainsAny, {1, 3});
+    EXPECT_EQ(cache.GetEntryCount(), 4);
+}
+
 TEST_F(JsonFlatIndexExprTest, TestUnaryExpr) {
     proto::plan::GenericValue value;
     value.set_int64_val(1);
@@ -1126,6 +1167,77 @@ TEST_F(JsonFlatIndexExprTest, TestComparisonUnknowns) {
     EXPECT_EQ(final.count(), 2);
     EXPECT_TRUE(final[0]);
     EXPECT_TRUE(final[13]);
+}
+
+TEST_F(JsonFlatIndexExprTest, ReusesValidityAcrossLiteralsAndOperators) {
+    auto& cache = exec::ExprResCacheManager::Instance();
+    exec::CacheConfig config;
+    config.mode = exec::CacheMode::Memory;
+    config.mem_max_bytes = 1 << 20;
+    config.compression_enabled = true;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(cache.SetConfig(config));
+    exec::ExprResCacheManager::SetEnabled(true);
+
+    auto evaluate = [&](std::vector<std::string> nested_path,
+                        proto::plan::OpType op,
+                        proto::plan::GenericValue value) {
+        auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid_, DataType::JSON, std::move(nested_path)),
+            op,
+            value,
+            std::vector<proto::plan::GenericValue>());
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           unary_expr);
+        return query::ExecuteQueryExpr(
+            plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    };
+    auto int_value = [](int64_t literal) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(literal);
+        return value;
+    };
+
+    EXPECT_EQ(evaluate({"a"}, proto::plan::OpType::Equal, int_value(1)).count(),
+              2);
+    EXPECT_EQ(cache.GetEntryCount(), 2);
+
+    exec::ExprResCacheManager::Key artifact_key{
+        segment_->get_segment_id(),
+        fmt::format("json-flat-validity:v1:field={}:path-length=2:"
+                    "path=/a:family={}",
+                    json_fid_.get(),
+                    static_cast<unsigned int>(index::JsonValueType::Numeric))};
+    exec::ExprResCacheManager::Value artifact;
+    artifact.active_count = json_data_.size();
+    ASSERT_TRUE(cache.Get(artifact_key, artifact));
+    EXPECT_EQ(artifact.result->count(), 6);
+    EXPECT_EQ(artifact.valid_result->count(), json_data_.size());
+    artifact.active_count = json_data_.size() + 1;
+    EXPECT_FALSE(cache.Get(artifact_key, artifact));
+
+    EXPECT_EQ(evaluate({"a"}, proto::plan::OpType::Equal, int_value(3)).count(),
+              1);
+    EXPECT_EQ(cache.GetEntryCount(), 3);
+
+    EXPECT_EQ(
+        evaluate({"a"}, proto::plan::OpType::GreaterThan, int_value(1)).count(),
+        4);
+    EXPECT_EQ(cache.GetEntryCount(), 4);
+
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("abc");
+    EXPECT_EQ(evaluate({"a"}, proto::plan::OpType::Equal, string_value).count(),
+              1);
+    EXPECT_EQ(cache.GetEntryCount(), 6);
+
+    EXPECT_EQ(evaluate({"b"}, proto::plan::OpType::Equal, int_value(2)).count(),
+              1);
+    EXPECT_EQ(cache.GetEntryCount(), 8);
+
+    EXPECT_EQ(cache.EraseSegment(segment_->get_segment_id()), 8);
+    EXPECT_EQ(cache.GetEntryCount(), 0);
 }
 
 TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
