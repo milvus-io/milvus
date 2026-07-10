@@ -357,6 +357,7 @@ type StatsTaskInfo struct {
 	Bm25Logs         []*datapb.FieldBinlog
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 	FileResources    []*internalpb.FileResourceInfo
+	BaseManifest     string
 	Manifest         string
 }
 
@@ -376,6 +377,7 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		Bm25Logs:         s.CloneBm25Logs(),
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 		FileResources:    s.CloneFileResources(),
+		BaseManifest:     s.BaseManifest,
 		Manifest:         s.Manifest,
 	}
 }
@@ -395,6 +397,7 @@ func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 		Bm25Logs:         s.Bm25Logs,
 		NumRows:          s.NumRows,
 		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
+		BaseManifest:     s.BaseManifest,
 		Manifest:         s.Manifest,
 	}
 }
@@ -520,6 +523,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 	segID typeutil.UniqueID,
 	channel string,
 	texIndexLogs map[int64]*datapb.TextIndexStats,
+	baseManifest string,
 	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
@@ -531,6 +535,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.BaseManifest = baseManifest
 		info.Manifest = manifest
 	}
 }
@@ -543,6 +548,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	segID typeutil.UniqueID,
 	channel string,
 	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats,
+	baseManifest string,
 	manifest string,
 ) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
@@ -554,6 +560,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.BaseManifest = baseManifest
 		info.Manifest = manifest
 	}
 }

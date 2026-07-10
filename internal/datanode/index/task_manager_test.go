@@ -50,6 +50,20 @@ func (s *statsTaskInfoSuite) SetupSuite() {
 }
 
 func (s *statsTaskInfoSuite) Test_Methods() {
+	baseManifest := "test_base_manifest_path"
+	textBaseManifest := "test_text_base_manifest_path"
+	manifest := "test_manifest_path"
+	jsonKeyStatsLogs := map[int64]*datapb.JsonKeyStats{
+		100: {
+			FieldID:                100,
+			Version:                1,
+			Files:                  []string{"file1"},
+			LogSize:                1024,
+			MemorySize:             1024,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+		},
+	}
+
 	s.Run("loadOrStoreStatsTask", func() {
 		_, cancel := context.WithCancel(s.manager.ctx) //nolint:gosec // cancel is deferred below
 		defer cancel()
@@ -94,21 +108,15 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 					LogSize:    1024,
 					MemorySize: 1024,
 				},
-			}, "test_manifest_path")
+			}, textBaseManifest, "test_manifest_path")
+
+		taskInfo := s.manager.GetStatsTaskInfo(s.cluster, s.taskID)
+		s.Equal(textBaseManifest, taskInfo.ToStatsResult(s.taskID).GetBaseManifest())
 	})
 
 	s.Run("storeStatsJsonIndexResult", func() {
 		s.manager.StoreJSONKeyStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
-			map[int64]*datapb.JsonKeyStats{
-				100: {
-					FieldID:                100,
-					Version:                1,
-					Files:                  []string{"file1"},
-					LogSize:                1024,
-					MemorySize:             1024,
-					JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
-				},
-			}, "test_manifest_path")
+			jsonKeyStatsLogs, baseManifest, manifest)
 	})
 
 	s.Run("getStatsTaskInfo", func() {
@@ -120,6 +128,11 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 		s.Equal(int64(3), taskInfo.SegID)
 		s.Equal("ch1", taskInfo.InsertChannel)
 		s.Equal(int64(65535), taskInfo.NumRows)
+
+		result := taskInfo.ToStatsResult(s.taskID)
+		s.Equal(baseManifest, result.GetBaseManifest())
+		s.Equal(manifest, result.GetManifest())
+		s.Equal(jsonKeyStatsLogs, result.GetJsonKeyStatsLogs())
 	})
 
 	s.Run("deleteStatsTaskInfos", func() {

@@ -114,7 +114,8 @@ The following features are explicitly **NOT supported** for external tables in t
 |  +---------------------------------------------------------------+      |
 |  +---------------------------------------------------------------+      |
 |  |              Stats Inspector (LIMITED for external)            |      |
-|  |  - TextIndexJob enabled; JSON/BM25 inspector jobs skipped       |      |
+|  |  - TextIndexJob enabled; JSON enabled for StorageV3 manifests   |      |
+|  |  - BM25 inspector jobs skipped                                 |      |
 |  +---------------------------------------------------------------+      |
 |  +---------------------------------------------------------------+      |
 |  |              UpdateExternalCollectionTask                      |      |
@@ -583,14 +584,23 @@ if collection.IsExternal() {
 **File**: `internal/datacoord/stats_inspector.go`
 
 External collections allow text-index stats tasks for persisted `text_match`
-support. Other stats task types are still skipped:
+support. They also allow JSON key stats tasks for StorageV3 segments that have
+already committed a manifest path, because the stats result can be written back
+through the manifest. Other stats task types are still skipped:
 
 ```go
 func (si *statsInspector) SubmitStatsTask(..., subJobType indexpb.StatsSubJob, ...) {
-    if si.isExternalCollection(segment.GetCollectionID()) &&
-        subJobType != indexpb.StatsSubJob_TextIndexJob {
-        log.Info("skip submit stats task for external collection")
-        return nil
+    if si.isExternalCollection(segment.GetCollectionID()) {
+        if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob &&
+            !canBuildExternalJSONKeyIndex(segment) {
+            log.Info("skip submit external json stats task without v3 manifest")
+            return nil
+        }
+        if subJobType != indexpb.StatsSubJob_TextIndexJob &&
+            subJobType != indexpb.StatsSubJob_JsonKeyIndexJob {
+            log.Info("skip submit stats task for external collection")
+            return nil
+        }
     }
     // ... submit task
 }
@@ -599,7 +609,7 @@ func (si *statsInspector) SubmitStatsTask(..., subJobType indexpb.StatsSubJob, .
 | Stats Task Type | Status |
 |-----------------|--------|
 | Text Index Stats | Enabled for persisted `text_match` support |
-| JSON Key Index Stats | Disabled |
+| JSON Key Index Stats | Enabled only for StorageV3 external segments with a non-empty manifest path |
 | BM25 Stats | Disabled; BM25 function stats are generated during refresh |
 
 ### 5.3 Write Operations Blocked
