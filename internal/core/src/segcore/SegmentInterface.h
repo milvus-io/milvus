@@ -536,6 +536,13 @@ class SegmentInternalInterface : public SegmentInterface {
         return HasFieldData(field_id) || HasIndex(field_id);
     }
 
+    // Returns whether the segment's loaded manifest contains the storage
+    // column. Non-manifest segment types default to true.
+    virtual bool
+    HasColumnInLoadedManifest(const std::string&) const {
+        return true;
+    }
+
     // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
     // per-segment container from the scalar/vector/binlog index bitsets, so
     // they are checked via this dedicated API rather than widening HasIndex().

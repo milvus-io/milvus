@@ -55,6 +55,26 @@ SegmentLoadInfo::GetColumnGroups() const {
     return column_groups_;
 }
 
+// Looks up a storage column in the cached manifest column groups only.
+bool
+SegmentLoadInfo::HasManifestColumn(const std::string& column_name) const {
+    auto column_groups = column_groups_;
+    if (column_groups == nullptr) {
+        return false;
+    }
+    for (const auto& group : *column_groups) {
+        if (group == nullptr) {
+            continue;
+        }
+        for (const auto& column : group->columns) {
+            if (column == column_name) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 LoadIndexInfo
 SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     const proto::segcore::FieldIndexInfo* field_index_info,
