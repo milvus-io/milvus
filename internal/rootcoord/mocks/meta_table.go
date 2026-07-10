@@ -5,16 +5,12 @@ package mockrootcoord
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-
-	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
-	mock "github.com/stretchr/testify/mock"
-
 	model "github.com/milvus-io/milvus/internal/metastore/model"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	mock "github.com/stretchr/testify/mock"
 
 	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )
@@ -1936,6 +1932,54 @@ func (_c *IMetaTable_DropRole_Call) Return(_a0 error) *IMetaTable_DropRole_Call 
 }
 
 func (_c *IMetaTable_DropRole_Call) RunAndReturn(run func(context.Context, string, string) error) *IMetaTable_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropRoleWithGrants provides a mock function with given fields: ctx, tenant, roleName
+func (_m *IMetaTable) DropRoleWithGrants(ctx context.Context, tenant string, roleName string) error {
+	ret := _m.Called(ctx, tenant, roleName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropRoleWithGrants")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, tenant, roleName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_DropRoleWithGrants_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropRoleWithGrants'
+type IMetaTable_DropRoleWithGrants_Call struct {
+	*mock.Call
+}
+
+// DropRoleWithGrants is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - roleName string
+func (_e *IMetaTable_Expecter) DropRoleWithGrants(ctx interface{}, tenant interface{}, roleName interface{}) *IMetaTable_DropRoleWithGrants_Call {
+	return &IMetaTable_DropRoleWithGrants_Call{Call: _e.mock.On("DropRoleWithGrants", ctx, tenant, roleName)}
+}
+
+func (_c *IMetaTable_DropRoleWithGrants_Call) Run(run func(ctx context.Context, tenant string, roleName string)) *IMetaTable_DropRoleWithGrants_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DropRoleWithGrants_Call) Return(_a0 error) *IMetaTable_DropRoleWithGrants_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_DropRoleWithGrants_Call) RunAndReturn(run func(context.Context, string, string) error) *IMetaTable_DropRoleWithGrants_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -548,6 +548,36 @@ func TestRbacDropRole(t *testing.T) {
 	require.ErrorIs(t, err, errRoleNotExists)
 }
 
+func TestRbacDropRoleWithGrants(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	roleName := "role" + funcutil.RandomString(10)
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName})
+	require.NoError(t, err)
+
+	err = mt.OperatePrivilege(context.TODO(), util.DefaultTenant, &milvuspb.GrantEntity{
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "user_name"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"},
+		},
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
+		ObjectName: "obj_name",
+	}, milvuspb.OperatePrivilegeType_Grant)
+	require.NoError(t, err)
+
+	err = mt.DropRoleWithGrants(context.TODO(), util.DefaultTenant, roleName)
+	require.NoError(t, err)
+
+	_, err = mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	grants, err := mt.SelectGrant(context.TODO(), util.DefaultTenant, &milvuspb.GrantEntity{
+		Role: &milvuspb.RoleEntity{Name: roleName},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(grants))
+}
+
 func TestRbacOperateRole(t *testing.T) {
 	mt := generateMetaTable(t)
 	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
@@ -1552,11 +1582,14 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 func TestMetaTable_RemoveCollection(t *testing.T) {
 	t.Run("catalog error", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("DropCollection",
+		catalog.On("DropCollectionAndDeleteGrants",
 			mock.Anything, // context.Context
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
-		).Return(errors.New("error mock DropCollection"))
+			mock.Anything, // tenant
+			mock.Anything, // dbName
+			mock.Anything, // collectionName
+		).Return(errors.New("error mock DropCollectionAndDeleteGrants"))
 
 		meta := &MetaTable{
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
@@ -1581,13 +1614,13 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("DropCollection",
+		catalog.On("DropCollectionAndDeleteGrants",
 			mock.Anything, // context.Context
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
-		).Return(nil)
-		catalog.On("DeleteGrantByCollectionName",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, // tenant
+			mock.Anything, // dbName
+			mock.Anything, // collectionName
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1608,17 +1641,22 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 	})
 }
 
-func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
-	// When DeleteGrantByCollectionName fails, RemoveCollection should still succeed (best-effort)
+func TestMetaTable_RemoveCollection_GrantDelete(t *testing.T) {
+	// RemoveCollection should pass the collection's tenant/dbName/name to the
+	// compound catalog method. The best-effort semantic of the grant deletion
+	// is covered by the catalog's own tests.
 	catalog := mocks.NewRootCoordCatalog(t)
-	catalog.On("DropCollection",
+	catalog.On("DropCollectionAndDeleteGrants",
 		mock.Anything,
 		mock.Anything,
 		mock.AnythingOfType("uint64"),
-	).Return(nil)
-	catalog.On("DeleteGrantByCollectionName",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-	).Return(errors.New("grant delete failed"))
+		mock.Anything, mock.Anything, mock.Anything,
+	).Run(func(args mock.Arguments) {
+		assert.Equal(t, uint64(9999), args.Get(2).(uint64))
+		assert.Equal(t, util.DefaultTenant, args.Get(3).(string))
+		assert.Equal(t, "testdb", args.Get(4).(string))
+		assert.Equal(t, "collection", args.Get(5).(string))
+	}).Return(nil)
 
 	meta := &MetaTable{
 		catalog:            catalog,
@@ -1626,25 +1664,26 @@ func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
 		aliases:            newNameDb(),
 		fileResourceRefCnt: make(map[int64]int),
 		collID2Meta: map[typeutil.UniqueID]*model.Collection{
-			100: {Name: "collection", State: pb.CollectionState_CollectionDropping},
+			100: {Name: "collection", DBName: "testdb", State: pb.CollectionState_CollectionDropping},
 		},
 	}
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
-	meta.names.insert("", "collection", 100)
+	meta.names.insert("testdb", "collection", 100)
 	ctx := context.Background()
 	err := meta.RemoveCollection(ctx, 100, 9999)
 	assert.NoError(t, err)
+	catalog.AssertCalled(t, "DropCollectionAndDeleteGrants",
+		mock.Anything, mock.Anything, mock.AnythingOfType("uint64"),
+		mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 	t.Run("grant cleanup on drop", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		).Return(nil)
-		catalog.On("DeleteGrantByCollectionName",
-			mock.Anything, mock.Anything, "testdb", "collection",
+		catalog.On("AlterCollectionAndDeleteGrants",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			util.DefaultTenant, "testdb", "collection",
 		).Return(nil)
 
 		meta := &MetaTable{
@@ -1665,18 +1704,19 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 		ctx := context.Background()
 		err := meta.DropCollection(ctx, 100, 9999)
 		assert.NoError(t, err)
-		catalog.AssertCalled(t, "DeleteGrantByCollectionName", mock.Anything, mock.Anything, "testdb", "collection")
+		catalog.AssertCalled(t, "AlterCollectionAndDeleteGrants",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			util.DefaultTenant, "testdb", "collection")
 	})
 
-	t.Run("grant cleanup best-effort on drop", func(t *testing.T) {
-		// When DeleteGrantByCollectionName fails, DropCollection should still succeed
+	t.Run("compound catalog method fails", func(t *testing.T) {
+		// When the compound catalog method fails, DropCollection should fail
+		// and the in-memory state should stay untouched.
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		).Return(nil)
-		catalog.On("DeleteGrantByCollectionName",
+		catalog.On("AlterCollectionAndDeleteGrants",
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		).Return(errors.New("grant delete failed"))
+			mock.Anything, mock.Anything, mock.Anything,
+		).Return(errors.New("error mock AlterCollectionAndDeleteGrants"))
 
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1695,7 +1735,31 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 		meta.names.insert("default", "collection", 100)
 		ctx := context.Background()
 		err := meta.DropCollection(ctx, 100, 9999)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Equal(t, pb.CollectionState_CollectionCreated, meta.collID2Meta[100].State)
+	})
+
+	t.Run("db not found fails before persisting", func(t *testing.T) {
+		// When the collection's dbID cannot be resolved, DropCollection should
+		// fail before touching the catalog at all.
+		catalog := mocks.NewRootCoordCatalog(t)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "collection", DBID: 999, State: pb.CollectionState_CollectionCreated},
+			},
+			dbName2Meta:        map[string]*model.Database{},
+			fileResourceRefCnt: make(map[int64]int),
+		}
+		ctx := context.Background()
+		err := meta.DropCollection(ctx, 100, 9999)
+		assert.Error(t, err)
+		catalog.AssertNotCalled(t, "AlterCollectionAndDeleteGrants",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, mock.Anything, mock.Anything)
 	})
 }
 

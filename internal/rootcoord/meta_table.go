@@ -134,6 +134,8 @@ type IMetaTable interface {
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
 	AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
 	DropRole(ctx context.Context, tenant string, roleName string) error
+	// DropRoleWithGrants drops the role and then all grants of the role.
+	DropRoleWithGrants(ctx context.Context, tenant string, roleName string) error
 	OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
 	SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
 	SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
@@ -610,12 +612,20 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		return nil
 	}
 
+	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
+	if err != nil {
+		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
+	}
+
 	clone := coll.Clone()
 	clone.State = pb.CollectionState_CollectionDropping
 	clone.UpdateTimestamp = ts
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
+	// Alter the collection state and delete all grants referencing it
+	// immediately so they don't linger until the tombstone sweeper runs
+	// (which can take minutes). Grant deletion is best-effort inside the catalog.
+	if err := mt.catalog.AlterCollectionAndDeleteGrants(ctx1, coll, clone, ts, util.DefaultTenant, db.Name, coll.Name); err != nil {
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
@@ -633,11 +643,6 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		mlog.String("state", clone.State.String()),
 	)
 
-	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
-	if err != nil {
-		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
-	}
-
 	pn := coll.GetPartitionNum(true)
 
 	mt.generalCnt -= pn * int(coll.ShardsNum)
@@ -647,13 +652,6 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 
 	mlog.Info(ctx, "drop collection from meta table", mlog.Int64("collection", collectionID),
 		mlog.String("state", coll.State.String()), mlog.Uint64("ts", ts))
-
-	// Delete all grants referencing this collection immediately so they don't
-	// linger until the tombstone sweeper runs (which can take minutes).
-	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, db.Name, coll.Name); err != nil {
-		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
-			mlog.String("dbName", db.Name), mlog.String("collectionName", coll.Name), mlog.Err(err))
-	}
 
 	return nil
 }
@@ -730,13 +728,10 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Aliases:           aliases,
 		DBID:              coll.DBID,
 	}
-	if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
+	// Drop the collection and delete all grants referencing it; grant
+	// deletion is best-effort inside the catalog.
+	if err := mt.catalog.DropCollectionAndDeleteGrants(ctx1, newColl, ts, util.DefaultTenant, coll.DBName, coll.Name); err != nil {
 		return err
-	}
-
-	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, coll.DBName, coll.Name); err != nil {
-		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
-			mlog.String("dbName", coll.DBName), mlog.String("collectionName", coll.Name), mlog.Err(err))
 	}
 
 	allNames := common.CloneStringList(aliases)
@@ -1073,22 +1068,11 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	newColl.UpdateTimestamp = result.GetMaxTimeTick()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if !dbChanged {
-		if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, fieldModify); err != nil {
-			return err
-		}
-	} else {
-		if err := mt.catalog.AlterCollectionDB(ctx1, oldColl, newColl, newColl.UpdateTimestamp); err != nil {
-			return err
-		}
-	}
-
-	if oldColl.Name != newColl.Name || oldColl.DBName != newColl.DBName {
-		if err := mt.catalog.MigrateGrantCollectionName(ctx1, util.DefaultTenant, oldColl.DBName, oldColl.Name, newColl.DBName, newColl.Name); err != nil {
-			mlog.Warn(ctx, "failed to migrate grants for renamed collection, skipping",
-				mlog.String("oldDBName", oldColl.DBName), mlog.String("oldName", oldColl.Name),
-				mlog.String("newDBName", newColl.DBName), mlog.String("newName", newColl.Name), mlog.Err(err))
-		}
+	// Alter the collection and, when the collection is renamed or moved
+	// across databases, migrate its grants to the new name; grant migration
+	// is best-effort inside the catalog.
+	if err := mt.catalog.AlterCollectionAndMigrateGrants(ctx1, oldColl, newColl, newColl.UpdateTimestamp, fieldModify, dbChanged, util.DefaultTenant); err != nil {
+		return err
 	}
 
 	mt.names.remove(oldColl.DBName, oldColl.Name)
@@ -1978,6 +1962,14 @@ func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName strin
 	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.DropRole(ctx, tenant, roleName)
+}
+
+// DropRoleWithGrants drops the role and then all grants of the role.
+func (mt *MetaTable) DropRoleWithGrants(ctx context.Context, tenant string, roleName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	return mt.catalog.DropRoleAndGrants(ctx, tenant, roleName)
 }
 
 func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {
