@@ -3,14 +3,16 @@
 - Status: Draft
 - Author: Xiaofan Luan
 - Date: 2026-07-09
+- Related: [discussion #51115](https://github.com/milvus-io/milvus/discussions/51115)
 
 ## Motivation
 
-Today any change to a single scalar value in Milvus requires a full-row upsert: the
-entire row (including vectors) is rewritten, a delete tombstone is emitted, and
-compaction pressure grows. For frequently-updated scalar fields — counters,
-inventory, timestamps, status flags, ACL id lists — this is prohibitively
-expensive, and users work around it by joining against an external KV store.
+Today any change to a single scalar value in Milvus requires a full-row
+upsert: the entire row (including vectors) is rewritten, a delete tombstone
+is emitted, and compaction pressure grows. For frequently-updated scalar
+fields — counters, inventory, timestamps, status flags, ACL id lists — this
+is prohibitively expensive, and users work around it by joining against an
+external KV store.
 
 A concrete example of the demand is
 [discussion #51115](https://github.com/milvus-io/milvus/discussions/51115):
@@ -19,11 +21,11 @@ updates / 30s (~1,700 rows/s) while embeddings and every other field stay
 unchanged. Today each such update is a delete + reinsert; once a segment's
 update ratio crosses the compaction threshold (~20%), the whole segment —
 vectors included — is rewritten and its vector index rebuilt, so a steady
-update stream becomes a permanent compaction-and-indexing storm that only
-a large cluster can absorb. Under this design the same stream is ~1,700
-tiny SET ops/s down the delete-shaped write path; overlay memory grows
-only with the number of distinct touched rows, and folding rewrites just
-the 8-byte column file — vector data and vector indexes are never touched.
+update stream becomes a permanent compaction-and-indexing storm that only a
+large cluster can absorb. Under this design the same stream is ~1,700 tiny
+SET ops/s down the delete-shaped write path; overlay memory grows only with
+the number of distinct touched rows, and folding rewrites just the 8-byte
+column file — vector data and vector indexes are never touched.
 
 This design introduces **mutable columns**: fields that can be updated in
 place through a partial-update API, without rewriting the row, touching the
@@ -61,6 +63,22 @@ read side is "the delete mask plus one OR-back leg", and the background is
 "two new members of the compaction family (patch compaction, column
 folding)". No mechanism in this design is invented from scratch.
 
+## Terminology
+
+| Term | Meaning |
+|---|---|
+| patch | One logged mutation, `(pk, ts, op, operand)`; op ∈ {SET, INCR, APPEND, POP_FRONT, REMOVE} |
+| patch deltalog | Persisted file of patches for one (segment, mutable column); one emitted per flush cycle; internally ts-ordered |
+| overlay | Per-(segment, mutable column) in-memory structure serving current values; chunk-partitioned `hashmap<offset, version chain>` |
+| version chain | Per-row list of `(ts, op, operand)` nodes providing MVCC |
+| floor node | The single chain node holding everything folded below safe_ts; still a relative op, never materialized |
+| safe timestamp (safe_ts) | Lower bound of any timestamp a current or future reader may use; history below it is dead and purgeable |
+| materialization | Computing an absolute value from base + ops; happens only at read time and at column folding |
+| patch compaction | Background merge of deltalogs with per-PK op folding; output is still deltalog format |
+| column folding | Background rewrite of one column file with patches applied, swapped in atomically via the segment manifest |
+| fold_ts | Per-(segment, column) watermark recorded in the manifest; load replays only entries with `ts > fold_ts` |
+| patched_bitset | Monotone per-(segment, column) bitmap of ever-patched rows; used for index result correction (Phase 3) |
+
 ## Goals
 
 - Partial update of designated columns by primary key.
@@ -69,7 +87,7 @@ folding)". No mechanism in this design is invented from scratch.
 - Counter support via **INCR delta ops**: an increment is just `+1` written
   to the log — no read-modify-write anywhere in the system.
 - Mutable columns can appear in filter expressions, evaluated by brute-force
-  scan only.
+  scan in v1 (indexes return post-v1 via result correction).
 - Reuse existing subsystems: DML channel/WAL, PK bloom-filter routing,
   L0→L1 compaction, manifest-based atomic file replacement. No new storage
   subsystem.
@@ -139,7 +157,9 @@ update(collection, pk, {arr: Append([v, ...]), ...}) # array: Append / PopFront 
 | ARRAY (numeric/bool/timestamptz elements) | ✓ whole-value | — | plus APPEND / POP_FRONT / REMOVE(value, all occurrences); list semantics, order and duplicates preserved |
 | VARCHAR / JSON / GEOMETRY / vector / struct | — | — | immutable |
 
-## Update Semantics: SET and INCR
+## Update Semantics
+
+### SET and INCR
 
 Patch entries are `(pk, ts, op, operand)` with op ∈ {SET, INCR}.
 
@@ -155,7 +175,7 @@ absolute value requires reading the base column — DataNodes never load
 sealed column data, and materializing on QueryNodes would trigger random
 reads into possibly-evicted (mmap) base chunks on the apply path. Instead:
 
-- WAL messages, L0/L1 patch files, and the overlay all carry raw ops.
+- WAL messages, patch deltalogs, and the overlay all carry raw ops.
 - Folding rules are associative and never need the base: a run of INCRs
   folds to one INCR carrying the sum; SET absorbs everything before it;
   `SET(v)` followed by INCRs folds to `SET(v + Σdeltas)`. Patch compaction
@@ -245,19 +265,44 @@ ordered. CDC replication and recovery replay apply to the new type
 automatically (user DML messages get the replicate header and are replayed
 from checkpoint in TimeTick order like deletes).
 
-1. **L0 patch files.** Like deletes, updates first land in L0 patch files,
+1. **L0 patch deltalogs.** Like deletes, updates first land in L0 files,
    unrouted.
-2. **PK routing.** L0 compaction routes patches to per-segment patch files
-   using the existing PK bloom filter / PK index machinery.
+2. **PK routing.** L0 compaction routes patches to per-segment, per-column
+   patch deltalogs using the existing PK bloom filter / PK index machinery.
 3. **Streaming consumption.** QueryNodes consuming the DML stream apply
    updates to an in-memory overlay (below) so they are visible per the
    collection's consistency level, exactly as deletes are.
 4. **Growing segment flush.** When a growing segment seals, its accumulated
-   patches are flushed as **patch binlogs alongside** the insert binlogs —
+   patches are flushed as **patch deltalogs alongside** the insert binlogs —
    never materialized into the base. This preserves the invariant that an
    insert binlog contains rows exactly as inserted (which CDC, backup, and
    replay all rely on); the base/patch separation is uniform across growing
    and sealed segments.
+
+## Patch Deltalog Format
+
+Patches persist exactly the way delete deltalogs do: **each flush cycle
+emits one patch deltalog per (segment, mutable column)**, so a column
+accumulates **multiple** deltalog files on object storage over time. Each
+file contains sparse `(pk, ts, op, operand)` entries, is internally
+ts-ordered, and covers a ts range. Columns are never combined into one
+file, because:
+
+- Column folding rewrites only the affected column file, and its deltalog
+  GC must not be entangled with other columns'.
+- Different mutable columns can have update rates that differ by orders of
+  magnitude; combining them couples their compaction schedules.
+
+Patch compaction merges many small deltalogs into fewer folded ones —
+**still deltalog format**. The only point where patch content returns to
+native columnar format is column folding, which materializes deltalogs into
+a new column binlog on disk.
+
+Entries are keyed by PK, not offset: L0 files predate routing, and after a
+segment is compacted away its patches must replay to the successor segment,
+where old offsets are meaningless. PK→offset resolution happens once, at
+apply time. Scalar operands are fixed-width; ARRAY operands use the same
+length-prefixed encoding as existing array binlogs.
 
 ## In-Memory Overlay
 
@@ -297,28 +342,6 @@ makes the "no patches here" fast path a single branch.
   files with a small mutable tail, i.e. a node-local memtable/L0 — is
   deliberately out of scope for v1.)
 
-## Patch Deltalog Format
-
-Patches persist exactly the way delete deltalogs do: **each flush cycle
-emits one patch deltalog per (segment, mutable column)**, so a column
-accumulates **multiple** deltalog files on object storage over time. Each
-file contains sparse `(pk, ts, op, operand)` entries, is internally
-ts-ordered, and covers a ts range. Columns are never combined into one
-file, because:
-
-- Column folding (below) rewrites only the affected column file, and its
-  deltalog GC must not be entangled with other columns'.
-- Different mutable columns can have update rates that differ by orders of
-  magnitude; combining them couples their compaction schedules.
-
-Patch compaction merges many small deltalogs into fewer folded ones —
-**still deltalog format**. The only point where patch content returns to
-native columnar format is column folding, which materializes deltalogs into
-a new column binlog on disk.
-
-Scalar operands are fixed-width; ARRAY operands use the same length-prefixed
-encoding as existing array binlogs.
-
 ### Building the overlay from deltalogs
 
 At segment load, the overlay is constructed by **replay, not by
@@ -351,15 +374,15 @@ Two contrasts worth stating explicitly:
 ## Read Path
 
 - **Expression evaluation** on a mutable column reads the base column chunk
-  and consults the overlay at the query timestamp. Evaluation is brute-force
-  only; since no index can exist on these columns, no planner change is
-  needed beyond rejecting `create_index`.
+  and consults the overlay at the query timestamp. Evaluation is
+  brute-force only in v1; since no index can exist on these columns yet, no
+  planner change is needed beyond rejecting `create_index`.
 - **Output fields** are materialized the same way after search/query.
 - The vector search path is entirely unaware of mutable columns.
 - Consistency: visibility is governed by the same timestamp mechanism as
   deletes; guaranteed-timestamp / bounded / eventually all behave identically.
 
-### Expression Evaluation over Patched Columns
+### Expression evaluation over patched columns
 
 Mutable columns integrate at the **leaf predicate** level of the segcore
 PhyExpr tree; AND/OR/NOT combination over bitsets is unchanged.
@@ -433,11 +456,11 @@ patch-aware in **v1** — numeric columns are exactly what they serve:
 
 Two levels keep patch volume bounded:
 
-1. **Patch compaction.** Multiple patch files for a segment are merged and
+1. **Patch compaction.** Multiple deltalogs for a segment are merged and
    folded per PK using the op folding rules (SET absorbs, INCR sums, array
    ops fold to `(k, S)` / `(R, S)` or a compacted symbolic chain), below
    the safe timestamp. This is what absorbs high-frequency counter
-   workloads.
+   workloads. Output is still deltalog format.
 2. **Column folding.** When the patch ratio for (segment, column) exceeds a
    threshold, rewrite that single column file with patches applied
    (materializing INCRs against the base — the one place deltas become
@@ -445,24 +468,26 @@ Two levels keep patch volume bounded:
    Vector files and index files are untouched.
 
 Regular segment merge compaction folds all outstanding patches into the new
-base as a side effect.
+base as a side effect, so a successor segment starts with an empty patch
+set.
+
+**Folding watermark.** A fold materializes ops up to some timestamp
+`fold_ts`; the manifest records `fold_ts` per (segment, column) alongside
+the new column file. Segment load replays only patch entries with
+`ts > fold_ts` — without the watermark, recovery would double-apply folded
+patches (harmless for SET, **wrong for INCR/APPEND**). Old deltalogs are
+GC-eligible only after the manifest swap commits and no reader pins the old
+version; the swap itself rides the existing segment-reopen atomic
+read-update COW mechanism (see `20260627-segment-reopen-atomic-read-update-cow`).
 
 **Delta cleanup happens only through compaction — nothing else ever deletes
-a deltalog.** The three cleaners and their roles:
-
-1. *Patch compaction* shrinks the file set (merge + op-fold; output is
-   still deltalog format).
-2. *Column folding* is the terminal cleaner: it materializes deltalogs into
-   the base column file, and once the manifest swap commits and no reader
-   pins the old version, the folded deltalogs become GC-eligible.
-3. *Segment merge compaction* folds all outstanding patches as a side
-   effect, so a successor segment starts with an empty patch set.
-
-If compaction lags, the debt is visible and bounded in form: load-replay
-time and overlay memory grow. This is why folding triggers must include
-overlay memory pressure and deltalog count (not just patch ratio), and why
-the overlay quota's backpressure is the final backstop that throttles the
-write path when cleanup cannot keep up.
+a deltalog.** Patch compaction shrinks the file set; column folding is the
+terminal cleaner (materialize, swap, then GC); segment merge compaction
+folds everything as a side effect. If compaction lags, the debt is visible
+and bounded in form: load-replay time and overlay memory grow. This is why
+folding triggers must include overlay memory pressure and deltalog count
+(not just patch ratio), and why the overlay quota's backpressure is the
+final backstop that throttles the write path when cleanup cannot keep up.
 
 **Wide-update pacing.** Workloads that touch most rows of most segments
 (heartbeat-style `offline_time` updates) push all segments across the
@@ -475,15 +500,6 @@ patched fraction sits high between folds, so result correction degrades
 toward brute force anyway while forcing continuous index-rebuild churn;
 brute force with the dense-chunk materialize-then-scan path is simply the
 right plan for them.
-
-**Folding watermark.** A fold materializes ops up to some timestamp
-`fold_ts`; the manifest records `fold_ts` per (segment, column) alongside
-the new column file. Segment load replays only patch entries with
-`ts > fold_ts` — without the watermark, recovery would double-apply folded
-patches (harmless for SET, **wrong for INCR/APPEND**). Old patch files are
-GC-eligible only after the manifest swap commits and no reader pins the old
-version; the swap itself rides the existing segment-reopen atomic
-read-update COW mechanism (see `20260627-segment-reopen-atomic-read-update-cow`).
 
 ## Path to Indexed Mutable Columns (Post-v1)
 
@@ -535,6 +551,15 @@ per-segment overlay tantivy index, and established that BM25 can never be
 supported (exact IDF maintenance requires reading the old document's tokens
 — a read-before-write the append-only write path forbids). Recorded here so
 the analysis isn't redone if mutable strings are ever revisited.
+
+### Fold / rebuild atomicity
+
+Column folding rewrites the base column file; the old index still reflects
+the old base. The `patched_bitset` therefore MUST NOT be reset at fold time.
+The segment continues serving with old-index + correction until the new
+index is built, then the manifest swaps the new column file, new index, and
+cleared bitset **atomically**. Resetting the bitset before the index rebuild
+completes would silently return stale index results.
 
 ### Alternative considered: updating indexes in place / at load — rejected
 
@@ -602,20 +627,12 @@ Under that invariant, family 4 (base + delta + read-time correction +
 background rewrite — the fifty-year-old differential-file idea, also HANA
 delta/main, StarRocks PK tables, Kudu) is the payable cost.
 
-### Fold / rebuild atomicity
-
-Column folding rewrites the base column file; the old index still reflects
-the old base. The `patched_bitset` therefore MUST NOT be reset at fold time.
-The segment continues serving with old-index + correction until the new
-index is built, then the manifest swaps the new column file, new index, and
-cleared bitset **atomically**. Resetting the bitset before the index rebuild
-completes would silently return stale index results.
-
 ## Recovery and Failover
 
-Nothing new: patches are recovered exactly as delete records are — replay the
-DML stream from the last flush checkpoint; flushed L0/L1 patch files are part
-of the segment's file set and are reloaded with the segment.
+Nothing new: patches are recovered exactly as delete records are — replay
+the DML stream from the last flush checkpoint; flushed patch deltalogs are
+part of the segment's file set and are reloaded with the segment (see
+"Building the overlay from deltalogs").
 
 ## Interaction with Existing Features
 
@@ -628,10 +645,10 @@ of the segment's file set and are reloaded with the segment.
   construction (reads apply the delete mask first), so re-inserted rows are
   handled with no special casing — the old offset's patches are masked, the
   new offset accepts patches with `ts >` its insert ts.
-- **CDC / backup / snapshot export.** Patch files are part of the segment
-  file set and travel with it; the update message type must be added to CDC
-  replication, and backup/restore and snapshot export/restore must include
-  patch files — missing either is silent data loss.
+- **CDC / backup / snapshot export.** Patch deltalogs are part of the
+  segment file set and travel with it; the update message type must be
+  added to CDC replication, and backup/restore and snapshot export/restore
+  must include patch deltalogs — missing either is silent data loss.
 - **Bulk import.** Imported segments start with empty overlays; updates apply
   only after the segment is visible.
 - **Compaction.** In-flight patches routed to a segment that gets compacted
@@ -642,23 +659,24 @@ of the segment's file set and are reloaded with the segment.
   requires folding all outstanding patches first. Interactions with
   add-field/drop-field need a pass during implementation.
 - **Rolling upgrade.** Older query/data nodes cannot parse update messages
-  or patch files. Mutable columns are gated behind a collection-level
+  or patch deltalogs. Mutable columns are gated behind a collection-level
   feature flag that can only be enabled once the whole cluster runs a
   supporting version.
 
 ## Known Risks
 
 - **Overlay memory under wide updates.** Hot-row workloads are bounded, but
-  a workload touching many distinct rows once each grows the overlay
-  linearly until folding. With the v1 type set this is far smaller than the
-  earlier draft (no text/JSON blobs); ARRAY is the one type needing arena
-  management and is the main memory risk. Stress-test first.
+  a workload touching many distinct rows grows the overlay linearly until
+  folding. With the v1 type set this is far smaller than a design including
+  text/JSON blobs; ARRAY is the one type needing arena management and is
+  the main memory risk. Stress-test first. (The read-side counterpart of
+  wide updates is covered by the dense-chunk materialize-then-scan path.)
 - **PK routing amplification.** Every update probes segment bloom filters on
   every query node, the same cost structure as heavy-delete workloads —
   already a known pain point. High-frequency updates double down on it;
   benchmark against the delete path early.
-- **Load-time replay.** Segment load replays patch files into the overlay.
-  Folding discipline bounds this.
+- **Load-time replay.** Segment load replays patch deltalogs into the
+  overlay. Folding discipline bounds this.
 - **Observability.** Patch ratio, overlay bytes, and folding lag need
   first-class metrics, or query-performance regressions become
   undiagnosable.
@@ -668,7 +686,8 @@ of the segment's file set and are reloaded with the segment.
 Three phases, each independently shippable behind the collection-level
 feature gate. The expensive foundations (write path, overlay, data-access
 integration) all land in Phase 1 on the simplest value types; later phases
-are additive.
+are additive. Phase 2 and Phase 3 are independent of each other and can
+proceed in parallel.
 
 ### Phase 1 — MOR foundation + fixed-width scalars (SET / INCR)
 
@@ -678,8 +697,8 @@ Scope: the entire vertical slice for INT/FLOAT/DOUBLE/BOOL/TIMESTAMPTZ.
   the new WAL message type via codegen (**the op field and operand encoding
   cover array ops from day one** — file/wire formats don't change in
   Phase 2, only new op values activate).
-- Write path: proxy → WAL (PK→channel affinity) → L0 patch files → PK-routed
-  per-segment patch binlogs; growing-segment flush of patch binlogs;
+- Write path: proxy → WAL (PK→channel affinity) → L0 → PK-routed
+  per-segment patch deltalogs; growing-segment flush of patch deltalogs;
   recovery replay; CDC message type.
 - QueryNode: overlay (chunk-partitioned, inline fixed-width version chains,
   safe-ts pruning, memory quota); **PatchedColumnView** at the data access
@@ -719,7 +738,8 @@ INVERTED (including array inverted).
 
 - `patched_bitset` formalized per (segment, column), rebuilt at load.
 - Correction wrapper on the index evaluation path (reuses Phase 1's
-  materializer + row-wise evaluation as the brute-force leg).
+  materializer + row-wise evaluation as the brute-force leg) + the base
+  fallback rule.
 - Planner threshold fallback to full brute force; per-index-type threshold
   benchmarks.
 - Fold/rebuild atomic-swap state machine (bitset survives folding until new
@@ -742,3 +762,5 @@ curves published and thresholds set from them.
   index-fallback thresholds (likely yes).
 - The patch-ratio threshold at which index result correction becomes slower
   than pure brute force (needs benchmarking per index type).
+- The dense-chunk materialize-then-scan crossover threshold (expected
+  5–10% patched fraction; benchmark).
