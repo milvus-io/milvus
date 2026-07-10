@@ -311,6 +311,70 @@ TEST(JsonFlatIndexExactPathExistsTest, DistinguishesObjectSubpaths) {
     EXPECT_FALSE(exact_exists[5]);
 }
 
+TEST(JsonFlatIndexExactPathExistsTest, FiltersByComparableTypeFamily) {
+    auto json_index = BuildInMemoryJsonFlatIndex({
+        R"({"a": 1})",
+        R"({"a": 1.5})",
+        R"({"a": "one"})",
+        R"({"a": true})",
+        R"({"a": [2, 3]})",
+        R"({"a": ["two"]})",
+        R"({"a": [false]})",
+        R"({"a": {"b": 1}})",
+        R"({"a": null})",
+        R"({})",
+    });
+
+    std::string json_path = "/a";
+    auto executor = json_index->create_executor<int64_t>(json_path);
+
+    auto any = executor->ExactPathExists(index::JsonValueType::Any);
+    ASSERT_EQ(any.size(), 10);
+    EXPECT_EQ(any.count(), 7);
+    EXPECT_FALSE(any[7]);
+    EXPECT_FALSE(any[8]);
+    EXPECT_FALSE(any[9]);
+
+    auto numeric = executor->ExactPathExists(index::JsonValueType::Numeric);
+    ASSERT_EQ(numeric.size(), 10);
+    EXPECT_TRUE(numeric[0]);
+    EXPECT_TRUE(numeric[1]);
+    EXPECT_FALSE(numeric[2]);
+    EXPECT_FALSE(numeric[3]);
+    EXPECT_TRUE(numeric[4]);
+    EXPECT_FALSE(numeric[5]);
+    EXPECT_FALSE(numeric[6]);
+    EXPECT_FALSE(numeric[7]);
+    EXPECT_FALSE(numeric[8]);
+    EXPECT_FALSE(numeric[9]);
+
+    auto string = executor->ExactPathExists(index::JsonValueType::String);
+    ASSERT_EQ(string.size(), 10);
+    EXPECT_FALSE(string[0]);
+    EXPECT_FALSE(string[1]);
+    EXPECT_TRUE(string[2]);
+    EXPECT_FALSE(string[3]);
+    EXPECT_FALSE(string[4]);
+    EXPECT_TRUE(string[5]);
+    EXPECT_FALSE(string[6]);
+    EXPECT_FALSE(string[7]);
+    EXPECT_FALSE(string[8]);
+    EXPECT_FALSE(string[9]);
+
+    auto boolean = executor->ExactPathExists(index::JsonValueType::Bool);
+    ASSERT_EQ(boolean.size(), 10);
+    EXPECT_FALSE(boolean[0]);
+    EXPECT_FALSE(boolean[1]);
+    EXPECT_FALSE(boolean[2]);
+    EXPECT_TRUE(boolean[3]);
+    EXPECT_FALSE(boolean[4]);
+    EXPECT_FALSE(boolean[5]);
+    EXPECT_TRUE(boolean[6]);
+    EXPECT_FALSE(boolean[7]);
+    EXPECT_FALSE(boolean[8]);
+    EXPECT_FALSE(boolean[9]);
+}
+
 TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
     auto json_flat_index =
         dynamic_cast<index::JsonFlatIndex*>(json_index_.get());

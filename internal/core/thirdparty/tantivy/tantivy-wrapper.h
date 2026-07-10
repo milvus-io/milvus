@@ -1395,9 +1395,10 @@ struct TantivyIndexWrapper {
     void
     json_exist_query(const std::string& json_path,
                      bool json_subpaths,
+                     JsonExistValueType value_type,
                      void* bitset) {
         auto array = tantivy_json_exist_query(
-            reader_, json_path.c_str(), json_subpaths, bitset);
+            reader_, json_path.c_str(), json_subpaths, value_type, bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.json_exist_query: {}",
