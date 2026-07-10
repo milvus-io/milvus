@@ -364,6 +364,10 @@ func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vcha
 			return nil
 		}
 	}
+	// NOTE: the two SaveImportJob calls below are an intentional two-phase
+	// commit, NOT a candidate for a compound catalog call: the first write is
+	// the fence (Committing must be persisted before the visibility callback
+	// runs), and the second must happen only after the callback succeeds.
 	if job.GetState() == internalpb.ImportJobState_Uncommitted {
 		updatedJob := job.Clone()
 		updatedJob.(*importJob).State = internalpb.ImportJobState_Committing

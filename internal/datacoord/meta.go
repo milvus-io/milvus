@@ -1978,12 +1978,9 @@ func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSeg
 	for _, seg := range modSegments {
 		segments = append(segments, seg.SegmentInfo)
 	}
-	err := m.catalog.SaveDroppedSegmentsInBatch(ctx, segments)
-	if err != nil {
-		return err
-	}
-
-	if err = m.catalog.MarkChannelDeleted(ctx, channel); err != nil {
+	// the catalog persists the dropped segments strictly before the removal
+	// flag; the flag is the failover commit point (see the note above)
+	if err := m.catalog.DropSegmentsAndMarkChannelDeleted(ctx, channel, segments); err != nil {
 		return err
 	}
 
@@ -2499,13 +2496,10 @@ func (m *meta) completeMixCompactionMutation(
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
 
-	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
-	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter compactTo segments", mlog.Err(err))
-		return nil, nil, err
-	}
-	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter compactFrom segments", mlog.Err(err))
+	// the catalog persists compactTo (with binlogs) strictly before compactFrom,
+	// so a crash in between never loses the compaction result
+	if err := m.catalog.AlterCompactionSegments(m.ctx, compactToInfos, compactFromInfos, binlogs); err != nil {
+		mlog.Warn(context.TODO(), "fail to alter compaction segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
@@ -3088,22 +3082,39 @@ func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.Partiti
 		return err
 	}
 
-	// first clean analyze task
-	if err = m.analyzeMeta.DropAnalyzeTask(ctx, info.GetAnalyzeTaskID()); err != nil {
-		mlog.Warn(ctx, "remove analyze task failed", mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()), mlog.Err(err))
+	// hold both sub-meta locks (analyzeMeta first, then partitionStatsMeta —
+	// the same order as the historical sequential calls; no other path holds
+	// both) so the compound catalog write and the in-memory updates below are
+	// consistent to concurrent readers
+	m.analyzeMeta.Lock()
+	defer m.analyzeMeta.Unlock()
+	m.partitionStatsMeta.Lock()
+	defer m.partitionStatsMeta.Unlock()
+
+	rollbackVersion := m.partitionStatsMeta.getRollbackVersionLocked(info)
+
+	// clean the analyze task, roll back the current partition-stats version if
+	// needed, and drop the partition stats info in one compound catalog call;
+	// both sub-metas share this catalog instance
+	if err = m.catalog.DropPartitionStatsAndAnalyzeTask(ctx, info, info.GetAnalyzeTaskID(), rollbackVersion); err != nil {
+		mlog.Warn(ctx, "drop partition stats and analyze task failed",
+			mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()),
+			mlog.Int64("collectionID", info.GetCollectionID()),
+			mlog.Int64("partitionID", info.GetPartitionID()),
+			mlog.String("vChannel", info.GetVChannel()),
+			mlog.Int64("planID", info.GetVersion()),
+			mlog.Err(err))
 		return err
 	}
 
-	// finally, clean up the partition stats info, and make sure the analysis task is cleaned up
-	err = m.partitionStatsMeta.DropPartitionStatsInfo(ctx, info)
+	// update memory only after the catalog write succeeded
+	m.analyzeMeta.dropTaskLocked(ctx, info.GetAnalyzeTaskID())
+	m.partitionStatsMeta.applyDropLocked(info, rollbackVersion)
 	mlog.Debug(ctx, "drop partition stats meta",
 		mlog.Int64("collectionID", info.GetCollectionID()),
 		mlog.Int64("partitionID", info.GetPartitionID()),
 		mlog.String("vChannel", info.GetVChannel()),
 		mlog.Int64("planID", info.GetVersion()))
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
