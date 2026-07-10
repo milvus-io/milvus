@@ -184,7 +184,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if err != nil {
 		return err
 	}
-	mlog.Info(context.TODO(), "read delete done",
+	mlog.Info(r.ctx, "read delete done",
 		mlog.String("collection", r.schema.GetName()),
 		mlog.Int("deleteRows", len(r.deleteData)),
 	)
@@ -228,7 +228,7 @@ func (r *reader) initWithL0Deletes(l0DeltaPaths []string, tsStart, tsEnd uint64)
 		r.deleteData[pk] = ts
 	}
 
-	mlog.Info(context.TODO(), "merged L0 deletes",
+	mlog.Info(r.ctx, "merged L0 deletes",
 		mlog.String("collection", r.schema.GetName()),
 		mlog.Int("totalDeleteRows", len(r.deleteData)),
 	)
