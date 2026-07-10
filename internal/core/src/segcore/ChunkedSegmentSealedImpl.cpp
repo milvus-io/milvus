@@ -5371,7 +5371,7 @@ ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
             continue;
         }
         committer.Commit(
-            [field_id, index = std::move(index)](
+            [field_id = field_id, index = std::move(index)](
                 RuntimeResourceState& runtime, PublishedSegmentState&) mutable {
                 runtime.json_stats[field_id] = std::move(index);
             });
