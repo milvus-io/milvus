@@ -88,6 +88,11 @@ type GrowingFlushResult struct {
 
 type GrowingFlushSource interface {
 	CurrentOffset() int64
+	// MaterializedFieldIDs returns the field ids with materialized columns in
+	// the source segment. The flush layout must be trimmed to this set;
+	// non-materialized function-output columns are absent from it. An empty
+	// result means the source cannot report and no trimming is applied.
+	MaterializedFieldIDs(ctx context.Context) ([]int64, error)
 	FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) (*GrowingFlushResult, error)
 	Release()
 }
@@ -580,6 +585,13 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	// Unification point: from here on the intended layout and the layout the
+	// flush actually writes are one. Every consumer below (writer config,
+	// binlog meta, metacache current split) sees the same trimmed groups.
+	columnGroups, err = t.trimColumnGroupsToMaterialized(ctx, columnGroups)
+	if err != nil {
+		return err
+	}
 	if t.committedManifestPath != "" {
 		t.manifestPath = t.committedManifestPath
 		t.bm25Stats = t.committedBM25Stats
@@ -676,6 +688,58 @@ func (t *GrowingSourceSyncTask) getColumnGroups(segment *metacache.SegmentInfo) 
 	return resolveColumnGroups(segment, t.schema, t.segmentID, func() map[int64]storagecommon.ColumnStats {
 		return map[int64]storagecommon.ColumnStats{}
 	}), nil
+}
+
+// trimColumnGroupsToMaterialized drops non-materialized function-output
+// fields from the flush layout: their columns are recomputable and are
+// backfilled by bump-schema compaction after flush. Non-function-output
+// fields are never dropped here — a missing one is source data and the C++
+// flush fails loudly on it. A group left empty is dropped entirely. When the
+// source cannot report materialized fields the layout is kept unchanged.
+func (t *GrowingSourceSyncTask) trimColumnGroupsToMaterialized(ctx context.Context, columnGroups []storagecommon.ColumnGroup) ([]storagecommon.ColumnGroup, error) {
+	if t.source == nil || t.schema == nil || len(columnGroups) == 0 {
+		return columnGroups, nil
+	}
+	functionOutputs := typeutil.NewSet[int64]()
+	for _, field := range typeutil.GetAllFieldSchemas(t.schema) {
+		if field.GetIsFunctionOutput() {
+			functionOutputs.Insert(field.GetFieldID())
+		}
+	}
+	if functionOutputs.Len() == 0 {
+		return columnGroups, nil
+	}
+	materialized, err := t.source.MaterializedFieldIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(materialized) == 0 {
+		return columnGroups, nil
+	}
+	materializedSet := typeutil.NewSet(materialized...)
+	skipped := make([]int64, 0)
+	trimmed := make([]storagecommon.ColumnGroup, 0, len(columnGroups))
+	for _, columnGroup := range columnGroups {
+		fields := make([]int64, 0, len(columnGroup.Fields))
+		for _, fieldID := range columnGroup.Fields {
+			if functionOutputs.Contain(fieldID) && !materializedSet.Contain(fieldID) {
+				skipped = append(skipped, fieldID)
+				continue
+			}
+			fields = append(fields, fieldID)
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		columnGroup.Fields = fields
+		trimmed = append(trimmed, columnGroup)
+	}
+	if len(skipped) > 0 {
+		mlog.Info(ctx, "exclude non-materialized function output fields from growing flush layout",
+			mlog.Int64("segmentID", t.segmentID),
+			mlog.Int64s("fieldIDs", skipped))
+	}
+	return trimmed, nil
 }
 
 func (t *GrowingSourceSyncTask) schemaBasedPattern(columnGroups []storagecommon.ColumnGroup) (string, error) {

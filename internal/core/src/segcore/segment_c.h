@@ -370,6 +370,16 @@ typedef struct CFlushResult {
  * @param result Output flush result (caller must free manifest_path)
  * @return CStatus indicating success or failure
  */
+/**
+ * @brief Get the field ids with materialized columns in a growing segment.
+ * The flush layout must be derived from this set. Caller frees *field_ids
+ * with free().
+ */
+CStatus
+GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
+                                      int64_t** field_ids,
+                                      int64_t* count);
+
 CStatus
 FlushGrowingSegmentData(CSegmentInterface c_segment,
                         int64_t start_offset,

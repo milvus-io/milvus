@@ -1790,6 +1790,51 @@ BuildArrayForChunk(const FieldInfo& field_info,
 }  // anonymous namespace
 
 CStatus
+GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
+                                      int64_t** field_ids,
+                                      int64_t* count) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        if (!c_segment || !field_ids || !count) {
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "invalid arguments: segment, field_ids and count must not be "
+                "null");
+        }
+        *field_ids = nullptr;
+        *count = 0;
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto growing_segment =
+            dynamic_cast<milvus::segcore::SegmentGrowingImpl*>(
+                segment_interface);
+        if (!growing_segment) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "segment is not a growing segment");
+        }
+        auto ids = growing_segment->get_insert_record().get_data_field_ids();
+        if (!ids.empty()) {
+            auto* buf =
+                static_cast<int64_t*>(malloc(sizeof(int64_t) * ids.size()));
+            if (!buf) {
+                return milvus::FailureCStatus(
+                    milvus::UnexpectedError,
+                    "failed to allocate materialized field ids");
+            }
+            for (size_t i = 0; i < ids.size(); i++) {
+                buf[i] = ids[i];
+            }
+            *field_ids = buf;
+            *count = static_cast<int64_t>(ids.size());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 FlushGrowingSegmentData(CSegmentInterface c_segment,
                         int64_t start_offset,
                         int64_t end_offset,

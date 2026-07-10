@@ -291,6 +291,15 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
     config.retry_limit = 3;
     config.schema_blob = schema_blob.data();
     config.schema_length = static_cast<int64_t>(schema_blob.size());
+    // Column-group config still carrying the skipped function output: the
+    // accounting loop must tolerate its absence instead of failing the flush.
+    int64_t column_group_ids[] = {0};
+    int64_t column_group_field_ids[] = {0, 1, 100, 101};
+    size_t column_group_field_counts[] = {4};
+    config.column_group_ids = column_group_ids;
+    config.column_group_field_ids = column_group_field_ids;
+    config.column_group_field_counts = column_group_field_counts;
+    config.num_column_groups = 1;
 
     CFlushResult result{};
     auto status =
@@ -298,8 +307,12 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
 
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     ASSERT_EQ(result.num_rows, N);
+    ASSERT_EQ(result.num_column_groups, 1u);
     for (size_t i = 0; i < result.num_field_stats; ++i) {
         EXPECT_NE(result.field_ids[i], 101);
+    }
+    for (size_t i = 0; i < result.num_flushed_fields; ++i) {
+        EXPECT_NE(result.flushed_field_ids[i], 101);
     }
 
     FreeFlushResult(&result);

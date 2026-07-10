@@ -1733,6 +1733,20 @@ class InsertRecordGrowing {
         return data_.find(field_id) != data_.end();
     }
 
+    // Field ids that have materialized columns. The exact set the flush
+    // layout must be trimmed to: non-materialized function outputs are
+    // absent here.
+    std::vector<int64_t>
+    get_data_field_ids() const {
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        std::vector<int64_t> ids;
+        ids.reserve(data_.size());
+        for (const auto& [field_id, _] : data_) {
+            ids.push_back(field_id.get());
+        }
+        return ids;
+    }
+
     bool
     is_valid_data_exist(FieldId field_id) const {
         std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
