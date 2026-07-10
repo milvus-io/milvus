@@ -419,6 +419,91 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	b.Close()
 }
 
+func TestBalancer_PrimaryResourceGroupChangeTriggersBalance(t *testing.T) {
+	paramtable.Init()
+	oldTriggerInterval := paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.SwapTempValue("1h")
+	oldExpectedStreamingNodeNum := paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")
+	defer paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.SwapTempValue(oldTriggerInterval)
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue(oldExpectedStreamingNodeNum)
+	assert.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.PrimaryResourceGroup.Key, "rg-old"))
+	defer func() {
+		assert.NoError(t, paramtable.Get().Remove(paramtable.Get().StreamingCfg.PrimaryResourceGroup.Key))
+	}()
+
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	rgHints := make(chan string, 8)
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
+		rgHints <- resourceGroupHint
+		return map[int64]*types.StreamingNodeStatus{
+			1: {
+				StreamingNodeInfo: types.StreamingNodeInfo{
+					ServerID: 1,
+					Address:  "localhost:1",
+				},
+			},
+		}, nil
+	}).Maybe()
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: channel.StreamingVersion260}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{
+				Name:       "test-channel",
+				Term:       1,
+				AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+			},
+			State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:  &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel"))
+	assert.NoError(t, err)
+	assert.NotNil(t, b)
+	defer b.Close()
+
+	assert.Eventually(t, func() bool {
+		select {
+		case hint := <-rgHints:
+			return hint == "rg-old"
+		default:
+			return false
+		}
+	}, 3*time.Second, 10*time.Millisecond)
+
+	assert.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.PrimaryResourceGroup.Key, "rg-new"))
+	assert.Eventually(t, func() bool {
+		select {
+		case hint := <-rgHints:
+			return hint == "rg-new"
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 	paramtable.Init()
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
