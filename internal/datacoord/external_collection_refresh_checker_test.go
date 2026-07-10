@@ -482,7 +482,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(nil).Build()
+		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJobAndTasks).Return(nil).Build()
 		defer mockDropJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -513,9 +513,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 		defer mockListJobs.UnPatch()
 		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockDropTask := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(nil).Build()
-		defer mockDropTask.UnPatch()
-		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(nil).Build()
+		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJobAndTasks).Return(nil).Build()
 		defer mockDropJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -826,7 +824,7 @@ func TestExternalCollectionRefreshChecker_CheckGC_DropJobFailed(t *testing.T) {
 	defer mockListTasks.UnPatch()
 
 	// Mock drop to fail
-	mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(errors.New("drop failed")).Build()
+	mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJobAndTasks).Return(errors.New("drop failed")).Build()
 	defer mockDropJob.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)

@@ -508,14 +508,16 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
-		mockDropTask := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(errors.New("drop task error")).Build()
-		defer mockDropTask.UnPatch()
+		// Simulate task deletion failure: the compound drop fails as a whole
+		mockDrop := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJobAndTasks).Return(errors.New("drop task error")).Build()
+		defer mockDrop.UnPatch()
 
 		err = meta.DropJob(ctx, 1)
 		assert.Error(t, err)
 
-		// Job should still exist
+		// Job and tasks should still exist, in-memory state untouched on failure
 		assert.NotNil(t, meta.GetJob(1))
+		assert.NotNil(t, meta.GetTask(1001))
 	})
 
 	t.Run("drop_job_catalog_failed", func(t *testing.T) {
@@ -531,8 +533,8 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
-		// Mock drop job to fail
-		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(errors.New("drop job error")).Build()
+		// Simulate job deletion failure: the compound drop fails as a whole
+		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJobAndTasks).Return(errors.New("drop job error")).Build()
 		defer mockDropJob.UnPatch()
 
 		err = meta.DropJob(ctx, 1)
