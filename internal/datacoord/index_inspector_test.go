@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -487,7 +488,7 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 
 	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
 	collID := int64(10)
-	m.collections.Insert(collID, &collectionInfo{
+	collInfo := &collectionInfo{
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -500,7 +501,9 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 				{Name: "bm25_fn", OutputFieldIds: []int64{102}},
 			},
 		},
-	})
+	}
+	m.collections.Insert(collID, collInfo)
+	handler.EXPECT().GetCollection(mock.Anything, collID).Return(collInfo, nil).Maybe()
 
 	t.Run("create function output index when binlog exists", func(t *testing.T) {
 		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
@@ -603,5 +606,52 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segment.GetID())
 		assert.Contains(t, segIndexes, UniqueID(8))
 		assert.NotContains(t, segIndexes, UniqueID(9))
+	})
+
+	t.Run("defer index build when schema is unresolvable", func(t *testing.T) {
+		unresolvableCollID := int64(11)
+		handler.EXPECT().GetCollection(mock.Anything, unresolvableCollID).
+			Return(nil, errors.New("mock rootcoord unreachable")).Once()
+		m.indexMeta.indexes[unresolvableCollID] = map[UniqueID]*model.Index{
+			10: {CollectionID: unresolvableCollID, FieldID: 102, IndexID: 10, IndexName: "unresolvable_schema_idx"},
+		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           5,
+				CollectionID: unresolvableCollID,
+				State:        commonpb.SegmentState_Flushed,
+				IsSorted:     true,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 0, ChildFields: []int64{100, 101}},
+				},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.NotContains(t, m.indexMeta.GetSegmentIndexes(unresolvableCollID, segment.GetID()), UniqueID(10))
+	})
+
+	t.Run("defer index build when indexed field is unknown to schema", func(t *testing.T) {
+		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			11: {CollectionID: collID, FieldID: 104, IndexID: 11, IndexName: "stale_schema_idx"},
+		}
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           6,
+				CollectionID: collID,
+				State:        commonpb.SegmentState_Flushed,
+				IsSorted:     true,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 0, ChildFields: []int64{100, 101}},
+				},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		assert.NotContains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(11))
 	})
 }

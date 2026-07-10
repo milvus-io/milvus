@@ -884,7 +884,7 @@ func (sm *snapshotManager) RestoreIndexes(
 		}
 
 		// Validate the index params (basic validation without JSON path parsing)
-		if err := ValidateIndexParams(index); err != nil {
+		if err := indexparamcheck.ValidateIndexParams(index); err != nil {
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
