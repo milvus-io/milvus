@@ -405,6 +405,58 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Mult
 	}
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_DefaultFiveMillionTarget() {
+	paramtable.Init()
+
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{
+				FieldID:       100,
+				Name:          "text",
+				ExternalField: "text_col",
+			}},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	manifestMock := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		Return("manifest.json", nil).Build()
+	defer manifestMock.UnPatch()
+
+	sampleMock := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 100}, nil).Build()
+	defer sampleMock.UnPatch()
+
+	fragments := make([]packed.Fragment, 20)
+	for i := range fragments {
+		fragments[i] = packed.Fragment{
+			FragmentID: int64(i),
+			FilePath:   fmt.Sprintf("f%d.parquet", i),
+			StartRow:   0,
+			EndRow:     int64(packed.DefaultFragmentRowLimit),
+			RowCount:   int64(packed.DefaultFragmentRowLimit),
+		}
+	}
+
+	segments, err := task.balanceFragmentsToSegments(ctx, fragments)
+	s.NoError(err)
+	s.Len(segments, 4)
+	for _, segment := range segments {
+		s.Equal(int64(5000000), segment.GetNumOfRows())
+	}
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteContextCanceled() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2785,6 +2837,57 @@ func (s *RefreshExternalCollectionTaskSuite) TestFetchFragmentsFromExternalSourc
 	frags, err := task.fetchFragmentsFromExternalSource(ctx)
 	s.NoError(err)
 	s.Len(frags, 1)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestFetchFragmentsFromExternalSource_UsesStableFragmentRowLimit() {
+	paramtable.Init()
+	key := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.Key
+	paramtable.Get().Save(key, "10000000")
+	defer paramtable.Get().Reset(key)
+
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:        s.collectionID,
+		TaskID:              s.taskID,
+		ExternalSource:      "s3:///bucket/path",
+		ExternalSpec:        `{"format":"parquet"}`,
+		ExploreManifestPath: "/manifests/explore.json",
+		FileIndexBegin:      0,
+		FileIndexEnd:        1,
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType: "local",
+			BucketName:  "/tmp",
+		},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"col1"}
+
+	mockFetch := mockey.Mock(packed.FetchFragmentsFromExternalSourceWithRange).
+		To(func(
+			ctx context.Context,
+			format string,
+			columns []string,
+			externalSource string,
+			storageConfig *indexpb.StorageConfig,
+			fileIndexBegin, fileIndexEnd int64,
+			exploreManifestPath string,
+			opts packed.ExternalFetchOptions,
+		) ([]packed.Fragment, error) {
+			s.Equal(int64(packed.DefaultFragmentRowLimit), opts.RowLimit)
+			return []packed.Fragment{{
+				FragmentID: 0,
+				FilePath:   "f1.parquet",
+				StartRow:   0,
+				EndRow:     1000,
+				RowCount:   1000,
+			}}, nil
+		}).Build()
+	defer mockFetch.UnPatch()
+
+	fragments, err := task.fetchFragmentsFromExternalSource(ctx)
+	s.NoError(err)
+	s.Len(fragments, 1)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_CreateManifestError() {

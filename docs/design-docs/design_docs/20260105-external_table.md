@@ -1038,21 +1038,29 @@ Final Segments: [S1, S3, S6, S7]
 
 ### 7.8 Fragment to Segment Organization
 
-The `balanceFragmentsToSegments` function organizes orphan fragments into balanced segments:
+The `balanceFragmentsToSegments` function organizes orphan fragments into
+balanced segments. External files are first split into stable fragments of at
+most 1,000,000 rows. Keeping this fragment boundary independent from the
+segment target preserves fragment identity across configuration-default
+changes.
 
 ```go
-func (t *UpdateExternalTask) balanceFragmentsToSegments(
+func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(
     ctx context.Context,
-    fragments []exttable.Fragment,
+    fragments []packed.Fragment,
 ) ([]*datapb.SegmentInfo, error) {
     // 1. Calculate total rows
-    // 2. Determine target rows per segment (default: 1M rows)
+    // 2. Determine target rows per segment (default: 5M rows)
     // 3. Sort fragments by row count descending
     // 4. Greedy bin-packing: assign each fragment to bin with lowest row count
     // 5. Create manifest for each segment
     // 6. Return SegmentInfo list
 }
 ```
+
+The configured row count is a grouping target rather than a strict upper
+bound. Fragment sizes and greedy bin packing can produce segments above or
+below the target.
 
 ---
 
@@ -1100,7 +1108,8 @@ func ReadFragmentsFromManifest(
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `external.collection.target.rows.per.segment` | Target rows per segment | 1,000,000 |
+| `dataNode.externalCollection.targetRowsPerSegment` | Target rows for newly created external segments | 5,000,000 |
+| `dataCoord.externalCollectionJobTimeout` | Overall refresh job timeout; also bounds external source exploration | 86,400 seconds (24 hours) |
 | `external.collection.worker.pool.size` | DataNode worker pool size | 4 |
 | `external.collection.job.retention.duration` | How long to keep completed/failed jobs | 24h |
 | `external.collection.job.max.concurrent` | Max concurrent refresh jobs | 2 |

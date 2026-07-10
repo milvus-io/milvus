@@ -6647,7 +6647,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Key:          "dataCoord.externalCollectionJobTimeout",
 		Version:      "2.6.8",
 		Doc:          "The timeout in seconds for external collection refresh jobs. Jobs exceeding this duration will be marked as failed.",
-		DefaultValue: "3600",
+		DefaultValue: "86400",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionJobTimeout.Init(base.mgr)
@@ -7522,7 +7522,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
 		Key:          "dataNode.externalCollection.targetRowsPerSegment",
 		Version:      "3.0.0",
-		DefaultValue: "1000000",
+		DefaultValue: "5000000",
 		Doc:          "Target number of rows per segment for external collections",
 		Export:       false,
 	}

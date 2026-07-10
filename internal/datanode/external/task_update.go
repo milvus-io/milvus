@@ -256,8 +256,6 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		mlog.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
 		mlog.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
-	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
-
 	return packed.FetchFragmentsFromExternalSourceWithRange(
 		ctx,
 		t.parsedSpec.Format,
@@ -270,7 +268,7 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		packed.ExternalFetchOptions{
 			CollectionID: t.req.GetCollectionID(),
 			ExternalSpec: t.req.GetExternalSpec(),
-			RowLimit:     targetRowsPerSegment,
+			RowLimit:     int64(packed.DefaultFragmentRowLimit),
 		},
 	)
 }
