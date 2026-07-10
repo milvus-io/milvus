@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -214,8 +215,12 @@ func TestIsDirtyWithSalvageCheckpoint(t *testing.T) {
 
 func TestPersistDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	snCatalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
-	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
+	snCatalog.EXPECT().SaveRecoverySnapshot(mock.Anything, "test-pchannel", mock.Anything).RunAndReturn(func(ctx context.Context, s string, snapshot *metastore.WALRecoverySnapshot) error {
+		assert.NotNil(t, snapshot.SalvageCheckpoint)
+		assert.Equal(t, "cluster-x", snapshot.SalvageCheckpoint.GetClusterId())
+		assert.NotNil(t, snapshot.ConsumeCheckpoint)
+		return nil
+	})
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
 
 	cp := &utility.ReplicateCheckpoint{
