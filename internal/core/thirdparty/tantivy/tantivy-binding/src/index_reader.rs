@@ -638,13 +638,18 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
-    pub fn json_exist_query(&self, json_path: &str, bitset: *mut c_void) -> Result<()> {
+    pub fn json_exist_query(
+        &self,
+        json_path: &str,
+        json_subpaths: bool,
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let full_json_path = if json_path == "" {
             self.field_name.clone()
         } else {
             format!("{}.{}", self.field_name, json_path)
         };
-        let q = ExistsQuery::new(full_json_path, true);
+        let q = ExistsQuery::new(full_json_path, json_subpaths);
         self.search(&q, bitset)
     }
 

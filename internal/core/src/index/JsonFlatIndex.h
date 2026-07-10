@@ -53,7 +53,16 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Exists",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        this->wrapper_->json_exist_query(json_path_, &bitset);
+        this->wrapper_->json_exist_query(json_path_, true, &bitset);
+        return bitset;
+    }
+
+    TargetBitmap
+    ExactPathExists() {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::ExactPathExists",
+                              tracer::GetRootSpan());
+        TargetBitmap bitset(this->Count());
+        this->wrapper_->json_exist_query(json_path_, false, &bitset);
         return bitset;
     }
 
@@ -747,7 +756,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         } else if constexpr (std::is_same_v<T, std::string>) {
             this->wrapper_->json_prefix_query(json_path_, "", &bitset);
         } else {
-            this->wrapper_->json_exist_query(json_path_, &bitset);
+            this->wrapper_->json_exist_query(json_path_, true, &bitset);
         }
         return bitset;
     }

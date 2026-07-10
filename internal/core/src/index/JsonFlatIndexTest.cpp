@@ -67,6 +67,7 @@
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -276,6 +277,38 @@ TEST_F(JsonFlatIndexTest, TestExistsQuery) {
     ASSERT_TRUE(result[0]);   // Alice
     ASSERT_FALSE(result[1]);  // null
     ASSERT_FALSE(result[2]);  // not exist
+}
+
+TEST(JsonFlatIndexExactPathExistsTest, DistinguishesObjectSubpaths) {
+    auto json_index = BuildInMemoryJsonFlatIndex({
+        R"({"a": 1})",
+        R"({"a": [1, 2]})",
+        R"({"a": {"b": 1}})",
+        R"({"a": []})",
+        R"({"a": null})",
+        R"({})",
+    });
+
+    std::string json_path = "/a";
+    auto executor = json_index->create_executor<int64_t>(json_path);
+
+    auto recursive_exists = executor->Exists();
+    ASSERT_EQ(recursive_exists.size(), 6);
+    EXPECT_TRUE(recursive_exists[0]);
+    EXPECT_TRUE(recursive_exists[1]);
+    EXPECT_TRUE(recursive_exists[2]);
+    EXPECT_FALSE(recursive_exists[3]);
+    EXPECT_FALSE(recursive_exists[4]);
+    EXPECT_FALSE(recursive_exists[5]);
+
+    auto exact_exists = executor->ExactPathExists();
+    ASSERT_EQ(exact_exists.size(), 6);
+    EXPECT_TRUE(exact_exists[0]);
+    EXPECT_TRUE(exact_exists[1]);
+    EXPECT_FALSE(exact_exists[2]);
+    EXPECT_FALSE(exact_exists[3]);
+    EXPECT_FALSE(exact_exists[4]);
+    EXPECT_FALSE(exact_exists[5]);
 }
 
 TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
@@ -826,6 +859,155 @@ class JsonFlatIndexExprTest : public ::testing::Test {
     std::unique_ptr<index::JsonFlatIndex> json_index_;
     segcore::SegmentSealedUPtr segment_;
 };
+
+class JsonFlatIndexContainsExprTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        json_data_ = {
+            R"({"a": [1, 2]})",
+            R"({"a": [2]})",
+            R"({"a": 1})",
+            R"({"a": 2})",
+            R"({"a": {"b": 1}})",
+            R"({"a": []})",
+            R"({"a": null})",
+            R"({})",
+            R"({"a": ["x"]})",
+            R"({"a": [1]})",
+        };
+
+        auto schema = std::make_shared<Schema>();
+        schema->AddDebugField(
+            "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+        auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+        json_fid_ = schema->AddDebugField("json", DataType::JSON, true);
+        schema->set_primary_field_id(i64_fid);
+
+        segment_ = segcore::CreateSealedSegment(schema);
+        segcore::LoadIndexInfo load_index_info;
+
+        auto file_manager_ctx = storage::FileManagerContext();
+        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+            milvus::proto::schema::JSON);
+        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(
+            json_fid_.get());
+        file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+        file_manager_ctx.fieldDataMeta.field_id = json_fid_.get();
+
+        index::CreateIndexInfo json_index_info;
+        json_index_info.index_type = index::INVERTED_INDEX_TYPE;
+        json_index_info.json_cast_type = JsonCastType::FromString("JSON");
+        json_index_info.json_path = "";
+        auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
+            json_index_info, file_manager_ctx);
+        auto json_index = std::unique_ptr<index::JsonFlatIndex>(
+            static_cast<index::JsonFlatIndex*>(index.release()));
+
+        json_field_ =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        std::vector<milvus::Json> jsons;
+        for (auto& json_str : json_data_) {
+            jsons.emplace_back(simdjson::padded_string(json_str));
+        }
+        json_field_->add_json_data(jsons);
+        auto* valid_data = json_field_->ValidData();
+        std::fill(valid_data,
+                  valid_data + json_field_->ValidDataSize(),
+                  static_cast<uint8_t>(0));
+        valid_data[0] = 0xFF;
+        valid_data[1] = 0x01;
+
+        json_index->BuildWithFieldData({json_field_});
+        json_index->finish();
+        json_index->create_reader(milvus::index::SetBitsetSealed);
+
+        load_index_info.field_id = json_fid_.get();
+        load_index_info.field_type = DataType::JSON;
+        load_index_info.index_params = {{JSON_PATH, ""},
+                                        {JSON_CAST_TYPE, "JSON"}};
+        load_index_info.cache_index =
+            CreateTestCacheIndex("", std::move(json_index));
+        segment_->LoadIndex(load_index_info);
+
+        auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        auto load_info = PrepareSingleFieldInsertBinlog(
+            1, 1, 1, json_fid_.get(), {json_field_}, cm);
+        segment_->LoadFieldData(load_info);
+    }
+
+    ColumnVectorPtr
+    Evaluate(proto::plan::JSONContainsExpr_JSONOp op,
+             std::vector<int64_t> values,
+             bool negate = false) {
+        std::vector<proto::plan::GenericValue> generic_values;
+        for (auto value : values) {
+            generic_values.emplace_back();
+            generic_values.back().set_int64_val(value);
+        }
+        auto contains_expr = std::make_shared<expr::JsonContainsExpr>(
+            expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+            op,
+            true,
+            generic_values);
+        expr::TypedExprPtr filter_expr = contains_expr;
+        if (negate) {
+            filter_expr = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, contains_expr);
+        }
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return gen_filter_res(
+            plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    }
+
+    void
+    CheckResult(const ColumnVectorPtr& result,
+                const std::vector<bool>& expected_result,
+                const std::vector<bool>& expected_valid) {
+        ASSERT_EQ(result->size(), expected_result.size());
+        ASSERT_EQ(result->size(), expected_valid.size());
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
+            if (expected_valid[i]) {
+                EXPECT_EQ(result_view[i], expected_result[i]) << "row " << i;
+            }
+        }
+    }
+
+    FieldId json_fid_;
+    std::vector<std::string> json_data_;
+    std::shared_ptr<FieldData<milvus::Json>> json_field_;
+    segcore::SegmentSealedUPtr segment_;
+};
+
+TEST_F(JsonFlatIndexContainsExprTest, UsesExactPathThreeValuedValidity) {
+    const std::vector<bool> expected_valid = {
+        true, true, true, true, false, false, false, false, true, false};
+
+    CheckResult(
+        Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1}),
+        {true, false, true, false, false, false, false, false, false, false},
+        expected_valid);
+
+    CheckResult(
+        Evaluate(proto::plan::JSONContainsExpr_JSONOp_ContainsAny, {1, 3}),
+        {true, false, true, false, false, false, false, false, false, false},
+        expected_valid);
+
+    CheckResult(
+        Evaluate(proto::plan::JSONContainsExpr_JSONOp_ContainsAll, {1, 2}),
+        {true, false, false, false, false, false, false, false, false, false},
+        expected_valid);
+
+    CheckResult(
+        Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1}, true),
+        {false, true, false, true, false, false, false, false, true, false},
+        expected_valid);
+}
 
 TEST_F(JsonFlatIndexExprTest, TestUnaryExpr) {
     proto::plan::GenericValue value;

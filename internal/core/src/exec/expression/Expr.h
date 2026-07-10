@@ -1745,11 +1745,17 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
+    enum class IndexValidityMode {
+        Default,
+        JsonExactPath,
+    };
+
     // ProcessIndexChunks: execute index query and batch results
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(func, false, values...);
+        return ProcessIndexChunksImpl<T>(
+            func, false, IndexValidityMode::Default, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -1757,14 +1763,17 @@ class SegmentExpr : public Expr {
     //   (used when func already handles element-to-row conversion internally)
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
-    ProcessIndexChunksWithRowLevel(FUNC func, const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(func, true, values...);
+    ProcessIndexChunksWithRowLevel(FUNC func,
+                                   IndexValidityMode validity_mode,
+                                   const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, true, validity_mode, values...);
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunksImpl(FUNC func,
                            bool func_returns_row_level,
+                           IndexValidityMode validity_mode,
                            const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -1822,7 +1831,11 @@ class SegmentExpr : public Expr {
                     TargetBitmap res = func(index_ptr, values...);
 
                     TargetBitmap valid_res;
-                    if (cached_is_nested_index_ && func_returns_row_level) {
+                    if (validity_mode == IndexValidityMode::JsonExactPath &&
+                        executor != nullptr) {
+                        valid_res = executor->ExactPathExists();
+                    } else if (cached_is_nested_index_ &&
+                               func_returns_row_level) {
                         valid_res = TargetBitmap(active_count_, true);
                     } else {
                         valid_res = index_ptr->IsNotNull();

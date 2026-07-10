@@ -2460,8 +2460,11 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     };
 
     // Use WithRowLevel version since func handles element-to-row conversion for nested index
-    auto res =
-        ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch, elems);
+    auto validity_mode = field_type_ == DataType::JSON
+                             ? IndexValidityMode::JsonExactPath
+                             : IndexValidityMode::Default;
+    auto res = ProcessIndexChunksWithRowLevel<GetType>(
+        execute_sub_batch, validity_mode, elems);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

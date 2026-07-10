@@ -298,7 +298,10 @@ RustResult tantivy_json_terms_query_keyword(void *ptr,
                                             uintptr_t len,
                                             void *bitset);
 
-RustResult tantivy_json_exist_query(void *ptr, const char *json_path, void *bitset);
+RustResult tantivy_json_exist_query(void *ptr,
+                                    const char *json_path,
+                                    bool json_subpaths,
+                                    void *bitset);
 
 RustResult tantivy_json_range_query_i64(void *ptr,
                                         const char *json_path,
