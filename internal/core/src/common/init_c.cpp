@@ -92,6 +92,11 @@ SetDefaultOptimizeExprEnable(bool val) {
 }
 
 void
+SetDefaultDriverPrefetchEnable(bool val) {
+    milvus::SetDefaultDriverPrefetchEnable(val);
+}
+
+void
 SetDefaultJSONKeyStatsEnable(bool val) {
     milvus::SetDefaultJSONKeyStatsEnable(val);
 }
