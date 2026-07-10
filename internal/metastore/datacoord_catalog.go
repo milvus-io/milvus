@@ -155,4 +155,35 @@ type DataCoordCatalog interface {
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error
 	ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error)
+
+	// Compound operations
+	//
+	// Each method below collapses a multi-step catalog write sequence, which
+	// callers previously issued as separate calls inside one critical section,
+	// into a single catalog call. The etcd-based implementation replays the
+	// original stepwise sequence with identical ordering and error semantics
+	// (fail-hard, first error returned); an atomic (remote) implementation may
+	// execute the whole compound operation in a single round-trip.
+
+	// AlterCompactionSegments persists the segment mutation of a completed mix
+	// compaction: the compactTo segments (with their binlog increments) are
+	// written strictly before the compactFrom segments, so that a crash in
+	// between never loses the compaction result.
+	AlterCompactionSegments(ctx context.Context, compactToSegments []*datapb.SegmentInfo, compactFromSegments []*datapb.SegmentInfo, compactToBinlogs []BinlogsIncrement) error
+	// DropSegmentsAndMarkChannelDeleted saves the dropped segments and then
+	// marks the channel with the removal flag. The segments are written
+	// strictly first: the removal flag is the failover commit point, so it
+	// must not be observable before the dropped segments are persisted.
+	DropSegmentsAndMarkChannelDeleted(ctx context.Context, channel string, segments []*datapb.SegmentInfo) error
+	// DropExternalCollectionRefreshJobAndTasks drops all tasks of the refresh
+	// job and then drops the job itself. The job is dropped strictly last so
+	// that a crash in between leaves a job record from which the remaining
+	// tasks can be found and re-dropped.
+	DropExternalCollectionRefreshJobAndTasks(ctx context.Context, jobID typeutil.UniqueID, taskIDs []typeutil.UniqueID) error
+	// DropPartitionStatsAndAnalyzeTask cleans up a partition-stats version and
+	// its analyze task in one compound write: it drops the analyze task,
+	// rolls back the current partition-stats version to rollbackVersion when
+	// non-nil (the dropped version was the current one), and finally drops the
+	// partition-stats info itself.
+	DropPartitionStatsAndAnalyzeTask(ctx context.Context, info *datapb.PartitionStatsInfo, analyzeTaskID typeutil.UniqueID, rollbackVersion *int64) error
 }

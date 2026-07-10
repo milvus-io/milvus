@@ -74,6 +74,55 @@ func (_c *DataCoordCatalog_AddSegment_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// AlterCompactionSegments provides a mock function with given fields: ctx, compactToSegments, compactFromSegments, compactToBinlogs
+func (_m *DataCoordCatalog) AlterCompactionSegments(ctx context.Context, compactToSegments []*datapb.SegmentInfo, compactFromSegments []*datapb.SegmentInfo, compactToBinlogs []metastore.BinlogsIncrement) error {
+	ret := _m.Called(ctx, compactToSegments, compactFromSegments, compactToBinlogs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCompactionSegments")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*datapb.SegmentInfo, []*datapb.SegmentInfo, []metastore.BinlogsIncrement) error); ok {
+		r0 = rf(ctx, compactToSegments, compactFromSegments, compactToBinlogs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_AlterCompactionSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCompactionSegments'
+type DataCoordCatalog_AlterCompactionSegments_Call struct {
+	*mock.Call
+}
+
+// AlterCompactionSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - compactToSegments []*datapb.SegmentInfo
+//   - compactFromSegments []*datapb.SegmentInfo
+//   - compactToBinlogs []metastore.BinlogsIncrement
+func (_e *DataCoordCatalog_Expecter) AlterCompactionSegments(ctx interface{}, compactToSegments interface{}, compactFromSegments interface{}, compactToBinlogs interface{}) *DataCoordCatalog_AlterCompactionSegments_Call {
+	return &DataCoordCatalog_AlterCompactionSegments_Call{Call: _e.mock.On("AlterCompactionSegments", ctx, compactToSegments, compactFromSegments, compactToBinlogs)}
+}
+
+func (_c *DataCoordCatalog_AlterCompactionSegments_Call) Run(run func(ctx context.Context, compactToSegments []*datapb.SegmentInfo, compactFromSegments []*datapb.SegmentInfo, compactToBinlogs []metastore.BinlogsIncrement)) *DataCoordCatalog_AlterCompactionSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*datapb.SegmentInfo), args[2].([]*datapb.SegmentInfo), args[3].([]metastore.BinlogsIncrement))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_AlterCompactionSegments_Call) Return(_a0 error) *DataCoordCatalog_AlterCompactionSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_AlterCompactionSegments_Call) RunAndReturn(run func(context.Context, []*datapb.SegmentInfo, []*datapb.SegmentInfo, []metastore.BinlogsIncrement) error) *DataCoordCatalog_AlterCompactionSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterIndexes provides a mock function with given fields: ctx, newIndexes
 func (_m *DataCoordCatalog) AlterIndexes(ctx context.Context, newIndexes []*model.Index) error {
 	ret := _m.Called(ctx, newIndexes)
@@ -749,6 +798,54 @@ func (_c *DataCoordCatalog_DropExternalCollectionRefreshJob_Call) RunAndReturn(r
 	return _c
 }
 
+// DropExternalCollectionRefreshJobAndTasks provides a mock function with given fields: ctx, jobID, taskIDs
+func (_m *DataCoordCatalog) DropExternalCollectionRefreshJobAndTasks(ctx context.Context, jobID int64, taskIDs []int64) error {
+	ret := _m.Called(ctx, jobID, taskIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropExternalCollectionRefreshJobAndTasks")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) error); ok {
+		r0 = rf(ctx, jobID, taskIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropExternalCollectionRefreshJobAndTasks'
+type DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call struct {
+	*mock.Call
+}
+
+// DropExternalCollectionRefreshJobAndTasks is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobID int64
+//   - taskIDs []int64
+func (_e *DataCoordCatalog_Expecter) DropExternalCollectionRefreshJobAndTasks(ctx interface{}, jobID interface{}, taskIDs interface{}) *DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call {
+	return &DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call{Call: _e.mock.On("DropExternalCollectionRefreshJobAndTasks", ctx, jobID, taskIDs)}
+}
+
+func (_c *DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call) Run(run func(ctx context.Context, jobID int64, taskIDs []int64)) *DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].([]int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call) Return(_a0 error) *DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call) RunAndReturn(run func(context.Context, int64, []int64) error) *DataCoordCatalog_DropExternalCollectionRefreshJobAndTasks_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropExternalCollectionRefreshTask provides a mock function with given fields: ctx, taskID
 func (_m *DataCoordCatalog) DropExternalCollectionRefreshTask(ctx context.Context, taskID int64) error {
 	ret := _m.Called(ctx, taskID)
@@ -934,6 +1031,55 @@ func (_c *DataCoordCatalog_DropIndex_Call) Return(_a0 error) *DataCoordCatalog_D
 }
 
 func (_c *DataCoordCatalog_DropIndex_Call) RunAndReturn(run func(context.Context, int64, int64) error) *DataCoordCatalog_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropPartitionStatsAndAnalyzeTask provides a mock function with given fields: ctx, info, analyzeTaskID, rollbackVersion
+func (_m *DataCoordCatalog) DropPartitionStatsAndAnalyzeTask(ctx context.Context, info *datapb.PartitionStatsInfo, analyzeTaskID int64, rollbackVersion *int64) error {
+	ret := _m.Called(ctx, info, analyzeTaskID, rollbackVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropPartitionStatsAndAnalyzeTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PartitionStatsInfo, int64, *int64) error); ok {
+		r0 = rf(ctx, info, analyzeTaskID, rollbackVersion)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPartitionStatsAndAnalyzeTask'
+type DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call struct {
+	*mock.Call
+}
+
+// DropPartitionStatsAndAnalyzeTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *datapb.PartitionStatsInfo
+//   - analyzeTaskID int64
+//   - rollbackVersion *int64
+func (_e *DataCoordCatalog_Expecter) DropPartitionStatsAndAnalyzeTask(ctx interface{}, info interface{}, analyzeTaskID interface{}, rollbackVersion interface{}) *DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call {
+	return &DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call{Call: _e.mock.On("DropPartitionStatsAndAnalyzeTask", ctx, info, analyzeTaskID, rollbackVersion)}
+}
+
+func (_c *DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call) Run(run func(ctx context.Context, info *datapb.PartitionStatsInfo, analyzeTaskID int64, rollbackVersion *int64)) *DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.PartitionStatsInfo), args[2].(int64), args[3].(*int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call) Return(_a0 error) *DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call) RunAndReturn(run func(context.Context, *datapb.PartitionStatsInfo, int64, *int64) error) *DataCoordCatalog_DropPartitionStatsAndAnalyzeTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1125,6 +1271,54 @@ func (_c *DataCoordCatalog_DropSegmentIndex_Call) Return(_a0 error) *DataCoordCa
 }
 
 func (_c *DataCoordCatalog_DropSegmentIndex_Call) RunAndReturn(run func(context.Context, int64, int64, int64, int64) error) *DataCoordCatalog_DropSegmentIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSegmentsAndMarkChannelDeleted provides a mock function with given fields: ctx, channel, segments
+func (_m *DataCoordCatalog) DropSegmentsAndMarkChannelDeleted(ctx context.Context, channel string, segments []*datapb.SegmentInfo) error {
+	ret := _m.Called(ctx, channel, segments)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSegmentsAndMarkChannelDeleted")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []*datapb.SegmentInfo) error); ok {
+		r0 = rf(ctx, channel, segments)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentsAndMarkChannelDeleted'
+type DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call struct {
+	*mock.Call
+}
+
+// DropSegmentsAndMarkChannelDeleted is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+//   - segments []*datapb.SegmentInfo
+func (_e *DataCoordCatalog_Expecter) DropSegmentsAndMarkChannelDeleted(ctx interface{}, channel interface{}, segments interface{}) *DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call {
+	return &DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call{Call: _e.mock.On("DropSegmentsAndMarkChannelDeleted", ctx, channel, segments)}
+}
+
+func (_c *DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call) Run(run func(ctx context.Context, channel string, segments []*datapb.SegmentInfo)) *DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].([]*datapb.SegmentInfo))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call) Return(_a0 error) *DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call) RunAndReturn(run func(context.Context, string, []*datapb.SegmentInfo) error) *DataCoordCatalog_DropSegmentsAndMarkChannelDeleted_Call {
 	_c.Call.Return(run)
 	return _c
 }

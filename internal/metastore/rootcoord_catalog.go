@@ -97,6 +97,40 @@ type RootCoordCatalog interface {
 	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 
+	// Compound DDL operations
+	//
+	// Each method below collapses a multi-step catalog write sequence, which
+	// callers previously issued as separate calls inside one critical section,
+	// into a single catalog call. The etcd-based implementation replays the
+	// original stepwise sequence with identical ordering and error semantics;
+	// an atomic (remote) implementation may execute the whole compound
+	// operation in a single round-trip.
+
+	// AlterCollectionAndDeleteGrants alters the collection (MODIFY, no field
+	// modification) and then deletes all grants referencing it. It returns an
+	// error if and only if the collection write fails; the grant deletion is
+	// best-effort in non-atomic implementations (failure is logged and
+	// swallowed, leftover grants are swept later) while in atomic
+	// implementations it takes effect atomically with the collection write.
+	AlterCollectionAndDeleteGrants(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, tenant string, dbName string, collectionName string) error
+	// DropCollectionAndDeleteGrants drops the collection and then deletes all
+	// grants referencing it. It returns an error if and only if the collection
+	// drop fails; the grant deletion is best-effort in non-atomic
+	// implementations while in atomic implementations it takes effect
+	// atomically with the collection drop.
+	DropCollectionAndDeleteGrants(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp, tenant string, dbName string, collectionName string) error
+	// AlterCollectionAndMigrateGrants alters the collection (in-place MODIFY
+	// when dbChanged is false, cross-database move otherwise) and, when the
+	// collection name or database name changes, migrates all grants from the
+	// old name to the new one. It returns an error if and only if the
+	// collection write fails; the grant migration is best-effort in non-atomic
+	// implementations while in atomic implementations it takes effect
+	// atomically with the collection write.
+	AlterCollectionAndMigrateGrants(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool, dbChanged bool, tenant string) error
+	// DropRoleAndGrants drops the role and then deletes all grants of the
+	// role. Both steps are fail-hard: the first error is returned.
+	DropRoleAndGrants(ctx context.Context, tenant string, roleName string) error
+
 	Close()
 }
 

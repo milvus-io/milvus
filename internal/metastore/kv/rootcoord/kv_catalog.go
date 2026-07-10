@@ -2285,6 +2285,72 @@ func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
 }
 
+// AlterCollectionAndDeleteGrants alters the collection and best-effort deletes
+// all grants referencing it. See metastore.RootCoordCatalog for the contract.
+func (kc *Catalog) AlterCollectionAndDeleteGrants(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, tenant string, dbName string, collectionName string) error {
+	if err := kc.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts, false); err != nil {
+		return err
+	}
+	// Grant deletion is best-effort: the collection write already succeeded and
+	// must not be rolled back; leftover grants are removed by the tombstone
+	// sweeper eventually.
+	if err := kc.DeleteGrantByCollectionName(ctx, tenant, dbName, collectionName); err != nil {
+		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
+			mlog.String("dbName", dbName), mlog.String("collectionName", collectionName), mlog.Err(err))
+	}
+	return nil
+}
+
+// DropCollectionAndDeleteGrants drops the collection and best-effort deletes
+// all grants referencing it. See metastore.RootCoordCatalog for the contract.
+func (kc *Catalog) DropCollectionAndDeleteGrants(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp, tenant string, dbName string, collectionName string) error {
+	if err := kc.DropCollection(ctx, collectionInfo, ts); err != nil {
+		return err
+	}
+	// Grant deletion is best-effort: the collection is already dropped and the
+	// drop must not be rolled back; leftover grants are removed by the
+	// tombstone sweeper eventually.
+	if err := kc.DeleteGrantByCollectionName(ctx, tenant, dbName, collectionName); err != nil {
+		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
+			mlog.String("dbName", dbName), mlog.String("collectionName", collectionName), mlog.Err(err))
+	}
+	return nil
+}
+
+// AlterCollectionAndMigrateGrants alters the collection and, when the
+// collection is renamed or moved across databases, best-effort migrates its
+// grants to the new name. See metastore.RootCoordCatalog for the contract.
+func (kc *Catalog) AlterCollectionAndMigrateGrants(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool, dbChanged bool, tenant string) error {
+	if !dbChanged {
+		if err := kc.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts, fieldModify); err != nil {
+			return err
+		}
+	} else {
+		if err := kc.AlterCollectionDB(ctx, oldColl, newColl, ts); err != nil {
+			return err
+		}
+	}
+	if oldColl.Name != newColl.Name || oldColl.DBName != newColl.DBName {
+		// Grant migration is best-effort: the collection write already
+		// succeeded and must not be rolled back.
+		if err := kc.MigrateGrantCollectionName(ctx, tenant, oldColl.DBName, oldColl.Name, newColl.DBName, newColl.Name); err != nil {
+			mlog.Warn(ctx, "failed to migrate grants for renamed collection, skipping",
+				mlog.String("oldDBName", oldColl.DBName), mlog.String("oldName", oldColl.Name),
+				mlog.String("newDBName", newColl.DBName), mlog.String("newName", newColl.Name), mlog.Err(err))
+		}
+	}
+	return nil
+}
+
+// DropRoleAndGrants drops the role and then all grants of the role, fail-hard.
+// See metastore.RootCoordCatalog for the contract.
+func (kc *Catalog) DropRoleAndGrants(ctx context.Context, tenant string, roleName string) error {
+	if err := kc.DropRole(ctx, tenant, roleName); err != nil {
+		return err
+	}
+	return kc.DeleteGrant(ctx, tenant, &milvuspb.RoleEntity{Name: roleName})
+}
+
 func (kc *Catalog) Close() {
 	// do nothing
 }

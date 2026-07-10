@@ -1266,3 +1266,55 @@ func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, e
 	}
 	return snapshots, nil
 }
+
+// AlterCompactionSegments persists a completed mix-compaction mutation:
+// compactTo segments are written strictly before compactFrom segments so that
+// a crash in between never loses the compaction result. See
+// metastore.DataCoordCatalog for the contract.
+func (kc *Catalog) AlterCompactionSegments(ctx context.Context, compactToSegments []*datapb.SegmentInfo, compactFromSegments []*datapb.SegmentInfo, compactToBinlogs []metastore.BinlogsIncrement) error {
+	// alter compactTo before compactFrom segments to avoid data lost if service
+	// crash between the two writes
+	if err := kc.AlterSegments(ctx, compactToSegments, compactToBinlogs...); err != nil {
+		return err
+	}
+	return kc.AlterSegments(ctx, compactFromSegments)
+}
+
+// DropSegmentsAndMarkChannelDeleted saves the dropped segments and then marks
+// the channel with the removal flag. The removal flag is the failover commit
+// point and is always written last. See metastore.DataCoordCatalog for the
+// contract.
+func (kc *Catalog) DropSegmentsAndMarkChannelDeleted(ctx context.Context, channel string, segments []*datapb.SegmentInfo) error {
+	if err := kc.SaveDroppedSegmentsInBatch(ctx, segments); err != nil {
+		return err
+	}
+	return kc.MarkChannelDeleted(ctx, channel)
+}
+
+// DropExternalCollectionRefreshJobAndTasks drops all tasks of the refresh job
+// and then the job itself, fail-hard. The job is dropped strictly last so a
+// crash in between leaves a job record from which the remaining tasks can be
+// found and re-dropped. See metastore.DataCoordCatalog for the contract.
+func (kc *Catalog) DropExternalCollectionRefreshJobAndTasks(ctx context.Context, jobID typeutil.UniqueID, taskIDs []typeutil.UniqueID) error {
+	for _, taskID := range taskIDs {
+		if err := kc.DropExternalCollectionRefreshTask(ctx, taskID); err != nil {
+			return err
+		}
+	}
+	return kc.DropExternalCollectionRefreshJob(ctx, jobID)
+}
+
+// DropPartitionStatsAndAnalyzeTask cleans up a partition-stats version and its
+// analyze task in one compound write, fail-hard. See
+// metastore.DataCoordCatalog for the contract.
+func (kc *Catalog) DropPartitionStatsAndAnalyzeTask(ctx context.Context, info *datapb.PartitionStatsInfo, analyzeTaskID typeutil.UniqueID, rollbackVersion *int64) error {
+	if err := kc.DropAnalyzeTask(ctx, analyzeTaskID); err != nil {
+		return err
+	}
+	if rollbackVersion != nil {
+		if err := kc.SaveCurrentPartitionStatsVersion(ctx, info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), *rollbackVersion); err != nil {
+			return err
+		}
+	}
+	return kc.DropPartitionStatsInfo(ctx, info)
+}

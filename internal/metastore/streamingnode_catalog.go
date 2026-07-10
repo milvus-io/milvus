@@ -38,4 +38,30 @@ type StreamingNodeCataLog interface {
 	// GetSalvageCheckpoint gets all salvage checkpoints for a channel.
 	// Returns an empty slice if none exist. One checkpoint per source cluster.
 	GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error)
+
+	// SaveRecoverySnapshot saves a WAL recovery snapshot in one compound
+	// operation. Nil or empty parts of the snapshot are skipped. The etcd-based
+	// implementation writes the parts in order: segment assignments, vchannels,
+	// salvage checkpoint, and strictly last the consume checkpoint, which is
+	// the commit point of the snapshot — a crash before it is written makes the
+	// whole snapshot invisible and the next retry re-persists everything (all
+	// parts are idempotent puts on deterministic keys). A future atomic
+	// implementation can persist the whole snapshot in a single
+	// compare-and-swap round-trip (see the CAS TODO in the recovery storage).
+	SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *WALRecoverySnapshot) error
+}
+
+// WALRecoverySnapshot is the compound payload of
+// StreamingNodeCataLog.SaveRecoverySnapshot.
+type WALRecoverySnapshot struct {
+	// SegmentAssignments are the segment assignments to save; skipped if empty.
+	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
+	// VChannels are the vchannel metas to save; skipped if empty.
+	VChannels map[string]*streamingpb.VChannelMeta
+	// SalvageCheckpoint is the salvage checkpoint to save; skipped if nil.
+	// It must be persisted before the consume checkpoint to guarantee ordering.
+	SalvageCheckpoint *commonpb.ReplicateCheckpoint
+	// ConsumeCheckpoint is the consume checkpoint to save; skipped if nil.
+	// It is always written last as the commit point of the snapshot.
+	ConsumeCheckpoint *streamingpb.WALCheckpoint
 }

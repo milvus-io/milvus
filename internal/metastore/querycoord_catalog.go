@@ -25,4 +25,15 @@ type QueryCoordCatalog interface {
 	RemoveCollectionTarget(ctx context.Context, collectionID int64) error
 	RemoveCollectionTargets(ctx context.Context) error
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
+
+	// SaveAndReleaseReplicas is a compound operation that saves the given
+	// replicas and then releases the given replica IDs of the collection. The
+	// etcd-based implementation replays the two steps in order and fail-hard
+	// (first error returned).
+	//
+	// Contract gap note: the current remote-catalog record-store contract
+	// (PutRecords/DeleteRecords) has no atomic mixed put+delete call, so a
+	// remote implementation either needs a contract extension or degrades to
+	// two RPCs. To be settled on the contract side.
+	SaveAndReleaseReplicas(ctx context.Context, collectionID int64, saves []*querypb.Replica, releases []int64) error
 }
