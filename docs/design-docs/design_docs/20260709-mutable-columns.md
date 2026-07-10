@@ -12,6 +12,19 @@ compaction pressure grows. For frequently-updated scalar fields — counters,
 inventory, timestamps, status flags, ACL id lists — this is prohibitively
 expensive, and users work around it by joining against an external KV store.
 
+A concrete example of the demand is
+[discussion #51115](https://github.com/milvus-io/milvus/discussions/51115):
+continuously updating a single `offline_time` timestamp column at 50k
+updates / 30s (~1,700 rows/s) while embeddings and every other field stay
+unchanged. Today each such update is a delete + reinsert; once a segment's
+update ratio crosses the compaction threshold (~20%), the whole segment —
+vectors included — is rewritten and its vector index rebuilt, so a steady
+update stream becomes a permanent compaction-and-indexing storm that only
+a large cluster can absorb. Under this design the same stream is ~1,700
+tiny SET ops/s down the delete-shaped write path; overlay memory grows
+only with the number of distinct touched rows, and folding rewrites just
+the 8-byte column file — vector data and vector indexes are never touched.
+
 This design introduces **mutable columns**: fields that can be updated in
 place through a partial-update API, without rewriting the row, touching the
 vector data, or invalidating any index.
@@ -368,6 +381,20 @@ predicates (`array_contains` etc.) evaluate row-wise against the arena
 value. Existing conjunct reordering should schedule mutable-column
 predicates after indexed/cheap predicates so they run on surviving rows.
 
+**Dense-overlay chunks.** Row-wise fix-up is the right strategy only while
+patches are sparse. Under wide-update workloads (the `offline_time`
+scenario in Motivation), a large fraction of a chunk may be patched
+between folds, and re-evaluating half a chunk row-by-row is one to two
+orders of magnitude slower than SIMD — and such columns are exactly the
+ones queried with range filters (`offline_time > now - 5min`). When a
+chunk's patched fraction exceeds a threshold, the evaluator therefore
+switches to **materialize-then-scan**: gather the chunk's current values
+(base + overlay at the query timestamp) into a scratch columnar buffer
+once, then run the normal vectorized kernel over it. Cost becomes
+O(chunk) copy + SIMD instead of O(patched) scalar evaluations; the
+crossover threshold is a tuning parameter (expected in the 5–10% range,
+to be benchmarked).
+
 Implementation decisions (fixed here so the implementation doesn't
 re-litigate them):
 
@@ -436,6 +463,18 @@ time and overlay memory grow. This is why folding triggers must include
 overlay memory pressure and deltalog count (not just patch ratio), and why
 the overlay quota's backpressure is the final backstop that throttles the
 write path when cleanup cannot keep up.
+
+**Wide-update pacing.** Workloads that touch most rows of most segments
+(heartbeat-style `offline_time` updates) push all segments across the
+folding threshold at roughly the same time. Per-segment folding cost is
+small — one narrow column rewrite, no vectors, no indexes — but the
+scheduler must still stagger folds to avoid manifest-update and IO
+bursts. The same reasoning carries into Phase 3: **very-high-churn
+columns should stay unindexed even once indexes are available** — their
+patched fraction sits high between folds, so result correction degrades
+toward brute force anyway while forcing continuous index-rebuild churn;
+brute force with the dense-chunk materialize-then-scan path is simply the
+right plan for them.
 
 **Folding watermark.** A fold materializes ops up to some timestamp
 `fold_ts`; the manifest records `fold_ts` per (segment, column) alongside
@@ -644,9 +683,10 @@ Scope: the entire vertical slice for INT/FLOAT/DOUBLE/BOOL/TIMESTAMPTZ.
   recovery replay; CDC message type.
 - QueryNode: overlay (chunk-partitioned, inline fixed-width version chains,
   safe-ts pruning, memory quota); **PatchedColumnView** at the data access
-  layer; expression fix-up via the offset-input path; SkipIndex
-  unconditional-fix-up rule; expression-cache disable; output-field
-  materialization; nullable/validity overlay.
+  layer; expression fix-up via the offset-input path, with the dense-chunk
+  materialize-then-scan fallback; SkipIndex unconditional-fix-up rule;
+  expression-cache disable; output-field materialization;
+  nullable/validity overlay.
 - Background: patch compaction (SET/INCR folding), column folding with
   `fold_ts` watermark + manifest swap, folding scheduling policy v0.
 - Ops: feature gate, metrics (patch ratio / overlay bytes / fold lag).
