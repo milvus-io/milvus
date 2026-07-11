@@ -94,6 +94,18 @@ func TestValidateCollectionName(t *testing.T) {
 	assert.Nil(t, validateCollectionName("_123abc"))
 	assert.Nil(t, validateCollectionName("abc123_"))
 
+	// Hyphens are allowed after the first character (issue #50676), so that
+	// externally-derived names (e.g. tenant/environment identifiers) can be
+	// used directly without a normalization layer.
+	assert.Nil(t, validateCollectionName("rag-prod"))
+	assert.Nil(t, validateCollectionName("tenant-a_docs"))
+	assert.Nil(t, validateCollectionName("customer-123_vectors"))
+	assert.Nil(t, validateCollectionName("a-b"))
+
+	// The same relaxation applies to aliases, which share the validator.
+	assert.Nil(t, validateCollectionNameOrAlias("rag-prod", "alias"))
+	assert.Nil(t, ValidateCollectionAlias("tenant-a_docs"))
+
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
 		longName[i] = 'a'
@@ -108,6 +120,7 @@ func TestValidateCollectionName(t *testing.T) {
 		string(longName),
 		"中文",
 		"abc ",
+		"-abc", // hyphen is still not allowed as the first character
 	}
 
 	for _, name := range invalidNames {
