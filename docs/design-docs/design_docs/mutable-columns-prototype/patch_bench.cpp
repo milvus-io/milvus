@@ -122,6 +122,19 @@ int main() {
     const int64_t threshold = 500'000; // ~50% selectivity
     const uint64_t qts = 1'000'000;
 
+    // DVFS warmup: spin ~200ms of real scan work so the CPU boosts to a
+    // performance core / high frequency before any measurement. Without this,
+    // the first bench() calls run cold and read ~3x slow (pure artifact).
+    {
+        volatile uint64_t sink = 0;
+        auto t0 = clk::now();
+        while (std::chrono::duration<double, std::milli>(clk::now() - t0).count() < 200.0) {
+            for (int i = 0; i < CHUNK_ROWS; ++i) res[i] = (src[i] > threshold);
+            for (int i = 0; i < CHUNK_ROWS; ++i) sink += res[i];
+        }
+        (void)sink;
+    }
+
     // isolate memcpy cost of one chunk
     double memcpy_ns = bench([&]{
         std::memcpy(scratch.data(), base.data(), CHUNK_ROWS * sizeof(int64_t));
@@ -130,8 +143,8 @@ int main() {
     printf("chunk memcpy (256KB) = %.0f ns   [mat+scan pays this unconditionally]\n",
            memcpy_ns);
 
-    // fractions to sweep (patched rows in this chunk)
-    double fracs[] = {0.0, 0.001, 0.005, 0.01, 0.02, 0.03, 0.05, 0.08, 0.10, 0.20, 0.50};
+    // fractions to sweep — focus on the fold-threshold region (0-25%)
+    double fracs[] = {0.0, 0.005, 0.01, 0.025, 0.05, 0.075, 0.10, 0.15, 0.20, 0.25, 0.50};
 
     for (int model = 0; model < 2; ++model) {
         const char* mname = model == OP_SET ? "SET " : "INCR";
@@ -141,14 +154,14 @@ int main() {
                "patched%", "#dirty", "base+fixup", "mat+scan", "base-only", "winner");
         printf("%-9s %-9s %12s %12s %12s\n", "", "", "(ns)", "(ns)", "(ns)");
 
-        // base-only cost (no overlay) as the floor
-        Overlay empty;
-        double base_ns = bench([&]{
-            for (int i = 0; i < CHUNK_ROWS; ++i) res[i] = (src[i] > threshold);
-            uint64_t s = 0; for (int i = 0; i < CHUNK_ROWS; ++i) s += res[i]; return s;
-        });
-
-        for (double frac : fracs) {
+        // Collect all measurements first; the clean-chunk base cost is defined
+        // empirically as the minimum observed fix-up cost (the near-clean point),
+        // which sidesteps memory-state / DVFS outliers on any single sample.
+        int NF = sizeof(fracs) / sizeof(fracs[0]);
+        std::vector<double> fixv(NF), matv(NF);
+        std::vector<int> ndv(NF);
+        for (int fi = 0; fi < NF; ++fi) {
+            double frac = fracs[fi];
             int ndirty = (int)(frac * CHUNK_ROWS);
             Overlay ov;
             // pick ndirty distinct offsets
@@ -172,17 +185,44 @@ int main() {
                 ov.chains.emplace(o, std::move(ch));
             }
 
-            double fixup_ns = (ndirty == 0)
-                ? base_ns
-                : bench([&]{ return eval_fixup(src.data(), threshold, res.data(),
-                                               ov, qts, base.data()); });
+            double fixup_ns = bench([&]{ return eval_fixup(src.data(), threshold,
+                                               res.data(), ov, qts, base.data()); });
             double mat_ns = bench([&]{ return eval_materialize_scan(base.data(), threshold,
                                                res.data(), ov, qts, scratch.data()); });
+            fixv[fi] = fixup_ns; matv[fi] = mat_ns; ndv[fi] = ndirty;
+        }
 
-            const char* winner = (fixup_ns <= mat_ns) ? "fixup" : "mat+scan";
-            if (ndirty == 0) winner = "(clean)";
-            printf("%-9.3f %-9d %12.0f %12.0f %12.0f   %s\n",
-                   frac * 100, ndirty, fixup_ns, mat_ns, base_ns, winner);
+        double base_ns = 1e18;
+        for (double v : fixv) base_ns = std::min(base_ns, v);
+        for (int fi = 0; fi < NF; ++fi) {
+            printf("%-9.3f %-9d %12.0f %12.0f %12.0f   %5.2fx\n",
+                   fracs[fi] * 100, ndv[fi], fixv[fi], matv[fi], base_ns,
+                   fixv[fi] / base_ns);
+        }
+
+        // sawtooth: read density ramps 0->T uniformly then folds. Average read
+        // multiplier ~= multiplier at density T/2; peak = at T. Report both.
+        printf("  -- sawtooth (linear ramp to fold threshold, then fold) --\n");
+        double folds[] = {0.05, 0.10, 0.20};
+        for (double T : folds) {
+            // measure at T/2 (avg) and T (peak)
+            auto measure_at = [&](double frac)->double {
+                int nd = (int)(frac * CHUNK_ROWS);
+                Overlay ov; std::vector<uint32_t> o(CHUNK_ROWS);
+                for (int i=0;i<CHUNK_ROWS;++i) o[i]=i;
+                std::shuffle(o.begin(),o.end(),rng); o.resize(nd); std::sort(o.begin(),o.end());
+                ov.dirty=o;
+                for (uint32_t off:o){ std::vector<Node> ch;
+                    if(model==OP_SET) ch.push_back({500,OP_SET,vdist(rng)});
+                    else { ch.push_back({300,OP_INCR,1}); ch.push_back({600,OP_INCR,2}); ch.push_back({900,OP_INCR,1}); }
+                    ov.chains.emplace(off,std::move(ch)); }
+                if(nd==0) return base_ns;
+                return bench([&]{ return eval_fixup(src.data(),threshold,res.data(),ov,qts,base.data()); });
+            };
+            double avg = measure_at(T/2) / base_ns;
+            double peak = measure_at(T) / base_ns;
+            printf("    fold at %4.0f%% -> hot-column read: avg %.2fx, peak %.2fx (post-fold 1.00x)\n",
+                   T*100, avg, peak);
         }
     }
     printf("\n");

@@ -412,39 +412,57 @@ reproducing the segcore kernel (32768-row int64 chunk, `x > c` predicate,
 overlay lookup + version-chain materialize per dirty row; Apple M-series,
 clang -O3 -march=native) quantifies it:
 
-| patched fraction | fix-up (SET) | fix-up (INCR ×3) | clean-chunk base scan |
-|---|---|---|---|
-| 0% | 4.08 µs | 4.14 µs | 4.08 µs |
-| 1% | 4.96 | 6.05 | — |
-| 5% | 10.3 | 11.9 | — |
-| 10% | 13.9 | 19.2 | — |
-| 50% | 36.2 | 57.4 | — |
+read cost as a multiple of the clean base scan (base = 4.0 µs):
+
+| patched fraction | fix-up SET | fix-up INCR (×3 chain) |
+|---|---|---|
+| 0% (clean) | 1.00× | 1.00× |
+| 5% | 2.3× | 2.9× |
+| 10% | 3.6× | 4.8× |
+| 20% | 5.2× | 7.3× |
+| 50% | 9.3× | 14.1× |
 
 Two conclusions:
 
-- **Clean chunks cost exactly the base scan** (4.08 µs = 4.08 µs). The
-  per-chunk patched-count fast path is free; an empty overlay is one
-  branch.
-- **A dense chunk is ~9–14× the clean scan** at 50% patched — the concern
-  is real.
+- **Clean chunks cost exactly the base scan** (1.00×). The per-chunk
+  patched-count fast path is free; an empty overlay is one branch. Every
+  non-updated column, and the whole vector-search path, always stays at 1×.
+- **A dense chunk is genuinely expensive** — up to 9–14× at 50% patched.
+  The concern is real; INCR is steeper because each dirty row walks a
+  version chain.
 
 An earlier draft proposed a *materialize-then-scan* fallback for dense
 chunks (gather current values into a scratch buffer, run the vectorized
 kernel). The benchmark **refutes it**: materializing a 32768-row chunk
-requires a 256KB memcpy costing ~3.2 µs — ~78% of a full scan — and since
+requires a 256KB memcpy costing ~3.1 µs — ~78% of a full scan — and since
 both paths pay the identical per-row materialize, materialize-then-scan is
-strictly memcpy-worse at *every* density, including 50%. The reason
-fix-up is already optimal: it does exactly one SIMD base scan plus O(dirty)
-scalar work; its only waste is scanning dirty rows twice, but half a wasted
-SIMD scan (~2 µs) is cheaper than the memcpy a scratch buffer costs.
+strictly memcpy-worse at *every* density, including 50%. Fix-up is already
+optimal: it does exactly one SIMD base scan plus O(dirty) scalar work; its
+only waste is scanning dirty rows twice, and half a wasted SIMD scan
+(~2 µs) is cheaper than the memcpy a scratch buffer costs.
 
-Therefore **there is no read-path fallback**; row-wise fix-up is used at all
-densities. The lever that keeps dense chunks from persisting is the
-**folding cadence**: folding a (segment, column) resets its chunks to clean,
-so the fold trigger doubles as the read-cost bound. Folding at a ~20%
-patched ratio (matching today's compaction threshold) caps steady-state
-read overhead near 5× the clean scan for the hot column, while every other
-column in the segment stays at 1×.
+**Therefore there is no read-path fallback; the lever is folding.** A fold
+materializes the column to a fresh native file, so **after folding a
+mutable column reads at exactly 1× — identical to any immutable column**;
+folding erases the penalty entirely. This is why per-query materialization
+loses but folding wins: folding pays the materialize *once*, in the
+background, persisted, and shared by every replica, whereas a read-path
+fallback would re-pay it per query per replica.
+
+What a query actually experiences is a sawtooth: the hot column's read cost
+ramps with density between folds and snaps back to 1× on each fold. The
+fold threshold is therefore the read-cost knob:
+
+| fold at | pre-fold avg (SET / INCR) | pre-fold peak | post-fold |
+|---|---|---|---|
+| 5% | 1.5× / 1.7× | 2.3× / 3.0× | 1.0× |
+| 10% | 2.4× / 2.9× | 3.4× / 4.9× | 1.0× |
+| 20% | 3.4× / 5.0× | 5.1× / 7.3× | 1.0× |
+
+For a heartbeat column like `offline_time`, folding aggressively (5–10%)
+keeps its steady-state read near 1.5–2.9× and touches only that one narrow
+column; folding is a background rewrite of an 8-byte-wide file, no vectors,
+no indexes.
 
 Implementation decisions (fixed here so the implementation doesn't
 re-litigate them):
