@@ -1642,6 +1642,40 @@ func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
 	return stats
 }
 
+// MaterializedFieldIDs returns the field ids with materialized columns in the
+// growing segment's insert record. The flush layout must be trimmed to this
+// set; a non-materialized column is legally absent (a dropped field or a
+// function output backfilled by bump-schema compaction).
+func (s *LocalSegment) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
+	if s.Type() != SegmentTypeGrowing {
+		return nil, merr.WrapErrServiceInternalMsg("unexpected segmentType for MaterializedFieldIDs, segmentType = %s", s.segmentType.String())
+	}
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	var cIDs *C.int64_t
+	var cCount C.int64_t
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.GetGrowingSegmentMaterializedFieldIDs(s.ptr, &cIDs, &cCount)
+		return nil, nil
+	}).Await()
+	if err := HandleCStatus(ctx, &status, "GetGrowingSegmentMaterializedFieldIDs"); err != nil {
+		return nil, err
+	}
+	if cIDs == nil || cCount == 0 {
+		return nil, nil
+	}
+	defer C.free(unsafe.Pointer(cIDs))
+	ids := make([]int64, 0, int(cCount))
+	for _, id := range unsafe.Slice(cIDs, int(cCount)) {
+		ids = append(ids, int64(id))
+	}
+	return ids, nil
+}
+
 // FlushData flushes data from the growing segment directly to storage via C++ milvus-storage.
 // This is a unified interface that combines data extraction from segcore and writing to storage.
 // The C++ side handles: extracting raw field data from ConcurrentVector, converting to Arrow,
@@ -1851,6 +1885,13 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 			fieldNullCounts[fieldID] = int64(nullCounts[i])
 		}
 	}
+	flushedFieldIDs := make([]int64, 0, int(cResult.num_flushed_fields))
+	if cResult.num_flushed_fields > 0 {
+		ids := unsafe.Slice(cResult.flushed_field_ids, int(cResult.num_flushed_fields))
+		for i := 0; i < int(cResult.num_flushed_fields); i++ {
+			flushedFieldIDs = append(flushedFieldIDs, int64(ids[i]))
+		}
+	}
 	columnGroupMemorySizes := make(map[int64]int64, int(cResult.num_column_groups))
 	if cResult.num_column_groups > 0 {
 		columnGroupIDs := unsafe.Slice(cResult.column_group_ids, int(cResult.num_column_groups))
@@ -1879,6 +1920,7 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		NumRows:                int64(cResult.num_rows),
 		TimestampFrom:          uint64(cResult.timestamp_from),
 		TimestampTo:            uint64(cResult.timestamp_to),
+		FlushedFieldIDs:        flushedFieldIDs,
 		ColumnGroupMemorySizes: columnGroupMemorySizes,
 		FieldNullCounts:        fieldNullCounts,
 		BM25Stats:              bm25Stats,
