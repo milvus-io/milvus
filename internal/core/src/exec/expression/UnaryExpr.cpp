@@ -1214,6 +1214,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         }
 
         // process shredding data
+        const auto& numeric_bound = expr_->val_;
         auto try_execute = [&](milvus::index::JSONType json_type,
                                auto GetType,
                                auto ValType) {
@@ -1221,18 +1222,50 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
             if (!target_field.empty()) {
                 using ColType = decltype(GetType);
                 using ValType = decltype(ValType);
+                constexpr bool kNumericColumn =
+                    std::is_same_v<ColType, int64_t> ||
+                    std::is_same_v<ColType, double>;
+                constexpr bool kNumericValue =
+                    std::is_same_v<ValType, int64_t> ||
+                    std::is_same_v<ValType, double>;
                 TargetBitmap target_res(active_count_, false);
                 TargetBitmapView target_res_view(target_res);
                 TargetBitmap target_valid(active_count_, true);
                 TargetBitmapView target_valid_view(target_valid);
-                ShreddingExecutor<ColType, ValType> executor(
-                    op_type, pointer, val);
-                index->ExecutorForShreddingData<ColType>(op_ctx_,
-                                                         target_field,
-                                                         executor,
-                                                         nullptr,
-                                                         target_res_view,
-                                                         target_valid_view);
+                if constexpr (kNumericColumn && kNumericValue) {
+                    auto executor = [op_type, &numeric_bound](
+                                        const ColType* src,
+                                        const bool* valid,
+                                        size_t size,
+                                        TargetBitmapView res,
+                                        TargetBitmapView valid_res) {
+                        for (size_t i = 0; i < size; ++i) {
+                            if (valid != nullptr && !valid[i]) {
+                                res[i] = valid_res[i] = false;
+                                continue;
+                            }
+                            auto comparison =
+                                CompareJsonNumberToBound(src[i], numeric_bound);
+                            res[i] = comparison.has_value() &&
+                                     JsonNumberMatchesOp(*comparison, op_type);
+                        }
+                    };
+                    index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                             target_field,
+                                                             executor,
+                                                             nullptr,
+                                                             target_res_view,
+                                                             target_valid_view);
+                } else {
+                    ShreddingExecutor<ColType, ValType> executor(
+                        op_type, pointer, val);
+                    index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                             target_field,
+                                                             executor,
+                                                             nullptr,
+                                                             target_res_view,
+                                                             target_valid_view);
+                }
                 res_view.inplace_or_with_count(target_res_view, active_count_);
                 valid_res_view.inplace_or_with_count(target_valid_view,
                                                      active_count_);
@@ -1318,6 +1351,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         auto shared_executor = [op_type,
                                 val,
                                 array_index,
+                                &numeric_bound,
                                 &res_view,
                                 &valid_res_view,
                                 &context](milvus::BsonView bson,
@@ -1364,84 +1398,53 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                             : !CompareTwoJsonArray(array_value.value(), val));
                 }
             } else {
-                std::optional<GetType> get_value;
-                if (array_index != INVALID_ARRAY_INDEX) {
-                    auto array_value = bson.ParseAsArrayAtOffset(value_offset);
-                    if (!array_value.has_value()) {
+                if constexpr (std::is_same_v<GetType, int64_t> ||
+                              std::is_same_v<GetType, double>) {
+                    std::optional<int> comparison;
+                    if (array_index != INVALID_ARRAY_INDEX) {
+                        auto array_value =
+                            bson.ParseAsArrayAtOffset(value_offset);
+                        if (!array_value.has_value()) {
+                            set_unknown(row_id);
+                            return;
+                        }
+                        comparison = CompareBsonArrayNumberToBound(
+                            *array_value, array_index, numeric_bound);
+                    } else {
+                        comparison = CompareBsonNumberToBound(
+                            bson, value_offset, numeric_bound);
+                    }
+                    if (!comparison.has_value()) {
                         set_unknown(row_id);
                         return;
                     }
-                    get_value = milvus::BsonView::GetNthElementInArray<GetType>(
-                        array_value.value().data(), array_index);
-                    // If GetType is int and value is not found, try double
-                    if constexpr (std::is_same_v<GetType, int64_t>) {
-                        if (!get_value.has_value()) {
-                            auto get_value =
-                                milvus::BsonView::GetNthElementInArray<double>(
-                                    array_value.value().data(), array_index);
-                            if (get_value.has_value()) {
-                                set_known(row_id,
-                                          UnaryCompare(
-                                              get_value.value(), val, op_type));
-                            } else {
-                                set_unknown(row_id);
-                            }
-                            return;
-                        }
-                    } else if constexpr (std::is_same_v<GetType, double>) {
-                        if (!get_value.has_value()) {
-                            auto get_value =
-                                milvus::BsonView::GetNthElementInArray<int64_t>(
-                                    array_value.value().data(), array_index);
-                            if (get_value.has_value()) {
-                                set_known(row_id,
-                                          UnaryCompare(
-                                              get_value.value(), val, op_type));
-                            } else {
-                                set_unknown(row_id);
-                            }
-                            return;
-                        }
-                    }
-                } else {
-                    get_value =
-                        bson.ParseAsValueAtOffset<GetType>(value_offset);
-                    // If GetType is int and value is not found, try double
-                    if constexpr (std::is_same_v<GetType, int64_t>) {
-                        if (!get_value.has_value()) {
-                            auto get_value =
-                                bson.ParseAsValueAtOffset<double>(value_offset);
-                            if (get_value.has_value()) {
-                                set_known(row_id,
-                                          UnaryCompare(
-                                              get_value.value(), val, op_type));
-                            } else {
-                                set_unknown(row_id);
-                            }
-                            return;
-                        }
-                    } else if constexpr (std::is_same_v<GetType, double>) {
-                        if (!get_value.has_value()) {
-                            auto get_value = bson.ParseAsValueAtOffset<int64_t>(
-                                value_offset);
-                            if (get_value.has_value()) {
-                                set_known(row_id,
-                                          UnaryCompare(
-                                              get_value.value(), val, op_type));
-                            } else {
-                                set_unknown(row_id);
-                            }
-                            return;
-                        }
-                    }
-                }
-                if (!get_value.has_value()) {
-                    set_unknown(row_id);
+                    set_known(row_id,
+                              JsonNumberMatchesOp(*comparison, op_type));
                     return;
+                } else {
+                    std::optional<GetType> get_value;
+                    if (array_index != INVALID_ARRAY_INDEX) {
+                        auto array_value =
+                            bson.ParseAsArrayAtOffset(value_offset);
+                        if (!array_value.has_value()) {
+                            set_unknown(row_id);
+                            return;
+                        }
+                        get_value =
+                            milvus::BsonView::GetNthElementInArray<GetType>(
+                                array_value.value().data(), array_index);
+                    } else {
+                        get_value =
+                            bson.ParseAsValueAtOffset<GetType>(value_offset);
+                    }
+                    if (!get_value.has_value()) {
+                        set_unknown(row_id);
+                        return;
+                    }
+                    set_known(row_id,
+                              UnaryCompare(
+                                  get_value.value(), val, op_type, &context));
                 }
-                set_known(
-                    row_id,
-                    UnaryCompare(get_value.value(), val, op_type, &context));
             }
         };
 
