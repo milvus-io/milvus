@@ -452,6 +452,30 @@ constraint: while a fold is in flight the writer must not prune the
 manifest swap commits, the writer drops the `≤ fold_ts` entries (freed via
 EBR).
 
+**Invariants (the correctness contract to test).** The model reduces to five
+invariants; a Phase-1 TSan/stress harness must exercise all five:
+
+- **I1 — single mutator.** Exactly one thread mutates a given overlay; apply,
+  prune, and fold-drop all run on that writer thread. No writer-writer race
+  exists by construction.
+- **I2 — immutable nodes.** A version-chain node is never modified after
+  publication; the only write to a live slot is an atomic release-store of a
+  new head pointer.
+- **I3 — publication safety.** A reader's acquire-load of a head is paired
+  with the writer's release-store, so it observes a fully-constructed node
+  (no torn reads).
+- **I4 — no use-after-free.** A node unlinked by prune/fold-drop is freed
+  only after every epoch that could still reference it has advanced (EBR).
+- **I5 — fold/prune ordering.** While a fold is in flight the writer does not
+  prune `≤ fold_ts`; it drops that region only after the manifest swap
+  commits.
+
+Memory ordering is release/acquire on the per-offset head pointer and on the
+per-chunk overlay pointer + patched-count; everything else is single-writer
+and needs no atomics. This is the same generation-guard shape Vespa runs in
+production for mutable attributes, but it is **designed here, not yet
+stress-tested** — see "Validation Status".
+
 ### Deltalog lifecycle — immutable, never edited in place
 
 Deltalogs are immutable, exactly like delete deltalogs. Nothing is ever
@@ -887,6 +911,45 @@ part of the segment's file set and are reloaded with the segment (see
 - **Observability.** Patch ratio, overlay bytes, fold rate/lag, and
   backpressure events need first-class metrics, or query-performance
   regressions and write throttling become undiagnosable.
+
+## Validation Status
+
+Stated explicitly so a reviewer can see the confidence level of each claim.
+Prototypes live in `mutable-columns-prototype/`.
+
+**Validated by standalone prototype (executable evidence):**
+
+- Read-path performance: clean-chunk zero-overhead, the dense-chunk cost
+  curve, and the **refutation of materialize-then-scan** (`patch_bench.cpp`).
+  The design was corrected as a result.
+- Folding algebra + MVCC correctness for scalar SET/INCR, the `fold_ts`
+  watermark, and array APPEND/REMOVE `(R,S)` — 200k property-test cases each
+  (`fold_correctness.cpp`). This pass **refuted the original
+  APPEND/POP_FRONT `(k,S)` claim** and the design was corrected.
+
+**Asserted from code/doc reading, not build-verified:**
+
+- Reuse of the offset-input evaluation path and a data-access-layer
+  `PatchedColumnView` in segcore.
+- Streaming integration: the new codegen message type, PK→channel affinity,
+  L0 routing, and CDC/recovery reuse (checked against the streaming-system
+  docs, not a build).
+- Bit-packed `TargetBitmap` makes the clean scan cheaper than the prototype's
+  `uint8` buffer — which makes the dense-chunk multipliers *larger* than
+  reported (the prototype numbers are conservative).
+- PK→offset apply cost is delete-equivalent.
+
+**To validate during implementation (Phase-1 gates, in priority order):**
+
+1. **Overlay concurrency (I1–I5) under TSan** with concurrent readers +
+   writer + pruner + an in-flight fold. Highest-risk unproven piece; the
+   model is designed but not stress-tested.
+2. **POP_FRONT prune-materialization** end-to-end: prune collapses the chain
+   to a floor list at `safe_ts`, later ops still materialize correctly.
+   Extend `fold_correctness.cpp` to cover it.
+3. **Overlay memory and PK-apply throughput** at the target write rate,
+   benchmarked against the delete-path baseline; ARRAY arena memory density
+   separately.
 
 ## Implementation Phases
 
