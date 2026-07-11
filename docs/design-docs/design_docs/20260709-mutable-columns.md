@@ -841,23 +841,35 @@ part of the segment's file set and are reloaded with the segment (see
 
 ## Known Risks
 
-- **Overlay memory under wide updates.** Hot-row workloads are bounded, but
-  a workload touching many distinct rows grows the overlay linearly until
-  folding. With the v1 type set this is far smaller than a design including
-  text/JSON blobs; ARRAY is the one type needing arena management and is
-  the main memory risk. Stress-test first. (The read-side counterpart of
-  wide updates — a dense overlay chunk costing ~9–14× a clean scan — is
-  bounded by the fold cadence, not a read-path fallback; see "Dense-overlay
-  chunks".)
-- **PK routing amplification.** Every update probes segment bloom filters on
-  every query node, the same cost structure as heavy-delete workloads —
-  already a known pain point. High-frequency updates double down on it;
-  benchmark against the delete path early.
+- **Overlay memory — bounded by construction, not a blow-up risk.**
+  Memory-driven folding plus the hard-watermark backpressure make it
+  physically impossible for the overlay to exceed its budget: the write
+  path throttles before the node OOMs. At a steady state of ~48 bytes per
+  distinct dirty row (one floor node + slot), a 2 GB budget holds ~42M
+  dirty rows; the `offline_time` workload (~1,700 distinct rows/s, an
+  event stream over a fraction of the collection) sits in the tens of MB
+  and folds every few minutes. The residual is throughput, not safety:
+  fold rate must keep up with the write rate, else the write path throttles
+  (the intended behavior). Effective capacity in rows = budget / ~48 B —
+  size the budget accordingly. ARRAY is the one type with higher memory
+  density (arena, variable-length values) and is worth its own stress test;
+  fixed-width scalars are not a concern.
+- **PK apply cost = the delete path's cost.** The overlay is keyed by
+  offset, so each patch needs a PK→offset resolution before it applies:
+  a PK-index lookup on sealed segments (the *same* index delete application
+  uses), an O(1) map lookup on growing segments. On the routing side, L0
+  compaction bloom-tests a patch's PK against segments exactly as deletes
+  do. Both facets inherit the delete path's already-optimized machinery, so
+  at ~1,700/s the cost is negligible; the only ceiling — bloom fan-out
+  across all segments × query nodes at extreme rates — is identical for
+  patches and deletes and is not newly introduced here. Benchmark against
+  the delete-path baseline to confirm, but treat it as delete-equivalent,
+  not a novel risk.
 - **Load-time replay.** Segment load replays patch deltalogs into the
   overlay. Folding discipline bounds this.
-- **Observability.** Patch ratio, overlay bytes, and folding lag need
-  first-class metrics, or query-performance regressions become
-  undiagnosable.
+- **Observability.** Patch ratio, overlay bytes, fold rate/lag, and
+  backpressure events need first-class metrics, or query-performance
+  regressions and write throttling become undiagnosable.
 
 ## Implementation Phases
 
