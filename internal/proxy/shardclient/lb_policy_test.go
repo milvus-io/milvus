@@ -695,7 +695,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryInputErrorNotRetried() {
 	ctx := context.Background()
 	channel := s.channels[0]
 	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
-	s.lbPolicy.retryOnReplica = 3
+	s.setRetryTimesOnReplica("3")
 
 	s.mgr.ExpectedCalls = nil
 	s.lbBalancer.ExpectedCalls = nil
