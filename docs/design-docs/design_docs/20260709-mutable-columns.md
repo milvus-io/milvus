@@ -211,27 +211,39 @@ three ops besides SET:
   the first match lives in the base or in the appended suffix is unknowable
   without reading the base.
 
-Folding: any interleaving of APPEND/POP_FRONT folds exactly to
-`(pop_count k, suffix S)` — pops always consume the current head and
-appends always extend the tail, so the result is `(base ⧺ S)` minus its
-first `k` elements, computable at read time with no base access during
-compaction. Any interleaving of APPEND/REMOVE folds exactly to
-`(remove_set R, surviving suffix S)`. Sequences interleaving POP_FRONT
-*with* REMOVE do not fully compress (their order of action on the unseen
-base matters); patch compaction keeps them as a compacted symbolic op chain
-and full materialization happens at column folding, where the base is in
-hand. Correctness is unaffected; only compression ratio suffers, and the
-two realistic workloads (sliding window = APPEND+POP, tags = APPEND+REMOVE)
-each fold perfectly.
+**Folding — which forms are base-free (property-tested).** Two op families
+fold to an exact, base-free floor (no base read below `safe_ts`): a run of
+scalar INCRs sums, and any interleaving of APPEND/REMOVE folds to
+`(remove_set R, surviving suffix S)` — remove-all-occurrences has no
+underflow, so `R` applies to base only at read.
+
+**POP_FRONT has no base-free closed form.** Whether a POP is a real removal
+or a no-op on an already-empty list depends on `len(base)`, which is not
+available during base-free folding, so the tempting `(pop_count k, suffix S)`
+closed form is **wrong** — it miscounts pops-on-empty and lets a later
+APPEND's element be dropped. A property test over 200k random APPEND/POP
+sequences fails ~12% on exactly this (e.g. `base=[]`, ops `POP, APPEND(7)`:
+naive `[7]`, `(k,S)` gives `[]`). POP_FRONT is therefore kept as a
+**coalesced symbolic op-chain** (consecutive APPENDs merge) and resolved
+against base where base is in hand: at read, at column folding, and — to
+keep memory bounded — at overlay **pruning**, which for a POP-containing row
+materializes the chain against the locally-available base into a floor list.
+Pruning runs on the writer thread *off* the per-patch apply path, so reading
+base there is allowed (the no-base-read rule governs the apply hot path, not
+background pruning). POP×REMOVE mixes are symbolic-until-materialize the same
+way. Correctness holds in every case; the exact base-free floors are only
+the two above (scalar SET/INCR, INCR-watermark, and APPEND/REMOVE `(R,S)`
+each pass 200k property-test cases).
 
 **What an array patch actually stores:** an op's operand is only its
 arguments — APPEND stores just the appended elements, REMOVE stores one
 value, POP_FRONT stores nothing; **SET is the only op that carries a full
-array**. Neither the deltalog nor the overlay ever holds a materialized
-full array: materialization happens per read (base ⊕ folded ops), and the
-only durable full-array form is the column file written at folding. A row
-appended to 10,000 times costs the overlay one folded suffix, not 10,000
-array copies.
+array**. Deltalogs never hold a materialized full array. The overlay holds
+ops / `(R,S)` / appended suffixes, with one exception: a POP-containing row,
+once pruned, holds its materialized floor list (the current window
+contents — inherent data the user is storing, not overhead). A row appended
+to 10,000 times without pops costs the overlay one folded suffix, not
+10,000 array copies.
 
 Rejected by the admission rule, permanently: index-addressed ops
 (LSET/LINSERT — ambiguous under concurrent APPEND, weak use case),
@@ -346,10 +358,14 @@ makes the "no patches here" fast path a single branch.
   consistency staleness window; a query below it is impossible by
   construction, so history below it is dead and purgeable (the same
   contract that lets MVCC databases vacuum). The pruner is also what
-  recycles arena blocks. In steady state each updated row holds one live
-  node — overlay memory is bounded by the number of *distinct* updated
-  rows, not by update frequency. A hot counter updated 1000×/s occupies
-  one slot.
+  recycles arena blocks. For base-free op families (SET/INCR,
+  APPEND/REMOVE) the floor node is relative and needs no base; for a
+  POP_FRONT-containing array row the pruner reads the (locally available)
+  base to collapse the chain into a floor list (allowed here because
+  pruning is off the per-patch apply path — see "Array mutation ops"). In
+  steady state each updated row holds one live node — overlay memory is
+  bounded by the number of *distinct* updated rows, not by update
+  frequency. A hot counter updated 1000×/s occupies one slot.
 - Overlay memory is accounted against the query/data node memory quota and
   participates in backpressure.
 - **The overlay is heap-resident only — it cannot be file-backed mmap'd**
@@ -593,10 +609,11 @@ patch-aware in **v1** — numeric columns are exactly what they serve:
 Two levels keep patch volume bounded:
 
 1. **Patch compaction.** Multiple deltalogs for a segment are merged and
-   folded per PK using the op folding rules (SET absorbs, INCR sums, array
-   ops fold to `(k, S)` / `(R, S)` or a compacted symbolic chain), below
-   the safe timestamp. This is what absorbs high-frequency counter
-   workloads. Output is still deltalog format.
+   folded per PK using the op folding rules (SET absorbs, INCR sums,
+   APPEND/REMOVE → `(R, S)`, POP_FRONT stays a coalesced symbolic chain —
+   see "Array mutation ops"), below the safe timestamp. This is what
+   absorbs high-frequency counter workloads. Output is still deltalog
+   format.
 2. **Column folding.** When the patch ratio for (segment, column) exceeds a
    threshold, rewrite that single column file with patches applied
    (materializing INCRs against the base — the one place deltas become
@@ -911,15 +928,19 @@ delete-path baseline.
 Scope: additive on Phase 1; no write-path or format changes.
 
 - Overlay arena for variable-length values; op-chain version nodes with
-  `(k, S)` / `(R, S)` exact folding and the symbolic-chain fallback;
-  property tests for folding rules.
-- Proxy validation for array ops; max_capacity clamping at
-  materialization; NULL-base semantics; array predicate fix-up
-  (`array_contains`, `array_length`) through PatchedColumnView.
+  `(R, S)` exact folding for APPEND/REMOVE and the base-materialized
+  coalesced symbolic chain for POP_FRONT (no base-free closed form —
+  established by the folding property test, see prototype).
+- Prune-materializes-against-base path for POP-containing rows (keeps
+  overlay memory ∝ distinct rows); proxy validation for array ops;
+  max_capacity clamping at materialization; NULL-base semantics; array
+  predicate fix-up (`array_contains`, `array_length`) through
+  PatchedColumnView.
 
-Exit criteria: array predicates and outputs correct under all op
-interleavings (property-tested); hot-row read cost within the pruning
-window benchmarked.
+Exit criteria: the folding property test (already green for scalar SET/INCR,
+watermark, and `(R,S)`) extended to cover the POP prune-materialization path
+under all op interleavings; hot-row read cost within the pruning window
+benchmarked.
 
 ### Phase 3 — Index support via result correction
 
