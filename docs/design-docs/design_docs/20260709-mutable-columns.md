@@ -404,19 +404,47 @@ predicates (`array_contains` etc.) evaluate row-wise against the arena
 value. Existing conjunct reordering should schedule mutable-column
 predicates after indexed/cheap predicates so they run on surviving rows.
 
-**Dense-overlay chunks.** Row-wise fix-up is the right strategy only while
-patches are sparse. Under wide-update workloads (the `offline_time`
-scenario in Motivation), a large fraction of a chunk may be patched
-between folds, and re-evaluating half a chunk row-by-row is one to two
-orders of magnitude slower than SIMD — and such columns are exactly the
-ones queried with range filters (`offline_time > now - 5min`). When a
-chunk's patched fraction exceeds a threshold, the evaluator therefore
-switches to **materialize-then-scan**: gather the chunk's current values
-(base + overlay at the query timestamp) into a scratch columnar buffer
-once, then run the normal vectorized kernel over it. Cost becomes
-O(chunk) copy + SIMD instead of O(patched) scalar evaluations; the
-crossover threshold is a tuning parameter (expected in the 5–10% range,
-to be benchmarked).
+**Dense-overlay chunks — measured, and the fix-up path is optimal.** Under
+wide-update workloads (the `offline_time` scenario in Motivation) a large
+fraction of a chunk may be patched between folds, and re-evaluating those
+rows one at a time is genuinely expensive. A standalone microbenchmark
+reproducing the segcore kernel (32768-row int64 chunk, `x > c` predicate,
+overlay lookup + version-chain materialize per dirty row; Apple M-series,
+clang -O3 -march=native) quantifies it:
+
+| patched fraction | fix-up (SET) | fix-up (INCR ×3) | clean-chunk base scan |
+|---|---|---|---|
+| 0% | 4.08 µs | 4.14 µs | 4.08 µs |
+| 1% | 4.96 | 6.05 | — |
+| 5% | 10.3 | 11.9 | — |
+| 10% | 13.9 | 19.2 | — |
+| 50% | 36.2 | 57.4 | — |
+
+Two conclusions:
+
+- **Clean chunks cost exactly the base scan** (4.08 µs = 4.08 µs). The
+  per-chunk patched-count fast path is free; an empty overlay is one
+  branch.
+- **A dense chunk is ~9–14× the clean scan** at 50% patched — the concern
+  is real.
+
+An earlier draft proposed a *materialize-then-scan* fallback for dense
+chunks (gather current values into a scratch buffer, run the vectorized
+kernel). The benchmark **refutes it**: materializing a 32768-row chunk
+requires a 256KB memcpy costing ~3.2 µs — ~78% of a full scan — and since
+both paths pay the identical per-row materialize, materialize-then-scan is
+strictly memcpy-worse at *every* density, including 50%. The reason
+fix-up is already optimal: it does exactly one SIMD base scan plus O(dirty)
+scalar work; its only waste is scanning dirty rows twice, but half a wasted
+SIMD scan (~2 µs) is cheaper than the memcpy a scratch buffer costs.
+
+Therefore **there is no read-path fallback**; row-wise fix-up is used at all
+densities. The lever that keeps dense chunks from persisting is the
+**folding cadence**: folding a (segment, column) resets its chunks to clean,
+so the fold trigger doubles as the read-cost bound. Folding at a ~20%
+patched ratio (matching today's compaction threshold) caps steady-state
+read overhead near 5× the clean scan for the hot column, while every other
+column in the segment stays at 1×.
 
 Implementation decisions (fixed here so the implementation doesn't
 re-litigate them):
@@ -494,12 +522,14 @@ final backstop that throttles the write path when cleanup cannot keep up.
 folding threshold at roughly the same time. Per-segment folding cost is
 small — one narrow column rewrite, no vectors, no indexes — but the
 scheduler must still stagger folds to avoid manifest-update and IO
-bursts. The same reasoning carries into Phase 3: **very-high-churn
-columns should stay unindexed even once indexes are available** — their
-patched fraction sits high between folds, so result correction degrades
-toward brute force anyway while forcing continuous index-rebuild churn;
-brute force with the dense-chunk materialize-then-scan path is simply the
-right plan for them.
+bursts. The fold ratio is also the read-cost knob: because a dense chunk
+costs ~9–14× a clean scan (see "Dense-overlay chunks"), folding at ~20%
+keeps steady-state read overhead on the hot column near 5×. The same
+reasoning carries into Phase 3: **very-high-churn columns should stay
+unindexed even once indexes are available** — their patched fraction sits
+high between folds, so result correction degrades toward brute force
+anyway while forcing continuous index-rebuild churn; plain brute-force
+fix-up plus an aggressive fold cadence is the right plan for them.
 
 ## Path to Indexed Mutable Columns (Post-v1)
 
@@ -670,7 +700,9 @@ part of the segment's file set and are reloaded with the segment (see
   folding. With the v1 type set this is far smaller than a design including
   text/JSON blobs; ARRAY is the one type needing arena management and is
   the main memory risk. Stress-test first. (The read-side counterpart of
-  wide updates is covered by the dense-chunk materialize-then-scan path.)
+  wide updates — a dense overlay chunk costing ~9–14× a clean scan — is
+  bounded by the fold cadence, not a read-path fallback; see "Dense-overlay
+  chunks".)
 - **PK routing amplification.** Every update probes segment bloom filters on
   every query node, the same cost structure as heavy-delete workloads —
   already a known pain point. High-frequency updates double down on it;
@@ -702,10 +734,10 @@ Scope: the entire vertical slice for INT/FLOAT/DOUBLE/BOOL/TIMESTAMPTZ.
   recovery replay; CDC message type.
 - QueryNode: overlay (chunk-partitioned, inline fixed-width version chains,
   safe-ts pruning, memory quota); **PatchedColumnView** at the data access
-  layer; expression fix-up via the offset-input path, with the dense-chunk
-  materialize-then-scan fallback; SkipIndex unconditional-fix-up rule;
-  expression-cache disable; output-field materialization;
-  nullable/validity overlay.
+  layer; expression fix-up via the offset-input path (row-wise at all
+  densities — see "Dense-overlay chunks" for why no fallback is needed);
+  SkipIndex unconditional-fix-up rule; expression-cache disable;
+  output-field materialization; nullable/validity overlay.
 - Background: patch compaction (SET/INCR folding), column folding with
   `fold_ts` watermark + manifest swap, folding scheduling policy v0.
 - Ops: feature gate, metrics (patch ratio / overlay bytes / fold lag).
@@ -762,5 +794,8 @@ curves published and thresholds set from them.
   index-fallback thresholds (likely yes).
 - The patch-ratio threshold at which index result correction becomes slower
   than pure brute force (needs benchmarking per index type).
-- The dense-chunk materialize-then-scan crossover threshold (expected
-  5–10% patched fraction; benchmark).
+- The column-folding trigger ratio that best balances read-cost bound
+  (dense-chunk overhead) against fold IO. A microbenchmark puts a 50%-dirty
+  chunk at ~9–14× the clean scan; folding at ~20% caps the hot column near
+  5×. Confirm on the real segcore kernel with bit-packed TargetBitmap
+  (which makes the clean scan cheaper and thus the dense multiplier larger).
