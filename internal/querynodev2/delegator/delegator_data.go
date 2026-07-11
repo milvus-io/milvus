@@ -1028,7 +1028,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	sd.deleteMut.RUnlock()
 	// RLock released — WAL pipeline (ProcessDelete) is now unblocked
 
-	// Create one forwarder per segment, shared across Phase 2 and Phase 3, flushed once at the end.
+	// Create one forwarder per segment, shared across Phase 2 and Phase 3.
 	forwarders := make([]*BufferForwarder, len(infos))
 	for i, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
@@ -1061,50 +1061,135 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		)
 	}
 
-	// === Phase 3: Catch-up new entries + flush + add distribution under RLock (fast — milliseconds) ===
-	sd.deleteMut.RLock()
-	defer sd.deleteMut.RUnlock()
-
-	for i, info := range infos {
-		candidate := idCandidates[info.GetSegmentID()]
-
-		// Use timestamp-based catch-up: fetch records added after the snapshot's max timestamp.
-		// This is robust against delete buffer eviction (Put → evict discards old tail during Phase 2).
-		// Index-based approach (allRecords[snapshotLen:]) would panic or miss data if eviction occurs.
-		// Item.Ts comes from WAL TSO, monotonically increasing and unique per ProcessDelete call,
-		// so ListAfter(snapshotMaxTs + 1) precisely captures only new records.
-		catchUpTs := segmentEffectiveTs(info)
-		if snapshots[i].snapshotMaxTs > 0 {
-			catchUpTs = snapshots[i].snapshotMaxTs + 1
-		}
-		newRecords := sd.deleteBuffer.ListAfter(catchUpTs)
-		if len(newRecords) > 0 {
-			start := time.Now()
-			tsHit, bfHit, err := sd.processDeleteRecords(candidate, newRecords, forwarders[i])
-			if err != nil {
-				return err
-			}
-			log.Info(ctx, "forward delete to worker (phase 3: catch-up)...",
-				mlog.String("channel", info.InsertChannel),
-				mlog.FieldSegmentID(info.GetSegmentID()),
-				mlog.Int64("tsHitDeleteRowNum", tsHit),
-				mlog.Int64("bfHitDeleteRowNum", bfHit),
-				mlog.Int64("bfCost", time.Since(start).Milliseconds()),
-			)
-		}
-
-		// Flush once per segment after both phases are done
+	// === Phase 2.5: Flush the bulk snapshot payload WITHOUT the lock ===
+	// This is where the expensive worker.Delete → LoadDeltaData apply happens
+	// (potentially tens of seconds for huge replays, see issue #49435).
+	// Holding deleteMut across it would starve ProcessDelete — the single
+	// writer that also advances tsafe — and freeze the whole channel.
+	for i := range infos {
 		if err := forwarders[i].Flush(); err != nil {
 			return err
 		}
 	}
 
-	// Atomically add to distribution while still holding RLock.
-	// This guarantees no ProcessDelete can run between catch-up and distribution update,
-	// so there is no gap between "deletes applied" and "segment visible".
-	if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
-		return err
+	// Per-segment catch-up cursors. Timestamp-based catch-up is robust against
+	// delete buffer eviction (Put → evict discards old tail while we run
+	// lock-free). Item.Ts comes from WAL TSO, monotonically increasing, so
+	// ListAfter(lastTs + 1) precisely captures only newer records.
+	catchUpTs := make([]uint64, len(infos))
+	for i, info := range infos {
+		catchUpTs[i] = segmentEffectiveTs(info)
+		if snapshots[i].snapshotMaxTs > 0 {
+			catchUpTs[i] = snapshots[i].snapshotMaxTs + 1
+		}
 	}
+
+	// === Phase 3: catch-up the live delete stream, then publish. ===
+	// Normal catch-up forwards (worker.Delete, a cross-node RPC) are done WITHOUT
+	// the lock: deleteMut excludes ProcessDelete, the single writer that advances
+	// tsafe, so awaiting an RPC under it would refreeze the channel exactly when
+	// the worker is saturated by a load storm (issue #49435). The only exception
+	// is the bounded final barrier below, used after several lock-free attempts
+	// fail to find a quiet point.
+	//
+	// Each lock-free round forwards only the deletes that arrived during the
+	// previous round, so the remainder usually shrinks quickly. If arrivals keep
+	// the buffer non-empty past maxLockFreeCatchUpRounds, do one final catch-up
+	// while holding RLock and publish before unlocking. That bounded barrier is
+	// the termination escape hatch: ProcessDelete cannot interleave, so after
+	// this tail is applied, "all buffered deletes applied" and "segment visible"
+	// become atomic. New deletes after unlock see the segment in distribution
+	// and use the normal streaming forward path. The expensive bulk snapshot
+	// replay remains lock-free; only the small live tail falls back to the
+	// locked barrier.
+	const maxLockFreeCatchUpRounds = 5
+	pending := make([][]*deletebuffer.Item, len(infos))
+	for round := 0; ; round++ {
+		sd.deleteMut.RLock()
+		remaining := 0
+		for i := range infos {
+			pending[i] = sd.deleteBuffer.ListAfter(catchUpTs[i])
+			remaining += len(pending[i])
+		}
+
+		// Drained: publish while still holding RLock. No Flush is called here:
+		// the normal catch-up path keeps worker.Delete RPCs outside deleteMut,
+		// otherwise a saturated worker can starve ProcessDelete and freeze tsafe.
+		if remaining == 0 {
+			// Atomically add to distribution while still holding RLock, so no
+			// ProcessDelete can run between "deletes applied" and "segment
+			// visible".
+			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+				sd.deleteMut.RUnlock()
+				return err
+			}
+			sd.deleteMut.RUnlock()
+			break
+		}
+
+		if round >= maxLockFreeCatchUpRounds {
+			log.Info(ctx, "loadStreamDelete catch-up exceeded expected rounds; applying final locked barrier",
+				mlog.Int("round", round),
+				mlog.Int("remainingDeleteRecords", remaining))
+			for i, info := range infos {
+				if len(pending[i]) == 0 {
+					continue
+				}
+				candidate := idCandidates[info.GetSegmentID()]
+				start := time.Now()
+				tsHit, bfHit, err := sd.processDeleteRecords(candidate, pending[i], forwarders[i])
+				if err != nil {
+					sd.deleteMut.RUnlock()
+					return err
+				}
+				if err := forwarders[i].Flush(); err != nil {
+					sd.deleteMut.RUnlock()
+					return err
+				}
+				log.Info(ctx, "forward delete to worker (phase 3: final locked catch-up)...",
+					mlog.String("channel", info.InsertChannel),
+					mlog.FieldSegmentID(info.GetSegmentID()),
+					mlog.Int("round", round),
+					mlog.Int64("tsHitDeleteRowNum", tsHit),
+					mlog.Int64("bfHitDeleteRowNum", bfHit),
+					mlog.Int64("bfCost", time.Since(start).Milliseconds()),
+				)
+			}
+			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+				sd.deleteMut.RUnlock()
+				return err
+			}
+			sd.deleteMut.RUnlock()
+			break
+		}
+		sd.deleteMut.RUnlock()
+
+		// Forward this round's arrivals OUTSIDE the lock.
+		for i, info := range infos {
+			if len(pending[i]) == 0 {
+				continue
+			}
+			candidate := idCandidates[info.GetSegmentID()]
+			start := time.Now()
+			tsHit, bfHit, err := sd.processDeleteRecords(candidate, pending[i], forwarders[i])
+			if err != nil {
+				return err
+			}
+			if err := forwarders[i].Flush(); err != nil {
+				return err
+			}
+			catchUpTs[i] = pending[i][len(pending[i])-1].Ts + 1
+			log.Info(ctx, "forward delete to worker (phase 3: lock-free catch-up)...",
+				mlog.String("channel", info.InsertChannel),
+				mlog.FieldSegmentID(info.GetSegmentID()),
+				mlog.Int("round", round),
+				mlog.Int64("tsHitDeleteRowNum", tsHit),
+				mlog.Int64("bfHitDeleteRowNum", bfHit),
+				mlog.Int64("bfCost", time.Since(start).Milliseconds()),
+			)
+		}
+	}
+
 	log.Info(ctx, "load stream delete done")
 	return nil
 }
