@@ -1253,6 +1253,54 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	suite.Len(result, 0, "Should release all segments when partition is nil")
 }
 
+// TestFilterOutSegmentAheadOfCurrent covers the promote-race case where a delegator's
+// readable target version is AHEAD of the current target version (view > current).
+// In that state the redundant segment may still be part of the delegator's readable set,
+// so releasing it would drop loadedRatio below 1.0 and make the shard unserviceable.
+// The segment must be protected (filtered out of the release set) until the versions
+// reconcile, exactly like the view < current lagging case.
+func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentAheadOfCurrent() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	collectionID := int64(1)
+	partitionID := int64(1)
+	segmentID := int64(1)
+	nodeID := int64(1)
+	channel := "test-insert-channel"
+
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+	replica := utils.CreateTestReplica(1, collectionID, []int64{nodeID})
+
+	channels := []*datapb.VchannelInfo{
+		{CollectionID: collectionID, ChannelName: channel},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		channels, []*datapb.SegmentInfo{}, nil).Maybe()
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+
+	// delegator readable view is ahead of current (promote race)
+	leaderView := utils.CreateTestLeaderView(nodeID, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{})
+	leaderView.TargetVersion = currentTargetVersion + 1
+	checker.dist.ChannelDistManager.Update(nodeID, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channel},
+		Node:         nodeID,
+		View:         leaderView,
+	})
+
+	seg := utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 1, channel)
+	delegatorList := checker.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+		return d.View.Channel
+	})
+
+	result := checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{seg}, ch2DelegatorList)
+	suite.Len(result, 0, "Segment must be protected when delegator view is ahead of current target")
+}
+
 func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 	ctx := context.Background()
 	checker := suite.checker
