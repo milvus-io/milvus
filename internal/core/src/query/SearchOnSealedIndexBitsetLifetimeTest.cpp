@@ -118,6 +118,15 @@ AssertVectorIteratorUsableAfterSearchReturns(SearchResult& search_result,
     ASSERT_GT(result_count, 0);
 }
 
+segcore::SealedIndexingEntry
+MakeSealedIndexingEntry(const MetricType& metric_type,
+                        index::CacheIndexBasePtr indexing) {
+    segcore::SealedIndexingEntry entry;
+    entry.metric_type_ = metric_type;
+    entry.indexing_ = std::move(indexing);
+    return entry;
+}
+
 const DataArray&
 FindFieldData(const segcore::GeneratedData& dataset, FieldId field_id) {
     for (const auto& field_data : dataset.raw_->fields_data()) {
@@ -233,9 +242,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     ASSERT_NE(vector_index, nullptr);
     ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
 
-    segcore::SealedIndexingRecord indexing_record;
-    indexing_record.append_field_indexing(
-        vector_field,
+    auto indexing_entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
         CreateTestCacheIndex("nullable-vector-bitset-lifetime",
                              std::move(index_base)));
@@ -249,7 +256,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
 
     SearchResult search_result;
     SearchOnSealedIndex(*schema,
-                        indexing_record,
+                        indexing_entry,
                         search_info,
                         query.data(),
                         nullptr,
@@ -279,9 +286,7 @@ TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
 
     milvus::OpContext* observed_ctx = nullptr;
-    segcore::SealedIndexingRecord indexing_record;
-    indexing_record.append_field_indexing(
-        vector_field,
+    auto indexing_entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
         CreateTestCacheIndex("cancellable-search-on-sealed-index",
                              std::move(index_base),
@@ -300,7 +305,7 @@ TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
     milvus::OpContext op_context(source.getToken());
     SearchResult search_result;
     SearchOnSealedIndex(*schema,
-                        indexing_record,
+                        indexing_entry,
                         search_info,
                         vectors.data(),
                         nullptr,
@@ -334,9 +339,7 @@ TEST(SearchOnSealedIndexNullableNoFilter,
     ASSERT_TRUE(vector_index->GetOffsetMapping().IsEnabled());
     ASSERT_EQ(vector_index->GetOffsetMapping().GetValidCount(), valid_count);
 
-    segcore::SealedIndexingRecord indexing_record;
-    indexing_record.append_field_indexing(
-        vector_field,
+    auto indexing_entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
         CreateTestCacheIndex("nullable-vector-empty-bitset",
                              std::move(index_base)));
@@ -352,7 +355,7 @@ TEST(SearchOnSealedIndexNullableNoFilter,
 
     SearchResult search_result;
     SearchOnSealedIndex(*schema,
-                        indexing_record,
+                        indexing_entry,
                         search_info,
                         vectors.data(),
                         nullptr,
@@ -386,9 +389,7 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    segcore::SealedIndexingRecord indexing_record;
-    indexing_record.append_field_indexing(
-        vector_field,
+    auto indexing_entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
         CreateTestCacheIndex("nullable-vector-empty-bitset-iterator",
                              std::move(index_base)));
@@ -406,7 +407,7 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
 
     SearchResult search_result;
     SearchOnSealedIndex(*schema,
-                        indexing_record,
+                        indexing_entry,
                         search_info,
                         vectors.data(),
                         nullptr,
