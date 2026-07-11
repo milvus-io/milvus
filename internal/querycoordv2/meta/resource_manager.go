@@ -996,12 +996,12 @@ func (rm *ResourceManager) stageCreateResourceGroupIfNotExists(ctx context.Conte
 		},
 	}
 	if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
-		mlog.Warn(context.TODO(), "failed to create resource group from session of new incoming node", mlog.String("rgName", rgName), mlog.Int64("nodeID", nodeID), mlog.Err(err))
+		mlog.Warn(ctx, "failed to create resource group from session of new incoming node", mlog.String("rgName", rgName), mlog.Int64("nodeID", nodeID), mlog.Err(err))
 		return err
 	}
 	staging.put(NewResourceGroup(rgName, cfg, rm.nodeMgr))
 	staging.rgCreated = true
-	mlog.Info(context.TODO(), "stage create resource group from session of new incoming node", mlog.String("rgName", rgName), mlog.Int64("nodeID", nodeID))
+	mlog.Info(ctx, "stage create resource group from session of new incoming node", mlog.String("rgName", rgName), mlog.Int64("nodeID", nodeID))
 	return nil
 }
 
@@ -1141,7 +1141,7 @@ func (rm *ResourceManager) stageTransferNode(ctx context.Context, staging *rgSta
 	if rg := rm.getResourceGroupByNodeIDWithStaging(staging, node); rg != nil {
 		if rg.GetName() == rgName {
 			// node is already assign to rg.
-			mlog.Info(context.TODO(), "node already assign to resource group",
+			mlog.Info(ctx, "node already assign to resource group",
 				mlog.String("rgName", rgName),
 				mlog.Int64("node", node),
 			)
@@ -1160,7 +1160,7 @@ func (rm *ResourceManager) stageTransferNode(ctx context.Context, staging *rgSta
 	mrg.AssignNode(node)
 	staging.put(mrg.ToResourceGroup())
 
-	mlog.Info(context.TODO(), "stage node transfer to resource group",
+	mlog.Info(ctx, "stage node transfer to resource group",
 		mlog.String("rgName", rgName),
 		mlog.String("originalRG", originalRG),
 		mlog.Int64("node", node),
@@ -1177,7 +1177,7 @@ func (rm *ResourceManager) stageUnassignNode(ctx context.Context, staging *rgSta
 		rg := mrg.ToResourceGroup()
 		staging.put(rg)
 
-		mlog.Info(context.TODO(), "stage unassign node from resource group",
+		mlog.Info(ctx, "stage unassign node from resource group",
 			mlog.String("rgName", rg.GetName()),
 			mlog.Int64("node", node),
 		)
@@ -1201,7 +1201,7 @@ func (rm *ResourceManager) commitStaging(ctx context.Context, staging *rgStaging
 		updates = append(updates, staging.groups[rgName].GetMeta())
 	}
 	if err := rm.catalog.SaveResourceGroup(ctx, updates...); err != nil {
-		mlog.Warn(context.TODO(), "failed to save staged resource groups",
+		mlog.Warn(ctx, "failed to save staged resource groups",
 			mlog.Strings("rgNames", staging.dirty),
 			mlog.Err(err),
 		)
@@ -1212,7 +1212,7 @@ func (rm *ResourceManager) commitStaging(ctx context.Context, staging *rgStaging
 	for _, rgName := range staging.dirty {
 		rm.setupInMemResourceGroup(staging.groups[rgName])
 	}
-	mlog.Info(context.TODO(), "commit staged resource groups",
+	mlog.Info(ctx, "commit staged resource groups",
 		mlog.Strings("rgNames", staging.dirty),
 	)
 
