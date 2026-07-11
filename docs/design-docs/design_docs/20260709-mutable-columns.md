@@ -526,6 +526,23 @@ GC-eligible only after the manifest swap commits and no reader pins the old
 version; the swap itself rides the existing segment-reopen atomic
 read-update COW mechanism (see `20260627-segment-reopen-atomic-read-update-cow`).
 
+**Local-cache consequence of a fold.** Folding runs on a DataNode and
+writes the new column binlog to object storage; it does not touch any
+QueryNode cache directly. Each QueryNode holding the segment then does a
+**column-level** cache update: fetch the new `col.bin'`, mmap it, and drop
+the old `col.bin` plus the folded deltalogs and their overlay entries. This
+is *not* a segment reload — vector files, index files, and every other
+column stay cached and mmap'd. The re-fetched data is one narrow column
+(e.g. 8 bytes × rows ≈ single-digit MB per segment), versus the GBs a
+full-segment compaction moves (vectors + index rebuild). That
+~two-orders-of-magnitude difference is the point of the feature; but the
+fetch still fans out to every replica, so the fold trigger must account for
+it (another reason not to fold every few seconds). A future optimization
+avoids the fetch entirely: a QueryNode already holds base + overlay = the
+identical data, so it can materialize `col.bin'` locally under the same
+`fold_ts` (bit-identical) instead of re-downloading — deferred with the
+rest of the node-local-materialization idea (out of scope for v1).
+
 **Delta cleanup happens only through compaction — nothing else ever deletes
 a deltalog.** Patch compaction shrinks the file set; column folding is the
 terminal cleaner (materialize, swap, then GC); segment merge compaction
