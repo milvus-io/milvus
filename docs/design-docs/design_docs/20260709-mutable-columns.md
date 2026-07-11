@@ -279,6 +279,28 @@ from checkpoint in TimeTick order like deletes).
    replay all rely on); the base/patch separation is uniform across growing
    and sealed segments.
 
+### Growing segments use the same overlay
+
+A patch to a row in a growing segment goes through the **same overlay**, not
+an in-place mutation of the growing column. In-place is tempting (the
+growing column is already mutable memory) but wrong on three counts:
+
+- **MVCC.** Growing segments are queryable; overwriting destroys the old
+  value that a reader at `ts < patch_ts` must still see. Keeping versions
+  *is* the overlay.
+- **No-read write path.** In-place INCR is a read-modify-write; the design
+  forbids reads on the write path even when the data is local.
+- **Uniform seal/recovery.** With one overlay, seal is trivial (base →
+  insert binlog, overlay → patch deltalog) and recovery is one replay path.
+  In-place would fork both.
+
+Growing segments actually have the *cheapest* PK→offset resolution (the
+insert append position is the offset, and the growing segment already keeps
+a PK→offset map). WAL per-channel total order + PK→channel affinity
+guarantees `insert(ts)` precedes `patch(ts')` in the stream, so the row
+exists before its patch applies; a patch to a not-yet-inserted PK is
+silently ignored, consistent with the sealed case.
+
 ## Patch Deltalog Format
 
 Patches persist exactly the way delete deltalogs do: **each flush cycle
@@ -370,6 +392,74 @@ Two contrasts worth stating explicitly:
   sparse structure. Rebuilding the column in memory on every load would
   double memory and break mmap sharing — patches return to columnar format
   only at column folding, on disk, in the background.
+
+## Overlay Concurrency and Deltalog Lifecycle
+
+The overlay is mutated by streaming apply, pruning, and fold-drop while many
+queries read it concurrently. The model is **single-writer / multi-reader
+with epoch-based reclamation** — the same shape Vespa uses for in-memory
+mutable attributes serving concurrent queries.
+
+**One writer per (segment, replica).** A segment's patch stream is consumed
+serially by one channel consumer, so exactly one thread ever mutates a given
+overlay. Each replica has its own node-local overlay with its own single
+writer; there is no cross-node coordination.
+
+**Version chain = immutable, prepend-only, published by an atomic pointer.**
+
+- Each row's chain is a newest-first singly linked list; a node is immutable
+  once published.
+- *Apply* allocates `Node{ts, op, operand, next = current_head}` and does a
+  release-store of the head into the offset's slot. Because there is a
+  single writer, **no CAS is needed** — one atomic store; readers never see
+  a torn node. First patch to a clean chunk allocates and publishes the
+  chunk overlay and bumps its patched-count with a release store.
+- *Read* acquire-loads the per-chunk overlay pointer; null (patched-count 0)
+  takes the clean fast path. Otherwise acquire-load the head and walk to the
+  first node with `ts ≤ query_ts`. Readers never lock, allocate, or block.
+
+**Pruning runs on the writer thread.** Folding `≤ safe_ts` nodes into a
+floor node is done lazily by the same single apply thread (when it touches
+an offset, or on a periodic chunk sweep). Keeping *all* chain mutation on
+one thread makes correctness trivial — there is never a writer-writer race.
+
+**Reclamation is epoch-based (EBR/RCU).** A node unlinked by pruning or
+fold-drop may still be under a reader's walk. Readers publish a per-query
+epoch; retired nodes are freed only once every epoch that could reach them
+has advanced. Reuse Milvus's existing generation/hazard utility if present;
+otherwise a global epoch counter plus per-query snapshot suffices.
+
+**Fold is a reader of the overlay.** The folder computes `col.bin'` from
+base + overlay at `fold_ts` without mutating the overlay. The one ordering
+constraint: while a fold is in flight the writer must not prune the
+`≤ fold_ts` region (it keeps appending `> fold_ts` freely); after the
+manifest swap commits, the writer drops the `≤ fold_ts` entries (freed via
+EBR).
+
+### Deltalog lifecycle — immutable, never edited in place
+
+Deltalogs are immutable, exactly like delete deltalogs. Nothing is ever
+modified in place; the lifecycle is append → flush → compact → materialize →
+GC:
+
+- **Append.** The apply thread appends each patch to an in-memory deltalog
+  buffer *in addition to* the overlay — the same way an insert feeds both
+  the growing column and the insert-binlog buffer. Single writer, append
+  only.
+- **Flush.** At a flush boundary the writer **atomically rotates the
+  buffer**: it hands the sealed buffer to the flusher and starts a fresh
+  one. The flusher writes the sealed buffer to object storage as one
+  immutable deltalog file while the writer keeps appending to the new
+  buffer — no lock on the hot append path.
+- **Compact / materialize / GC.** Patch compaction reads N immutable
+  deltalogs and writes M<N new immutable ones (op-folded), then GCs the N;
+  column folding materializes them into a new base column file. A later SET
+  that "overrides" an earlier one is just a higher-`ts` entry resolved at
+  fold time — never an in-place edit.
+
+This immutability is what makes recovery (replay the files) and CDC (ship
+the files) trivial, and it is why the whole design can reuse the delete
+path's file lifecycle unchanged.
 
 ## Read Path
 
@@ -546,11 +636,32 @@ rest of the node-local-materialization idea (out of scope for v1).
 **Delta cleanup happens only through compaction — nothing else ever deletes
 a deltalog.** Patch compaction shrinks the file set; column folding is the
 terminal cleaner (materialize, swap, then GC); segment merge compaction
-folds everything as a side effect. If compaction lags, the debt is visible
-and bounded in form: load-replay time and overlay memory grow. This is why
-folding triggers must include overlay memory pressure and deltalog count
-(not just patch ratio), and why the overlay quota's backpressure is the
-final backstop that throttles the write path when cleanup cannot keep up.
+folds everything as a side effect.
+
+**Folding is memory-driven; read-cost is a secondary QoS knob.** The
+per-column patch ratio is a local read-cost signal, but the hard
+operational constraint is the node overlay memory budget, so memory is the
+primary trigger:
+
+- **Soft watermark** (e.g. 70% of the overlay budget): a background folder
+  selects victims by benefit/cost score
+  `reclaimable_bytes / rewrite_cost`, where `reclaimable_bytes` is the
+  (segment, column) overlay below `safe_ts` (actually foldable) and
+  `rewrite_cost` is that column's binlog size plus the per-replica re-fetch
+  fan-out. The score naturally prefers **large-overlay, narrow-base**
+  columns — exactly the hot wide-update columns like `offline_time`. Fold
+  until back under the soft watermark.
+- **Hard watermark** (e.g. 90%): the WAL consumer is backpressured (apply
+  throttled) until folding catches up. This is the honest steady state —
+  folding is a continuous background process paced by memory, and if the
+  write rate exceeds fold throughput the write path throttles rather than
+  the node OOMing.
+- **Optional read-QoS floor**: a per-collection "max read amplification"
+  knob folds a hot column at a ratio threshold even when memory is fine
+  (using the sawtooth numbers in "Dense-overlay chunks" to pick the ratio).
+
+Load-replay time and deltalog count are additional inputs (a column with
+many small deltalogs is cheap to fold and worth folding early).
 
 **Wide-update pacing.** Workloads that touch most rows of most segments
 (heartbeat-style `offline_time` updates) push all segments across the
