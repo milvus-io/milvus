@@ -4044,7 +4044,6 @@ dependencies = [
  "serde_json",
  "tantivy 0.21.1",
  "tantivy 0.23.0",
- "tantivy-columnar 0.3.0",
  "tar",
  "tempfile",
  "tokio",

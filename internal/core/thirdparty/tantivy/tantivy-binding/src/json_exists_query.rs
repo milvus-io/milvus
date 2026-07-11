@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use columnar::{ColumnIndex, ColumnType, DynamicColumn};
+use tantivy::columnar::{ColumnIndex, ColumnType, DynamicColumn};
 use tantivy::index::SegmentReader;
 use tantivy::query::{ConstScorer, EmptyScorer, EnableScoring, Explanation, Query, Scorer, Weight};
 use tantivy::schema::Type;

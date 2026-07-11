@@ -168,9 +168,27 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-                result = EvalArrayContainsForIndexSegment(
-                    value_type_ == DataType::INT64 ? DataType::DOUBLE
-                                                   : value_type_);
+                const auto has_unsafe_int_literal =
+                    std::any_of(expr_->vals_.begin(),
+                                expr_->vals_.end(),
+                                [this](const auto& value) {
+                                    return value.has_int64_val() &&
+                                           !IsInt64SafeForJsonDoubleIndex(
+                                               value.int64_val());
+                                });
+                const auto all_int_literals = std::all_of(
+                    expr_->vals_.begin(),
+                    expr_->vals_.end(),
+                    [](const auto& value) { return value.has_int64_val(); });
+                if (all_int_literals && PinnedJsonIndexIsFlat()) {
+                    result = EvalArrayContainsForIndexSegment(DataType::INT64);
+                } else if (has_unsafe_int_literal) {
+                    result = EvalJsonContainsForDataSegment(context);
+                } else {
+                    result = EvalArrayContainsForIndexSegment(
+                        value_type_ == DataType::INT64 ? DataType::DOUBLE
+                                                       : value_type_);
+                }
             } else {
                 result = EvalJsonContainsForDataSegment(context);
             }

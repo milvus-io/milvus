@@ -231,7 +231,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     void
     OrU64TermRanges(TargetBitmap& bitset, size_t n, const T* values) {
-        if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
+        if constexpr (std::is_floating_point_v<T>) {
             for (size_t i = 0; i < n; ++i) {
                 auto value = static_cast<double>(values[i]);
                 auto range = DoubleRangeForBounds(value, true, value, true);

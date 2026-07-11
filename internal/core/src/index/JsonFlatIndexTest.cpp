@@ -631,7 +631,7 @@ TEST(JsonFlatIndexUint64Test, TestNumericQueriesIncludeMixedIntegerTerms) {
     EXPECT_TRUE(not_max_int64[1]);
     EXPECT_TRUE(not_max_int64[2]);
     EXPECT_TRUE(not_max_int64[3]);
-    EXPECT_FALSE(not_max_int64[4]);
+    EXPECT_TRUE(not_max_int64[4]);
     EXPECT_TRUE(not_max_int64[5]);
     EXPECT_FALSE(not_max_int64[6]);
     EXPECT_FALSE(not_max_int64[7]);
@@ -942,6 +942,10 @@ class JsonFlatIndexContainsExprTest : public ::testing::Test {
             R"({})",
             R"({"a": ["x"]})",
             R"({"a": [1]})",
+            R"({"a": [9007199254740992]})",
+            R"({"a": [9007199254740993]})",
+            R"({"a": [9007199254740994]})",
+            R"({"a": [9007199254740992.0]})",
         };
 
         auto schema = std::make_shared<Schema>();
@@ -983,7 +987,7 @@ class JsonFlatIndexContainsExprTest : public ::testing::Test {
                   valid_data + json_field_->ValidDataSize(),
                   static_cast<uint8_t>(0));
         valid_data[0] = 0xFF;
-        valid_data[1] = 0x01;
+        valid_data[1] = 0x3D;
 
         json_index->BuildWithFieldData({json_field_});
         json_index->finish();
@@ -1052,28 +1056,124 @@ class JsonFlatIndexContainsExprTest : public ::testing::Test {
 };
 
 TEST_F(JsonFlatIndexContainsExprTest, UsesExactPathThreeValuedValidity) {
-    const std::vector<bool> expected_valid = {
-        true, true, true, true, false, false, false, false, true, false};
+    const std::vector<bool> expected_valid = {true,
+                                              true,
+                                              true,
+                                              true,
+                                              false,
+                                              false,
+                                              false,
+                                              false,
+                                              true,
+                                              false,
+                                              true,
+                                              true,
+                                              true,
+                                              true};
 
-    CheckResult(
-        Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1}),
-        {true, false, true, false, false, false, false, false, false, false},
-        expected_valid);
+    CheckResult(Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1}),
+                {true,
+                 false,
+                 true,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false},
+                expected_valid);
 
     CheckResult(
         Evaluate(proto::plan::JSONContainsExpr_JSONOp_ContainsAny, {1, 3}),
-        {true, false, true, false, false, false, false, false, false, false},
+        {true,
+         false,
+         true,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false},
         expected_valid);
 
     CheckResult(
         Evaluate(proto::plan::JSONContainsExpr_JSONOp_ContainsAll, {1, 2}),
-        {true, false, false, false, false, false, false, false, false, false},
+        {true,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false,
+         false},
         expected_valid);
 
     CheckResult(
         Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1}, true),
-        {false, true, false, true, false, false, false, false, true, false},
+        {false,
+         true,
+         false,
+         true,
+         false,
+         false,
+         false,
+         false,
+         true,
+         false,
+         true,
+         true,
+         true,
+         true},
         expected_valid);
+}
+
+TEST_F(JsonFlatIndexContainsExprTest, PreservesLargeInt64LiteralPrecision) {
+    CheckResult(Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains,
+                         {9007199254740993LL}),
+                {false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 false,
+                 true,
+                 false,
+                 false},
+                {true,
+                 true,
+                 true,
+                 true,
+                 false,
+                 false,
+                 false,
+                 false,
+                 true,
+                 false,
+                 true,
+                 true,
+                 true,
+                 true});
 }
 
 TEST_F(JsonFlatIndexExprTest, TestUnaryExpr) {
@@ -1201,6 +1301,42 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
     EXPECT_TRUE(valid_view[17]);
     EXPECT_TRUE(valid_view[18]);
     EXPECT_FALSE(result_view[16]);
+    EXPECT_TRUE(result_view[17]);
+    EXPECT_FALSE(result_view[18]);
+
+    proto::plan::GenericValue upper_float;
+    upper_float.set_float_val(9007199254740994.0);
+    auto mixed_lower_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        value,
+        upper_float,
+        true,
+        true);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  mixed_lower_expr);
+    result = gen_filter_res(
+        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_FALSE(result_view[16]);
+    EXPECT_TRUE(result_view[17]);
+    EXPECT_TRUE(result_view[18]);
+
+    proto::plan::GenericValue lower_float;
+    lower_float.set_float_val(9007199254740992.0);
+    auto mixed_upper_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        lower_float,
+        value,
+        true,
+        true);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  mixed_upper_expr);
+    result = gen_filter_res(
+        plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(result_view[16]);
     EXPECT_TRUE(result_view[17]);
     EXPECT_FALSE(result_view[18]);
 }

@@ -46,6 +46,7 @@
 #include "common/type_c.h"
 #include "exec/expression/ExprCache.h"
 #include "exec/expression/ExprCacheHelper.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
@@ -260,7 +261,8 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     case proto::plan::GenericValue::ValCase::kInt64Val:
                         if (!IsInt64SafeForJsonDoubleIndex(
                                 expr_->val_.int64_val())) {
-                            result = ExecRangeVisitorImplJson<int64_t>(context);
+                            result =
+                                ExecRangeVisitorImplJsonPreciseNumeric(context);
                         } else if (PinnedJsonIndexIsFlat()) {
                             result = ExecRangeVisitorImplForIndex<int64_t>();
                         } else {
@@ -355,6 +357,82 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
+}
+
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
+    EvalCtx& context) {
+    const auto& bitmap_input = context.get_bitmap_input();
+    auto* input = context.get_offset_input();
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto bound = expr_->val_;
+    const auto op_type = expr_->op_type_;
+
+    size_t processed_cursor = 0;
+    auto execute_sub_batch =
+        [ pointer, bound, op_type, &bitmap_input, &
+          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
+        const bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = offsets ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+
+            auto number = data[offset].at_numeric(pointer);
+            if (number.error()) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            auto comparison = CompareJsonNumberToBound(number.value(), bound);
+            res[i] = comparison.has_value() &&
+                     JsonNumberMatchesOp(*comparison, op_type);
+        }
+        processed_cursor += size;
+    };
+
+    int64_t processed_size;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+    } else {
+        processed_size = ProcessDataChunks<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
 }
 
 template <typename ValueType>
