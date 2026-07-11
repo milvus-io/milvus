@@ -119,3 +119,168 @@ TEST_F(SchemaReopenTest, LoadWithAbsentNullableVectorFieldShouldReadAllNull) {
         ASSERT_FALSE(col->valid_data(i)) << "row " << i << " should be null";
     }
 }
+
+// #50484: Reopen must build the text index for an enable_match field added
+// by schema evolution and index the pre-existing rows (nulls here);
+// otherwise text_match throws TextIndexNotFound.
+TEST_F(SchemaReopenTest, ReopenBuildsTextIndexForNewEnableMatchField) {
+    // V1 has no text field, so the constructor builds no text index.
+    auto segment = CreateGrowingSegment(schema_v1_, milvus::empty_index_meta);
+    auto* seg_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(seg_impl, nullptr);
+
+    int N = 20;
+    auto dataset = DataGen(schema_v1_, N, /*seed=*/7);
+    auto reserved = segment->PreInsert(N);
+    segment->Insert(reserved,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+    ASSERT_EQ(segment->get_row_count(), N);
+
+    // V2 shares V1's field ids and adds a nullable enable_match VARCHAR.
+    auto schema_v2 = std::make_shared<Schema>();
+    schema_v2->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    auto pk_fid = schema_v2->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text_fid = schema_v2->AddDebugVarcharField(FieldName("text_content"),
+                                                    DataType::VARCHAR,
+                                                    /*max_length=*/65535,
+                                                    /*nullable=*/true,
+                                                    /*enable_match=*/true,
+                                                    /*enable_analyzer=*/true,
+                                                    analyzer_params,
+                                                    std::nullopt);
+    schema_v2->set_primary_field_id(pk_fid);
+    schema_v2->set_schema_version(2);
+
+    milvus::OpContext op_ctx;
+    EXPECT_ANY_THROW(seg_impl->GetTextIndex(&op_ctx, text_fid));
+
+    seg_impl->Reopen(schema_v2);
+
+    ASSERT_NO_THROW(seg_impl->GetTextIndex(&op_ctx, text_fid));
+    auto pw = seg_impl->GetTextIndex(&op_ctx, text_fid);
+    auto* index = pw.get();
+    ASSERT_NE(index, nullptr);
+
+    // No explicit Commit/Reload: Reopen already made the backfill visible.
+    // No default value -> all rows null, nothing matches.
+    EXPECT_EQ(index->MatchQuery("anything", 1).count(), 0);
+    auto not_null = index->IsNotNull();
+    ASSERT_EQ(not_null.size(), static_cast<size_t>(N));
+    EXPECT_EQ(not_null.count(), 0);
+}
+
+// #50484: when the added enable_match field has a default value, Reopen's
+// backfill must index the default text for pre-existing rows, matching
+// sealed's create-from-raw results.
+TEST_F(SchemaReopenTest, ReopenTextIndexIndexesDefaultValueForOldRows) {
+    auto segment = CreateGrowingSegment(schema_v1_, milvus::empty_index_meta);
+    auto* seg_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(seg_impl, nullptr);
+
+    int N = 20;
+    auto dataset = DataGen(schema_v1_, N, /*seed=*/11);
+    auto reserved = segment->PreInsert(N);
+    segment->Insert(reserved,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+    ASSERT_EQ(segment->get_row_count(), N);
+
+    auto schema_v2 = std::make_shared<Schema>();
+    schema_v2->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    auto pk_fid = schema_v2->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    DefaultValueType default_value;
+    default_value.set_string_data("sample default text");
+    auto text_fid =
+        schema_v2->AddDebugVarcharField(FieldName("text_content"),
+                                        DataType::VARCHAR,
+                                        /*max_length=*/65535,
+                                        /*nullable=*/true,
+                                        /*enable_match=*/true,
+                                        /*enable_analyzer=*/true,
+                                        analyzer_params,
+                                        std::make_optional(default_value));
+    schema_v2->set_primary_field_id(pk_fid);
+    schema_v2->set_schema_version(2);
+
+    seg_impl->Reopen(schema_v2);
+
+    milvus::OpContext op_ctx;
+    auto pw = seg_impl->GetTextIndex(&op_ctx, text_fid);
+    auto* index = pw.get();
+    ASSERT_NE(index, nullptr);
+
+    // No explicit Commit/Reload: every old row carries the default text.
+    EXPECT_EQ(index->MatchQuery("default", 1).count(), static_cast<size_t>(N));
+    EXPECT_EQ(index->MatchQuery("absent-token", 1).count(), 0);
+    auto not_null = index->IsNotNull();
+    ASSERT_EQ(not_null.size(), static_cast<size_t>(N));
+    EXPECT_EQ(not_null.count(), static_cast<size_t>(N));
+}
+
+// #50484: one Reopen may add several enable_match fields; the staged indexes
+// are published together, so every field must come out complete.
+TEST_F(SchemaReopenTest, ReopenBuildsTextIndexesForMultipleNewFields) {
+    auto segment = CreateGrowingSegment(schema_v1_, milvus::empty_index_meta);
+    auto* seg_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(seg_impl, nullptr);
+
+    int N = 20;
+    auto dataset = DataGen(schema_v1_, N, /*seed=*/13);
+    auto reserved = segment->PreInsert(N);
+    segment->Insert(reserved,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+    ASSERT_EQ(segment->get_row_count(), N);
+
+    auto schema_v2 = std::make_shared<Schema>();
+    schema_v2->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    auto pk_fid = schema_v2->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto null_fid = schema_v2->AddDebugVarcharField(FieldName("text_null"),
+                                                    DataType::VARCHAR,
+                                                    /*max_length=*/65535,
+                                                    /*nullable=*/true,
+                                                    /*enable_match=*/true,
+                                                    /*enable_analyzer=*/true,
+                                                    analyzer_params,
+                                                    std::nullopt);
+    DefaultValueType default_value;
+    default_value.set_string_data("sample default text");
+    auto default_fid =
+        schema_v2->AddDebugVarcharField(FieldName("text_default"),
+                                        DataType::VARCHAR,
+                                        /*max_length=*/65535,
+                                        /*nullable=*/true,
+                                        /*enable_match=*/true,
+                                        /*enable_analyzer=*/true,
+                                        analyzer_params,
+                                        std::make_optional(default_value));
+    schema_v2->set_primary_field_id(pk_fid);
+    schema_v2->set_schema_version(2);
+
+    seg_impl->Reopen(schema_v2);
+
+    milvus::OpContext op_ctx;
+    auto null_pw = seg_impl->GetTextIndex(&op_ctx, null_fid);
+    ASSERT_NE(null_pw.get(), nullptr);
+    EXPECT_EQ(null_pw.get()->MatchQuery("anything", 1).count(), 0);
+    EXPECT_EQ(null_pw.get()->IsNotNull().count(), 0);
+
+    auto default_pw = seg_impl->GetTextIndex(&op_ctx, default_fid);
+    ASSERT_NE(default_pw.get(), nullptr);
+    EXPECT_EQ(default_pw.get()->MatchQuery("default", 1).count(),
+              static_cast<size_t>(N));
+    EXPECT_EQ(default_pw.get()->IsNotNull().count(), static_cast<size_t>(N));
+}
