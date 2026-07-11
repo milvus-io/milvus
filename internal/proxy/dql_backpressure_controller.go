@@ -22,10 +22,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -251,12 +250,12 @@ func (c *dqlBackpressureController) slowdown(reason string) {
 	c.lastRecover = now
 	c.updateConcurrencyMetricsLocked()
 	c.recordEventLocked(dqlBackpressureEventSlowdown, reason)
-	log.Info("proxy DQL backpressure enters slowdown",
-		zap.String("reason", reason),
-		zap.Int64("oldConcurrency", oldConcurrency),
-		zap.Int64("newConcurrency", c.currentConcurrency),
-		zap.Int64("maxConcurrency", c.maxConcurrency),
-		zap.Int64("slowdownMinConcurrency", c.slowdownMinConcurrency),
+	mlog.Info(context.TODO(), "proxy DQL backpressure enters slowdown",
+		mlog.String("reason", reason),
+		mlog.Int64("oldConcurrency", oldConcurrency),
+		mlog.Int64("newConcurrency", c.currentConcurrency),
+		mlog.Int64("maxConcurrency", c.maxConcurrency),
+		mlog.Int64("slowdownMinConcurrency", c.slowdownMinConcurrency),
 	)
 }
 
@@ -330,12 +329,12 @@ func (c *dqlBackpressureController) recoverByElapsedQuietPeriodLocked(now time.T
 
 func (c *dqlBackpressureController) recordRecoverLocked(reason string, oldConcurrency int64) {
 	c.recordEventLocked(dqlBackpressureEventRecover, reason)
-	log.Info("proxy DQL backpressure enters recover",
-		zap.String("reason", reason),
-		zap.Int64("oldConcurrency", oldConcurrency),
-		zap.Int64("newConcurrency", c.currentConcurrency),
-		zap.Int64("maxConcurrency", c.maxConcurrency),
-		zap.Int64("recoverStep", c.recoverStep),
+	mlog.Info(context.TODO(), "proxy DQL backpressure enters recover",
+		mlog.String("reason", reason),
+		mlog.Int64("oldConcurrency", oldConcurrency),
+		mlog.Int64("newConcurrency", c.currentConcurrency),
+		mlog.Int64("maxConcurrency", c.maxConcurrency),
+		mlog.Int64("recoverStep", c.recoverStep),
 	)
 }
 
