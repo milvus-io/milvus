@@ -1515,11 +1515,19 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`(Int64Field << -1) == 0`,
 		`(Int64Field >> 64) == 0`,
 		`Int64Field == (1 << 64)`,
+		`Int64Field == (1 >> 64)`,
+		// folding a shift over non-integer literals is invalid (integer-only)
+		`Int64Field == (1.5 << 1)`,
+		`Int64Field == (1.5 >> 1)`,
 		// shift between two fields is unsupported (right operand must be a constant)
 		`(Int64Field << Int32Field) == 0`,
 		// bitwise NOT on non-integer fields is invalid
 		`~FloatField == 0`,
 		`~DoubleField == 0`,
+		`~BoolField == 0`,
+		`~VarCharField == 0`,
+		// folding ~ over a non-integer literal is invalid (integer-only)
+		`Int64Field == ~1.5`,
 		// nested arithmetic (two arith ops before the comparison) is unsupported,
 		// consistent with the other arithmetic / bitwise operators
 		`(Int64Field >> 2) * 2 == 4`,
