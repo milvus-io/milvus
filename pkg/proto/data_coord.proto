@@ -554,6 +554,7 @@ message TextIndexStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int32 current_scalar_index_version = 7;
+  // Mirrors index.SegmentIndex.is_nested_index (unused for text indexes today).
 }
 
 message JsonKeyStats {
@@ -767,6 +768,8 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  // Mirrors index.SegmentIndex.is_nested_index (unused by compaction today;
+  // scalar indexes are rebuilt by index tasks after compaction).
 }
 
 message CompactionSegment {
@@ -1140,6 +1143,9 @@ message VectorScalarIndexInfo {
   int32 current_scalar_index_version = 8;  // Scalar index engine version
   string index_name = 9;                   // Index name for multi-index-per-field lookup
   index.IndexStorePathVersion index_store_path_version = 10;
+  // Persisted per-segment marker: this ARRAY-field scalar index was built as
+  // a nested (element-level) index; must travel with copied index metadata.
+  bool is_nested_index = 11;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation

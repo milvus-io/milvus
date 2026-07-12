@@ -31,7 +31,11 @@ type SegmentIndex struct {
 	CurrentIndexVersion       int32
 	FinishedUTCTime           uint64
 	CurrentScalarIndexVersion int32
-	IndexType                 string
+	// IsNestedIndex marks an ARRAY-field scalar index that was built as a
+	// nested (element-level) index. Missing/false = legacy row-level index.
+	// Load routing uses this persisted marker, not the engine version.
+	IsNestedIndex bool
+	IndexType     string
 	// Zero value is the legacy build-rooted layout and remains wire-compatible with old metadata.
 	// IndexStorePathVersion is the requested path version while IndexState is
 	// Unissued/InProgress, and reflects the actual on-disk layout only after
@@ -64,6 +68,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CurrentIndexVersion:       segIndex.GetCurrentIndexVersion(),
 		FinishedUTCTime:           segIndex.FinishedTime,
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
+		IsNestedIndex:             segIndex.IsNestedIndex,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
 	}
@@ -94,6 +99,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 		FinishedTime:              segIdx.FinishedUTCTime,
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+		IsNestedIndex:             segIdx.IsNestedIndex,
 		IndexType:                 segIdx.IndexType,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 	}
@@ -120,6 +126,7 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CurrentIndexVersion:       segIndex.CurrentIndexVersion,
 		FinishedUTCTime:           segIndex.FinishedUTCTime,
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
+		IsNestedIndex:             segIndex.IsNestedIndex,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
 	}

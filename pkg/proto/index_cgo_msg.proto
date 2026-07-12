@@ -112,6 +112,10 @@ message BuildIndexInfo {
   // External collection fields (empty for regular collections)
   string external_source = 33;
   string external_spec = 34;
+  // Build this ARRAY-field scalar index as a nested (element-level) index.
+  // Decided by datacoord (field is ARRAY && negotiated scalar index engine
+  // version supports nested) and persisted with the segment index meta.
+  bool is_nested_index = 35;
 }
 
 message StoragePluginContext {
@@ -134,6 +138,7 @@ message LoadTextIndexInfo {
   int32 current_scalar_index_version = 11;
   string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
   string base_path = 13;  // remote base path; files are relative to this path
+  // Mirrors LoadIndexInfo.is_nested_index (unused for text indexes today).
 }
 
 message LoadJsonKeyIndexInfo {

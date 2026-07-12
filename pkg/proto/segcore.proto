@@ -31,6 +31,7 @@ message TextIndexStats {
   int64 buildID = 6;
   int32 current_scalar_index_version = 7;
   string base_path = 8;  // remote base path; files are relative to this path
+  // Mirrors FieldIndexInfo.is_nested_index (unused for text indexes today).
 }
 
 message JsonKeyStats {
@@ -112,6 +113,10 @@ message FieldIndexInfo {
   int64 index_store_version = 12 [deprecated = true];
   int32 current_scalar_index_version = 13;
   index.IndexStorePathVersion index_store_path_version = 14;
+  // Persisted per-segment marker: this ARRAY-field scalar index was built
+  // as a nested (element-level) index. Missing/false = legacy row-level
+  // index. Load routing MUST use this marker, not the engine version.
+  bool is_nested_index = 15;
 }
 
 message SegmentLoadInfo {

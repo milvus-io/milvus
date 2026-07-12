@@ -399,6 +399,60 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     ASSERT_TRUE(request.has_raw_data);
 }
 
+// A NESTED (element-level) ARRAY bitmap allocates its resident validity bitset
+// by ELEMENT count, not row count, so BitsetBytes(num_rows) under-counts it by
+// the array fan-out -- here a tiny 1025-row segment whose (element-sized) index
+// is 1 GiB. The estimator has no element count, but the serialized index file
+// already holds the element-sized validity bitset, so the ARRAY bitmap resident
+// estimate is floored to index_size, preventing catastrophic over-admission /
+// OOM. A scalar-field bitmap is unaffected (stays row-count sized).
+TEST(IndexLoadTest, BitmapArrayMmapEstimateFlooredByIndexSize) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;  // 1 GiB
+    constexpr int64_t kNumRows = 1025;                     // tiny row count
+    constexpr uint64_t kValidBitsetBytes = (kNumRows + 7) / 8;  // => 129 bytes
+
+    auto makeInfo = [&](milvus::DataType field_type,
+                        milvus::DataType element_type) {
+        milvus::segcore::LoadIndexInfo info;
+        info.collection_id = 1;
+        info.partition_id = 2;
+        info.segment_id = 3;
+        info.field_id = 4;
+        info.field_type = field_type;
+        info.element_type = element_type;
+        info.enable_mmap = true;
+        info.index_id = 5;
+        info.index_build_id = 6;
+        info.index_version = 1;
+        info.index_params = {
+            {"index_type", "BITMAP"},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "5"},
+        };
+        info.index_files = {"/tmp/index/1"};
+        info.index = nullptr;
+        info.cache_index = nullptr;
+        info.uri = "";
+        info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        info.index_size = kIndexSize;
+        info.num_rows = kNumRows;
+        return info;
+    };
+
+    // ARRAY field: resident validity is element-sized -> floored to index_size,
+    // not the tiny row-count-sized BitsetBytes(num_rows).
+    auto array_info = makeInfo(milvus::DataType::ARRAY, milvus::DataType::INT64);
+    auto array_req = EstimateLoadIndexResource(&array_info);
+    ASSERT_EQ(array_req.final_memory_cost, kIndexSize);
+    ASSERT_GT(array_req.final_memory_cost, kValidBitsetBytes);
+    ASSERT_GE(array_req.max_memory_cost, array_req.final_memory_cost);
+
+    // Scalar (INT64) field bitmap: unchanged, resident == BitsetBytes(num_rows).
+    auto scalar_info = makeInfo(milvus::DataType::INT64, milvus::DataType::NONE);
+    auto scalar_req = EstimateLoadIndexResource(&scalar_info);
+    ASSERT_EQ(scalar_req.final_memory_cost, kValidBitsetBytes);
+}
+
 TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;

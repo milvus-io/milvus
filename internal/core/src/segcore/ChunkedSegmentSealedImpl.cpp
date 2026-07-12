@@ -6439,6 +6439,15 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 *column, field_meta, num_rows);
             target_runtime.struct_to_array_offsets[struct_name] = new_offsets;
             target_runtime.array_offsets_map[field_id] = new_offsets;
+        } else if (field_meta.get_data_type() == DataType::ARRAY &&
+                   target_runtime.array_offsets_map.find(field_id) ==
+                       target_runtime.array_offsets_map.end()) {
+            // Scalar ARRAY field (not part of a struct): build its own
+            // ArrayOffsetsSealed keyed by field_id so MATCH_*/element_filter
+            // can resolve element ranges. struct_to_array_offsets is untouched.
+            target_runtime.array_offsets_map[field_id] =
+                ArrayOffsetsSealed::BuildFromColumn(
+                    *column, field_meta, num_rows);
         }
     };
 
@@ -7086,6 +7095,21 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
     RuntimeResourceState& runtime) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
+        // Scalar ARRAY field (not part of a struct). When such a field is
+        // materialized for old sealed rows via FillDefaultValueFields(), the
+        // load path that normally builds its ArrayOffsetsSealed is bypassed, so
+        // register an all-zeros offsets here (every old row is an empty array).
+        // Without this, MATCH_*/element_filter would hit a missing-offsets
+        // assert instead of treating the filled rows as empty arrays.
+        if (field_meta.get_data_type() == DataType::ARRAY &&
+            runtime.array_offsets_map.find(field_meta.get_id()) ==
+                runtime.array_offsets_map.end()) {
+            // Use BuildAllZeros (like the struct branch) so the offsets' heap
+            // cost is charged to the caching layer instead of being silently
+            // under-counted by the raw constructor.
+            runtime.array_offsets_map[field_meta.get_id()] =
+                ArrayOffsetsSealed::BuildAllZeros(row_count);
+        }
         return;
     }
 

@@ -66,6 +66,11 @@ ScalarIndexCreator::ScalarIndexCreator(
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
+    // Build this ARRAY-field scalar index as a nested (element-level) index;
+    // the marker is decided by datacoord and injected via the build config.
+    index_info.nested_array_index = milvus::index::GetValueFromConfig<bool>(
+                                        config, milvus::index::NESTED_INDEX)
+                                        .value_or(false);
 
     index_info.tantivy_index_version =
         milvus::index::GetValueFromConfig<int32_t>(

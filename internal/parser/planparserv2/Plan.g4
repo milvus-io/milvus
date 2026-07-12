@@ -13,6 +13,7 @@ expr:
 	| StructFieldIdentifier                                                                                 # StructField
 	| StructIndexFieldIdentifier                                                                            # StructIndexField
 	| StructSubFieldIdentifier                                                                              # StructSubField
+	| ElementSelf                                                                                           # ElementSelf
 	| LBRACE Identifier RBRACE                                                                              # TemplateVariable
 	| '(' expr ')'											                                                # Parens
 	| '[' expr (',' expr)* ','? ']'                                                                         # Array
@@ -26,8 +27,8 @@ expr:
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
-	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
-	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
+	| op=(MATCH_ALL | MATCH_ANY) '(' (Identifier | JSONIdentifier) ',' expr ')'                                                 # MatchSimple
+	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' (Identifier | JSONIdentifier) ',' expr ',' kw=Identifier ASSIGN IntegerConstant ')'  # MatchThreshold
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -43,8 +44,8 @@ expr:
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier)')'                                 # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
-	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (LT | LE) expr	# Range
-	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
+	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier | ElementSelf) op2 = (LT | LE) expr	# Range
+	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier | ElementSelf) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                                                # Relational
 	| expr op = (EQ | NE) expr								                                                # Equality
 	| expr BAND expr										                                                # BitAnd
@@ -82,7 +83,6 @@ MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
-THRESHOLD: 'threshold' | 'THRESHOLD';
 REGEXMATCH: '=~';
 REGEXNOTMATCH: '!~';
 ASSIGN: '=';
@@ -152,6 +152,7 @@ JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | RawStringLiteral | Deci
 StructIndexFieldIdentifier: Identifier '[' DecimalConstant ']' '[' Identifier ']';
 StructFieldIdentifier: Identifier '[' Identifier ']';
 StructSubFieldIdentifier: '$[' Identifier ']';
+ElementSelf: '$';
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 

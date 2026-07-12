@@ -36,6 +36,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
+#include "common/Array.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
@@ -475,6 +476,67 @@ TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
         EXPECT_EQ(start, 0);
         EXPECT_EQ(end, 0);
     }
+}
+
+TEST(test_chunk_segment, ScalarArrayOffsetsBuiltForArrayField) {
+    // A sealed segment with a scalar Array<Int64> field must register an
+    // IArrayOffsets so MATCH_*/element_filter can resolve element ranges.
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto scores = schema->AddDebugArrayField("scores", DataType::INT64, false);
+
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    constexpr int64_t row_count = 3;
+    // Rows: [[1,2],[],[3,4,5]] -> 5 elements total.
+    std::vector<std::vector<int64_t>> rows = {{1, 2}, {}, {3, 4, 5}};
+
+    std::vector<milvus::proto::schema::ScalarField> score_protos(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        for (auto v : rows[i]) {
+            score_protos[i].mutable_long_data()->add_data(v);
+        }
+    }
+
+    FixedVector<Array> arrays;
+    arrays.reserve(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        arrays.emplace_back(score_protos[i]);
+    }
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+
+    // Load pk field.
+    std::vector<int64_t> pk_values(row_count);
+    std::iota(pk_values.begin(), pk_values.end(), 0);
+    auto pk_field_data =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    pk_field_data->FillFieldData(pk_values.data(), row_count);
+    auto pk_load_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, pk.get(), {pk_field_data}, cm);
+    segment->LoadFieldData(pk_load_info);
+
+    // Load scalar array field.
+    auto scores_field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::INT64, false);
+    scores_field_data->FillFieldData(arrays.data(), row_count);
+    auto scores_load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                           kPartitionID,
+                                                           kSegmentID,
+                                                           scores.get(),
+                                                           {scores_field_data},
+                                                           cm);
+    segment->LoadFieldData(scores_load_info);
+
+    auto offsets = segment->GetArrayOffsets(scores);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(segment->get_row_count(), row_count);
+    EXPECT_EQ(offsets->GetRowCount(), row_count);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 5);
+    // Row 2 begins after rows 0 (2 elements) and 1 (0 elements) -> 2.
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(2).first, 2);
 }
 
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {

@@ -651,6 +651,15 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
             return;
         }
 
+        // MATCH_*/element_filter arithmetic ($ predicate) is element-level and
+        // can only use a nested index; fall back to brute force on a non-nested
+        // (legacy flat) array index so a rolling upgrade stays correct. Use the
+        // non-reentrant PinnedIndexIsNested() — we are inside DetermineExecPath().
+        if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+
         auto data_type = expr_->column_.data_type_;
         if (expr_->column_.element_level_) {
             data_type = expr_->column_.element_type_;
@@ -733,6 +742,13 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     template <typename ValueType>
     VectorPtr
     ExecRangeVisitorImplForJson(OffsetVector* input = nullptr);
+
+    // Element-level JSON array arithmetic predicate (the `$` accessor inside
+    // MATCH_*/element_filter over a JSON array). Applies arith_op + compare per
+    // array element at the JSON path, emitting a per-element bitmap.
+    template <typename ValueType>
+    VectorPtr
+    ExecRangeVisitorImplForJsonElement(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr

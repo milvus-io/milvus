@@ -23,6 +23,7 @@
 #include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Json.h"
 #include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -36,6 +37,12 @@ using MatchType = milvus::expr::MatchType;
 
 // Core matching logic for a single row's elements
 // Returns true if the row matches the condition
+//
+// Word-wise implementation: the row's element bits are consumed in 64-bit
+// chunks (bitmap word width) instead of bit by bit. Invalid elements are
+// masked out with the valid bitmap, which preserves the per-bit semantics:
+// only valid elements are counted, and MatchAll requires every *valid*
+// element to match (vacuously true when the row has no valid elements).
 template <MatchType match_type, bool all_valid>
 bool
 MatchSingleRow(int64_t bitset_start,
@@ -43,68 +50,62 @@ MatchSingleRow(int64_t bitset_start,
                const TargetBitmapView& match_bitset,
                const TargetBitmapView& valid_bitset,
                int64_t threshold) {
+    using word_t = TargetBitmapView::policy_type::data_type;
+    constexpr int64_t kWordBits = static_cast<int64_t>(8 * sizeof(word_t));
+
     int64_t hit_count = 0;
-    int64_t element_count = row_elem_count;
 
-    if constexpr (all_valid) {
-        for (int64_t j = 0; j < row_elem_count; ++j) {
-            bool matched = match_bitset[bitset_start + j];
-            if (matched) {
-                ++hit_count;
-            }
-
-            // Early exit conditions
-            if constexpr (match_type == MatchType::MatchAny) {
-                if (hit_count > 0)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchAll) {
-                if (!matched)
+    for (int64_t done = 0; done < row_elem_count; done += kWordBits) {
+        const size_t n =
+            static_cast<size_t>(std::min(kWordBits, row_elem_count - done));
+        const size_t pos = static_cast<size_t>(bitset_start + done);
+        word_t m = match_bitset.read(pos, n);
+        if constexpr (all_valid) {
+            if constexpr (match_type == MatchType::MatchAll) {
+                const word_t full = (n == static_cast<size_t>(kWordBits))
+                                        ? ~word_t(0)
+                                        : ((word_t(1) << n) - 1);
+                if (m != full) {
                     return false;
-            } else if constexpr (match_type == MatchType::MatchLeast) {
-                if (hit_count >= threshold)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchMost ||
-                                 match_type == MatchType::MatchExact) {
-                if (hit_count > threshold)
-                    return false;
-            }
-        }
-    } else {
-        element_count = 0;
-        for (int64_t j = 0; j < row_elem_count; ++j) {
-            if (!valid_bitset[bitset_start + j]) {
+                }
                 continue;
             }
-            ++element_count;
-            bool matched = match_bitset[bitset_start + j];
-            if (matched) {
-                ++hit_count;
+        } else {
+            const word_t v = valid_bitset.read(pos, n);
+            m &= v;
+            if constexpr (match_type == MatchType::MatchAll) {
+                // Some valid element unmatched?
+                if (m != v) {
+                    return false;
+                }
+                continue;
             }
-
-            // Early exit conditions
-            if constexpr (match_type == MatchType::MatchAny) {
-                if (hit_count > 0)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchAll) {
-                if (!matched)
-                    return false;
-            } else if constexpr (match_type == MatchType::MatchLeast) {
-                if (hit_count >= threshold)
-                    return true;
-            } else if constexpr (match_type == MatchType::MatchMost ||
-                                 match_type == MatchType::MatchExact) {
-                if (hit_count > threshold)
-                    return false;
+        }
+        if constexpr (match_type == MatchType::MatchAny) {
+            if (m != 0) {
+                return true;
+            }
+        } else if constexpr (match_type == MatchType::MatchLeast) {
+            hit_count += __builtin_popcountll(m);
+            if (hit_count >= threshold) {
+                return true;
+            }
+        } else if constexpr (match_type == MatchType::MatchMost ||
+                             match_type == MatchType::MatchExact) {
+            hit_count += __builtin_popcountll(m);
+            if (hit_count > threshold) {
+                return false;
             }
         }
     }
 
     // Final match decision
     if constexpr (match_type == MatchType::MatchAny) {
-        return hit_count > 0;
+        return false;
     } else if constexpr (match_type == MatchType::MatchAll) {
-        // Empty array returns true (vacuous truth)
-        return hit_count == element_count;
+        // Every (valid) element matched; empty array returns true
+        // (vacuous truth).
+        return true;
     } else if constexpr (match_type == MatchType::MatchLeast) {
         return hit_count >= threshold;
     } else if constexpr (match_type == MatchType::MatchMost) {
@@ -147,6 +148,16 @@ ProcessContiguousRows(int64_t row_count,
                       const TargetBitmapView& valid_bitset,
                       TargetBitmapView& result_bitset,
                       int64_t threshold) {
+    if constexpr (match_type == MatchType::MatchAny && all_valid) {
+        // Fast path: ANY-semantics reduction over contiguous rows. The match
+        // bitmap covers exactly the element ranges of
+        // [row_start, row_start + row_count) shifted by elem_start; jump
+        // between set bits word-wise instead of walking rows element by
+        // element.
+        array_offsets->ElementBitsetToRowBitsetAny(
+            match_bitset, elem_start, row_start, result_bitset);
+        return;
+    }
     for (int64_t i = 0; i < row_count; ++i) {
         auto [first_elem, last_elem] =
             array_offsets->ElementIDRangeOfRow(row_start + i);
@@ -228,11 +239,145 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
 
-    auto schema = segment_->get_schema();
-    auto field_meta =
-        schema.GetFirstArrayFieldInStruct(expr_->get_struct_name());
+    // Dispatch from schema. A real JSON field is resolvable by field_id, so we
+    // intercept it before name-based array resolution. Struct logical ids from
+    // the Go schema are NOT present in the C++ schema, so guard the type probe
+    // with has_field. Plain scalar arrays and struct arrays are resolved by
+    // name via ResolveArrayElementField, keeping the existing element
+    // aggregation (ArrayOffsets) path unchanged.
+    const auto& schema = segment_->get_schema();
+    auto field_id = FieldId(expr_->get_field_id());
+    if (schema.has_field(field_id) &&
+        schema.GetFieldType(field_id) == DataType::JSON) {
+        EvalJson(context, result);
+        return;
+    }
 
-    auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());
+    auto field_meta = schema.ResolveArrayElementField(expr_->get_field_name());
+    EvalWithOffsets(context,
+                    result,
+                    segment_->GetArrayOffsets(field_meta.get_id()),
+                    field_meta.get_id());
+}
+
+void
+PhyMatchFilterExpr::EvalJson(EvalCtx& context, VectorPtr& result) {
+    // The JSON path index fast-path is added in a later step; for this
+    // checkpoint JSON MATCH always runs the brute-force per-row path.
+    EvalJsonBrute(context, result);
+}
+
+void
+PhyMatchFilterExpr::EvalJsonBrute(EvalCtx& context, VectorPtr& result) {
+    auto input = context.get_offset_input();
+    int64_t batch_rows =
+        has_offset_input_ ? input->size()
+                          : std::min(batch_size_, active_count_ - current_pos_);
+
+    if (batch_rows <= 0) {
+        result = nullptr;
+        return;
+    }
+
+    result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
+                                            TargetBitmap(batch_rows, true));
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+    TargetBitmapView result_view(col_vec->GetRawData(), col_vec->size());
+
+    auto match_type = expr_->get_match_type();
+    int64_t threshold = expr_->get_count();
+
+    auto match_one_row = [&](int64_t row_idx,
+                             const TargetBitmapView& match_view,
+                             const TargetBitmapView& valid_view,
+                             int64_t elem_count,
+                             bool all_valid) {
+        auto dispatch = [&]<bool all_valid_v>() {
+            switch (match_type) {
+                case MatchType::MatchAny:
+                    return MatchSingleRow<MatchType::MatchAny, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchAll:
+                    return MatchSingleRow<MatchType::MatchAll, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchLeast:
+                    return MatchSingleRow<MatchType::MatchLeast, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchMost:
+                    return MatchSingleRow<MatchType::MatchMost, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                case MatchType::MatchExact:
+                    return MatchSingleRow<MatchType::MatchExact, all_valid_v>(
+                        0, elem_count, match_view, valid_view, threshold);
+                default:
+                    ThrowInfo(OpTypeInvalid,
+                              "Unsupported match type: {}",
+                              static_cast<int>(match_type));
+            }
+        };
+        if (all_valid ? dispatch.template operator()<true>()
+                      : dispatch.template operator()<false>()) {
+            result_view[row_idx] = true;
+        }
+    };
+
+    TargetBitmap empty_match;
+    TargetBitmap empty_valid;
+    TargetBitmapView empty_match_view(empty_match);
+    TargetBitmapView empty_valid_view(empty_valid);
+
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        int32_t row_id = has_offset_input_
+                             ? (*input)[i]
+                             : static_cast<int32_t>(current_pos_ + i);
+        OffsetVector one_row;
+        one_row.push_back(row_id);
+        EvalCtx eval_ctx(context.get_exec_context(), &one_row);
+
+        VectorPtr match_result;
+        inputs_[0]->Eval(eval_ctx, match_result);
+        if (match_result == nullptr) {
+            match_one_row(i, empty_match_view, empty_valid_view, 0, true);
+            continue;
+        }
+
+        auto match_result_col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(match_result);
+        AssertInfo(match_result_col_vec != nullptr,
+                   "Match result should be ColumnVector");
+        AssertInfo(match_result_col_vec->IsBitmap(),
+                   "Match result should be bitmap");
+
+        TargetBitmapView match_view(match_result_col_vec->GetRawData(),
+                                    match_result_col_vec->size());
+        TargetBitmapView valid_view(match_result_col_vec->GetValidRawData(),
+                                    match_result_col_vec->size());
+        match_one_row(i,
+                      match_view,
+                      valid_view,
+                      match_result_col_vec->size(),
+                      valid_view.all());
+    }
+
+    // Three-valued MATCH for JSON: exclude any row that does not resolve to a
+    // real JSON array at the path (field NULL, JSON null, missing key, or a
+    // non-array value). A genuine empty array `[]` keeps vacuous semantics. This
+    // is the JSON analogue of MaskNullRows (field-null masking) on the array/
+    // struct path, so all three containers exclude "no real array" rows.
+    MaskJsonNonArrayRows(col_vec.get(), input, batch_rows);
+
+    if (!has_offset_input_) {
+        current_pos_ += batch_rows;
+    }
+}
+
+void
+PhyMatchFilterExpr::EvalWithOffsets(
+    EvalCtx& context,
+    VectorPtr& result,
+    std::shared_ptr<const IArrayOffsets> array_offsets,
+    FieldId field_id) {
+    auto input = context.get_offset_input();
     AssertInfo(array_offsets != nullptr, "Array offsets not available");
 
     int64_t batch_rows;
@@ -288,6 +433,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (MatchEmptyElements(match_type, threshold)) {
             bitset_view.set();
         }
+        MaskNullRows(col_vec.get(), field_id, input, batch_rows);
         if (!has_offset_input_) {
             current_pos_ += batch_rows;
         }
@@ -299,6 +445,17 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                "Match result should be ColumnVector");
     AssertInfo(match_result_col_vec->IsBitmap(),
                "Match result should be bitmap");
+    // Backstop for the parser-side predicate-shape validation: the child MUST
+    // be element-level (one bit per element). A row-level child (row-space
+    // column ref or a constant-folded predicate) returns batch_rows bits; the
+    // per-row aggregation below would then read up to elem_count bits from it,
+    // i.e. past its end. Fail loudly instead of returning garbage.
+    AssertInfo(match_result_col_vec->size() == elem_count,
+               "MATCH predicate produced a non-element-level bitmap: got {} "
+               "bits, expected {} (one per array element); the predicate must "
+               "only reference $ / $[subField]",
+               match_result_col_vec->size(),
+               elem_count);
     TargetBitmapView match_result_bitset_view(
         match_result_col_vec->GetRawData(), match_result_col_vec->size());
     TargetBitmapView match_result_valid_view(
@@ -386,8 +543,120 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         dispatch.template operator()<false>();
     }
 
+    MaskNullRows(col_vec.get(), field_id, input, batch_rows);
     if (!has_offset_input_) {
         current_pos_ += batch_rows;
+    }
+}
+
+void
+PhyMatchFilterExpr::MaskNullRows(ColumnVector* col_vec,
+                                 FieldId field_id,
+                                 const OffsetVector* input,
+                                 int64_t batch_rows) {
+    // Build the physical row-offset list for this batch (offset-input vs
+    // sequential scan), then ask the segment to clear the valid bits of NULL
+    // field rows. ApplyFieldValidDataByOffsets only CLEARS invalid rows and is
+    // a no-op for a non-nullable field, so this is safe for all field kinds and
+    // for both sealed and growing segments.
+    std::vector<int64_t> row_offsets(batch_rows);
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        row_offsets[i] = has_offset_input_ ? static_cast<int64_t>((*input)[i])
+                                           : (current_pos_ + i);
+    }
+    TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
+    TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
+    segment_->ApplyFieldValidDataByOffsets(
+        op_ctx_, field_id, row_offsets.data(), batch_rows, valid_view);
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        if (!valid_view[i]) {
+            bitset_view[i] = false;
+        }
+    }
+}
+
+void
+PhyMatchFilterExpr::MaskJsonNonArrayRows(ColumnVector* col_vec,
+                                         const OffsetVector* input,
+                                         int64_t batch_rows) {
+    auto field_id = FieldId(expr_->get_field_id());
+    auto pointer = milvus::Json::pointer(expr_->get_nested_path());
+
+    TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
+    TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
+
+    // Three-valued MATCH for JSON: a row survives only if it produces a REAL
+    // JSON array at the path. Field NULL, JSON null at path, missing key, and a
+    // non-array scalar/object at the path all yield UNKNOWN -> excluded. A
+    // genuine empty array `[]` is a real array and keeps vacuous semantics.
+    auto check =
+        [&](int64_t out_idx, const milvus::Json& json, bool row_valid) {
+            bool is_real_array = false;
+            if (row_valid) {
+                auto doc = json.doc();
+                if (!doc.error()) {
+                    auto v = pointer.empty()
+                                 ? doc.value().get_array()
+                                 : doc.value().at_pointer(pointer).get_array();
+                    is_real_array = !v.error();
+                }
+            }
+            if (!is_real_array) {
+                valid_view[out_idx] = false;
+                bitset_view[out_idx] = false;
+            }
+        };
+
+    std::vector<int64_t> row_offsets(batch_rows);
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        row_offsets[i] = has_offset_input_ ? static_cast<int64_t>((*input)[i])
+                                           : (current_pos_ + i);
+    }
+
+    // Iterate JSON rows by offset. PhyMatchFilterExpr does not derive from
+    // SegmentExpr, so we replicate VisitJsonRowsByOffsets' access logic inline
+    // against segment_.
+    if (segment_->type() == SegmentType::Sealed) {
+        if (segment_->is_chunked()) {
+            for (int64_t i = 0; i < batch_rows; ++i) {
+                auto [chunk_id, chunk_offset] =
+                    segment_->get_chunk_by_offset(field_id, row_offsets[i]);
+                FixedVector<int32_t> offs;
+                offs.push_back(static_cast<int32_t>(chunk_offset));
+                auto pw = segment_->get_views_by_offsets<Json>(
+                    op_ctx_, field_id, chunk_id, offs);
+                auto [data_vec, valid_data] = pw.get();
+                bool row_valid = !valid_data.data() || valid_data[0];
+                check(i, data_vec[0], row_valid);
+            }
+        } else {
+            FixedVector<int32_t> all_offsets(batch_rows);
+            for (int64_t i = 0; i < batch_rows; ++i) {
+                all_offsets[i] = static_cast<int32_t>(row_offsets[i]);
+            }
+            auto pw = segment_->get_views_by_offsets<Json>(
+                op_ctx_, field_id, 0, all_offsets);
+            auto [data_vec, valid_data] = pw.get();
+            for (int64_t i = 0; i < batch_rows; ++i) {
+                bool row_valid = !valid_data.data() || valid_data[i];
+                check(i, data_vec[i], row_valid);
+            }
+        }
+    } else {  // growing
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            auto row_offset = row_offsets[i];
+            auto chunk_id = row_offset / size_per_chunk_;
+            auto chunk_offset = row_offset % size_per_chunk_;
+            auto pw = segment_->chunk_data<Json>(op_ctx_, field_id, chunk_id);
+            auto chunk = pw.get();
+            const Json* data = chunk.data() + chunk_offset;
+            const bool* valid_data = chunk.valid_data();
+            if (valid_data != nullptr) {
+                valid_data += chunk_offset;
+            }
+            bool row_valid = !valid_data || valid_data[0];
+            check(i, *data, row_valid);
+        }
     }
 }
 

@@ -25,6 +25,10 @@ message LoadIndexInfo {
   int64 num_rows = 17;
   int32 current_scalar_index_version = 18;
   index.IndexStorePathVersion index_store_path_version = 19;
+  // Persisted per-segment marker: the scalar index on this ARRAY field was
+  // built as a nested (element-level) index. Missing/false = legacy row-level
+  // index. Load routing MUST use this marker, not the engine version.
+  bool is_nested_index = 20;
 }
 
 message IndexStats {

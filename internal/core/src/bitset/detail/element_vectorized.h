@@ -227,6 +227,23 @@ struct VectorizedElementWiseBitsetPolicy {
     }
 
     //
+    static inline data_type
+    op_read(const data_type* const data,
+            const size_t start,
+            const size_t nbits) {
+        return ElementWiseBitsetPolicy<ElementT>::op_read(data, start, nbits);
+    }
+
+    //
+    static inline void
+    op_write(data_type* const data,
+             const size_t start,
+             const size_t nbits,
+             const data_type value) {
+        ElementWiseBitsetPolicy<ElementT>::op_write(data, start, nbits, value);
+    }
+
+    //
     template <typename T, typename U, CompareOpType Op>
     static inline void
     op_compare_column(data_type* const __restrict data,

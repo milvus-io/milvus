@@ -87,6 +87,33 @@ class IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const = 0;
+
+    // Per-row NULL info retained from the raw field at build time.
+    // Returns nullptr when no validity was recorded (treat every row as valid).
+    // When non-null, bit[row]==true means the array at that row is NON-NULL.
+    //
+    // A nested array index only exposes element-level validity, and a NULL row
+    // has zero elements -- indistinguishable at element level from an empty
+    // array. Row-level consumers (e.g. array_contains over a nullable array via
+    // a nested index) use this to exclude NULL rows exactly as the brute-force
+    // path does.
+    virtual const TargetBitmap*
+    GetRowValidBitmap() const = 0;
+
+    // Word-wise ANY-semantics reduction of an element-level bitmap to row
+    // level. Bit j of elem_bitset corresponds to global element id
+    // (elem_offset + j). For each i in [0, row_result.size()), sets
+    // row_result[i] = true iff any element bit of row (row_start + i) is set.
+    // Bits in row_result are only ever set, never cleared. elem_bitset must
+    // cover the element ranges of all addressed rows.
+    // This is the hot path used to aggregate element-level index hits
+    // (nested array index) back to rows; it skips zero words instead of
+    // testing element bits one by one.
+    virtual void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -156,6 +183,17 @@ class ArrayOffsetsSealed : public IArrayOffsets {
                            int64_t row_start,
                            int64_t row_count) const override;
 
+    const TargetBitmap*
+    GetRowValidBitmap() const override {
+        return has_row_valid_ ? &row_valid_ : nullptr;
+    }
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
+
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
@@ -166,6 +204,11 @@ class ArrayOffsetsSealed : public IArrayOffsets {
 
  private:
     const std::vector<int32_t> row_to_element_start_;
+    // Per-row NULL bitmap (bit==true => non-null). Populated by the static
+    // builders when the source field is nullable; empty & has_row_valid_==false
+    // for non-nullable fields (all rows valid).
+    TargetBitmap row_valid_;
+    bool has_row_valid_{false};
     int64_t resource_size_{0};
 };
 
@@ -211,6 +254,19 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const override;
+
+    // Growing segments do not carry a nested scalar index, so the row-level
+    // nested-index consumer never queries this. Report "no validity recorded".
+    const TargetBitmap*
+    GetRowValidBitmap() const override {
+        return nullptr;
+    }
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
 
  private:
     struct PendingRow {

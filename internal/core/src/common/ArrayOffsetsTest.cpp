@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <cstdint>
+#include <random>
 #include <string>
 #include <thread>
 #include <utility>
@@ -692,4 +693,179 @@ TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementBitsetWithRowStart) {
     EXPECT_FALSE(elem_bitset[3]);
     EXPECT_TRUE(elem_bitset[4]);
     EXPECT_TRUE(elem_bitset[5]);
+}
+
+// ============ ElementBitsetToRowBitsetAny (word-wise ANY reduction) ============
+
+namespace {
+
+// Per-bit reference implementation of ANY-semantics element->row reduction.
+TargetBitmap
+ReferenceAnyReduce(const IArrayOffsets& offsets,
+                   const TargetBitmap& elem_bitset,
+                   int64_t elem_offset,
+                   int64_t row_start,
+                   int64_t row_count) {
+    TargetBitmap expected(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        auto [start, end] = offsets.ElementIDRangeOfRow(row_start + i);
+        for (int64_t e = start; e < end; ++e) {
+            if (elem_bitset[e - elem_offset]) {
+                expected[i] = true;
+                break;
+            }
+        }
+    }
+    return expected;
+}
+
+void
+CheckAnyReduce(const IArrayOffsets& offsets,
+               const TargetBitmap& elem_bitset,
+               int64_t elem_offset,
+               int64_t row_start,
+               int64_t row_count) {
+    TargetBitmap actual(row_count);
+    offsets.ElementBitsetToRowBitsetAny(
+        elem_bitset.view(), elem_offset, row_start, actual.view());
+    TargetBitmap expected = ReferenceAnyReduce(
+        offsets, elem_bitset, elem_offset, row_start, row_count);
+    ASSERT_EQ(actual.size(), expected.size());
+    for (int64_t i = 0; i < row_count; ++i) {
+        ASSERT_EQ(actual[i], expected[i])
+            << "row " << i << " (row_start=" << row_start
+            << ", elem_offset=" << elem_offset << ")";
+    }
+}
+
+}  // namespace
+
+TEST_F(ArrayOffsetsTest, SealedElementBitsetToRowBitsetAnyBasic) {
+    // row 0: elems [0,2), row 1: elems [2,5), row 2: empty, row 3: elems [5,6)
+    ArrayOffsetsSealed offsets({0, 2, 5, 5, 6});
+
+    TargetBitmap elem_bitset(6);
+    elem_bitset[3] = true;  // row 1
+    elem_bitset[5] = true;  // row 3
+
+    TargetBitmap row_bitset(4);
+    offsets.ElementBitsetToRowBitsetAny(
+        elem_bitset.view(), 0, 0, row_bitset.view());
+    EXPECT_FALSE(row_bitset[0]);
+    EXPECT_TRUE(row_bitset[1]);
+    EXPECT_FALSE(row_bitset[2]);  // empty row never matches
+    EXPECT_TRUE(row_bitset[3]);
+
+    // Never clears pre-set bits.
+    TargetBitmap preset(4);
+    preset[0] = true;
+    offsets.ElementBitsetToRowBitsetAny(
+        elem_bitset.view(), 0, 0, preset.view());
+    EXPECT_TRUE(preset[0]);
+    EXPECT_TRUE(preset[1]);
+    EXPECT_FALSE(preset[2]);
+    EXPECT_TRUE(preset[3]);
+}
+
+TEST_F(ArrayOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
+    ArrayOffsetsSealed offsets({0, 2, 5, 5, 6});
+
+    // All-zero element bitmap -> no rows.
+    {
+        TargetBitmap elem_bitset(6);
+        TargetBitmap row_bitset(4);
+        offsets.ElementBitsetToRowBitsetAny(
+            elem_bitset.view(), 0, 0, row_bitset.view());
+        EXPECT_EQ(row_bitset.count(), 0);
+    }
+    // All-one element bitmap -> all non-empty rows.
+    {
+        TargetBitmap elem_bitset(6, true);
+        TargetBitmap row_bitset(4);
+        offsets.ElementBitsetToRowBitsetAny(
+            elem_bitset.view(), 0, 0, row_bitset.view());
+        EXPECT_TRUE(row_bitset[0]);
+        EXPECT_TRUE(row_bitset[1]);
+        EXPECT_FALSE(row_bitset[2]);
+        EXPECT_TRUE(row_bitset[3]);
+    }
+    // Empty row range.
+    {
+        TargetBitmap elem_bitset(6, true);
+        TargetBitmap row_bitset(0);
+        offsets.ElementBitsetToRowBitsetAny(
+            elem_bitset.view(), 0, 0, row_bitset.view());
+    }
+    // Sub-range of rows with a batch-local bitmap (elem_offset != 0):
+    // rows [1, 4) cover elements [2, 6).
+    {
+        TargetBitmap elem_bitset(4);
+        elem_bitset[0] = true;  // global elem 2 -> row 1
+        elem_bitset[3] = true;  // global elem 5 -> row 3
+        TargetBitmap row_bitset(3);
+        offsets.ElementBitsetToRowBitsetAny(elem_bitset.view(),
+                                            /*elem_offset=*/2,
+                                            /*row_start=*/1,
+                                            row_bitset.view());
+        EXPECT_TRUE(row_bitset[0]);
+        EXPECT_FALSE(row_bitset[1]);
+        EXPECT_TRUE(row_bitset[2]);
+    }
+    // Global bitmap but only a sub-range of rows: hits outside the row range
+    // must be ignored.
+    {
+        TargetBitmap elem_bitset(6);
+        elem_bitset[0] = true;  // row 0, outside range
+        elem_bitset[3] = true;  // row 1, inside
+        TargetBitmap row_bitset(2);
+        offsets.ElementBitsetToRowBitsetAny(
+            elem_bitset.view(), 0, /*row_start=*/1, row_bitset.view());
+        EXPECT_TRUE(row_bitset[0]);   // row 1
+        EXPECT_FALSE(row_bitset[1]);  // row 2 (empty)
+    }
+}
+
+TEST_F(ArrayOffsetsTest, ElementBitsetToRowBitsetAnyRandomized) {
+    std::mt19937 rng(12345);
+    for (int iter = 0; iter < 20; ++iter) {
+        // Random layout: mixes empty rows, short and long (multi-word) rows.
+        int64_t num_rows = 1 + rng() % 300;
+        std::vector<int32_t> starts(num_rows + 1, 0);
+        std::vector<int32_t> lengths(num_rows);
+        for (int64_t i = 0; i < num_rows; ++i) {
+            int pick = rng() % 4;
+            lengths[i] = pick == 0 ? 0 : (pick == 1 ? rng() % 3 : rng() % 200);
+            starts[i + 1] = starts[i] + lengths[i];
+        }
+        int64_t total = starts[num_rows];
+
+        ArrayOffsetsSealed sealed(starts);
+        ArrayOffsetsGrowing growing;
+        growing.Insert(0, lengths.data(), num_rows);
+
+        for (double density : {0.0, 0.005, 0.1, 0.9, 1.0}) {
+            TargetBitmap elem_bitset(total);
+            for (int64_t e = 0; e < total; ++e) {
+                if (rng() % 1000 < density * 1000) {
+                    elem_bitset[e] = true;
+                }
+            }
+            CheckAnyReduce(sealed, elem_bitset, 0, 0, num_rows);
+            CheckAnyReduce(growing, elem_bitset, 0, 0, num_rows);
+
+            // Random row sub-range with a batch-local element bitmap.
+            int64_t row_start = rng() % num_rows;
+            int64_t row_count = rng() % (num_rows - row_start + 1);
+            int64_t elem_lo = starts[row_start];
+            int64_t elem_hi = starts[row_start + row_count];
+            TargetBitmap local(elem_hi - elem_lo);
+            for (int64_t e = elem_lo; e < elem_hi; ++e) {
+                if (elem_bitset[e]) {
+                    local[e - elem_lo] = true;
+                }
+            }
+            CheckAnyReduce(sealed, local, elem_lo, row_start, row_count);
+            CheckAnyReduce(growing, local, elem_lo, row_start, row_count);
+        }
+    }
 }

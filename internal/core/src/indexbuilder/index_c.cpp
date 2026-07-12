@@ -298,6 +298,18 @@ CreateIndex(CIndex* res_index,
             build_index_info->current_scalar_index_version();
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
             scalar_index_engine_version;
+        // Nested (element-level) array index marker, decided by datacoord and
+        // frozen into the build request (see CreateJobRequest.is_nested_index).
+        // Emit the key ONLY for a genuine nested index. The vanilla-FAISS
+        // vector build path strict-checks its build params and rejects any
+        // unrecognized key, so a stray "nested_index" leaking into a vector
+        // (or any non-nested) build fails knowhere with segcore 2004. This
+        // mirrors the load-side guard (load_index_c.cpp / SegmentLoadInfo.cpp),
+        // which already injects the key only when is_nested_index() is true.
+        if (build_index_info->is_nested_index()) {
+            config[milvus::index::NESTED_INDEX] =
+                build_index_info->is_nested_index();
+        }
         auto tantivy_index_version =
             scalar_index_engine_version <= 1
                 ? milvus::index::TANTIVY_INDEX_MINIMUM_VERSION
@@ -430,6 +442,18 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             build_index_info->current_scalar_index_version();
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
             scalar_index_engine_version;
+        // Nested (element-level) array index marker, decided by datacoord and
+        // frozen into the build request (see CreateJobRequest.is_nested_index).
+        // Emit the key ONLY for a genuine nested index. The vanilla-FAISS
+        // vector build path strict-checks its build params and rejects any
+        // unrecognized key, so a stray "nested_index" leaking into a vector
+        // (or any non-nested) build fails knowhere with segcore 2004. This
+        // mirrors the load-side guard (load_index_c.cpp / SegmentLoadInfo.cpp),
+        // which already injects the key only when is_nested_index() is true.
+        if (build_index_info->is_nested_index()) {
+            config[milvus::index::NESTED_INDEX] =
+                build_index_info->is_nested_index();
+        }
         auto tantivy_index_version =
             scalar_index_engine_version <= 1
                 ? milvus::index::TANTIVY_INDEX_MINIMUM_VERSION
@@ -565,6 +589,18 @@ BuildTextIndex(ProtoLayoutInterface result,
             build_index_info->current_scalar_index_version();
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
             scalar_index_engine_version;
+        // Nested (element-level) array index marker, decided by datacoord and
+        // frozen into the build request (see CreateJobRequest.is_nested_index).
+        // Emit the key ONLY for a genuine nested index. The vanilla-FAISS
+        // vector build path strict-checks its build params and rejects any
+        // unrecognized key, so a stray "nested_index" leaking into a vector
+        // (or any non-nested) build fails knowhere with segcore 2004. This
+        // mirrors the load-side guard (load_index_c.cpp / SegmentLoadInfo.cpp),
+        // which already injects the key only when is_nested_index() is true.
+        if (build_index_info->is_nested_index()) {
+            config[milvus::index::NESTED_INDEX] =
+                build_index_info->is_nested_index();
+        }
         auto tantivy_index_version =
             scalar_index_engine_version <= 1
                 ? milvus::index::TANTIVY_INDEX_MINIMUM_VERSION

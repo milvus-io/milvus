@@ -35,6 +35,82 @@
 
 namespace milvus {
 
+namespace {
+
+// Word-wise ANY-semantics reduction shared by the sealed and growing
+// implementations of ElementBitsetToRowBitsetAny.
+//
+// `starts` is the row -> element-start table, indexable over
+// [row_start, row_start + row_count]. Bit j of `elem_bitset` corresponds to
+// global element id (elem_offset + j).
+//
+// Linear merge of the element bitmap (consumed one 64-bit word at a time)
+// with the sorted row-start table: zero words are skipped with a single
+// compare, a set bit advances the monotone row cursor (amortized
+// O(row_count) over the whole call, no binary search), and once a row is
+// marked the scan jumps directly to the row's end, skipping its remaining
+// words. Complexity is O(total_elements / 64 + row_count + hit_rows)
+// instead of the per-bit O(total_elements).
+void
+ElementBitsetAnyReduce(const int32_t* starts,
+                       const TargetBitmapView& elem_bitset,
+                       int64_t elem_offset,
+                       int64_t row_start,
+                       int64_t row_count,
+                       TargetBitmapView row_result) {
+    using word_t = TargetBitmapView::policy_type::data_type;
+    constexpr int64_t kWordBits = static_cast<int64_t>(8 * sizeof(word_t));
+
+    if (row_count == 0) {
+        return;
+    }
+    const int64_t first_bit = starts[row_start] - elem_offset;
+    const int64_t last_bit = starts[row_start + row_count] - elem_offset;
+    AssertInfo(
+        first_bit >= 0 && last_bit <= static_cast<int64_t>(elem_bitset.size()),
+        "element bitset does not cover rows [{}, {}): bits [{}, {}), "
+        "bitset size {}",
+        row_start,
+        row_start + row_count,
+        first_bit,
+        last_bit,
+        elem_bitset.size());
+
+    int64_t pos = first_bit;
+    int64_t row = row_start;
+    while (pos < last_bit) {
+        const int64_t n = std::min(kWordBits, last_bit - pos);
+        word_t word =
+            elem_bitset.read(static_cast<size_t>(pos), static_cast<size_t>(n));
+        if (word == 0) {
+            pos += n;
+            continue;
+        }
+        int64_t next_pos = pos + n;
+        do {
+            const int64_t bit = pos + __builtin_ctzll(word);
+            const int32_t elem_id = static_cast<int32_t>(bit + elem_offset);
+            // Monotone row cursor; empty rows are skipped by the same loop.
+            while (starts[row + 1] <= elem_id) {
+                ++row;
+            }
+            row_result[row - row_start] = true;
+            // Skip the rest of this row's elements.
+            const int64_t row_end = starts[row + 1] - elem_offset;
+            if (row_end >= pos + n) {
+                next_pos = row_end;
+                break;
+            }
+            // row_end falls inside the current word: clear bits below it.
+            // (0 < row_end - pos < kWordBits, so the shift is well-defined.)
+            word &= ~word_t(0) << (row_end - pos);
+        } while (word != 0);
+        pos = next_pos;
+    }
+}
+
+}  // namespace
+
 std::pair<int32_t, int32_t>
 ArrayOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
     assert(elem_id >= 0 && elem_id < GetTotalElementCount());
@@ -80,15 +156,21 @@ ArrayOffsetsSealed::RowBitsetToElementBitset(
     int64_t element_count = element_end - element_start;
 
     TargetBitmap element_bitset(element_count);
-    TargetBitmap valid_element_bitset(element_count);
+    TargetBitmap valid_element_bitset(element_count, true);
 
     for (int64_t i = 0; i < row_count; ++i) {
         int64_t row_id = row_start + i;
         int64_t start = row_to_element_start_[row_id] - element_start;
         int64_t end = row_to_element_start_[row_id + 1] - element_start;
         if (start < end) {
-            element_bitset.set(start, end - start, row_bitset[i]);
-            valid_element_bitset.set(start, end - start, valid_row_bitset[i]);
+            // Bitmaps are pre-initialized (false / true); only flip ranges
+            // that differ to avoid per-row no-op range fills.
+            if (row_bitset[i]) {
+                element_bitset.set(start, end - start, true);
+            }
+            if (!valid_row_bitset[i]) {
+                valid_element_bitset.set(start, end - start, false);
+            }
         }
     }
 
@@ -179,6 +261,28 @@ ArrayOffsetsSealed::ForEachRowElementRange(
     return result;
 }
 
+void
+ArrayOffsetsSealed::ElementBitsetToRowBitsetAny(
+    const TargetBitmapView& elem_bitset,
+    int64_t elem_offset,
+    int64_t row_start,
+    TargetBitmapView row_result) const {
+    const int64_t row_count = row_result.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    ElementBitsetAnyReduce(row_to_element_start_.data(),
+                           elem_bitset,
+                           elem_offset,
+                           row_start,
+                           row_count,
+                           row_result);
+}
+
 std::shared_ptr<ArrayOffsetsSealed>
 ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                                      const FieldMeta& field_meta) {
@@ -197,6 +301,11 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     auto data_type = field_meta.get_data_type();
 
     std::vector<int32_t> row_to_element_start(row_count + 1);
+    // Retain per-row NULL info so row-level consumers (e.g. array_contains via a
+    // nested index) can exclude NULL rows -- a NULL row has zero elements and is
+    // otherwise indistinguishable from an empty array at element level.
+    TargetBitmap row_valid(row_count, true);
+    bool nullable_seen = false;
 
     auto temp_op_ctx = std::make_unique<OpContext>();
     auto op_ctx_ptr = temp_op_ctx.get();
@@ -215,6 +324,9 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -232,6 +344,9 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -259,6 +374,11 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
+    if (nullable_seen) {
+        result->has_row_valid_ = true;
+        result->row_valid_ = std::move(row_valid);
+        result->resource_size_ += (row_count + 7) / 8;
+    }
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
@@ -279,6 +399,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
     auto data_type = field_meta.get_data_type();
 
     std::vector<int32_t> row_to_element_start(row_count + 1);
+    // See BuildFromSegment: retain per-row NULL info for row-level consumers.
+    TargetBitmap row_valid(row_count, true);
+    bool nullable_seen = false;
 
     auto temp_op_ctx = std::make_unique<OpContext>();
     auto op_ctx_ptr = temp_op_ctx.get();
@@ -297,6 +420,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -314,6 +440,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -341,6 +470,11 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
+    if (nullable_seen) {
+        result->has_row_valid_ = true;
+        result->row_valid_ = std::move(row_valid);
+        result->resource_size_ += (row_count + 7) / 8;
+    }
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
@@ -395,7 +529,7 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
     int64_t element_count = element_end - element_start;
 
     TargetBitmap element_bitset(element_count);
-    TargetBitmap valid_element_bitset(element_count);
+    TargetBitmap valid_element_bitset(element_count, true);
 
     // Use row-based iteration (more efficient than element-based)
     for (int64_t i = 0; i < row_count; ++i) {
@@ -403,8 +537,14 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
         int64_t start = row_to_element_start_[row_id] - element_start;
         int64_t end = row_to_element_start_[row_id + 1] - element_start;
         if (start < end) {
-            element_bitset.set(start, end - start, row_bitset[i]);
-            valid_element_bitset.set(start, end - start, valid_row_bitset[i]);
+            // Bitmaps are pre-initialized (false / true); only flip ranges
+            // that differ to avoid per-row no-op range fills.
+            if (row_bitset[i]) {
+                element_bitset.set(start, end - start, true);
+            }
+            if (!valid_row_bitset[i]) {
+                valid_element_bitset.set(start, end - start, false);
+            }
         }
     }
 
@@ -498,6 +638,30 @@ ArrayOffsetsGrowing::ForEachRowElementRange(
     }
 
     return result;
+}
+
+void
+ArrayOffsetsGrowing::ElementBitsetToRowBitsetAny(
+    const TargetBitmapView& elem_bitset,
+    int64_t elem_offset,
+    int64_t row_start,
+    TargetBitmapView row_result) const {
+    std::shared_lock lock(mutex_);
+
+    const int64_t row_count = row_result.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed_row_count_);
+
+    ElementBitsetAnyReduce(row_to_element_start_.data(),
+                           elem_bitset,
+                           elem_offset,
+                           row_start,
+                           row_count,
+                           row_result);
 }
 
 void

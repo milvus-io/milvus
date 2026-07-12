@@ -965,7 +965,14 @@ def gt_struct_array_expression_rows(
         threshold = int(raw_threshold) if raw_threshold is not None else None
         results = []
         for row in scoped_rows:
-            struct_array = row.get(STRUCT_FIELD) or []
+            struct_array = row.get(STRUCT_FIELD)
+            # Three-valued MATCH semantics: a row whose struct-array field is NULL
+            # (explicit null or omitted) yields UNKNOWN and is excluded for every
+            # MATCH operator -- it is NOT treated as an empty array. A real empty
+            # array [] is a valid zero-element input and is still evaluated
+            # vacuously below (MATCH_ALL/MOST/EXACT(0) keep it, ANY/LEAST drop it).
+            if struct_array is None:
+                continue
             match_count = sum(1 for element in struct_array if _eval_struct_element_condition(element, condition))
             total_count = len(struct_array)
             matched = (

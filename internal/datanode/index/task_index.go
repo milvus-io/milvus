@@ -213,12 +213,25 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 	it.req.CurrentScalarIndexVersion = common.ClampScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
+	// Keep the nested marker consistent with the clamped version: if this node
+	// cannot build nested array indexes, it builds a legacy row-level index and
+	// must report the marker as false (the request value is echoed into the
+	// task result and persisted with the segment index meta). Note struct
+	// sub-field indexes never carry the marker in the first place -- they are
+	// routed nested by NAME on every released binary, so the marker's
+	// "requires v5 to load" semantics does not apply to them (see the decision
+	// site in datacoord prepareJobRequest).
+	if it.req.GetIsNestedIndex() &&
+		it.req.GetCurrentScalarIndexVersion() < common.MinScalarIndexVersionForNestedArrayIndex {
+		it.req.IsNestedIndex = false
+	}
 
 	mlog.Info(ctx, "Successfully prepare indexBuildTask", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.FieldCollectionID(it.req.GetCollectionID()), mlog.FieldSegmentID(it.req.GetSegmentID()),
 		mlog.Int64("taskVersion", it.req.GetIndexVersion()),
 		mlog.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
 		mlog.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
+		mlog.Bool("isNestedIndex", it.req.GetIsNestedIndex()),
 	)
 	return nil
 }
@@ -299,6 +312,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		IndexVersion:              it.req.GetIndexVersion(),
 		CurrentIndexVersion:       it.req.GetCurrentIndexVersion(),
 		CurrentScalarIndexVersion: it.req.GetCurrentScalarIndexVersion(),
+		IsNestedIndex:             it.req.GetIsNestedIndex(),
 		NumRows:                   it.req.GetNumRows(),
 		Dim:                       it.req.GetDim(),
 		IndexFilePrefix:           it.req.GetIndexFilePrefix(),
@@ -390,6 +404,9 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		uint64(indexStats.MemSize),
 		it.req.GetCurrentIndexVersion(),
 		it.req.GetCurrentScalarIndexVersion(),
+		// The nested marker is echoed from the (Prepare-adjusted) request:
+		// C++ builds exactly what the request asked for.
+		it.req.GetIsNestedIndex(),
 		it.req.GetIndexStorePathVersion(),
 	)
 	saveIndexFileDur := it.tr.RecordSpan()

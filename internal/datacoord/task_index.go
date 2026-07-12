@@ -409,6 +409,29 @@ func vectorArrayElementSize(field *schemapb.FieldSchema) (int64, error) {
 	}
 }
 
+// isNestedArrayIndex reports whether a scalar array index for `field`, built at
+// scalarIndexVersion, is a nested (element-level) array index whose loading
+// requires nested-array-capable (scalar index version >= 5) code.
+//
+// Marker semantics: "loading this index requires nested-array-capable code",
+// NOT "the physical layout is element-level". Struct sub-field indexes
+// ("parent[sub]", ARRAY-typed) are physically element-level too, but every
+// released binary routes them nested by NAME (IsStructSubField precedes the
+// marker check in C++), so they load everywhere and their marker MUST stay
+// false -- otherwise the snapshot-restore version guard (snapshot_manager.go)
+// would wrongly refuse to place them on a pre-v5 pool that can load them fine.
+//
+// This is the single source of truth for the is_nested_index marker: the build
+// path (prepareJobRequest) and the snapshot-restore copy path
+// (syncVectorScalarIndexes) both derive the marker here from the field type +
+// scalar version, so a stale/old copy worker echoing a dropped marker bit can
+// never corrupt the persisted value.
+func isNestedArrayIndex(field *schemapb.FieldSchema, scalarIndexVersion int32) bool {
+	return field.GetDataType() == schemapb.DataType_Array &&
+		!typeutil.IsStructSubField(field.GetName()) &&
+		scalarIndexVersion >= common.MinScalarIndexVersionForNestedArrayIndex
+}
+
 // Helper method to prepare job request
 func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo, segIndex *model.SegmentIndex,
 	indexParams []*commonpb.KeyValuePair, indexType string,
@@ -489,6 +512,15 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
+	// Decide here whether this build produces a nested (element-level) array
+	// index. The scalar index engine version is the capability signal (minimum
+	// across all querynodes, so during a rolling upgrade no pre-nested node can
+	// be handed an element-level index); the decision is frozen into the request
+	// and persisted with the segment index meta, and load routing uses the
+	// persisted marker, never the version. See isNestedArrayIndex for the
+	// struct-sub-field carve-out and why it is the single source of truth.
+	isNestedIndex := isNestedArrayIndex(field, currentScalarIndexVersion)
+
 	// Create the job request. The path layout (v0/v1) is propagated via
 	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
@@ -505,6 +537,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		NumRows:                   segIndex.NumRows,
 		CurrentIndexVersion:       currentVecIndexVersion,
 		CurrentScalarIndexVersion: currentScalarIndexVersion,
+		IsNestedIndex:             isNestedIndex,
 		CollectionID:              segment.GetCollectionID(),
 		PartitionID:               segment.GetPartitionID(),
 		SegmentID:                 segment.GetID(),

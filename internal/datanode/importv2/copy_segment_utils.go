@@ -728,6 +728,7 @@ func buildIndexInfoFromSource(
 			IndexSize:                 int64(srcIndex.GetSerializedSize()),
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
+			IsNestedIndex:             srcIndex.GetIsNestedIndex(),
 			IndexName:                 srcIndex.GetIndexName(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
 		}

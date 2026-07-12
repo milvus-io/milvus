@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 namespace milvus {
@@ -54,6 +55,14 @@ class ThreeValuedLogicOp {
     static void
     And(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
+        // Both operands must live in the same bitmap space (row-level vs
+        // element-level). A mismatch means a mis-planned expression (e.g. a
+        // row-level column inside a MATCH predicate); reading `size` bits from
+        // the smaller operand would run past its buffer.
+        AssertInfo(right->size() == size,
+                   "three-valued AND operand size mismatch: left={}, right={}",
+                   size,
+                   right->size());
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);
         TargetBitmapView right_data(right->GetRawData(), size);
@@ -104,6 +113,11 @@ class ThreeValuedLogicOp {
     static void
     Or(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
+        // See And(): operands must share one bitmap space.
+        AssertInfo(right->size() == size,
+                   "three-valued OR operand size mismatch: left={}, right={}",
+                   size,
+                   right->size());
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);
         TargetBitmapView right_data(right->GetRawData(), size);

@@ -239,6 +239,36 @@ class ShreddingArrayBsonContainsAllExecutor {
     std::set<GetType> elements_;
 };
 
+// ContainsAll with an EMPTY candidate set (`contains_all(x, [])`) over the
+// shredded ARRAY column: every row holding a real array — including an empty
+// one — vacuously contains all zero requested elements. Rows invalid in this
+// column stay UNKNOWN here and are resolved by the shared-data pass, exactly
+// like the non-empty ShreddingArrayBsonContainsAllExecutor above.
+class ShreddingArrayBsonEmptyContainsAllExecutor {
+ public:
+    void
+    operator()(const std::string_view* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        for (size_t i = 0; i < size; ++i) {
+            if (valid != nullptr && !valid[i]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            milvus::BsonView bson(
+                reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
+            auto array_view = bson.ParseAsArrayAtOffset(0);
+            if (!array_view.has_value()) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = true;
+        }
+    }
+};
+
 class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
  public:
     ShreddingArrayBsonContainsAllWithDiffTypeExecutor(
@@ -495,6 +525,15 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::JsonStats;
             return;
         }
+        if (expr_->vals_.empty() &&
+            expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
+            // Empty-set ContainsAll degenerates to a per-row "is a real
+            // array" probe (see ExecEmptyArrayContainsAll /
+            // ExecEmptyJsonContainsAll); the scalar-index path cannot answer
+            // that, so pin nothing and scan raw data.
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
         SegmentExpr::DetermineExecPath();
     }
 
@@ -525,6 +564,20 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     template <typename ExprValueType>
     VectorPtr
     ExecArrayContainsAll(EvalCtx& context);
+
+    // ContainsAll with an EMPTY candidate set (`contains_all(x, [])`):
+    // vacuously TRUE for every row whose target is a real array (an empty
+    // [] counts), UNKNOWN for NULL rows and for JSON rows whose path is
+    // missing or not an array — mirroring the non-empty ContainsAll row
+    // treatment. See PhyJsonContainsFilterExpr::Eval.
+    VectorPtr
+    ExecEmptyArrayContainsAll(EvalCtx& context);
+
+    VectorPtr
+    ExecEmptyJsonContainsAll(EvalCtx& context);
+
+    VectorPtr
+    ExecEmptyJsonContainsAllByStats();
 
     VectorPtr
     ExecJsonContainsArray(EvalCtx& context);

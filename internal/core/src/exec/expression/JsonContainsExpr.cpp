@@ -136,6 +136,31 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     if (expr_->vals_.empty()) {
+        if (expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
+            // contains_all(x, []) is vacuously true, but only over a real
+            // array: a row matches iff its target resolves to an actual
+            // array (an empty [] counts), while a NULL row / a JSON path
+            // that is missing or not an array stays UNKNOWN — exactly how
+            // the non-empty ContainsAll treats such rows. PG grounding:
+            // '[1,2]'::jsonb @> '[]' is true, but NULL @> '{}' yields NULL.
+            switch (expr_->column_.data_type_) {
+                case DataType::ARRAY: {
+                    result = ExecEmptyArrayContainsAll(context);
+                    break;
+                }
+                case DataType::JSON: {
+                    result = ExecEmptyJsonContainsAll(context);
+                    break;
+                }
+                default:
+                    ThrowInfo(DataTypeInvalid,
+                              "unsupported data type: {}",
+                              expr_->column_.data_type_);
+            }
+            return;
+        }
+        // Contains/ContainsAny over an empty candidate set can never match:
+        // definite false for every row, zero comparisons needed.
         auto real_batch_size = has_offset_input_
                                    ? context.get_offset_input()->size()
                                    : GetNextBatchSize();
@@ -143,15 +168,9 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = nullptr;
             return;
         }
-        if (expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
-            result = std::make_shared<ColumnVector>(
-                TargetBitmap(real_batch_size, true),
-                TargetBitmap(real_batch_size, true));
-        } else {
-            result = std::make_shared<ColumnVector>(
-                TargetBitmap(real_batch_size, false),
-                TargetBitmap(real_batch_size, true));
-        }
+        result =
+            std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                           TargetBitmap(real_batch_size, true));
         MoveCursor();
         return;
     }
@@ -1055,6 +1074,253 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+VectorPtr
+PhyJsonContainsFilterExpr::ExecEmptyArrayContainsAll(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
+    AssertInfo(expr_->column_.nested_path_.size() == 0,
+               "[ExecEmptyArrayContainsAll]nested path must be null");
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+    int processed_cursor = 0;
+    auto execute_sub_batch =
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::ArrayView* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            // A real array — even an empty one — vacuously contains all
+            // zero requested elements.
+            res[i] = true;
+        }
+        processed_cursor += size;
+    };
+
+    int64_t processed_size;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<milvus::ArrayView>(
+            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+    } else {
+        processed_size = ProcessDataChunks<milvus::ArrayView>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
+}
+
+VectorPtr
+PhyJsonContainsFilterExpr::ExecEmptyJsonContainsAll(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
+
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "json_contains_all_empty_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
+        return ExecEmptyJsonContainsAllByStats();
+    }
+
+    milvus::ScopedTimer timer(
+        "json_contains_all_empty_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+
+    size_t processed_cursor = 0;
+    auto execute_sub_batch =
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            const std::string& pointer) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            auto doc = data[offset].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                // Missing path / non-array / JSON null: UNKNOWN, same as
+                // the non-empty ExecJsonContainsAll bad-path treatment.
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            // A real array — even an empty one — vacuously contains all
+            // zero requested elements.
+            res[i] = true;
+        }
+        processed_cursor += size;
+    };
+
+    int64_t processed_size;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<Json>(execute_sub_batch,
+                                                    std::nullptr_t{},
+                                                    input,
+                                                    res,
+                                                    valid_res,
+                                                    pointer);
+    } else {
+        processed_size = ProcessDataChunks<Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);
+    }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
+}
+
+VectorPtr
+PhyJsonContainsFilterExpr::ExecEmptyJsonContainsAllByStats() {
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
+        auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
+
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(active_count_);
+        TargetBitmapView res_view(*cached_index_chunk_res_);
+        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        // process shredding data for ARRAY type (non-shared)
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_empty_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
+            auto target_field = index->GetShreddingField(
+                pointer, milvus::index::JSONType::ARRAY);
+            if (!target_field.empty()) {
+                TargetBitmap target_res(active_count_, false);
+                TargetBitmapView target_res_view(target_res);
+                TargetBitmap target_valid(active_count_, true);
+                TargetBitmapView target_valid_view(target_valid);
+                ShreddingArrayBsonEmptyContainsAllExecutor executor;
+
+                index->ExecutorForShreddingData<std::string_view>(
+                    op_ctx_,
+                    target_field,
+                    executor,
+                    nullptr,
+                    target_res_view,
+                    target_valid_view);
+                res_view.inplace_or_with_count(target_res_view, active_count_);
+                valid_res_view.inplace_or_with_count(target_valid_view,
+                                                     active_count_);
+            }
+        }
+        // process shared data
+        auto shared_executor = [&res_view, &valid_res_view](
+                                   milvus::BsonView bson,
+                                   uint32_t row_offset,
+                                   uint32_t value_offset) {
+            auto val = bson.ParseAsArrayAtOffset(value_offset);
+            if (!val.has_value()) {
+                // Path is not an array on this row: stays UNKNOWN, same as
+                // the non-empty ContainsAll shared-data treatment.
+                return;
+            }
+            valid_res_view[row_offset] = true;
+            res_view[row_offset] = true;
+        };
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_empty_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
+        cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
+    }
+
+    auto res = MoveOrSliceBitmap(*cached_index_chunk_res_,
+                                 *cached_index_chunk_valid_res_,
+                                 current_data_global_pos_,
+                                 real_batch_size);
+    MoveCursor();
+    return res;
 }
 
 template <typename ExprValueType>
@@ -2393,17 +2659,13 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
             AssertInfo(array_offsets != nullptr,
                        "array offsets not found for field {}",
                        expr_->column_.field_id_.get());
-            return array_offsets->ForEachRowElementRange(
-                [&element_bitset](int32_t elem_start, int32_t elem_end) {
-                    for (int32_t i = elem_start; i < elem_end; ++i) {
-                        if (element_bitset[i]) {
-                            return true;
-                        }
-                    }
-                    return false;
-                },
-                0,
-                active_count_);
+            // Word-wise ANY reduction: a row matches iff any element bit in
+            // its range is set. Skips zero words instead of testing each
+            // element bit.
+            TargetBitmap row_bitset(active_count_);
+            array_offsets->ElementBitsetToRowBitsetAny(
+                element_bitset.view(), 0, 0, row_bitset.view());
+            return row_bitset;
         };
 
         switch (expr_->op_) {
