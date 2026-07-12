@@ -28,13 +28,13 @@ class MiniMaxProviderTest(unittest.TestCase):
                 False,
             ),
             (
-                "https://api.minimax.io/anthropic/v1",
+                "https://api.minimax.io/anthropic",
                 "MiniMax-M3",
                 "https://api.minimax.io/anthropic/v1/messages",
                 True,
             ),
             (
-                "https://api.minimaxi.com/anthropic/v1",
+                "https://api.minimaxi.com/anthropic",
                 "MiniMax-M2.7",
                 "https://api.minimaxi.com/anthropic/v1/messages",
                 True,

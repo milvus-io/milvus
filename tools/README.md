@@ -52,9 +52,9 @@
    | Protocol | International | China |
    |---|---|---|
    | OpenAI-compatible | `https://api.minimax.io/v1` | `https://api.minimaxi.com/v1` |
-   | Anthropic-compatible | `https://api.minimax.io/anthropic/v1` | `https://api.minimaxi.com/anthropic/v1` |
+   | Anthropic-compatible | `https://api.minimax.io/anthropic` | `https://api.minimaxi.com/anthropic` |
 
-   `mgit.py` appends `/chat/completions` or `/messages` to these API bases.
+   `mgit.py` appends `/chat/completions` or `/v1/messages` to these API bases.
 
    Add to `~/.bashrc` or `~/.zshrc` for persistence:
    ```bash

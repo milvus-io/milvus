@@ -749,10 +749,10 @@ Ensure title is concise and ≤80 characters.
         self, prompt: str, temperature: float, timeout: int
     ) -> str:
         """Call the configured MiniMax OpenAI- or Anthropic-compatible API."""
-        uses_anthropic_api = self.minimax_api_base_url.endswith("/anthropic/v1")
+        uses_anthropic_api = self.minimax_api_base_url.endswith("/anthropic")
 
         if uses_anthropic_api:
-            url = f"{self.minimax_api_base_url}/messages"
+            url = f"{self.minimax_api_base_url}/v1/messages"
             data = {
                 "model": self.minimax_model,
                 "max_tokens": 2048,
