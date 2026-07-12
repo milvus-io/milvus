@@ -1885,15 +1885,31 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         reader_create_ms,
         column_groups->size());
 
+    // A manifest column whose field was dropped from the schema is a legal
+    // leftover of drop semantics: filter it out (a group filtered to empty
+    // produces no load task) instead of tripping the schema lookup on it.
     std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
     cg_field_ids.reserve(column_groups->size());
     for (size_t i = 0; i < column_groups->size(); ++i) {
         auto cg = column_groups->at(i);
         std::vector<FieldId> field_ids;
+        std::vector<int64_t> dropped_fields;
         field_ids.reserve(cg->columns.size());
         for (auto& column : cg->columns) {
-            field_ids.emplace_back(
-                schema_snapshot->ResolveColumnFieldId(column));
+            auto field_id = schema_snapshot->ResolveColumnFieldId(column);
+            if (!schema_snapshot->has_field(field_id)) {
+                dropped_fields.push_back(field_id.get());
+                continue;
+            }
+            field_ids.emplace_back(field_id);
+        }
+        if (!dropped_fields.empty()) {
+            LOG_INFO(
+                "segment {} skips dropped fields {} of column group {} on "
+                "load",
+                id_,
+                fmt::format("{}", dropped_fields),
+                i);
         }
         cg_field_ids.emplace_back(static_cast<int>(i), std::move(field_ids));
     }
