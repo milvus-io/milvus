@@ -1559,6 +1559,18 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                     field_data->FillFieldData(chunked_array);
                 }
                 field_data_list.push_back(field_data);
+                total_num_rows += num_rows;
+                if (max_rows > 0 && total_num_rows > max_rows) {
+                    LOG_DEBUG(
+                        "[StorageV2] max_rows: {} reached, total rows: {}",
+                        max_rows,
+                        total_num_rows);
+                    is_full = true;
+                    break;
+                }
+            }
+            if (is_full) {
+                break;
             }
         } catch (...) {
             // The load task captures this frame by reference and may be
