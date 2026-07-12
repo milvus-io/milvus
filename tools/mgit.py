@@ -506,6 +506,8 @@ class AIService:
     """Handles AI API calls for commit message and PR generation"""
 
     COMMIT_TYPES = ["fix", "enhance", "feat", "refactor", "test", "docs", "chore"]
+    MINIMAX_MODELS = ("MiniMax-M3", "MiniMax-M2.7")
+    MINIMAX_DEFAULT_API_BASE_URL = "https://api.minimax.io/v1"
 
     def __init__(self):
         # Check for local claude CLI first
@@ -515,6 +517,10 @@ class AIService:
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.minimax_key = os.getenv("MINIMAX_API_KEY")
+        self.minimax_model = os.getenv("MINIMAX_MODEL") or self.MINIMAX_MODELS[0]
+        self.minimax_api_base_url = (
+            os.getenv("MINIMAX_API_BASE_URL") or self.MINIMAX_DEFAULT_API_BASE_URL
+        ).rstrip("/")
 
         # Has API key if any key is set OR local claude is available
         self.has_api_key = bool(
@@ -735,34 +741,68 @@ Ensure title is concise and ≤80 characters.
             raise Exception(f"OpenAI API error: {e}")
 
     def _call_minimax(self, prompt: str) -> Dict[str, str]:
-        """Call MiniMax API using its OpenAI-compatible chat completions endpoint"""
-        url = "https://api.minimax.io/v1/chat/completions"
+        """Call MiniMax API and parse a commit message response."""
+        content = self._call_minimax_api(prompt, temperature=0.7, timeout=30)
+        return self._parse_ai_response(content)
 
-        data = {
-            "model": "MiniMax-M3",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-        }
+    def _call_minimax_api(
+        self, prompt: str, temperature: float, timeout: int
+    ) -> str:
+        """Call the configured MiniMax OpenAI- or Anthropic-compatible API."""
+        uses_anthropic_api = self.minimax_api_base_url.endswith("/anthropic/v1")
+
+        if uses_anthropic_api:
+            url = f"{self.minimax_api_base_url}/messages"
+            data = {
+                "model": self.minimax_model,
+                "max_tokens": 2048,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+            }
+            headers = {
+                "Authorization": f"Bearer {self.minimax_key}",
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+        else:
+            url = f"{self.minimax_api_base_url}/chat/completions"
+            data = {
+                "model": self.minimax_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "reasoning_split": True,
+            }
+            headers = {
+                "Authorization": f"Bearer {self.minimax_key}",
+                "Content-Type": "application/json",
+            }
 
         req = urllib.request.Request(
             url,
             data=json.dumps(data).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.minimax_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
-                content = result["choices"][0]["message"]["content"]
-                return self._parse_ai_response(content)
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
-            raise Exception(f"MiniMax API HTTP {e.code}: {error_body}")
+            raise Exception(f"MiniMax API HTTP {e.code}: {error_body}") from e
         except Exception as e:
-            raise Exception(f"MiniMax API error: {e}")
+            raise Exception(f"MiniMax API error: {e}") from e
+
+        if uses_anthropic_api:
+            content = "".join(
+                block.get("text", "")
+                for block in result["content"]
+                if block.get("type") == "text"
+            )
+            if not content:
+                raise Exception("MiniMax API response did not contain a text block")
+            return content
+
+        return result["choices"][0]["message"]["content"]
 
     def _call_gemini(self, prompt: str) -> Dict[str, str]:
         """Call Google Gemini API"""
@@ -1047,23 +1087,7 @@ Use markdown formatting in the body where appropriate.
                 result = json.loads(response.read().decode("utf-8"))
                 content = result["choices"][0]["message"]["content"]
         elif provider == "minimax":
-            url = "https://api.minimax.io/v1/chat/completions"
-            data = {
-                "model": "MiniMax-M3",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-            }
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(data).encode("utf-8"),
-                headers={
-                    "Authorization": f"Bearer {self.minimax_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=30) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                content = result["choices"][0]["message"]["content"]
+            content = self._call_minimax_api(prompt, temperature=0.7, timeout=30)
         else:
             raise Exception(f"Unknown provider: {provider}")
 
@@ -1190,23 +1214,7 @@ Keep the response concise and actionable. Focus on the most important conflicts 
                     return result["choices"][0]["message"]["content"]
 
             if self.minimax_key:
-                url = "https://api.minimax.io/v1/chat/completions"
-                data = {
-                    "model": "MiniMax-M3",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                }
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(data).encode("utf-8"),
-                    headers={
-                        "Authorization": f"Bearer {self.minimax_key}",
-                        "Content-Type": "application/json",
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                    return result["choices"][0]["message"]["content"]
+                return self._call_minimax_api(prompt, temperature=0.3, timeout=30)
 
         except Exception as e:
             return f"AI analysis failed: {e}"
@@ -1436,23 +1444,9 @@ Keep concerns and suggestions concise and actionable.
 
         if content is None and self.minimax_key:
             try:
-                url = "https://api.minimax.io/v1/chat/completions"
-                data = {
-                    "model": "MiniMax-M3",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                }
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(data).encode("utf-8"),
-                    headers={
-                        "Authorization": f"Bearer {self.minimax_key}",
-                        "Content-Type": "application/json",
-                    },
+                content = self._call_minimax_api(
+                    prompt, temperature=0.3, timeout=60
                 )
-                with urllib.request.urlopen(req, timeout=60) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                    content = result["choices"][0]["message"]["content"]
             except Exception as e:
                 errors.append(f"MiniMax: {e}")
 
@@ -2570,6 +2564,7 @@ def workflow_commit():
         print_info("  export GEMINI_API_KEY='your-key'  (recommended)")
         print_info("  export ANTHROPIC_API_KEY='your-key'")
         print_info("  export OPENAI_API_KEY='your-key'")
+        print_info("  export MINIMAX_API_KEY='your-key'")
         print("")
         full_message = UserInteraction.prompt_multiline(
             "Enter commit message manually:"

@@ -42,7 +42,19 @@
 
    # MiniMax API
    export MINIMAX_API_KEY=your-minimax-key
+   export MINIMAX_MODEL=MiniMax-M3
+   export MINIMAX_API_BASE_URL=https://api.minimax.io/v1
    ```
+
+   `MINIMAX_MODEL` defaults to `MiniMax-M3`; `MiniMax-M2.7` is also supported.
+   Set `MINIMAX_API_BASE_URL` to the API base for your region and protocol:
+
+   | Protocol | International | China |
+   |---|---|---|
+   | OpenAI-compatible | `https://api.minimax.io/v1` | `https://api.minimaxi.com/v1` |
+   | Anthropic-compatible | `https://api.minimax.io/anthropic/v1` | `https://api.minimaxi.com/anthropic/v1` |
+
+   `mgit.py` appends `/chat/completions` or `/messages` to these API bases.
 
    Add to `~/.bashrc` or `~/.zshrc` for persistence:
    ```bash
