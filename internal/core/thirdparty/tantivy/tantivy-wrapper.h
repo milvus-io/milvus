@@ -1318,12 +1318,33 @@ struct TantivyIndexWrapper {
                     free_rust_result(res_u64);
                 }
 
-                // Also query as f64 since JSON doesn't distinguish int/float
-                std::vector<double> f64_values(n);
-                for (size_t i = 0; i < n; ++i)
-                    f64_values[i] = static_cast<double>(values[i]);
-                return tantivy_json_terms_query_f64(
-                    reader_, json_path.c_str(), f64_values.data(), n, bitset);
+                // Query f64 only when the integer round-trips exactly. JSON
+                // numeric equality is cross-type, but a lossy conversion here
+                // would alias adjacent integers above 2^53.
+                std::vector<double> f64_values;
+                f64_values.reserve(n);
+                for (size_t i = 0; i < n; ++i) {
+                    const auto value_as_double = static_cast<double>(values[i]);
+                    if constexpr (std::is_signed_v<T>) {
+                        if (can_cast_double_to_i64(value_as_double) &&
+                            static_cast<int64_t>(value_as_double) ==
+                                static_cast<int64_t>(values[i])) {
+                            f64_values.push_back(value_as_double);
+                        }
+                    } else if (can_cast_double_to_u64(value_as_double) &&
+                               static_cast<uint64_t>(value_as_double) ==
+                                   static_cast<uint64_t>(values[i])) {
+                        f64_values.push_back(value_as_double);
+                    }
+                }
+                double empty_f64_value = 0;
+                const auto* f64_data =
+                    f64_values.empty() ? &empty_f64_value : f64_values.data();
+                return tantivy_json_terms_query_f64(reader_,
+                                                    json_path.c_str(),
+                                                    f64_data,
+                                                    f64_values.size(),
+                                                    bitset);
             }
 
             if constexpr (std::is_floating_point_v<T>) {
@@ -1393,9 +1414,12 @@ struct TantivyIndexWrapper {
     }
 
     void
-    json_exist_query(const std::string& json_path, void* bitset) {
-        auto array =
-            tantivy_json_exist_query(reader_, json_path.c_str(), bitset);
+    json_exist_query(const std::string& json_path,
+                     bool json_subpaths,
+                     JsonExistValueType value_type,
+                     void* bitset) {
+        auto array = tantivy_json_exist_query(
+            reader_, json_path.c_str(), json_subpaths, value_type, bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.json_exist_query: {}",

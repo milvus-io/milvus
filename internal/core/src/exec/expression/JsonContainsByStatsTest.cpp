@@ -29,6 +29,8 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/BinaryRangeExpr.h"
+#include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
@@ -52,6 +54,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -351,4 +354,199 @@ TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     EXPECT_TRUE(result[6]);
     EXPECT_FALSE(result[7]);
     EXPECT_EQ(result.count(), 2);
+}
+
+TEST(JsonStatsThreeValuedAuditTest,
+     EmptyInAndLargeInt64KeepThreeValuedSemantics) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    const std::vector<std::string> json_raw_data = {
+        R"({"a": 9007199254740992})",
+        R"({"a": 9007199254740993})",
+        R"({"a": 9007199254740994})",
+        R"({"a": "abc"})",
+        R"({})",
+        R"({"a": null})",
+        R"({"a": 9007199254740993})"};
+    const std::vector<uint8_t> valid_data{0b00111111};
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1201,
+                                          2201,
+                                          3201,
+                                          json_fid.get(),
+                                          5201,
+                                          1,
+                                          &valid_data);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    json_field->FillFieldData(MakeNullableJsonArray(json_raw_data, valid_data));
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    };
+    auto check = [](const ColumnVectorPtr& result,
+                    const std::vector<bool>& expected_result,
+                    const std::vector<bool>& expected_valid) {
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i = 0; i < result->size(); ++i) {
+            EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
+            if (expected_valid[i]) {
+                EXPECT_EQ(result_view[i], expected_result[i]) << "row " << i;
+            }
+        }
+    };
+
+    auto empty_term = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{},
+        false);
+    check(evaluate(empty_term),
+          std::vector<bool>(json_raw_data.size(), false),
+          std::vector<bool>(json_raw_data.size(), true));
+    check(evaluate(std::make_shared<expr::LogicalUnaryExpr>(
+              expr::LogicalUnaryExpr::OpType::LogicalNot, empty_term)),
+          std::vector<bool>(json_raw_data.size(), true),
+          std::vector<bool>(json_raw_data.size(), true));
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(9007199254740993LL);
+    const std::vector<bool> numeric_valid = {
+        true, true, true, false, false, false, false};
+    auto equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::Equal,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    check(evaluate(equal_expr),
+          {false, true, false, false, false, false, false},
+          numeric_valid);
+
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{value},
+        false);
+    check(evaluate(term_expr),
+          {false, true, false, false, false, false, false},
+          numeric_valid);
+
+    auto greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::GreaterThan,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    check(evaluate(greater_expr),
+          {false, false, true, false, false, false, false},
+          numeric_valid);
+
+    auto between_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        value,
+        value,
+        true,
+        true);
+    check(evaluate(between_expr),
+          {false, true, false, false, false, false, false},
+          numeric_valid);
+}
+
+TEST(JsonStatsThreeValuedAuditTest,
+     UnsafeInt64DoesNotAliasDoubleShreddingOrSharedData) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    const std::vector<std::string> json_raw_data = {
+        R"({"typed": 9007199254740992.0, "shared": 9007199254740992.0, "typed_array": [9007199254740992.0], "shared_array": [9007199254740992.0]})",
+        R"({"typed": 9007199254740994.0, "shared": 1.5, "typed_array": [9007199254740994.0], "shared_array": [1.5]})",
+        R"({"typed": 1.0, "typed_array": [1.0]})",
+        R"({"typed": 2.0, "typed_array": [2.0]})"};
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1202,
+                                          2202,
+                                          3202,
+                                          json_fid.get(),
+                                          5202,
+                                          1);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
+
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_raw_data.size());
+    for (const auto& json : json_raw_data) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    json_field->add_json_data(jsons);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    };
+    auto check_non_matches_are_known = [](const ColumnVectorPtr& result) {
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        for (size_t i : {0, 1}) {
+            EXPECT_TRUE(valid_view[i]) << "row " << i;
+            EXPECT_FALSE(result_view[i]) << "row " << i;
+        }
+    };
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(9007199254740993LL);
+    for (const auto* path : {"typed", "shared"}) {
+        auto column = expr::ColumnInfo(json_fid, DataType::JSON, {path});
+        check_non_matches_are_known(
+            evaluate(std::make_shared<expr::UnaryRangeFilterExpr>(
+                column,
+                proto::plan::OpType::Equal,
+                value,
+                std::vector<proto::plan::GenericValue>())));
+        check_non_matches_are_known(
+            evaluate(std::make_shared<expr::TermFilterExpr>(
+                column, std::vector<proto::plan::GenericValue>{value}, false)));
+        check_non_matches_are_known(
+            evaluate(std::make_shared<expr::BinaryRangeFilterExpr>(
+                column, value, value, true, true)));
+    }
+
+    for (const auto* path : {"typed_array", "shared_array"}) {
+        check_non_matches_are_known(
+            evaluate(std::make_shared<expr::JsonContainsExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, {path}),
+                proto::plan::JSONContainsExpr_JSONOp_Contains,
+                true,
+                std::vector<proto::plan::GenericValue>{value})));
+    }
 }
