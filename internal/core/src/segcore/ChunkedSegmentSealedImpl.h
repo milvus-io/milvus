@@ -253,10 +253,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     CreateTextIndex(FieldId field_id,
                     milvus::OpContext* op_ctx = nullptr) override;
 
-    void
-    LoadTextIndex(milvus::OpContext* op_ctx,
-                  std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
-                      info_proto) override;
+    PinWrapper<index::TextMatchIndex*>
+    GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
@@ -319,6 +317,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     struct RuntimeResourceState;
 
+    using TextIndexVariant =
+        std::variant<std::shared_ptr<milvus::index::TextMatchIndexHolder>,
+                     std::shared_ptr<milvus::cachinglayer::CacheSlot<
+                         milvus::index::TextMatchIndex>>>;
+
     // When non-zero commit_ts is active, every row in this segment carries it
     // as its effective row timestamp (load-time overwrite). All timestamp
     // consumers must route through this so the override applies uniformly on
@@ -343,6 +346,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             std::unordered_map<std::string, index::CacheIndexBasePtr>>
             ngram_indexings;
         std::unordered_map<FieldId, std::string> text_lob_paths;
+        std::unordered_map<FieldId, TextIndexVariant> text_indexes;
         std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
             json_stats;
         std::shared_ptr<milvus_storage::api::Reader> reader;
@@ -1648,12 +1652,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     RecordDefaultFieldsFilled(const std::vector<FieldId>& field_ids);
 
     void
-    RecordTextIndexCreatedLocked(FieldId field_id);
-
-    void
-    RecordTextIndexCreated(FieldId field_id);
-
-    void
     SetUseTakeForOutputForTestingLocked(bool val);
 
     void
@@ -1943,14 +1941,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId,
                            std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
             text_indexes_to_load,
-        const SchemaPtr& schema_snapshot);
-
-    void
-    LoadBatchTextIndexes(
-        milvus::OpContext* op_ctx,
-        std::unordered_map<FieldId,
-                           std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
-            text_indexes_to_load);
+        const SchemaPtr& schema_snapshot,
+        const SegmentLoadInfo& segment_load_info,
+        StagedStateCommitter& committer);
 
     void
     CreateTextIndexWithSchema(FieldId field_id,
@@ -1965,40 +1958,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                               milvus::OpContext* op_ctx,
                               StagedStateCommitter& committer);
 
-    using TextIndexVariant =
-        std::variant<std::unique_ptr<milvus::index::TextMatchIndex>,
-                     std::shared_ptr<milvus::index::TextMatchIndexHolder>,
-                     std::shared_ptr<milvus::cachinglayer::CacheSlot<
-                         milvus::index::TextMatchIndex>>>;
-
     class ScopedTextIndexBuildGuard {
      public:
         ScopedTextIndexBuildGuard(ChunkedSegmentSealedImpl& segment,
-                                  FieldId field_id,
-                                  bool publish_marker,
-                                  bool holds_reopen_mutex = false)
-            : segment_(segment),
-              field_id_(field_id),
-              publish_marker_(publish_marker),
-              holds_reopen_mutex_(holds_reopen_mutex) {
+                                  FieldId field_id)
+            : segment_(segment), field_id_(field_id) {
         }
 
         void
         Register();
 
         void
-        Commit(TextIndexVariant index);
+        Commit();
 
         ~ScopedTextIndexBuildGuard();
 
      private:
         ChunkedSegmentSealedImpl& segment_;
         FieldId field_id_;
-        bool publish_marker_;
-        bool holds_reopen_mutex_;
         bool registered_{false};
         bool committed_{false};
     };
+
+    TextIndexVariant
+    BuildTextIndexFromFiles(
+        milvus::OpContext* op_ctx,
+        const std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>& info_proto,
+        const SegmentLoadInfo& segment_load_info);
 
     void
     RecordTextIndexCreated(SegmentLoadInfo& segment_load_info,
@@ -2443,7 +2429,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     TestRecordTextIndexCreated(FieldId field_id) {
-        RecordTextIndexCreated(field_id);
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        MutatePublishedStateLocked([&](PublishedSegmentState& state) {
+            state.load_info =
+                CloneLoadInfoWithTextIndexCreated(state.load_info, field_id);
+            state.use_take_for_output = state.load_info != nullptr &&
+                                        state.load_info->GetUseTakeForOutput();
+            ClearFieldBitsForAbsentLoadInfo(state);
+            SetSystemFieldReadyInState(state, state.load_info.get());
+        });
     }
 
     bool
@@ -2452,8 +2446,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    TestRegisterPendingTextIndex(FieldId field_id, bool publish_marker) {
-        ScopedTextIndexBuildGuard guard(*this, field_id, publish_marker);
+    TestRegisterPendingTextIndex(FieldId field_id) {
+        ScopedTextIndexBuildGuard guard(*this, field_id);
         guard.Register();
     }
 

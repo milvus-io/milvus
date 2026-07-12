@@ -3855,7 +3855,7 @@ TEST(SealedSegmentReopen, TextIndexCancellationGuardDoesNotLeakPendingState) {
     EXPECT_FALSE(
         sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
 
-    sealed->TestRegisterPendingTextIndex(text_fid, true);
+    sealed->TestRegisterPendingTextIndex(text_fid);
 
     EXPECT_FALSE(sealed->TestHasPendingTextIndex(text_fid));
     EXPECT_FALSE(
@@ -4002,6 +4002,81 @@ TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
 
     EXPECT_TRUE(
         sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+}
+
+TEST(SealedSegmentCowState, StagedTextIndexIsInvisibleBeforePublish) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text = schema->AddDebugVarcharField(FieldName("text"),
+                                             DataType::VARCHAR,
+                                             /*max_length=*/65535,
+                                             /*nullable=*/false,
+                                             /*enable_match=*/true,
+                                             /*enable_analyzer=*/true,
+                                             analyzer_params,
+                                             std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    auto dataset = DataGen(schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto published_before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(published_before->runtime->text_indexes.count(text), 0);
+
+    auto staged_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    sealed->TestCreateTextIndexWithSchema(
+        text, schema, nullptr, false, staged_runtime.get());
+
+    EXPECT_EQ(staged_runtime->text_indexes.count(text), 1);
+    EXPECT_EQ(published_before->runtime->text_indexes.count(text), 0);
+    EXPECT_ANY_THROW(sealed->GetTextIndex(nullptr, text));
+    EXPECT_FALSE(sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text));
+}
+
+TEST(SealedSegmentCowState, PublishedTextIndexFollowsSnapshotLifetime) {
+    auto old_schema = std::make_shared<Schema>();
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text = old_schema->AddDebugVarcharField(FieldName("text"),
+                                                 DataType::VARCHAR,
+                                                 /*max_length=*/65535,
+                                                 /*nullable=*/false,
+                                                 /*enable_match=*/true,
+                                                 /*enable_analyzer=*/true,
+                                                 analyzer_params,
+                                                 std::nullopt);
+    old_schema->set_primary_field_id(pk);
+    old_schema->set_schema_version(100);
+
+    auto dataset = DataGen(old_schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto before_create = sealed->TestGetPublishedStateSnapshot();
+    sealed->CreateTextIndex(text);
+    auto published_with_index = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(before_create->runtime->text_indexes.count(text), 0);
+    ASSERT_EQ(published_with_index->runtime->text_indexes.count(text), 1);
+    EXPECT_TRUE(published_with_index->load_info->HasTextIndexCreated(text));
+
+    auto old_pin = sealed->GetTextIndex(nullptr, text);
+    ASSERT_NE(old_pin.get(), nullptr);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk);
+    new_schema->set_schema_version(200);
+    sealed->Reopen(new_schema);
+
+    auto published_after_drop = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(published_after_drop->runtime->text_indexes.count(text), 0);
+    EXPECT_ANY_THROW(sealed->GetTextIndex(nullptr, text));
+    EXPECT_NE(old_pin.get(), nullptr);
+    EXPECT_EQ(published_with_index->runtime->text_indexes.count(text), 1);
 }
 
 TEST(SealedSegmentCowState,
