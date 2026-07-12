@@ -28,6 +28,7 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -2981,6 +2982,65 @@ func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, e
 	return []any{uniqueIDs}, nil
 }
 
+// restoreGroupByFieldData overwrites group-by columns in FieldsData with the
+// search-time group-by values carried on the result data (GroupByFieldValues,
+// or the legacy singular GroupByFieldValue). The group-by decision (which rows
+// survive group_size) is made on the rows returned by search, but output fields
+// are re-fetched by PK only via requery/organize; when duplicate PKs exist, the
+// re-fetched row can be a different physical row with a different group-by
+// value, surfacing duplicated group values in the final response even with
+// group_size=1. Restoring the search-time values keeps the response consistent
+// with the grouping decision. Results without group-by are left untouched.
+func restoreGroupByFieldData(data *schemapb.SearchResultData) {
+	if data == nil {
+		return
+	}
+	groupByValues := data.GetGroupByFieldValues()
+	if len(groupByValues) == 0 && data.GetGroupByFieldValue() != nil {
+		groupByValues = []*schemapb.FieldData{data.GetGroupByFieldValue()}
+	}
+	for _, gbv := range groupByValues {
+		if gbv == nil {
+			continue
+		}
+		for i, fd := range data.GetFieldsData() {
+			// A type mismatch means the group-by key is an extraction (e.g. a
+			// JSON path or dynamic key) rather than the whole column; keep the
+			// re-fetched column in that case.
+			if fd == nil || fd.GetType() != gbv.GetType() {
+				continue
+			}
+			if (gbv.GetFieldId() != 0 && fd.GetFieldId() == gbv.GetFieldId()) ||
+				(gbv.GetFieldId() == 0 && gbv.GetFieldName() != "" && fd.GetFieldName() == gbv.GetFieldName()) {
+				data.FieldsData[i] = proto.Clone(gbv).(*schemapb.FieldData)
+				break
+			}
+		}
+	}
+}
+
+// attachOrganizedFieldsFunc is the shared "result" node body of rerank-based
+// pipelines: attach the organized output fields to the rank result, then
+// restore group-by columns so they reflect the values the grouping was
+// computed on (see restoreGroupByFieldData).
+func attachOrganizedFieldsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	result := inputs[0].(*milvuspb.SearchResults)
+	fields := inputs[1].([][]*schemapb.FieldData)
+	result.Results.FieldsData = fields[0]
+	restoreGroupByFieldData(result.GetResults())
+	return []any{result}, nil
+}
+
+// pickOrganizedFieldsFunc is attachOrganizedFieldsFunc for pipelines whose
+// carrying result is the reduced result list instead of a rank result.
+func pickOrganizedFieldsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	result := inputs[0].([]*milvuspb.SearchResults)[0]
+	fields := inputs[1].([][]*schemapb.FieldData)
+	result.Results.FieldsData = fields[0]
+	restoreGroupByFieldData(result.GetResults())
+	return []any{result}, nil
+}
+
 type pipeline struct {
 	name         string
 	nodes        []*Node
@@ -3147,12 +3207,7 @@ var searchWithRequeryPipe = &pipelineDef{
 			inputs:  []string{"reduced", "organized_fields"},
 			outputs: []string{"result"},
 			params: map[string]any{
-				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-					result := inputs[0].([]*milvuspb.SearchResults)[0]
-					fields := inputs[1].([][]*schemapb.FieldData)
-					result.Results.FieldsData = fields[0]
-					return []any{result}, nil
-				},
+				lambdaParamKey: pickOrganizedFieldsFunc,
 			},
 			opName: lambdaOp,
 		},
@@ -3199,12 +3254,7 @@ var searchWithRerankPipe = &pipelineDef{
 			inputs:  []string{"rank_result", "organized_fields"},
 			outputs: []string{"result"},
 			params: map[string]any{
-				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-					result := inputs[0].(*milvuspb.SearchResults)
-					fields := inputs[1].([][]*schemapb.FieldData)
-					result.Results.FieldsData = fields[0]
-					return []any{result}, nil
-				},
+				lambdaParamKey: attachOrganizedFieldsFunc,
 			},
 			opName: lambdaOp,
 		},
@@ -3267,12 +3317,7 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 			inputs:  []string{"rank_result", "organized_fields"},
 			outputs: []string{"result"},
 			params: map[string]any{
-				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-					result := inputs[0].(*milvuspb.SearchResults)
-					fields := inputs[1].([][]*schemapb.FieldData)
-					result.Results.FieldsData = fields[0]
-					return []any{result}, nil
-				},
+				lambdaParamKey: attachOrganizedFieldsFunc,
 			},
 			opName: lambdaOp,
 		},
@@ -3422,12 +3467,7 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 			inputs:  []string{"rank_result", "organized_fields"},
 			outputs: []string{"result"},
 			params: map[string]any{
-				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-					result := inputs[0].(*milvuspb.SearchResults)
-					fields := inputs[1].([][]*schemapb.FieldData)
-					result.Results.FieldsData = fields[0]
-					return []any{result}, nil
-				},
+				lambdaParamKey: attachOrganizedFieldsFunc,
 			},
 			opName: lambdaOp,
 		},
@@ -3491,12 +3531,7 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 			inputs:  []string{"rank_result", "organized_fields"},
 			outputs: []string{"result"},
 			params: map[string]any{
-				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-					result := inputs[0].(*milvuspb.SearchResults)
-					fields := inputs[1].([][]*schemapb.FieldData)
-					result.Results.FieldsData = fields[0]
-					return []any{result}, nil
-				},
+				lambdaParamKey: attachOrganizedFieldsFunc,
 			},
 			opName: lambdaOp,
 		},
@@ -3555,12 +3590,7 @@ var searchWithOrderByPipe = &pipelineDef{
 			inputs:  []string{"reduced", "organized_fields"},
 			outputs: []string{"result"},
 			params: map[string]any{
-				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-					result := inputs[0].([]*milvuspb.SearchResults)[0]
-					fields := inputs[1].([][]*schemapb.FieldData)
-					result.Results.FieldsData = fields[0]
-					return []any{result}, nil
-				},
+				lambdaParamKey: pickOrganizedFieldsFunc,
 			},
 			opName: lambdaOp,
 		},
