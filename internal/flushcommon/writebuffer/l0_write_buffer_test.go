@@ -56,6 +56,10 @@ func (s fakeGrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
 
+func (s fakeGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
+	return []int64{0, 1, 100, 101, 102}, nil
+}
+
 func (s fakeGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 	if s.flushFunc != nil {
 		return s.flushFunc(ctx, startOffset, endOffset, config)
