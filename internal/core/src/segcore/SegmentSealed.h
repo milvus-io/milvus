@@ -56,11 +56,6 @@ class SegmentSealed : public SegmentInternalInterface {
                const int64_t* ids,
                int64_t count) const = 0;
 
-    virtual void
-    LoadTextIndex(milvus::OpContext* op_ctx,
-                  std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
-                      info_proto) = 0;
-
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
