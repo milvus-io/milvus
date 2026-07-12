@@ -110,8 +110,5 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		return err
-	}
-	return nil
+	return c.broadcastSchemaChange(ctx, broadcaster, coll, schema, msg)
 }

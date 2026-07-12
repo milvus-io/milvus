@@ -335,6 +335,19 @@ message ShardLeadersList {  // All leaders of all replicas of one shard
     repeated bool serviceable = 4;
 }
 
+message CheckSchemaReadyRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    int32 schema_version = 3;
+}
+
+message CheckSchemaReadyResponse {
+    common.Status status = 1;
+    // ready is true when the collection is not loaded, or every shard
+    // delegator's published ready schema version is >= the requested version.
+    bool ready = 2;
+}
+
 message SyncNewCreatedPartitionRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
@@ -689,6 +702,13 @@ message LeaderView {
     int64 num_of_growing_rows = 7;
     map<int64, int64> partition_stats_versions = 8;
     LeaderViewStatus status = 9;
+    // Schema version of the delegator's published ready snapshot: the highest
+    // schema version whose runtime dependencies (function runners, BM25 stats)
+    // are fully ready for the read path. -1 = no snapshot published yet.
+    // Optional so field presence distinguishes a pre-upgrade querynode (absent:
+    // readiness unknown, treated as ready to keep rolling upgrades live) from a
+    // new querynode that is genuinely not ready yet.
+    optional int32 ready_schema_version = 10;
 }
 
 message LeaderViewStatus {

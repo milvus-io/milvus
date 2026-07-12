@@ -718,6 +718,12 @@ func withValidMixCoord() Opt {
 		merr.Success(), nil,
 	)
 
+	// Schema-change DDL callbacks wait on shard readiness before expiring
+	// caches; default to ready so DDL flows complete in tests.
+	mixc.EXPECT().CheckSchemaReady(mock.Anything, mock.Anything).Return(
+		&querypb.CheckSchemaReadyResponse{Status: merr.Success(), Ready: true}, nil,
+	).Maybe()
+
 	mixc.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(
 		&datapb.WatchChannelsResponse{
 			Status: merr.Success(),

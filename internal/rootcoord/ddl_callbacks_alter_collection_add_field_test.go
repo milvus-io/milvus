@@ -157,6 +157,9 @@ func getFieldSchema(fieldName string) []byte {
 	fieldSchema := &schemapb.FieldSchema{
 		Name:     fieldName,
 		DataType: schemapb.DataType_Int64,
+		// Added fields must be backfillable into existing rows; proxy requires nullable and
+		// so does the rootcoord admission gate (schemautil.ValidateSchemaEvolution).
+		Nullable: true,
 	}
 	schemaBytes, _ := proto.Marshal(fieldSchema)
 	return schemaBytes

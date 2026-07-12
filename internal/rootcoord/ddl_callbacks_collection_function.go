@@ -42,7 +42,7 @@ func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema)
 	return nil
 }
 
-func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, dbName string, collectionName string) error {
+func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, oldColl, coll *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
@@ -77,10 +77,7 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 		WithBody(body).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		return err
-	}
-	return nil
+	return c.broadcastSchemaChange(ctx, broadcaster, oldColl, schema, msg)
 }
 
 func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.FunctionSchema, collection *model.Collection) error {
@@ -168,7 +165,7 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 		return err
 	}
 
-	return callAlterCollection(ctx, c, broadcaster, newColl, req.GetDbName(), req.GetCollectionName())
+	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }
 
 func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req *milvuspb.DropCollectionFunctionRequest) error {
@@ -218,7 +215,7 @@ func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req 
 		}
 		field.IsFunctionOutput = false
 	}
-	return callAlterCollection(ctx, c, broadcaster, newColl, req.GetDbName(), req.GetCollectionName())
+	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }
 
 func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *milvuspb.AddCollectionFunctionRequest) error {
@@ -278,5 +275,5 @@ func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *
 	}
 	newFunc := model.UnmarshalFunctionModel(fSchema)
 	newColl.Functions = append(newColl.Functions, newFunc)
-	return callAlterCollection(ctx, c, broadcaster, newColl, req.GetDbName(), req.GetCollectionName())
+	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }

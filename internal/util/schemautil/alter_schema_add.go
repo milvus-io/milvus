@@ -113,8 +113,13 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 	function := plan.Function
 	switch plan.Kind {
 	case AlterSchemaAddFunction:
-		if function.GetType() == schemapb.FunctionType_BM25 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function must be added with its output field in add_function_field interface")
+		// BM25 and MinHash outputs (sparse / binary signatures) MUST be a brand-new
+		// empty field, never an existing one: pointing the function at a pre-existing
+		// (possibly already-populated) field would relabel that field as function
+		// output and serve its stored user data as a signature. Force both through
+		// add_function_field, which requires a freshly-added output field.
+		if function.GetType() == schemapb.FunctionType_BM25 || function.GetType() == schemapb.FunctionType_MinHash {
+			return merr.WrapErrParameterInvalidMsg("%s function must be added with its output field in add_function_field interface", function.GetType().String())
 		}
 		return nil
 	case AlterSchemaAddFunctionField:

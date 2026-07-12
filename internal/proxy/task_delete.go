@@ -486,6 +486,12 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) sha
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
 				QueryLabel:         metrics.DeleteQueryLabel,
+				// Carry the schema version the plan was compiled against so the
+				// delegator's read gate applies to delete-by-expression too;
+				// without it the request is treated as legacy (version 0) and a
+				// plan referencing a just-added field hard-fails in segcore
+				// instead of getting a retriable NotReady.
+				CollectionSchemaVersion: dr.schema.GetVersion(),
 			},
 			DmlChannels: []string{channel},
 			Scope:       querypb.DataScope_All,

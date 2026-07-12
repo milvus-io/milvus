@@ -497,6 +497,22 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
+		// A nil oracle is only legitimate when the schema has no BM25 function.
+		// Judge by the SAME schema source as the pendingBM25Loads marking (the
+		// request's schema, falling back to the live view): a load can carry a
+		// BM25-bearing schema while the live view has not advanced yet (e.g.
+		// the request had no index meta, so syncCollectionIndexMeta did not
+		// advance it) — returning success there would silently skip this
+		// segment's stats forever (progressive visibility never retries an
+		// already-loaded segment). Error out instead so querycoord retries the
+		// load until the oracle exists; mirrors loadBM25StatsForReopen.
+		bm25Schema := req.GetSchema()
+		if bm25Schema == nil {
+			bm25Schema = sd.collection.Schema()
+		}
+		if len(newBM25FunctionSet(bm25Schema)) > 0 {
+			return merr.WrapErrServiceInternal("segment load carries BM25 stats before delegator BM25 oracle is initialized")
+		}
 		return nil
 	}
 
@@ -526,28 +542,63 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	return nil
 }
 
-func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	log := sd.getLogger(ctx).With(
-		mlog.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
-		mlog.String("loadScope", req.GetLoadScope().String()),
-	)
-
+// reopenInfosWithBM25Stats returns the reopen request's segments that carry
+// BM25 stats to ingest.
+func (sd *shardDelegator) reopenInfosWithBM25Stats(ctx context.Context, req *querypb.LoadSegmentsRequest) ([]*querypb.SegmentLoadInfo, error) {
+	log := sd.getLogger(ctx)
 	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(req.GetInfos()))
 	for _, info := range req.GetInfos() {
 		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
 		if err != nil {
 			log.Warn(ctx, "resolve reopened bm25 stats failed", mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))
-			return err
+			return nil, err
 		}
 		if len(bm25Paths) > 0 {
 			infosWithBM25Stats = append(infosWithBM25Stats, info)
 		}
 	}
+	return infosWithBM25Stats, nil
+}
 
-	if len(infosWithBM25Stats) == 0 {
+// preloadReopenBM25Stats downloads and registers (without activating) the BM25
+// stats of every reopened segment BEFORE the worker swaps the new data shape
+// in. LoadSealedForReopen is idempotent: the post-load activation pass finds
+// everything downloaded and only flips the activation.
+func (sd *shardDelegator) preloadReopenBM25Stats(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	infos, err := sd.reopenInfosWithBM25Stats(ctx, req)
+	if err != nil {
+		return err
+	}
+	if len(infos) == 0 {
 		return nil
 	}
-	return sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req)
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
+		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
+	}
+	cm := sd.loader.GetChunkManager()
+	for _, info := range infos {
+		if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	infosWithBM25Stats, err := sd.reopenInfosWithBM25Stats(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	if len(infosWithBM25Stats) > 0 {
+		if err := sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req); err != nil {
+			return err
+		}
+	}
+	// The ready publish attempt happens in LoadSegments' deferred
+	// tryPublishReadySchema, after this load's pending BM25 marks are cleared.
+	return nil
 }
 
 func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
@@ -602,11 +653,41 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 		}
 	}
 
+	beforeVersion := sd.collection.Schema().GetVersion()
+
 	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
 	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
 		return err
 	}
 	sd.collectionManager.Unref(req.GetCollectionID(), 1)
+
+	// Load-wins race: PutOrRef may have advanced the collection schema ahead of
+	// the UpdateSchema event. When it did, register the new runtime deps and
+	// attempt the ready publish so the read path can serve the new version.
+	// schemaChangeMutex is required: ensureIDFOracle is a non-atomic
+	// check-then-act, and this must not interleave with UpdateSchema or another
+	// concurrent load (otherwise two oracles get created — split-brain). Taking
+	// the lock here is safe: LoadSegments does not hold it, so no re-entrancy.
+	// updateFunctionRunners/ensureIDFOracle are idempotent and tryPublish
+	// re-derives readiness from state (this load's own BM25 stats are still in
+	// the pending set here, so a not-yet-ready version cannot slip out), so a
+	// redundant run after a concurrent UpdateSchema is harmless.
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+	if advanced, _, advancedBarrier := sd.collection.SchemaSnapshot(); advanced.GetVersion() > beforeVersion {
+		// Load-wins: this load advanced the local schema ahead of the WAL
+		// UpdateSchema event, but only this load's DstNode worker knows the new
+		// schema. Fan it out to every worker before the publish attempt — a
+		// published version admits reads compiled against it, and those reads
+		// fan out to workers whose segcore must know the schema. An error fails
+		// the load and querycoord retries it.
+		if err := sd.fanoutWorkerSchema(ctx, advanced, advancedBarrier); err != nil {
+			return err
+		}
+		if err := sd.syncSchemaRuntimeAndPublish(ctx, advanced); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -640,6 +721,60 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			sd.deleteBuffer.Unpin(segmentEffectiveTs(info), info.GetSegmentID())
 		}
 	}()
+
+	// Mark segments whose BM25 stats this load may download as pending BEFORE
+	// any step that can advance the collection schema (syncCollectionIndexMeta's
+	// PutOrRef): while pending, tryPublishReadySchema refuses to publish, so a
+	// concurrent schema-version advance (UpdateSchema no-op branch, another
+	// load) cannot expose a BM25 search to stats that are still downloading.
+	// The BM25 schema check uses the request's schema (the load-wins case
+	// carries a schema newer than the collection's) falling back to the live
+	// one; the segment filter over-approximates on purpose (v2 manifest paths
+	// are only resolved to concrete stats paths later, remotely) — a spurious
+	// mark merely delays a concurrent version publish until this load returns.
+	// Always cleared on return — a failed load is retried by querycoord and
+	// meanwhile degrades to progressive visibility instead of blocking
+	// publishes; the deferred tryPublish then makes the attempt that a gated
+	// concurrent path may have skipped while this load was pending.
+	bm25Schema := req.GetSchema()
+	if bm25Schema == nil {
+		bm25Schema = sd.collection.Schema()
+	}
+	if len(newBM25FunctionSet(bm25Schema)) > 0 {
+		pendingBM25Segments := lo.FilterMap(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) (int64, bool) {
+			return info.GetSegmentID(), len(info.GetBm25Logs()) > 0 || info.GetManifestPath() != ""
+		})
+		if len(pendingBM25Segments) > 0 {
+			sd.addPendingBM25Loads(pendingBM25Segments)
+			defer func() {
+				sd.removePendingBM25Loads(pendingBM25Segments)
+				if err := sd.tryPublishReadySchema(ctx); err != nil {
+					log.Warn(ctx, "failed to publish ready schema after BM25 stats load", mlog.Err(err))
+				}
+			}()
+		}
+	}
+
+	// Reopen carries a new data shape (e.g. a backfilled BM25 column) for
+	// segments that are ALREADY searchable. We DOWNLOAD their BM25 stats BEFORE
+	// the worker swaps the new column in, which shrinks the inconsistency window
+	// from "the whole remote download" (seconds) to just the local activation
+	// step: a download failure aborts the reopen before the swap, so no long
+	// window opens. NOTE: preload only downloads/registers the stats; they are
+	// merged into the IDF oracle's live corpus only at ACTIVATION, which happens
+	// after the worker swap (in handleReopenPostLoad). So a residual sub-millisecond
+	// window remains — between swap and activation the column is searchable while
+	// its stats are not yet in the oracle (empty results when avgdl is still 0,
+	// slightly skewed IDF otherwise) — but it self-heals within this same
+	// LoadSegments call. Fully closing it would require activating before the swap,
+	// which risks the reverse inconsistency (stats present, column not yet live),
+	// so this ordering is a deliberate trade-off.
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		if err := sd.preloadReopenBM25Stats(ctx, req); err != nil {
+			log.Warn(ctx, "failed to preload reopened BM25 stats before worker swap", mlog.Err(err))
+			return err
+		}
+	}
 
 	worker, err := sd.workerManager.GetWorker(ctx, targetNodeID)
 	if err != nil {
@@ -1284,7 +1419,15 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
 	var tfArray *schemapb.SparseFloatArray
-	schemaVersion := sd.collection.Schema().GetVersion()
+	// Resolve the runner at the latest registered version, NOT the ready
+	// snapshot's version: runner registration follows the live schema
+	// (updateFunctionRunners GCs versions the delegator key no longer holds), so
+	// during a reopen's deferred-publish window the published snapshot's version
+	// has no runners while the advanced live version does. Runners are keyed by
+	// function signature and shared across versions, and an incompatible BM25
+	// function change on a loaded collection is rejected by UpdateSchema, so the
+	// latest runner is always compatible with the snapshot's function set.
+	schemaVersion := function.LatestFunctionRunnerVersion
 	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
 		if functionType != schemapb.FunctionType_BM25 {
 			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
@@ -1325,9 +1468,15 @@ func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.Sear
 		return 0, err
 	}
 	if !ok {
-		// internal invariant: runners are populated with the schema, never by
-		// the request — classified system, keeps cross-replica failover
-		return 0, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		// The latest runner version has no runner for this field. The published
+		// snapshot's function state said it IS a BM25 output, so the function
+		// was dropped in an applied-but-not-yet-published schema (runner GC'd by
+		// updateFunctionRunners). Transitional by construction: once the newer
+		// version publishes, this request's version stops mapping the field to
+		// BM25 entirely. Retriable so the proxy retries instead of failing a
+		// read that legitimately passed the version gate.
+		return 0, errors.Wrapf(merr.ErrCollectionSchemaVersionNotReady,
+			"function runner for field %d is not available; the schema is transitioning past the published snapshot", req.GetFieldId())
 	}
 
 	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
@@ -1369,7 +1518,8 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
 	var fieldData *schemapb.FieldData
-	schemaVersion := sd.collection.Schema().GetVersion()
+	// Latest registered runner version, not the snapshot's — see buildBM25IDF.
+	schemaVersion := function.LatestFunctionRunnerVersion
 	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
 		if functionType != schemapb.FunctionType_MinHash {
 			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
@@ -1394,7 +1544,11 @@ func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.Sear
 		return err
 	}
 	if !ok {
-		return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		// Same transitional state as buildBM25IDF: the function was dropped in
+		// an applied-but-not-yet-published schema, so the latest runner version
+		// no longer maps this field. Retriable — see buildBM25IDF.
+		return errors.Wrapf(merr.ErrCollectionSchemaVersionNotReady,
+			"function runner for field %d is not available; the schema is transitioning past the published snapshot", req.GetFieldId())
 	}
 
 	vectorField := fieldData.GetVectors()
@@ -1425,6 +1579,10 @@ func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexR
 }
 
 func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
+	snap, err := sd.schemaReady.resolve()
+	if err != nil {
+		return nil, err
+	}
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
@@ -1433,7 +1591,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 		topks := req.GetTopks()
 		var results [][]*milvuspb.AnalyzerToken
 		var analyzeErr error
-		ok, err := sd.runWithAnalyzer(ctx, task.GetFieldId(), func(analyzer function.Analyzer) error {
+		ok, err := sd.runWithAnalyzer(ctx, snap.schema, task.GetFieldId(), func(analyzer function.Analyzer) error {
 			if len(analyzer.GetInputFields()) == 1 {
 				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts())
 				return analyzeErr

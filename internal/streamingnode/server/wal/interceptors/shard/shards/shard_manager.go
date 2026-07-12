@@ -233,6 +233,22 @@ func (c *CollectionInfo) SchemaVersion() int32 {
 	return s.GetVersion()
 }
 
+// acceptsSchemaVersion reports whether a write stamped with schemaVersion may be
+// accepted against the current schema. A write is accepted iff it is at or behind
+// the current version — an exact match, or any earlier version (compiled against an
+// older schema while a change is still propagating across vchannels). segcore
+// reconciles the gap: it backfills nullable/default columns the write lacks and
+// skips columns the write still carries for a since-dropped field. A write AHEAD of
+// this vchannel (a not-yet-applied newer schema) is rejected, so the proxy retries
+// once this vchannel catches up (invariant: proxy never runs ahead of a vchannel).
+//
+// Accepting a behind write is loss-free ONLY because the rootcoord DDL gate (I1)
+// admits pure add / pure drop and rejects every in-place semantic change, so the
+// node never needs to distinguish additive from destructive here.
+func (c *CollectionInfo) acceptsSchemaVersion(schemaVersion int32) bool {
+	return schemaVersion <= c.SchemaVersion()
+}
+
 func (c *CollectionInfo) UseGrowingSourceFlush() bool {
 	if c == nil || c.Schema == nil {
 		return false

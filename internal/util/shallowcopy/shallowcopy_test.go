@@ -43,6 +43,7 @@ func TestShallowCopySearchRequest(t *testing.T) {
 			AnalyzerName:            "analyzer",
 			CollectionTtlTimestamps: 999,
 			EntityTtlPhysicalTime:   888,
+			CollectionSchemaVersion: 7,
 		}
 
 		dst := ShallowCopySearchRequest(src, 42)
@@ -60,6 +61,8 @@ func TestShallowCopySearchRequest(t *testing.T) {
 		assert.Equal(t, src.IsIterator, dst.IsIterator)
 		assert.Equal(t, src.AnalyzerName, dst.AnalyzerName)
 		assert.Equal(t, src.EntityTtlPhysicalTime, dst.EntityTtlPhysicalTime)
+		// Schema version must survive: the delegator read gate depends on it.
+		assert.Equal(t, src.CollectionSchemaVersion, dst.CollectionSchemaVersion)
 
 		// Slices share underlying array (shallow copy)
 		assert.Equal(t, src.PartitionIDs, dst.PartitionIDs)
@@ -91,6 +94,7 @@ func TestShallowCopyRetrieveRequest(t *testing.T) {
 			CollectionTtlTimestamps: 999,
 			EntityTtlPhysicalTime:   888,
 			QueryLabel:              "query",
+			CollectionSchemaVersion: 7,
 		}
 
 		dst := ShallowCopyRetrieveRequest(src, 42)
@@ -104,5 +108,7 @@ func TestShallowCopyRetrieveRequest(t *testing.T) {
 		assert.Equal(t, src.EntityTtlPhysicalTime, dst.EntityTtlPhysicalTime)
 		assert.Equal(t, src.QueryLabel, dst.QueryLabel)
 		assert.Equal(t, src.PartitionIDs, dst.PartitionIDs)
+		// Schema version must survive: the delegator read gate depends on it.
+		assert.Equal(t, src.CollectionSchemaVersion, dst.CollectionSchemaVersion)
 	})
 }

@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	stdatomic "sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -83,6 +84,10 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	// ReadySchemaVersion reports the schema version of the published ready
+	// snapshot (-1 before the first publish); surfaced to querycoord via the
+	// leader view so DDLs can wait for shard readiness.
+	ReadySchemaVersion() int32
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -164,7 +169,27 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
-	functionState *functionRuntimeState
+	// schemaReady holds the immutable, fully-ready schema snapshot (RCU) that the
+	// read path (Search/Query) serves from. Published atomically once a version's
+	// runtime dependencies (function state, idfOracle sync) are in place.
+	schemaReady schemaReadyState
+	// pendingBM25Loads ref-counts segments whose BM25 stats are being loaded by
+	// in-flight LoadSegments calls. While non-empty, tryPublishReadySchema
+	// refuses to publish so a concurrent schema-version advance (UpdateSchema
+	// no-op branch, load-wins) cannot expose a BM25 search to half-loaded
+	// stats. A count (not a set) because LoadSegments calls for the same
+	// segment can overlap (querycoord retry racing an abandoned-but-running
+	// RPC): each call decrements only its own mark on return (success or
+	// failure), so a fast-failing retry cannot un-mark the load still in
+	// flight. A failed load degrades to progressive visibility (querycoord
+	// retries it) instead of blocking publishes forever.
+	pendingBM25LoadsMu sync.Mutex
+	pendingBM25Loads   map[int64]int
+
+	// readyPublishNotifier is fired after every ready-snapshot publish so the
+	// querynode can bump its distribution-modify timestamp (see
+	// SetReadyPublishNotifier).
+	readyPublishNotifier stdatomic.Pointer[func()]
 
 	// current forward policy
 	l0ForwardPolicy string
@@ -211,6 +236,55 @@ func (sd *shardDelegator) publishIDFOracle(idfOracle IDFOracle) {
 	sd.idfOracle.Store(&idfOracleHolder{oracle: idfOracle})
 }
 
+// ensureIDFOracle guarantees the BM25 idfOracle exists whenever the given schema
+// carries a BM25 function. It returns the live oracle (existing or newly created),
+// or nil when the schema has no BM25 function. Idempotent; callers must hold
+// schemaChangeMutex. This lets both the normal UpdateSchema path and its no-op
+// early-return branch (which the load-wins race can take, see UpdateSchema) create
+// the oracle, so a later reopen - which errors-and-retries while the oracle is
+// missing - can eventually succeed.
+func (sd *shardDelegator) ensureIDFOracle(schema *schemapb.CollectionSchema) IDFOracle {
+	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+		return idfOracle
+	}
+	if len(newBM25FunctionSet(schema)) == 0 {
+		return nil
+	}
+	// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
+	// Old growings cannot receive stats for newly added BM25 fields; ProcessInsert registers only new growings.
+	idfOracle := NewIDFOracle(sd.vchannelName, schema.GetFunctions())
+	idfOracle.SetOnStatsActivated(sd.onIDFStatsActivated)
+	idfOracle.Start()
+	sd.distribution.SetIDFOracle(idfOracle)
+	// Publish the oracle pointer BEFORE the first SetNext: SetNext on a fresh
+	// oracle runs SyncDistribution (and the activation callback) synchronously
+	// inline, and concurrent paths (loadBM25Stats, tryPublishReadySchema) must
+	// already observe the oracle — otherwise a racing segment load would treat
+	// the collection as BM25-less and silently skip its stats.
+	sd.publishIDFOracle(idfOracle)
+	if current := sd.distribution.current.Load(); current != nil {
+		idfOracle.SetNext(current)
+	}
+	return idfOracle
+}
+
+// onIDFStatsActivated is the idfOracle activation callback: sealed BM25 stats
+// flipped to active (e.g. by the oracle sync loop), so re-attempt publishing
+// the ready schema snapshot. Runner initialization was already ensured by the
+// path that advanced the schema, so the bounded context only guards against a
+// pathological re-init stall; errors are logged, the next state change
+// (another activation, UpdateSchema retry, load retry) re-attempts.
+func (sd *shardDelegator) onIDFStatsActivated() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := sd.tryPublishReadySchema(ctx); err != nil {
+		mlog.Warn(ctx, "failed to publish ready schema after idf stats activation",
+			mlog.Int64("collectionID", sd.collectionID),
+			mlog.String("vchannel", sd.vchannelName),
+			mlog.Err(err))
+	}
+}
+
 func (sd *shardDelegator) NotStopped(state lifetime.State) error {
 	if state != lifetime.Stopped {
 		return nil
@@ -234,10 +308,190 @@ func (sd *shardDelegator) Stopped() bool {
 	return sd.NotStopped(sd.lifetime.GetState()) != nil
 }
 
-func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
+// buildReadySnapshot builds (without publishing) an immutable ready snapshot
+// from the live collection view. Schema payload, logical version and applied
+// barrier are read atomically from one collection snapshot: reading them
+// separately could pair a stale schema payload with a newer barrier, and the
+// publish monotonic guard would then drop the genuine refresh of that payload,
+// pinning the stale one until the next version bump.
+func (sd *shardDelegator) buildReadySnapshot() (*readySnapshot, error) {
+	schema, version, barrierTs := sd.collection.SchemaSnapshot()
+	functionState, err := buildFunctionRuntimeState(schema)
+	if err != nil {
+		return nil, err
+	}
+	return newReadySnapshot(int64(version), barrierTs, schema, functionState), nil
+}
+
+// tryPublishReadySchema builds an immutable ready snapshot from the live
+// collection view and publishes it for the read path — but only when the
+// state-derived readiness checklist holds:
+//
+//  1. function runners of the schema are synchronously initialized (a hard
+//     error: the caller's retry loop must re-drive it);
+//  2. no in-flight LoadSegments is still downloading BM25 stats;
+//  3. every sealed BM25 stats entry in the serving target is activated.
+//
+// (2) and (3) are not errors — the snapshot is simply not published yet and
+// the read path keeps serving the previous ready version; the next state
+// change (stats activation, load completion, UpdateSchema) re-attempts. It is
+// safe to call from any path without ordering coordination: readiness is
+// re-derived from state on every attempt and publish itself is monotonic.
+func (sd *shardDelegator) tryPublishReadySchema(ctx context.Context) error {
+	// Fast path first: steady-state no-op attempts (every LoadSegments return,
+	// every oracle activation sync) must not pay the runtime-state build when
+	// the live version cannot advance the published snapshot.
+	if cur := sd.schemaReady.load(); cur != nil {
+		_, version, barrierTs := sd.collection.SchemaSnapshot()
+		if int64(version) < cur.version || (int64(version) == cur.version && barrierTs <= cur.barrierTs) {
+			return nil
+		}
+	}
+	snap, err := sd.buildReadySnapshot()
+	if err != nil {
+		return err
+	}
+	// Authoritative guard (the live view may have moved since the fast path).
+	if cur := sd.schemaReady.load(); cur != nil && !snap.isNewerThan(cur) {
+		return nil
+	}
+	if err := function.EnsureRunnersReady(ctx, sd.collectionID, snap.schema); err != nil {
+		return err
+	}
+	if sd.hasPendingBM25Loads() {
+		return nil
+	}
+	if idfOracle := sd.getIDFOracle(); idfOracle != nil && !idfOracle.Ready() {
+		return nil
+	}
+	sd.schemaReady.publish(snap)
+	// A newly published ready version must reach querycoord: GetDataDistribution
+	// skips the full (leader-view-carrying) response while the node's
+	// distribution-modify timestamp is unchanged, and a pure schema publish
+	// (WAL UpdateSchema on a quiet collection) changes no distribution — without
+	// this notification the new ReadySchemaVersion would stay invisible and the
+	// DDL readiness handshake would wait on a stale value indefinitely.
+	if fn := sd.readyPublishNotifier.Load(); fn != nil {
+		(*fn)()
+	}
+	return nil
+}
+
+// SetReadyPublishNotifier registers a callback fired after every ready-snapshot
+// publish. The querynode wires this to its distribution-modify timestamp so the
+// new ReadySchemaVersion is included in the next GetDataDistribution response.
+func (sd *shardDelegator) SetReadyPublishNotifier(fn func()) {
+	sd.readyPublishNotifier.Store(&fn)
+}
+
+func (sd *shardDelegator) hasPendingBM25Loads() bool {
+	sd.pendingBM25LoadsMu.Lock()
+	defer sd.pendingBM25LoadsMu.Unlock()
+	return len(sd.pendingBM25Loads) > 0
+}
+
+func (sd *shardDelegator) addPendingBM25Loads(segmentIDs []int64) {
+	sd.pendingBM25LoadsMu.Lock()
+	defer sd.pendingBM25LoadsMu.Unlock()
+	if sd.pendingBM25Loads == nil {
+		sd.pendingBM25Loads = make(map[int64]int)
+	}
+	for _, id := range segmentIDs {
+		sd.pendingBM25Loads[id]++
+	}
+}
+
+func (sd *shardDelegator) removePendingBM25Loads(segmentIDs []int64) {
+	sd.pendingBM25LoadsMu.Lock()
+	defer sd.pendingBM25LoadsMu.Unlock()
+	for _, id := range segmentIDs {
+		if count, ok := sd.pendingBM25Loads[id]; ok {
+			if count <= 1 {
+				delete(sd.pendingBM25Loads, id)
+			} else {
+				sd.pendingBM25Loads[id] = count - 1
+			}
+		}
+	}
+}
+
+// ReadySchemaVersion returns the schema version of the published ready
+// snapshot, or -1 when no snapshot has been published yet. Reported to
+// querycoord via the leader view so DDLs can wait for all shard delegators to
+// become ready before expiring proxy schema caches.
+func (sd *shardDelegator) ReadySchemaVersion() int32 {
+	snap := sd.schemaReady.load()
+	if snap == nil {
+		return -1
+	}
+	return int32(snap.version)
+}
+
+// reconcileIDFOracle makes the shared idfOracle exist for any BM25 function in
+// schema and syncs its tracked function set to schema's current functions. It
+// unifies the oracle side effect across the normal UpdateSchema path and the
+// load-wins / no-op early-return paths: without the SyncFunctions step, a
+// function-set change that first arrives via a load-advanced schema (a new BM25
+// output field on an already-loaded BM25 collection) would leave the new field
+// untracked in the oracle while the ready snapshot already advertises it, so a
+// search on that field silently returns empty (avgdl<=0). ensureIDFOracle only
+// creates a missing oracle and no-ops on an existing one, so it must be paired
+// with SyncFunctions. Idempotent (SyncFunctions retains/adds/removes to match
+// the schema); caller must hold schemaChangeMutex.
+func (sd *shardDelegator) reconcileIDFOracle(schema *schemapb.CollectionSchema) error {
+	idfOracle := sd.ensureIDFOracle(schema)
+	if idfOracle == nil {
+		return nil
+	}
+	return idfOracle.SyncFunctions(schema.GetFunctions())
+}
+
+// validateReadSchemaVersion gates a read on the schema version the proxy
+// compiled the request against: when the request's version is ahead of the
+// published ready snapshot, this delegator has not made that version's runtime
+// dependencies ready yet, so return retriable NotReady and let the proxy retry
+// until the snapshot catches up. reqVersion 0 means a legacy proxy that does
+// not attach a version — serve from the current snapshot as before. A request
+// compiled against an OLDER version is always served: schema changes are
+// additive for reads and the old plan's dependencies all exist in the newer
+// ready snapshot.
+func validateReadSchemaVersion(snap *readySnapshot, reqVersion int32) error {
+	if reqVersion > 0 && int64(reqVersion) > snap.version {
+		return errors.Wrapf(merr.ErrCollectionSchemaVersionNotReady,
+			"collection %s: request compiled against schema version %d but ready version is %d",
+			snap.schema.GetName(), reqVersion, snap.version)
+	}
+	return nil
+}
+
+func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, snap *readySnapshot, req *internalpb.SearchRequest) (float64, bool, error) {
+	// Dropped-anns-field guard. Drops are the non-additive exception to the
+	// "older versions are always serveable" rule: a version-gated request
+	// whose version the snapshot already covers (reqVersion <= snap.version —
+	// the gate rejected anything newer) that targets a field absent from the
+	// snapshot was compiled against a schema whose field has since been
+	// dropped. Forwarding it would fail opaquely downstream — or worse,
+	// silently mis-execute (a BM25/MinHash text search would ship its raw
+	// VarChar placeholder to segcore) — and the opaque error additionally
+	// blacklists this healthy delegator in the proxy LB. Reject explicitly
+	// with a clear, correctly-classified input error instead. Version-0
+	// legacy requests skip the guard: for them the same state can also mean
+	// "field just added, snapshot behind", which must stay
+	// serveable-after-retry.
+	if reqVersion := req.GetCollectionSchemaVersion(); reqVersion > 0 && int64(reqVersion) <= snap.version &&
+		req.GetFieldId() != 0 && !snap.hasField(req.GetFieldId()) {
+		return 0, false, merr.WrapErrParameterInvalidMsg(
+			"anns field %d does not exist in ready schema version %d; the request was compiled against version %d whose field has since been dropped, please retry with the latest schema",
+			req.GetFieldId(), snap.version, reqVersion)
+	}
+
 	var avgdl float64
 	isBM25 := false
-	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType) error {
+	// Read the function runtime state from the ready snapshot, not from a lazily
+	// refreshed live view: the snapshot is only published once its function
+	// runners are registered, so a search never has to load/rebuild runtime
+	// state on the read path.
+	err := snap.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType) error {
 		switch functionType {
 		case schemapb.FunctionType_BM25:
 			isBM25 = true
@@ -256,6 +510,9 @@ func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *intern
 			return nil
 		}
 	})
+	if err != nil {
+		return 0, false, err
+	}
 	return avgdl, isBM25 && avgdl <= 0, err
 }
 
@@ -367,11 +624,24 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		growing = []SegmentEntry{}
 	}
 
+	// Serve only from the fully-ready schema snapshot (RCU). resolve returns a
+	// retriable NotReady until the first snapshot is published; the version gate
+	// returns retriable NotReady while this delegator's ready snapshot is behind
+	// the schema version the proxy compiled the request against. Every schema
+	// read below uses snap.schema, never the live collection view.
+	snap, err := sd.schemaReady.resolve()
+	if err != nil {
+		return nil, err
+	}
+	if err := validateReadSchemaVersion(snap, req.GetReq().GetCollectionSchemaVersion()); err != nil {
+		return nil, err
+	}
+
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
 		func() {
 			sd.partitionStatsMut.RLock()
 			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
+			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, snap.schema, sealed,
 				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		}()
 	}
@@ -386,7 +656,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		)
 	}
 
-	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
+	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, snap, req.GetReq())
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +683,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	)
 
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
-		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := sd.twoStageSearch(ctx, req, snap, sealed, growing, sealedRowCount)
 		if err != nil {
 			return nil, err
 		}
@@ -425,7 +695,9 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	const isSecondStageSearch = false
-	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
+	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, func(fieldID int64) int64 {
+		return vectorFieldDim(snap.schema, fieldID)
+	})
 	if err != nil {
 		mlog.Warn(ctx, "failed to optimize search params", mlog.Err(err))
 		return nil, err
@@ -433,10 +705,10 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
 }
 
-// getVectorFieldDim returns the dimension of the vector field with the given field ID.
-// Returns 0 if the field is not found or dim cannot be determined.
-func (sd *shardDelegator) getVectorFieldDim(fieldID int64) int64 {
-	field := typeutil.GetFieldByID(sd.collection.Schema(), fieldID)
+// vectorFieldDim returns the dimension of the vector field with the given field
+// ID in schema, or 0 if not found / not a vector field.
+func vectorFieldDim(schema *schemapb.CollectionSchema, fieldID int64) int64 {
+	field := typeutil.GetFieldByID(schema, fieldID)
 	if field == nil {
 		return 0
 	}
@@ -537,6 +809,10 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				AnalyzerName:            subReq.GetAnalyzerName(),
 				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
 				SearchType:              subReq.GetSearchType(),
+				// Propagate the schema version so each sub-request is gated in
+				// search(); otherwise hybrid sub-requests reach the delegator
+				// with version 0 and bypass validateReadSchemaVersion.
+				CollectionSchemaVersion: req.GetReq().GetCollectionSchemaVersion(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -624,6 +900,19 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	// use tsafe as mvcc timestamp if request not provide it
 	if req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
+	}
+
+	// Same ready-schema version gate as Search/Query, checked AFTER the tsafe
+	// wait like those paths: a strong-consistency stream query waiting to its
+	// guarantee timestamp consumes the pending schema update first, so the gate
+	// sees the freshly published version instead of bouncing the request with a
+	// spurious retriable NotReady.
+	snap, err := sd.schemaReady.resolve()
+	if err != nil {
+		return err
+	}
+	if err := validateReadSchemaVersion(snap, req.GetReq().GetCollectionSchemaVersion()); err != nil {
+		return err
 	}
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
@@ -727,11 +1016,22 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		growing = []SegmentEntry{}
 	}
 
+	// Serve only from the fully-ready schema snapshot (RCU); NotReady is
+	// retriable. The version gate rejects requests compiled against a schema
+	// version this delegator has not made ready yet.
+	snap, err := sd.schemaReady.resolve()
+	if err != nil {
+		return nil, err
+	}
+	if err := validateReadSchemaVersion(snap, req.GetReq().GetCollectionSchemaVersion()); err != nil {
+		return nil, err
+	}
+
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
 		func() {
 			sd.partitionStatsMut.RLock()
 			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+			PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), snap.schema, sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		}()
 	}
 
@@ -1205,55 +1505,14 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 	return sd.catchingUpStreamingData.Load()
 }
 
-func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+// fanoutWorkerSchema pushes schema (fenced by schemaBarrierTs) to every worker
+// currently serving this shard's segments. Required before publishing a
+// version for reads: the published snapshot admits requests compiled against
+// it, and those requests fan out to workers whose segcore must already know
+// the schema. Idempotent on workers (stale versions no-op there). Caller must
+// hold schemaChangeMutex.
+func (sd *shardDelegator) fanoutWorkerSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
-		return err
-	}
-	defer sd.lifetime.Done()
-
-	schemaVersion := uint64(schema.GetVersion())
-	mlog.Info(ctx, "delegator received update schema event",
-		mlog.Uint64("schemaVersion", schemaVersion),
-		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
-	)
-
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
-
-	// This pre-check is a best-effort guard for delegator side effects. Load
-	// paths can still call collectionManager.PutOrRef under collectionManager's
-	// own lock and advance the collection snapshot before the final
-	// collectionManager.UpdateSchema below. The collection manager remains the
-	// source-of-truth freshness gate and will skip that stale final apply.
-	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
-		mlog.Info(ctx, "delegator skip stale or no-op schema event",
-			mlog.Uint64("schemaVersion", schemaVersion),
-			mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
-		)
-		return nil
-	}
-
-	newFunctionState, err := buildFunctionRuntimeState(schema)
-	if err != nil {
-		return err
-	}
-
-	oldSet := newBM25FunctionSet(sd.collection.Schema())
-	newSet := newBM25FunctionSet(schema)
-	idfOracle := sd.getIDFOracle()
-	if idfOracle != nil && newSet.HasIncompatibleCommonFunction(oldSet) {
-		newFunctionState.Close()
-		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
-	}
-
-	// Keep the load barrier monotonic. A higher logical schema version can be
-	// replayed with a smaller barrier than an earlier same-version property
-	// refresh, but that must not reopen older load results.
-	if sd.schemaBarrierTs < schemaBarrierTs {
-		sd.schemaBarrierTs = schemaBarrierTs
-	}
-
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
 	defer sd.distribution.Unpin(version)
 
@@ -1283,7 +1542,6 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 			return nodeReq
 		})
 	if err != nil {
-		newFunctionState.Close()
 		return err
 	}
 
@@ -1292,41 +1550,125 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		status, err := worker.UpdateSchema(ctx, req)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
-	if err != nil {
-		newFunctionState.Close()
+	return err
+}
+
+// syncSchemaRuntimeAndPublish registers schema's runtime dependencies
+// (function runners, idfOracle existence + function-set sync) and attempts the
+// ready publish — the shared tail of every path that can advance the
+// collection schema (UpdateSchema main and no-op branches, load-wins). Caller
+// must hold schemaChangeMutex.
+func (sd *shardDelegator) syncSchemaRuntimeAndPublish(ctx context.Context, schema *schemapb.CollectionSchema) error {
+	if err := sd.updateFunctionRunners(schema); err != nil {
+		return err
+	}
+	if err := sd.reconcileIDFOracle(schema); err != nil {
+		return err
+	}
+	return sd.tryPublishReadySchema(ctx)
+}
+
+func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	schemaVersion := uint64(schema.GetVersion())
+	mlog.Info(ctx, "delegator received update schema event",
+		mlog.Uint64("schemaVersion", schemaVersion),
+		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
+	)
+
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+
+	// This pre-check is a best-effort guard for delegator side effects. Load
+	// paths can still call collectionManager.PutOrRef under collectionManager's
+	// own lock and advance the collection snapshot before the final
+	// collectionManager.UpdateSchema below. The collection manager remains the
+	// source-of-truth freshness gate and will skip that stale final apply.
+	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
+		// The load-wins race can advance the collection snapshot (via segment-load
+		// PutOrRef) to a schema that first introduces a BM25 function, turning this
+		// UpdateSchema into a no-op before the oracle-creation side effect below runs.
+		// Create the oracle here against the authoritative (already-advanced) collection
+		// schema - not the possibly-stale event schema - so a later reopen can succeed.
+		// Idempotent: no-op when the oracle already exists or the schema has no BM25 function.
+		// ShouldUpdateCollectionSchema returns false for a nil collection too, so guard it.
+		if sd.collection != nil {
+			advanced, _, advancedBarrier := sd.collection.SchemaSnapshot()
+			// The load path already advanced the local schema WITHOUT the worker
+			// fan-out that the main path below performs — only the loading
+			// segment's DstNode learned the new schema. This WAL event is the
+			// designated fan-out carrier, so even though it is a local no-op,
+			// push the (authoritative, already-advanced) schema to all workers
+			// before attempting the publish: a published version admits reads
+			// compiled against it, and those reads fan out to workers whose
+			// segcore must know the schema. An error here is retried by the
+			// pipeline (never-skip rule).
+			if err := sd.fanoutWorkerSchema(ctx, advanced, advancedBarrier); err != nil {
+				return err
+			}
+			// Make the advanced schema's runtime deps registered (oracle created
+			// AND synced to the new function set) and attempt the ready publish.
+			// tryPublish re-derives the readiness checklist from state, so this
+			// branch can never expose a not-yet-ready version: while a concurrent
+			// load is still downloading BM25 stats (pending set) or activation
+			// lags, the attempt is a silent no-op and a later state change
+			// publishes.
+			if err := sd.syncSchemaRuntimeAndPublish(ctx, advanced); err != nil {
+				return err
+			}
+		}
+		mlog.Info(ctx, "delegator skip stale or no-op schema event",
+			mlog.Uint64("schemaVersion", schemaVersion),
+			mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
+		)
+		return nil
+	}
+
+	// Validate the schema early so a malformed function schema fails before any
+	// side effects; the ready snapshot's function state is built at publish time.
+	if _, err := buildFunctionRuntimeState(schema); err != nil {
+		return err
+	}
+
+	oldSet := newBM25FunctionSet(sd.collection.Schema())
+	newSet := newBM25FunctionSet(schema)
+	idfOracle := sd.getIDFOracle()
+	if idfOracle != nil && newSet.HasIncompatibleCommonFunction(oldSet) {
+		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
+	}
+
+	// Keep the load barrier monotonic. A higher logical schema version can be
+	// replayed with a smaller barrier than an earlier same-version property
+	// refresh, but that must not reopen older load results.
+	if sd.schemaBarrierTs < schemaBarrierTs {
+		sd.schemaBarrierTs = schemaBarrierTs
+	}
+
+	if err := sd.fanoutWorkerSchema(ctx, schema, schemaBarrierTs); err != nil {
 		return err
 	}
 
 	// Apply the local collection update with the same barrier used for remote
 	// workers. collectionManager keeps schema.Version as the logical freshness key.
 	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
-		newFunctionState.Close()
 		return err
 	}
-	sd.updateFunctionRunners(schema)
-	if idfOracle == nil && len(newSet) > 0 {
-		// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
-		// Old growings cannot receive stats for newly added BM25 fields; ProcessInsert registers only new growings.
-		idfOracle = NewIDFOracle(sd.vchannelName, schema.GetFunctions())
-		idfOracle.Start()
-		sd.distribution.SetIDFOracle(idfOracle)
-		if current := sd.distribution.current.Load(); current != nil {
-			idfOracle.SetNext(current)
-		}
-		sd.publishIDFOracle(idfOracle)
-	} else if idfOracle != nil && !newSet.Equal(oldSet) {
-		if err := idfOracle.SyncFunctions(schema.GetFunctions()); err != nil {
-			newFunctionState.Close()
-			return err
-		}
+	// Segments are updated; register runtime deps and attempt the ready
+	// publish. tryPublish additionally verifies runner initialization
+	// synchronously and skips (without error) while BM25 stats of this version
+	// are still loading/activating — the read path keeps serving the previous
+	// ready version until the last state change publishes this one.
+	if err := sd.syncSchemaRuntimeAndPublish(ctx, schema); err != nil {
+		return err
 	}
-	sd.functionState.swap(newFunctionState).Close()
 	mlog.Info(ctx, "delegator finished update schema event",
 		mlog.Uint64("schemaVersion", schemaVersion),
 		mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
 		mlog.Uint64("loadBarrierTs", sd.schemaBarrierTs),
-		mlog.Int("sealedNum", len(sealed)),
-		mlog.Int("growingNum", len(growing)),
 		mlog.Int("bm25FunctionNum", len(newSet)),
 	)
 	return nil
@@ -1362,7 +1704,6 @@ func (sd *shardDelegator) Close() {
 		idfOracle.Close()
 	}
 
-	sd.functionState.Close()
 	sd.releaseFunctionRunners()
 
 	// clean up l0 segment in delete buffer
@@ -1377,29 +1718,18 @@ func (sd *shardDelegator) Close() {
 	}
 }
 
-func (sd *shardDelegator) allocFunctionRunners(schema *schemapb.CollectionSchema) {
-	if err := function.AllocFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		sd.warnFunctionRunnerInit(err, "allocate", schema)
-	}
+// allocFunctionRunners / updateFunctionRunners register the delegator's
+// function runners for the schema version. Errors propagate: registration is
+// part of the ready-schema checklist, and the caller's retry loop (querycoord
+// load retry / pipeline UpdateSchema retry) re-drives it. Actual runner
+// initialization is verified synchronously by tryPublishReadySchema via
+// EnsureRunnersReady before the version is published.
+func (sd *shardDelegator) allocFunctionRunners(schema *schemapb.CollectionSchema) error {
+	return function.AllocFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
 }
 
-func (sd *shardDelegator) updateFunctionRunners(schema *schemapb.CollectionSchema) {
-	if err := function.UpdateFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		sd.warnFunctionRunnerInit(err, "update", schema)
-	}
-}
-
-func (sd *shardDelegator) warnFunctionRunnerInit(err error, operation string, schema *schemapb.CollectionSchema) {
-	schemaVersion := function.LatestFunctionRunnerVersion
-	if schema != nil {
-		schemaVersion = schema.GetVersion()
-	}
-	mlog.Warn(context.TODO(), "failed to initialize delegator function runners",
-		mlog.Int64("collectionID", sd.collectionID),
-		mlog.String("vchannel", sd.vchannelName),
-		mlog.String("operation", operation),
-		mlog.Int32("schemaVersion", schemaVersion),
-		mlog.Err(err))
+func (sd *shardDelegator) updateFunctionRunners(schema *schemapb.CollectionSchema) error {
+	return function.UpdateFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema)
 }
 
 func (sd *shardDelegator) releaseFunctionRunners() {
@@ -1516,12 +1846,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
-	functionState, err := buildFunctionRuntimeState(collection.Schema())
-	if err != nil {
+	if err := sd.allocFunctionRunners(collection.Schema()); err != nil {
+		sd.distribution.Close() // stop the snapshotLoop goroutine started by NewDistribution
 		return nil, err
 	}
-	sd.functionState = functionState
-	sd.allocFunctionRunners(collection.Schema())
 
 	hasBM25Field := lo.ContainsBy(collection.Schema().GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
 		return tf.GetType() == schemapb.FunctionType_BM25
@@ -1529,9 +1857,25 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	if hasBM25Field {
 		idfOracle := NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
+		idfOracle.SetOnStatsActivated(sd.onIDFStatsActivated)
 		idfOracle.Start()
 		sd.distribution.SetIDFOracle(idfOracle)
 		sd.publishIDFOracle(idfOracle)
+	}
+
+	// Publish the initial ready snapshot: the distribution is empty at creation,
+	// so the checklist reduces to runner readiness (verified synchronously
+	// inside tryPublish). Failure fails delegator creation and querycoord
+	// retries the whole shard load; release the runtime resources registered
+	// above, otherwise the leaked (failed) runner entries would poison the next
+	// creation attempt for this collection.
+	if err := sd.tryPublishReadySchema(ctx); err != nil {
+		if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+			idfOracle.Close()
+		}
+		sd.releaseFunctionRunners()
+		sd.distribution.Close() // stop the snapshotLoop goroutine started by NewDistribution
+		return nil, err
 	}
 
 	// Register growing-source segments as optional local flush sources. Metadata
@@ -1562,14 +1906,27 @@ func (sd *shardDelegator) useGrowingSourceFlush() bool {
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
 }
 
-func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {
-	schema := sd.collection.Schema()
-	ok, err := function.RunWithAnalyzer(ctx, sd.collectionID, schema.GetVersion(), fieldID, run)
+// runWithAnalyzer runs the analyzer for fieldID for the given ready schema
+// snapshot. The analyzer registry is resolved at the LATEST runner version, not
+// the snapshot's: updateFunctionRunners moves the delegator's registry key to
+// the advanced live version and GCs the snapshot version's entry during the
+// deferred-publish window, so a snapshot-version lookup would miss there even
+// for an unchanged function — the same reason buildBM25IDF/parseMinHash resolve
+// at LatestFunctionRunnerVersion. Runners are keyed by function signature and
+// shared across versions, and in-place signature changes are rejected, so the
+// latest analyzer is always compatible with the snapshot's function set.
+func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, schema *schemapb.CollectionSchema, fieldID int64, run func(function.Analyzer) error) (bool, error) {
+	ok, err := function.RunWithAnalyzer(ctx, sd.collectionID, function.LatestFunctionRunnerVersion, fieldID, run)
 	if ok || err != nil {
 		return ok, err
 	}
 	if fieldHasBM25Analyzer(schema, fieldID) {
-		return false, nil
+		// The snapshot still maps the field to a BM25 analyzer but the latest
+		// registry no longer has it: the function was dropped in an
+		// applied-but-not-yet-published schema. Transitional — retriable, not a
+		// permanent parameter error; see buildBM25IDF.
+		return false, errors.Wrapf(merr.ErrCollectionSchemaVersionNotReady,
+			"analyzer for field %d is not available; the schema is transitioning past the published snapshot", fieldID)
 	}
 
 	field := typeutil.GetField(schema, fieldID)
@@ -1597,13 +1954,18 @@ func fieldHasBM25Analyzer(schema *schemapb.CollectionSchema, fieldID int64) bool
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
+	snap, err := sd.schemaReady.resolve()
+	if err != nil {
+		return nil, err
+	}
+
 	var result [][]*milvuspb.AnalyzerToken
 	var analyzeErr error
 	texts := lo.Map(req.GetPlaceholder(), func(bytes []byte, _ int) string {
 		return string(bytes)
 	})
 
-	ok, err := sd.runWithAnalyzer(ctx, req.GetFieldId(), func(analyzer function.Analyzer) error {
+	ok, err := sd.runWithAnalyzer(ctx, snap.schema, req.GetFieldId(), func(analyzer function.Analyzer) error {
 		if len(analyzer.GetInputFields()) == 1 {
 			result, analyzeErr = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts)
 			return analyzeErr

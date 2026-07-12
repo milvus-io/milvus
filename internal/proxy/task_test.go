@@ -8636,7 +8636,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop by function_name - detach minhash success", func(t *testing.T) {
+	t.Run("drop by function_name - detach minhash rejected", func(t *testing.T) {
 		schemaWithFunc := &schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -8665,7 +8665,8 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 			},
 		}
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "must be dropped together with its output fields")
 	})
 
 	t.Run("drop by function_name - bm25 function field success", func(t *testing.T) {
@@ -8858,7 +8859,9 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("detach minhash function succeeds", func(t *testing.T) {
+	t.Run("detach minhash function fails", func(t *testing.T) {
+		// Search-time runner functions (BM25, MinHash) cannot be detached:
+		// re-attaching a different function would silently mix corpora.
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8873,7 +8876,8 @@ func TestValidateDropFunction(t *testing.T) {
 			},
 		}
 		err := validateDropFunction(schema, "minhash_func", false)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must be dropped together with its output fields")
 	})
 
 	t.Run("detach bm25 function fails", func(t *testing.T) {
@@ -8892,7 +8896,7 @@ func TestValidateDropFunction(t *testing.T) {
 		}
 		err := validateDropFunction(schema, "bm25_func", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
+		assert.Contains(t, err.Error(), "must be dropped together with its output fields")
 	})
 
 	t.Run("drop function field leaves another vector field", func(t *testing.T) {

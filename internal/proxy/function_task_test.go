@@ -888,6 +888,64 @@ func (f *FunctionTaskSuite) TestDropCollectionFunctionTaskExecute() {
 		}
 
 		err := task.Execute(ctx)
-		f.ErrorContains(err, "currently does not support droping BM25 function")
+		f.ErrorContains(err, "currently does not support dropping BM25 function")
 	}
+
+	// MinHash mirrors BM25: dropping only the function would strand output
+	// data generated under its signature.
+	{
+		mockRootCoord := mocks.NewMockMixCoordClient(f.T())
+		task := &dropCollectionFunctionTask{
+			Condition: NewTaskCondition(ctx),
+			DropCollectionFunctionRequest: &milvuspb.DropCollectionFunctionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollectionFunction},
+				CollectionName: "test_collection",
+				CollectionID:   1,
+				FunctionName:   "minhash_function",
+			},
+			mixCoord: mockRootCoord,
+			fSchema: &schemapb.FunctionSchema{
+				Type: schemapb.FunctionType_MinHash,
+			},
+		}
+		err := task.Execute(ctx)
+		f.ErrorContains(err, "currently does not support dropping MinHash function")
+	}
+}
+
+// The legacy function APIs must reject search-time runner functions (BM25 and
+// MinHash) symmetrically: altering their parameters in place, or adding them
+// detached from their output fields, silently diverges query-time
+// hashing/scoring from the indexed corpus.
+func (f *FunctionTaskSuite) TestLegacyAPIRejectsMinHash() {
+	ctx := context.Background()
+
+	addTask := &addCollectionFunctionTask{
+		Condition: NewTaskCondition(ctx),
+		AddCollectionFunctionRequest: &milvuspb.AddCollectionFunctionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AddCollectionFunction},
+			CollectionName: "test_collection",
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name: "minhash_function",
+				Type: schemapb.FunctionType_MinHash,
+			},
+		},
+	}
+	err := addTask.PreExecute(ctx)
+	f.ErrorContains(err, "currently does not support adding MinHash function")
+
+	alterTask := &alterCollectionFunctionTask{
+		Condition: NewTaskCondition(ctx),
+		AlterCollectionFunctionRequest: &milvuspb.AlterCollectionFunctionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionFunction},
+			CollectionName: "test_collection",
+			FunctionName:   "minhash_function",
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name: "minhash_function",
+				Type: schemapb.FunctionType_MinHash,
+			},
+		},
+	}
+	err = alterTask.PreExecute(ctx)
+	f.ErrorContains(err, "currently does not support alter MinHash function")
 }

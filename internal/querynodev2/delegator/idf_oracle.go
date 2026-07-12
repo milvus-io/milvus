@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -69,6 +70,20 @@ type IDFOracle interface {
 	SyncFunctions(functions []*schemapb.FunctionSchema) error
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
+
+	// Ready reports whether every loaded sealed stats entry that belongs to the
+	// current serving target has been activated (merged into the aggregated
+	// stats). It intentionally does NOT require every target segment to have
+	// stats: a segment absent from the sealed stats map has nothing loadable
+	// yet (e.g. its BM25 backfill has not run) and is progressive-visibility by
+	// design — requiring it would deadlock the ready gate against the external
+	// backfill job. In-flight stats downloads are tracked separately by the
+	// delegator's pending-loads set.
+	Ready() bool
+	// SetOnStatsActivated registers a callback invoked (outside oracle locks)
+	// whenever sealed stats transition to active. The delegator uses it to
+	// re-attempt publishing the ready schema snapshot after a state change.
+	SetOnStatsActivated(fn func())
 
 	DirPath() string
 
@@ -406,6 +421,10 @@ type idfOracle struct {
 	resourceMu    sync.Mutex
 	chargedMemory int64
 	chargedDisk   int64
+
+	// invoked outside oracle locks whenever sealed stats become active; see
+	// IDFOracle.SetOnStatsActivated.
+	onStatsActivated atomic.Pointer[func()]
 }
 
 // now only used for test
@@ -415,6 +434,55 @@ func (o *idfOracle) TargetVersion() int64 {
 
 func (o *idfOracle) DirPath() string {
 	return o.dirPath
+}
+
+// SetOnStatsActivated registers the activation callback. Set once right after
+// construction (before Start); stored atomically so the sync loop can read it
+// without racing the setter.
+func (o *idfOracle) SetOnStatsActivated(fn func()) {
+	o.onStatsActivated.Store(&fn)
+}
+
+// notifyStatsActivated invokes the activation callback. Callers must NOT hold
+// the oracle lock or any sealedBm25Stats lock: the callback re-enters the
+// oracle via Ready().
+func (o *idfOracle) notifyStatsActivated() {
+	if fn := o.onStatsActivated.Load(); fn != nil && *fn != nil {
+		(*fn)()
+	}
+}
+
+// Ready reports whether every sealed stats entry belonging to the current
+// serving target has been activated. See IDFOracle.Ready for why absent
+// entries (nothing loadable yet, progressive backfill) do not count against
+// readiness — only loaded-but-not-yet-activated entries do; those are
+// transient (the sync loop activates them) so Ready cannot deadlock.
+func (o *idfOracle) Ready() bool {
+	snapshot, _ := o.next.GetSnapshot()
+	if snapshot == nil {
+		return true
+	}
+	sealed, _ := snapshot.Peek()
+	targetSet := typeutil.NewSet[UniqueID]()
+	for _, item := range sealed {
+		for _, segment := range item.Segments {
+			if segment.Level == datapb.SegmentLevel_L0 {
+				continue
+			}
+			if segment.TargetVersion == snapshot.targetVersion {
+				targetSet.Insert(segment.SegmentID)
+			}
+		}
+	}
+	ready := true
+	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
+		if targetSet.Contain(segmentID) && !stats.activate.Load() {
+			ready = false
+			return false
+		}
+		return true
+	})
+	return ready
 }
 
 func (o *idfOracle) preloadSealed(segmentID int64, stats *sealedBm25Stats, memoryStats bm25Stats) {
@@ -1018,7 +1086,11 @@ func (o *idfOracle) SyncDistribution() error {
 			case snapshot.targetVersion:
 				targetMap.Insert(segment.SegmentID)
 				if !o.sealed.Contain(segment.SegmentID) {
-					mlog.Warn(context.TODO(), "idf oracle lack some sealed segment", mlog.Int64("segment", segment.SegmentID))
+					// Expected while the oracle is warming up or was just lazily created
+					// (e.g. UpdateSchema/init building the oracle after segments already
+					// registered in the target): the sealed stats load asynchronously.
+					// Rate-limit so this transient, per-segment gap cannot spam the log.
+					mlog.RatedWarn(context.TODO(), rate.Limit(1), "idf oracle lack some sealed segment", mlog.Int64("segment", segment.SegmentID))
 				}
 			case unreadableTargetVersion:
 				reserveMap.Insert(segment.SegmentID)
@@ -1117,6 +1189,9 @@ func (o *idfOracle) SyncDistribution() error {
 
 	o.syncResource()
 	mlog.Info(context.TODO(), "sync idf distribution finished", mlog.Int64("version", snapshot.targetVersion), mlog.Int64("numrow", numRow), mlog.Int("growing", growingLen), mlog.Int("sealed", sealedLen))
+	// A sync pass can flip sealed stats to active (or bring a new target into
+	// effect); let the delegator re-attempt publishing the ready schema.
+	o.notifyStatsActivated()
 	return nil
 }
 

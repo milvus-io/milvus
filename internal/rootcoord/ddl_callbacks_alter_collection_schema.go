@@ -130,7 +130,6 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
-
 	// Materialize the bound index meta for the new function output field BEFORE the
 	// broadcast, so the WAL message carries a complete, replay-deterministic index
 	// definition and the ack callback stays a pure idempotent apply.
@@ -170,10 +169,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		return err
-	}
-	return nil
+	return c.broadcastSchemaChange(ctx, broadcaster, coll, schema, msg)
 }
 
 // prepareBoundFieldIndex materializes the index meta bound to the newly added
@@ -378,7 +374,6 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	if err != nil {
 		return err
 	}
-
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
@@ -405,10 +400,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		return err
-	}
-	return nil
+	return c.broadcastSchemaChange(ctx, broadcaster, coll, schema, msg)
 }
 
 // buildSchemaForDropField builds the new schema, properties, and droppedFieldIds for dropping a field.
@@ -474,12 +466,12 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		maxFieldID := maxAssignedFieldIDFromSchema(schema)
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 		schema.StructArrayFields = newStructs
-		schema.Properties = properties
 		schema.Version = coll.SchemaVersion + 1
 		droppedFieldIds = append(droppedFieldIds, droppedStruct.FieldID)
 		for _, subField := range droppedStruct.Fields {
 			droppedFieldIds = append(droppedFieldIds, subField.FieldID)
 		}
+		schema.Properties = properties
 		return schema, properties, droppedFieldIds, nil
 	}
 
@@ -489,6 +481,16 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 	return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field not found with id: %d", fieldID)
 }
 
+// buildSchemaForDetachFunction detaches a function while keeping its output
+// fields. Rejected for the search-time runner functions (BM25, MinHash): their
+// detached output field keeps data generated under the removed function's
+// signature, and re-attaching a function with different parameters (allowed
+// once IsFunctionOutput is cleared) would silently mix corpora — query-time
+// hashing/scoring no longer matches the indexed data. Removing them always
+// goes through drop_function_output_fields=true, so a re-added function gets
+// fresh field IDs and old and new data can never mix. Other function types
+// keep detach because drop-with-fields does not support them yet; unifying
+// them onto the same drop-with-fields-only rule is a follow-up.
 func buildSchemaForDetachFunction(coll *model.Collection, functionName string) (
 	schema *schemapb.CollectionSchema,
 	properties []*commonpb.KeyValuePair,
@@ -505,8 +507,12 @@ func buildSchemaForDetachFunction(coll *model.Collection, functionName string) (
 	if targetFunc == nil {
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
 	}
-	if targetFunc.Type == schemapb.FunctionType_BM25 {
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
+	switch targetFunc.Type {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg(
+			"function %s must be dropped together with its output fields (set drop_function_output_fields=true): "+
+				"detaching would strand data generated under the function's signature and re-attaching a different function would silently mix corpora",
+			functionName)
 	}
 
 	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))

@@ -1094,6 +1094,20 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.Equal(t, collInfo.updateTimestamp, st.GuaranteeTimestamp)
 	})
+	t.Run("search_carries_schema_version", func(t *testing.T) {
+		collName := "collection_schema_version" + funcutil.GenRandomStr()
+		createColl(t, collName, qc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		assert.NoError(t, st.PreExecute(ctx))
+		// The request must carry the schema version the plan was compiled
+		// against: the delegator's ready-schema version gate compares it and
+		// returns retriable NotReady while the shard is behind.
+		assert.Equal(t, st.schema.GetVersion(), st.GetCollectionSchemaVersion())
+	})
 	t.Run("search with rerank", func(t *testing.T) {
 		collName := "search_with_rerank" + funcutil.GenRandomStr()
 		createCollWithFields(t, collName, qc)

@@ -1509,6 +1509,65 @@ func (_c *MixCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// CheckSchemaReady provides a mock function with given fields: ctx, req
+func (_m *MixCoord) CheckSchemaReady(ctx context.Context, req *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckSchemaReady")
+	}
+
+	var r0 *querypb.CheckSchemaReadyResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckSchemaReadyRequest) *querypb.CheckSchemaReadyResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.CheckSchemaReadyResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.CheckSchemaReadyRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CheckSchemaReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckSchemaReady'
+type MixCoord_CheckSchemaReady_Call struct {
+	*mock.Call
+}
+
+// CheckSchemaReady is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.CheckSchemaReadyRequest
+func (_e *MixCoord_Expecter) CheckSchemaReady(ctx interface{}, req interface{}) *MixCoord_CheckSchemaReady_Call {
+	return &MixCoord_CheckSchemaReady_Call{Call: _e.mock.On("CheckSchemaReady", ctx, req)}
+}
+
+func (_c *MixCoord_CheckSchemaReady_Call) Run(run func(ctx context.Context, req *querypb.CheckSchemaReadyRequest)) *MixCoord_CheckSchemaReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.CheckSchemaReadyRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CheckSchemaReady_Call) Return(_a0 *querypb.CheckSchemaReadyResponse, _a1 error) *MixCoord_CheckSchemaReady_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CheckSchemaReady_Call) RunAndReturn(run func(context.Context, *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error)) *MixCoord_CheckSchemaReady_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ClearReadTaskQueue provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ClearReadTaskQueue(_a0 context.Context, _a1 *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	ret := _m.Called(_a0, _a1)

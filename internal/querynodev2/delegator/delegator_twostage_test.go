@@ -465,7 +465,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{2000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -527,7 +527,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -585,7 +585,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 			3101: 10000,
 		}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.True(fallback)
 		s.Nil(results)
@@ -681,7 +681,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3500: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -757,7 +757,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3600: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -811,7 +811,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{4000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -886,7 +886,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithMultipleSegments() {
 			5002: 10000,
 		}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -1032,7 +1032,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		}
 		sealedRowCount := map[int64]int64{6000: 10000}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -1098,7 +1098,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchZeroValidCounts() {
 			7002: 10000,
 		}
 
-		results, fallback, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, err := s.delegator.twoStageSearch(ctx, req, s.delegator.schemaReady.load(), sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)

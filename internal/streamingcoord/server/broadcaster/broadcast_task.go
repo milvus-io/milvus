@@ -373,7 +373,10 @@ func (b *broadcastTask) isControlChannelAcked() bool {
 	return false
 }
 
-// BlockUntilDone blocks until the broadcast task is done.
+// BlockUntilDone blocks until the broadcast task is fully done: all vchannels acked
+// AND the post-ack callback has completed (the `done` channel is closed by
+// MarkAckCallbackDone, after doAckCallback runs the registered ack callback).
+// For "all vchannels acked" without waiting on the callback, use BlockUntilAllAck.
 func (b *broadcastTask) BlockUntilDone(ctx context.Context) (*types.BroadcastAppendResult, error) {
 	select {
 	case <-ctx.Done():

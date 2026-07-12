@@ -701,6 +701,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
+	// Carry the schema version this request is compiled against; the delegator
+	// serves it only once its ready snapshot reaches this version (retriable
+	// NotReady before that, so the LB policy retries until the shard catches up).
+	t.CollectionSchemaVersion = t.schema.GetVersion()
 	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
 	if err != nil {
 		return err

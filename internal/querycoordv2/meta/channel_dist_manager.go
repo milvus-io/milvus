@@ -44,6 +44,12 @@ type LeaderView struct {
 	NumOfGrowingRows       int64
 	PartitionStatsVersions map[int64]int64
 	Status                 *querypb.LeaderViewStatus
+	// ReadySchemaVersion is the schema version of the delegator's published
+	// ready snapshot (-1 = none yet); used by CheckSchemaReady to gate
+	// schema-change DDL completion. nil means the querynode predates readiness
+	// reporting (rolling upgrade) — treated as ready so schema-change DDLs stay
+	// live in mixed-version clusters.
+	ReadySchemaVersion *int32
 }
 
 func (view *LeaderView) Clone() *LeaderView {
@@ -67,6 +73,7 @@ func (view *LeaderView) Clone() *LeaderView {
 		TargetVersion:          view.TargetVersion,
 		NumOfGrowingRows:       view.NumOfGrowingRows,
 		PartitionStatsVersions: view.PartitionStatsVersions,
+		ReadySchemaVersion:     view.ReadySchemaVersion,
 	}
 }
 

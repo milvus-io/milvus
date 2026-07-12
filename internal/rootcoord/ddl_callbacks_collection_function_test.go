@@ -151,7 +151,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Su
 		return msg != nil
 	})).Return(&types.BroadcastAppendResult{}, nil)
 
-	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.NoError(err)
 }
 
@@ -169,7 +169,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Ge
 	// Mock meta calls to return error
 	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(nil, errors.New("cache expire error"))
 
-	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.Error(err)
 	suite.Contains(err.Error(), "cache expire error")
 }
@@ -192,7 +192,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 	// Mock broadcaster to return error
 	suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(nil, errors.New("broadcast error"))
 
-	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.Error(err)
 	suite.Contains(err.Error(), "broadcast error")
 }
@@ -456,28 +456,34 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAddFunction_NextFuncti
 
 // Test broadcastAlterCollectionForAlterFunction
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForAlterFunction() {
-	suite.Run("success", func() {
+	suite.Run("in-place alter rejected", func() {
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
+		// Altering an existing function in place is rejected by the schema-evolution
+		// admission gate (I1): the old output was produced by the old model/params and
+		// cannot be reinterpreted. We keep the same output field ("output_field") and only
+		// change a param, so the rejection is specifically the function-in-place one rather
+		// than the "repurpose an existing field as a function output" one. callAlterCollection
+		// is intentionally NOT mocked here so the real gate runs; the user must instead add a
+		// new function with a fresh output field and backfill it.
 		req := &milvuspb.AlterCollectionFunctionRequest{
 			DbName:         "test_db",
 			CollectionName: "test_collection",
 			FunctionSchema: &schemapb.FunctionSchema{
 				Name:             "test_function",
-				Type:             schemapb.FunctionType_BM25,
+				Type:             schemapb.FunctionType_TextEmbedding,
 				InputFieldNames:  []string{"text_field"},
-				OutputFieldNames: []string{"vector"},
+				OutputFieldNames: []string{"output_field"},
+				Params:           []*commonpb.KeyValuePair{{Key: "param1", Value: "value2"}},
 			},
 		}
-		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
-		defer mocker.UnPatch()
 
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
-		suite.NoError(err)
+		suite.ErrorContains(err, "cannot alter function")
 	})
 
 	suite.Run("external collection rejected", func() {

@@ -183,6 +183,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
+	// Carry the schema version this request is compiled against; the delegator
+	// serves it only once its ready snapshot reaches this version (retriable
+	// NotReady before that, so the LB policy retries until the shard catches up).
+	t.CollectionSchemaVersion = t.schema.GetVersion()
 
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {

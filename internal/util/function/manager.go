@@ -62,6 +62,14 @@ type FunctionRunnerManager interface {
 	// are closed only after all keys are released.
 	Release(collectionID int64, key string)
 
+	// EnsureReady synchronously initializes every runner of the schema's
+	// version and returns the first initialization error. Complements
+	// Alloc/Update (whose initialization is asynchronous and best-effort):
+	// callers that need runner readiness as a hard precondition — e.g. the
+	// delegator before publishing a ready schema snapshot — call this after
+	// Alloc/Update. A schema without runner-backed functions is trivially ready.
+	EnsureReady(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema) error
+
 	// Materialize fills missing function output fields for an insert request.
 	// Passing a nil schema uses the latest version snapshot already allocated by
 	// Create, recovery, or update; any foreground runner initialization uses the
@@ -528,6 +536,27 @@ func (m *functionRunnerManager) Update(
 	return m.getOrCreateEntry(collectionID).Update(key, schema)
 }
 
+// EnsureReady synchronously initializes the runners of schema's version, see
+// functionRunnerCollectionEntry.EnsureReady. A schema without embedding
+// functions is trivially ready.
+func (m *functionRunnerManager) EnsureReady(
+	ctx context.Context,
+	collectionID int64,
+	schema *schemapb.CollectionSchema,
+) error {
+	if schema == nil {
+		return merr.WrapErrFunctionFailedMsg("collection schema is nil")
+	}
+	if !HasEmbeddingFunctions(schema) {
+		return nil
+	}
+	entry := m.getEntry(collectionID)
+	if entry == nil {
+		return merr.WrapErrFunctionFailedMsg("function runners for collection %d are not allocated", collectionID)
+	}
+	return entry.EnsureReady(ctx, schema.GetVersion())
+}
+
 func (e *functionRunnerCollectionEntry) ensureVersion(
 	key string,
 	schema *schemapb.CollectionSchema,
@@ -670,6 +699,37 @@ func (e *functionRunnerCollectionEntry) updateKeyVersionLocked(
 	if version <= schemaVersion {
 		e.keyVersions[key] = schemaVersion
 	}
+}
+
+// EnsureReady synchronously initializes every runner of the given schema
+// version and returns the first initialization error. Unlike allocOrUpdate's
+// background warm-up goroutine, this gives callers (the delegator ready-schema
+// publish gate) a hard guarantee: when it returns nil, every runner of the
+// version serves requests without lazy read-path initialization.
+func (e *functionRunnerCollectionEntry) EnsureReady(ctx context.Context, schemaVersion int32) error {
+	e.mu.RLock()
+	versionRunners, ok := e.getVersionRunnerLocked(schemaVersion)
+	if !ok {
+		e.mu.RUnlock()
+		return merr.WrapErrFunctionFailedMsg("function runners for schema version %d are not allocated", schemaVersion)
+	}
+	runnerEntries := make([]*functionRunnerEntry, 0, len(versionRunners.signatures))
+	for _, signature := range versionRunners.signatures {
+		runnerEntry := e.runners[signature]
+		if runnerEntry == nil {
+			e.mu.RUnlock()
+			return merr.WrapErrFunctionFailedMsg("function runner %s for schema version %d is not allocated", signature, schemaVersion)
+		}
+		runnerEntries = append(runnerEntries, runnerEntry)
+	}
+	e.mu.RUnlock()
+
+	for _, runnerEntry := range runnerEntries {
+		if err := runnerEntry.ensureReady(ctx); err != nil {
+			return merr.Wrapf(err, "failed to initialize function runner %s for schema version %d", runnerEntry.signature, schemaVersion)
+		}
+	}
+	return nil
 }
 
 func (e *functionRunnerCollectionEntry) getRunnerEntryByOutputField(schemaVersion int32, outputFieldID int64) (*functionRunnerEntry, schemapb.FunctionType, bool) {
@@ -1222,6 +1282,14 @@ func ReleaseFunctionRunners(collectionID int64, key string) {
 	defaultFunctionRunnerManager.Release(collectionID, key)
 }
 
+// EnsureRunnersReady synchronously initializes every function runner of the
+// schema's version, returning the first initialization error. Callers use it
+// to make runner readiness a precondition (e.g. before publishing a ready
+// schema snapshot) instead of relying on lazy read-path initialization.
+func EnsureRunnersReady(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema) error {
+	return defaultFunctionRunnerManager.EnsureReady(ctx, collectionID, schema)
+}
+
 func RunWithRunner(
 	ctx context.Context,
 	collectionID int64,
@@ -1258,6 +1326,19 @@ func FillFunctionFields(runners []FunctionRunner, body *msgpb.InsertRequest) (bo
 			continue
 		}
 
+		// A write stamped at an older schema version (accepted by the v<=current write
+		// gate) can predate this function's input field: the field was added after the
+		// write was built, so its data is simply absent. Materializing anyway fails with
+		// "input field not found", and because a lagging vchannel that does not yet carry
+		// this function accepts the same write, that failure resurfaces a cross-vchannel
+		// partial commit. Skip instead -- a row with no input has no function output, so
+		// leave the output unset (segcore backfills null; the external backfill later
+		// recomputes it, which for an absent/empty input is still empty). This keeps the
+		// pre-WAL transform a total function over any at-or-behind schema version.
+		if !hasAllInputFields(runner, body) {
+			continue
+		}
+
 		output, err := RunFunction(runner, body)
 		if err != nil {
 			return false, err
@@ -1267,6 +1348,19 @@ func FillFunctionFields(runners []FunctionRunner, body *msgpb.InsertRequest) (bo
 	}
 
 	return changed, nil
+}
+
+// hasAllInputFields reports whether every input field this runner consumes is present
+// in the insert body. A write that predates a function's input field (accepted behind
+// the current schema version by the write gate) lacks that field entirely, which is the
+// signal FillFunctionFields uses to skip materialization rather than fail the write.
+func hasAllInputFields(runner FunctionRunner, body *msgpb.InsertRequest) bool {
+	for _, field := range runner.GetInputFields() {
+		if GetFieldData(body.GetFieldsData(), field.GetFieldID()) == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func IsEmbeddingFunctionType(functionType schemapb.FunctionType) bool {

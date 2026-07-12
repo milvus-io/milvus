@@ -1418,8 +1418,14 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 	}
 
 	if !dropOutputFields {
-		if targetFunc.GetType() == schemapb.FunctionType_BM25 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
+		switch targetFunc.GetType() {
+		case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+			// Search-time runner functions cannot be detached from their output
+			// fields: re-attaching a different function would silently mix
+			// corpora (query-time hashing/scoring vs indexed data). Mirrors the
+			// rootcoord rejection in buildSchemaForDetachFunction.
+			return merr.WrapErrParameterInvalidMsg(
+				"function %s must be dropped together with its output fields (set drop_function_output_fields=true)", functionName)
 		}
 		return nil
 	}
@@ -2602,10 +2608,18 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
+			var curMaxLength int64 = -1
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 					IsStringType = true
 					fieldName = field.GetName()
+					for _, kv := range field.GetTypeParams() {
+						if kv.GetKey() == common.MaxLengthKey {
+							if v, e := strconv.ParseInt(kv.GetValue(), 10, 64); e == nil {
+								curMaxLength = v
+							}
+						}
+					}
 					break
 				}
 			}
@@ -2621,13 +2635,27 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			if int64(value) > defaultMaxVarCharLength {
 				return merr.WrapErrParameterInvalidMsg("%s exceeds the maximum allowed value %s", prop.Value, strconv.FormatInt(defaultMaxVarCharLength, 10))
 			}
+			// Shrinking max_length is destructive: existing rows may already hold
+			// longer values that would violate the new limit (and a one-behind write
+			// under the old bound would be wrongly accepted). Only growth is allowed.
+			if curMaxLength >= 0 && int64(value) < curMaxLength {
+				return merr.WrapErrParameterInvalidMsg("max_length of field %s can only be increased (current %d), not shrunk to %d", fieldName, curMaxLength, value)
+			}
 		case common.MaxCapacityKey:
 			IsArrayType := false
 			fieldName := ""
+			var curMaxCapacity int64 = -1
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
 					IsArrayType = true
 					fieldName = field.GetName()
+					for _, kv := range field.GetTypeParams() {
+						if kv.GetKey() == common.MaxCapacityKey {
+							if v, e := strconv.ParseInt(kv.GetValue(), 10, 64); e == nil {
+								curMaxCapacity = v
+							}
+						}
+					}
 					break
 				}
 			}
@@ -2642,6 +2670,11 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
 			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
 				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
+			}
+			// Shrinking max_capacity is destructive: existing rows may already hold
+			// more elements than the new limit. Only growth is allowed.
+			if curMaxCapacity >= 0 && maxCapacityPerRow < curMaxCapacity {
+				return merr.WrapErrParameterInvalidMsg("max_capacity of field %s can only be increased (current %d), not shrunk to %d", fieldName, curMaxCapacity, maxCapacityPerRow)
 			}
 		}
 	}

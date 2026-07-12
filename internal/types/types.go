@@ -295,6 +295,15 @@ type MixCoord interface {
 	querypb.QueryCoordServer
 	datapb.DataCoordServer
 
+	// CheckSchemaReady reports whether every shard delegator of a loaded
+	// collection has published a ready schema snapshot at or above the given
+	// schema version. It is an IN-PROCESS contract (deliberately not a service
+	// RPC): the readiness data flows to querycoord through the regular
+	// GetDataDistribution heartbeat, and the only caller — rootcoord's
+	// schema-change DDL callback, which polls it before expiring proxy schema
+	// caches — always lives in the same coordinator process.
+	CheckSchemaReady(ctx context.Context, req *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error)
+
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	GetDcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 

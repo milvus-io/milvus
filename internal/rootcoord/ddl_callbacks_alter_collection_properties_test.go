@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -484,6 +485,31 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionErro
 		Results: map[string]*message.AppendResult{},
 	})
 	require.Error(t, err)
+}
+
+// System-maintained schema-integrity properties must be immutable through the
+// public property API: overwriting or deleting max_field_id would let a
+// dropped field's ID be re-assigned (resurrecting not-yet-compacted old column
+// data).
+func TestDDLCallbacksAlterCollectionPropertiesRejectsReservedKeys(t *testing.T) {
+	ctx := context.Background()
+	c := &Core{}
+
+	for _, key := range []string{common.MaxFieldIDKey} {
+		err := c.broadcastAlterCollectionForAlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			CollectionName: "coll",
+			Properties:     []*commonpb.KeyValuePair{{Key: key, Value: "1"}},
+		})
+		require.Error(t, err, key)
+		require.ErrorContains(t, err, "system-maintained property")
+
+		err = c.broadcastAlterCollectionForAlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			CollectionName: "coll",
+			DeleteKeys:     []string{key},
+		})
+		require.Error(t, err, key)
+		require.ErrorContains(t, err, "system-maintained property")
+	}
 }
 
 func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {
@@ -962,4 +988,130 @@ func assertDynamicSchema(t *testing.T, ctx context.Context, core *Core, dbName s
 	}
 	require.True(t, coll.Fields[len(coll.Fields)-1].IsDynamic)
 	require.Equal(t, coll.Fields[len(coll.Fields)-1].DataType, schemapb.DataType_JSON)
+}
+
+// newSchemaReadyTestMessage builds an alter-collection broadcast whose body
+// carries a bumped schema (the shape produced by AddCollectionField), which
+// must gate cache expiration on shard readiness.
+func newSchemaReadyTestMessage(t *testing.T, version int32) message.BroadcastResultAlterCollectionMessageV2 {
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId:     1,
+			CacheExpirations: &messagespb.CacheExpirations{},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema: &schemapb.CollectionSchema{Name: "test", Version: version},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	return message.BroadcastResultAlterCollectionMessageV2{
+		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+		Results: map[string]*message.AppendResult{},
+	}
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_WaitsSchemaReadyBeforeExpireCaches(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	// First poll: shards not ready yet; second poll: ready. ExpireCaches must
+	// only happen after the ready response.
+	mixc.EXPECT().CheckSchemaReady(mock.Anything, mock.Anything).
+		Return(&querypb.CheckSchemaReadyResponse{Status: merr.Success(), Ready: false}, nil).Once()
+	mixc.EXPECT().CheckSchemaReady(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, req *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error) {
+			require.Equal(t, int64(1), req.GetCollectionID())
+			require.Equal(t, int32(2), req.GetSchemaVersion())
+			return &querypb.CheckSchemaReadyResponse{Status: merr.Success(), Ready: true}, nil
+		}).Once()
+
+	broker := newMockBroker()
+	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
+		return nil
+	}
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(broker),
+	)
+	cb := &DDLCallback{Core: c}
+
+	err := cb.alterCollectionV2AckCallback(ctx, newSchemaReadyTestMessage(t, 2))
+	require.NoError(t, err)
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_SchemaReadyCheckErrorPropagates(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.EXPECT().CheckSchemaReady(mock.Anything, mock.Anything).
+		Return(nil, errors.New("querycoord unavailable"))
+
+	broker := newMockBroker()
+	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
+		return nil
+	}
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(broker),
+	)
+	cb := &DDLCallback{Core: c}
+
+	// The callback must fail (framework will retry it) instead of expiring
+	// caches without readiness confirmation.
+	err := cb.alterCollectionV2AckCallback(ctx, newSchemaReadyTestMessage(t, 2))
+	require.Error(t, err)
+	require.ErrorContains(t, err, "failed to check schema readiness")
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_NoSchemaChangeSkipsReadinessWait(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	// No CheckSchemaReady expectation: a properties-only alter (no schema in
+	// the body) must not wait on shard readiness; mockery fails the test if it
+	// is called.
+	mixc := imocks.NewMixCoord(t)
+
+	broker := newMockBroker()
+	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
+		return nil
+	}
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(broker),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId:     1,
+			CacheExpirations: &messagespb.CacheExpirations{},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+		Results: map[string]*message.AppendResult{},
+	})
+	require.NoError(t, err)
 }

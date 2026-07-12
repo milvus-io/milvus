@@ -1045,6 +1045,10 @@ func (s *mixCoordImpl) UpdateLoadConfig(ctx context.Context, req *querypb.Update
 	return s.queryCoordServer.UpdateLoadConfig(ctx, req)
 }
 
+func (s *mixCoordImpl) CheckSchemaReady(ctx context.Context, req *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error) {
+	return s.queryCoordServer.CheckSchemaReady(ctx, req)
+}
+
 // DataCoordServer
 func (s *mixCoordImpl) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	return s.datacoordServer.GetSegmentInfo(ctx, req)

@@ -175,6 +175,13 @@ func (m *mockMixCoord) CommitBackfillResult(context.Context, *datapb.CommitBackf
 	return &datapb.CommitBackfillResultResponse{Status: merr.Success()}, nil
 }
 
+func (m *mockMixCoord) CheckSchemaReady(ctx context.Context, req *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error) {
+	return &querypb.CheckSchemaReadyResponse{
+		Status: merr.Success(),
+		Ready:  true,
+	}, nil
+}
+
 func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{
 		Status:           merr.Success(),

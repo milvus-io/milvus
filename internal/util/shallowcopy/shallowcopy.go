@@ -46,6 +46,7 @@ func ShallowCopySearchRequest(src *internalpb.SearchRequest, targetID int64) *in
 		PkFilter:                src.PkFilter,
 		SearchType:              src.SearchType,
 		GroupByFieldIds:         src.GroupByFieldIds,
+		CollectionSchemaVersion: src.CollectionSchemaVersion,
 	}
 }
 
@@ -82,5 +83,6 @@ func ShallowCopyRetrieveRequest(src *internalpb.RetrieveRequest, targetID int64)
 		OrderByFields:                src.OrderByFields,
 		QueryLabel:                   src.QueryLabel,
 		PkFilter:                     src.PkFilter,
+		CollectionSchemaVersion:      src.CollectionSchemaVersion,
 	}
 }

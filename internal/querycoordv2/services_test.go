@@ -2315,3 +2315,107 @@ func (suite *ServiceSuite) TearDownTest() {
 func TestService(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }
+
+func (suite *ServiceSuite) updateChannelDistWithReadyVersion(ctx context.Context, collection int64, readyVersion int32) {
+	channels := suite.channels[collection]
+	segments := lo.Flatten(lo.Values(suite.segments[collection]))
+
+	replicas := suite.meta.GetByCollection(ctx, collection)
+	targetVersion := suite.targetMgr.GetCollectionTargetVersion(ctx, collection, meta.CurrentTargetFirst)
+	for _, replica := range replicas {
+		i := 0
+		for _, node := range suite.sortInt64(replica.GetNodes()) {
+			suite.dist.ChannelDistManager.Update(node, &meta.DmChannel{
+				VchannelInfo: &datapb.VchannelInfo{
+					CollectionID: collection,
+					ChannelName:  channels[i],
+				},
+				Node: node,
+				View: &meta.LeaderView{
+					ID:           node,
+					CollectionID: collection,
+					Channel:      channels[i],
+					Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
+						return segment, &querypb.SegmentDist{
+							NodeID:  node,
+							Version: time.Now().Unix(),
+						}
+					}),
+					TargetVersion: targetVersion,
+					Status: &querypb.LeaderViewStatus{
+						Serviceable: true,
+					},
+					ReadySchemaVersion: lo.ToPtr(readyVersion),
+				},
+			})
+			i++
+			if i >= len(channels) {
+				break
+			}
+		}
+	}
+}
+
+func (suite *ServiceSuite) TestCheckSchemaReady() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	// A collection that is not loaded is trivially ready.
+	resp, err := server.CheckSchemaReady(ctx, &querypb.CheckSchemaReadyRequest{
+		CollectionID:  int64(999999),
+		SchemaVersion: 5,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp.GetStatus()))
+	suite.True(resp.GetReady())
+
+	collection := suite.collections[0]
+	suite.updateCollectionStatus(ctx, collection, querypb.LoadStatus_Loaded)
+
+	// Shard leaders report ready version 1: a request for version 2 is not
+	// ready, a request for version <= 1 is.
+	suite.updateChannelDistWithReadyVersion(ctx, collection, 1)
+	resp, err = server.CheckSchemaReady(ctx, &querypb.CheckSchemaReadyRequest{
+		CollectionID:  collection,
+		SchemaVersion: 2,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp.GetStatus()))
+	suite.False(resp.GetReady())
+
+	resp, err = server.CheckSchemaReady(ctx, &querypb.CheckSchemaReadyRequest{
+		CollectionID:  collection,
+		SchemaVersion: 1,
+	})
+	suite.NoError(err)
+	suite.True(resp.GetReady())
+
+	// All shard leaders caught up to version 2.
+	suite.updateChannelDistWithReadyVersion(ctx, collection, 2)
+	resp, err = server.CheckSchemaReady(ctx, &querypb.CheckSchemaReadyRequest{
+		CollectionID:  collection,
+		SchemaVersion: 2,
+	})
+	suite.NoError(err)
+	suite.True(resp.GetReady())
+
+	// Legacy querynodes (no ready_schema_version reported) are treated as
+	// ready so rolling upgrades cannot stall schema-change DDLs.
+	suite.updateChannelDist(ctx, collection)
+	resp, err = server.CheckSchemaReady(ctx, &querypb.CheckSchemaReadyRequest{
+		CollectionID:  collection,
+		SchemaVersion: 5,
+	})
+	suite.NoError(err)
+	suite.True(resp.GetReady())
+
+	// Unhealthy server surfaces a non-OK status.
+	server.UpdateStateCode(commonpb.StateCode_Initializing)
+	resp, err = server.CheckSchemaReady(ctx, &querypb.CheckSchemaReadyRequest{
+		CollectionID:  collection,
+		SchemaVersion: 2,
+	})
+	suite.NoError(err)
+	suite.False(merr.Ok(resp.GetStatus()))
+}

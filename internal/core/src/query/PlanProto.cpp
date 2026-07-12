@@ -953,16 +953,49 @@ ProtoParser::RetrievePlanNodeFromProto(
     return plan_node;
 }
 
+namespace {
+// A read compiled against an older schema may reference a field that a
+// concurrent schema change has since dropped. Reject it here with a clean input
+// error (FieldIDInvalid=2020) instead of letting it reach Schema::operator[]
+// deep in execution, which throws the default UnexpectedError(2001) — a generic
+// segcore error the proxy LB treats as a node fault, blacklisting a healthy
+// shard leader. 2020 maps to InputError on the Go side, so no blacklist.
+void
+CheckPlanFieldPresent(const SchemaPtr& schema, FieldId field_id) {
+    if (SystemProperty::Instance().IsSystem(field_id)) {
+        return;  // row id / timestamp: always valid, absent from the field map.
+    }
+    if (!schema->has_field(field_id)) {
+        ThrowInfo(FieldIDInvalid,
+                  "field id {} referenced by the request is not in the current "
+                  "collection schema (likely dropped by a concurrent schema "
+                  "change); recompile against the current schema",
+                  field_id.get());
+    }
+}
+}  // namespace
+
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     LOG_DEBUG("create search plan from proto: {}",
               plan_node_proto.ShortDebugString());
+    // Validate every referenced field id against the schema BEFORE parsing. Parsing
+    // (PlanNodeFromProto -> ParseExprs -> Schema::operator[], and add_involved_field)
+    // would otherwise throw the default UnexpectedError(2001) on a since-dropped field
+    // id, which the proxy LB treats as a node fault and blacklists a healthy shard
+    // leader. CollectAccessFieldIDs enumerates every field a plan touches (ANN,
+    // predicate columns, group-by, output), so this must precede any parsing.
+    auto access_entries = CollectAccessFieldIDs(plan_node_proto);
+    for (auto field_id : access_entries) {
+        CheckPlanFieldPresent(schema, field_id);
+    }
+
     auto plan = std::make_unique<Plan>(schema);
 
     auto plan_node = PlanNodeFromProto(plan_node_proto);
     plan->plan_node_ = std::move(plan_node);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
-    plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
+    plan->access_entries_ = std::move(access_entries);
     ExtractedPlanInfo extra_info(schema->get_field_id_bitset_size());
     extra_info.add_involved_field(plan->plan_node_->search_info_.field_id_);
     plan->extra_info_opt_ = std::move(extra_info);
@@ -982,12 +1015,19 @@ std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     LOG_DEBUG("create retrieve plan from proto: {}",
               plan_node_proto.ShortDebugString());
+    // Validate referenced field ids before parsing (see CreatePlan); output field
+    // ids are included in CollectAccessFieldIDs.
+    auto access_entries = CollectAccessFieldIDs(plan_node_proto);
+    for (auto field_id : access_entries) {
+        CheckPlanFieldPresent(schema, field_id);
+    }
+
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
     auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
 
     retrieve_plan->plan_node_ = std::move(plan_node);
-    retrieve_plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
+    retrieve_plan->access_entries_ = std::move(access_entries);
     for (auto field_id_raw : plan_node_proto.output_field_ids()) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);

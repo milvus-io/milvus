@@ -19,6 +19,7 @@ package delegator
 import (
 	"context"
 	"io"
+	"math"
 	"os"
 	"sync"
 	"testing"
@@ -937,6 +938,51 @@ func (s *DelegatorSuite) TestQuery() {
 
 		s.Error(err)
 	})
+}
+
+// TestReadSchemaVersionGate: a request compiled against a schema version ahead
+// of the published ready snapshot gets retriable NotReady on every read path
+// (Search / Query / QueryStream); version 0 (legacy proxy) and at-or-below
+// versions are served (covered by every other test in this suite, which all
+// use version 0).
+func (s *DelegatorSuite) TestReadSchemaVersionGate() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	aheadVersion := int32(math.MaxInt32)
+
+	_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Base:                    commonpbutil.NewMsgBase(),
+			CollectionSchemaVersion: aheadVersion,
+		},
+		DmlChannels: []string{s.vchannelName},
+	})
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	_, err = s.delegator.Query(ctx, &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			Base:                    commonpbutil.NewMsgBase(),
+			CollectionSchemaVersion: aheadVersion,
+		},
+		DmlChannels: []string{s.vchannelName},
+	})
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	client := streamrpc.NewLocalQueryClient(ctx)
+	server := client.CreateServer()
+	err = s.delegator.QueryStream(ctx, &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			QueryLabel:              "query",
+			Base:                    commonpbutil.NewMsgBase(),
+			CollectionSchemaVersion: aheadVersion,
+		},
+		DmlChannels: []string{s.vchannelName},
+	}, server)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
 }
 
 func (s *DelegatorSuite) TestQueryStream() {
@@ -2255,11 +2301,8 @@ func TestBuildFunctionRuntimeStateAddsBM25FunctionType(t *testing.T) {
 	state, err := buildFunctionRuntimeState(schema)
 	require.NoError(t, err)
 
-	runnerCount, functionTypeCount, analyzerCount := state.counts()
-	assert.Equal(t, 0, runnerCount)
-	assert.Equal(t, 1, functionTypeCount)
-	assert.Equal(t, 0, analyzerCount)
 	assert.True(t, state.hasFunctionType(102, schemapb.FunctionType_BM25))
+	assert.False(t, state.hasFunctionType(104, schemapb.FunctionType_MinHash))
 }
 
 func TestBuildFunctionRuntimeStateAddsMinHashFunctionType(t *testing.T) {
@@ -2269,11 +2312,8 @@ func TestBuildFunctionRuntimeStateAddsMinHashFunctionType(t *testing.T) {
 	state, err := buildFunctionRuntimeState(schema)
 	require.NoError(t, err)
 
-	runnerCount, functionTypeCount, analyzerCount := state.counts()
-	assert.Equal(t, 0, runnerCount)
-	assert.Equal(t, 1, functionTypeCount)
-	assert.Equal(t, 0, analyzerCount)
 	assert.True(t, state.hasFunctionType(104, schemapb.FunctionType_MinHash))
+	assert.False(t, state.hasFunctionType(102, schemapb.FunctionType_BM25))
 }
 
 func TestBM25FunctionSetAdditiveValidation(t *testing.T) {
@@ -2337,15 +2377,12 @@ func TestUpdateSchemaRejectsIncompatibleBM25FunctionChange(t *testing.T) {
 	oldSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
 	oldOracle := NewIDFOracle("test-channel", oldSchema.GetFunctions())
 	sd := &shardDelegator{
-		collectionID:  1000,
-		vchannelName:  "test-channel",
-		collection:    segments.NewCollectionWithoutSegcoreForTest(1000, oldSchema),
-		lifetime:      lifetime.NewLifetime(lifetime.Working),
-		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
-		workerManager: workerManager,
-		functionState: &functionRuntimeState{
-			functionFieldType: map[int64]schemapb.FunctionType{102: schemapb.FunctionType_BM25},
-		},
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 segments.NewCollectionWithoutSegcoreForTest(1000, oldSchema),
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              workerManager,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2358,8 +2395,52 @@ func TestUpdateSchemaRejectsIncompatibleBM25FunctionChange(t *testing.T) {
 	err := sd.UpdateSchema(context.Background(), newFunctionRuntimeTestSchemaWithVersion(1, changed), 100)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported incompatible BM25 function schema change")
-	assert.True(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
+	// UpdateSchema errored before any side effect: the oracle is left untouched.
 	assert.Same(t, oldOracle, sd.getIDFOracle())
+}
+
+// TestUpdateSchemaNoOpStillCreatesMissingIDFOracle reproduces the load-wins race:
+// segment load's collectionManager.PutOrRef advances the collection snapshot to a
+// schema that first introduces a BM25 function, so the later UpdateSchema event is
+// judged a no-op by ShouldUpdateCollectionSchema and returns early. That early return
+// used to skip the idfOracle creation, leaving the oracle nil forever - a subsequent
+// backfill reopen (loadBM25StatsForReopen) then errors-and-retries indefinitely.
+// The no-op branch must still create the oracle against the authoritative collection
+// schema so the reopen path can eventually succeed.
+func TestUpdateSchemaNoOpStillCreatesMissingIDFOracle(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+	workerManager := cluster.NewMockManager(t)
+	// The no-op branch fans the advanced schema out to workers before its
+	// publish attempt; with an empty distribution that still reaches the local
+	// worker ("don't skip empty"), so it must be mocked.
+	worker := cluster.NewMockWorker(t)
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	workerManager.EXPECT().GetWorker(mock.Anything, mock.Anything).Return(worker, nil).Maybe()
+	// Collection snapshot already carries the BM25 function at version 1 (PutOrRef won
+	// the race); the oracle was never created because UpdateSchema no-ops.
+	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
+	sd := &shardDelegator{
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 segments.NewCollectionWithoutSegcoreForTest(1000, schema),
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              workerManager,
+		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
+		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+	}
+	defer sd.Close()
+
+	require.Nil(t, sd.getIDFOracle())
+
+	// Same version + same barrier => ShouldUpdateCollectionSchema returns false =>
+	// UpdateSchema takes the no-op early-return branch.
+	err := sd.UpdateSchema(context.Background(), schema, 0)
+	require.NoError(t, err)
+
+	require.NotNil(t, sd.getIDFOracle(), "no-op UpdateSchema must still create the missing BM25 idfOracle")
 }
 
 func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
@@ -2370,16 +2451,21 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 	workerManager := cluster.NewMockManager(t)
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 	oldSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
+	// Use the real collection manager: tryPublishReadySchema verifies runner
+	// readiness against the LIVE collection schema, so the fixture must apply
+	// UpdateSchema for real (a mocked manager would leave the live schema and
+	// the registered runner versions out of sync).
+	manager := segments.NewManager()
+	require.NoError(t, manager.Collection.PutOrRef(1000, oldSchema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 1}))
+	defer manager.Collection.Unref(1000, 1)
 	sd := &shardDelegator{
-		collectionID:  1000,
-		vchannelName:  "test-channel",
-		collection:    segments.NewCollectionWithoutSegcoreForTest(1000, oldSchema),
-		lifetime:      lifetime.NewLifetime(lifetime.Working),
-		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
-		workerManager: workerManager,
-		functionState: &functionRuntimeState{
-			functionFieldType: map[int64]schemapb.FunctionType{},
-		},
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 manager.Collection.Get(1000),
+		collectionManager:          manager.Collection,
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              workerManager,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2389,10 +2475,6 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 	defer sd.Close()
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newAdditionalBM25FunctionSchema())
-	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
-	sd.collectionManager = collectionManager
-
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
 	require.NoError(t, err)
 
@@ -2409,15 +2491,12 @@ func TestUpdateSchemaDoesNotSyncIDFOracleWhenWorkerUpdateFails(t *testing.T) {
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 	oldSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
 	sd := &shardDelegator{
-		collectionID:  1000,
-		vchannelName:  "test-channel",
-		collection:    segments.NewCollectionWithoutSegcoreForTest(1000, oldSchema),
-		lifetime:      lifetime.NewLifetime(lifetime.Working),
-		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
-		workerManager: workerManager,
-		functionState: &functionRuntimeState{
-			functionFieldType: map[int64]schemapb.FunctionType{},
-		},
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 segments.NewCollectionWithoutSegcoreForTest(1000, oldSchema),
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              workerManager,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2443,15 +2522,12 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 	oldSchema := newFunctionRuntimeTestSchema()
 	sd := &shardDelegator{
-		collectionID:  1000,
-		vchannelName:  "test-channel",
-		collection:    segments.NewCollectionWithoutSegcoreForTest(1000, oldSchema),
-		lifetime:      lifetime.NewLifetime(lifetime.Working),
-		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
-		workerManager: workerManager,
-		functionState: &functionRuntimeState{
-			functionFieldType: map[int64]schemapb.FunctionType{},
-		},
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 segments.NewCollectionWithoutSegcoreForTest(1000, oldSchema),
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              workerManager,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2484,8 +2560,6 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 	workerManager := cluster.NewMockManager(t)
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 
-	functionState, err := buildFunctionRuntimeState(oldSchema)
-	require.NoError(t, err)
 	sd := &shardDelegator{
 		collectionID:               1000,
 		vchannelName:               "test-channel",
@@ -2494,7 +2568,6 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 		lifetime:                   lifetime.NewLifetime(lifetime.Working),
 		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager:              workerManager,
-		functionState:              functionState,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2502,7 +2575,7 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 	defer sd.Close()
 
 	firstSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
-	err = sd.UpdateSchema(context.Background(), firstSchema, 100)
+	err := sd.UpdateSchema(context.Background(), firstSchema, 100)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), sd.collection.SchemaVersion())
 
@@ -2521,16 +2594,19 @@ func TestUpdateSchemaSyncsFunctionRuntimeMetadata(t *testing.T) {
 	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
 	workerManager := cluster.NewMockManager(t)
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+	// Real collection manager: tryPublishReadySchema builds the snapshot from
+	// the LIVE collection schema, so UpdateSchema must actually apply it.
+	manager := segments.NewManager()
+	require.NoError(t, manager.Collection.PutOrRef(1000, newFunctionRuntimeTestSchema(), nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 1}))
+	defer manager.Collection.Unref(1000, 1)
 	sd := &shardDelegator{
-		collectionID:  1000,
-		vchannelName:  "test-channel",
-		collection:    segments.NewCollectionWithoutSegcoreForTest(1000, newFunctionRuntimeTestSchema()),
-		lifetime:      lifetime.NewLifetime(lifetime.Working),
-		distribution:  NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
-		workerManager: workerManager,
-		functionState: &functionRuntimeState{
-			functionFieldType: map[int64]schemapb.FunctionType{999: schemapb.FunctionType_BM25},
-		},
+		collectionID:               1000,
+		vchannelName:               "test-channel",
+		collection:                 manager.Collection.Get(1000),
+		collectionManager:          manager.Collection,
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
+		workerManager:              workerManager,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2538,25 +2614,28 @@ func TestUpdateSchemaSyncsFunctionRuntimeMetadata(t *testing.T) {
 	defer sd.Close()
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newMinHashFunctionSchema())
-	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
-	sd.collectionManager = collectionManager
-
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
 	require.NoError(t, err)
 
-	assert.True(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
-	assert.True(t, sd.functionState.hasFunctionType(104, schemapb.FunctionType_MinHash))
-	assert.False(t, sd.functionState.hasFunctionType(999, schemapb.FunctionType_BM25))
+	// UpdateSchema publishes the ready snapshot; the read path sees the new
+	// function types and no longer the pre-update one.
+	snap := sd.schemaReady.load()
+	require.NotNil(t, snap)
+	assert.True(t, snap.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
+	assert.True(t, snap.functionState.hasFunctionType(104, schemapb.FunctionType_MinHash))
+	assert.False(t, snap.functionState.hasFunctionType(999, schemapb.FunctionType_BM25))
 }
 
 func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	currentSchema := newFunctionRuntimeTestSchemaWithVersion(2, newMinHashFunctionSchema())
-	currentFunctionState, err := buildFunctionRuntimeState(currentSchema)
-	require.NoError(t, err)
 	workerManager := cluster.NewMockManager(t)
+	// The no-op branch's worker fan-out reaches the local worker even with an
+	// empty distribution ("don't skip empty").
+	worker := cluster.NewMockWorker(t)
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	workerManager.EXPECT().GetWorker(mock.Anything, mock.Anything).Return(worker, nil).Maybe()
 	collectionManager := segments.NewMockCollectionManager(t)
 	sd := &shardDelegator{
 		collectionID:               1000,
@@ -2566,7 +2645,6 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 		lifetime:                   lifetime.NewLifetime(lifetime.Working),
 		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager:              workerManager,
-		functionState:              currentFunctionState,
 		schemaBarrierTs:            100,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
@@ -2575,12 +2653,15 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 	defer sd.Close()
 
 	staleSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
-	err = sd.UpdateSchema(context.Background(), staleSchema, 200)
+	err := sd.UpdateSchema(context.Background(), staleSchema, 200)
 	require.NoError(t, err)
 
+	// The stale event is a no-op that still publishes the current (v2) snapshot.
 	assert.Equal(t, uint64(100), sd.schemaBarrierTs)
-	assert.True(t, sd.functionState.hasFunctionType(104, schemapb.FunctionType_MinHash))
-	assert.False(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
+	snap := sd.schemaReady.load()
+	require.NotNil(t, snap)
+	assert.True(t, snap.functionState.hasFunctionType(104, schemapb.FunctionType_MinHash))
+	assert.False(t, snap.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
 }
 
 func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
@@ -2594,12 +2675,22 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	searchReq.Req.FieldId = 101
 	searchReq.Req.MetricType = metric.IP
 
-	sd := &shardDelegator{
-		functionState: &functionRuntimeState{
-			functionFieldType: map[int64]schemapb.FunctionType{101: schemapb.FunctionType_BM25},
+	// The read path serves from a published ready snapshot: field 101 is a BM25
+	// output field in the ready schema, so validation passes and the BM25 branch
+	// rejects the non-BM25 metric type.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "bm25_output", DataType: schemapb.DataType_SparseFloatVector},
 		},
+	}
+	snap := newReadySnapshot(1, 0, schema, &functionRuntimeState{
+		functionFieldType: map[int64]schemapb.FunctionType{101: schemapb.FunctionType_BM25},
+	})
+
+	sd := &shardDelegator{
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
+	sd.schemaReady.publish(snap)
 
 	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})
 	require.Error(t, err)
@@ -2957,9 +3048,13 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
-		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
-		s.Require().NoError(err)
-		defer delegator.Close()
+		// Strict readiness: an invalid function schema fails delegator creation
+		// synchronously (runner initialization is part of the ready-schema
+		// checklist) instead of deferring the failure to the read path;
+		// querycoord retries the shard load.
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+		s.Require().Error(err)
+		s.ErrorContains(err, "minhash function should only have one output field")
 
 		function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
 		s.NoError(function.AllocFunctionRunners(s.collectionID, "WAL-"+s.vchannelName, schema1))
@@ -2980,6 +3075,11 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		})
 		s.False(changed)
 		s.ErrorContains(err, "minhash function should only have one output field")
+		// Drop the invalid-function runner entries so the next subtest (same
+		// collection, same schema version, fixed function) starts clean — the
+		// runner manager keys entries by schema version and would otherwise
+		// reuse the poisoned ones.
+		function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
 	})
 
 	s.Run("init function ", func() {

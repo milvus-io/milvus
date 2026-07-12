@@ -996,6 +996,51 @@ func (_c *MockShardDelegator_QueryStream_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// ReadySchemaVersion provides a mock function with no fields
+func (_m *MockShardDelegator) ReadySchemaVersion() int32 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReadySchemaVersion")
+	}
+
+	var r0 int32
+	if rf, ok := ret.Get(0).(func() int32); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_ReadySchemaVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReadySchemaVersion'
+type MockShardDelegator_ReadySchemaVersion_Call struct {
+	*mock.Call
+}
+
+// ReadySchemaVersion is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) ReadySchemaVersion() *MockShardDelegator_ReadySchemaVersion_Call {
+	return &MockShardDelegator_ReadySchemaVersion_Call{Call: _e.mock.On("ReadySchemaVersion")}
+}
+
+func (_c *MockShardDelegator_ReadySchemaVersion_Call) Run(run func()) *MockShardDelegator_ReadySchemaVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ReadySchemaVersion_Call) Return(_a0 int32) *MockShardDelegator_ReadySchemaVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_ReadySchemaVersion_Call) RunAndReturn(run func() int32) *MockShardDelegator_ReadySchemaVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReleaseSegments provides a mock function with given fields: ctx, req, force
 func (_m *MockShardDelegator) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error {
 	ret := _m.Called(ctx, req, force)

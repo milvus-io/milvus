@@ -180,15 +180,31 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 			return nil, status.NewInvalidArgument("schema change message has nil schema body")
 		}
 		collectionInfo := m.collections[collectionID]
-		collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
-			Schema:             schema,
-			CheckpointTimeTick: timetick,
-			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+		// Idempotency guard: a broadcast/redo retry can re-deliver the same (or an
+		// older) AlterCollection. Only a STRICTLY newer schema advances the state,
+		// so a retry cannot overwrite PrevSchemaVersion (N) with the already-applied
+		// version (N+1) — which would wrongly reject one-behind writes.
+		if schema.GetVersion() > collectionInfo.SchemaVersion() {
+			// Only a strictly newer schema advances the vchannel's version (an
+			// idempotency guard against a broadcast/redo retry re-delivering an older
+			// or equal schema). The write gate accepts any at-or-behind write and lets
+			// segcore reconcile; safety rests on the rootcoord DDL gate (I1: only pure
+			// add / pure drop reach the WAL, never an in-place semantic change).
+			collectionInfo.Schema = &streamingpb.CollectionSchemaOfVChannel{
+				Schema:             schema,
+				CheckpointTimeTick: timetick,
+				State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+			}
+			logger.Info(context.TODO(), "updated collection schema in shard manager",
+				mlog.Int64("collectionID", collectionID),
+				mlog.Int32("schemaVersion", schema.GetVersion()),
+				mlog.Uint64("checkpointTimeTick", timetick))
+		} else {
+			logger.Info(context.TODO(), "skip re-applying non-newer schema (idempotent retry)",
+				mlog.Int64("collectionID", collectionID),
+				mlog.Int32("incomingVersion", schema.GetVersion()),
+				mlog.Int32("currentVersion", collectionInfo.SchemaVersion()))
 		}
-		logger.Info(context.TODO(), "updated collection schema in shard manager",
-			mlog.Int64("collectionID", collectionID),
-			mlog.Int32("schemaVersion", schema.GetVersion()),
-			mlog.Uint64("checkpointTimeTick", timetick))
 	}
 
 	return segmentIDs, nil
@@ -222,7 +238,12 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	}
 
 	collectionSchemaVersion := collectionInfo.SchemaVersion()
-	if collectionSchemaVersion != header.GetSchemaVersion() {
+	// Accept any write at or behind the current version (segcore reconciles the gap
+	// by backfilling missing nullable/default columns and skipping columns carried
+	// for a since-dropped field); the returned current version drives function-output
+	// materialization. A write AHEAD of this vchannel is rejected → proxy retries
+	// once this vchannel catches up.
+	if !collectionInfo.acceptsSchemaVersion(header.GetSchemaVersion()) {
 		m.Logger().Warn(context.TODO(), "collection schema version not match", mlog.Int64("collectionID", collectionID),
 			mlog.Int32("schemaVersion", header.GetSchemaVersion()),
 			mlog.Int32("collectionSchemaVersion", collectionSchemaVersion))

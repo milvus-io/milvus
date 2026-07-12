@@ -578,7 +578,9 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	_, err = m.AlterCollection(alterMsg)
 	assert.NoError(t, err)
 
-	// now version 2 matches, version 1 doesn't
+	// version 2 (current) is accepted; version 1 (behind current) is now also accepted
+	// -- the node accepts any write at-or-behind current and lets segcore reconcile the
+	// gap -- and only version 3 (ahead of current) is rejected, for the proxy to retry.
 	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
 		CollectionId:  100,
 		SchemaVersion: proto.Int32(2),
@@ -589,6 +591,13 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
 		CollectionId:  100,
 		SchemaVersion: proto.Int32(1),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), ver)
+
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  100,
+		SchemaVersion: proto.Int32(3),
 	})
 	assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
 	assert.Equal(t, int32(2), ver)
@@ -833,6 +842,21 @@ func TestCollectionInfoSchemaVersion(t *testing.T) {
 		Schema: &schemapb.CollectionSchema{Name: "x", Version: 3},
 	}
 	assert.Equal(t, int32(3), ci.SchemaVersion())
+}
+
+func TestCollectionInfoAcceptsSchemaVersion(t *testing.T) {
+	ci := &CollectionInfo{
+		Schema: &streamingpb.CollectionSchemaOfVChannel{Schema: &schemapb.CollectionSchema{Version: 5}},
+	}
+	// Accept the current version and ANY earlier version (a write compiled against an
+	// older schema while a change is still propagating across vchannels — segcore
+	// reconciles the gap by backfilling missing columns and skipping dropped ones).
+	// Reject anything ahead of this vchannel; the proxy retries once it catches up.
+	assert.True(t, ci.acceptsSchemaVersion(5), "exact current version")
+	assert.True(t, ci.acceptsSchemaVersion(4), "one behind is accepted")
+	assert.True(t, ci.acceptsSchemaVersion(3), "two behind is accepted (no relaxation-window limit)")
+	assert.True(t, ci.acceptsSchemaVersion(0), "legacy versionless (0) is accepted")
+	assert.False(t, ci.acceptsSchemaVersion(6), "ahead of this vchannel is rejected")
 }
 
 func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {

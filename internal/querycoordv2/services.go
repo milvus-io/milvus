@@ -795,6 +795,71 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	}, nil
 }
 
+// CheckSchemaReady reports whether every shard delegator of the collection has
+// published a ready schema snapshot at or above the requested schema version.
+// Schema-change DDLs poll it before expiring proxy schema caches, so a client
+// only observes the new schema once all shards can actually serve it; the
+// delegator-side version gate remains the correctness backstop for requests
+// that obtain the new schema early (fresh proxies, cache misses).
+func (s *Server) CheckSchemaReady(ctx context.Context, req *querypb.CheckSchemaReadyRequest) (*querypb.CheckSchemaReadyResponse, error) {
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return &querypb.CheckSchemaReadyResponse{Status: merr.Status(err)}, nil
+	}
+
+	collectionID := req.GetCollectionID()
+	// A collection that is not loaded has no delegator serving reads: trivially ready.
+	if s.meta.GetCollection(ctx, collectionID) == nil {
+		return &querypb.CheckSchemaReadyResponse{Status: merr.Success(), Ready: true}, nil
+	}
+
+	notReady := func(reason string, fields ...mlog.Field) (*querypb.CheckSchemaReadyResponse, error) {
+		mlog.RatedInfo(ctx, rate.Limit(1), "collection schema not ready yet: "+reason,
+			append([]mlog.Field{mlog.Int64("collectionID", collectionID), mlog.Int32("schemaVersion", req.GetSchemaVersion())}, fields...)...)
+		return &querypb.CheckSchemaReadyResponse{Status: merr.Success(), Ready: false}, nil
+	}
+
+	channels := s.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	if len(channels) == 0 {
+		// Loaded but the current target is not established (recovering).
+		return notReady("no channel in current target")
+	}
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	visibleChecked := false
+	for _, channel := range channels {
+		for _, replica := range replicas {
+			if !replica.IsQueryVisible() {
+				continue
+			}
+			visibleChecked = true
+			leader := s.dist.ChannelDistManager.GetShardLeader(channel.GetChannelName(), replica)
+			if leader == nil || leader.View == nil {
+				return notReady("shard leader missing", mlog.String("channel", channel.GetChannelName()), mlog.Int64("replicaID", replica.GetID()))
+			}
+			if leader.View.ReadySchemaVersion == nil {
+				// Pre-upgrade querynode: readiness unknown. Treat as ready so a
+				// rolling upgrade cannot stall schema-change DDLs forever; the
+				// shard behaves exactly as pre-feature until the node upgrades.
+				continue
+			}
+			if *leader.View.ReadySchemaVersion < req.GetSchemaVersion() {
+				return notReady("shard leader behind",
+					mlog.String("channel", channel.GetChannelName()),
+					mlog.Int64("nodeID", leader.Node),
+					mlog.Int32("readySchemaVersion", *leader.View.ReadySchemaVersion))
+			}
+		}
+	}
+	if !visibleChecked {
+		// A loaded collection whose replicas are all transitioning (none
+		// query-visible) has no leader view to vouch for readiness; returning
+		// ready here would expire proxy caches before any shard can serve the
+		// new version. Report not-ready and let the caller's poll converge once
+		// a replica becomes visible.
+		return notReady("no query-visible replica")
+	}
+	return &querypb.CheckSchemaReadyResponse{Status: merr.Success(), Ready: true}, nil
+}
+
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		return &milvuspb.CheckHealthResponse{Status: merr.Status(err), IsHealthy: false, Reasons: []string{err.Error()}}, nil

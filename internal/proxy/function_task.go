@@ -97,8 +97,12 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("function schema is empty")
 	}
 
-	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg("currently does not support adding BM25 function")
+	switch t.FunctionSchema.Type {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+		// Search-time runner functions must be added through
+		// AlterCollectionSchema together with their output fields, so query
+		// hashing/scoring and indexed data can never diverge.
+		return merr.WrapErrParameterInvalidMsg("currently does not support adding %s function through this API, use AlterCollectionSchema", t.FunctionSchema.Type.String())
 	}
 	if err := validateAddFunctionRequiresStorageV3(); err != nil {
 		return err
@@ -189,8 +193,13 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("function schema is empty")
 	}
-	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
+	switch t.FunctionSchema.Type {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+		// Altering a search-time runner function in place changes its
+		// signature while the indexed corpus keeps the old one — silently
+		// wrong search results forever. Drop it with its output fields and
+		// re-add instead.
+		return merr.WrapErrParameterInvalidMsg("currently does not support alter %s function; drop it with its output fields and re-add", t.FunctionSchema.Type.String())
 	}
 	if t.FunctionName != t.FunctionSchema.Name {
 		return merr.WrapErrParameterInvalidMsg("invalid function config, name not match")
@@ -210,8 +219,9 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	newFunctions := []*schemapb.FunctionSchema{}
 	for _, fSchema := range coll.schema.Functions {
 		if t.FunctionName == fSchema.Name {
-			if fSchema.Type == schemapb.FunctionType_BM25 {
-				return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
+			switch fSchema.Type {
+			case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+				return merr.WrapErrParameterInvalidMsg("currently does not support alter %s function; drop it with its output fields and re-add", fSchema.Type.String())
 			}
 			newFunctions = append(newFunctions, t.FunctionSchema)
 			funcExist = true
@@ -323,8 +333,13 @@ func (t *dropCollectionFunctionTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	if t.fSchema.Type == schemapb.FunctionType_BM25 {
-		return merr.WrapErrParameterInvalidMsg("currently does not support droping BM25 function")
+	switch t.fSchema.Type {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+		// Dropping only the function would strand output-field data generated
+		// under its signature; re-attaching a different function would then
+		// silently mix corpora. Use AlterCollectionSchema's
+		// drop_function_output_fields=true, which removes the fields with it.
+		return merr.WrapErrParameterInvalidMsg("currently does not support dropping %s function through this API, use AlterCollectionSchema with drop_function_output_fields=true", t.fSchema.Type.String())
 	}
 
 	var err error

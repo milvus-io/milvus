@@ -173,6 +173,9 @@ func TestQueryTask_all(t *testing.T) {
 
 		// after preExecute
 		assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
+		// The request carries the schema version the plan was compiled against
+		// for the delegator's ready-schema version gate.
+		assert.Equal(t, task.schema.GetVersion(), task.GetCollectionSchemaVersion())
 
 		// check reduce_stop_for_best
 		assert.Equal(t, false, task.GetReduceStopForBest())

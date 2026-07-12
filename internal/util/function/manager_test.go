@@ -1242,3 +1242,55 @@ func newBM25InsertRequest(texts ...string) *msgpb.InsertRequest {
 		},
 	}
 }
+
+func TestFunctionRunnerManagerEnsureReadyWithoutEmbeddingFunctions(t *testing.T) {
+	manager := newFunctionRunnerManager()
+	t.Cleanup(manager.Close)
+
+	schema := cloneCollectionSchema(newBM25SignatureTestSchema())
+	schema.Functions = nil
+
+	// Trivially ready without any prior Alloc: nothing to initialize.
+	require.NoError(t, manager.EnsureReady(context.Background(), 1, schema))
+}
+
+func TestFunctionRunnerManagerEnsureReadyRequiresAllocation(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+
+	err := manager.EnsureReady(context.Background(), 1, schema)
+	require.ErrorContains(t, err, "not allocated")
+}
+
+func TestFunctionRunnerManagerEnsureReadyInitializesSynchronously(t *testing.T) {
+	manager, factory := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", schema))
+
+	// EnsureReady must return only once every runner of the version is
+	// initialized, regardless of the async warm-up goroutine's progress.
+	require.NoError(t, manager.EnsureReady(context.Background(), 1, schema))
+	require.GreaterOrEqual(t, factory.buildCount.Load(), int32(1))
+
+	entry := manager.getEntry(1)
+	require.NotNil(t, entry)
+	require.NoError(t, entry.EnsureReady(context.Background(), schema.GetVersion()))
+}
+
+func TestFunctionRunnerManagerEnsureReadyPropagatesInitFailure(t *testing.T) {
+	manager := newFunctionRunnerManager()
+	t.Cleanup(manager.Close)
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+		return nil, errors.New("runner init unavailable")
+	})
+
+	schema := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", schema))
+
+	err := manager.EnsureReady(context.Background(), 1, schema)
+	require.ErrorContains(t, err, "runner init unavailable")
+}

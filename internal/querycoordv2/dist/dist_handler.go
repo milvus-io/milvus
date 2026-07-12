@@ -287,6 +287,7 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 				PartitionStatsVersions: lview.PartitionStatsVersions,
 				TargetVersion:          lview.GetTargetVersion(),
 				Status:                 lview.GetStatus(),
+				ReadySchemaVersion:     lview.ReadySchemaVersion,
 			},
 		}
 		updates = append(updates, dmChannel)

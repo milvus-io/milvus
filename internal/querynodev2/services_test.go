@@ -2049,6 +2049,11 @@ func (suite *ServiceSuite) TestGetDataDistribution_LeaderViewStatus() {
 		// Initially delegator is catching up streaming data (true)
 		suite.True(leaderView.Status.CatchingUpStreamingData,
 			"New delegator should be catching up streaming data")
+		// New querynodes always report the ready schema version (field
+		// presence distinguishes them from pre-upgrade nodes in
+		// CheckSchemaReady).
+		suite.NotNil(leaderView.ReadySchemaVersion,
+			"LeaderView should report the delegator's ready schema version")
 	}
 }
 

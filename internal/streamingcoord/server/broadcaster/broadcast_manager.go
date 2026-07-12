@@ -208,7 +208,10 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 }
 
 // broadcast broadcasts the message to all vchannels.
-// it will block until the message is broadcasted to all vchannels
+// It blocks until the broadcast task is fully done: the message is appended to every
+// vchannel AND the post-ack callback has completed (the task reaches tombstone via
+// MarkAckCallbackDone). It does NOT return at merely all-vchannels-acked — for
+// AlterCollection DDL, that means it returns only after proxy caches have been expired.
 func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) (*types.BroadcastAppendResult, error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		guards.Unlock()

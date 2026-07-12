@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 
+#include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
@@ -203,4 +204,55 @@ TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
     EXPECT_EQ(
         plan->access_entries_,
         std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
+}
+
+TEST(PlanProto, SearchPlanRejectsDroppedPredicateField) {
+    // Regression: a filter predicate that references a since-dropped field id must be
+    // rejected with FieldIDInvalid (input error) BEFORE the expression is parsed. If the
+    // check runs after PlanNodeFromProto, ParseExprs reaches Schema::operator[] and throws
+    // the default UnexpectedError(2001), which the proxy LB mistakes for a node fault and
+    // blacklists a healthy shard leader.
+    auto schema = BuildSchema();
+    auto vector_field_id = schema->get_field_id(milvus::FieldName("fakevec"));
+    const milvus::FieldId dropped_field_id(9999);  // absent from schema
+
+    auto plan_node = BuildSearchPlanNode(0.0f, 0.0f, vector_field_id);
+    auto* predicates = plan_node.mutable_vector_anns()->mutable_predicates();
+    auto* term_expr = predicates->mutable_term_expr();
+    auto* column_info = term_expr->mutable_column_info();
+    column_info->set_field_id(dropped_field_id.get());
+    column_info->set_data_type(milvus::proto::schema::DataType::Int64);
+
+    try {
+        milvus::query::CreateSearchPlanFromPlanNode(schema, plan_node);
+        FAIL() << "expected CreateSearchPlanFromPlanNode to throw on dropped "
+                  "field";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FieldIDInvalid);
+    }
+}
+
+TEST(PlanProto, RetrievePlanRejectsDroppedPredicateField) {
+    // Regression, retrieve path (see SearchPlanRejectsDroppedPredicateField).
+    auto schema = BuildSchema();
+    const milvus::FieldId dropped_field_id(9999);  // absent from schema
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(10);
+    auto* predicates = query->mutable_predicates();
+    auto* term_expr = predicates->mutable_term_expr();
+    auto* column_info = term_expr->mutable_column_info();
+    column_info->set_field_id(dropped_field_id.get());
+    column_info->set_data_type(milvus::proto::schema::DataType::Int64);
+
+    try {
+        milvus::query::CreateRetrievePlanByExpr(
+            schema,
+            plan_node.SerializeAsString().data(),
+            plan_node.ByteSizeLong());
+        FAIL() << "expected CreateRetrievePlanByExpr to throw on dropped field";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FieldIDInvalid);
+    }
 }

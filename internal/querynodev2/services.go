@@ -260,6 +260,14 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		log.Warn(ctx, "failed to create shard delegator", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	// A ready-snapshot publish changes no segment/channel distribution, but its
+	// new ReadySchemaVersion must still reach querycoord through the next full
+	// GetDataDistribution response — bump the distribution-modify timestamp on
+	// every publish so the unchanged-distribution fast path does not hide it
+	// from the DDL readiness handshake.
+	if notifiable, ok := delegator.(interface{ SetReadyPublishNotifier(func()) }); ok {
+		notifiable.SetReadyPublishNotifier(node.updateDistributionModifyTS)
+	}
 	node.delegators.Insert(channel.GetChannelName(), delegator)
 	defer func() {
 		if err != nil {
@@ -1357,6 +1365,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 				Serviceable:             queryView.Serviceable(),
 				CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
 			},
+			ReadySchemaVersion: proto.Int32(delegator.ReadySchemaVersion()),
 		})
 		return true
 	})

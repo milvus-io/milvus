@@ -17,12 +17,15 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -145,6 +148,42 @@ func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
 	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	out := node.Operate(in)
 	suite.Nil(out)
+}
+
+// TestSchemaUpdateRetriesUntilSuccess: a schema-change message must never be
+// skipped — transient UpdateSchema failures are retried in place (blocking this
+// vchannel's consumption) until the schema is applied. The exhausted-retries
+// path ends in mlog.Fatal (process exit, recovery via WAL replay) and is not
+// unit-testable here.
+func (suite *DeleteNodeSuite) TestSchemaUpdateRetriesUntilSuccess() {
+	suite.manager = &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	suite.delegator = delegator.NewMockShardDelegator(suite.T())
+
+	schema := &schemapb.CollectionSchema{Name: "test", Version: 2}
+	attempts := 0
+	suite.delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(7)).
+		RunAndReturn(func(_ context.Context, _ *schemapb.CollectionSchema, _ uint64) error {
+			attempts++
+			if attempts < 3 {
+				return errors.New("transient worker failure")
+			}
+			return nil
+		}).Times(3)
+	suite.delegator.EXPECT().UpdateTSafe(suite.timeRange.timestampMax).Return()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	in := &deleteNodeMsg{
+		deleteMsgs:      []*DeleteMsg{},
+		timeRange:       suite.timeRange,
+		schema:          schema,
+		schemaBarrierTs: 7,
+	}
+	out := node.Operate(in)
+	suite.Nil(out)
+	suite.Equal(3, attempts)
 }
 
 func TestDeleteNode(t *testing.T) {

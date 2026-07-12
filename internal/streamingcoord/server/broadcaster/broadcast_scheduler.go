@@ -41,6 +41,9 @@ type broadcasterScheduler struct {
 	workerChan             chan *pendingBroadcastTask
 }
 
+// AddTask enqueues the pending broadcast task and blocks until it is fully done —
+// appended to all vchannels AND its post-ack callback has completed (see
+// broadcastTask.BlockUntilDone). It does NOT return at merely all-vchannels-acked.
 func (b *broadcasterScheduler) AddTask(ctx context.Context, task *pendingBroadcastTask) (*types.BroadcastAppendResult, error) {
 	select {
 	case <-b.backgroundTaskNotifier.Context().Done():
@@ -54,7 +57,11 @@ func (b *broadcasterScheduler) AddTask(ctx context.Context, task *pendingBroadca
 	// Wait both request context and the background task context.
 	ctx, cancel := contextutil.MergeContext(ctx, b.backgroundTaskNotifier.Context())
 	defer cancel()
-	// wait for all the vchannels acked.
+	// Block until the task is fully done — NOT merely all-vchannels-acked, but until
+	// the post-ack callback has completed: BlockUntilDone waits on the task's `done`
+	// signal, which is closed by MarkAckCallbackDone after doAckCallback runs the
+	// registered ack callback. For AlterCollection DDL this means AddTask returns only
+	// after the callback's meta update + readiness wait + proxy cache expiry all finish.
 	result, err := task.BlockUntilDone(ctx)
 	if err != nil {
 		return nil, err

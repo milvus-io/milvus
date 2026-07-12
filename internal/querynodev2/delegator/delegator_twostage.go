@@ -90,6 +90,7 @@ func (sd *shardDelegator) executeFilterStage(
 func (sd *shardDelegator) twoStageSearch(
 	ctx context.Context,
 	req *querypb.SearchRequest,
+	snap *readySnapshot,
 	sealed []SnapshotItem,
 	growing []SegmentEntry,
 	sealedRowCount map[int64]int64,
@@ -133,7 +134,9 @@ func (sd *shardDelegator) twoStageSearch(
 	// ==================== Optimize with actual stats ====================
 	log.Debug(ctx, "Optimizing search params with actual stats")
 	const isSecondStageSearch = true
-	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
+	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, func(fieldID int64) int64 {
+		return vectorFieldDim(snap.schema, fieldID)
+	})
 	if err != nil {
 		log.Warn(ctx, "Two-stage search: failed to optimize search params", mlog.Err(err))
 		return nil, false, err

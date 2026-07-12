@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -1023,14 +1024,15 @@ func TestBuildSchemaForDetachFunction(t *testing.T) {
 		require.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("detach function keeps output fields", func(t *testing.T) {
-		coll := &model.Collection{
+	detachColl := func() *model.Collection {
+		return &model.Collection{
 			Name: "test_coll",
 			Fields: []*model.Field{
 				{FieldID: 100, Name: "pk"},
 				{FieldID: 101, Name: "text"},
 				{FieldID: 102, Name: "minhash_vec", IsFunctionOutput: true},
-				{FieldID: 103, Name: "dense_vec"},
+				{FieldID: 103, Name: "dense_vec", IsFunctionOutput: true},
+				{FieldID: 104, Name: "sparse_vec", IsFunctionOutput: true},
 			},
 			Functions: []*model.Function{
 				{
@@ -1049,42 +1051,48 @@ func TestBuildSchemaForDetachFunction(t *testing.T) {
 					OutputFieldIDs:   []int64{103},
 					OutputFieldNames: []string{"dense_vec"},
 				},
-			},
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.MaxFieldIDKey, Value: "103"},
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldIDs:    []int64{101},
+					InputFieldNames:  []string{"text"},
+					OutputFieldIDs:   []int64{104},
+					OutputFieldNames: []string{"sparse_vec"},
+				},
 			},
 			SchemaVersion: 3,
 		}
+	}
 
-		schema, properties, droppedFieldIDs, err := buildSchemaForDetachFunction(coll, "minhash_func")
+	// Search-time runner functions (BM25, MinHash) cannot be detached: their
+	// output data is only meaningful under the function's signature, and
+	// re-attaching a different function would silently mix corpora.
+	t.Run("detach is rejected for search-time runner functions", func(t *testing.T) {
+		for _, fnName := range []string{"minhash_func", "bm25_func"} {
+			_, _, _, err := buildSchemaForDetachFunction(detachColl(), fnName)
+			require.Error(t, err, fnName)
+			require.Contains(t, err.Error(), "must be dropped together with its output fields", fnName)
+		}
+	})
+
+	t.Run("detach keeps output fields for other function types", func(t *testing.T) {
+		schema, properties, droppedFieldIDs, err := buildSchemaForDetachFunction(detachColl(), "embed_func")
 		require.NoError(t, err)
 		require.Empty(t, droppedFieldIDs)
-		require.Equal(t, coll.Properties, properties)
+		// detach passes collection properties through unchanged (nil here).
+		require.Nil(t, properties)
 		require.Equal(t, int32(4), schema.Version)
 
-		require.Len(t, schema.Fields, 4)
-		var minhashField *schemapb.FieldSchema
+		var denseField *schemapb.FieldSchema
 		for _, field := range schema.Fields {
-			if field.GetName() == "minhash_vec" {
-				minhashField = field
+			if field.GetName() == "dense_vec" {
+				denseField = field
 				break
 			}
 		}
-		require.NotNil(t, minhashField)
-		require.False(t, minhashField.GetIsFunctionOutput())
-		require.Len(t, schema.Functions, 1)
-		require.Equal(t, "embed_func", schema.Functions[0].GetName())
-	})
-
-	t.Run("detach bm25 function fails", func(t *testing.T) {
-		coll := &model.Collection{
-			Functions: []*model.Function{
-				{Name: "bm25_func", Type: schemapb.FunctionType_BM25, OutputFieldIDs: []int64{102}},
-			},
-		}
-		_, _, _, err := buildSchemaForDetachFunction(coll, "bm25_func")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
+		require.NotNil(t, denseField)
+		require.False(t, denseField.GetIsFunctionOutput())
+		require.Len(t, schema.Functions, 2)
 	})
 }
 
@@ -1408,6 +1416,10 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 			},
 		}, nil,
 	)
+	// The schema-bumping alter waits on shard readiness before expiring caches.
+	mixc.EXPECT().CheckSchemaReady(mock.Anything, mock.Anything).Return(
+		&querypb.CheckSchemaReadyResponse{Status: merr.Success(), Ready: true}, nil,
+	).Maybe()
 
 	broker := newValidMockBroker()
 	c := newTestCore(withMeta(meta), withMixCoord(mixc), withBroker(broker))

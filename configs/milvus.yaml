@@ -635,6 +635,7 @@ queryNode:
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
   delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
+  schemaUpdateRetryTimes: 10 # max in-place retry attempts when applying a schema-change message from the WAL fails; the vchannel's consumption is blocked while retrying and the querynode panics (recovering via WAL replay) when exhausted
   exprCache:
     enabled: false # enable expression result cache
     mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)

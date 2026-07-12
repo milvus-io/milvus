@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 type deleteNode struct {
@@ -94,8 +96,31 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 
 	if nodeMsg.schema != nil {
 		ctx := context.TODO()
-		if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
-			mlog.Warn(ctx, "failed to update schema in delete node",
+		// A schema-change message must NOT be skipped: WAL order guarantees that
+		// inserts carrying the new schema follow it on this vchannel, and
+		// processing them against the old schema would silently drop the new
+		// field. Retry in place with backoff — this intentionally blocks the
+		// vchannel's consumption (tsafe stops advancing; reads keep serving the
+		// previous ready schema) until the schema is applied. If retries are
+		// exhausted the querynode panics and recovers by replaying the WAL.
+		attempt := 0
+		err := retry.Do(ctx, func() error {
+			attempt++
+			if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
+				mlog.Warn(ctx, "failed to update schema in delete node, retrying",
+					mlog.Int64("collectionID", dNode.collectionID),
+					mlog.String("channel", dNode.channel),
+					mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+					mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
+					mlog.Int("attempt", attempt),
+					mlog.Err(err))
+				return err
+			}
+			return nil
+		}, retry.Attempts(paramtable.Get().QueryNodeCfg.SchemaUpdateRetryTimes.GetAsUint()),
+			retry.Sleep(time.Second), retry.MaxSleepTime(time.Second*30))
+		if err != nil {
+			mlog.Fatal(ctx, "failed to apply schema change after retries, panicking to recover via WAL replay",
 				mlog.Int64("collectionID", dNode.collectionID),
 				mlog.String("channel", dNode.channel),
 				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),

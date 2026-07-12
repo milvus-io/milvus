@@ -3649,6 +3649,7 @@ type queryNodeConfig struct {
 	StreamingDeltaForwardPolicy        ParamItem `refreshable:"true"`
 	ForwardBatchSize                   ParamItem `refreshable:"true"`
 	DelegatorPostLoadConcurrencyFactor ParamItem `refreshable:"true"`
+	SchemaUpdateRetryTimes             ParamItem `refreshable:"true"`
 
 	// loader
 	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
@@ -4772,6 +4773,16 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export: true,
 	}
 	p.DelegatorPostLoadConcurrencyFactor.Init(base.mgr)
+
+	p.SchemaUpdateRetryTimes = ParamItem{
+		Key:          "queryNode.schemaUpdateRetryTimes",
+		Version:      "2.6.16",
+		DefaultValue: "10",
+		Doc: "max in-place retry attempts when applying a schema-change message from the WAL fails; " +
+			"the vchannel's consumption is blocked while retrying and the querynode panics (recovering via WAL replay) when exhausted",
+		Export: true,
+	}
+	p.SchemaUpdateRetryTimes.Init(base.mgr)
 
 	p.DeltaDataExpansionRate = ParamItem{
 		Key:          "querynode.deltaDataExpansionRate",
