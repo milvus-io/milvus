@@ -1142,10 +1142,11 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
         }
         LOG_INFO("index_mem_size: {}", info.index_mem_size);
         stats_.mem_size += info.index_mem_size;
-        LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, mem_size: {}",
-                 info.field_id,
-                 id_,
-                 stats_.mem_size.load());
+        LOG_INFO(
+            "Has load vec index done, fieldID:{}. segmentID:{}, mem_size: {}",
+            info.field_id,
+            id_,
+            stats_.mem_size.load());
         PublishIndexReadyLocked(field_id,
                                 request.has_raw_data,
                                 ToConstRuntimeState(std::move(next_runtime)));
