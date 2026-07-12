@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use libc::c_char;
 use tantivy::fastfield::FastValue;
-use tantivy::query::{
-    BooleanQuery, ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery,
-};
+use tantivy::query::{BooleanQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
 use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
@@ -19,7 +17,9 @@ use crate::milvus_id_collector::MilvusIdCollector;
 use crate::util::{c_ptr_to_str, make_bounds};
 use crate::vec_collector::VecCollector;
 
+use crate::data_type::JsonExistValueType;
 use crate::error::{Result, TantivyBindingError};
+use crate::json_exists_query::JsonExistsQuery;
 
 // Threshold for batch-in query. Less than this threshold, we use term_query one by one and use
 // TermSetQuery when larger than this threshold. This value is based on some experiments.
@@ -638,13 +638,19 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
-    pub fn json_exist_query(&self, json_path: &str, bitset: *mut c_void) -> Result<()> {
+    pub fn json_exist_query(
+        &self,
+        json_path: &str,
+        json_subpaths: bool,
+        value_type: JsonExistValueType,
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let full_json_path = if json_path == "" {
             self.field_name.clone()
         } else {
             format!("{}.{}", self.field_name, json_path)
         };
-        let q = ExistsQuery::new(full_json_path, true);
+        let q = JsonExistsQuery::new(full_json_path, json_subpaths, value_type);
         self.search(&q, bitset)
     }
 

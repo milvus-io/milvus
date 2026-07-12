@@ -168,9 +168,27 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-                result = EvalArrayContainsForIndexSegment(
-                    value_type_ == DataType::INT64 ? DataType::DOUBLE
-                                                   : value_type_);
+                const auto has_unsafe_int_literal =
+                    std::any_of(expr_->vals_.begin(),
+                                expr_->vals_.end(),
+                                [this](const auto& value) {
+                                    return value.has_int64_val() &&
+                                           !IsInt64SafeForJsonDoubleIndex(
+                                               value.int64_val());
+                                });
+                const auto all_int_literals = std::all_of(
+                    expr_->vals_.begin(),
+                    expr_->vals_.end(),
+                    [](const auto& value) { return value.has_int64_val(); });
+                if (all_int_literals && PinnedJsonIndexIsFlat()) {
+                    result = EvalArrayContainsForIndexSegment(DataType::INT64);
+                } else if (has_unsafe_int_literal) {
+                    result = EvalJsonContainsForDataSegment(context);
+                } else {
+                    result = EvalArrayContainsForIndexSegment(
+                        value_type_ == DataType::INT64 ? DataType::DOUBLE
+                                                       : value_type_);
+                }
             } else {
                 result = EvalJsonContainsForDataSegment(context);
             }
@@ -575,19 +593,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
-        if constexpr (std::is_same_v<GetType, int64_t>) {
-            // for int64_t, we need to a double vector to store the values
-            auto int_arg_set =
-                std::dynamic_pointer_cast<SetElement<int64_t>>(arg_set_);
-            std::vector<double> double_vals;
-            double_vals.reserve(int_arg_set->GetElements().size());
-            for (const auto& val : int_arg_set->GetElements()) {
-                double_vals.emplace_back(static_cast<double>(val));
-            }
-            arg_set_double_ = std::make_shared<SetElement<double>>(double_vals);
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            arg_set_double_ = arg_set_;
-        }
         arg_inited_ = true;
     }
 
@@ -626,7 +631,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 TargetBitmap target_valid(active_count_, true);
                 TargetBitmapView target_valid_view(target_valid);
                 ShreddingArrayBsonContainsAnyExecutor<GetType> executor(
-                    arg_set_, arg_set_double_);
+                    arg_set_);
 
                 index->ExecutorForShreddingData<std::string_view>(
                     op_ctx_,
@@ -655,10 +660,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
             for (const auto& element : val.value()) {
                 if constexpr (std::is_same_v<GetType, int64_t> ||
                               std::is_same_v<GetType, double>) {
-                    auto value = milvus::BsonView::GetValueFromBsonView<double>(
-                        element.get_value());
-                    if (value.has_value() &&
-                        this->arg_set_double_->In(value.value())) {
+                    auto value =
+                        GetBsonNumberExact<GetType>(element.get_value());
+                    if (value.has_value() && this->arg_set_->In(*value)) {
                         res_view[row_offset] = true;
                         return;
                     }
@@ -1321,26 +1325,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             if (shared_matcher.use_small()) {
                 uint64_t found = 0;
                 for (const auto& element : val.value()) {
-                    auto value =
-                        milvus::BsonView::GetValueFromBsonView<GetType>(
-                            element.get_value());
-                    if (!value.has_value()) {
-                        if constexpr (std::is_same_v<GetType, int64_t>) {
-                            auto double_value =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    element.get_value());
-                            if (double_value.has_value() &&
-                                double_value.value() ==
-                                    std::floor(double_value.value())) {
-                                if (shared_matcher.set_if_found(
-                                        static_cast<int64_t>(
-                                            double_value.value()),
-                                        found)) {
-                                    res_view[row_offset] = true;
-                                    return;
-                                }
-                            }
+                    auto value = [&]() -> std::optional<GetType> {
+                        if constexpr (std::is_same_v<GetType, int64_t> ||
+                                      std::is_same_v<GetType, double>) {
+                            return GetBsonNumberExact<GetType>(
+                                element.get_value());
+                        } else {
+                            return milvus::BsonView::GetValueFromBsonView<
+                                GetType>(element.get_value());
                         }
+                    }();
+                    if (!value.has_value()) {
                         continue;
                     }
                     if (shared_matcher.set_if_found(value.value(), found)) {
@@ -1354,27 +1349,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                     shared_found_large.begin(), shared_found_large.end(), 0);
                 size_t remaining = shared_matcher.target_count();
                 for (const auto& element : val.value()) {
-                    auto value =
-                        milvus::BsonView::GetValueFromBsonView<GetType>(
-                            element.get_value());
-                    if (!value.has_value()) {
-                        if constexpr (std::is_same_v<GetType, int64_t>) {
-                            auto double_value =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    element.get_value());
-                            if (double_value.has_value() &&
-                                double_value.value() ==
-                                    std::floor(double_value.value())) {
-                                if (shared_matcher.set_if_found(
-                                        static_cast<int64_t>(
-                                            double_value.value()),
-                                        shared_found_large,
-                                        remaining)) {
-                                    res_view[row_offset] = true;
-                                    return;
-                                }
-                            }
+                    auto value = [&]() -> std::optional<GetType> {
+                        if constexpr (std::is_same_v<GetType, int64_t> ||
+                                      std::is_same_v<GetType, double>) {
+                            return GetBsonNumberExact<GetType>(
+                                element.get_value());
+                        } else {
+                            return milvus::BsonView::GetValueFromBsonView<
+                                GetType>(element.get_value());
                         }
+                    }();
+                    if (!value.has_value()) {
                         continue;
                     }
                     if (shared_matcher.set_if_found(
@@ -1686,26 +1671,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                             break;
                         }
                         case proto::plan::GenericValue::kInt64Val: {
-                            // get double/int64 from bson
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 tmp_elements_index.erase(i);
                             }
                             break;
                         }
                         case proto::plan::GenericValue::kFloatVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 tmp_elements_index.erase(i);
                             }
                             break;
@@ -2275,26 +2251,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                             break;
                         }
                         case proto::plan::GenericValue::kInt64Val: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 res_view[row_offset] = true;
                                 return;
                             }
                             break;
                         }
                         case proto::plan::GenericValue::kFloatVal: {
-                            auto val =
-                                milvus::BsonView::GetValueFromBsonView<double>(
-                                    sub_value.get_value());
-                            if (!val.has_value()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
+                            auto comparison = CompareBsonNumberToBound(
+                                sub_value.get_value(), element);
+                            if (comparison.has_value() && *comparison == 0) {
                                 res_view[row_offset] = true;
                                 return;
                             }
@@ -2460,8 +2428,11 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     };
 
     // Use WithRowLevel version since func handles element-to-row conversion for nested index
-    auto res =
-        ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch, elems);
+    auto validity_mode = field_type_ == DataType::JSON
+                             ? IndexValidityMode::JsonExactPath
+                             : IndexValidityMode::Default;
+    auto res = ProcessIndexChunksWithRowLevel<GetType>(
+        execute_sub_batch, validity_mode, elems);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
