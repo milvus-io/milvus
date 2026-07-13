@@ -2,7 +2,6 @@ package wp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 
@@ -19,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -58,13 +56,14 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		return nil, err
 	}
 	log.Ctx(context.Background()).Info("create etcd client finish while building wp opener")
-	var wpClient woodpecker.Client
+	// woodpecker service storage mode (woodpecker.storage.type=service) is not
+	// supported in this version. Fail fast with a clear message so a mis-configured
+	// deployment is caught at startup instead of silently falling back.
 	if cfg.Woodpecker.Storage.IsStorageService() {
-		wpClient, err = woodpecker.NewClient(context.Background(), cfg, etcdCli, true)
-	} else {
-		wpMetrics.RegisterServerMetricsWithRegisterer(metrics.GetRegisterer())
-		wpClient, err = woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
+		panic("woodpecker service storage mode (woodpecker.storage.type=service) is not supported in this version, please set woodpecker.storage.type to 'minio' or 'local'")
 	}
+	wpMetrics.RegisterServerMetricsWithRegisterer(metrics.GetRegisterer())
+	wpClient, err := woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
 	if err != nil {
 		return nil, err
 	}
@@ -114,22 +113,9 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxBlocks = cfg.SegmentRollingMaxBlocks.GetAsInt64()
 
-	// quorum configuration
-	setQuorumConfig(wpConfig, cfg)
-
 	// logStore
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds()))
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds()))
-	// NOTE: SyncMaxIntervalForService is intentionally NOT wired here. It is only
-	// consumed by woodpecker's staged-storage writer, which is instantiated solely
-	// when storage.type == "service" — i.e. inside a standalone woodpecker log-store
-	// server that milvus talks to as a pure client (NewClient). That server is
-	// configured from its own config file, not from setCustomWpConfig; in embed mode
-	// the in-process server uses the disk/object-storage writer and never touches
-	// staged storage. The woodpecker.logstore.segmentSyncPolicy.maxIntervalForService
-	// key in milvus.yaml therefore exists only as the config surface for that
-	// server-side deployment path: open-source installs hand the same milvus.yaml to
-	// the woodpecker server, so the key reaches it (and is validated) there, not here.
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxEntries = cfg.SyncMaxEntries.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = config.NewByteSize(cfg.SyncMaxBytes.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushRetries = cfg.FlushMaxRetries.GetAsInt()
@@ -192,103 +178,6 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Log.File.MaxBackups = paramtable.Get().LogCfg.MaxBackups.GetAsInt()
 
 	return nil
-}
-
-func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) {
-	q := &wpConfig.Woodpecker.Client.Quorum
-
-	// Bind milvus' dynamic config as the runtime source for woodpecker's quorum
-	// knobs. milvus is the authoritative config source, so the source always wins
-	// (ok=true) over woodpecker's static YAML value. These params are
-	// refreshable:"true", and woodpecker calls .Get() per segment when selecting a
-	// quorum (woodpecker/quorum/discovery.go), so etcd config changes take effect on
-	// the next segment with no restart.
-	q.SelectStrategy.AffinityMode.WithSource(func() (string, bool) {
-		return cfg.QuorumAffinityMode.GetValue(), true
-	})
-	q.SelectStrategy.Replicas.WithSource(func() (int, bool) {
-		return cfg.QuorumReplicas.GetAsInt(), true
-	})
-	q.SelectStrategy.Strategy.WithSource(func() (string, bool) {
-		return cfg.QuorumStrategy.GetValue(), true
-	})
-
-	// JSON-encoded knobs: parse on each read; on empty/parse failure return ok=false
-	// so woodpecker falls back to its static (YAML default) value. No logging here
-	// because .Get() is called per segment and would spam; format problems are
-	// surfaced by the startup validation and change callbacks below instead.
-	q.BufferPools.WithSource(func() ([]config.QuorumBufferPool, bool) {
-		raw := cfg.QuorumBufferPools.GetValue()
-		if raw == "" {
-			return nil, false
-		}
-		var pools []config.QuorumBufferPool
-		if err := json.Unmarshal([]byte(raw), &pools); err != nil {
-			return nil, false
-		}
-		return pools, true
-	})
-	q.SelectStrategy.CustomPlacement.WithSource(func() ([]config.CustomPlacement, bool) {
-		raw := cfg.QuorumCustomPlacement.GetValue()
-		if raw == "" {
-			return nil, false
-		}
-		var customPlacements []config.CustomPlacement
-		if err := json.Unmarshal([]byte(raw), &customPlacements); err != nil {
-			return nil, false
-		}
-		return customPlacements, true
-	})
-
-	// Validate the current JSON values once at startup (the change callbacks below
-	// only fire on subsequent updates, not on the initial value). Invalid JSON only
-	// warns; woodpecker falls back to its static default.
-	validateQuorumJSON("woodpecker quorum buffer pools", cfg.QuorumBufferPools.GetValue(), func(b []byte) error {
-		var v []config.QuorumBufferPool
-		return json.Unmarshal(b, &v)
-	})
-	validateQuorumJSON("woodpecker quorum custom placement", cfg.QuorumCustomPlacement.GetValue(), func(b []byte) error {
-		var v []config.CustomPlacement
-		return json.Unmarshal(b, &v)
-	})
-
-	// Validate JSON format on config change. A non-nil error is logged once per
-	// change by the param framework ("param change callback failed"); it does not
-	// veto the change, so on bad JSON woodpecker simply falls back to its static
-	// default on the next .Get().
-	cfg.QuorumBufferPools.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-		if newValue == "" {
-			return nil
-		}
-		var v []config.QuorumBufferPool
-		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid quorum buffer pools JSON %q: %v", newValue, err)
-		}
-		return nil
-	})
-	cfg.QuorumCustomPlacement.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-		if newValue == "" {
-			return nil
-		}
-		var v []config.CustomPlacement
-		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid quorum custom placement JSON %q: %v", newValue, err)
-		}
-		return nil
-	})
-}
-
-// validateQuorumJSON parses a non-empty raw JSON config once and warns on failure.
-func validateQuorumJSON(label, raw string, parse func([]byte) error) {
-	if raw == "" {
-		return
-	}
-	if err := parse([]byte(raw)); err != nil {
-		log.Ctx(context.Background()).Warn("invalid quorum JSON config at startup, will fall back to static default",
-			zap.String("config", label),
-			zap.String("json", raw),
-			zap.Error(err))
-	}
 }
 
 func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
