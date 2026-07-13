@@ -738,11 +738,51 @@ func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
 func (scheduler *taskScheduler) Add(task Task) error {
 	scheduler.collKeyLock.Lock(task.CollectionID())
 	defer scheduler.collKeyLock.Unlock(task.CollectionID())
-	err := scheduler.preAdd(task)
-	if err != nil {
+	return scheduler.addLocked(task)
+}
+
+type schedulerAdmissionError struct {
+	reason BalanceAdmissionReason
+	err    error
+}
+
+func (scheduler *taskScheduler) AdmitBalanceTask(task Task, validate BalanceAdmissionValidator) BalanceAdmissionResult {
+	scheduler.collKeyLock.Lock(task.CollectionID())
+	defer scheduler.collKeyLock.Unlock(task.CollectionID())
+
+	if reason := validate(); reason != BalanceAdmissionAccepted {
+		err := merr.WrapErrServiceInternal(reason.String())
 		task.Cancel(err)
-		return err
+		return BalanceAdmissionResult{Reason: reason, Err: err}
 	}
+	if admissionErr := scheduler.validateAddLocked(task); admissionErr != nil {
+		task.Cancel(admissionErr.err)
+		return BalanceAdmissionResult{Reason: admissionErr.reason, Err: admissionErr.err}
+	}
+	if reason := validate(); reason != BalanceAdmissionAccepted {
+		err := merr.WrapErrServiceInternal(reason.String())
+		task.Cancel(err)
+		return BalanceAdmissionResult{Reason: reason, Err: err}
+	}
+
+	scheduler.commitAddLocked(task)
+	return BalanceAdmissionResult{
+		TaskID: task.ID(),
+		Reason: BalanceAdmissionAccepted,
+	}
+}
+
+func (scheduler *taskScheduler) addLocked(task Task) error {
+	if admissionErr := scheduler.validateAddLocked(task); admissionErr != nil {
+		task.Cancel(admissionErr.err)
+		return admissionErr.err
+	}
+	scheduler.commitAddLocked(task)
+	return nil
+}
+
+func (scheduler *taskScheduler) commitAddLocked(task Task) {
+	scheduler.replaceLowerPriorityTaskLocked(task)
 
 	task.SetID(scheduler.idAllocator())
 	scheduler.waitQueue.Add(task)
@@ -766,7 +806,6 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	scheduler.updateTaskMetrics()
 	mlog.Info(task.Context(), "task added", mlog.String("task", task.String()))
 	task.RecordStartTs()
-	return nil
 }
 
 func (scheduler *taskScheduler) updateTaskMetrics() {
@@ -833,26 +872,20 @@ func (scheduler *taskScheduler) updateTaskMetrics() {
 	scheduler.lastUpdateMetricTime.Store(time.Now())
 }
 
-// check whether the task is valid to add,
-// must hold lock
-func (scheduler *taskScheduler) preAdd(task Task) error {
+// validateAddLocked checks whether the task is valid to add without making it
+// visible to scheduler queues, indexes, deltas, or metrics. The collection lock
+// must be held by the caller.
+func (scheduler *taskScheduler) validateAddLocked(task Task) *schedulerAdmissionError {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
 		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
-					mlog.Int64("oldID", old.ID()),
-					mlog.String("oldPriority", old.Priority().String()),
-					mlog.Int64("newID", task.ID()),
-					mlog.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
+			if task.Priority() <= old.Priority() {
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionDuplicate,
+					err:    merr.WrapErrServiceInternal("task with the same segment exists"),
+				}
 			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 
 		taskType := GetTaskType(task)
@@ -860,30 +893,29 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		if taskType == TaskTypeMove {
 			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
 			if leader == nil {
-				return merr.WrapErrServiceInternal("segment's delegator leader not found, stop balancing")
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionLeaderMissing,
+					err:    merr.WrapErrServiceInternal("segment's delegator leader not found, stop balancing"),
+				}
 			}
 			segmentInTargetNode := scheduler.distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(task.Actions()[1].Node()), meta.WithSegmentID(task.SegmentID()))
 			if len(segmentInTargetNode) == 0 {
-				return merr.WrapErrServiceInternal("source segment released, stop balancing")
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionSourceGone,
+					err:    merr.WrapErrServiceInternal("source segment released, stop balancing"),
+				}
 			}
 		}
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		if old, ok := scheduler.channelTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
-					mlog.Int64("oldID", old.ID()),
-					mlog.String("oldPriority", old.Priority().String()),
-					mlog.Int64("newID", task.ID()),
-					mlog.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
+			if task.Priority() <= old.Priority() {
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionDuplicate,
+					err:    merr.WrapErrServiceInternal("task with the same channel exists"),
+				}
 			}
-
-			return merr.WrapErrServiceInternal("task with the same channel exists")
 		}
 
 		taskType := GetTaskType(task)
@@ -893,53 +925,76 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			nodesWithChannel := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) UniqueID { return v.Node })
 			replicaNodeMap := utils.GroupNodesByReplica(task.ctx, scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
-				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionDuplicate,
+					err:    merr.WrapErrServiceInternal("channel subscribed, it can be only balanced"),
+				}
 			}
 		case TaskTypeMove:
 			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
 			_, ok := lo.Find(delegatorList, func(v *meta.DmChannel) bool { return v.Node == task.Actions()[1].Node() })
 			if !ok {
-				return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionSourceGone,
+					err:    merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing"),
+				}
 			}
 		}
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
 		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
-					mlog.Int64("oldID", old.ID()),
-					mlog.String("oldPriority", old.Priority().String()),
-					mlog.Int64("newID", task.ID()),
-					mlog.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
+			if task.Priority() <= old.Priority() {
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionDuplicate,
+					err:    merr.WrapErrServiceInternal("task with the same segment exists"),
+				}
 			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 	case *DropIndexTask:
 		index := NewReplicaDropIndex(task)
 		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
-					mlog.Int64("oldID", old.ID()),
-					mlog.String("oldPriority", old.Priority().String()),
-					mlog.Int64("newID", task.ID()),
-					mlog.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
+			if task.Priority() <= old.Priority() {
+				return &schedulerAdmissionError{
+					reason: BalanceAdmissionDuplicate,
+					err:    merr.WrapErrServiceInternal("task with the same segment exists"),
+				}
 			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 	default:
-		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
+		panic(fmt.Sprintf("validateAddLocked: forget to process task type: %+v", task))
 	}
 	return nil
+}
+
+// replaceLowerPriorityTaskLocked preserves Add's existing replacement behavior,
+// but delays the mutation until admission has passed its final validation.
+func (scheduler *taskScheduler) replaceLowerPriorityTaskLocked(task Task) {
+	var old Task
+	var ok bool
+	switch task := task.(type) {
+	case *SegmentTask:
+		old, ok = scheduler.segmentTasks.Get(NewReplicaSegmentIndex(task))
+	case *ChannelTask:
+		old, ok = scheduler.channelTasks.Get(replicaChannelIndex{task.ReplicaID(), task.Channel()})
+	case *LeaderTask:
+		old, ok = scheduler.segmentTasks.Get(NewReplicaLeaderIndex(task))
+	case *DropIndexTask:
+		old, ok = scheduler.segmentTasks.Get(NewReplicaDropIndex(task))
+	default:
+		panic(fmt.Sprintf("replaceLowerPriorityTaskLocked: forget to process task type: %+v", task))
+	}
+	if !ok || task.Priority() <= old.Priority() {
+		return
+	}
+
+	mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
+		mlog.Int64("oldID", old.ID()),
+		mlog.String("oldPriority", old.Priority().String()),
+		mlog.Int64("newID", task.ID()),
+		mlog.String("newPriority", task.Priority().String()),
+	)
+	old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
+	scheduler.remove(old)
 }
 
 func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
