@@ -479,6 +479,7 @@ message SegmentInfo {
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
+  int64 mem_size = 40;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
