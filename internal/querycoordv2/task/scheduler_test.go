@@ -270,8 +270,78 @@ func (suite *TaskSuite) TestAdmitBalanceTaskFinalCheckKeepsLowerPriorityTask() {
 	suite.Len(suite.scheduler.segmentTaskDelta.records, 1)
 }
 
+func (suite *TaskSuite) TestAddHigherPrioritySegmentMoveSkipsTopologyRevalidation() {
+	segmentID := int64(1007)
+	sourceNode := int64(1)
+	suite.setSegmentMovePrerequisites(segmentID, sourceNode)
+	oldTask := suite.newSegmentMoveTask(segmentID, sourceNode, 2)
+	oldTask.SetPriority(TaskPriorityNormal)
+	suite.Require().NoError(suite.scheduler.Add(oldTask))
+
+	// Preserve Add's historical replacement behavior: once a lower-priority
+	// duplicate is found, the higher-priority task replaces it without running
+	// the later move-topology checks.
+	suite.dist.ChannelDistManager.Update(sourceNode)
+	newTask := suite.newSegmentMoveTask(segmentID, sourceNode, 3)
+	newTask.SetPriority(TaskPriorityHigh)
+
+	suite.Require().NoError(suite.scheduler.Add(newTask))
+
+	suite.Equal(TaskStatusCanceled, oldTask.Status())
+	suite.Equal(TaskStatusStarted, newTask.Status())
+	suite.NotZero(newTask.ID())
+	suite.Equal(1, suite.scheduler.waitQueue.Len())
+	suite.Equal(1, suite.scheduler.tasks.Len())
+	registered, ok := suite.scheduler.segmentTasks.Get(NewReplicaSegmentIndex(newTask))
+	suite.True(ok)
+	suite.Same(newTask, registered)
+}
+
+func (suite *TaskSuite) TestAddHigherPriorityChannelMoveSkipsTopologyRevalidation() {
+	channelName := "balance-admission-channel"
+	sourceNode := int64(1)
+	suite.dist.ChannelDistManager.Update(
+		sourceNode,
+		suite.channel(suite.collection, channelName, sourceNode),
+	)
+	oldTask := suite.newChannelMoveTask(
+		suite.collection,
+		suite.replica.GetID(),
+		suite.replica.GetResourceGroup(),
+		channelName,
+		sourceNode,
+		2,
+	)
+	oldTask.SetPriority(TaskPriorityNormal)
+	suite.Require().NoError(suite.scheduler.Add(oldTask))
+
+	// The source disappears after the old task was admitted. A higher-priority
+	// duplicate still follows Add's historical immediate-replacement path.
+	suite.dist.ChannelDistManager.Update(sourceNode)
+	newTask := suite.newChannelMoveTask(
+		suite.collection,
+		suite.replica.GetID(),
+		suite.replica.GetResourceGroup(),
+		channelName,
+		sourceNode,
+		3,
+	)
+	newTask.SetPriority(TaskPriorityHigh)
+
+	suite.Require().NoError(suite.scheduler.Add(newTask))
+
+	suite.Equal(TaskStatusCanceled, oldTask.Status())
+	suite.Equal(TaskStatusStarted, newTask.Status())
+	suite.NotZero(newTask.ID())
+	suite.Equal(1, suite.scheduler.waitQueue.Len())
+	suite.Equal(1, suite.scheduler.tasks.Len())
+	registered, ok := suite.scheduler.channelTasks.Get(replicaChannelIndex{newTask.ReplicaID(), newTask.Channel()})
+	suite.True(ok)
+	suite.Same(newTask, registered)
+}
+
 func (suite *TaskSuite) TestBalanceEpochMetaDiagnostics() {
-	task := suite.newSegmentMoveTask(1007, 1, 2)
+	task := suite.newSegmentMoveTask(1008, 1, 2)
 	suite.NotContains(task.String(), "[balanceSequence=")
 	meta := BalanceEpochMeta{
 		ResourceGroup: "rg1",

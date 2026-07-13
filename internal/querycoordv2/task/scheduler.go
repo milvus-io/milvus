@@ -644,7 +644,7 @@ type taskScheduler struct {
 	nodeMgr   *session.NodeManager
 
 	scheduleMu   sync.Mutex           // guards schedule() and RemoveByNode()
-	collKeyLock  *lock.KeyLock[int64] // guards Add()
+	collKeyLock  *lock.KeyLock[int64] // guards Add() and AdmitBalanceTask()
 	tasks        *ConcurrentMap[UniqueID, struct{}]
 	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
 	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
@@ -880,11 +880,12 @@ func (scheduler *taskScheduler) validateAddLocked(task Task) *schedulerAdmission
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
 		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() <= old.Priority() {
-				return &schedulerAdmissionError{
-					reason: BalanceAdmissionDuplicate,
-					err:    merr.WrapErrServiceInternal("task with the same segment exists"),
-				}
+			if task.Priority() > old.Priority() {
+				return nil
+			}
+			return &schedulerAdmissionError{
+				reason: BalanceAdmissionDuplicate,
+				err:    merr.WrapErrServiceInternal("task with the same segment exists"),
 			}
 		}
 
@@ -910,11 +911,12 @@ func (scheduler *taskScheduler) validateAddLocked(task Task) *schedulerAdmission
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		if old, ok := scheduler.channelTasks.Get(index); ok {
-			if task.Priority() <= old.Priority() {
-				return &schedulerAdmissionError{
-					reason: BalanceAdmissionDuplicate,
-					err:    merr.WrapErrServiceInternal("task with the same channel exists"),
-				}
+			if task.Priority() > old.Priority() {
+				return nil
+			}
+			return &schedulerAdmissionError{
+				reason: BalanceAdmissionDuplicate,
+				err:    merr.WrapErrServiceInternal("task with the same channel exists"),
 			}
 		}
 
