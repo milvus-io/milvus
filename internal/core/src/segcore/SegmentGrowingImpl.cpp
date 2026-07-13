@@ -2752,11 +2752,37 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
+    // A column group whose fields were all dropped from the segment schema
+    // has an empty read projection; opening it violates the reader contract
+    // (ChunkReaderImpl::open rejects a group containing none of the needed
+    // columns). Such a group is a legal leftover of drop semantics — skip it
+    // and let compaction remove it from the manifest.
+    auto schema_snapshot = schema_;
+    auto group_has_live_field = [&](int64_t group_index) {
+        for (const auto& column : column_groups->at(group_index)->columns) {
+            // An untranslatable column name is a broken manifest and throws
+            // (same contract as the sealed loader).
+            auto field_id = schema_snapshot->ResolveColumnFieldId(column);
+            if (schema_snapshot->has_field(field_id)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
+        if (!group_has_live_field(i)) {
+            LOG_INFO(
+                "skip loading column group {} of segment {}: all of its "
+                "fields are dropped from the schema",
+                i,
+                id_);
+            continue;
+        }
         auto future =
             pool.Submit([this, column_groups, properties, i, num_rows] {
                 return LoadColumnGroup(column_groups, properties, i, num_rows);

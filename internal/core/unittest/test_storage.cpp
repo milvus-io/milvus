@@ -42,6 +42,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
@@ -485,6 +486,130 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
     }
 
     FreeFlushResult(&result);
+    cleanup();
+}
+
+// A manifest column group whose only field was dropped from the segment
+// schema before recovery is a legal leftover of drop semantics: reloading
+// the growing segment must skip that group instead of failing the whole
+// load with milvus-storage "No needed columns found in column group".
+TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
+    std::string test_dir =
+        "/tmp/load_skip_dropped_group_" +
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(test_dir);
+    auto cleanup = [&]() {
+        if (std::filesystem::exists(test_dir)) {
+            std::filesystem::remove_all(test_dir);
+        }
+    };
+
+    // Reduced schema: what remains after field 101 is dropped.
+    milvus::proto::schema::CollectionSchema reduced_proto;
+    reduced_proto.set_name("load_skip_dropped_group");
+    auto* row_id_field = reduced_proto.add_fields();
+    row_id_field->set_fieldid(0);
+    row_id_field->set_name("RowID");
+    row_id_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    auto* ts_field = reduced_proto.add_fields();
+    ts_field->set_fieldid(1);
+    ts_field->set_name("Timestamp");
+    ts_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    auto* pk_field = reduced_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    // Full schema at flush time still carries field 101.
+    auto full_proto = reduced_proto;
+    auto* extra_field = full_proto.add_fields();
+    extra_field->set_fieldid(101);
+    extra_field->set_name("extra");
+    extra_field->set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto full_schema = Schema::ParseFrom(full_proto);
+    auto segment = CreateGrowingSegment(full_schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    std::vector<int64_t> extras = {200, 201, 202};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            pks.data(), nullptr, N, (*full_schema)[FieldId(100)])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            extras.data(), nullptr, N, (*full_schema)[FieldId(101)])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    std::string schema_blob = full_proto.SerializeAsString();
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir + "/collection/partition/segment_lg";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.schema_blob = schema_blob.data();
+    config.schema_length = static_cast<int64_t>(schema_blob.size());
+    // Force field 101 into its own column group so that dropping the field
+    // leaves a group with no live field.
+    config.schema_based_pattern = "0|1|100,101";
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+    std::string manifest_json =
+        "{\"base_path\":\"" + segment_path +
+        "\",\"ver\":" + std::to_string(result.committed_version) + "}";
+    FreeFlushResult(&result);
+
+    // Guard against a vacuous pass: the split pattern must have produced a
+    // column group holding field 101 exclusively, or the load below would
+    // succeed via projection without exercising the skip branch.
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    ASSERT_NE(properties, nullptr);
+    auto manifest = GetLoonManifest(manifest_json, properties);
+    ASSERT_EQ(manifest->columnGroups().size(), 2u);
+    bool has_exclusive_101_group = false;
+    for (const auto& cg : manifest->columnGroups()) {
+        if (cg->columns.size() == 1 && cg->columns[0] == "101") {
+            has_exclusive_101_group = true;
+        }
+    }
+    ASSERT_TRUE(has_exclusive_101_group)
+        << "expected a column group holding field 101 exclusively";
+
+    // Reload the manifest under the reduced schema (field 101 dropped).
+    auto reduced_schema = Schema::ParseFrom(reduced_proto);
+    auto reloaded = CreateGrowingSegment(reduced_schema, empty_index_meta);
+    ASSERT_NE(reloaded, nullptr);
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(N);
+    load_info.set_manifest_path(manifest_json);
+    reloaded->SetLoadInfo(load_info);
+
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(reloaded->Load(trace_ctx, nullptr));
+    EXPECT_EQ(reloaded->get_row_count(), N);
+    EXPECT_TRUE(reloaded->HasFieldData(FieldId(100)));
+    EXPECT_FALSE(reloaded->HasFieldData(FieldId(101)));
+
     cleanup();
 }
 
