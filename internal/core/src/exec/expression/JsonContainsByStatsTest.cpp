@@ -65,6 +65,16 @@
 using namespace milvus;
 using namespace milvus::index;
 
+class JsonStatsProjectionTestAccessor {
+ public:
+    static bool
+    IsInMultiFieldColumnGroup(const JsonKeyStats& stats,
+                              const std::string& field_name) {
+        return stats.shredding_columns_.at(field_name)
+            ->IsInMultiFieldColumnGroup();
+    }
+};
+
 namespace {
 
 bool
@@ -368,6 +378,62 @@ ReadJsonStatsInt64Equal(JsonKeyStats& stats,
     return res;
 }
 
+void
+AssertJsonStatsProjectionMode(const std::string& warmup_policy,
+                              int64_t id_offset,
+                              bool expect_multi_field_group) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    std::vector<std::string> json_raw_data = {
+        R"({"a": 1, "b": 10})",
+        R"({"a": 2, "b": 20})",
+        R"({"a": 1, "b": 30})",
+    };
+
+    const int64_t collection_id = 1200 + id_offset;
+    const int64_t partition_id = 2200 + id_offset;
+    const int64_t segment_id = 3200 + id_offset;
+    const int64_t field_id = json_fid.get();
+    const int64_t build_id = 5200 + id_offset;
+    const int64_t version_id = 1;
+    const std::string root_path = TestLocalPath;
+
+    auto built_index = BuildJsonStatsIndex(json_raw_data,
+                                           json_fid,
+                                           root_path,
+                                           collection_id,
+                                           partition_id,
+                                           segment_id,
+                                           field_id,
+                                           build_id,
+                                           version_id);
+    built_index.load_config[milvus::index::WARMUP] = warmup_policy;
+    ASSERT_TRUE(built_index.load_config.contains(milvus::index::WARMUP));
+    ASSERT_EQ(
+        built_index.load_config.at(milvus::index::WARMUP).get<std::string>(),
+        warmup_policy);
+    auto stats = LoadBuiltJsonStatsIndex(built_index);
+
+    auto a_field = stats->GetShreddingField("/a", JSONType::INT64);
+    auto b_field = stats->GetShreddingField("/b", JSONType::INT64);
+    ASSERT_FALSE(a_field.empty());
+    ASSERT_FALSE(b_field.empty());
+
+    auto a_result =
+        ReadJsonStatsInt64Equal(*stats, a_field, /*expected=*/1, /*size=*/3);
+    EXPECT_TRUE(a_result[0]);
+    EXPECT_FALSE(a_result[1]);
+    EXPECT_TRUE(a_result[2]);
+
+    EXPECT_EQ(JsonStatsProjectionTestAccessor::IsInMultiFieldColumnGroup(
+                  *stats, a_field),
+              expect_multi_field_group);
+    EXPECT_EQ(JsonStatsProjectionTestAccessor::IsInMultiFieldColumnGroup(
+                  *stats, b_field),
+              expect_multi_field_group);
+}
+
 }  // namespace
 
 TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
@@ -566,6 +632,18 @@ TEST(JsonStatsAsyncLoadTest, LoadsMultipleShreddingParquetFilesInFileIdOrder) {
     EXPECT_TRUE(result[3]);
     EXPECT_FALSE(result[4]);
     EXPECT_EQ(result.count(), 2);
+}
+
+TEST(JsonStatsAsyncLoadTest, UsesSingleColumnProjectionWithoutWarmup) {
+    AssertJsonStatsProjectionMode("disable",
+                                  /*id_offset=*/3,
+                                  /*expect_multi_field_group=*/false);
+}
+
+TEST(JsonStatsAsyncLoadTest, UsesFullColumnGroupProjectionWithWarmup) {
+    AssertJsonStatsProjectionMode("sync",
+                                  /*id_offset=*/4,
+                                  /*expect_multi_field_group=*/true);
 }
 
 TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
