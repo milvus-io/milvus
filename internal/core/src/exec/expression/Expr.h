@@ -1790,12 +1790,14 @@ class SegmentExpr : public Expr {
             PinWrapper<const index::IndexBase*> json_pw;
             std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
                 executor;
+            const auto json_pointer = field_type_ == DataType::JSON
+                                          ? milvus::Json::pointer(nested_path_)
+                                          : std::string();
             auto prepare_index = [&]() {
                 if (index_ptr != nullptr) {
                     return;
                 }
                 if (field_type_ == DataType::JSON) {
-                    auto pointer = milvus::Json::pointer(nested_path_);
                     json_pw = pinned_index_[0];
                     auto json_flat_index =
                         dynamic_cast<const index::JsonFlatIndex*>(
@@ -1806,7 +1808,7 @@ class SegmentExpr : public Expr {
                         executor =
                             json_flat_index
                                 ->template create_executor<IndexInnerType>(
-                                    pointer.substr(index_path.size()));
+                                    json_pointer.substr(index_path.size()));
                         index_ptr = executor.get();
                     } else {
                         auto json_index =
@@ -1831,9 +1833,45 @@ class SegmentExpr : public Expr {
                     TargetBitmap res = func(index_ptr, values...);
 
                     TargetBitmap valid_res;
-                    if (validity_mode == IndexValidityMode::JsonExactPath &&
-                        executor != nullptr) {
-                        valid_res = executor->ExactPathExists();
+                    std::optional<index::JsonValueType> json_value_type;
+                    if (executor != nullptr) {
+                        if (validity_mode == IndexValidityMode::JsonExactPath) {
+                            json_value_type = index::JsonValueType::Any;
+                        } else if constexpr (std::is_same_v<IndexInnerType,
+                                                            bool>) {
+                            json_value_type = index::JsonValueType::Bool;
+                        } else if constexpr (std::is_integral_v<
+                                                 IndexInnerType> ||
+                                             std::is_floating_point_v<
+                                                 IndexInnerType>) {
+                            json_value_type = index::JsonValueType::Numeric;
+                        } else if constexpr (std::is_same_v<IndexInnerType,
+                                                            std::string>) {
+                            json_value_type = index::JsonValueType::String;
+                        }
+                    }
+
+                    if (json_value_type.has_value()) {
+                        const auto family =
+                            static_cast<unsigned int>(json_value_type.value());
+                        const auto signature = fmt::format(
+                            "json-flat-validity:v1:field={}:path-length={}:"
+                            "path={}:family={}",
+                            field_id_.get(),
+                            json_pointer.size(),
+                            json_pointer,
+                            family);
+                        if (ExprResCacheManager::IsEnabled()) {
+                            auto validity = ExprCacheHelper::GetOrComputeBitmap(
+                                segment_, signature, active_count_, [&]() {
+                                    return executor->ExactPathExists(
+                                        json_value_type.value());
+                                });
+                            valid_res = std::move(*validity);
+                        } else {
+                            valid_res = executor->ExactPathExists(
+                                json_value_type.value());
+                        }
                     } else if (cached_is_nested_index_ &&
                                func_returns_row_level) {
                         valid_res = TargetBitmap(active_count_, true);
