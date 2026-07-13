@@ -258,6 +258,43 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 	nextGuards.Unlock()
 }
 
+func TestBroadcastTaskErrorAfterRegistrationIsUnmarked(t *testing.T) {
+	paramtable.Init()
+
+	locker := newResourceKeyLocker()
+	rk := message.NewExclusiveCollectionNameResourceKey("db", "collection")
+	guards := locker.Lock(rk)
+
+	taskRegistered := make(chan struct{})
+	scheduler := &broadcasterScheduler{
+		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		pendingChan:            make(chan *pendingBroadcastTask),
+	}
+	defer scheduler.backgroundTaskNotifier.Cancel()
+	go func() {
+		<-scheduler.pendingChan
+		close(taskRegistered)
+	}()
+
+	bm := &broadcastTaskManager{
+		lifetime:           typeutil.NewLifetime(),
+		mu:                 &sync.Mutex{},
+		tasks:              map[uint64]*broadcastTask{},
+		metrics:            newBroadcasterMetrics(),
+		broadcastScheduler: scheduler,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := bm.broadcast(ctx, createNewBroadcastMsg([]string{"v1"}, rk), 1, guards)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, IsBroadcastTaskNotCreated(err))
+	require.Contains(t, bm.tasks, uint64(1))
+	<-taskRegistered
+	bm.tasks[1].guards.Unlock()
+}
+
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {
 	msg := createNewBroadcastMsg(vchannels).OverwriteBroadcastHeader(broadcastID, rks...)
 	pb := msg.IntoMessageProto()
