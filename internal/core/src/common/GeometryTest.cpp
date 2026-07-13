@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -60,6 +61,38 @@ TEST_F(GeometryValueSemanticsTest, SelfCopyAssignmentIsSafe) {
     a = alias;  // self-assignment must not destroy its own geometry
     ASSERT_TRUE(a.IsValid());
     EXPECT_EQ(a.to_wkb_string(), before);
+}
+
+// Clone(ctx) is the query-thread-safe duplication path: all GEOS work runs
+// through the caller-supplied context and the clone is bound to it, so a
+// cache-owned Geometry can be duplicated without touching the cache's shared
+// (non-thread-safe) context and the clone survives the cache.
+TEST_F(GeometryValueSemanticsTest, CloneDeepClonesIntoCallerContext) {
+    Geometry a(ctx_, "POINT (1 2)");
+    ASSERT_TRUE(a.IsValid());
+
+    GEOSContextHandle_t other_ctx = GEOS_init_r();
+    ASSERT_NE(other_ctx, nullptr);
+    {
+        Geometry b = a.Clone(other_ctx);
+
+        ASSERT_TRUE(b.IsValid());
+        // Independent underlying geometries, never a shared raw pointer.
+        EXPECT_NE(a.GetRawGeometry(), b.GetRawGeometry());
+        EXPECT_EQ(a.to_wkb_string(), b.to_wkb_string());
+        // b destructs here, via other_ctx; a destructs later via ctx_. Each
+        // must free exactly once.
+    }
+    GEOS_finish_r(other_ctx);
+    ASSERT_TRUE(a.IsValid());
+}
+
+TEST_F(GeometryValueSemanticsTest, CloneOfInvalidGeometryIsInvalid) {
+    Geometry a;
+    ASSERT_FALSE(a.IsValid());
+    Geometry b = a.Clone(ctx_);
+    EXPECT_FALSE(b.IsValid());
+    EXPECT_EQ(b.GetRawGeometry(), nullptr);
 }
 
 TEST_F(GeometryValueSemanticsTest, MoveConstructorTransfersOwnership) {
