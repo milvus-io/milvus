@@ -332,6 +332,159 @@ func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 	}, nil
 }
 
+// foldedArithChain is a nested arithmetic chain that has been reduced to a
+// single `column arithOp operand` triple.
+type foldedArithChain struct {
+	columnInfo *planpb.ColumnInfo
+	arithOp    planpb.ArithOpType
+	operand    *planpb.GenericValue
+}
+
+// isFoldableArithOp reports whether an arithmetic operation participates in one
+// of the algebraic identities used by composeArithOps.
+//
+// Div and Mod are deliberately excluded: integer division truncates, so
+// `(x / a) / b` cannot be folded into `x / (a*b)` in general, and Mod has no
+// such identity at all. ArrayLength takes no right operand.
+func isFoldableArithOp(op planpb.ArithOpType) bool {
+	switch op {
+	case planpb.ArithOpType_Add, planpb.ArithOpType_Sub, planpb.ArithOpType_Mul,
+		planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor:
+		return true
+	default:
+		return false
+	}
+}
+
+// isIntegerArithColumn reports whether the column being operated on holds
+// integers.
+//
+// Folding is restricted to integer columns on purpose. Integer arithmetic is
+// two's-complement wrap-around arithmetic, under which +, - and * are exactly
+// associative (and &, | and ^ are associative by definition), so reassociating a
+// chain never changes a result -- not even when it overflows. Floating point
+// addition and multiplication are NOT associative, and a JSON column is
+// dynamically typed, so its runtime value may well be a float. Both are left to
+// the existing "not supported" path rather than silently rounding differently.
+func isIntegerArithColumn(columnInfo *planpb.ColumnInfo) bool {
+	dataType := columnInfo.GetDataType()
+	if typeutil.IsArrayType(dataType) &&
+		(len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel()) {
+		return typeutil.IsIntegerType(columnInfo.GetElementType())
+	}
+	return typeutil.IsIntegerType(dataType)
+}
+
+// composeArithOps folds two chained integer operations into the single operation
+// that is equivalent to applying both, i.e. it returns (op, c) such that
+// `(x op1 a) op2 b` == `x op c` for every integer x. It reports ok=false when the
+// pair has no such identity, in which case the caller must keep the chain
+// unsupported.
+func composeArithOps(op1 planpb.ArithOpType, a *planpb.GenericValue,
+	op2 planpb.ArithOpType, b *planpb.GenericValue,
+) (planpb.ArithOpType, *planpb.GenericValue, bool) {
+	if !IsInteger(a) || !IsInteger(b) {
+		return planpb.ArithOpType_Unknown, nil, false
+	}
+	// aVal is the inner operand, bVal the outer one; x below denotes the column.
+	aVal, bVal := a.GetInt64Val(), b.GetInt64Val()
+
+	switch op1 {
+	case planpb.ArithOpType_Add, planpb.ArithOpType_Sub:
+		// Normalize the inner operation to an addition: `x - a` == `x + (-a)`.
+		// Negating math.MinInt64 wraps to itself, which is exactly its additive
+		// inverse modulo 2^64, so this stays correct at the boundary.
+		inner := aVal
+		if op1 == planpb.ArithOpType_Sub {
+			inner = -aVal
+		}
+		switch op2 {
+		case planpb.ArithOpType_Add:
+			// (x + a) + b -> x + (a+b);  (x - a) + b -> x + (b-a)
+			return planpb.ArithOpType_Add, NewInt(inner + bVal), true
+		case planpb.ArithOpType_Sub:
+			// (x + a) - b -> x + (a-b);  (x - a) - b -> x + (-a-b)
+			return planpb.ArithOpType_Add, NewInt(inner - bVal), true
+		}
+	case planpb.ArithOpType_Mul:
+		if op2 == planpb.ArithOpType_Mul {
+			// (x * a) * b -> x * (a*b)
+			return planpb.ArithOpType_Mul, NewInt(aVal * bVal), true
+		}
+	case planpb.ArithOpType_BitAnd:
+		if op2 == planpb.ArithOpType_BitAnd {
+			// (x & a) & b -> x & (a&b)
+			return planpb.ArithOpType_BitAnd, NewInt(aVal & bVal), true
+		}
+	case planpb.ArithOpType_BitOr:
+		if op2 == planpb.ArithOpType_BitOr {
+			// (x | a) | b -> x | (a|b)
+			return planpb.ArithOpType_BitOr, NewInt(aVal | bVal), true
+		}
+	case planpb.ArithOpType_BitXor:
+		if op2 == planpb.ArithOpType_BitXor {
+			// (x ^ a) ^ b -> x ^ (a^b)
+			return planpb.ArithOpType_BitXor, NewInt(aVal ^ bVal), true
+		}
+	}
+	return planpb.ArithOpType_Unknown, nil, false
+}
+
+// foldArithChain reduces a nested arithmetic expression of the shape
+// `((column op1 a) op2 b) ...` -- with the column innermost and a constant on the
+// right of every operation -- down to a single `column arithOp operand` triple.
+// Chains of arbitrary depth fold, as long as every adjacent pair shares an
+// identity in composeArithOps.
+//
+// It reports ok=false for anything it cannot prove equivalent, which keeps the
+// caller on the pre-existing "not supported" error path.
+func foldArithChain(arithExpr *planpb.BinaryArithExpr) (*foldedArithChain, bool) {
+	op := arithExpr.GetOp()
+	if !isFoldableArithOp(op) {
+		return nil, false
+	}
+
+	// Every operation in the chain must have a plain integer constant on its
+	// right. A template variable ({v}) carries no value at plan time, so there is
+	// nothing to fold.
+	rightValueExpr := arithExpr.GetRight().GetValueExpr()
+	if rightValueExpr == nil || isTemplateExpr(rightValueExpr) || !IsInteger(rightValueExpr.GetValue()) {
+		return nil, false
+	}
+	rightValue := rightValueExpr.GetValue()
+
+	// Base case: `column op constant`, the innermost operation.
+	if columnExpr := arithExpr.GetLeft().GetColumnExpr(); columnExpr != nil {
+		if !isIntegerArithColumn(columnExpr.GetInfo()) {
+			return nil, false
+		}
+		return &foldedArithChain{
+			columnInfo: columnExpr.GetInfo(),
+			arithOp:    op,
+			operand:    rightValue,
+		}, true
+	}
+
+	// Recursive case: the left operand is itself an arithmetic chain.
+	innerArithExpr := arithExpr.GetLeft().GetBinaryArithExpr()
+	if innerArithExpr == nil {
+		return nil, false
+	}
+	inner, ok := foldArithChain(innerArithExpr)
+	if !ok {
+		return nil, false
+	}
+	arithOp, operand, ok := composeArithOps(inner.arithOp, inner.operand, op, rightValue)
+	if !ok {
+		return nil, false
+	}
+	return &foldedArithChain{
+		columnInfo: inner.columnInfo,
+		arithOp:    arithOp,
+		operand:    operand,
+	}, true
+}
+
 func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, arithExprDataType schemapb.DataType, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
 	leftExpr, leftValue := arithExpr.Left.GetColumnExpr(), arithExpr.Left.GetValueExpr()
 	rightExpr, rightValue := arithExpr.Right.GetColumnExpr(), arithExpr.Right.GetValueExpr()
@@ -371,6 +524,14 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 			return nil, merr.WrapErrQueryPlanMsg("module field is not yet supported")
 		}
 	} else {
+		// The left operand is itself an arithmetic expression, e.g.
+		// ((a + 1) + 2) == 5. Chains that are algebraically equivalent to a single
+		// `column op constant` operation fold into the existing
+		// BinaryArithOpEvalRangeExpr; everything else stays unsupported.
+		if folded, ok := foldArithChain(arithExpr); ok {
+			return combineBinaryArithExpr(op, folded.arithOp, arithExprDataType, folded.columnInfo,
+				&planpb.ValueExpr{Value: folded.operand}, valueExpr)
+		}
 		// (a + b) / 2 == 3
 		return nil, merr.WrapErrQueryPlanMsg("complicated arithmetic operations are not supported")
 	}
