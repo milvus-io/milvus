@@ -468,6 +468,7 @@ message SegmentInfo {
   // It is populated only on cloned SegmentInfo responses from GetSegmentInfo
   // with includeUnHealthy=true.
   repeated string child_manifest_paths = 37;
+  int64 mem_size = 38;
 }
 
 message SegmentStartPosition {
