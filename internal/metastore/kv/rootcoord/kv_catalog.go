@@ -2342,15 +2342,6 @@ func (kc *Catalog) AlterCollectionAndMigrateGrants(ctx context.Context, oldColl 
 	return nil
 }
 
-// DropRoleAndGrants drops the role and then all grants of the role, fail-hard.
-// See metastore.RootCoordCatalog for the contract.
-func (kc *Catalog) DropRoleAndGrants(ctx context.Context, tenant string, roleName string) error {
-	if err := kc.DropRole(ctx, tenant, roleName); err != nil {
-		return err
-	}
-	return kc.DeleteGrant(ctx, tenant, &milvuspb.RoleEntity{Name: roleName})
-}
-
 func (kc *Catalog) Close() {
 	// do nothing
 }

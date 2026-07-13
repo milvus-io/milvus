@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -234,58 +233,5 @@ func TestCatalog_AlterCollectionAndMigrateGrants(t *testing.T) {
 		newColl := &model.Collection{CollectionID: 1, Name: "new", DBName: "db"}
 		err := kc.AlterCollectionAndMigrateGrants(context.TODO(), oldColl, newColl, ts, false, false, "tenant1")
 		assert.NoError(t, err)
-	})
-}
-
-func TestCatalog_DropRoleAndGrants(t *testing.T) {
-	mockey.PatchConvey("success executes drop role then delete grant", t, func() {
-		kc := &Catalog{}
-		var calls []string
-		mockey.Mock((*Catalog).DropRole).To(func(_ *Catalog, _ context.Context, tenant, roleName string) error {
-			assert.Equal(t, "tenant1", tenant)
-			assert.Equal(t, "role1", roleName)
-			calls = append(calls, "DropRole")
-			return nil
-		}).Build()
-		mockey.Mock((*Catalog).DeleteGrant).To(func(_ *Catalog, _ context.Context, tenant string, role *milvuspb.RoleEntity) error {
-			assert.Equal(t, "tenant1", tenant)
-			assert.Equal(t, "role1", role.GetName())
-			calls = append(calls, "DeleteGrant")
-			return nil
-		}).Build()
-
-		err := kc.DropRoleAndGrants(context.TODO(), "tenant1", "role1")
-		assert.NoError(t, err)
-		assert.Equal(t, []string{"DropRole", "DeleteGrant"}, calls)
-	})
-
-	mockey.PatchConvey("drop role failure aborts before delete grant", t, func() {
-		kc := &Catalog{}
-		var calls []string
-		mockey.Mock((*Catalog).DropRole).To(func(_ *Catalog, _ context.Context, _, _ string) error {
-			calls = append(calls, "DropRole")
-			return errors.New("drop role failed")
-		}).Build()
-		mockey.Mock((*Catalog).DeleteGrant).To(func(_ *Catalog, _ context.Context, _ string, _ *milvuspb.RoleEntity) error {
-			calls = append(calls, "DeleteGrant")
-			return nil
-		}).Build()
-
-		err := kc.DropRoleAndGrants(context.TODO(), "tenant1", "role1")
-		assert.Error(t, err)
-		assert.Equal(t, []string{"DropRole"}, calls)
-	})
-
-	mockey.PatchConvey("delete grant failure is returned (fail-hard)", t, func() {
-		kc := &Catalog{}
-		mockey.Mock((*Catalog).DropRole).To(func(_ *Catalog, _ context.Context, _, _ string) error {
-			return nil
-		}).Build()
-		mockey.Mock((*Catalog).DeleteGrant).To(func(_ *Catalog, _ context.Context, _ string, _ *milvuspb.RoleEntity) error {
-			return errors.New("delete grant failed")
-		}).Build()
-
-		err := kc.DropRoleAndGrants(context.TODO(), "tenant1", "role1")
-		assert.Error(t, err)
 	})
 }

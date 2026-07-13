@@ -1436,54 +1436,6 @@ func (_c *RootCoordCatalog_DropRole_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// DropRoleAndGrants provides a mock function with given fields: ctx, tenant, roleName
-func (_m *RootCoordCatalog) DropRoleAndGrants(ctx context.Context, tenant string, roleName string) error {
-	ret := _m.Called(ctx, tenant, roleName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DropRoleAndGrants")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
-		r0 = rf(ctx, tenant, roleName)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// RootCoordCatalog_DropRoleAndGrants_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropRoleAndGrants'
-type RootCoordCatalog_DropRoleAndGrants_Call struct {
-	*mock.Call
-}
-
-// DropRoleAndGrants is a helper method to define mock.On call
-//   - ctx context.Context
-//   - tenant string
-//   - roleName string
-func (_e *RootCoordCatalog_Expecter) DropRoleAndGrants(ctx interface{}, tenant interface{}, roleName interface{}) *RootCoordCatalog_DropRoleAndGrants_Call {
-	return &RootCoordCatalog_DropRoleAndGrants_Call{Call: _e.mock.On("DropRoleAndGrants", ctx, tenant, roleName)}
-}
-
-func (_c *RootCoordCatalog_DropRoleAndGrants_Call) Run(run func(ctx context.Context, tenant string, roleName string)) *RootCoordCatalog_DropRoleAndGrants_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string))
-	})
-	return _c
-}
-
-func (_c *RootCoordCatalog_DropRoleAndGrants_Call) Return(_a0 error) *RootCoordCatalog_DropRoleAndGrants_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *RootCoordCatalog_DropRoleAndGrants_Call) RunAndReturn(run func(context.Context, string, string) error) *RootCoordCatalog_DropRoleAndGrants_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetCollectionByID provides a mock function with given fields: ctx, dbID, ts, collectionID
 func (_m *RootCoordCatalog) GetCollectionByID(ctx context.Context, dbID int64, ts uint64, collectionID int64) (*model.Collection, error) {
 	ret := _m.Called(ctx, dbID, ts, collectionID)

@@ -134,8 +134,6 @@ type IMetaTable interface {
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
 	AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
 	DropRole(ctx context.Context, tenant string, roleName string) error
-	// DropRoleWithGrants drops the role and then all grants of the role.
-	DropRoleWithGrants(ctx context.Context, tenant string, roleName string) error
 	OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
 	SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
 	SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
@@ -1962,14 +1960,6 @@ func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName strin
 	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.DropRole(ctx, tenant, roleName)
-}
-
-// DropRoleWithGrants drops the role and then all grants of the role.
-func (mt *MetaTable) DropRoleWithGrants(ctx context.Context, tenant string, roleName string) error {
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
-
-	return mt.catalog.DropRoleAndGrants(ctx, tenant, roleName)
 }
 
 func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {

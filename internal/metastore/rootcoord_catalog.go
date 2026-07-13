@@ -127,9 +127,6 @@ type RootCoordCatalog interface {
 	// implementations while in atomic implementations it takes effect
 	// atomically with the collection write.
 	AlterCollectionAndMigrateGrants(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool, dbChanged bool, tenant string) error
-	// DropRoleAndGrants drops the role and then deletes all grants of the
-	// role. Both steps are fail-hard: the first error is returned.
-	DropRoleAndGrants(ctx context.Context, tenant string, roleName string) error
 
 	Close()
 }

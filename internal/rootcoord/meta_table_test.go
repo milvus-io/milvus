@@ -548,36 +548,6 @@ func TestRbacDropRole(t *testing.T) {
 	require.ErrorIs(t, err, errRoleNotExists)
 }
 
-func TestRbacDropRoleWithGrants(t *testing.T) {
-	mt := generateMetaTable(t)
-
-	roleName := "role" + funcutil.RandomString(10)
-	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName})
-	require.NoError(t, err)
-
-	err = mt.OperatePrivilege(context.TODO(), util.DefaultTenant, &milvuspb.GrantEntity{
-		Grantor: &milvuspb.GrantorEntity{
-			User:      &milvuspb.UserEntity{Name: "user_name"},
-			Privilege: &milvuspb.PrivilegeEntity{Name: "privilege_name"},
-		},
-		Role:       &milvuspb.RoleEntity{Name: roleName},
-		Object:     &milvuspb.ObjectEntity{Name: "obj_name"},
-		ObjectName: "obj_name",
-	}, milvuspb.OperatePrivilegeType_Grant)
-	require.NoError(t, err)
-
-	err = mt.DropRoleWithGrants(context.TODO(), util.DefaultTenant, roleName)
-	require.NoError(t, err)
-
-	_, err = mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
-	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
-	grants, err := mt.SelectGrant(context.TODO(), util.DefaultTenant, &milvuspb.GrantEntity{
-		Role: &milvuspb.RoleEntity{Name: roleName},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, 0, len(grants))
-}
-
 func TestRbacOperateRole(t *testing.T) {
 	mt := generateMetaTable(t)
 	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
