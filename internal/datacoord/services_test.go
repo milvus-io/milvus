@@ -2363,36 +2363,42 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 }
 
 func TestGetSegmentInfo_WithCompaction(t *testing.T) {
-	t.Run("use handler.GetDeltaLogFromCompactTo", func(t *testing.T) {
+	setupParent := func(t *testing.T, collID, partID, parentID int64) *Server {
+		t.Helper()
+
 		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
+		t.Cleanup(func() {
+			closeTestServer(t, svr)
+		})
 
-		collID := int64(100)
-		partID := int64(10)
-
-		// Add collection
 		svr.meta.AddCollection(&collectionInfo{
 			ID:         collID,
 			Partitions: []int64{partID},
 		})
-
-		// Create parent segment
-		parent := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           1000,
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           parentID,
 			CollectionID: collID,
 			PartitionID:  partID,
 			State:        commonpb.SegmentState_Dropped,
-		})
-		err := svr.meta.AddSegment(context.TODO(), parent)
-		require.NoError(t, err)
+		})))
+		return svr
+	}
+
+	t.Run("legacy child appends delta logs", func(t *testing.T) {
+		collID := int64(100)
+		partID := int64(10)
+		parentID := int64(1000)
+		childID := int64(1001)
+
+		svr := setupParent(t, collID, partID, parentID)
 
 		// Create child segment with delta logs
 		child := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             1001,
+			ID:             childID,
 			CollectionID:   collID,
 			PartitionID:    partID,
 			State:          commonpb.SegmentState_Flushed,
-			CompactionFrom: []int64{1000},
+			CompactionFrom: []int64{parentID},
 			NumOfRows:      100,
 			Deltalogs: []*datapb.FieldBinlog{
 				{
@@ -2403,12 +2409,11 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 				},
 			},
 		})
-		err = svr.meta.AddSegment(context.TODO(), child)
-		require.NoError(t, err)
+		require.NoError(t, svr.meta.AddSegment(context.Background(), child))
 
 		// Test GetSegmentInfo
 		req := &datapb.GetSegmentInfoRequest{
-			SegmentIDs:       []int64{1000},
+			SegmentIDs:       []int64{parentID},
 			IncludeUnHealthy: true,
 		}
 
@@ -2419,8 +2424,91 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 
 		// Verify delta logs were merged from child
 		info := resp.GetInfos()[0]
-		assert.Equal(t, int64(1000), info.GetID())
+		assert.Equal(t, parentID, info.GetID())
 		assert.NotEmpty(t, info.GetDeltalogs())
+	})
+
+	t.Run("v3 child returns child manifest path", func(t *testing.T) {
+		collID := int64(101)
+		partID := int64(11)
+		parentID := int64(1100)
+		childID := int64(1101)
+		childManifest := `{"ver":3,"base_path":"files/insert_log/101/11/1101"}`
+
+		svr := setupParent(t, collID, partID, parentID)
+
+		child := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             childID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{parentID},
+			ManifestPath:   childManifest,
+			Deltalogs: []*datapb.FieldBinlog{{
+				FieldID: 0,
+				Binlogs: []*datapb.Binlog{{
+					LogID:      9001,
+					EntriesNum: 7,
+				}},
+			}},
+		})
+		require.NoError(t, svr.meta.AddSegment(context.Background(), child))
+
+		resp, err := svr.GetSegmentInfo(context.Background(), &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{parentID},
+			IncludeUnHealthy: true,
+		})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetStatus()), resp.GetStatus().GetReason())
+		require.Len(t, resp.GetInfos(), 1)
+		assert.Equal(t, []string{childManifest}, resp.GetInfos()[0].GetChildManifestPaths())
+		assert.Empty(t, resp.GetInfos()[0].GetDeltalogs())
+	})
+
+	t.Run("mixed child chain returns legacy deltalogs and v3 manifests", func(t *testing.T) {
+		collID := int64(102)
+		partID := int64(12)
+		parentID := int64(1200)
+		legacyChildID := int64(1201)
+		v3GrandChildID := int64(1202)
+		grandChildManifest := `{"ver":5,"base_path":"files/insert_log/102/12/1202"}`
+
+		svr := setupParent(t, collID, partID, parentID)
+
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             legacyChildID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Dropped,
+			CompactionFrom: []int64{parentID},
+			Deltalogs: []*datapb.FieldBinlog{{
+				FieldID: 0,
+				Binlogs: []*datapb.Binlog{{
+					LogID:      7001,
+					LogSize:    100,
+					EntriesNum: 3,
+				}},
+			}},
+		})))
+
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             v3GrandChildID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{legacyChildID},
+			ManifestPath:   grandChildManifest,
+		})))
+
+		resp, err := svr.GetSegmentInfo(context.Background(), &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{parentID},
+			IncludeUnHealthy: true,
+		})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetStatus()), resp.GetStatus().GetReason())
+		require.Len(t, resp.GetInfos(), 1)
+		assert.Len(t, resp.GetInfos()[0].GetDeltalogs(), 1)
+		assert.Equal(t, []string{grandChildManifest}, resp.GetInfos()[0].GetChildManifestPaths())
 	})
 }
 

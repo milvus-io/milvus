@@ -192,6 +192,11 @@ func TestDDLCallbacksAlterCollectionAddFieldVersionGateDoesNotReserveAnalyzerFil
 		resourceID: {Id: resourceID, Name: "dict", Path: "dict.txt"},
 	}
 	meta.fileResourceRefCnt = map[int64]int{}
+	mixCoord := core.mixCoord.(*mocks.MixCoord)
+	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+		Status:      merr.Success(),
+		ResourceIds: []int64{resourceID},
+	}, nil).Maybe()
 
 	fieldSchema := &schemapb.FieldSchema{
 		Name:     fieldName,
@@ -212,6 +217,7 @@ func TestDDLCallbacksAlterCollectionAddFieldVersionGateDoesNotReserveAnalyzerFil
 		Schema:         schemaBytes,
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrServiceUnavailable)
+	mixCoord.AssertNotCalled(t, "ValidateAnalyzer", mock.Anything, mock.Anything)
 	require.Zero(t, meta.fileResourceRefCnt[resourceID])
 
 	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
