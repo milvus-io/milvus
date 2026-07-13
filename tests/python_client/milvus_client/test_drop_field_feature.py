@@ -2008,10 +2008,6 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="Known issue: https://github.com/milvus-io/milvus/issues/50484",
-        strict=False,
-    )
     def test_drop_then_add_same_name_analyzer_field(self):
         """
         TC-L1-14: Drop analyzer field and re-add same-name field with different analyzer params.
