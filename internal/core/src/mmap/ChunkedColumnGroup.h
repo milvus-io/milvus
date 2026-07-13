@@ -262,6 +262,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     fn(true, i);
                 }
             }
+            return;
         }
         // nullable:
         if (count == 0) {

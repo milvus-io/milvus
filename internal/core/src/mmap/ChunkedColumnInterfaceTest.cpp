@@ -546,6 +546,37 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
         std::exception);
 }
 
+TYPED_TEST(ChunkedColumnInterfaceTest, RawFormatScanDoesNotSupportUnaryRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(3);
+    auto options = ChunkedColumnInterface::ScanOptions::ForUnary(
+        0, 5, proto::plan::OpType::Equal, value);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           RawFormatScanDoesNotSupportBinaryRangeRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue lower;
+    proto::plan::GenericValue upper;
+    lower.set_int64_val(1);
+    upper.set_int64_val(10);
+    auto options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
+        0, 5, lower, true, upper, true);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
+}
+
 TYPED_TEST(ChunkedColumnInterfaceTest,
            FixedWidthDataScanReturnsNaturalChunkBatches) {
     ColumnSpec spec{{3, 2},

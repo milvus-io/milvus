@@ -175,6 +175,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                     fn(true, i);
                 }
             }
+            return;
         }
         // nullable:
         if (offsets == nullptr) {
