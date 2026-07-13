@@ -224,9 +224,15 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-	// udpates.Schema is nil for a properties-only alter (the gate no-ops on nil) and, for a
-	// TTL-driven alter, is the current schema with only properties changed (the gate passes).
-	return c.broadcastSchemaChange(ctx, broadcaster, coll, udpates.Schema, msg)
+	// This callback only ever changes collection-level metadata (properties, external
+	// source/spec, or the ttl-field property) -- never the field/function graph. The structural
+	// gate must therefore validate a FULL candidate schema, not udpates.Schema: for an external
+	// source/spec refresh udpates.Schema is a partial snapshot carrying only those two fields,
+	// which the gate would otherwise read as "every field dropped" and reject (breaking external
+	// collection refresh). Pass the current schema so the gate diffs full-vs-full (no field or
+	// function change); the wire message still carries udpates.Schema for the consumer to apply
+	// by mask, and the cluster-version gate inside still runs.
+	return c.broadcastSchemaChange(ctx, broadcaster, coll, coll.ToCollectionSchemaPB(), msg)
 }
 
 func validateNamespaceModeImmutable(properties []*commonpb.KeyValuePair, deleteKeys []string) error {

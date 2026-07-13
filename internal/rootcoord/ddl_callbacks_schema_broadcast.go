@@ -44,6 +44,13 @@ func (c *Core) broadcastSchemaChange(
 	newSchema *schemapb.CollectionSchema,
 	msg message.BroadcastMutableMessage,
 ) error {
+	// Environment precondition: refuse the change outright while the cluster still has a
+	// pre-3.0 component (e.g. mid rolling upgrade) that cannot honor the write/read/DDL
+	// protocol the change relies on. Checked before the structural gate so a mixed-version
+	// cluster is rejected regardless of what the schema edit is.
+	if err := c.checkClusterVersionForSchemaChange(ctx); err != nil {
+		return err
+	}
 	if err := schemautil.ValidateSchemaEvolution(oldColl.ToCollectionSchemaPB(), newSchema); err != nil {
 		return err
 	}

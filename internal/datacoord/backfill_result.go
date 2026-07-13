@@ -32,9 +32,15 @@ import (
 //
 // Reference: spark-milvus/docs/backfill-result-json-format.md
 type BackfillResult struct {
-	Success       bool                       `json:"success"`
-	CollectionID  int64                      `json:"collectionId"`
-	PartitionID   int64                      `json:"partitionId"`
+	Success      bool  `json:"success"`
+	CollectionID int64 `json:"collectionId"`
+	PartitionID  int64 `json:"partitionId"`
+	// SchemaVersion is the collection schema version the Spark job read when it computed this
+	// result. Commit refuses the result when it no longer matches the collection's current schema
+	// version -- the schema changed while the job was in flight, so the result is stale. Zero
+	// means the producing Spark build does not stamp it yet; the fence is skipped in that case so
+	// existing jobs keep working, and can tighten to reject a missing stamp once Spark always sets it.
+	SchemaVersion int32                      `json:"schemaVersion,omitempty"`
 	NewFieldNames []string                   `json:"newFieldNames"`
 	Segments      map[string]BackfillSegment `json:"segments"` // key = segmentID as decimal string
 }

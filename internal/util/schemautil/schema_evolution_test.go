@@ -80,10 +80,13 @@ func TestValidateSchemaEvolution_Allowed(t *testing.T) {
 	def.Fields = append(def.Fields, &schemapb.FieldSchema{FieldID: 201, Name: "d", DataType: schemapb.DataType_Int64, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}}})
 	assert.NoError(t, ValidateSchemaEvolution(base(), def))
 
-	// add a function with a brand-new output field
+	// add a function whose input AND output fields are both brand new (existing rows carry
+	// neither, so nothing is silently left un-computed)
 	addFn := base()
-	addFn.Fields = append(addFn.Fields, &schemapb.FieldSchema{FieldID: 202, Name: "emb2", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true})
-	addFn.Functions = append(addFn.Functions, &schemapb.FunctionSchema{Id: 2, Name: "bm25b", Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{102}, OutputFieldIds: []int64{202}})
+	addFn.Fields = append(addFn.Fields,
+		&schemapb.FieldSchema{FieldID: 204, Name: "txt2", DataType: schemapb.DataType_VarChar, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "100"}}},
+		&schemapb.FieldSchema{FieldID: 202, Name: "emb2", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true})
+	addFn.Functions = append(addFn.Functions, &schemapb.FunctionSchema{Id: 2, Name: "bm25b", Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{204}, OutputFieldIds: []int64{202}})
 	assert.NoError(t, ValidateSchemaEvolution(base(), addFn))
 
 	// drop a plain field
@@ -169,6 +172,14 @@ func TestValidateSchemaEvolution_RejectsInPlace(t *testing.T) {
 	changeFn := base()
 	changeFn.Functions = []*schemapb.FunctionSchema{{Id: 1, Name: "bm25", Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{104}, OutputFieldIds: []int64{103}}}
 	assert.Error(t, ValidateSchemaEvolution(base(), changeFn))
+
+	// add a function onto an EXISTING input field (txt id=102): rejected -- the field's existing
+	// rows cannot be given the function output online, so its output would be silently incomplete.
+	// The output field is brand new, so the rejection is specifically due to the pre-existing input.
+	addFnOldInput := base()
+	addFnOldInput.Fields = append(addFnOldInput.Fields, &schemapb.FieldSchema{FieldID: 205, Name: "emb3", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true})
+	addFnOldInput.Functions = append(addFnOldInput.Functions, &schemapb.FunctionSchema{Id: 3, Name: "bm25c", Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{102}, OutputFieldIds: []int64{205}})
+	assert.Error(t, ValidateSchemaEvolution(base(), addFnOldInput))
 }
 
 func TestValidateSchemaEvolution_RejectsUnbackfillableAdd(t *testing.T) {
@@ -196,6 +207,58 @@ func TestValidateSchemaEvolution_RejectsGraphBreakingDrop(t *testing.T) {
 		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
 	}}
 	assert.Error(t, ValidateSchemaEvolution(single, dropField(cloneSchema(single), 101)), "drop the last vector field")
+}
+
+func TestValidateSchemaEvolution_RejectsInconsistentGraph(t *testing.T) {
+	// orphan function-output field: flagged IsFunctionOutput but no function produces it (the
+	// user cannot write it and nothing fills it -> permanently empty). This is the concrete
+	// AddCollectionField hole.
+	orphan := base()
+	orphan.Fields = append(orphan.Fields, &schemapb.FieldSchema{FieldID: 300, Name: "orphan", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true})
+	assert.Error(t, ValidateSchemaEvolution(base(), orphan), "orphan IsFunctionOutput field")
+
+	// a dynamic field while EnableDynamicField is off.
+	bogusDyn := base()
+	bogusDyn.Fields = append(bogusDyn.Fields, &schemapb.FieldSchema{FieldID: 301, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true})
+	assert.Error(t, ValidateSchemaEvolution(base(), bogusDyn), "dynamic field with dynamic disabled")
+
+	// a dynamic field with the wrong name.
+	badName := base()
+	badName.EnableDynamicField = true
+	badName.Fields = append(badName.Fields, &schemapb.FieldSchema{FieldID: 302, Name: "notmeta", DataType: schemapb.DataType_JSON, IsDynamic: true})
+	assert.Error(t, ValidateSchemaEvolution(base(), badName), "dynamic field not named $meta")
+
+	// a dynamic field with the wrong type.
+	badType := base()
+	badType.EnableDynamicField = true
+	badType.Fields = append(badType.Fields, &schemapb.FieldSchema{FieldID: 303, Name: common.MetaFieldName, DataType: schemapb.DataType_Int64, IsDynamic: true})
+	assert.Error(t, ValidateSchemaEvolution(base(), badType), "dynamic field not JSON")
+
+	// EnableDynamicField set but no $meta field present.
+	enabledNoMeta := base()
+	enabledNoMeta.EnableDynamicField = true
+	assert.Error(t, ValidateSchemaEvolution(base(), enabledNoMeta), "dynamic enabled without $meta")
+
+	// two dynamic fields.
+	twoDyn := base()
+	twoDyn.EnableDynamicField = true
+	twoDyn.Fields = append(twoDyn.Fields,
+		&schemapb.FieldSchema{FieldID: 306, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true},
+		&schemapb.FieldSchema{FieldID: 307, Name: "meta2", DataType: schemapb.DataType_JSON, IsDynamic: true})
+	assert.Error(t, ValidateSchemaEvolution(base(), twoDyn), "two dynamic fields")
+
+	// a newly-added function referencing a non-existent input field.
+	badInput := base()
+	badInput.Fields = append(badInput.Fields, &schemapb.FieldSchema{FieldID: 304, Name: "o2", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true})
+	badInput.Functions = append(badInput.Functions, &schemapb.FunctionSchema{Id: 9, Name: "bad", Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{9999}, OutputFieldIds: []int64{304}})
+	assert.Error(t, ValidateSchemaEvolution(base(), badInput), "function input field does not exist")
+
+	// two functions producing the same output field (input is brand new so it clears the
+	// input-must-be-new rule and the failure is specifically the shared output).
+	dupOut := base()
+	dupOut.Fields = append(dupOut.Fields, &schemapb.FieldSchema{FieldID: 305, Name: "in2", DataType: schemapb.DataType_VarChar, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "50"}}})
+	dupOut.Functions = append(dupOut.Functions, &schemapb.FunctionSchema{Id: 9, Name: "bad", Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{305}, OutputFieldIds: []int64{103}})
+	assert.Error(t, ValidateSchemaEvolution(base(), dupOut), "output field shared by two functions")
 }
 
 // cloneSchema returns a shallow structural copy sufficient for these tests (fresh field slice).

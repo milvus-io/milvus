@@ -41,18 +41,21 @@ import (
 // It rejects, deriving every rule from (oldSchema, newSchema):
 //   - in-place reinterpretation of a live field id: changed data/element type, changed
 //     nullability, a shrunk or removed max_length/max_capacity, a changed dim, or an
-//     existing field turned into (or out of) a function output;
+//     existing field turned into a function output;
 //   - an added field that cannot be backfilled into existing rows (not nullable, no default,
 //     and not a function output / dynamic field);
 //   - a drop that breaks the schema graph: primary / partition / clustering key, a system
 //     field, the last vector field, or a field still referenced by a surviving function;
 //   - an in-place change to a surviving function (its output was produced by the old
-//     model/params and cannot be reinterpreted).
+//     model/params and cannot be reinterpreted);
+//   - a newly-added function whose input field already existed: its existing rows cannot be
+//     given the function output online (there is no backfill yet), so its output would be
+//     silently incomplete; the input field must be added fresh alongside the function.
 //
-// It ALLOWS: adding a backfillable field or a function, dropping a field or a function
-// (including disabling the dynamic field, which is a safe drop of $meta), and growing a
-// bound. A dropped field id is never reused (max_field_id is monotonic), so a drop can never
-// silently reinterpret old data.
+// It ALLOWS: adding a backfillable field, adding a function whose input and output fields are
+// both brand new, dropping a field or a function (including disabling the dynamic field, which
+// is a safe drop of $meta), and growing a bound. A dropped field id is never reused
+// (max_field_id is monotonic), so a drop can never silently reinterpret old data.
 //
 // Note: proxy keeps its own richer request-level checks (limits, storage-version/compaction
 // prerequisites, "cannot alter if loaded", TTL-property references, API routing) as fast,
@@ -101,8 +104,18 @@ func ValidateSchemaEvolution(oldSchema, newSchema *schemapb.CollectionSchema) er
 		}
 	}
 
-	// (D) A surviving function must be byte-identical; dropping a function is fine.
-	return validateFunctionsUnchanged(oldSchema, newSchema)
+	// (D) A surviving function must be byte-identical; a newly-added function may reference only
+	// newly-added input fields (existing rows cannot be given its output online); dropping a
+	// function is fine.
+	if err := validateFunctions(oldSchema, newSchema, oldFields); err != nil {
+		return err
+	}
+
+	// (E) The resulting schema must be an internally consistent field/function graph. This is
+	// the backstop for entry points -- notably AddCollectionField -- that can otherwise persist
+	// a field with an inconsistent role (an orphan function-output field, a stray dynamic field)
+	// the proxy did not reject.
+	return validateSchemaGraph(newSchema)
 }
 
 func fieldsByID(schema *schemapb.CollectionSchema) map[int64]*schemapb.FieldSchema {
@@ -195,21 +208,112 @@ func validateDroppedField(f *schemapb.FieldSchema, newSchema *schemapb.Collectio
 	return nil
 }
 
-func validateFunctionsUnchanged(oldSchema, newSchema *schemapb.CollectionSchema) error {
-	newByID := make(map[int64]*schemapb.FunctionSchema)
-	for _, fn := range newSchema.GetFunctions() {
-		newByID[fn.GetId()] = fn
+// validateFunctions enforces two rules on the function set:
+//   - a surviving function (same id before and after) must be byte-identical: its existing
+//     output was produced by the old model/params and cannot be reinterpreted in place;
+//   - a newly-added function may reference only newly-added input fields. If its input field
+//     already existed, the collection may already hold rows for that field that the function
+//     was never run over, and there is no online backfill to fill their output -- so the new
+//     function's output would be silently incomplete on existing data. Requiring a brand-new
+//     input keeps it consistent: existing rows carry neither the input nor the output, and only
+//     rows written after the change carry both. Deriving this from the schema alone (an input
+//     that did not exist before) avoids querying row counts; it is intentionally conservative
+//     (it also rejects adding a function onto a pre-existing but empty field). Backfilling onto
+//     existing data is deferred to the online-backfill work.
+func validateFunctions(oldSchema, newSchema *schemapb.CollectionSchema, oldFields map[int64]*schemapb.FieldSchema) error {
+	oldFnByID := make(map[int64]*schemapb.FunctionSchema)
+	for _, fn := range oldSchema.GetFunctions() {
+		oldFnByID[fn.GetId()] = fn
 	}
-	for _, oldFn := range oldSchema.GetFunctions() {
-		newFn, ok := newByID[oldFn.GetId()]
-		if !ok {
-			continue // function dropped -- allowed
+	for _, newFn := range newSchema.GetFunctions() {
+		if oldFn, survived := oldFnByID[newFn.GetId()]; survived {
+			if !proto.Equal(oldFn, newFn) {
+				return merr.WrapErrParameterInvalidMsg(
+					"cannot alter function %q in place: its existing output was produced by the old model/params and cannot be reinterpreted; add a new function with a fresh output field, backfill it, then drop the old function", oldFn.GetName())
+			}
+			continue // surviving and unchanged -- allowed
 		}
-		if !proto.Equal(oldFn, newFn) {
-			return merr.WrapErrParameterInvalidMsg(
-				"cannot alter function %q in place: its existing output was produced by the old model/params and cannot be reinterpreted; add a new function with a fresh output field, backfill it, then drop the old function", oldFn.GetName())
+		// Newly-added function: every input field must be brand new.
+		for _, inID := range newFn.GetInputFieldIds() {
+			if pre, existed := oldFields[inID]; existed {
+				return merr.WrapErrParameterInvalidMsg(
+					"cannot add function %q onto existing field %q: its existing rows cannot be given the function output online (no backfill yet); add the input field together with the function as new, or define the function at collection creation",
+					newFn.GetName(), pre.GetName())
+			}
 		}
 	}
+	return nil
+}
+
+// validateSchemaGraph checks that schema is an internally consistent field/function graph. These
+// are invariants every well-formed schema already holds (create-time validation enforces them);
+// enforcing them at the admission gate closes the entry points that can otherwise persist an
+// inconsistent schema the proxy did not vet -- most concretely AddCollectionField, which will
+// happily store a field carrying IsFunctionOutput or IsDynamic with nothing to back it. It checks:
+//   - every function input / output field id exists in the schema;
+//   - no field is the output of more than one function;
+//   - a field marked IsFunctionOutput is actually produced by some function (no orphan output
+//     field, which the user cannot write and no function fills, so it stays permanently empty);
+//   - the dynamic field is unique, named $meta, JSON typed, and present exactly when
+//     EnableDynamicField is set.
+//
+// It deliberately does NOT flag a function-output field left un-marked (the reverse direction):
+// whether the un-bypassable pre-broadcast paths always stamp IsFunctionOutput on the new output
+// field is not guaranteed here, and rejecting that would risk a false positive; the orphan
+// direction above is the one AddCollectionField can actually reach.
+func validateSchemaGraph(schema *schemapb.CollectionSchema) error {
+	allFields := fieldsByID(schema)
+	outputOwner := make(map[int64]string)
+	for _, fn := range schema.GetFunctions() {
+		for _, id := range fn.GetInputFieldIds() {
+			if _, ok := allFields[id]; !ok {
+				return merr.WrapErrParameterInvalidMsg("function %q references a non-existent input field id %d", fn.GetName(), id)
+			}
+		}
+		for _, id := range fn.GetOutputFieldIds() {
+			if _, ok := allFields[id]; !ok {
+				return merr.WrapErrParameterInvalidMsg("function %q references a non-existent output field id %d", fn.GetName(), id)
+			}
+			if owner, dup := outputOwner[id]; dup {
+				return merr.WrapErrParameterInvalidMsg("field id %d is an output of more than one function (%q and %q)", id, owner, fn.GetName())
+			}
+			outputOwner[id] = fn.GetName()
+		}
+	}
+
+	for _, f := range schema.GetFields() {
+		if f.GetIsFunctionOutput() {
+			if _, produced := outputOwner[f.GetFieldID()]; !produced {
+				return merr.WrapErrParameterInvalidMsg(
+					"field %q is marked as a function output but no function produces it", f.GetName())
+			}
+		}
+	}
+
+	var dynamic *schemapb.FieldSchema
+	for _, f := range schema.GetFields() {
+		if !f.GetIsDynamic() {
+			continue
+		}
+		if dynamic != nil {
+			return merr.WrapErrParameterInvalidMsg("more than one dynamic field: %q and %q", dynamic.GetName(), f.GetName())
+		}
+		dynamic = f
+	}
+	if dynamic != nil {
+		if !schema.GetEnableDynamicField() {
+			return merr.WrapErrParameterInvalidMsg("field %q is marked dynamic but the collection has the dynamic field disabled", dynamic.GetName())
+		}
+		if dynamic.GetName() != common.MetaFieldName {
+			return merr.WrapErrParameterInvalidMsg("the dynamic field must be named %q, got %q", common.MetaFieldName, dynamic.GetName())
+		}
+		if dynamic.GetDataType() != schemapb.DataType_JSON {
+			return merr.WrapErrParameterInvalidMsg("the dynamic field %q must be JSON typed, got %s", dynamic.GetName(), dynamic.GetDataType())
+		}
+	} else if schema.GetEnableDynamicField() {
+		return merr.WrapErrParameterInvalidMsg("the collection has the dynamic field enabled but no %s field", common.MetaFieldName)
+	}
+
 	return nil
 }
 

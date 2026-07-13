@@ -1944,6 +1944,8 @@ type rootCoordConfig struct {
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
 	DefaultDBProperties         ParamItem `refreshable:"false"`
+
+	EnableSchemaChangeVersionGate ParamItem `refreshable:"true"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -2035,6 +2037,18 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.DefaultDBProperties.Init(base.mgr)
+
+	p.EnableSchemaChangeVersionGate = ParamItem{
+		Key:          "rootCoord.enableSchemaChangeVersionGate",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Refuse online schema-change DDL (add/drop field, add/drop/alter function, enable/disable dynamic field)
+while any live component is below version 3.0, which is the minimum version that understands the online
+schema-change protocol. This guards against a rolling upgrade in which a still-running 2.x node would receive
+a schema-changing write it cannot interpret safely. Set to false only to force a change through in an emergency.`,
+		Export: true,
+	}
+	p.EnableSchemaChangeVersionGate.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

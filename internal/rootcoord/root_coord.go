@@ -164,6 +164,11 @@ type Core struct {
 	startOnce sync.Once
 	session   sessionutil.SessionInterface
 
+	// sessionLister lists live component sessions of a given role from the registry. It is
+	// wired only on the real init path (SetSession); unit tests that build Core directly leave
+	// it nil, which disables the schema-change version gate (there is no cluster to inspect).
+	sessionLister func(ctx context.Context, role string) (map[string]*sessionutil.Session, error)
+
 	factory dependency.Factory
 
 	activateFunc func() error
@@ -362,6 +367,13 @@ func (c *Core) SetSession(session sessionutil.SessionInterface) error {
 	c.session = session
 	if c.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
+	}
+	// Wire the schema-change version gate's session lister to the real registry. Only this
+	// production path sets it; Cores built directly in unit tests leave it nil and the gate
+	// becomes a no-op.
+	c.sessionLister = func(ctx context.Context, role string) (map[string]*sessionutil.Session, error) {
+		sessions, _, err := session.GetSessions(ctx, role)
+		return sessions, err
 	}
 	return nil
 }

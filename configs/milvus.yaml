@@ -340,6 +340,11 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
+  # Refuse online schema-change DDL (add/drop field, add/drop/alter function, enable/disable dynamic field)
+  # while any live component is below version 3.0, the minimum version that understands the online
+  # schema-change protocol. Guards a rolling upgrade in which a still-running 2.x node would receive a
+  # schema-changing write it cannot interpret safely. Set to false only to force a change through in an emergency.
+  enableSchemaChangeVersionGate: true
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord
   grpc:

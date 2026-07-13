@@ -74,6 +74,21 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
+	// Schema-version fence: refuse a result computed against a schema that is no longer current
+	// (the schema changed while the Spark job was in flight -- e.g. the function was dropped and
+	// re-added). This is a terminal, non-retriable error -- the same stale result can never
+	// become valid; it must be recomputed against the current schema. It is skipped when the
+	// result carries no version (SchemaVersion == 0): Spark does not stamp it yet, and rejecting
+	// unstamped results would break every backfill until that ships. Once Spark always stamps it
+	// this can tighten to reject the missing-stamp case too.
+	if isStaleBackfillSchema(result.SchemaVersion, coll.GetSchema().GetVersion()) {
+		staleErr := merr.WrapErrParameterInvalidMsg(
+			"stale backfill result: computed against schema version %d but collection is now at version %d; recompute against the current schema",
+			result.SchemaVersion, coll.GetSchema().GetVersion())
+		log.Warn(ctx, "CommitBackfillResult rejected a stale result", mlog.Err(staleErr))
+		return &datapb.CommitBackfillResultResponse{Status: merr.Status(staleErr)}, nil
+	}
+
 	// Split items across multiple broadcast messages so a single
 	// BatchUpdateManifestMessageBody never exceeds the broker's message size
 	// limit (Pulsar defaults to 5MiB). Each batch acquires its own broadcaster
@@ -105,12 +120,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		mlog.Int32("committed", committed),
 		mlog.Int32("failed", failed))
 
-	// Top-level Success unless every broadcast failed -- partial failures are
-	// surfaced through per-segment statuses.
-	respStatus := merr.Success()
-	if committed == 0 && lastErr != nil {
-		respStatus = merr.Status(lastErr)
-	}
+	respStatus := backfillCommitStatus(lastErr != nil, failed, total)
 
 	return &datapb.CommitBackfillResultResponse{
 		Status:            respStatus,
@@ -361,6 +371,36 @@ func inferKind(entry *BackfillSegment) string {
 		return "v2"
 	}
 	return "v3"
+}
+
+// backfillCommitStatus decides the top-level status of a backfill commit.
+//
+// A broadcast failure (a batch that never reached the WAL: broker unavailable / message too
+// large / timeout) leaves its segments un-committed for a transient reason. ANY such failure --
+// not only the all-batches-failed case -- is surfaced as a retriable top-level error, so the
+// caller re-submits instead of trusting a 200 while some segments silently never got backfilled.
+// The commit is idempotent (V3 monotonic guard, V2 in-place replace), so segments earlier
+// batches already committed no-op on resubmit.
+//
+// Pre-validation rejections (segment gone, wrong storage version, or an already-applied manifest
+// version) carry no broadcastFailed: several are permanent, and one is the idempotent "already
+// committed" case, so they must NOT flip the top level -- keying off `failed > 0` instead would
+// make a fully-applied resubmit loop forever. They remain per-segment diagnostics in the response.
+func backfillCommitStatus(broadcastFailed bool, failed, total int32) *commonpb.Status {
+	if broadcastFailed {
+		return merr.Status(merr.WrapErrServiceUnavailableMsg(
+			"backfill partially committed: %d of %d segments failed to broadcast; resubmit the same result to retry (commit is idempotent)",
+			failed, total))
+	}
+	return merr.Success()
+}
+
+// isStaleBackfillSchema reports whether a backfill result was computed against a schema version
+// that no longer matches the collection's current one. A zero resultVersion means the producing
+// Spark build does not stamp the version yet -- the fence is skipped (treated as not stale) so
+// existing jobs keep working during the rollout.
+func isStaleBackfillSchema(resultVersion, currentVersion int32) bool {
+	return resultVersion != 0 && resultVersion != currentVersion
 }
 
 func countStatuses(statuses []*datapb.CommitBackfillResultSegmentStatus) (committed, failed int32) {
