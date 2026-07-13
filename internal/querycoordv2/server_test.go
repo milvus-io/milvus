@@ -1258,6 +1258,33 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		assert.ErrorContains(t, err, "not serviceable")
 	})
 
+	t.Run("leader reported non-serviceable returns error even when data ready", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+			42: {ID: 42, CollectionID: collectionID},
+		})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: false},
+				Segments: map[int64]*querypb.SegmentDist{42: {NodeID: 10}},
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "reported not serviceable")
+	})
+
 	t.Run("all serviceable returns nil", func(t *testing.T) {
 		s := newServer()
 		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
