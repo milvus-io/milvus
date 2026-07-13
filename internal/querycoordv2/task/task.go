@@ -93,6 +93,7 @@ type Task interface {
 	// fail the task as we encounter some error so be unable to continue,
 	// this error will be recorded for response to user requests
 	Fail(err error)
+	Done() <-chan struct{}
 	Wait() error
 	Actions() []Action
 	Step() int
@@ -259,6 +260,10 @@ func (task *baseTask) Fail(err error) {
 		task.err = err
 		close(task.doneCh)
 	}
+}
+
+func (task *baseTask) Done() <-chan struct{} {
+	return task.doneCh
 }
 
 func (task *baseTask) Wait() error {
