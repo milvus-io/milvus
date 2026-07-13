@@ -570,7 +570,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     ASSERT_FALSE(batch.values.empty());
     EXPECT_EQ(batch.values.encoding,
               ChunkedColumnInterface::ValueEncoding::FixedWidth);
-    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 1);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 0);
     EXPECT_EQ(batch.values.data_as<int32_t>()[1], 2);
     EXPECT_FALSE(batch.validity.IsValid(0));
     EXPECT_TRUE(batch.validity.IsValid(1));
@@ -578,7 +578,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     ASSERT_TRUE(cursor->Next(&batch));
     EXPECT_EQ(batch.row_id_start, 3);
     EXPECT_EQ(batch.size, 2);
-    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 3);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 0);
     EXPECT_EQ(batch.values.data_as<int32_t>()[1], 4);
     EXPECT_FALSE(batch.validity.IsValid(0));
     EXPECT_TRUE(batch.validity.IsValid(1));

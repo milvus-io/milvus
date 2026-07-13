@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -76,7 +77,7 @@ class FixedWidthDataScanCursor final
             const auto rows_to_return =
                 std::min<int64_t>(rows_left_in_chunk, rows_left_in_scan);
 
-            auto owner = std::make_shared<PinWrapper<SpanBase>>(span);
+            std::shared_ptr<void> owner;
             if (projection_ != ChunkedColumnInterface::ScanProjection::NoData) {
                 out->values.encoding =
                     ChunkedColumnInterface::ValueEncoding::FixedWidth;
@@ -87,10 +88,19 @@ class FixedWidthDataScanCursor final
                         : value_kind_;
                 out->values.physical_type = data_type_;
                 out->values.logical_type = data_type_;
-                out->values.data = span.get().data();
-                out->values.offset = current_chunk_offset_;
                 out->values.size = rows_to_return;
                 out->values.byte_width = span.get().element_sizeof();
+                if (span.get().valid_data() != nullptr) {
+                    auto dense_owner = std::make_shared<NullableValuesOwner>(
+                        span, current_chunk_offset_, rows_to_return);
+                    out->values.data = dense_owner->values.data();
+                    out->values.offset = 0;
+                    owner = std::move(dense_owner);
+                } else {
+                    out->values.data = span.get().data();
+                    out->values.offset = current_chunk_offset_;
+                    owner = std::make_shared<PinWrapper<SpanBase>>(span);
+                }
             }
             out->validity.size = rows_to_return;
             out->validity.nullable = column_->IsNullable();
@@ -100,6 +110,9 @@ class FixedWidthDataScanCursor final
                 out->validity.data = span.get().valid_data();
                 out->validity.offset = current_chunk_offset_;
                 out->validity.all_valid = false;
+            }
+            if (owner == nullptr) {
+                owner = std::make_shared<PinWrapper<SpanBase>>(span);
             }
             out->owner = std::move(owner);
             out->row_id_start = scan_pos_;
@@ -113,6 +126,33 @@ class FixedWidthDataScanCursor final
     }
 
  private:
+    struct NullableValuesOwner {
+        NullableValuesOwner(PinWrapper<SpanBase>& span,
+                            int64_t logical_offset,
+                            int64_t row_count)
+            : span(span), values(row_count * span.get().element_sizeof(), 0) {
+            const auto* validity = span.get().valid_data();
+            const auto* source = static_cast<const char*>(span.get().data());
+            const auto byte_width = span.get().element_sizeof();
+            int64_t physical_offset = 0;
+            for (int64_t i = 0; i < logical_offset; ++i) {
+                physical_offset += validity[i] ? 1 : 0;
+            }
+            for (int64_t i = 0; i < row_count; ++i) {
+                if (!validity[logical_offset + i]) {
+                    continue;
+                }
+                std::memcpy(values.data() + i * byte_width,
+                            source + physical_offset * byte_width,
+                            byte_width);
+                ++physical_offset;
+            }
+        }
+
+        PinWrapper<SpanBase> span;
+        std::vector<char> values;
+    };
+
     PinWrapper<SpanBase>&
     GetCurrentSpan() {
         if (!cached_span_.has_value() ||
