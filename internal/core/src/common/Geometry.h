@@ -87,6 +87,17 @@ class Geometry {
     // already owns before taking a clone of `other`, so the two instances
     // never share a raw GEOSGeometry* (which would double-free on
     // destruction).
+    //
+    // CONSTRAINT: copying drives GEOS through the SOURCE instance's context
+    // (GEOSGeom_clone_r(other.ctx_, ...)) and the copy keeps that context.
+    // Therefore a cache-owned Geometry must never be copied from a query
+    // thread: (1) the cache's shared context is not thread-safe, so the clone
+    // call itself is a data race, and (2) a copy that outlives the cache's
+    // shared_ptr holds a dangling context. Query threads must use Clone(ctx)
+    // with their own (thread-local) context instead. Implicit copies cannot
+    // simply be deleted: generic container code (FieldDataImpl's std::copy_n)
+    // copies Geometry values on the single-threaded ingest path, which is the
+    // legitimate use these operators exist for.
     Geometry&
     operator=(const Geometry& other) {
         if (this != &other) {
@@ -105,7 +116,8 @@ class Geometry {
         return *this;
     }
 
-    // Copy constructor with context (for cloning)
+    // Copy constructor (deep clone). Same CONSTRAINT as copy assignment above:
+    // never copy a cache-owned Geometry from a query thread; use Clone(ctx).
     Geometry(const Geometry& other) : ctx_(other.ctx_) {
         if (other.IsValid()) {
             GEOSGeometry* cloned =
@@ -115,6 +127,24 @@ class Geometry {
         } else {
             geometry_ = nullptr;
         }
+    }
+
+    // Explicit deep clone into the CALLER's context. All GEOS work runs
+    // through `ctx`, never through this instance's context, and the returned
+    // Geometry is bound to `ctx` -- this is the only safe way to duplicate a
+    // cache-owned Geometry from a query thread (hold the cache read lock and
+    // pass GetThreadLocalGEOSContext()), and the clone stays valid after the
+    // cache is gone.
+    Geometry
+    Clone(GEOSContextHandle_t ctx) const {
+        Geometry cloned;
+        cloned.ctx_ = ctx;
+        if (IsValid()) {
+            GEOSGeometry* geom = GEOSGeom_clone_r(ctx, geometry_);
+            AssertInfo(geom != nullptr, "Failed to clone geometry");
+            cloned.geometry_ = geom;
+        }
+        return cloned;
     }
 
     // Move constructor (transfers ownership, no GEOS allocation). Being
