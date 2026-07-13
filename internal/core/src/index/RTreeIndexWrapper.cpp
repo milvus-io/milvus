@@ -64,11 +64,18 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     // Index a deterministic placeholder MBR for this row without dropping it.
     // The R-tree is only a coarse filter (the exact predicate refines it out),
-    // so a placeholder is harmless -- but dropping the row would permanently
-    // desynchronize the index row count from the segment row count, which then
-    // trips the coarse-bitmap bounds guard in EvalForIndexSegment on EVERY
-    // subsequent geometry query against this segment. This mirrors the
-    // empty-geometry handling below.
+    // so a placeholder never yields a wrong result -- but dropping the row
+    // would permanently desynchronize the index row count from the segment row
+    // count, which then trips the coarse-bitmap bounds guard in
+    // EvalForIndexSegment on EVERY subsequent geometry query against this
+    // segment. This mirrors the empty-geometry handling below.
+    //
+    // Tradeoff: Point(0, 0) is a legal coordinate (Null Island), so any query
+    // whose bounding box covers the origin pulls every placeholder row in this
+    // segment into the candidate set and pays exact refinement for it (which
+    // then discards the row). World-scale bbox queries almost always cover the
+    // origin, so segments with many empty/corrupt geometries make such queries
+    // proportionally more expensive. Correctness is unaffected.
     auto index_placeholder_mbr = [&]() {
         Value val(Box(Point(0, 0), Point(0, 0)), row_offset);
         values_.push_back(val);
@@ -306,6 +313,12 @@ RTreeIndexWrapper::query_candidates(proto::plan::GISFunctionFilterExpr_GISOp op,
     // Equals would be a false negative versus the un-indexed data path, where
     // GEOSEquals(empty, empty) is true. So for Equals, fall back to the full
     // candidate set and let exact refinement keep only the true matches.
+    //
+    // NOTE: this fallback is an INTENTIONAL full scan. A single
+    // ST_Equals(field, 'POLYGON EMPTY') degenerates into an exact-refinement
+    // pass over every indexed row of the segment. That cost is accepted to
+    // preserve correctness; do not "optimize" the branch away without an
+    // alternative way to find placeholder-MBR rows.
     double minX, minY, maxX, maxY;
     if (!get_bounding_box(query_geom, ctx, minX, minY, maxX, maxY)) {
         if (op == proto::plan::GISFunctionFilterExpr_GISOp_Equals) {
