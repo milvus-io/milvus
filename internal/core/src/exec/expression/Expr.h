@@ -715,6 +715,7 @@ class SegmentExpr : public Expr {
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         OffsetVector* input,
+        const TargetBitmap& bitmap_input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
@@ -730,12 +731,43 @@ class SegmentExpr : public Expr {
         const bool all_valid = cached_index_all_valid_;
         auto batch_size = input->size();
 
+        // bitmap_input (from an AND conjunct's already-evaluated inputs) is
+        // addressed by BATCH POSITION i (matching res[i]/valid_res[i]), NOT by
+        // the segment offset (*input)[i]. A pruned row keeps res[i]/valid_res[i]
+        // at its init state (res=false, valid=true), which the null-rejecting AND
+        // folds to excluded (false & true == false) — identical to the raw path.
+        // A pruned row still invokes the callback with data==nullptr so callbacks
+        // that maintain a processed_cursor to index bitmap_input (Term/Unary/
+        // BinaryRange) advance it and a later surviving row reads the correct bit;
+        // a bare continue would desync the cursor and drop true matches.
+        const bool has_bitmap_input = !bitmap_input.empty();
+
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             for (auto i = 0; i < batch_size; ++i) {
+                // Prune BEFORE the expensive Reverse_Lookup, but drive the
+                // callback on a null batch to keep its cursor aligned.
+                if (has_bitmap_input && !bitmap_input[i]) {
+                    func.template operator()<FilterType::random>(nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 1,
+                                                                 res + i,
+                                                                 valid_res + i,
+                                                                 values...);
+                    continue;
+                }
                 auto offset = (*input)[i];
                 auto raw = index_ptr->Reverse_Lookup(offset);
                 if (!raw.has_value()) {
-                    res[i] = false;
+                    // No value for this offset: advance the callback the same
+                    // way; res[i] stays at its false init.
+                    func.template operator()<FilterType::random>(nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 1,
+                                                                 res + i,
+                                                                 valid_res + i,
+                                                                 values...);
                     continue;
                 }
                 T raw_data = raw.value();
@@ -748,11 +780,22 @@ class SegmentExpr : public Expr {
                                                              valid_res + i,
                                                              values...);
             }
-        } else if (all_valid) {
+        } else if (all_valid && !has_bitmap_input) {
             res.set(0, batch_size);
             valid_res.set(0, batch_size);
+        } else if (all_valid) {
+            for (auto i = 0; i < batch_size; ++i) {
+                if (!bitmap_input[i]) {
+                    continue;
+                }
+                res[i] = true;
+                valid_res[i] = true;
+            }
         } else {
             for (auto i = 0; i < batch_size; ++i) {
+                if (has_bitmap_input && !bitmap_input[i]) {
+                    continue;
+                }
                 auto offset = (*input)[i];
                 // materialize the bool once: chaining proxies would read
                 // back the word just stored into valid_res
@@ -773,6 +816,7 @@ class SegmentExpr : public Expr {
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         OffsetVector* input,
+        const TargetBitmap& bitmap_input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
@@ -781,8 +825,13 @@ class SegmentExpr : public Expr {
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView>) {
             if (UseIndexCursor() && num_data_chunk_ == 0) {
-                return ProcessIndexLookupByOffsets<T>(
-                    func, skip_func, input, res, valid_res, values...);
+                return ProcessIndexLookupByOffsets<T>(func,
+                                                      skip_func,
+                                                      input,
+                                                      bitmap_input,
+                                                      res,
+                                                      valid_res,
+                                                      values...);
             }
         }
 

@@ -63,6 +63,7 @@ set(MILVUS_TEST_FILES
         test_row_container.cpp
         test_query_order_by.cpp
         test_determine_use_index.cpp
+        test_index_reverse_lookup_prune.cpp
         test_virtual_pk.cpp
         test_mvcc_fast_path.cpp
         test_external_take.cpp

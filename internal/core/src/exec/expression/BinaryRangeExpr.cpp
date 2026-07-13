@@ -308,8 +308,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
+                                                            std::nullptr_t{},
+                                                            input,
+                                                            bitmap_input,
+                                                            res,
+                                                            valid_res);
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
@@ -584,6 +588,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
                                                      skip_index_func,
                                                      input,
+                                                     bitmap_input,
                                                      res,
                                                      valid_res,
                                                      val1,
@@ -734,6 +739,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
         processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
                                                             std::nullptr_t{},
                                                             input,
+                                                            bitmap_input,
                                                             res,
                                                             valid_res,
                                                             val1,
@@ -1070,6 +1076,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
                                                     std::nullptr_t{},
                                                     input,
+                                                    bitmap_input,
                                                     res,
                                                     valid_res,
                                                     val1,

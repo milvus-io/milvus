@@ -47,6 +47,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     span.GetSpan()->SetAttribute("op_type", static_cast<int>(expr_->op_type_));
 
     auto input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
@@ -54,46 +55,49 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
     switch (data_type) {
         case DataType::BOOL: {
-            result = ExecRangeVisitorImpl<bool>(input);
+            result = ExecRangeVisitorImpl<bool>(input, bitmap_input);
             break;
         }
         case DataType::INT8: {
-            result = ExecRangeVisitorImpl<int8_t>(input);
+            result = ExecRangeVisitorImpl<int8_t>(input, bitmap_input);
             break;
         }
         case DataType::INT16: {
-            result = ExecRangeVisitorImpl<int16_t>(input);
+            result = ExecRangeVisitorImpl<int16_t>(input, bitmap_input);
             break;
         }
         case DataType::INT32: {
-            result = ExecRangeVisitorImpl<int32_t>(input);
+            result = ExecRangeVisitorImpl<int32_t>(input, bitmap_input);
             break;
         }
         case DataType::INT64: {
-            result = ExecRangeVisitorImpl<int64_t>(input);
+            result = ExecRangeVisitorImpl<int64_t>(input, bitmap_input);
             break;
         }
         case DataType::FLOAT: {
-            result = ExecRangeVisitorImpl<float>(input);
+            result = ExecRangeVisitorImpl<float>(input, bitmap_input);
             break;
         }
         case DataType::DOUBLE: {
-            result = ExecRangeVisitorImpl<double>(input);
+            result = ExecRangeVisitorImpl<double>(input, bitmap_input);
             break;
         }
         case DataType::JSON: {
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal: {
-                    result = ExecRangeVisitorImplForJson<bool>(input);
+                    result =
+                        ExecRangeVisitorImplForJson<bool>(input, bitmap_input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForJson<int64_t>(input);
+                    result = ExecRangeVisitorImplForJson<int64_t>(input,
+                                                                  bitmap_input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForJson<double>(input);
+                    result = ExecRangeVisitorImplForJson<double>(input,
+                                                                 bitmap_input);
                     break;
                 }
                 default: {
@@ -109,11 +113,13 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForArray<int64_t>(input);
+                    result = ExecRangeVisitorImplForArray<int64_t>(
+                        input, bitmap_input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForArray<double>(input);
+                    result = ExecRangeVisitorImplForArray<double>(input,
+                                                                  bitmap_input);
                     break;
                 }
                 default: {
@@ -129,11 +135,13 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForVectorArray<int64_t>(input);
+                    result = ExecRangeVisitorImplForVectorArray<int64_t>(
+                        input, bitmap_input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForVectorArray<double>(input);
+                    result = ExecRangeVisitorImplForVectorArray<double>(
+                        input, bitmap_input);
                     break;
                 }
                 default: {
@@ -155,7 +163,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
-    OffsetVector* input) {
+    OffsetVector* input, const TargetBitmap& bitmap_input) {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
@@ -631,6 +639,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
         processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
                                                             std::nullptr_t{},
                                                             input,
+                                                            bitmap_input,
                                                             res,
                                                             valid_res,
                                                             value,
@@ -656,7 +665,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
 template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
-    OffsetVector* input) {
+    OffsetVector* input, const TargetBitmap& bitmap_input) {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
@@ -1110,6 +1119,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
                                                     std::nullptr_t{},
                                                     input,
+                                                    bitmap_input,
                                                     res,
                                                     valid_res,
                                                     value,
@@ -1135,7 +1145,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
 template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
-    OffsetVector* input) {
+    OffsetVector* input, const TargetBitmap& bitmap_input) {
     if (expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength) {
         ThrowInfo(OpTypeInvalid,
                   "unsupported arith type for vector array field: {}",
@@ -1211,8 +1221,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
 
     int64_t processed_size = 0;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<VectorArrayView>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        processed_size =
+            ProcessDataByOffsets<VectorArrayView>(execute_sub_batch,
+                                                  std::nullptr_t{},
+                                                  input,
+                                                  bitmap_input,
+                                                  res,
+                                                  valid_res);
     } else {
         processed_size = ProcessDataChunks<VectorArrayView>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
@@ -1228,11 +1243,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
 
 template <typename T>
 VectorPtr
-PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl(OffsetVector* input) {
+PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl(
+    OffsetVector* input, const TargetBitmap& bitmap_input) {
     if (exec_path_ == ExprExecPath::ScalarIndex) {
         return ExecRangeVisitorImplForIndex<T>(input);
     } else {
-        return ExecRangeVisitorImplForData<T>(input);
+        return ExecRangeVisitorImplForData<T>(input, bitmap_input);
     }
 }
 
@@ -1995,7 +2011,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
 template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
-    OffsetVector* input) {
+    OffsetVector* input, const TargetBitmap& bitmap_input) {
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -2590,6 +2606,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
                                                      skip_index_func,
                                                      input,
+                                                     bitmap_input,
                                                      res,
                                                      valid_res,
                                                      value,
@@ -2693,7 +2710,7 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
 
 template VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl<int64_t>(
-    OffsetVector*);  // add this for macos
+    OffsetVector*, const TargetBitmap&);  // add this for macos
 
 }  //namespace exec
 }  // namespace milvus

@@ -421,8 +421,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonPreciseNumeric(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
+                                                            std::nullptr_t{},
+                                                            input,
+                                                            bitmap_input,
+                                                            res,
+                                                            valid_res);
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
@@ -675,6 +679,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
                                                     std::nullptr_t{},
                                                     input,
+                                                    bitmap_input,
                                                     res,
                                                     valid_res,
                                                     val,
@@ -1118,8 +1123,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     };
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res, val);
+        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
+                                                            std::nullptr_t{},
+                                                            input,
+                                                            bitmap_input,
+                                                            res,
+                                                            valid_res,
+                                                            val);
 
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(
@@ -1950,8 +1960,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             processed_size = ProcessElementLevelByOffsets<T>(
                 execute_sub_batch, skip_index_func, input, res, valid_res, val);
         } else {
-            processed_size = ProcessDataByOffsets<T>(
-                execute_sub_batch, skip_index_func, input, res, valid_res, val);
+            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
+                                                     skip_index_func,
+                                                     input,
+                                                     bitmap_input,
+                                                     res,
+                                                     valid_res,
+                                                     val);
         }
     } else {
         if (expr_->column_.element_level_) {

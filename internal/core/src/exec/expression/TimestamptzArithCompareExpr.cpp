@@ -30,24 +30,26 @@ void
 PhyTimestamptzArithCompareExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     auto input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     SetHasOffsetInput((input != nullptr));
-    result = ExecCompareVisitorImpl<int64_t>(input);
+    result = ExecCompareVisitorImpl<int64_t>(input, bitmap_input);
 }
 
 template <typename T>
 VectorPtr
-PhyTimestamptzArithCompareExpr::ExecCompareVisitorImpl(OffsetVector* input) {
+PhyTimestamptzArithCompareExpr::ExecCompareVisitorImpl(
+    OffsetVector* input, const TargetBitmap& bitmap_input) {
     // We can not use index by transforming ts_col + interval > iso_string to ts_col > iso_string - interval
     // Because year / month interval is not fixed days, it depends on the specific date.
     // So, currently, we only support the data scanning path.
     // In the future, one could add a switch here to check for index availability.
-    return ExecCompareVisitorImplForAll<T>(input);
+    return ExecCompareVisitorImplForAll<T>(input, bitmap_input);
 }
 
 template <typename T>
 VectorPtr
 PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
-    OffsetVector* input) {
+    OffsetVector* input, const TargetBitmap& bitmap_input) {
     if (!arg_inited_) {
         interval_ = expr_->interval_;
         compare_value_.SetValue<T>(expr_->compare_value_);
@@ -81,7 +83,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                 consistency_level_);
             helperPhyExpr_->EnsureExecPathDetermined();
         }
-        return helperPhyExpr_->ExecRangeVisitorImpl<T>(input);
+        return helperPhyExpr_->ExecRangeVisitorImpl<T>(input, bitmap_input);
     }
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
@@ -106,6 +108,12 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             TargetBitmapView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
+        // data == nullptr means the framework skipped this row's reverse lookup
+        // (pruned by bitmap_input on the index path, or a null offset). Nothing
+        // to test; the caller leaves res/valid_res at their init state.
+        if (data == nullptr) {
+            return;
+        }
         const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
             const int64_t current_ts_us = data[i];
@@ -208,6 +216,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         processed_size = ProcessDataByOffsets<T>(exec_sub_batch,
                                                  std::nullptr_t{},
                                                  input,
+                                                 bitmap_input,
                                                  res,
                                                  valid_res,
                                                  compare_value,

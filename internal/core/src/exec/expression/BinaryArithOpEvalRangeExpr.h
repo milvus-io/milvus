@@ -720,7 +720,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
  private:
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImpl(OffsetVector* input = nullptr);
+    ExecRangeVisitorImpl(OffsetVector* input, const TargetBitmap& bitmap_input);
 
     template <typename T>
     VectorPtr
@@ -728,19 +728,23 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForData(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplForData(OffsetVector* input,
+                                const TargetBitmap& bitmap_input);
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForJson(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplForJson(OffsetVector* input,
+                                const TargetBitmap& bitmap_input);
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplForArray(OffsetVector* input,
+                                 const TargetBitmap& bitmap_input);
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForVectorArray(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplForVectorArray(OffsetVector* input,
+                                       const TargetBitmap& bitmap_input);
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;

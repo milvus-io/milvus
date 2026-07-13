@@ -66,11 +66,13 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
  private:
     template <typename T>
     VectorPtr
-    ExecCompareVisitorImpl(OffsetVector* input);
+    ExecCompareVisitorImpl(OffsetVector* input,
+                           const TargetBitmap& bitmap_input);
 
     template <typename T>
     VectorPtr
-    ExecCompareVisitorImplForAll(OffsetVector* input);
+    ExecCompareVisitorImplForAll(OffsetVector* input,
+                                 const TargetBitmap& bitmap_input);
 
  private:
     std::shared_ptr<PhyBinaryArithOpEvalRangeExpr> helperPhyExpr_;

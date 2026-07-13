@@ -197,6 +197,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
         processed_size = ProcessDataByOffsets<Json>(execute_sub_batch,
                                                     std::nullptr_t{},
                                                     input,
+                                                    bitmap_input,
                                                     res,
                                                     valid_res,
                                                     pointer);
