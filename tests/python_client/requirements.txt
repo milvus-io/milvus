@@ -23,8 +23,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus==3.1.0rc61
-pymilvus[bulk_writer]==3.1.0rc61
+pymilvus==3.1.0rc62
+pymilvus[bulk_writer]==3.1.0rc62
 # for protobuf
 protobuf>=5.29.5
 
@@ -93,3 +93,7 @@ pyiceberg[sql-sqlite]==0.8.1
 
 # for time zone
 tzdata>=2024.1
+
+
+# for function chain
+xgboost==3.3.0
