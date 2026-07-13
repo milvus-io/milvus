@@ -7,18 +7,22 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
 	registerIndex      = 0
 	maxSelectCase      = 65535
-	defaultRegisterBuf = 1
+	defaultRegisterBuf = 256 // Chosen from benchmark A/B runs as the best overall default for current workloads.
+	coresPerShard      = 32
 )
 
 var (
-	futureManager *activeFutureManager
-	initOnce      sync.Once
+	futureManagers []*activeFutureManager
+	managerCount   uint64
+	registerSeq    atomic.Uint64
+	initOnce       sync.Once
 )
 
 // initCGO initializes the cgo caller and future manager.
@@ -27,8 +31,17 @@ func initCGO() {
 		nodeID := paramtable.GetStringNodeID()
 		initCaller(nodeID)
 		initExecutor()
-		futureManager = newActiveFutureManager(nodeID)
-		futureManager.Run()
+
+		numShards := hardware.GetCPUNum() / coresPerShard
+		if numShards < 1 {
+			numShards = 1
+		}
+		managerCount = uint64(numShards)
+		futureManagers = make([]*activeFutureManager, numShards)
+		for i := 0; i < numShards; i++ {
+			futureManagers[i] = newActiveFutureManager(nodeID)
+			futureManagers[i].Run()
+		}
 	})
 }
 
@@ -92,18 +105,21 @@ func (m *activeFutureManager) doSelect() {
 			Chan: reflect.ValueOf(newCancelable.Context().Done()),
 		})
 		m.activeFutures = append(m.activeFutures, newCancelable)
+		metrics.ActiveFutureTotal.WithLabelValues(
+			m.nodeID,
+		).Inc()
 	} else {
 		m.cases = append(m.cases[:index], m.cases[index+1:]...)
 		offset := index - 1
 		// cancel the future and move it into gc manager.
 		m.activeFutures[offset].cancel(m.activeFutures[offset].Context().Err())
 		m.activeFutures = append(m.activeFutures[:offset], m.activeFutures[offset+1:]...)
+		metrics.ActiveFutureTotal.WithLabelValues(
+			m.nodeID,
+		).Dec()
 	}
 	activeTotal := len(m.activeFutures)
 	m.activeCount.Store(int64(activeTotal))
-	metrics.ActiveFutureTotal.WithLabelValues(
-		m.nodeID,
-	).Set(float64(activeTotal))
 }
 
 func (m *activeFutureManager) getSelectableCases() []reflect.SelectCase {
