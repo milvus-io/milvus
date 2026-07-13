@@ -51,7 +51,26 @@ struct ColumnSpec {
     std::vector<int64_t> rows_per_chunk;
     std::vector<std::vector<bool>> valid_patterns;  // empty => all valid
     bool nullable{true};
+    DataType data_type{DataType::VECTOR_INT8};
 };
+
+FieldMeta
+MakeTestFieldMeta(const ColumnSpec& spec) {
+    if (IsVectorDataType(spec.data_type)) {
+        return FieldMeta(FieldName("t"),
+                         FieldId(kTestFieldId),
+                         spec.data_type,
+                         kElementSize,
+                         std::nullopt,
+                         spec.nullable,
+                         std::nullopt);
+    }
+    return FieldMeta(FieldName("t"),
+                     FieldId(kTestFieldId),
+                     spec.data_type,
+                     spec.nullable,
+                     std::nullopt);
+}
 
 struct VectorArrayColumnFixture {
     std::shared_ptr<ChunkedColumnInterface> column;
@@ -218,13 +237,7 @@ struct ChunkedColumnFactory {
         auto fetched = std::make_shared<std::set<cachinglayer::cid_t>>();
         auto translator = std::make_unique<CountingChunkTranslator>(
             spec.rows_per_chunk, "cc_iface", std::move(chunks), fetched);
-        FieldMeta fm(FieldName("t"),
-                     FieldId(kTestFieldId),
-                     DataType::VECTOR_INT8,
-                     kElementSize,
-                     std::nullopt,
-                     spec.nullable,
-                     std::nullopt);
+        auto fm = MakeTestFieldMeta(spec);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
         auto column = std::make_shared<ChunkedColumn>(std::move(slot), fm);
@@ -267,13 +280,7 @@ struct ProxyChunkColumnFactory {
             fetched);
         auto group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
-        FieldMeta fm(FieldName("t"),
-                     FieldId(kTestFieldId),
-                     DataType::VECTOR_INT8,
-                     kElementSize,
-                     std::nullopt,
-                     spec.nullable,
-                     std::nullopt);
+        auto fm = MakeTestFieldMeta(spec);
         auto column = std::make_shared<ProxyChunkColumn>(
             group, FieldId(kTestFieldId), fm);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
@@ -537,6 +544,91 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
         fx.column->BulkVectorArrayAt(
             nullptr, [](VectorFieldProto&&, size_t) {}, null_offset, 1),
         std::exception);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthDataScanReturnsNaturalChunkBatches) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            1,
+                            4,
+                            ChunkedColumnInterface::ScanProjection::Data,
+                            ChunkedColumnInterface::ScanValueKind::FixedWidth));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(&batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_EQ(batch.size, 2);
+    ASSERT_FALSE(batch.values.empty());
+    EXPECT_EQ(batch.values.encoding,
+              ChunkedColumnInterface::ValueEncoding::FixedWidth);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 1);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[1], 2);
+    EXPECT_FALSE(batch.validity.IsValid(0));
+    EXPECT_TRUE(batch.validity.IsValid(1));
+
+    ASSERT_TRUE(cursor->Next(&batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 3);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[1], 4);
+    EXPECT_FALSE(batch.validity.IsValid(0));
+    EXPECT_TRUE(batch.validity.IsValid(1));
+
+    EXPECT_FALSE(cursor->Next(&batch));
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthNoDataScanReturnsOnlyValidity) {
+    ColumnSpec spec{{4},
+                    {{true, false, true, false}},
+                    /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor = fx.column->Scan(
+        nullptr, ChunkedColumnInterface::ScanOptions::ForNoData(0, 4));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(&batch));
+    EXPECT_EQ(batch.row_id_start, 0);
+    EXPECT_EQ(batch.size, 4);
+    EXPECT_TRUE(batch.values.empty());
+    EXPECT_TRUE(batch.validity.IsValid(0));
+    EXPECT_FALSE(batch.validity.IsValid(1));
+    EXPECT_TRUE(batch.validity.IsValid(2));
+    EXPECT_FALSE(batch.validity.IsValid(3));
+    EXPECT_FALSE(cursor->Next(&batch));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthDataScanReportsAllValidForNonNullableColumn) {
+    ColumnSpec spec{{3}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor = fx.column->Scan(
+        nullptr, ChunkedColumnInterface::ScanOptions::ForData(0, 3));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(&batch));
+    EXPECT_EQ(batch.validity.encoding,
+              ChunkedColumnInterface::ValidityEncoding::AllValid);
+    EXPECT_TRUE(batch.validity.all_valid);
+    for (int64_t i = 0; i < batch.size; ++i) {
+        EXPECT_TRUE(batch.validity.IsValid(i));
+    }
 }
 
 }  // namespace milvus
