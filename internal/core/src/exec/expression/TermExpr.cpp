@@ -34,6 +34,7 @@
 #include "common/ScopedTimer.h"
 #include "exec/expression/Element.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "exec/expression/Utils.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
@@ -261,12 +262,24 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-            // we create double index for json int64 field for now
-            using GetType =
-                std::conditional_t<std::is_same_v<ValueType, int64_t>,
-                                   double,
-                                   ValueType>;
-            return ExecVisitorImplForIndex<GetType>();
+            if constexpr (std::is_same_v<ValueType, int64_t>) {
+                const auto has_unsafe_literal = std::any_of(
+                    expr_->vals_.begin(),
+                    expr_->vals_.end(),
+                    [this](const auto& val) {
+                        return val.has_int64_val() &&
+                               !IsInt64SafeForJsonDoubleIndex(val.int64_val());
+                    });
+                if (has_unsafe_literal) {
+                    return ExecTermJsonFieldInVariable<int64_t>(context);
+                }
+                if (PinnedJsonIndexIsFlat()) {
+                    return ExecVisitorImplForIndex<int64_t>();
+                }
+                return ExecVisitorImplForIndex<double>();
+            } else {
+                return ExecVisitorImplForIndex<ValueType>();
+            }
         } else {
             return ExecTermJsonFieldInVariable<ValueType>(context);
         }
@@ -607,18 +620,6 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
-        if constexpr (std::is_same_v<GetType, int64_t>) {
-            // for int64_t, we need to a double vector to store the values
-            auto int_arg_set =
-                std::static_pointer_cast<SetElement<int64_t>>(arg_set_);
-            std::vector<double> double_vals;
-            for (const auto& val : int_arg_set->GetElements()) {
-                double_vals.emplace_back(static_cast<double>(val));
-            }
-            arg_set_double_ = std::make_shared<SetElement<double>>(double_vals);
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            arg_set_double_ = arg_set_;
-        }
         arg_inited_ = true;
     }
 
@@ -647,10 +648,10 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
 
         // process shredding data
         auto try_execute = [&](milvus::index::JSONType json_type,
-                               auto GetType) {
+                               auto get_type) {
             auto target_field = index->GetShreddingField(pointer, json_type);
             if (!target_field.empty()) {
-                using ColType = decltype(GetType);
+                using ColType = decltype(get_type);
                 TargetBitmap target_res(active_count_, false);
                 TargetBitmapView target_res_view(target_res);
                 TargetBitmap target_valid(active_count_, true);
@@ -665,8 +666,12 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                             res[i] = valid_res[i] = false;
                             continue;
                         }
-                        if constexpr (std::is_same_v<ColType, double>) {
-                            res[i] = this->arg_set_double_->In(src[i]);
+                        if constexpr (std::is_same_v<GetType, int64_t> ||
+                                      std::is_same_v<GetType, double>) {
+                            auto value =
+                                ConvertJsonNumberExact<GetType>(src[i]);
+                            res[i] =
+                                value.has_value() && this->arg_set_->In(*value);
                         } else {
                             res[i] = this->arg_set_->In(src[i]);
                         }
@@ -717,11 +722,13 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                                    uint32_t value_offset) {
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
-                auto get_value =
-                    bson.ParseAsValueAtOffset<double>(value_offset);
+                bool is_number = false;
+                auto get_value = ParseBsonNumberExact<GetType>(
+                    bson, value_offset, is_number);
                 if (get_value.has_value()) {
-                    res_view[row_offset] =
-                        this->arg_set_double_->In(get_value.value());
+                    res_view[row_offset] = this->arg_set_->In(*get_value);
+                }
+                if (is_number) {
                     valid_res_view[row_offset] = true;
                 }
                 return;
@@ -951,6 +958,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
+    if (field_type_ == DataType::JSON && args->values_.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
     auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -984,6 +997,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         return func(index_ptr, vals.size(), (bool*)vals.data());
     };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
+    if (field_type_ == DataType::JSON && args->values_.empty()) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
+    }
     auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);
     return res;
 }

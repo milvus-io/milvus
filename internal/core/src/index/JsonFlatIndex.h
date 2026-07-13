@@ -28,6 +28,7 @@
 namespace milvus::index {
 
 class JsonFlatIndex;
+using JsonValueType = ::JsonExistValueType;
 // JsonFlatIndexQueryExecutor is used to execute queries on a specified json path, and can be constructed by JsonFlatIndex
 template <typename T>
 class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
@@ -53,7 +54,18 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Exists",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        this->wrapper_->json_exist_query(json_path_, &bitset);
+        this->wrapper_->json_exist_query(
+            json_path_, true, JsonValueType::Any, &bitset);
+        return bitset;
+    }
+
+    TargetBitmap
+    ExactPathExists(JsonValueType value_type = JsonValueType::Any) {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::ExactPathExists",
+                              tracer::GetRootSpan());
+        TargetBitmap bitset(this->Count());
+        this->wrapper_->json_exist_query(
+            json_path_, false, value_type, &bitset);
         return bitset;
     }
 
@@ -206,46 +218,6 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     }
 
  private:
-    TargetBitmap
-    NumericComparableBitset() {
-        TargetBitmap bitset(this->Count());
-
-        TargetBitmap int_bitset(this->Count());
-        this->wrapper_->json_range_query(json_path_,
-                                         std::numeric_limits<int64_t>::lowest(),
-                                         std::numeric_limits<int64_t>::max(),
-                                         false,
-                                         false,
-                                         true,
-                                         true,
-                                         &int_bitset);
-        bitset |= int_bitset;
-
-        TargetBitmap double_bitset(this->Count());
-        this->wrapper_->json_range_query(json_path_,
-                                         std::numeric_limits<double>::lowest(),
-                                         std::numeric_limits<double>::max(),
-                                         false,
-                                         false,
-                                         true,
-                                         true,
-                                         &double_bitset);
-        bitset |= double_bitset;
-
-        TargetBitmap u64_bitset(this->Count());
-        this->wrapper_->json_range_query(json_path_,
-                                         std::numeric_limits<uint64_t>::min(),
-                                         std::numeric_limits<uint64_t>::max(),
-                                         false,
-                                         false,
-                                         true,
-                                         true,
-                                         &u64_bitset);
-        bitset |= u64_bitset;
-
-        return bitset;
-    }
-
     using U64Range = std::optional<std::pair<uint64_t, uint64_t>>;
     using I64Range = std::optional<std::pair<int64_t, int64_t>>;
 
@@ -259,7 +231,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     void
     OrU64TermRanges(TargetBitmap& bitset, size_t n, const T* values) {
-        if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
+        if constexpr (std::is_floating_point_v<T>) {
             for (size_t i = 0; i < n; ++i) {
                 auto value = static_cast<double>(values[i]);
                 auto range = DoubleRangeForBounds(value, true, value, true);
@@ -736,20 +708,17 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     TargetBitmap
     ComparableValueBitset() {
-        TargetBitmap bitset(this->Count());
         if constexpr (std::is_same_v<T, bool>) {
-            bool values[] = {false, true};
-            this->wrapper_->json_terms_query(json_path_, values, 2, &bitset);
+            return ExactPathExists(JsonValueType::Bool);
         } else if constexpr (std::is_integral_v<T>) {
-            bitset = NumericComparableBitset();
+            return ExactPathExists(JsonValueType::Numeric);
         } else if constexpr (std::is_floating_point_v<T>) {
-            bitset = NumericComparableBitset();
+            return ExactPathExists(JsonValueType::Numeric);
         } else if constexpr (std::is_same_v<T, std::string>) {
-            this->wrapper_->json_prefix_query(json_path_, "", &bitset);
+            return ExactPathExists(JsonValueType::String);
         } else {
-            this->wrapper_->json_exist_query(json_path_, &bitset);
+            return Exists();
         }
-        return bitset;
     }
 
     std::string json_path_;

@@ -6,6 +6,13 @@
 #include <ostream>
 #include <new>
 
+enum class JsonExistValueType : uint8_t {
+  Any,
+  Numeric,
+  String,
+  Bool,
+};
+
 enum class TantivyDataType : uint8_t {
   Text,
   Keyword,
@@ -298,7 +305,11 @@ RustResult tantivy_json_terms_query_keyword(void *ptr,
                                             uintptr_t len,
                                             void *bitset);
 
-RustResult tantivy_json_exist_query(void *ptr, const char *json_path, void *bitset);
+RustResult tantivy_json_exist_query(void *ptr,
+                                    const char *json_path,
+                                    bool json_subpaths,
+                                    JsonExistValueType value_type,
+                                    void *bitset);
 
 RustResult tantivy_json_range_query_i64(void *ptr,
                                         const char *json_path,
