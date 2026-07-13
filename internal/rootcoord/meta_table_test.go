@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -1696,6 +1698,146 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 		ctx := context.Background()
 		err := meta.DropCollection(ctx, 100, 9999)
 		assert.NoError(t, err)
+	})
+}
+
+func buildAlterCollectionSchemaResult(collectionID int64, schema *schemapb.CollectionSchema, timetick uint64) message.BroadcastResultAlterCollectionMessageV2 {
+	controlChannel := funcutil.GetControlChannel("test")
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask: &fieldmaskpb.FieldMask{
+				Paths: []string{message.FieldMaskCollectionSchema},
+			},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema: schema,
+			},
+		}).
+		WithBroadcast([]string{controlChannel}).
+		MustBuildBroadcast()
+	return message.BroadcastResultAlterCollectionMessageV2{
+		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+		Results: map[string]*message.AppendResult{
+			controlChannel: {TimeTick: timetick},
+		},
+	}
+}
+
+func TestMetaTableAlterCollectionFileResourceRefCnt(t *testing.T) {
+	const (
+		collectionID = int64(100)
+		resourceID   = int64(10)
+		oldResource  = int64(20)
+	)
+
+	newMeta := func(oldIDs []int64, refCnt map[int64]int) (*MetaTable, *mocks.RootCoordCatalog) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID: {
+					CollectionID:    collectionID,
+					Name:            "collection",
+					DBName:          "db",
+					DBID:            1,
+					State:           pb.CollectionState_CollectionCreated,
+					FileResourceIds: oldIDs,
+				},
+			},
+			fileResourceID2Meta: map[int64]*internalpb.FileResourceInfo{
+				resourceID:  {Id: resourceID, Name: "dict", Path: "dict.txt"},
+				oldResource: {Id: oldResource, Name: "old_dict", Path: "old_dict.txt"},
+			},
+			fileResourceRefCnt: refCnt,
+			fileResourceRefHolds: map[int64]map[int64]int{
+				999: {resourceID: 1},
+			},
+		}
+		meta.names.insert("db", "collection", collectionID)
+		return meta, catalog
+	}
+
+	buildSchema := func(ids ...int64) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name:            "collection",
+			Version:         2,
+			FileResourceIds: ids,
+		}
+	}
+
+	t.Run("consume request path reservation", func(t *testing.T) {
+		meta, catalog := newMeta(nil, map[int64]int{})
+		require.NoError(t, reserveAlterCollectionFileResourceRefs(meta, collectionID, []int64{resourceID}))
+		catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, true).Return(nil).Once()
+
+		err := meta.AlterCollection(context.Background(), buildAlterCollectionSchemaResult(collectionID, buildSchema(resourceID), 100))
+
+		require.NoError(t, err)
+		require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+		require.ElementsMatch(t, []int64{resourceID}, meta.collID2Meta[collectionID].FileResourceIds)
+	})
+
+	t.Run("rollback request path reservation", func(t *testing.T) {
+		meta, _ := newMeta(nil, map[int64]int{})
+		require.NoError(t, reserveAlterCollectionFileResourceRefs(meta, collectionID, []int64{resourceID}))
+
+		rollbackAlterCollectionFileResourceRefs(context.Background(), meta, collectionID, []int64{resourceID})
+
+		require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
+		require.NotContains(t, meta.fileResourceRefHolds, collectionID)
+	})
+
+	t.Run("replay or replicated task adds refCnt without reservation", func(t *testing.T) {
+		meta, catalog := newMeta(nil, map[int64]int{resourceID: 1})
+		catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, true).Return(nil).Once()
+
+		err := meta.AlterCollection(context.Background(), buildAlterCollectionSchemaResult(collectionID, buildSchema(resourceID), 100))
+
+		require.NoError(t, err)
+		require.Equal(t, 2, meta.fileResourceRefCnt[resourceID])
+		require.ElementsMatch(t, []int64{resourceID}, meta.collID2Meta[collectionID].FileResourceIds)
+		require.Equal(t, 1, meta.fileResourceRefHolds[999][resourceID])
+	})
+
+	t.Run("recovery hold prevents double increment for pending alter", func(t *testing.T) {
+		meta, catalog := newMeta(nil, map[int64]int{})
+		meta.RecoverFileResourceRefCnt(map[int64][]int64{collectionID: {resourceID}})
+		catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, true).Return(nil).Once()
+
+		err := meta.AlterCollection(context.Background(), buildAlterCollectionSchemaResult(collectionID, buildSchema(resourceID), 100))
+
+		require.NoError(t, err)
+		require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+		require.NotContains(t, meta.fileResourceRefHolds, collectionID)
+		require.ElementsMatch(t, []int64{resourceID}, meta.collID2Meta[collectionID].FileResourceIds)
+	})
+
+	t.Run("replace resource decrements removed and consumes added reservation", func(t *testing.T) {
+		meta, catalog := newMeta([]int64{oldResource}, map[int64]int{oldResource: 1})
+		require.NoError(t, reserveAlterCollectionFileResourceRefs(meta, collectionID, []int64{resourceID}))
+		catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, true).Return(nil).Once()
+
+		err := meta.AlterCollection(context.Background(), buildAlterCollectionSchemaResult(collectionID, buildSchema(resourceID), 100))
+
+		require.NoError(t, err)
+		require.Equal(t, 0, meta.fileResourceRefCnt[oldResource])
+		require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+		require.ElementsMatch(t, []int64{resourceID}, meta.collID2Meta[collectionID].FileResourceIds)
+	})
+
+	t.Run("missing added resource fails before catalog update", func(t *testing.T) {
+		meta, catalog := newMeta(nil, map[int64]int{})
+		delete(meta.fileResourceID2Meta, resourceID)
+
+		err := meta.AlterCollection(context.Background(), buildAlterCollectionSchemaResult(collectionID, buildSchema(resourceID), 100))
+
+		require.Error(t, err)
+		catalog.AssertNotCalled(t, "AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		require.Empty(t, meta.collID2Meta[collectionID].FileResourceIds)
 	})
 }
 
