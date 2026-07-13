@@ -124,19 +124,46 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[s
 	ctx := context.Background()
 	log := log.Ctx(ctx).WithRateGroup("qcv2.checkStreamingQueryNodesInReplica", 1, 60)
 	collections := ob.meta.GetAll(context.Background())
-
-	for _, collectionID := range collections {
-		ob.meta.RecoverSQNodesInCollection(context.Background(), collectionID, sqNodeIDsByRG)
+	batchSize := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	recoveryCollections := make([]int64, 0)
+	recoveryReplicaCount := 0
+	flushRecoveries := func() {
+		if len(recoveryCollections) == 0 {
+			return
+		}
+		if err := ob.meta.RecoverSQNodesInCollections(ctx, recoveryCollections, sqNodeIDsByRG); err != nil {
+			log.Warn("failed to recover streaming query nodes in batch", zap.Error(err))
+		}
+		recoveryCollections = recoveryCollections[:0]
+		recoveryReplicaCount = 0
 	}
-
 	for _, collectionID := range collections {
-		replicas := ob.meta.GetByCollection(ctx, collectionID)
-		for _, replica := range replicas {
+		replicaCount := len(ob.meta.GetByCollection(ctx, collectionID))
+		if replicaCount == 0 {
+			continue
+		}
+		if recoveryReplicaCount > 0 && recoveryReplicaCount+replicaCount > batchSize {
+			flushRecoveries()
+		}
+		recoveryCollections = append(recoveryCollections, collectionID)
+		recoveryReplicaCount += replicaCount
+	}
+	flushRecoveries()
+
+	removals := make([]meta.SQNodeRemoval, 0)
+	flushRemovals := func() {
+		if len(removals) == 0 {
+			return
+		}
+		if err := ob.meta.RemoveSQNodesInCollections(ctx, removals); err != nil {
+			log.Warn("failed to remove streaming query nodes in batch", zap.Error(err))
+		}
+		removals = removals[:0]
+	}
+	for _, collectionID := range collections {
+		for _, replica := range ob.meta.GetByCollection(ctx, collectionID) {
 			roSQNodes := replica.GetROSQNodes()
 			rwSQNodes := replica.GetRWSQNodes()
-			if len(roSQNodes) == 0 {
-				continue
-			}
 			removeNodes := make([]int64, 0, len(roSQNodes))
 			for _, node := range roSQNodes {
 				channels := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(node))
@@ -155,13 +182,18 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[s
 				zap.Int64s("roNodes", roSQNodes),
 				zap.Int64s("rwNodes", rwSQNodes),
 			)
-			if err := ob.meta.RemoveSQNode(ctx, collectionID, replica.GetID(), removeNodes...); err != nil {
-				logger.Warn("fail to remove streaming query node from replica", zap.Error(err))
-				continue
+			removals = append(removals, meta.SQNodeRemoval{
+				CollectionID: collectionID,
+				ReplicaID:    replica.GetID(),
+				Nodes:        removeNodes,
+			})
+			logger.Info("all segment/channel has been removed from ro streaming query node, will remove it from replica")
+			if len(removals) >= batchSize {
+				flushRemovals()
 			}
-			logger.Info("all segment/channel has been removed from ro streaming query node, remove it from replica")
 		}
 	}
+	flushRemovals()
 }
 
 func (ob *ReplicaObserver) checkNodesInReplica() {
