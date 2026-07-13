@@ -229,6 +229,11 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		return nil, err
 	}
 
+	// Prefer the collection's actual db from cache instead of echoing request.DbName,
+	// which is empty when the collection is queried by id only (e.g. the HTTP management
+	// API). Keeps the response consistent with the non-cached describeCollectionTask path.
+	resp.DbName = c.dbName
+	resp.DbId = c.dbID
 	resp.CollectionID = c.collID
 	resp.UpdateTimestamp = c.updateTimestamp
 	resp.UpdateTimestampStr = fmt.Sprintf("%d", c.updateTimestamp)

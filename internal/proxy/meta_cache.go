@@ -106,6 +106,7 @@ type Cache interface {
 type collectionInfo struct {
 	collID                typeutil.UniqueID
 	dbName                string
+	dbID                  typeutil.UniqueID
 	schema                *schemaInfo
 	createdTimestamp      uint64
 	createdUtcTimestamp   uint64
@@ -502,6 +503,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return &collectionInfo{
 			collID:                collection.CollectionID,
 			dbName:                collection.GetDbName(),
+			dbID:                  collection.GetDbId(),
 			schema:                schemaInfo,
 			createdTimestamp:      collection.CreatedTimestamp,
 			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
@@ -534,6 +536,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		dbName:                collection.GetDbName(),
+		dbID:                  collection.GetDbId(),
 		schema:                schemaInfo,
 		createdTimestamp:      collection.CreatedTimestamp,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
