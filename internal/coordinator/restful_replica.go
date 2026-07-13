@@ -120,16 +120,6 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 			}
 		}
 
-		for _, replica := range internalReplicas {
-			if !replica.IsQueryVisible() {
-				reason := fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible",
-					collectionID, replica.GetID(), replica.GetResourceGroup())
-				logger.Info("collection has query-invisible replica", zap.String("reason", reason))
-				s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
-				return
-			}
-		}
-
 		// Now that replica count and RG distribution match, verify every replica actually
 		// has a serviceable shard leader for every channel. This live dist check avoids
 		// the stale CollectionObserver-persisted LoadPercentage that can falsely report
@@ -139,6 +129,16 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 			logger.Info("collection not serviceable", zap.String("reason", reason))
 			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
 			return
+		}
+
+		for _, replica := range internalReplicas {
+			if !replica.IsQueryVisible() {
+				reason := fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible",
+					collectionID, replica.GetID(), replica.GetResourceGroup())
+				logger.Info("collection has query-invisible replica", zap.String("reason", reason))
+				s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
+				return
+			}
 		}
 
 		// Check that physical resources have been released from querynodes no longer
