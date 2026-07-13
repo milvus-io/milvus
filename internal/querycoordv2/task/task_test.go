@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -206,6 +207,61 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 			},
 		})
 		suite.meta.Put(suite.ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
+	}
+}
+
+func (suite *TaskSuite) TestTaskDoneClosesOnTerminalState() {
+	testCases := []struct {
+		name      string
+		terminate func(Task, error)
+	}{
+		{
+			name: "Fail",
+			terminate: func(task Task, err error) {
+				task.Fail(err)
+			},
+		},
+		{
+			name: "Cancel",
+			terminate: func(task Task, err error) {
+				task.Cancel(err)
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		suite.Run(testCase.name, func() {
+			task, err := NewChannelTask(
+				context.Background(),
+				time.Second,
+				WrapIDSource(0),
+				100,
+				meta.NewReplica(&querypb.Replica{ID: 10, CollectionID: 100, ResourceGroup: "rg1"}),
+				NewChannelAction(2, ActionTypeGrow, "ch-1"),
+			)
+			suite.Require().NoError(err)
+
+			select {
+			case <-task.Done():
+				suite.Fail("new task must not be done")
+			default:
+			}
+
+			terminalErr := errors.New("terminal")
+			testCase.terminate(task, terminalErr)
+			<-task.Done()
+			suite.ErrorIs(task.Err(), terminalErr)
+
+			// A second terminal transition must neither close again nor replace
+			// the first terminal error.
+			testCase.terminate(task, errors.New("second terminal error"))
+			select {
+			case <-task.Done():
+			default:
+				suite.Fail("terminal task must remain done")
+			}
+			suite.ErrorIs(task.Err(), terminalErr)
+		})
 	}
 }
 
@@ -2172,6 +2228,153 @@ func (suite *TaskSuite) TestSegmentTaskDeltaSnapshotKeepsStreamingReduceUntilGro
 	scheduler.decExecutingTaskDelta(reduceTask)
 }
 
+func (suite *TaskSuite) newChannelMoveTask(collectionID, replicaID int64, resourceGroup, channelName string, sourceNode, targetNode int64) *ChannelTask {
+	task, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		collectionID,
+		meta.NewReplica(&querypb.Replica{
+			ID:            replicaID,
+			CollectionID:  collectionID,
+			ResourceGroup: resourceGroup,
+		}),
+		NewChannelAction(targetNode, ActionTypeGrow, channelName),
+		NewChannelAction(sourceNode, ActionTypeReduce, channelName),
+	)
+	suite.Require().NoError(err)
+	return task
+}
+
+func (suite *TaskSuite) channel(collectionID int64, channelName string, nodeID int64) *meta.DmChannel {
+	return utils.CreateTestChannel(collectionID, nodeID, 1, channelName)
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotMoveIntermediateState() {
+	move := suite.newChannelMoveTask(100, 10, "rg1", "ch-1", 1, 2)
+	move.SetID(101)
+	delta := NewChannelTaskDelta()
+	delta.Add(move)
+
+	// Before Grow is visible: target +1 and source -1 are pending.
+	suite.dist.ChannelDistManager.Update(1, suite.channel(100, "ch-1", 1))
+	snapshot := delta.GetChannelSnapshot([]int64{1, 2}, 100, suite.dist)
+	suite.Equal(-1, snapshot.GetByNodeInCollection(1))
+	suite.Equal(1, snapshot.GetByNodeInCollection(2))
+
+	// After Grow is visible but before Reduce: only source -1 remains pending.
+	suite.dist.ChannelDistManager.Update(2, suite.channel(100, "ch-1", 2))
+	snapshot = delta.GetChannelSnapshot([]int64{1, 2}, 100, suite.dist)
+	suite.Equal(-1, snapshot.GetByNodeInCollection(1))
+	suite.Zero(snapshot.GetByNodeInCollection(2))
+
+	// After source disappears: no projected effect remains.
+	suite.dist.ChannelDistManager.Update(1)
+	snapshot = delta.GetChannelSnapshot([]int64{1, 2}, 100, suite.dist)
+	suite.Zero(snapshot.GetByNodeInCollection(1))
+	suite.Zero(snapshot.GetByNodeInCollection(2))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotStandaloneGrow() {
+	grow, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		suite.replica,
+		NewChannelAction(2, ActionTypeGrow, "ch-grow"),
+	)
+	suite.Require().NoError(err)
+	grow.SetID(102)
+	delta := NewChannelTaskDelta()
+	delta.Add(grow)
+
+	snapshot := delta.GetChannelSnapshot([]int64{2}, 100, suite.dist)
+	suite.Equal(1, snapshot.GetByNode(2))
+	suite.Equal(1, snapshot.GetByNodeInCollection(2))
+
+	suite.dist.ChannelDistManager.Update(2, suite.channel(100, "ch-grow", 2))
+	snapshot = delta.GetChannelSnapshot([]int64{2}, 100, suite.dist)
+	suite.Zero(snapshot.GetByNode(2))
+	suite.Zero(snapshot.GetByNodeInCollection(2))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotStandaloneReduce() {
+	suite.dist.ChannelDistManager.Update(1, suite.channel(100, "ch-reduce", 1))
+	reduce, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		suite.replica,
+		NewChannelAction(1, ActionTypeReduce, "ch-reduce"),
+	)
+	suite.Require().NoError(err)
+	reduce.SetID(103)
+	delta := NewChannelTaskDelta()
+	delta.Add(reduce)
+
+	snapshot := delta.GetChannelSnapshot([]int64{1}, 100, suite.dist)
+	suite.Equal(-1, snapshot.GetByNode(1))
+	suite.Equal(-1, snapshot.GetByNodeInCollection(1))
+
+	suite.dist.ChannelDistManager.Update(1)
+	snapshot = delta.GetChannelSnapshot([]int64{1}, 100, suite.dist)
+	suite.Zero(snapshot.GetByNode(1))
+	suite.Zero(snapshot.GetByNodeInCollection(1))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotAllCollections() {
+	delta := NewChannelTaskDelta()
+
+	for i, collectionID := range []int64{100, 200} {
+		grow, err := NewChannelTask(
+			context.Background(),
+			time.Second,
+			WrapIDSource(0),
+			collectionID,
+			suite.replica,
+			NewChannelAction(2, ActionTypeGrow, fmt.Sprintf("ch-%d", collectionID)),
+		)
+		suite.Require().NoError(err)
+		grow.SetID(int64(104 + i))
+		delta.Add(grow)
+	}
+
+	snapshot := delta.GetChannelSnapshot([]int64{2}, 100, suite.dist)
+	suite.Equal(2, snapshot.GetByNode(2))
+	suite.Equal(1, snapshot.GetByNodeInCollection(2))
+
+	snapshot = delta.GetChannelSnapshot([]int64{2}, -1, suite.dist)
+	suite.Equal(2, snapshot.GetByNode(2))
+	suite.Equal(2, snapshot.GetByNodeInCollection(2))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotSchedulerCompatibility() {
+	scheduler := suite.newScheduler()
+	grow, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		suite.replica,
+		NewChannelAction(2, ActionTypeGrow, "ch-scheduler"),
+	)
+	suite.Require().NoError(err)
+	grow.SetID(106)
+	scheduler.incExecutingTaskDelta(grow)
+
+	suite.Equal(1, scheduler.GetChannelTaskDelta(2, 100))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(2, -1))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, 100))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, -1))
+	suite.dist.ChannelDistManager.Update(2, suite.channel(100, "ch-scheduler", 2))
+	suite.Zero(scheduler.GetChannelTaskDelta(2, 100))
+	suite.Zero(scheduler.GetChannelTaskDelta(2, -1))
+	suite.Zero(scheduler.GetChannelTaskDelta(-1, 100))
+	suite.Zero(scheduler.GetChannelTaskDelta(-1, -1))
+}
+
 func (suite *TaskSuite) TestChannelTaskDeltaCache() {
 	delta := NewChannelTaskDelta()
 
@@ -2203,9 +2406,7 @@ func (suite *TaskSuite) TestChannelTaskDeltaCache() {
 	for i := 0; i < len(taskDelta); i++ {
 		delta.Sub(tasks[i].(*ChannelTask))
 	}
-	suite.Equal(0, delta.Get(nodeID, collectionID))
-	suite.Equal(0, delta.Get(nodeID, -1))
-	suite.Equal(0, delta.Get(-1, -1))
+	suite.Empty(delta.records)
 }
 
 func (suite *TaskSuite) TestRemoveTaskWithError() {
@@ -2345,16 +2546,24 @@ func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
 	delta.Add(channelTask)
 	delta.printDetailInfos()
 	delta.Add(channelTask)
-	assert.Equal(t, 1, delta.Get(1, 100))
+	assert.Len(t, delta.records[channelTask.ID()], 1)
+	snapshot := delta.GetChannelSnapshot([]int64{1}, 100, nil)
+	assert.Equal(t, 1, snapshot.GetByNodeInCollection(1))
 
 	delta.Sub(channelTask)
 	delta.Sub(channelTask)
-	assert.Equal(t, 0, delta.Get(1, 100))
+	snapshot = delta.GetChannelSnapshot([]int64{1}, 100, nil)
+	assert.Equal(t, 0, snapshot.GetByNodeInCollection(1))
 
-	delta.taskIDRecords.Insert(channelTask.ID())
-	delete(delta.data, int64(1))
-	delta.Sub(channelTask)
-	assert.Equal(t, -1, delta.Get(1, 100))
+	base := newBaseTask(context.Background(), WrapIDSource(0), 100, replica, "ch", "MalformedChannelTask")
+	base.SetID(2)
+	base.actions = []Action{NewSegmentAction(1, ActionTypeGrow, "ch", 10)}
+	malformedTask := &ChannelTask{baseTask: base}
+	delta.Add(malformedTask)
+	assert.Empty(t, delta.records[malformedTask.ID()])
+
+	dist := meta.NewDistributionManager(nil)
+	assert.True(t, channelDeltaRecord{nodeID: 1, channelName: "ch", actionType: ActionTypeUpdate}.isChannelDistMatched(dist))
 }
 
 func TestMockSchedulerGetSegmentTaskDeltaSnapshot(t *testing.T) {
