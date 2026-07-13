@@ -62,26 +62,41 @@ func Test_isNestedArrayIndex(t *testing.T) {
 	arrayField := func(name string) *schemapb.FieldSchema {
 		return &schemapb.FieldSchema{Name: name, DataType: schemapb.DataType_Array}
 	}
+	jsonField := func(name string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{Name: name, DataType: schemapb.DataType_JSON}
+	}
+	castParams := func(castType string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: castType}}
+	}
 	cases := []struct {
 		name    string
 		field   *schemapb.FieldSchema
+		params  []*commonpb.KeyValuePair
 		version int32
 		want    bool
 	}{
-		{"plain array at v5 -> nested", arrayField("tags"), v5, true},
-		{"plain array above v5 -> nested", arrayField("tags"), v5 + 1, true},
-		{"plain array below v5 -> row-level", arrayField("tags"), v5 - 1, false},
+		{"plain array at v5 -> nested", arrayField("tags"), nil, v5, true},
+		{"plain array above v5 -> nested", arrayField("tags"), nil, v5 + 1, true},
+		{"plain array below v5 -> row-level", arrayField("tags"), nil, v5 - 1, false},
 		// struct sub-fields are routed nested by NAME on every binary, so their
 		// marker MUST stay false even at v5 -- otherwise the snapshot-restore
 		// version guard would wrongly refuse a pre-v5 pool that can load them.
-		{"struct sub-field at v5 -> marker false", arrayField("profile[ints]"), v5, false},
-		{"struct sub-field above v5 -> marker false", arrayField("profile[ints]"), v5 + 5, false},
+		{"struct sub-field at v5 -> marker false", arrayField("profile[ints]"), nil, v5, false},
+		{"struct sub-field above v5 -> marker false", arrayField("profile[ints]"), nil, v5 + 5, false},
 		// non-array fields never carry the marker.
-		{"int64 field -> false", &schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64}, v5, false},
-		{"json field -> false", &schemapb.FieldSchema{Name: "meta", DataType: schemapb.DataType_JSON}, v5, false},
+		{"int64 field -> false", &schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64}, nil, v5, false},
+		// JSON path index with an ARRAY_* cast is element-level -> nested at v5.
+		{"json ARRAY_BOOL at v5 -> nested", jsonField("meta"), castParams(common.JSONCastTypeArrayBool), v5, true},
+		{"json ARRAY_DOUBLE at v5 -> nested", jsonField("meta"), castParams(common.JSONCastTypeArrayDouble), v5, true},
+		{"json ARRAY_VARCHAR above v5 -> nested", jsonField("meta"), castParams(common.JSONCastTypeArrayVarChar), v5 + 1, true},
+		{"json ARRAY_BOOL below v5 -> row-level", jsonField("meta"), castParams(common.JSONCastTypeArrayBool), v5 - 1, false},
+		// JSON with a scalar (non-array) cast is row-level -> marker false.
+		{"json DOUBLE cast -> false", jsonField("meta"), castParams("DOUBLE"), v5, false},
+		// JSON without a cast type never gets the marker.
+		{"json no cast -> false", jsonField("meta"), nil, v5, false},
 	}
 	for _, c := range cases {
-		if got := isNestedArrayIndex(c.field, c.version); got != c.want {
+		if got := isNestedArrayIndex(c.field, c.params, c.version); got != c.want {
 			t.Errorf("%s: isNestedArrayIndex(%q, %d) = %v, want %v",
 				c.name, c.field.GetName(), c.version, got, c.want)
 		}

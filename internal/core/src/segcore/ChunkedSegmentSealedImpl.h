@@ -284,6 +284,38 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return nullptr;
     }
 
+    std::shared_ptr<const IArrayOffsets>
+    GetJsonArrayOffsets(FieldId field_id,
+                        const std::string& nested_path) const override {
+        // Key by field id + a separator byte that cannot appear in a JSON
+        // pointer, so distinct (field, path) pairs never collide.
+        auto key = std::to_string(field_id.get());
+        key.push_back('\x1f');
+        key.append(nested_path);
+        {
+            std::lock_guard<std::mutex> lk(json_array_offsets_mutex_);
+            auto it = json_array_offsets_cache_.find(key);
+            if (it != json_array_offsets_cache_.end()) {
+                return it->second;
+            }
+        }
+        auto column = get_column(field_id);
+        if (column == nullptr) {
+            return nullptr;
+        }
+        auto schema_snapshot = CaptureSchemaSnapshot();
+        const auto& field_meta = schema_snapshot->operator[](field_id);
+        int64_t row_count = num_rows_.value_or(0);
+        // Build outside the lock (parses the whole JSON column). If a concurrent
+        // caller wins the race, emplace keeps the first-inserted offsets and we
+        // return that one -- both are structurally identical.
+        auto offsets = ArrayOffsetsSealed::BuildFromJsonColumn(
+            *column, field_meta, nested_path, row_count);
+        std::lock_guard<std::mutex> lk(json_array_offsets_mutex_);
+        return json_array_offsets_cache_.emplace(std::move(key), offsets)
+            .first->second;
+    }
+
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -2195,6 +2227,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Direct field-id lookup for array/vector-array fields.
     std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
         array_offsets_map_;
+
+    // Lazily-built element-range offsets for JSON array paths, keyed by
+    // "<field_id>\x1f<nested_path>". Populated on the first MATCH_* over a JSON
+    // array path that has a nested index; guarded by its own mutex, independent
+    // of the RuntimeResourceState snapshots (which are load-time populated).
+    mutable std::mutex json_array_offsets_mutex_;
+    mutable std::unordered_map<std::string,
+                               std::shared_ptr<ArrayOffsetsSealed>>
+        json_array_offsets_cache_;
 
 #ifdef MILVUS_UNIT_TEST
  public:

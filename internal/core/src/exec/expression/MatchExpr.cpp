@@ -18,17 +18,24 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <string>
+#include <vector>
 
 #include "bitset/bitset.h"
 #include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/Utils.h"
 #include "folly/FBVector.h"
+#include "index/ScalarIndex.h"
+#include "segcore/SegmentSealed.h"
 
 namespace milvus {
 namespace exec {
@@ -262,9 +269,476 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 void
 PhyMatchFilterExpr::EvalJson(EvalCtx& context, VectorPtr& result) {
-    // The JSON path index fast-path is added in a later step; for this
-    // checkpoint JSON MATCH always runs the brute-force per-row path.
+    // Prefer the element-level nested-index fast path when it is eligible; it
+    // returns false (leaving `result` untouched) for anything it cannot serve
+    // with bit-for-bit parity, in which case we run the brute-force per-row path,
+    // which stays the source of truth.
+    if (EvalJsonIndexed(context, result)) {
+        return;
+    }
     EvalJsonBrute(context, result);
+}
+
+bool
+PhyMatchFilterExpr::EvalJsonIndexed(EvalCtx& context, VectorPtr& result) {
+    // The nested JSON array index only exists on sealed segments; growing
+    // segments have no such index and GetJsonArrayOffsets returns nullptr.
+    if (segment_->type() != SegmentType::Sealed) {
+        return false;
+    }
+
+    // The element predicate must be a single, simple, element-level ($ / $[sub])
+    // comparison the index can serve. Anything else (arith like `$ % 2`, a
+    // conjunct `$ > a && $ < b`, a binary range `a < $ < b`, a LIKE pattern, or a
+    // variable-IN) is left to the brute path.
+    const auto& child = expr_->inputs();
+    if (child.size() != 1) {
+        return false;
+    }
+
+    // Decode the child into (op_type, values) if it is a Unary comparison or a
+    // literal Term; otherwise bail to brute.
+    const milvus::expr::ColumnInfo* column = nullptr;
+    milvus::proto::plan::OpType op_type = milvus::proto::plan::Invalid;
+    std::vector<milvus::proto::plan::GenericValue> values;
+    if (auto unary =
+            std::dynamic_pointer_cast<const milvus::expr::UnaryRangeFilterExpr>(
+                child[0])) {
+        // Only plain comparisons map to a single index In/NotIn/Range call. A
+        // populated extra_values_ means a compound/rewritten predicate the index
+        // cannot serve as one call.
+        if (!unary->extra_values_.empty()) {
+            return false;
+        }
+        switch (unary->op_type_) {
+            case milvus::proto::plan::Equal:
+            case milvus::proto::plan::NotEqual:
+            case milvus::proto::plan::GreaterThan:
+            case milvus::proto::plan::GreaterEqual:
+            case milvus::proto::plan::LessThan:
+            case milvus::proto::plan::LessEqual:
+                break;
+            default:
+                // PrefixMatch / PostfixMatch / InnerMatch / Match (LIKE) etc.
+                return false;
+        }
+        column = &unary->column_;
+        op_type = unary->op_type_;
+        values.push_back(unary->val_);
+    } else if (auto term = std::dynamic_pointer_cast<
+                   const milvus::expr::TermFilterExpr>(child[0])) {
+        // `$ in [..]`. A variable-IN (column IN column) has no literal set.
+        if (term->is_in_field_ || term->vals_.empty()) {
+            return false;
+        }
+        column = &term->column_;
+        op_type = milvus::proto::plan::In;
+        values = term->vals_;
+    } else {
+        return false;
+    }
+
+    // The predicate must reference this JSON field at element level. (The parser
+    // guarantees this for a well-formed MATCH, but re-checking keeps the fast
+    // path self-contained and safe against unexpected shapes.)
+    if (!column->element_level_ ||
+        column->data_type_ != DataType::JSON ||
+        column->field_id_.get() != expr_->get_field_id()) {
+        return false;
+    }
+
+    auto field_id = FieldId(expr_->get_field_id());
+    auto query_pointer = milvus::Json::pointer(expr_->get_nested_path());
+
+    // Tantivy-backed JSON indexes cannot serve numeric array-index path segments
+    // (e.g. `a.0`): JSON Pointer does not distinguish an object key from an array
+    // index, so a path with an integer segment is ambiguous. Fall back to brute,
+    // mirroring SegmentExpr::IsJsonPathCompatible().
+    for (const auto& seg : expr_->get_nested_path()) {
+        if (!seg.empty() && milvus::IsInteger(seg)) {
+            return false;
+        }
+    }
+
+    // The JSON offsets table (element-range per row, with NULL/absent/non-array
+    // rows marked non-valid) is what folds element hits back to rows. It is
+    // nullptr on growing segments / when the field is absent.
+    auto array_offsets =
+        segment_->GetJsonArrayOffsets(field_id, query_pointer);
+    if (array_offsets == nullptr) {
+        return false;
+    }
+
+    // Choose the index element type from the literal value case, mirroring the
+    // JSON element-level index dispatch in PhyUnaryRangeFilterExpr::Eval:
+    //   bool   -> ScalarIndex<bool>   (cast ARRAY_BOOL)
+    //   float  -> ScalarIndex<double> (cast ARRAY_DOUBLE)
+    //   string -> ScalarIndex<string> (cast ARRAY_VARCHAR)
+    //   int64  -> ScalarIndex<double> (cast ARRAY_DOUBLE), but only when the
+    //             literal is injective in double; otherwise brute keeps int64
+    //             precision, so fall back.
+    // A Term set must be homogeneous; the first element's case drives the pick
+    // and GetValueFromProto asserts the rest match.
+    const auto val_case = values.front().val_case();
+    switch (val_case) {
+        case milvus::proto::plan::GenericValue::kBoolVal:
+            return EvalJsonIndexedImpl<bool>(context,
+                                             result,
+                                             query_pointer,
+                                             array_offsets,
+                                             *column,
+                                             op_type,
+                                             values);
+        case milvus::proto::plan::GenericValue::kFloatVal:
+            return EvalJsonIndexedImpl<double>(context,
+                                               result,
+                                               query_pointer,
+                                               array_offsets,
+                                               *column,
+                                               op_type,
+                                               values);
+        case milvus::proto::plan::GenericValue::kInt64Val:
+            // int64 literals only match the ARRAY_DOUBLE index when they are
+            // injective in double (|v| < 2^53). Outside that range the brute path
+            // keeps int64-exact comparison, so fall back to preserve parity. This
+            // mirrors SegmentExpr::IsInt64SafeForJsonDoubleIndex, inlined here
+            // because PhyMatchFilterExpr does not derive from SegmentExpr.
+            for (const auto& v : values) {
+                constexpr int64_t kFirstNonInjectiveInteger = int64_t{1} << 53;
+                if (v.val_case() !=
+                        milvus::proto::plan::GenericValue::kInt64Val ||
+                    v.int64_val() <= -kFirstNonInjectiveInteger ||
+                    v.int64_val() >= kFirstNonInjectiveInteger) {
+                    return false;
+                }
+            }
+            return EvalJsonIndexedImpl<double>(context,
+                                               result,
+                                               query_pointer,
+                                               array_offsets,
+                                               *column,
+                                               op_type,
+                                               values);
+        case milvus::proto::plan::GenericValue::kStringVal:
+            return EvalJsonIndexedImpl<std::string>(context,
+                                                    result,
+                                                    query_pointer,
+                                                    array_offsets,
+                                                    *column,
+                                                    op_type,
+                                                    values);
+        default:
+            // Array literal / unset: not an element-scalar comparison.
+            return false;
+    }
+}
+
+template <typename T>
+bool
+PhyMatchFilterExpr::EvalJsonIndexedImpl(
+    EvalCtx& context,
+    VectorPtr& result,
+    const std::string& index_pointer,
+    std::shared_ptr<const milvus::IArrayOffsets> array_offsets,
+    const milvus::expr::ColumnInfo& column,
+    milvus::proto::plan::OpType op_type,
+    const std::vector<milvus::proto::plan::GenericValue>& values) {
+    using Index = index::ScalarIndex<T>;
+
+    // Element (Milvus) type the ARRAY_* cast index must expose, used to select
+    // the exact ARRAY-cast entry in PinJsonIndex (is_array=true).
+    DataType element_data_type;
+    if constexpr (std::is_same_v<T, bool>) {
+        element_data_type = DataType::BOOL;
+    } else if constexpr (std::is_same_v<T, double>) {
+        element_data_type = DataType::DOUBLE;
+    } else {
+        element_data_type = DataType::VARCHAR;
+    }
+
+    auto field_id = FieldId(expr_->get_field_id());
+
+    // Pin the element-level nested ARRAY-cast index for exactly (field, path).
+    // is_array=true + element_data_type gates PinJsonIndex to the ARRAY_* cast
+    // entry (IsDataTypeSupported), never the flat scalar cast. any_type=false so
+    // a bare typed (non-nested) flat index is not mistaken for the nested one.
+    auto pins = segment_->PinJsonIndex(op_ctx_,
+                                       field_id,
+                                       index_pointer,
+                                       element_data_type,
+                                       /*any_type=*/false,
+                                       /*is_array=*/true);
+    if (pins.empty()) {
+        return false;
+    }
+    auto index_base = pins[0].get();
+    if (index_base == nullptr || !index_base->IsNestedIndex()) {
+        return false;
+    }
+    auto* index_ptr =
+        const_cast<Index*>(dynamic_cast<const Index*>(index_base));
+    if (index_ptr == nullptr) {
+        return false;
+    }
+
+    // Alignment guard (the crux of correctness). The nested index materializes
+    // one indexed element per *successfully typed* array element
+    // (ConvertJsonToArrayFieldData drops null / type-mismatched / non-scalar
+    // elements), whereas the JSON IArrayOffsets counts *every* raw array element
+    // (array.size()). They share the same contiguous per-row element-id space
+    // iff no element was ever dropped -- which, because the per-row indexed count
+    // never exceeds the raw count, holds exactly when the two totals are equal.
+    // If they differ, some row's element ranges disagree and folding the index
+    // bitmap through the offsets would be wrong; fall back to brute, which
+    // extracts all elements per row (type mismatches become non-matching /
+    // invalid elements) and stays parity-correct.
+    if (index_ptr->Size() != array_offsets->GetTotalElementCount()) {
+        return false;
+    }
+
+    // Range is only meaningful for ordered types; a bool inequality would have
+    // been rejected by the parser, but guard before instantiating Range for bool.
+    if constexpr (std::is_same_v<T, bool>) {
+        if (op_type != milvus::proto::plan::In &&
+            op_type != milvus::proto::plan::Equal &&
+            op_type != milvus::proto::plan::NotEqual) {
+            return false;
+        }
+    }
+
+    // Run the element predicate through the index -> element-level bitmap sized
+    // to the total element count (== offsets total, by the guard above).
+    // ScalarIndex::In/NotIn/Range return `const TargetBitmap`; copy-construct the
+    // local from that prvalue (TargetBitmap has a copy ctor but a deleted copy
+    // assignment), mirroring TermIndexFunc / UnaryIndexFunc.
+    auto run_index = [&]() -> TargetBitmap {
+        switch (op_type) {
+            case milvus::proto::plan::In: {
+                // Raw contiguous buffer (not std::vector<T>) so the bool
+                // specialization -- std::vector<bool> has no data() -- still
+                // yields a T* for ScalarIndex::In.
+                auto typed = std::make_unique<T[]>(values.size());
+                for (size_t i = 0; i < values.size(); ++i) {
+                    typed[i] = GetValueWithCastNumber<T>(values[i]);
+                }
+                return index_ptr->In(values.size(), typed.get());
+            }
+            case milvus::proto::plan::Equal: {
+                T v = GetValueWithCastNumber<T>(values.front());
+                return index_ptr->In(1, &v);
+            }
+            case milvus::proto::plan::NotEqual: {
+                T v = GetValueWithCastNumber<T>(values.front());
+                return index_ptr->NotIn(1, &v);
+            }
+            default: {
+                // GreaterThan / GreaterEqual / LessThan / LessEqual.
+                if constexpr (std::is_same_v<T, bool>) {
+                    // Unreachable (guarded above); keeps Range<bool> from being
+                    // instantiated.
+                    return TargetBitmap{};
+                } else {
+                    T v = GetValueWithCastNumber<T>(values.front());
+                    return index_ptr->Range(v, op_type);
+                }
+            }
+        }
+    };
+    TargetBitmap element_match = run_index();
+
+    // In the aligned case every array element is a valid typed scalar, so there
+    // are no invalid elements -- exactly the brute path's state when no element
+    // is null/type-mismatched. Use the all-valid fast path; an empty (all-false)
+    // valid view would be read for MatchAll otherwise.
+    AssertInfo(
+        element_match.size() ==
+            static_cast<size_t>(array_offsets->GetTotalElementCount()),
+        "nested index element bitmap size {} != offsets total element count {}",
+        element_match.size(),
+        array_offsets->GetTotalElementCount());
+
+    auto input = context.get_offset_input();
+    int64_t batch_rows =
+        has_offset_input_ ? input->size()
+                          : std::min(batch_size_, active_count_ - current_pos_);
+    if (batch_rows <= 0) {
+        result = nullptr;
+        return true;
+    }
+
+    result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
+                                            TargetBitmap(batch_rows, true));
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+
+    TargetBitmap empty_valid;
+    TargetBitmapView empty_valid_view(empty_valid);
+
+    // The row aggregators consume the match bitmap two different ways:
+    //  - sequential batch: ProcessContiguousRows indexes the *whole-segment*
+    //    element bitmap by global element id (bitset_start = first_elem -
+    //    elem_start), so the raw index result is used as-is.
+    //  - offset-input: ProcessOffsetRows walks a *compacted* bitmap, reading the
+    //    selected rows' elements back-to-back (elem_cursor advances by each row's
+    //    element count). Gather those element bits into that compacted layout,
+    //    which is exactly RowOffsetsToElementOffsets(*input) order.
+    if (has_offset_input_) {
+        auto element_offsets = array_offsets->RowOffsetsToElementOffsets(*input);
+        TargetBitmap compacted(element_offsets.size(), false);
+        for (size_t i = 0; i < element_offsets.size(); ++i) {
+            if (element_match[element_offsets[i]]) {
+                compacted[i] = true;
+            }
+        }
+        TargetBitmapView compacted_view(compacted);
+        FoldElementBitsetToRows(col_vec.get(),
+                                input,
+                                batch_rows,
+                                array_offsets.get(),
+                                compacted_view,
+                                empty_valid_view,
+                                /*all_valid=*/true);
+    } else {
+        TargetBitmapView match_view(element_match);
+        FoldElementBitsetToRows(col_vec.get(),
+                                input,
+                                batch_rows,
+                                array_offsets.get(),
+                                match_view,
+                                empty_valid_view,
+                                /*all_valid=*/true);
+    }
+
+    // Three-valued MATCH: exclude rows that do not resolve to a real JSON array
+    // at the path. The offsets table already encoded this as row-valid bits at
+    // build time (NULL / absent-path / non-array rows -> not valid, zero
+    // elements). Clear both the match and valid bits for such rows so the result
+    // is bit-identical to MaskJsonNonArrayRows on the brute path.
+    const TargetBitmap* row_valid = array_offsets->GetRowValidBitmap();
+    if (row_valid != nullptr) {
+        TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
+        TargetBitmapView valid_view(col_vec->GetValidRawData(),
+                                    col_vec->size());
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            int64_t row_offset = has_offset_input_
+                                     ? static_cast<int64_t>((*input)[i])
+                                     : (current_pos_ + i);
+            if (!(*row_valid)[row_offset]) {
+                valid_view[i] = false;
+                bitset_view[i] = false;
+            }
+        }
+    }
+
+    if (!has_offset_input_) {
+        current_pos_ += batch_rows;
+    }
+    return true;
+}
+
+void
+PhyMatchFilterExpr::FoldElementBitsetToRows(
+    ColumnVector* col_vec,
+    const OffsetVector* input,
+    int64_t batch_rows,
+    const milvus::IArrayOffsets* array_offsets,
+    const TargetBitmapView& match_view,
+    const TargetBitmapView& valid_view,
+    bool all_valid) {
+    TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
+
+    auto match_type = expr_->get_match_type();
+    int64_t threshold = expr_->get_count();
+
+    // elem_start is the global element id that bit 0 of `match_view` maps to.
+    // This helper is fed either the whole-segment element bitmap (sequential
+    // batch: bit i == global element i, so bit 0 == element 0) or the compacted
+    // per-selected-row bitmap (offset-input: ProcessOffsetRows walks it with its
+    // own elem_cursor and ignores elem_start). Both cases map bit 0 to global
+    // element 0 / are elem_start-agnostic, so elem_start is always 0 here --
+    // ProcessContiguousRows then reads bitset_start = first_elem - 0 = the global
+    // element id directly, and ElementBitsetToRowBitsetAny reads
+    // first_bit = starts[current_pos_] - 0.
+    const int64_t elem_start = 0;
+
+    auto dispatch = [&]<bool all_valid_v>() {
+        switch (match_type) {
+            case MatchType::MatchAny:
+                DispatchMatchProcessing<MatchType::MatchAny, all_valid_v>(
+                    has_offset_input_,
+                    batch_rows,
+                    current_pos_,
+                    elem_start,
+                    input,
+                    array_offsets,
+                    match_view,
+                    valid_view,
+                    bitset_view,
+                    threshold);
+                break;
+            case MatchType::MatchAll:
+                DispatchMatchProcessing<MatchType::MatchAll, all_valid_v>(
+                    has_offset_input_,
+                    batch_rows,
+                    current_pos_,
+                    elem_start,
+                    input,
+                    array_offsets,
+                    match_view,
+                    valid_view,
+                    bitset_view,
+                    threshold);
+                break;
+            case MatchType::MatchLeast:
+                DispatchMatchProcessing<MatchType::MatchLeast, all_valid_v>(
+                    has_offset_input_,
+                    batch_rows,
+                    current_pos_,
+                    elem_start,
+                    input,
+                    array_offsets,
+                    match_view,
+                    valid_view,
+                    bitset_view,
+                    threshold);
+                break;
+            case MatchType::MatchMost:
+                DispatchMatchProcessing<MatchType::MatchMost, all_valid_v>(
+                    has_offset_input_,
+                    batch_rows,
+                    current_pos_,
+                    elem_start,
+                    input,
+                    array_offsets,
+                    match_view,
+                    valid_view,
+                    bitset_view,
+                    threshold);
+                break;
+            case MatchType::MatchExact:
+                DispatchMatchProcessing<MatchType::MatchExact, all_valid_v>(
+                    has_offset_input_,
+                    batch_rows,
+                    current_pos_,
+                    elem_start,
+                    input,
+                    array_offsets,
+                    match_view,
+                    valid_view,
+                    bitset_view,
+                    threshold);
+                break;
+            default:
+                ThrowInfo(OpTypeInvalid,
+                          "Unsupported match type: {}",
+                          static_cast<int>(match_type));
+        }
+    };
+
+    if (all_valid) {
+        dispatch.template operator()<true>();
+    } else {
+        dispatch.template operator()<false>();
+    }
 }
 
 void

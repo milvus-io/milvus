@@ -815,8 +815,15 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 	// multiple indexes on different paths, and indexName is preserved during RestoreIndexes.
 	targetIndexes := meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
 	indexNameToTargetID := make(map[string]int64, len(targetIndexes))
+	// indexName -> target index params, so the is_nested_index marker can be
+	// re-derived for JSON path indexes whose json_cast_type is an ARRAY_* cast
+	// (VectorScalarIndexInfo on the wire does not carry the cast type; the target
+	// index definition is the authoritative source). Keyed by indexName because a
+	// single JSON field can have multiple indexes on different paths.
+	indexNameToParams := make(map[string][]*commonpb.KeyValuePair, len(targetIndexes))
 	for _, index := range targetIndexes {
 		indexNameToTargetID[index.IndexName] = index.IndexID
+		indexNameToParams[index.IndexName] = index.IndexParams
 	}
 
 	// Resolve the target collection's fields so the is_nested_index marker can
@@ -864,7 +871,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		// worker's bit only if the field cannot be resolved (schema drift).
 		isNestedIndex := indexInfo.GetIsNestedIndex()
 		if field, ok := fieldByID[indexInfo.GetFieldId()]; ok {
-			isNestedIndex = isNestedArrayIndex(field, indexInfo.GetCurrentScalarIndexVersion())
+			isNestedIndex = isNestedArrayIndex(field, indexNameToParams[indexInfo.GetIndexName()], indexInfo.GetCurrentScalarIndexVersion())
 		} else {
 			mlog.Warn(ctx, "copy segment index: field not found in target schema, "+
 				"falling back to worker-reported is_nested_index marker",

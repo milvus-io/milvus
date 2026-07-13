@@ -342,6 +342,17 @@ class SegmentInterface {
     // Returns nullptr if the field doesn't have IArrayOffsets
     virtual std::shared_ptr<const IArrayOffsets>
     GetArrayOffsets(FieldId field_id) const = 0;
+
+    // Element-range offsets for the array at `nested_path` inside a JSON field,
+    // used to fold element-level nested-index hits back to rows for MATCH_* over
+    // a JSON array path. Built lazily from the raw JSON column and cached.
+    // Returns nullptr when the segment cannot provide it (growing segments have
+    // no nested JSON index and always brute-force).
+    virtual std::shared_ptr<const IArrayOffsets>
+    GetJsonArrayOffsets(FieldId field_id,
+                        const std::string& nested_path) const {
+        return nullptr;
+    }
 };
 
 // internal API for DSL calculation

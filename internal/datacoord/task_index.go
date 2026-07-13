@@ -409,9 +409,18 @@ func vectorArrayElementSize(field *schemapb.FieldSchema) (int64, error) {
 	}
 }
 
-// isNestedArrayIndex reports whether a scalar array index for `field`, built at
-// scalarIndexVersion, is a nested (element-level) array index whose loading
-// requires nested-array-capable (scalar index version >= 5) code.
+// isNestedArrayIndex reports whether a scalar index for `field` with `indexParams`,
+// built at scalarIndexVersion, is a nested (element-level) array index whose
+// loading requires nested-array-capable (scalar index version >= 5) code.
+//
+// Two shapes are nested:
+//   - a plain DataType_Array field (non struct sub-field), and
+//   - a JSON path index whose json_cast_type is an ARRAY_* cast
+//     (ARRAY_BOOL / ARRAY_DOUBLE / ARRAY_VARCHAR): the cast makes the JSON path
+//     index physically element-level, exactly like a plain array index.
+//
+// The json_cast_type lives in the index params (common.JSONCastTypeKey), so this
+// predicate takes the index params in addition to the field + scalar version.
 //
 // Marker semantics: "loading this index requires nested-array-capable code",
 // NOT "the physical layout is element-level". Struct sub-field indexes
@@ -424,12 +433,33 @@ func vectorArrayElementSize(field *schemapb.FieldSchema) (int64, error) {
 // This is the single source of truth for the is_nested_index marker: the build
 // path (prepareJobRequest) and the snapshot-restore copy path
 // (syncVectorScalarIndexes) both derive the marker here from the field type +
-// scalar version, so a stale/old copy worker echoing a dropped marker bit can
-// never corrupt the persisted value.
-func isNestedArrayIndex(field *schemapb.FieldSchema, scalarIndexVersion int32) bool {
-	return field.GetDataType() == schemapb.DataType_Array &&
-		!typeutil.IsStructSubField(field.GetName()) &&
-		scalarIndexVersion >= common.MinScalarIndexVersionForNestedArrayIndex
+// index params + scalar version, so a stale/old copy worker echoing a dropped
+// marker bit can never corrupt the persisted value.
+func isNestedArrayIndex(field *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair, scalarIndexVersion int32) bool {
+	if scalarIndexVersion < common.MinScalarIndexVersionForNestedArrayIndex {
+		return false
+	}
+	// Plain array field (struct sub-fields are routed nested by NAME everywhere,
+	// so their marker must stay false -- see the doc comment above).
+	if field.GetDataType() == schemapb.DataType_Array {
+		return !typeutil.IsStructSubField(field.GetName())
+	}
+	// JSON path index cast to an ARRAY_* type is element-level too.
+	if field.GetDataType() == schemapb.DataType_JSON {
+		return isArrayJSONCastType(indexParams)
+	}
+	return false
+}
+
+// isArrayJSONCastType reports whether the index params carry a json_cast_type
+// whose cast is an ARRAY_* type (ARRAY_BOOL / ARRAY_DOUBLE / ARRAY_VARCHAR).
+func isArrayJSONCastType(indexParams []*commonpb.KeyValuePair) bool {
+	for _, kv := range indexParams {
+		if kv.GetKey() == common.JSONCastTypeKey {
+			return common.IsArrayJSONCastType(kv.GetValue())
+		}
+	}
+	return false
 }
 
 // Helper method to prepare job request
@@ -519,7 +549,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	// and persisted with the segment index meta, and load routing uses the
 	// persisted marker, never the version. See isNestedArrayIndex for the
 	// struct-sub-field carve-out and why it is the single source of truth.
-	isNestedIndex := isNestedArrayIndex(field, currentScalarIndexVersion)
+	isNestedIndex := isNestedArrayIndex(field, params, currentScalarIndexVersion)
 
 	// Create the job request. The path layout (v0/v1) is propagated via
 	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.

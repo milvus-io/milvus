@@ -42,6 +42,7 @@
 #include "index/TextMatchIndex.h"
 #include "index/JsonFlatIndex.h"
 #include "index/JsonHybridScalarIndex.h"
+#include "index/JsonNestedIndexWrapper.h"
 #include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
@@ -859,6 +860,114 @@ MakeJsonHybrid(const CreateIndexInfo& info,
         ctx);
 }
 
+// Context for a nested (element-level) index built over a JSON array path.
+// The base nested builders read the field schema as an ARRAY field: data_type
+// must be Array and element_type the array element's scalar type. The JSON
+// column always produces nullable data (missing path / non-array row -> null),
+// so the schema must be nullable, matching MakeJsonCastContext.
+inline storage::FileManagerContext
+MakeJsonNestedContext(const storage::FileManagerContext& ctx,
+                      const JsonCastType& cast_type) {
+    auto modified = ctx;
+    modified.fieldDataMeta.field_schema.set_data_type(
+        proto::schema::DataType::Array);
+    modified.fieldDataMeta.field_schema.set_element_type(
+        static_cast<proto::schema::DataType>(cast_type.ToMilvusDataType()));
+    modified.fieldDataMeta.field_schema.set_nullable(true);
+    return modified;
+}
+
+// Build a nested (element-level) ARRAY index over a JSON array path by reusing
+// the SAME nested builders real ARRAY fields use. BaseIndex is one of the
+// nested builders; args... are the nested-index constructor arguments in the
+// exact order each base expects, with the ARRAY-typed context spliced in. The
+// original (JSON-typed) ctx is passed separately so the wrapper can read the
+// JSON binlog through its own file manager.
+template <typename T, typename BaseIndex, typename... Args>
+IndexBasePtr
+MakeJsonNestedWrapped(const CreateIndexInfo& info,
+                      const storage::FileManagerContext& ctx,
+                      Args&&... args) {
+    return std::make_unique<JsonNestedIndexWrapper<T, BaseIndex>>(
+        info.json_cast_type,
+        info.json_path,
+        ctx.fieldDataMeta.field_schema,
+        ctx,
+        std::forward<Args>(args)...);
+}
+
+// Dispatch a nested-array JSON index build across the four nested builders,
+// selecting the element scalar type from the cast's element type. Mirrors the
+// CreateNestedIndex* dispatch, but feeds ARRAY FieldData materialized from a
+// JSON path (approach A) rather than a real ARRAY field.
+IndexBasePtr
+CreateJsonNestedArrayIndex(const CreateIndexInfo& info,
+                           const storage::FileManagerContext& ctx) {
+    const auto& index_type = info.index_type;
+    auto nested_ctx = MakeJsonNestedContext(ctx, info.json_cast_type);
+    auto element_type = info.json_cast_type.element_type();
+
+    if (index_type == INVERTED_INDEX_TYPE) {
+        auto tantivy_ver = info.tantivy_index_version;
+        switch (element_type) {
+            case JsonCastType::DataType::BOOL:
+                return MakeJsonNestedWrapped<bool, InvertedIndexTantivy<bool>>(
+                    info,
+                    ctx,
+                    tantivy_ver,
+                    nested_ctx,
+                    false,  // inverted_index_single_segment
+                    true,   // user_specified_doc_id
+                    true);  // is_nested_index
+            case JsonCastType::DataType::DOUBLE:
+                return MakeJsonNestedWrapped<double,
+                                             InvertedIndexTantivy<double>>(
+                    info, ctx, tantivy_ver, nested_ctx, false, true, true);
+            case JsonCastType::DataType::VARCHAR:
+                return MakeJsonNestedWrapped<std::string,
+                                             InvertedIndexTantivy<std::string>>(
+                    info, ctx, tantivy_ver, nested_ctx, false, true, true);
+            default:
+                ThrowInfo(DataTypeInvalid,
+                          "Invalid cast type for nested JSON array inverted "
+                          "index: {}",
+                          info.json_cast_type);
+        }
+    }
+
+    if (index_type == BITMAP_INDEX_TYPE) {
+        switch (element_type) {
+            case JsonCastType::DataType::BOOL:
+                return MakeJsonNestedWrapped<bool, BitmapIndex<bool>>(
+                    info, ctx, nested_ctx, /*is_nested_index=*/true);
+            case JsonCastType::DataType::VARCHAR:
+                return MakeJsonNestedWrapped<std::string,
+                                             BitmapIndex<std::string>>(
+                    info, ctx, nested_ctx, /*is_nested_index=*/true);
+            default:
+                ThrowInfo(DataTypeInvalid,
+                          "Invalid cast type for nested JSON array bitmap "
+                          "index: {}",
+                          info.json_cast_type);
+        }
+    }
+
+    // Default: sort index (ASCENDING_SORT / STL_SORT), matching
+    // CreateNestedIndexScalarIndexSort.
+    switch (element_type) {
+        case JsonCastType::DataType::DOUBLE:
+            return MakeJsonNestedWrapped<double, ScalarIndexSort<double>>(
+                info, ctx, nested_ctx, /*is_nested_index=*/true);
+        case JsonCastType::DataType::VARCHAR:
+            return MakeJsonNestedWrapped<std::string, StringIndexSort>(
+                info, ctx, nested_ctx, /*is_nested_index=*/true);
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "Invalid cast type for nested JSON array sort index: {}",
+                      info.json_cast_type);
+    }
+}
+
 }  // namespace
 
 IndexBasePtr
@@ -869,6 +978,17 @@ IndexFactory::CreateJsonIndex(
     const auto& cast_dtype = create_index_info.json_cast_type;
     const auto& nested_path = create_index_info.json_path;
     const auto& json_cast_function = create_index_info.json_cast_function;
+
+    // Element-level nested index over a JSON array path (json_cast_type=ARRAY_*)
+    // when the per-segment nested marker is set. Materialize an ARRAY FieldData
+    // from the JSON column and reuse the SAME nested builders real ARRAY fields
+    // use (approach A), instead of a row-level JsonFlatIndex. Missing/false
+    // marker keeps the legacy row-level JSON array path below.
+    if (cast_dtype.data_type() == JsonCastType::DataType::ARRAY &&
+        create_index_info.nested_array_index) {
+        return CreateJsonNestedArrayIndex(create_index_info,
+                                          file_manager_context);
+    }
 
     // Sort index
     if (index_type == ASCENDING_SORT) {

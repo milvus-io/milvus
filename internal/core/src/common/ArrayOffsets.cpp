@@ -26,6 +26,7 @@
 #include "common/Array.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Json.h"
 #include "common/OpContext.h"
 #include "common/VectorArray.h"
 #include "glog/logging.h"
@@ -471,6 +472,82 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
     if (nullable_seen) {
+        result->has_row_valid_ = true;
+        result->row_valid_ = std::move(row_valid);
+        result->resource_size_ += (row_count + 7) / 8;
+    }
+    cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+        cachinglayer::ResourceUsage{result->resource_size_, 0});
+    return result;
+}
+
+std::shared_ptr<ArrayOffsetsSealed>
+ArrayOffsetsSealed::BuildFromJsonColumn(const ChunkedColumnInterface& column,
+                                        const FieldMeta& field_meta,
+                                        const std::string& nested_path,
+                                        int64_t row_count) {
+    if (row_count == 0) {
+        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{0});
+    }
+
+    // Per-row element length, filled index-addressed from the bulk callback
+    // (order-independent), then prefix-summed. A row is marked NON-valid when it
+    // is NULL / the path is absent / the value is not a real array; such a row
+    // carries zero elements and is excluded by row-level consumers exactly like
+    // the brute-force MaskJsonNonArrayRows path. A genuine empty [] stays valid.
+    std::vector<int32_t> row_len(row_count, 0);
+    TargetBitmap row_valid(row_count, true);
+    bool invalid_seen = false;
+
+    auto temp_op_ctx = std::make_unique<OpContext>();
+    auto op_ctx_ptr = temp_op_ctx.get();
+
+    std::vector<int64_t> seg_offsets(row_count);
+    for (int64_t r = 0; r < row_count; ++r) {
+        seg_offsets[r] = r;
+    }
+
+    column.BulkRawJsonAt(
+        op_ctx_ptr,
+        [&](Json json, size_t i, bool is_valid) {
+            if (!is_valid) {
+                invalid_seen = true;
+                row_valid[i] = false;
+                return;
+            }
+            auto array = json.array_at(nested_path);
+            if (array.error() == simdjson::SUCCESS) {
+                row_len[i] = static_cast<int32_t>(array.value().size());
+            } else {
+                // path missing, or value at the path is not a real array
+                // -> UNKNOWN row (excluded), zero elements.
+                invalid_seen = true;
+                row_valid[i] = false;
+            }
+        },
+        seg_offsets.data(),
+        row_count);
+
+    std::vector<int32_t> row_to_element_start(row_count + 1);
+    int32_t total_elements = 0;
+    for (int64_t r = 0; r < row_count; ++r) {
+        row_to_element_start[r] = total_elements;
+        total_elements += row_len[r];
+    }
+    row_to_element_start[row_count] = total_elements;
+
+    LOG_INFO(
+        "ArrayOffsetsSealed::BuildFromJsonColumn: field_id={}, path='{}', "
+        "row_count={}, total_elements={}",
+        field_meta.get_id().get(),
+        nested_path,
+        row_count,
+        total_elements);
+
+    auto result =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+    result->resource_size_ = 4 * (row_count + 1);
+    if (invalid_seen) {
         result->has_row_valid_ = true;
         result->row_valid_ = std::move(row_valid);
         result->resource_size_ += (row_count + 7) / 8;

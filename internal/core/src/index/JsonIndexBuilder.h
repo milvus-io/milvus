@@ -69,6 +69,48 @@ ConvertJsonToTypedFieldData(
     const JsonCastType& cast_type,
     JsonCastFunction cast_function);
 
+// Materialize an ARRAY-shaped FieldData<Array> from JSON field data by parsing
+// each row's array at nested_path into a typed milvus::Array (element type from
+// cast_type). This feeds the SAME nested (element-level) builders that real
+// ARRAY fields use, so an element-granular nested index can be built over a
+// JSON array path. T is the element scalar type (bool / double / std::string);
+// cast_type.data_type() must be ARRAY.
+//
+// Layout mirrors the real ARRAY FillFieldData path (FieldData.cpp DataType::
+// ARRAY): the returned FieldData is dense and nullable — one Array slot per
+// logical row. A null row / missing path / non-array value produces an
+// invalid (valid-bit 0) empty Array in its slot, contributing zero elements,
+// exactly like the array nested NULL handling. All-null / all-empty is not an
+// error: it yields a valid FieldData<Array> with every row empty/invalid.
+template <typename T>
+FieldDataPtr
+ConvertJsonToArrayFieldData(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type);
+
+extern template FieldDataPtr
+ConvertJsonToArrayFieldData<bool>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type);
+
+extern template FieldDataPtr
+ConvertJsonToArrayFieldData<double>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type);
+
+extern template FieldDataPtr
+ConvertJsonToArrayFieldData<std::string>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type);
+
 extern template JsonToTypedResult
 ConvertJsonToTypedFieldData<bool>(
     const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,

@@ -202,6 +202,20 @@ class ArrayOffsetsSealed : public IArrayOffsets {
                     const FieldMeta& field_meta,
                     int64_t row_count);
 
+    // Build offsets for the array living at `nested_path` inside a JSON column.
+    // Mirrors BuildFromColumn, but each row's element count comes from parsing
+    // the JSON document and taking the length of the array at the path. A row
+    // whose JSON is NULL, whose path is absent, or whose value at the path is
+    // not a real array contributes ZERO elements and is marked NON-valid in the
+    // row-valid bitmap -- matching the three-valued MATCH semantics
+    // (MaskJsonNonArrayRows) so such rows are excluded exactly as brute force
+    // does. A genuine empty array [] contributes zero elements but stays valid.
+    static std::shared_ptr<ArrayOffsetsSealed>
+    BuildFromJsonColumn(const ChunkedColumnInterface& column,
+                        const FieldMeta& field_meta,
+                        const std::string& nested_path,
+                        int64_t row_count);
+
  private:
     const std::vector<int32_t> row_to_element_start_;
     // Per-row NULL bitmap (bit==true => non-null). Populated by the static

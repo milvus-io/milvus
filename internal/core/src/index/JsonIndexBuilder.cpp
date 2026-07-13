@@ -14,11 +14,13 @@
 #include <string_view>
 #include <type_traits>
 
+#include "common/Array.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
 #include "common/JsonUtils.h"
+#include "common/Types.h"
 #include "folly/FBVector.h"
 #include "index/JsonIndexBuilder.h"
 #include "pb/schema.pb.h"
@@ -266,6 +268,151 @@ ConvertJsonToTypedFieldData<std::string>(
     const std::string& nested_path,
     const JsonCastType& cast_type,
     JsonCastFunction cast_function);
+
+namespace {
+
+// Establish the ScalarField oneof data_case for element type T without adding
+// any element. This fixes Array's element_type_ even for a 0-element (empty)
+// array, so get_element_type() is correct (the string nested builder asserts on
+// it). Calling the mutable accessor sets the oneof case; Array(ScalarField)
+// then reads element_type_ from data_case(): bool_data -> BOOL, double_data ->
+// DOUBLE, string_data -> STRING.
+template <typename T>
+void
+SetArrayElementCase(ScalarFieldProto& row_proto) {
+    if constexpr (std::is_same_v<T, bool>) {
+        (void)row_proto.mutable_bool_data();
+    } else if constexpr (std::is_same_v<T, double>) {
+        (void)row_proto.mutable_double_data();
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        (void)row_proto.mutable_string_data();
+    } else {
+        static_assert(sizeof(T) == 0,
+                      "unsupported element type for JSON array conversion");
+    }
+}
+
+// Append one parsed element into the per-row ScalarField proto. The proto data
+// container picked here decides Array's element_type_ (see Array(ScalarField)):
+// bool_data -> BOOL, double_data -> DOUBLE, string_data -> STRING.
+template <typename T>
+void
+AppendArrayElement(ScalarFieldProto& row_proto, const T& value) {
+    if constexpr (std::is_same_v<T, bool>) {
+        row_proto.mutable_bool_data()->add_data(value);
+    } else if constexpr (std::is_same_v<T, double>) {
+        row_proto.mutable_double_data()->add_data(value);
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        row_proto.mutable_string_data()->add_data(value);
+    } else {
+        static_assert(sizeof(T) == 0,
+                      "unsupported element type for JSON array conversion");
+    }
+}
+
+}  // namespace
+
+template <typename T>
+FieldDataPtr
+ConvertJsonToArrayFieldData(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type) {
+    AssertInfo(cast_type.data_type() == JsonCastType::DataType::ARRAY,
+               "ConvertJsonToArrayFieldData requires an ARRAY cast type, got {}",
+               cast_type);
+
+    using SIMDJSON_T =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+
+    int64_t total_rows = 0;
+    for (const auto& data : json_field_datas) {
+        total_rows += data->get_num_rows();
+    }
+
+    // Dense, nullable ARRAY FieldData: one Array slot per logical row, mirroring
+    // the real ARRAY FillFieldData path (FieldData.cpp DataType::ARRAY). NULL /
+    // missing-path / non-array rows keep an empty Array with valid-bit 0 and so
+    // contribute zero elements to the element-level nested build.
+    auto field_data = std::make_shared<FieldData<Array>>(
+        DataType::ARRAY, /*nullable=*/true, total_rows);
+
+    FixedVector<Array> values(total_rows);
+    std::vector<uint8_t> valid_data((total_rows + 7) / 8, 0);
+
+    auto tokens = parse_json_pointer(nested_path);
+
+    int64_t offset = 0;
+    for (const auto& data : json_field_datas) {
+        auto n = data->get_num_rows();
+        for (int64_t i = 0; i < n; i++, offset++) {
+            if (schema.nullable() && !data->is_valid(i)) {
+                // null row -> empty invalid Array, no elements
+                continue;
+            }
+
+            auto json_column = static_cast<const Json*>(data->RawValue(i));
+            auto exists = path_exists(json_column->dom_doc(), tokens);
+            if (!exists || !json_column->exist(nested_path)) {
+                // missing path -> empty invalid Array, no elements
+                continue;
+            }
+
+            auto array_res =
+                json_column->dom_doc().at_pointer(nested_path).get_array();
+            if (array_res.error() != simdjson::SUCCESS) {
+                // value at path is not an array -> empty invalid Array
+                continue;
+            }
+
+            // Fix the element type up-front so an empty (0-element) array still
+            // reports the correct get_element_type() (the string nested builder
+            // asserts on it) instead of an unknown default.
+            ScalarFieldProto row_proto;
+            SetArrayElementCase<T>(row_proto);
+            for (auto value : array_res.value()) {
+                auto val = value.template get<SIMDJSON_T>();
+                if (val.error() == simdjson::SUCCESS) {
+                    AppendArrayElement<T>(row_proto,
+                                          static_cast<T>(val.value()));
+                }
+            }
+
+            // Even an empty array is a present value: mark the row valid so it
+            // is not treated as a null row (it just contributes zero elements).
+            values[offset] = Array(row_proto);
+            valid_data[offset / 8] |= (1 << (offset % 8));
+        }
+    }
+
+    field_data->FillFieldData(values.data(),
+                              valid_data.data(),
+                              static_cast<ssize_t>(total_rows),
+                              static_cast<ssize_t>(0));
+    return field_data;
+}
+
+template FieldDataPtr
+ConvertJsonToArrayFieldData<bool>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type);
+
+template FieldDataPtr
+ConvertJsonToArrayFieldData<double>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type);
+
+template FieldDataPtr
+ConvertJsonToArrayFieldData<std::string>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type);
 
 namespace json {
 

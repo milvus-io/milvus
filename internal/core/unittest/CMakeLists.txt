@@ -55,6 +55,7 @@ set(MILVUS_TEST_FILES
         test_storage_v2_index_raw_data.cpp
         test_group_by_json.cpp
         test_element_filter.cpp
+        test_json_nested_index.cpp
         test_query_group_by.cpp
         test_minhash.cpp
         test_async_warmup.cpp

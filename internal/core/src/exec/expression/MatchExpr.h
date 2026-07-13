@@ -95,16 +95,67 @@ class PhyMatchFilterExpr : public Expr {
                     std::shared_ptr<const milvus::IArrayOffsets> array_offsets,
                     FieldId field_id);
 
-    // JSON path entry point. For this checkpoint it dispatches straight to the
-    // brute-force path; the index fast-path is added in a later step.
+    // JSON path entry point. Tries the element-level nested-index fast path
+    // (EvalJsonIndexed); on any incompatibility it falls back to the brute-force
+    // per-row path (EvalJsonBrute), which stays the source of truth.
     void
     EvalJson(EvalCtx& context, VectorPtr& result);
+
+    // JSON element-level nested-index fast path. When a real element-granular
+    // ScalarIndex<T> exists over the queried JSON array path (a
+    // JsonNestedIndexWrapper, cast_type ARRAY_*), the element predicate is served
+    // by the index (In/Range) instead of re-parsing every JSON row, then the
+    // element-level hits are folded to rows through the JSON IArrayOffsets exactly
+    // like EvalWithOffsets does for real arrays.
+    //
+    // Returns true iff it fully produced `result` for this batch. Returns false
+    // (leaving `result` untouched) whenever the query is not eligible -- no
+    // sealed segment, no pinnable nested ARRAY-cast index, numeric array-index
+    // path segments tantivy cannot serve, no JSON IArrayOffsets, an element
+    // predicate the index cannot serve (arith / like / conjunct / binary-range /
+    // variable-IN), an int64 literal that is not injective in the double index,
+    // or an index whose element enumeration does not align element-for-element
+    // with the offsets table (any null / type-mismatched array element makes the
+    // two diverge). The caller then runs EvalJsonBrute for bit-for-bit parity.
+    bool
+    EvalJsonIndexed(EvalCtx& context, VectorPtr& result);
+
+    // Typed body of EvalJsonIndexed: pins the nested ScalarIndex<T>, runs the
+    // element predicate through it (In / NotIn / Range) to get an element-level
+    // bitmap sized to the total indexed element count, verifies that count equals
+    // the JSON IArrayOffsets total (the alignment guard), folds element -> row
+    // with MATCH semantics, and applies NULL/non-array masking. Returns false to
+    // request brute fallback.
+    template <typename T>
+    bool
+    EvalJsonIndexedImpl(EvalCtx& context,
+                        VectorPtr& result,
+                        const std::string& index_pointer,
+                        std::shared_ptr<const milvus::IArrayOffsets> array_offsets,
+                        const milvus::expr::ColumnInfo& column,
+                        milvus::proto::plan::OpType op_type,
+                        const std::vector<milvus::proto::plan::GenericValue>&
+                            values);
 
     // JSON brute-force: iterate JSON rows one at a time, evaluate the inner
     // predicate through the normal Eval framework, then aggregate that row's
     // element-level bitmap with MATCH semantics.
     void
     EvalJsonBrute(EvalCtx& context, VectorPtr& result);
+
+    // Fold an element-level match/valid bitmap through `array_offsets` with the
+    // MATCH quantifier for the current batch, writing the row-level result into
+    // `col_vec`. Shared by EvalWithOffsets-style aggregation and the JSON indexed
+    // path. `match_view` / `valid_view` are element-level and cover the whole
+    // segment (element ids [0, total_elements)); the batch slice is taken here.
+    void
+    FoldElementBitsetToRows(ColumnVector* col_vec,
+                            const OffsetVector* input,
+                            int64_t batch_rows,
+                            const milvus::IArrayOffsets* array_offsets,
+                            const TargetBitmapView& match_view,
+                            const TargetBitmapView& valid_view,
+                            bool all_valid);
 
     // Three-valued MATCH: mask rows whose ARRAY field value is NULL. For each row
     // in the batch, clears both the valid bit and the match bit when the field is

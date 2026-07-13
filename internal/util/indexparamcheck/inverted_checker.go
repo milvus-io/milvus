@@ -14,6 +14,14 @@ type INVERTEDChecker struct {
 	scalarIndexChecker
 }
 
+// validJSONCastTypes are the json_cast_type values an INVERTED JSON index accepts.
+// The ARRAY_* casts (ARRAY_BOOL / ARRAY_DOUBLE / ARRAY_VARCHAR) are element-level:
+// datacoord re-derives the internal is_nested_index marker from the cast type (see
+// isNestedArrayIndex in internal/datacoord/task_index.go) under the same scalar
+// index version >= 5 gate a plain DataType_Array index uses. Nested is NOT a
+// user-settable param for either shape -- the reserved-key guard in
+// ValidateIndexParams keeps rejecting an explicit "nested_index". Keep the ARRAY_*
+// entries in sync with common.IsArrayJSONCastType.
 var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR", "JSON"}
 
 var validJSONCastFunctions = []string{"STRING_TO_DOUBLE"}

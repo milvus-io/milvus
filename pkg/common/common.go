@@ -158,6 +158,19 @@ const (
 	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
 )
 
+// IsArrayJSONCastType reports whether a json_cast_type string denotes an ARRAY
+// cast (ARRAY_BOOL / ARRAY_DOUBLE / ARRAY_VARCHAR). A JSON path index built with
+// such a cast is physically element-level, so datacoord treats it like a plain
+// DataType_Array index for the is_nested_index marker decision.
+func IsArrayJSONCastType(castType string) bool {
+	switch castType {
+	case JSONCastTypeArrayBool, JSONCastTypeArrayDouble, JSONCastTypeArrayVarChar:
+		return true
+	default:
+		return false
+	}
+}
+
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
 // Used by DataNode to ensure the version written back to metadata does not exceed
 // what the cluster can handle.
@@ -255,6 +268,16 @@ const (
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
+
+	// JSONCastTypeArrayBool / JSONCastTypeArrayDouble / JSONCastTypeArrayVarChar
+	// are the json_cast_type values whose logical cast is an ARRAY. A JSON path
+	// index built with one of these casts is element-level (nested) just like a
+	// plain DataType_Array index, so datacoord marks it with is_nested_index. Keep
+	// this set in sync with the validJSONCastTypes ARRAY_* entries in
+	// internal/util/indexparamcheck/inverted_checker.go.
+	JSONCastTypeArrayBool    = "ARRAY_BOOL"
+	JSONCastTypeArrayDouble  = "ARRAY_DOUBLE"
+	JSONCastTypeArrayVarChar = "ARRAY_VARCHAR"
 
 	SchemaVersionConsistencyProportionKey = "schema_version_consistency_proportion"
 	// SchemaVersionConsistentSegmentsKey and SchemaVersionTotalSegmentsKey are emitted by DataCoord
