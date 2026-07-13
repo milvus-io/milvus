@@ -77,21 +77,22 @@ type ComponentParam struct {
 	TraceCfg        traceConfig
 	HolmesCfg       holmesConfig
 
-	MixCoordCfg    mixCoordConfig
-	RootCoordCfg   rootCoordConfig
-	ProxyCfg       proxyConfig
-	QueryCoordCfg  queryCoordConfig
-	QueryNodeCfg   queryNodeConfig
-	DataCoordCfg   dataCoordConfig
-	DataNodeCfg    dataNodeConfig
-	KnowhereConfig knowhereConfig
-	HTTPCfg        httpConfig
-	LogCfg         logConfig
-	RoleCfg        roleConfig
-	RbacConfig     rbacConfig
-	StreamingCfg   streamingConfig
-	FunctionCfg    functionConfig
-	CredentialCfg  credentialConfig
+	MixCoordCfg       mixCoordConfig
+	RootCoordCfg      rootCoordConfig
+	ProxyCfg          proxyConfig
+	QueryCoordCfg     queryCoordConfig
+	QueryNodeCfg      queryNodeConfig
+	DataCoordCfg      dataCoordConfig
+	DataNodeCfg       dataNodeConfig
+	KnowhereConfig    knowhereConfig
+	HTTPCfg           httpConfig
+	LogCfg            logConfig
+	RoleCfg           roleConfig
+	RbacConfig        rbacConfig
+	StreamingCfg      streamingConfig
+	FunctionCfg       functionConfig
+	CredentialCfg     credentialConfig
+	StorageProfileCfg storageProfileConfig
 
 	InternalTLSCfg InternalTLSConfig
 
@@ -153,6 +154,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.KnowhereConfig.init(bt)
 	p.FunctionCfg.init(bt)
 	p.CredentialCfg.init(bt)
+	p.StorageProfileCfg.init(bt)
 
 	p.InternalTLSCfg.Init(bt)
 
@@ -175,6 +177,39 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
 	p.IntegrationTestCfg.init(bt)
+}
+
+type storageProfileConfig struct {
+	Enabled                      ParamItem `refreshable:"true"`
+	Level                        ParamItem `refreshable:"true"`
+	RequestAllowExplicit         ParamItem `refreshable:"true"`
+	TaskEnabled                  ParamItem `refreshable:"true"`
+	TaskTypes                    ParamItem `refreshable:"true"`
+	CacheEnabled                 ParamItem `refreshable:"true"`
+	MaxActiveScopes              ParamItem `refreshable:"true"`
+	MaxProfiledRequestsPerSecond ParamItem `refreshable:"true"`
+	MaxProfiledTasks             ParamItem `refreshable:"true"`
+}
+
+func (p *storageProfileConfig) init(base *BaseTable) {
+	p.Enabled = ParamItem{Key: "storage.profile.enabled", Version: "3.0.0", DefaultValue: "false", Doc: "Enable opt-in request/task storage profile summaries", Export: true}
+	p.Enabled.Init(base.mgr)
+	p.Level = ParamItem{Key: "storage.profile.level", Version: "3.0.0", DefaultValue: "summary", Doc: "Storage profile level; summary is initially supported and detailed is reserved", Export: true}
+	p.Level.Init(base.mgr)
+	p.RequestAllowExplicit = ParamItem{Key: "storage.profile.request.allowExplicit", Version: "3.0.0", DefaultValue: "false", Doc: "Allow authorized explicit request storage profiling", Export: true}
+	p.RequestAllowExplicit.Init(base.mgr)
+	p.TaskEnabled = ParamItem{Key: "storage.profile.task.enabled", Version: "3.0.0", DefaultValue: "false", Doc: "Enable configured background task storage profiling", Export: true}
+	p.TaskEnabled.Init(base.mgr)
+	p.TaskTypes = ParamItem{Key: "storage.profile.task.types", Version: "3.0.0", DefaultValue: "", Doc: "Comma-separated bounded task workload kinds selected for storage profiling", Export: true}
+	p.TaskTypes.Init(base.mgr)
+	p.CacheEnabled = ParamItem{Key: "storage.profile.cache.enabled", Version: "3.0.0", DefaultValue: "true", Doc: "Collect relevant Milvus-visible cache signals in storage profiles", Export: true}
+	p.CacheEnabled.Init(base.mgr)
+	p.MaxActiveScopes = ParamItem{Key: "storage.profile.maxActiveScopes", Version: "3.0.0", DefaultValue: "1024", Doc: "Maximum concurrent profiled request and task scopes", Export: true}
+	p.MaxActiveScopes.Init(base.mgr)
+	p.MaxProfiledRequestsPerSecond = ParamItem{Key: "storage.profile.maxProfiledRequestsPerSecond", Version: "3.0.0", DefaultValue: "10", Doc: "Maximum newly profiled explicit requests per second", Export: true}
+	p.MaxProfiledRequestsPerSecond.Init(base.mgr)
+	p.MaxProfiledTasks = ParamItem{Key: "storage.profile.maxProfiledTasks", Version: "3.0.0", DefaultValue: "128", Doc: "Maximum concurrent profiled background tasks", Export: true}
+	p.MaxProfiledTasks.Init(base.mgr)
 }
 
 func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {

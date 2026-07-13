@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"path"
 
@@ -68,6 +69,7 @@ type packedBinlogRecordWriterBase struct {
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
 	writerFormat         string
+	storageProfileCtx    context.Context
 	// basePath is the segment data root, populated by initWriters. The
 	// underlying packed batch writers do not return a manifest path; the
 	// caller builds the manifest update against this base path.
@@ -289,7 +291,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 			paths = append(paths, path)
 			logIdStart++
 		}
-		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
+		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, pw.storageProfileCtx)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
@@ -344,7 +346,12 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
+	profileContexts ...context.Context,
 ) (*PackedBinlogRecordWriter, error) {
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
@@ -366,6 +373,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 			storageConfig:        storageConfig,
 			storagePluginContext: storagePluginContext,
 			writerFormat:         writerFormat,
+			storageProfileCtx:    profileCtx,
 			tsFrom:               typeutil.MaxTimestamp,
 			tsTo:                 0,
 			ttlFieldID:           getTTLFieldID(schema),
@@ -444,7 +452,7 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-		pw.writer, err = newPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, true, pw.textRefsAsBinary, writerFormat, schemaBasedFormats)
+		pw.writer, err = newPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, true, pw.textRefsAsBinary, writerFormat, schemaBasedFormats, pw.storageProfileCtx)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
@@ -505,7 +513,7 @@ func (pw *PackedManifestRecordWriter) Close() error {
 	if err := pw.appendV3Stats(updates); err != nil {
 		return err
 	}
-	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig, updates)
+	newManifest, err := packed.CommitManifestUpdatesWithContext(pw.storageProfileCtx, pw.basePath, packed.ManifestEarliest, pw.storageConfig, updates)
 	if err != nil {
 		return merr.Wrap(err, "PackedManifestRecordWriter.Close commit")
 	}
@@ -528,7 +536,7 @@ func (pw *PackedManifestRecordWriter) appendV3Stats(updates *packed.ManifestUpda
 			return err
 		}
 		fullPath := path.Join(pw.basePath, fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id))
-		if err := packed.WriteFile(pw.storageConfig, fullPath, statsBlob.Value); err != nil {
+		if err := packed.WriteFileWithContext(pw.storageProfileCtx, pw.storageConfig, fullPath, statsBlob.Value); err != nil {
 			return merr.Wrap(err, "appendV3Stats: failed to write bloom filter stats")
 		}
 		updates.Stats = append(updates.Stats, packed.StatEntry{
@@ -548,7 +556,7 @@ func (pw *PackedManifestRecordWriter) appendV3Stats(updates *packed.ManifestUpda
 			return err
 		}
 		fullPath := path.Join(pw.basePath, fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id))
-		if err := packed.WriteFile(pw.storageConfig, fullPath, blob.Value); err != nil {
+		if err := packed.WriteFileWithContext(pw.storageProfileCtx, pw.storageConfig, fullPath, blob.Value); err != nil {
 			return merr.Wrap(err, "appendV3Stats: failed to write bm25 stats")
 		}
 		updates.Stats = append(updates.Stats, packed.StatEntry{
@@ -566,7 +574,12 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	textRefsAsBinary bool,
 	writerFormat string,
+	profileContexts ...context.Context,
 ) (*PackedManifestRecordWriter, error) {
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
@@ -588,6 +601,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 			storageConfig:        storageConfig,
 			storagePluginContext: storagePluginContext,
 			writerFormat:         writerFormat,
+			storageProfileCtx:    profileCtx,
 			tsFrom:               typeutil.MaxTimestamp,
 			tsTo:                 0,
 			ttlFieldID:           getTTLFieldID(schema),
@@ -668,7 +682,7 @@ func (pw *PackedTextManifestRecordWriter) initWriters(r Record) error {
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats)
+		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats, pw.storageProfileCtx)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed text writer")
 		}
@@ -723,7 +737,7 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 		return pw.writeStats()
 	}
 
-	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig,
+	newManifest, err := packed.CommitManifestUpdatesWithContext(pw.storageProfileCtx, pw.basePath, packed.ManifestEarliest, pw.storageConfig,
 		&packed.ManifestUpdates{NewFiles: out})
 	if err != nil {
 		return merr.Wrap(err, "PackedTextManifestRecordWriter.Close commit")
@@ -745,7 +759,12 @@ func NewPackedTextManifestRecordWriter(
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
 	writerFormat string,
+	profileContexts ...context.Context,
 ) (*PackedTextManifestRecordWriter, error) {
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
@@ -766,6 +785,7 @@ func NewPackedTextManifestRecordWriter(
 			columnGroups:        columnGroups,
 			storageConfig:       storageConfig,
 			writerFormat:        writerFormat,
+			storageProfileCtx:   profileCtx,
 			tsFrom:              typeutil.MaxTimestamp,
 			tsTo:                0,
 			ttlFieldID:          getTTLFieldID(schema),

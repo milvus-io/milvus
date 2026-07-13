@@ -38,6 +38,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+
+	"github.com/milvus-io/milvus/internal/storageprofile"
 )
 
 // ChunkObjectWalkFunc is the callback function for walking objects.
@@ -67,6 +69,7 @@ type RemoteChunkManager struct {
 	rootPath   string
 
 	readRetryAttempts uint
+	backendKind       storageprofile.BackendKind
 }
 
 var _ ChunkManager = (*RemoteChunkManager)(nil)
@@ -90,6 +93,7 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 		bucketName:        c.BucketName,
 		rootPath:          strings.TrimLeft(c.RootPath, "/"),
 		readRetryAttempts: c.ReadRetryAttempts,
+		backendKind:       backendKindFromCloudProvider(c.CloudProvider),
 	}
 	mlog.Info(ctx, "remote chunk manager init success.", mlog.String("remote", c.CloudProvider), mlog.String("bucketname", c.BucketName), mlog.String("root", mcm.RootPath()))
 	return mcm, nil
@@ -102,6 +106,7 @@ func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath st
 		bucketName:        bucket,
 		rootPath:          rootPath,
 		readRetryAttempts: 10,
+		backendKind:       storageprofile.BackendKindS3Compatible,
 	}
 	return mcm
 }
@@ -123,43 +128,65 @@ func (mcm *RemoteChunkManager) UnderlyingObjectStorage() ObjectStorage {
 
 // Path returns the path of minio data if exists.
 func (mcm *RemoteChunkManager) Path(ctx context.Context, filePath string) (string, error) {
-	exist, err := mcm.Exist(ctx, filePath)
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationStat, AccessLayer: storageprofile.AccessLayerMilvus})
+	exist, err := mcm.Exist(storageprofile.WithSuppressed(ctx), filePath)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return "", err
 	}
 	if !exist {
-		return "", merr.WrapErrServiceInternalMsg("minio file manage cannot be found with filePath:" + filePath)
+		err := merr.WrapErrServiceInternalMsg("minio file manage cannot be found with filePath:" + filePath)
+		operation.Finish(storageprofile.OperationResult{Err: err, Category: storageprofile.ErrorCategoryNotFound})
+		return "", err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return filePath, nil
 }
 
 // Reader returns the path of minio data if exists.
 func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationRead, AccessLayer: storageprofile.AccessLayerMilvus, StreamingTTFBObservable: true})
 	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
 	if err != nil {
 		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
-	return reader, nil
+	return newInstrumentedFileReader(reader, operation, func(err error) storageprofile.ErrorCategory {
+		return storageprofile.ClassifyError(mapObjectStorageError(filePath, err))
+	}), nil
 }
 
 func (mcm *RemoteChunkManager) ReaderAtOffset(ctx context.Context, filePath string, offset int64) (FileReader, error) {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationRangeRead, AccessLayer: storageprofile.AccessLayerMilvus, StreamingTTFBObservable: true})
 	if offset < 0 {
+		operation.Finish(storageprofile.OperationResult{Err: io.EOF, Category: storageprofile.ErrorCategoryInvalidRange})
 		return nil, io.EOF
 	}
 
 	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, offset, int64(0))
 	if err != nil {
 		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Int64("offset", offset), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
-	return reader, nil
+	return newInstrumentedFileReader(reader, operation, func(err error) storageprofile.ErrorCategory {
+		return storageprofile.ClassifyError(mapObjectStorageError(filePath, err))
+	}), nil
 }
 
 func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationStat, AccessLayer: storageprofile.AccessLayerMilvus})
 	var objectInfo int64
 	var err error
+	var attempts uint64
+	var retryReason storageprofile.ErrorCategory
 	err = retry.Handle(ctx, func() (bool, error) {
+		attempts++
 		objectInfo, err = mcm.getObjectSize(ctx, mcm.bucketName, filePath)
 		if err == nil {
 			return false, nil
@@ -167,21 +194,35 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 		mlog.Warn(ctx, "failed to get object size", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		err = mapObjectStorageError(filePath, err)
 		if merr.IsRetryableErr(err) {
+			retryReason = storageprofile.ClassifyError(err)
 			return true, err
 		}
 		return false, err
 	}, retry.Attempts(mcm.readRetryAttempts))
+	result := storageprofile.OperationResult{Err: err, RetryReason: retryReason}
+	if attempts > 1 {
+		result.RetryCount = attempts - 1
+	}
+	operation.Finish(result)
 	return objectInfo, err
 }
 
 // Write writes the data to minio storage.
 func (mcm *RemoteChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		Operation: storageprofile.StorageOperationWrite, AccessLayer: storageprofile.AccessLayerMilvus,
+		BytesRequested: uint64(len(content)), RequestedBytesKnown: true,
+	})
 	err := mcm.putObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)))
 	if err != nil {
 		mlog.Warn(ctx, "failed to put object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
 		return err
 	}
 
+	operation.AddCompletedBytes(uint64(len(content)))
+	operation.Finish(storageprofile.OperationResult{SizeKnown: true})
 	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataPutLabel).Observe(float64(len(content)))
 	return nil
 }
@@ -201,23 +242,36 @@ func (mcm *RemoteChunkManager) MultiWrite(ctx context.Context, kvs map[string][]
 
 // Exist checks whether chunk is saved to minio storage.
 func (mcm *RemoteChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationStat, AccessLayer: storageprofile.AccessLayerMilvus})
 	_, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
 	if err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			operation.Finish(storageprofile.OperationResult{Err: err})
 			return false, nil
 		}
 		mlog.Warn(ctx, "failed to stat object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return false, err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return true, nil
 }
 
 // Read reads the minio storage data if exists.
 func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationRead, AccessLayer: storageprofile.AccessLayerMilvus})
 	var data []byte
+	var attempts uint64
+	var retryReason storageprofile.ErrorCategory
 	err := retry.Do(ctx, func() error {
+		attempts++
 		object, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
 		if err != nil {
+			if merr.IsRetryableErr(err) {
+				retryReason = storageprofile.ClassifyError(err)
+			}
 			mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
@@ -228,11 +282,17 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		_, err = object.Read(empty)
 		err = mapObjectStorageError(filePath, err)
 		if err != nil {
+			if merr.IsRetryableErr(err) {
+				retryReason = storageprofile.ClassifyError(err)
+			}
 			mlog.Warn(ctx, "failed to read object", mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		size, err := object.Size()
 		if err != nil {
+			if merr.IsRetryableErr(err) {
+				retryReason = storageprofile.ClassifyError(err)
+			}
 			mlog.Warn(ctx, "failed to stat object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
@@ -246,9 +306,20 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		return nil
 	}, retry.Attempts(mcm.readRetryAttempts), retry.RetryErr(merr.IsRetryableErr))
 	if err != nil {
+		result := storageprofile.OperationResult{Err: err, RetryReason: retryReason}
+		if attempts > 1 {
+			result.RetryCount = attempts - 1
+		}
+		operation.Finish(result)
 		return nil, err
 	}
 
+	operation.AddCompletedBytes(uint64(len(data)))
+	result := storageprofile.OperationResult{SizeKnown: true, RetryReason: retryReason}
+	if attempts > 1 {
+		result.RetryCount = attempts - 1
+	}
+	operation.Finish(result)
 	return data, nil
 }
 
@@ -272,13 +343,20 @@ func (mcm *RemoteChunkManager) Mmap(ctx context.Context, filePath string) (*mmap
 
 // ReadAt reads specific position data of minio storage if exists.
 func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		Operation: storageprofile.StorageOperationRangeRead, AccessLayer: storageprofile.AccessLayerMilvus,
+		BytesRequested: uint64(max(length, 0)), RequestedBytesKnown: length >= 0,
+	})
 	if off < 0 || length < 0 {
+		operation.Finish(storageprofile.OperationResult{Err: io.EOF, Category: storageprofile.ErrorCategoryInvalidRange, SizeKnown: length >= 0})
 		return nil, io.EOF
 	}
 
 	object, err := mcm.getObject(ctx, mcm.bucketName, filePath, off, length)
 	if err != nil {
 		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
 		return nil, err
 	}
 	defer object.Close()
@@ -287,19 +365,34 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	err = mapObjectStorageError(filePath, err)
 	if err != nil {
 		mlog.Warn(ctx, "failed to read object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
 		return nil, err
 	}
+	operation.AddCompletedBytes(uint64(len(data)))
+	if int64(len(data)) < length {
+		operation.Finish(storageprofile.OperationResult{
+			Err:       io.ErrUnexpectedEOF,
+			Category:  storageprofile.ErrorCategoryUnexpectedEOF,
+			SizeKnown: true,
+		})
+		return data, nil
+	}
+	operation.Finish(storageprofile.OperationResult{SizeKnown: true})
 	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(length))
 	return data, nil
 }
 
 // Remove deletes an object with @key.
 func (mcm *RemoteChunkManager) Remove(ctx context.Context, filePath string) error {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationDelete, AccessLayer: storageprofile.AccessLayerMilvus})
 	err := mcm.removeObject(ctx, mcm.bucketName, filePath)
 	if err != nil {
 		mlog.Warn(ctx, "failed to remove object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return nil
 }
 
@@ -323,7 +416,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 	err := mcm.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) bool {
 		key := object.FilePath
 		runningGroup.Go(func() error {
-			err := mcm.removeObject(ctx, mcm.bucketName, key)
+			err := mcm.Remove(ctx, key)
 			if err != nil {
 				mlog.Warn(ctx, "failed to remove object", mlog.String("path", key), mlog.Err(err))
 			}
@@ -340,6 +433,8 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 }
 
 func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationList, AccessLayer: storageprofile.AccessLayerMilvus})
 	start := timerecord.NewTimeRecorder("WalkWithPrefix")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
 	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
@@ -348,12 +443,17 @@ func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string
 	if err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, recursive, walkFunc); err != nil {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.FailLabel).Inc()
 		logger.Warn(ctx, "failed to walk through objects", mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{
+			Err:      err,
+			Category: storageprofile.ClassifyError(mapObjectStorageError(prefix, err)),
+		})
 		return err
 	}
 	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataWalkLabel).
 		Observe(float64(start.ElapseSpan().Milliseconds()))
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.SuccessLabel).Inc()
 	logger.Info(ctx, "finish walk through objects")
+	operation.Finish(storageprofile.OperationResult{})
 	return nil
 }
 
@@ -443,12 +543,27 @@ func ToMilvusIoError(fileName string, err error) error {
 }
 
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	ctx = storageprofile.WithBackendKind(ctx, mcm.backendKind)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationCopy, AccessLayer: storageprofile.AccessLayerMilvus})
 	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, dstFilePath)
 	if err != nil {
 		mlog.Warn(ctx, "failed to copy object", mlog.String("bucket", mcm.bucketName), mlog.String("src", srcFilePath), mlog.String("dst", dstFilePath), mlog.Err(err))
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return nil
+}
+
+func backendKindFromCloudProvider(provider string) storageprofile.BackendKind {
+	switch provider {
+	case objectstorage.CloudProviderAzure:
+		return storageprofile.BackendKindAzure
+	case objectstorage.CloudProviderGCP, objectstorage.CloudProviderGCPNative:
+		return storageprofile.BackendKindGCP
+	default:
+		return storageprofile.BackendKindS3Compatible
+	}
 }
 
 func (mcm *RemoteChunkManager) copyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
@@ -520,7 +635,12 @@ func mapObjectStorageError(fileName string, err error) error {
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		case azureServerBusy:
 			return merr.WrapErrIoTooManyRequests(fileName, err)
-		case azureAuthFailed, azureAuthFailure:
+		case azureAuthFailed:
+			return storageprofile.WithErrorCategory(
+				merr.WrapErrIoPermissionDenied(fileName, err),
+				storageprofile.ErrorCategoryInvalidCredentials,
+			)
+		case azureAuthFailure:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
 		case azureContainerNotFound:
 			return merr.WrapErrIoBucketNotFound(fileName, err)
@@ -539,8 +659,13 @@ func mapObjectStorageError(fileName string, err error) error {
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		case minioSlowDown, minioTooMany:
 			return merr.WrapErrIoTooManyRequests(fileName, err)
-		case minioAccessDenied, minioInvalidKeyId, minioSigMismatch, ossInvalidAccessKeyId:
+		case minioAccessDenied:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
+		case minioInvalidKeyId, minioSigMismatch, ossInvalidAccessKeyId:
+			return storageprofile.WithErrorCategory(
+				merr.WrapErrIoPermissionDenied(fileName, err),
+				storageprofile.ErrorCategoryInvalidCredentials,
+			)
 		case minioNoSuchBucket:
 			return merr.WrapErrIoBucketNotFound(fileName, err)
 		case minioInvalidToken, minioExpiredToken, ossSecurityTokenExpired:

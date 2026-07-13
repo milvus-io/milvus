@@ -11,6 +11,7 @@
 package storage
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -142,8 +143,8 @@ func TestPackedManifestRecordWriter_TextRefsUseBinarySchema(t *testing.T) {
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 
 	var gotSchema *arrow.Schema
-	patch := mockey.Mock(packed.NewFFIPackedWriter).To(
-		func(_ string, schema *arrow.Schema, _ []storagecommon.ColumnGroup,
+	patch := mockey.Mock(packed.NewFFIPackedWriterWithContext).To(
+		func(_ context.Context, _ string, schema *arrow.Schema, _ []storagecommon.ColumnGroup,
 			_ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext,
 			_ ...map[string]string,
 		) (*packed.FFIPackedWriter, error) {

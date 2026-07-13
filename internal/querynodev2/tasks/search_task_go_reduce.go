@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -241,9 +242,16 @@ func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult) {
 	}
 	var totalCost segcore.StorageCost
 	for _, r := range results {
-		c := r.GetMetadata().StorageCost
+		metadata := r.GetMetadata()
+		c := metadata.StorageCost
 		totalCost.ScannedRemoteBytes += c.ScannedRemoteBytes
 		totalCost.ScannedTotalBytes += c.ScannedTotalBytes
+		storageprofile.ObserveCppReadProfile(
+			t.ctx,
+			metadata.StorageProfile.ReadDurationNanos,
+			metadata.StorageProfile.ReadCompletedBytes,
+			metadata.StorageProfile.DroppedReadObservations,
+		)
 	}
 	for i, sliceNq := range t.originNqs {
 		task := t.subTaskAt(i)

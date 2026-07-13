@@ -25,8 +25,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -179,6 +181,69 @@ func TestRetryableReader_ReopenOnPrematureEOF(t *testing.T) {
 	assert.Equal(t, content, string(buf))
 	assert.Equal(t, 1, openCount)
 	assert.Equal(t, []int64{5}, offsets)
+}
+
+func TestRetryableReaderProfilesOneLogicalReadAcrossReopen(t *testing.T) {
+	path := "/test/path"
+	content := "hello world"
+	attribution := storageprofile.Attribution{
+		ScopeType:       storageprofile.ScopeTypeTask,
+		Component:       "datanode",
+		WorkloadClass:   storageprofile.WorkloadClassBackground,
+		WorkloadKind:    storageprofile.WorkloadKindImport,
+		WorkloadSubtype: storageprofile.WorkloadSubtypeIngest,
+		Phase:           storageprofile.WorkloadPhaseReadSource,
+		StorageRole:     storageprofile.StorageRoleSource,
+	}
+	recorder := storageprofile.NewRecorder(attribution)
+	ctx := storageprofile.WithRecorder(storageprofile.WithAttribution(context.Background(), attribution), recorder)
+	reopen := func(ctx context.Context, _ string, offset int64) (storage.FileReader, error) {
+		// A reusable lower layer may attempt to observe its own open/read. The
+		// retrying reader must suppress that nested observation.
+		nested := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationRead})
+		nested.Finish(storageprofile.OperationResult{})
+		return NewMockReader(content[offset:]), nil
+	}
+
+	reader := NewRetryableReaderWithReopen(ctx, path, NewPrematureEOFReader(content, 5), reopen, newSizeFunc(int64(len(content))))
+	data, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	assert.Equal(t, content, string(data))
+
+	profile := recorder.Snapshot()
+	stats := profile.Operations[storageprofile.StorageOperationRead]
+	assert.Equal(t, uint64(1), stats.Count)
+	assert.Equal(t, uint64(1), stats.Success)
+	assert.Equal(t, uint64(1), stats.Retried)
+	assert.Equal(t, uint64(len(content)), stats.BytesCompleted)
+	assert.Equal(t, uint64(1), stats.TTFB.Count)
+}
+
+func TestRetryableReaderErrorThenCloseFinishesOnce(t *testing.T) {
+	attribution := storageprofile.Attribution{
+		ScopeType:     storageprofile.ScopeTypeTask,
+		Component:     "datanode",
+		WorkloadClass: storageprofile.WorkloadClassBackground,
+		WorkloadKind:  storageprofile.WorkloadKindImport,
+		Phase:         storageprofile.WorkloadPhaseReadSource,
+		StorageRole:   storageprofile.StorageRoleSource,
+	}
+	recorder := storageprofile.NewRecorder(attribution)
+	ctx := storageprofile.WithRecorder(storageprofile.WithAttribution(context.Background(), attribution), recorder)
+	reader := NewRetryableReader(ctx, "/test/path", &customMockReader{
+		readFunc: func([]byte) (int, error) { return 0, context.Canceled },
+	})
+
+	_, err := reader.Read(make([]byte, 1))
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, reader.Close())
+
+	profile := recorder.Snapshot()
+	stats := profile.Operations[storageprofile.StorageOperationRead]
+	assert.Equal(t, uint64(1), stats.Count)
+	assert.Equal(t, uint64(1), stats.Canceled)
+	assert.Equal(t, uint64(0), stats.Success)
 }
 
 func TestRetryableReader_FinalEOFIsNotRetried(t *testing.T) {

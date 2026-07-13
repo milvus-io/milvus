@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -1645,15 +1646,15 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25Stats() {
 	stats.Append(map[uint32]float32{1: 2})
 	var gotFilePath string
 	var gotEntries []packed.StatEntry
-	mockWrite := mockey.Mock(packed.WriteFile).
-		To(func(storageConfig *indexpb.StorageConfig, filePath string, data []byte) error {
+	mockWrite := mockey.Mock(packed.WriteFileWithContext).
+		To(func(_ context.Context, storageConfig *indexpb.StorageConfig, filePath string, data []byte) error {
 			gotFilePath = filePath
 			s.NotEmpty(data)
 			return nil
 		}).Build()
 	defer mockWrite.UnPatch()
-	mockCommit := mockey.Mock(packed.CommitManifestUpdates).
-		To(func(basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithContext).
+		To(func(_ context.Context, basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			s.Equal("files/insert_log/1000/2000/3000", basePath)
 			s.Equal(int64(42), version)
 			gotEntries = updates.Stats
@@ -1682,15 +1683,15 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25StatsErrors() {
 	s.Empty(gotManifest)
 	mockSerialize.UnPatch()
 
-	mockWrite := mockey.Mock(packed.WriteFile).Return(fmt.Errorf("write failed")).Build()
+	mockWrite := mockey.Mock(packed.WriteFileWithContext).Return(fmt.Errorf("write failed")).Build()
 	gotManifest, err = finalizeBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, manifestPath)
 	s.Error(err)
 	s.Empty(gotManifest)
 	mockWrite.UnPatch()
 
-	mockWrite = mockey.Mock(packed.WriteFile).Return(nil).Build()
+	mockWrite = mockey.Mock(packed.WriteFileWithContext).Return(nil).Build()
 	defer mockWrite.UnPatch()
-	mockCommit := mockey.Mock(packed.CommitManifestUpdates).Return("", fmt.Errorf("commit failed")).Build()
+	mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithContext).Return("", fmt.Errorf("commit failed")).Build()
 	defer mockCommit.UnPatch()
 	gotManifest, err = finalizeBM25Stats(ctx, map[int64]*storage.BM25Stats{101: stats}, storageConfig, manifestPath)
 	s.Error(err)
@@ -1755,6 +1756,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOpenInputReader() {
 			storageConfig *indexpb.StorageConfig,
 			storagePluginContext *indexcgopb.StoragePluginContext,
 			ext packed.ExternalReaderContext,
+			_ ...context.Context,
 		) (*packed.FFIPackedReader, error) {
 			gotColumns = neededColumns
 			gotSchema = schema
@@ -1977,8 +1979,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 			return reader, nil
 		}).Build()
 	defer mockOpen.UnPatch()
-	mockNewWriter := mockey.Mock(packed.NewFFIPackedWriter).
+	mockNewWriter := mockey.Mock(packed.NewFFIPackedWriterWithContext).
 		To(func(
+			_ context.Context,
 			basePath string,
 			schema *arrow.Schema,
 			columnGroups []storagecommon.ColumnGroup,
@@ -2000,8 +2003,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 	defer mockClose.UnPatch()
 	mockAppend := mockey.Mock(appendBM25Stats).Return(nil).Build()
 	defer mockAppend.UnPatch()
-	mockCommit := mockey.Mock(packed.CommitManifestUpdates).
-		To(func(basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithContext).
+		To(func(_ context.Context, basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			s.Equal(int64(42), version)
 			s.Same(output, updates.NewFiles)
 			return "final-manifest", nil
@@ -2097,7 +2100,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
-		mockWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(nil, fmt.Errorf("writer failed")).Build()
+		mockWriter := mockey.Mock(packed.NewFFIPackedWriterWithContext).Return(nil, fmt.Errorf("writer failed")).Build()
 		defer mockWriter.UnPatch()
 		manifestPath, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
 		s.Error(err)
@@ -2111,7 +2114,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
-		mockWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(writer, nil).Build()
+		mockWriter := mockey.Mock(packed.NewFFIPackedWriterWithContext).Return(writer, nil).Build()
 		defer mockWriter.UnPatch()
 		mockStream := mockey.Mock(streamBatches).Return(int64(0), fmt.Errorf("stream failed")).Build()
 		defer mockStream.UnPatch()
@@ -2127,7 +2130,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
-		mockWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(writer, nil).Build()
+		mockWriter := mockey.Mock(packed.NewFFIPackedWriterWithContext).Return(writer, nil).Build()
 		defer mockWriter.UnPatch()
 		mockStream := mockey.Mock(streamBatches).Return(int64(1), nil).Build()
 		defer mockStream.UnPatch()
@@ -2145,7 +2148,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockCreate.UnPatch()
 		mockOpen := mockey.Mock(openInputReader).Return(reader, nil).Build()
 		defer mockOpen.UnPatch()
-		mockWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(writer, nil).Build()
+		mockWriter := mockey.Mock(packed.NewFFIPackedWriterWithContext).Return(writer, nil).Build()
 		defer mockWriter.UnPatch()
 		mockStream := mockey.Mock(streamBatches).Return(int64(1), nil).Build()
 		defer mockStream.UnPatch()
@@ -2169,7 +2172,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskAccessorsAndCloneHelpers() 
 	taskCtx := context.Background()
 	task := NewRefreshExternalCollectionTask(taskCtx, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 10})
 	task.updatedSegments = []*datapb.SegmentInfo{{ID: 100}}
-	s.Equal(taskCtx, task.Ctx())
+	s.NoError(ensureContext(task.Ctx()))
+	attribution := storageprofile.AttributionFromContext(task.Ctx())
+	s.Equal(storageprofile.WorkloadKindExternalSync, attribution.WorkloadKind)
+	s.Equal("10", attribution.TaskID)
 	s.Equal(task.updatedSegments, task.GetUpdatedSegments())
 
 	segments := []*datapb.SegmentInfo{{ID: 1}, nil, {ID: 2}}

@@ -25,6 +25,9 @@ package packed
 import "C"
 
 import (
+	"context"
+	"sync/atomic"
+
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/arrio"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
@@ -33,6 +36,8 @@ import (
 type PackedWriter struct {
 	cPackedWriter C.CPackedWriter
 	closedSizes   []int64
+	profileCtx    context.Context
+	writtenBytes  atomic.Uint64
 }
 
 type FFIPackedWriter struct {
@@ -46,7 +51,9 @@ type FFIPackedWriter struct {
 	// that do not yet exist in the manifest (e.g. function backfill).
 	addNewColumnGroups bool
 	// closed is set once Close has consumed the underlying C writer handle.
-	closed bool
+	closed       bool
+	profileCtx   context.Context
+	writtenBytes atomic.Uint64
 }
 
 type PackedReader struct {
@@ -54,12 +61,14 @@ type PackedReader struct {
 	arr           *cdata.CArrowArray
 	schema        *arrow.Schema
 	currentBatch  arrow.Record
+	profileCtx    context.Context
 }
 
 type FFIPackedReader struct {
 	cPackedReader C.CFFIPackedReader
 	recordReader  arrio.Reader
 	schema        *arrow.Schema
+	profileCtx    context.Context
 }
 
 type (

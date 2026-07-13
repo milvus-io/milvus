@@ -618,7 +618,7 @@ func (t *RefreshExternalCollectionTask) readMilvusTableSourceFiles(ctx context.C
 		if err := ensureContext(ctx); err != nil {
 			return nil, err
 		}
-		data, err := packed.ReadFileWithExternalSpec(t.req.GetStorageConfig(), filePath, extfs)
+		data, err := packed.ReadFileWithExternalSpecContext(ctx, t.req.GetStorageConfig(), filePath, extfs)
 		if err != nil {
 			return nil, merr.Wrapf(err, "read milvus-table source file %s", filePath)
 		}

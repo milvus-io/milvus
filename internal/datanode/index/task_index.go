@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -58,6 +59,12 @@ type indexBuildTask struct {
 	manager        *TaskManager
 
 	pluginContext *indexcgopb.StoragePluginContext
+	profileScope  *storageprofile.Scope
+}
+
+func (it *indexBuildTask) WithStorageProfile(scope *storageprofile.Scope) *indexBuildTask {
+	it.profileScope = scope
+	return it
 }
 
 func NewIndexBuildTask(ctx context.Context,
@@ -94,6 +101,9 @@ func (it *indexBuildTask) parseParams() {
 }
 
 func (it *indexBuildTask) Reset() {
+	if it.profileScope != nil {
+		it.profileScope.Finish()
+	}
 	it.ident = ""
 	it.cancel = nil
 	it.ctx = nil
@@ -104,6 +114,7 @@ func (it *indexBuildTask) Reset() {
 	it.newIndexParams = nil
 	it.tr = nil
 	it.manager = nil
+	it.profileScope = nil
 }
 
 // Ctx is the context of index tasks.
@@ -333,15 +344,33 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.StoragePluginContext = it.pluginContext
 	}
 
+	sourceBytes := getFieldDataSizeFromBinlogs(it.req.GetInsertLogs(), it.req.GetField().GetFieldID())
+	if sourceBytes == 0 {
+		sourceBytes = fieldDataSize
+	}
+	readOperation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		AccessLayer:         storageprofile.AccessLayerMilvus,
+		Operation:           storageprofile.StorageOperationRead,
+		Phase:               storageprofile.WorkloadPhaseReadSource,
+		StorageRole:         storageprofile.StorageRolePersistent,
+		CppBoundary:         true,
+		BytesRequested:      sourceBytes,
+		RequestedBytesKnown: sourceBytes > 0,
+	})
 	var err error
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
+		readOperation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: sourceBytes > 0})
 		if it.index != nil && it.index.CleanLocalData() != nil {
 			log.Warn(ctx, "failed to clean cached data on disk after build index failed")
 		}
 		log.Warn(ctx, "failed to build index", mlog.Err(err))
 		return err
 	}
+	if sourceBytes > 0 {
+		readOperation.AddCompletedBytes(sourceBytes)
+	}
+	readOperation.Finish(storageprofile.OperationResult{SizeKnown: sourceBytes > 0})
 
 	buildIndexLatency := it.tr.RecordSpan()
 	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
@@ -360,8 +389,16 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 			log.Warn(ctx, "indexBuildTask Execute CIndexDelete failed", mlog.Err(err))
 		}
 	}
+	writeOperation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		AccessLayer: storageprofile.AccessLayerMilvus,
+		Operation:   storageprofile.StorageOperationWrite,
+		Phase:       storageprofile.WorkloadPhaseWriteOutput,
+		StorageRole: storageprofile.StorageRolePersistent,
+		CppBoundary: true,
+	})
 	indexStats, err := it.index.UpLoad()
 	if err != nil {
+		writeOperation.Finish(storageprofile.OperationResult{Err: err})
 		log.Warn(ctx, "failed to upload index", mlog.Err(err))
 		gcIndex()
 		return err
@@ -381,6 +418,8 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		fileKey := parts[len(parts)-1]
 		saveFileKeys = append(saveFileKeys, fileKey)
 	}
+	writeOperation.AddCompletedBytes(serializedSize)
+	writeOperation.Finish(storageprofile.OperationResult{SizeKnown: true})
 
 	it.manager.StoreIndexFilesAndStatistic(
 		it.req.GetClusterID(),

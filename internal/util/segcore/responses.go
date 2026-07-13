@@ -28,8 +28,15 @@ func (r *SearchResult) Release() {
 type SearchResultMetadata struct {
 	HasGroupBy bool
 	// GroupSize is meaningful only when HasGroupBy is true; 0 otherwise.
-	GroupSize   int64
-	StorageCost StorageCost
+	GroupSize      int64
+	StorageCost    StorageCost
+	StorageProfile StorageProfileMetadata
+}
+
+type StorageProfileMetadata struct {
+	ReadDurationNanos       []uint64
+	ReadCompletedBytes      uint64
+	DroppedReadObservations uint64
 }
 
 // GetMetadata returns the post-search metadata for this SearchResult. Storage
@@ -40,12 +47,32 @@ func (r *SearchResult) GetMetadata() SearchResultMetadata {
 	var has C.bool
 	var gs, remote, total C.int64_t
 	C.GetSearchResultMetadata(r.cSearchResult, &has, &gs, &remote, &total)
+	var durations [64]C.uint64_t
+	var durationCount C.int64_t
+	var completedBytes, dropped C.uint64_t
+	C.GetSearchResultStorageProfile(
+		r.cSearchResult,
+		&durations[0],
+		C.int64_t(len(durations)),
+		&durationCount,
+		&completedBytes,
+		&dropped,
+	)
+	readDurations := make([]uint64, int(durationCount))
+	for i := range readDurations {
+		readDurations[i] = uint64(durations[i])
+	}
 	return SearchResultMetadata{
 		HasGroupBy: bool(has),
 		GroupSize:  int64(gs),
 		StorageCost: StorageCost{
 			ScannedRemoteBytes: int64(remote),
 			ScannedTotalBytes:  int64(total),
+		},
+		StorageProfile: StorageProfileMetadata{
+			ReadDurationNanos:       readDurations,
+			ReadCompletedBytes:      uint64(completedBytes),
+			DroppedReadObservations: uint64(dropped),
 		},
 	}
 }

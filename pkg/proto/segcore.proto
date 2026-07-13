@@ -49,6 +49,15 @@ message ElementIndices {
   repeated int32 indices = 1;
 }
 
+// Bounded Milvus-owned C++ storage observations. QueryNode immediately folds
+// this local handoff into the versioned storage-profile histogram; raw
+// observations never cross an internal RPC boundary.
+message StorageProfileStats {
+  repeated uint64 read_duration_nanos = 1;
+  uint64 read_completed_bytes = 2;
+  uint64 dropped_read_observations = 3;
+}
+
 message RetrieveResults {
   schema.IDs ids = 1;
   repeated int64 offset = 2;
@@ -62,6 +71,7 @@ message RetrieveResults {
   // Element indices per document (aligned with offset array)
   // element_indices[i] contains all matching element indices for offset[i]
   repeated ElementIndices element_indices = 9;
+  StorageProfileStats storage_profile = 10;
 }
 
 message LoadFieldMeta {

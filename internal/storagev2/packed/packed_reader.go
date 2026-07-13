@@ -35,19 +35,21 @@ CStatus NewPackedReaderWithProperties(char** paths,
 import "C"
 
 import (
+	"context"
 	"io"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
-	return NewPackedReaderWithExtfs(filePaths, schema, bufferSize, storageConfig, storagePluginContext, ExternalReaderContext{})
+func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, profileContexts ...context.Context) (*PackedReader, error) {
+	return NewPackedReaderWithExtfs(filePaths, schema, bufferSize, storageConfig, storagePluginContext, ExternalReaderContext{}, profileContexts...)
 }
 
 // NewPackedReaderWithExtfs opens packed files and optionally resolves them
@@ -59,7 +61,9 @@ func NewPackedReaderWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalReaderContext,
+	profileContexts ...context.Context,
 ) (*PackedReader, error) {
+	profileCtx := packedProfileContext(firstProfileContext(profileContexts), storageConfig)
 	var cProperties *C.LoonProperties
 	var cFilesystemPath *C.char
 	if extfs.Source != "" {
@@ -123,6 +127,7 @@ func NewPackedReaderWithExtfs(
 		pluginContextPtr = &pluginContext
 	}
 
+	operation := beginPackedOperation(profileCtx, storageprofile.StorageOperationStat, storageprofile.WorkloadPhaseReadMetadata, 0, false)
 	if cProperties != nil {
 		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
 	} else if storageConfig != nil {
@@ -167,9 +172,11 @@ func NewPackedReaderWithExtfs(
 		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
-	return &PackedReader{cPackedReader: cPackedReader, schema: schema}, nil
+	operation.Finish(storageprofile.OperationResult{})
+	return &PackedReader{cPackedReader: cPackedReader, schema: schema, profileCtx: profileCtx}, nil
 }
 
 func (pr *PackedReader) ReadNext() (arrow.Record, error) {
@@ -177,6 +184,7 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	if pr.cPackedReader == nil {
 		return nil, io.EOF
 	}
+	operation := beginPackedOperation(pr.profileCtx, storageprofile.StorageOperationRead, storageprofile.WorkloadPhaseReadSource, 0, false)
 
 	if pr.currentBatch != nil {
 		pr.currentBatch.Release()
@@ -186,10 +194,12 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	var cSchema C.CArrowSchema
 	status := C.ReadNext(pr.cPackedReader, &cArr, &cSchema)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
 
 	if cArr == nil {
+		operation.Finish(storageprofile.OperationResult{Ignored: true})
 		return nil, io.EOF // end of stream, no more records to read
 	}
 
@@ -202,9 +212,14 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	}()
 	recordBatch, err := cdata.ImportCRecordBatch(goCArr, goCSchema)
 	if err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to convert ArrowArray to Record")
+		err = merr.WrapErrStorage(err, "failed to convert ArrowArray to Record")
+		operation.Finish(storageprofile.OperationResult{Err: err})
+		return nil, err
 	}
 	pr.currentBatch = recordBatch
+	size := arrowRecordBytes(recordBatch)
+	operation.AddCompletedBytes(size)
+	operation.Finish(storageprofile.OperationResult{SizeKnown: true})
 
 	// Return the RecordBatch as an arrow.Record
 	return recordBatch, nil

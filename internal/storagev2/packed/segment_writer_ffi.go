@@ -25,6 +25,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"strings"
 	"unsafe"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -65,6 +67,7 @@ type FFISegmentWriter struct {
 	cProperties *C.LoonProperties
 	schema      *arrow.Schema
 	closed      bool
+	profileCtx  context.Context
 }
 
 // NewFFISegmentWriter creates a new segment writer via FFI.
@@ -72,7 +75,9 @@ func NewFFISegmentWriter(
 	schema *arrow.Schema,
 	config *SegmentWriterConfig,
 	storageConfig *indexpb.StorageConfig,
+	profileContexts ...context.Context,
 ) (*FFISegmentWriter, error) {
+	profileCtx := packedProfileContext(firstProfileContext(profileContexts), storageConfig)
 	// export schema to C Arrow format
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
@@ -95,16 +100,20 @@ func NewFFISegmentWriter(
 
 	// create writer
 	var writerHandle C.LoonSegmentWriterHandle
+	operation := beginPackedOperation(profileCtx, storageprofile.StorageOperationStat, storageprofile.WorkloadPhaseWriteMetadata, 0, false)
 	result := C.loon_segment_writer_new(cSchema, cConfig, cProperties, &writerHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		C.loon_properties_free(cProperties)
 		return nil, err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 
 	return &FFISegmentWriter{
 		handle:      writerHandle,
 		cProperties: cProperties,
 		schema:      schema,
+		profileCtx:  profileCtx,
 	}, nil
 }
 
@@ -147,6 +156,8 @@ func segmentWriterProperties(schema *arrow.Schema, config *SegmentWriterConfig) 
 
 // Write writes a record batch to the segment writer.
 func (w *FFISegmentWriter) Write(record arrow.Record) error {
+	size := arrowRecordBytes(record)
+	operation := beginPackedOperation(w.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, size, true)
 	var caa cdata.CArrowArray
 	var cas cdata.CArrowSchema
 
@@ -157,14 +168,22 @@ func (w *FFISegmentWriter) Write(record arrow.Record) error {
 	cArray := (*C.struct_ArrowArray)(unsafe.Pointer(&caa))
 
 	result := C.loon_segment_writer_write(w.handle, cArray)
-	return HandleLoonFFIResult(result)
+	err := HandleLoonFFIResult(result)
+	if err == nil {
+		operation.AddCompletedBytes(size)
+	}
+	operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
+	return err
 }
 
 // SyncBuffered syncs buffered data to storage without closing the writer.
 // Used for mid-stream flushes; Close detaches output and finalizes the writer.
 func (w *FFISegmentWriter) SyncBuffered() error {
+	operation := beginPackedOperation(w.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, 0, false)
 	result := C.loon_segment_writer_flush(w.handle)
-	return HandleLoonFFIResult(result)
+	err := HandleLoonFFIResult(result)
+	operation.Finish(storageprofile.OperationResult{Err: err})
+	return err
 }
 
 // SegmentOutput is the data carrier returned by FFISegmentWriter.Close.
@@ -241,10 +260,13 @@ func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 		}
 	}()
 	var cOutput C.LoonSegmentWriteOutput
+	operation := beginPackedOperation(w.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, 0, false)
 	result := C.loon_segment_writer_close(w.handle, &cOutput)
 	if err := HandleLoonFFIResult(result); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return &SegmentOutput{
 		cOutput:     cOutput,
 		rowsWritten: int64(cOutput.rows_written),

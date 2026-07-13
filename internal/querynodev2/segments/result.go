@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -130,6 +131,8 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchResults.IsRecallEvaluation = isRecallEvaluation
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
+	profilePayloads := lo.Map(results, func(result *internalpb.SearchResults, _ int) []byte { return result.GetStorageProfile() })
+	searchResults.StorageProfile, _ = storageprofile.MergeContributionPayloads(profilePayloads...)
 	return searchResults, nil
 }
 
@@ -184,6 +187,8 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	searchResults.IsTopkReduce = isTopkReduce
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
+	profilePayloads := lo.Map(results, func(result *internalpb.SearchResults, _ int) []byte { return result.GetStorageProfile() })
+	searchResults.StorageProfile, _ = storageprofile.MergeContributionPayloads(profilePayloads...)
 	return searchResults, nil
 }
 

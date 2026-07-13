@@ -61,6 +61,15 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 	// this loop is for "how many fields are provided?"
 	readFields := make(map[string]int64)
 	readers := make(map[int64]storage.FileReader)
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		for _, reader := range readers {
+			_ = reader.Close()
+		}
+	}()
 	for name, path := range nameToPath {
 		field, ok := nameToField[name]
 		if !ok {
@@ -124,6 +133,7 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 	}
 
 	mlog.Info(ctx, "create numpy readers", mlog.Any("readFields", readFields))
+	completed = true
 	return readers, nil
 }
 

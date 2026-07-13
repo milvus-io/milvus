@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/exp/mmap"
 
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -57,59 +58,85 @@ func (lcm *LocalChunkManager) RootPath() string {
 
 // Path returns the path of local data if exists.
 func (lcm *LocalChunkManager) Path(ctx context.Context, filePath string) (string, error) {
-	exist, err := lcm.Exist(ctx, filePath)
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationStat, AccessLayer: storageprofile.AccessLayerMilvus})
+	exist, err := lcm.Exist(storageprofile.WithSuppressed(ctx), filePath)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return "", err
 	}
 
 	if !exist {
-		return "", merr.WrapErrIoKeyNotFound(filePath)
+		err := merr.WrapErrIoKeyNotFound(filePath)
+		operation.Finish(storageprofile.OperationResult{Err: err})
+		return "", err
 	}
 
+	operation.Finish(storageprofile.OperationResult{})
 	return filePath, nil
 }
 
 func (lcm *LocalChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationRead, AccessLayer: storageprofile.AccessLayerMilvus, StreamingTTFBObservable: true})
 	file, err := Open(filePath)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
-	return &LocalReader{
+	return newInstrumentedFileReader(&LocalReader{
 		File: file,
-	}, nil
+	}, operation), nil
 }
 
 func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath string, offset int64) (FileReader, error) {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationRangeRead, AccessLayer: storageprofile.AccessLayerMilvus, StreamingTTFBObservable: true})
 	if offset < 0 {
+		operation.Finish(storageprofile.OperationResult{Err: io.EOF, Category: storageprofile.ErrorCategoryInvalidRange})
 		return nil, io.EOF
 	}
-	reader, err := lcm.Reader(ctx, filePath)
+	reader, err := lcm.Reader(storageprofile.WithSuppressed(ctx), filePath)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
 	if offset > 0 {
 		if _, err = reader.Seek(offset, io.SeekStart); err != nil {
 			_ = reader.Close()
+			operation.Finish(storageprofile.OperationResult{Err: err})
 			return nil, err
 		}
 	}
-	return reader, nil
+	return newInstrumentedFileReader(reader, operation), nil
 }
 
 // Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		Operation: storageprofile.StorageOperationWrite, AccessLayer: storageprofile.AccessLayerMilvus,
+		BytesRequested: uint64(len(content)), RequestedBytesKnown: true,
+	})
 	dir := path.Dir(filePath)
-	exist, err := lcm.Exist(ctx, dir)
+	exist, err := lcm.Exist(storageprofile.WithSuppressed(ctx), dir)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
 		return err
 	}
 	if !exist {
 		err := os.MkdirAll(dir, os.ModePerm)
 		if err != nil {
+			operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
 			return merr.WrapErrIoFailed(filePath, err)
 		}
 	}
-	return WriteFile(filePath, content, os.ModePerm)
+	err = WriteFile(filePath, content, os.ModePerm)
+	if err == nil {
+		operation.AddCompletedBytes(uint64(len(content)))
+	}
+	operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
+	return err
 }
 
 // MultiWrite writes the data to local storage.
@@ -126,19 +153,32 @@ func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[strin
 
 // Exist checks whether chunk is saved to local storage.
 func (lcm *LocalChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationStat, AccessLayer: storageprofile.AccessLayerMilvus})
 	_, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			operation.Finish(storageprofile.OperationResult{Err: merr.WrapErrIoKeyNotFound(filePath)})
 			return false, nil
 		}
-		return false, merr.WrapErrIoFailed(filePath, err)
+		err = merr.WrapErrIoFailed(filePath, err)
+		operation.Finish(storageprofile.OperationResult{Err: err})
+		return false, err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return true, nil
 }
 
 // Read reads the local storage data if exists.
 func (lcm *LocalChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
-	return ReadFile(filePath)
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationRead, AccessLayer: storageprofile.AccessLayerMilvus})
+	content, err := ReadFile(filePath)
+	if err == nil {
+		operation.AddCompletedBytes(uint64(len(content)))
+	}
+	operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
+	return content, err
 }
 
 // MultiRead reads the local storage data if exists.
@@ -156,6 +196,9 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 }
 
 func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationList, AccessLayer: storageprofile.AccessLayerMilvus})
+	defer func() { operation.Finish(storageprofile.OperationResult{Err: err}) }()
 	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
 	logger.Info(ctx, "start walk through objects")
 	defer func() {
@@ -210,21 +253,38 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 
 // ReadAt reads specific position data of local storage if exists.
 func (lcm *LocalChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		Operation: storageprofile.StorageOperationRangeRead, AccessLayer: storageprofile.AccessLayerMilvus,
+		BytesRequested: uint64(max(length, 0)), RequestedBytesKnown: length >= 0,
+	})
 	if off < 0 || length < 0 {
+		operation.Finish(storageprofile.OperationResult{Err: io.EOF, Category: storageprofile.ErrorCategoryInvalidRange, SizeKnown: length >= 0})
 		return nil, io.EOF
 	}
 
 	file, err := Open(path.Clean(filePath))
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
 		return nil, err
 	}
 	defer file.Close()
 
 	res := make([]byte, length)
-	_, err = file.ReadAt(res, off)
-	if err != nil {
-		return nil, merr.WrapErrIoFailed(filePath, err)
+	n, err := file.ReadAt(res, off)
+	if n > 0 {
+		operation.AddCompletedBytes(uint64(n))
 	}
+	if err != nil {
+		category := storageprofile.ErrorCategoryIOFailed
+		if errors.Is(err, io.EOF) {
+			category = storageprofile.ErrorCategoryUnexpectedEOF
+		}
+		err = merr.WrapErrIoFailed(filePath, err)
+		operation.Finish(storageprofile.OperationResult{Err: err, Category: category, SizeKnown: true})
+		return nil, err
+	}
+	operation.Finish(storageprofile.OperationResult{SizeKnown: true})
 	return res, nil
 }
 
@@ -238,21 +298,32 @@ func (lcm *LocalChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.
 }
 
 func (lcm *LocalChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationStat, AccessLayer: storageprofile.AccessLayerMilvus})
 	fi, err := os.Stat(filePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return 0, merr.WrapErrIoKeyNotFound(filePath, err.Error())
+			err = merr.WrapErrIoKeyNotFound(filePath, err.Error())
+			operation.Finish(storageprofile.OperationResult{Err: err})
+			return 0, err
 		}
-		return 0, merr.WrapErrIoFailed(filePath, err)
+		err = merr.WrapErrIoFailed(filePath, err)
+		operation.Finish(storageprofile.OperationResult{Err: err})
+		return 0, err
 	}
 	// get the size
 	size := fi.Size()
+	operation.Finish(storageprofile.OperationResult{})
 	return size, nil
 }
 
 func (lcm *LocalChunkManager) Remove(ctx context.Context, filePath string) error {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationDelete, AccessLayer: storageprofile.AccessLayerMilvus})
 	err := os.RemoveAll(filePath)
-	return merr.WrapErrIoFailed(filePath, err)
+	err = merr.WrapErrIoFailed(filePath, err)
+	operation.Finish(storageprofile.OperationResult{Err: err})
+	return err
 }
 
 func (lcm *LocalChunkManager) MultiRemove(ctx context.Context, filePaths []string) error {
@@ -286,39 +357,54 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 }
 
 func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	ctx = storageprofile.WithBackendKind(ctx, storageprofile.BackendKindLocal)
+	operation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{Operation: storageprofile.StorageOperationCopy, AccessLayer: storageprofile.AccessLayerMilvus})
 	// Read source file
 	srcFile, err := Open(srcFilePath)
 	if err != nil {
-		return merr.WrapErrIoFailed(srcFilePath, err)
+		err = merr.WrapErrIoFailed(srcFilePath, err)
+		operation.Finish(storageprofile.OperationResult{Err: err})
+		return err
 	}
 	defer srcFile.Close()
 
 	// Create destination directory if not exists
 	dstDir := path.Dir(dstFilePath)
-	exist, err := lcm.Exist(ctx, dstDir)
+	exist, err := lcm.Exist(storageprofile.WithSuppressed(ctx), dstDir)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return err
 	}
 	if !exist {
 		err := os.MkdirAll(dstDir, os.ModePerm)
 		if err != nil {
-			return merr.WrapErrIoFailed(dstFilePath, err)
+			err = merr.WrapErrIoFailed(dstFilePath, err)
+			operation.Finish(storageprofile.OperationResult{Err: err})
+			return err
 		}
 	}
 
 	// Create destination file
 	dstFile, err := os.Create(dstFilePath)
 	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
+		err = merr.WrapErrIoFailed(dstFilePath, err)
+		operation.Finish(storageprofile.OperationResult{Err: err})
+		return err
 	}
 	defer dstFile.Close()
 
 	// Copy content
-	_, err = io.Copy(dstFile, srcFile)
+	written, err := io.Copy(dstFile, srcFile)
+	if written > 0 {
+		operation.AddCompletedBytes(uint64(written))
+	}
 	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
+		err = merr.WrapErrIoFailed(dstFilePath, err)
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
+		return err
 	}
 
+	operation.Finish(storageprofile.OperationResult{SizeKnown: true})
 	return nil
 }
 

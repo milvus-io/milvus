@@ -77,6 +77,7 @@ type rwOptions struct {
 	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
 	externalReader      packed.ExternalReaderContext
 	writerFormat        string
+	storageProfileCtx   context.Context
 }
 
 func (o *rwOptions) validate() error {
@@ -197,6 +198,12 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 	}
 }
 
+func WithStorageProfileContext(ctx context.Context) RwOption {
+	return func(options *rwOptions) {
+		options.storageProfileCtx = ctx
+	}
+}
+
 // WithTextColumnConfigs sets TEXT column configurations for REWRITE_ALL mode during compaction.
 // when TEXT columns need to be rewritten (hole ratio >= threshold), this option enables
 // the writer to expand TEXT LOB references and write to new LOB files.
@@ -293,6 +300,7 @@ func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloa
 }
 
 func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, option ...RwOption) (rr RecordReader, err error) {
+	option = append(option, WithStorageProfileContext(ctx))
 	rwOptions := DefaultReaderOptions()
 	for _, opt := range option {
 		opt(rwOptions)
@@ -350,7 +358,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			}
 		}
 		// FIXME: add needed fields support
-		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader, ctx)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
@@ -361,6 +369,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 }
 
 func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *schemapb.CollectionSchema, option ...RwOption) (rr RecordReader, err error) {
+	option = append(option, WithStorageProfileContext(ctx))
 	rwOptions := DefaultReaderOptions()
 	for _, opt := range option {
 		opt(rwOptions)
@@ -396,6 +405,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	schema *schemapb.CollectionSchema, allocator allocator.Interface, chunkSize uint64, maxRowNum int64,
 	option ...RwOption,
 ) (BinlogRecordWriter, error) {
+	option = append(option, WithStorageProfileContext(ctx))
 	rwOptions := DefaultWriterOptions()
 	option = append(option, WithCollectionID(collectionID))
 	for _, opt := range option {
@@ -452,7 +462,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
 			pluginContext,
-			rwOptions.writerFormat,
+			rwOptions.writerFormat, rwOptions.storageProfileCtx,
 		)
 	case StorageV3:
 		// if TEXT column configs are provided, use the text writer with TEXT column support
@@ -462,7 +472,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				rwOptions.textColumnConfigs,
-				rwOptions.writerFormat,
+				rwOptions.writerFormat, rwOptions.storageProfileCtx,
 			)
 		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
@@ -471,7 +481,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.storageConfig,
 			pluginContext,
 			rwOptions.textRefsAsBinary,
-			rwOptions.writerFormat,
+			rwOptions.writerFormat, rwOptions.storageProfileCtx,
 		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
@@ -484,6 +494,7 @@ func NewDeltalogWriter(
 	path string,
 	option ...RwOption,
 ) (RecordWriter, error) {
+	option = append(option, WithStorageProfileContext(ctx))
 	rwOptions := DefaultWriterOptions()
 	for _, opt := range option {
 		opt(rwOptions)
@@ -512,7 +523,7 @@ func NewDeltalogWriter(
 		return NewPackedRecordWriter(bucketName, []string{path}, schema,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize,
 			[]storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{0, common.TimeStampField}}},
-			rwOptions.storageConfig, nil)
+			rwOptions.storageConfig, nil, rwOptions.storageProfileCtx)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
@@ -559,7 +570,7 @@ func NewDeltalogReader(
 				}
 				path := paths[pathPos]
 				pathPos++
-				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil, rwOptions.externalReader)
+				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil, rwOptions.externalReader, rwOptions.storageProfileCtx)
 			},
 		}, nil
 	default:
@@ -629,6 +640,7 @@ func NewDeltalogReaderFromBinlogs(
 			rwOptions.storageConfig,
 			nil,
 			rwOptions.externalReader,
+			rwOptions.storageProfileCtx,
 		)
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))

@@ -77,15 +77,21 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
         local_ctx.cancellation_token = op_ctx->cancellation_token;
         local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
     }
+    auto storage_start = std::chrono::steady_clock::now();
     auto field_data = bulk_subscript(
         &local_ctx, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
 
     ParsePksFromFieldData(results.primary_keys_, *field_data);
-    results.search_storage_cost_.scanned_remote_bytes +=
-        local_ctx.storage_usage.scanned_cold_bytes.load();
+    auto cold_bytes = local_ctx.storage_usage.scanned_cold_bytes.load();
+    results.search_storage_cost_.scanned_remote_bytes += cold_bytes;
     results.search_storage_cost_.scanned_total_bytes +=
         local_ctx.storage_usage.scanned_total_bytes.load();
+    if (cold_bytes > 0) {
+        results.storage_profile_.ObserveRead(
+            std::chrono::steady_clock::now() - storage_start,
+            static_cast<uint64_t>(cold_bytes));
+    }
 }
 
 void
@@ -106,6 +112,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
         local_ctx.cancellation_token = op_ctx->cancellation_token;
         local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
     }
+    auto storage_start = std::chrono::steady_clock::now();
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
         segcore::CheckCancellation(
@@ -128,10 +135,15 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
-    results.search_storage_cost_.scanned_remote_bytes +=
-        local_ctx.storage_usage.scanned_cold_bytes.load();
+    auto cold_bytes = local_ctx.storage_usage.scanned_cold_bytes.load();
+    results.search_storage_cost_.scanned_remote_bytes += cold_bytes;
     results.search_storage_cost_.scanned_total_bytes +=
         local_ctx.storage_usage.scanned_total_bytes.load();
+    if (cold_bytes > 0) {
+        results.storage_profile_.ObserveRead(
+            std::chrono::steady_clock::now() - storage_start,
+            static_cast<uint64_t>(cold_bytes));
+    }
 }
 
 std::unique_ptr<SearchResult>
@@ -218,6 +230,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    auto execution_storage_start = std::chrono::steady_clock::now();
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
     retrieve_results.segment_ = (void*)this;
@@ -226,6 +239,19 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         retrieve_results.retrieve_storage_cost_.scanned_remote_bytes);
     results->set_scanned_total_bytes(
         retrieve_results.retrieve_storage_cost_.scanned_total_bytes);
+    if (retrieve_results.retrieve_storage_cost_.scanned_remote_bytes > 0) {
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() -
+                            execution_storage_start)
+                            .count();
+        auto* storage_profile = results->mutable_storage_profile();
+        storage_profile->add_read_duration_nanos(
+            static_cast<uint64_t>(std::max<int64_t>(duration, 1)));
+        storage_profile->set_read_completed_bytes(
+            static_cast<uint64_t>(
+                retrieve_results.retrieve_storage_cost_
+                    .scanned_remote_bytes));
+    }
 
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
@@ -255,6 +281,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
         std::chrono::high_resolution_clock::now();
+    auto target_entry_remote_bytes = results->scanned_remote_bytes();
     // Carry the upstream cancel_token down into FillTargetEntry so the
     // take()/Arrow-convert path can short-circuit on abort.
     milvus::OpContext fte_op_ctx;
@@ -289,6 +316,19 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                 .count();
     milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
+    auto target_entry_cold_bytes =
+        results->scanned_remote_bytes() - target_entry_remote_bytes;
+    if (target_entry_cold_bytes > 0) {
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            get_target_entry_end - get_target_entry_start)
+                            .count();
+        auto* storage_profile = results->mutable_storage_profile();
+        storage_profile->add_read_duration_nanos(
+            static_cast<uint64_t>(std::max<int64_t>(duration, 1)));
+        storage_profile->set_read_completed_bytes(
+            storage_profile->read_completed_bytes() +
+            static_cast<uint64_t>(target_entry_cold_bytes));
+    }
 
     milvus::futures::throwIfCancelled(cancel_token);
     return results;
@@ -626,6 +666,7 @@ SegmentInternalInterface::Retrieve(
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    auto target_entry_remote_bytes = results->scanned_remote_bytes();
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
         std::chrono::high_resolution_clock::now();
     // Carry the upstream cancel_token down into the take() + Arrow-convert
@@ -641,6 +682,18 @@ SegmentInternalInterface::Retrieve(
                                 .count();
     milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
+    auto target_entry_cold_bytes =
+        results->scanned_remote_bytes() - target_entry_remote_bytes;
+    if (target_entry_cold_bytes > 0) {
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            get_target_entry_end - get_target_entry_start)
+                            .count();
+        auto* storage_profile = results->mutable_storage_profile();
+        storage_profile->add_read_duration_nanos(
+            static_cast<uint64_t>(std::max<int64_t>(duration, 1)));
+        storage_profile->set_read_completed_bytes(
+            static_cast<uint64_t>(target_entry_cold_bytes));
+    }
     return results;
 }
 

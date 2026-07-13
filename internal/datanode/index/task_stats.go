@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -78,6 +79,12 @@ type statsTask struct {
 	logIDOffset  int64
 	currentTime  time.Time
 	manifestPath string // current manifest version, updated after each AddStatsToManifest
+	profileScope *storageprofile.Scope
+}
+
+func (st *statsTask) WithStorageProfile(scope *storageprofile.Scope) *statsTask {
+	st.profileScope = scope
+	return st
 }
 
 type BuildIndexOptions struct {
@@ -422,12 +429,16 @@ func (st *statsTask) PostExecute(ctx context.Context) error {
 }
 
 func (st *statsTask) Reset() {
+	if st.profileScope != nil {
+		st.profileScope.Finish()
+	}
 	st.ident = ""
 	st.ctx = nil
 	st.req = nil
 	st.cancel = nil
 	st.tr = nil
 	st.manager = nil
+	st.profileScope = nil
 }
 
 func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compactor.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
@@ -573,14 +584,37 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
 			}
 
+			sourceBytes := getFieldDataSizeFromBinlogs(insertBinlogs, field.GetFieldID())
+			readOperation := storageprofile.BeginOperation(egCtx, storageprofile.OperationMeta{
+				AccessLayer:         storageprofile.AccessLayerMilvus,
+				Operation:           storageprofile.StorageOperationRead,
+				Phase:               storageprofile.WorkloadPhaseReadSource,
+				StorageRole:         storageprofile.StorageRolePersistent,
+				CppBoundary:         true,
+				BytesRequested:      sourceBytes,
+				RequestedBytesKnown: sourceBytes > 0,
+			})
 			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams)
 			if err != nil {
+				readOperation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: sourceBytes > 0})
 				return err
 			}
+			if sourceBytes > 0 {
+				readOperation.AddCompletedBytes(sourceBytes)
+			}
+			readOperation.Finish(storageprofile.OperationResult{SizeKnown: sourceBytes > 0})
 			defer index.Delete()
 
+			writeOperation := storageprofile.BeginOperation(egCtx, storageprofile.OperationMeta{
+				AccessLayer: storageprofile.AccessLayerMilvus,
+				Operation:   storageprofile.StorageOperationWrite,
+				Phase:       storageprofile.WorkloadPhaseWriteOutput,
+				StorageRole: storageprofile.StorageRolePersistent,
+				CppBoundary: true,
+			})
 			indexStats, err := index.UpLoad()
 			if err != nil {
+				writeOperation.Finish(storageprofile.OperationResult{Err: err})
 				return err
 			}
 
@@ -588,6 +622,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			for _, info := range indexStats.GetSerializedIndexInfos() {
 				uploaded[info.FileName] = info.FileSize
 			}
+			writtenBytes := uint64(max(lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize }), 0))
+			writeOperation.AddCompletedBytes(writtenBytes)
+			writeOperation.Finish(storageprofile.OperationResult{SizeKnown: true})
 			// TextMatch upload returns relative filenames. Store full paths in
 			// metadata/task results for mixed-version compatibility.
 			statsFiles := metautil.BuildStatsFilePaths(statsBasePath, lo.Keys(uploaded))
@@ -745,16 +782,41 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			}
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, statsBasePath)
 
+			sourceBytes := getFieldDataSizeFromBinlogs(insertBinlogs, field.GetFieldID())
+			readOperation := storageprofile.BeginOperation(egCtx, storageprofile.OperationMeta{
+				AccessLayer:         storageprofile.AccessLayerMilvus,
+				Operation:           storageprofile.StorageOperationRead,
+				Phase:               storageprofile.WorkloadPhaseReadSource,
+				StorageRole:         storageprofile.StorageRolePersistent,
+				CppBoundary:         true,
+				BytesRequested:      sourceBytes,
+				RequestedBytesKnown: sourceBytes > 0,
+			})
+			writeOperation := storageprofile.BeginOperation(egCtx, storageprofile.OperationMeta{
+				AccessLayer: storageprofile.AccessLayerMilvus,
+				Operation:   storageprofile.StorageOperationWrite,
+				Phase:       storageprofile.WorkloadPhaseWriteOutput,
+				StorageRole: storageprofile.StorageRolePersistent,
+				CppBoundary: true,
+			})
 			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams)
 			if err != nil {
+				readOperation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: sourceBytes > 0})
+				writeOperation.Finish(storageprofile.OperationResult{Err: err})
 				return err
 			}
+			if sourceBytes > 0 {
+				readOperation.AddCompletedBytes(sourceBytes)
+			}
+			readOperation.Finish(storageprofile.OperationResult{SizeKnown: sourceBytes > 0})
 
 			// calculate log size (disk size) from file sizes
 			var logSize int64
 			for _, fileSize := range statsResult.Files {
 				logSize += fileSize
 			}
+			writeOperation.AddCompletedBytes(uint64(max(logSize, 0)))
+			writeOperation.Finish(storageprofile.OperationResult{SizeKnown: true})
 
 			mu.Lock()
 			jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{

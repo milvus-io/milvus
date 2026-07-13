@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -48,11 +49,12 @@ type ImportTask struct {
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
 
-	allocator  allocator.Interface
-	manager    TaskManager
-	syncMgr    syncmgr.SyncManager
-	cm         storage.ChunkManager
-	metaCaches map[string]metacache.MetaCache
+	allocator    allocator.Interface
+	manager      TaskManager
+	syncMgr      syncmgr.SyncManager
+	cm           storage.ChunkManager
+	metaCaches   map[string]metacache.MetaCache
+	profileScope *storageprofile.Scope
 }
 
 func NewImportTask(req *datapb.ImportRequest,
@@ -60,7 +62,8 @@ func NewImportTask(req *datapb.ImportRequest,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
 ) Task {
-	ctx, cancel := context.WithCancel(context.Background())
+	profileScope := newImportStorageScope(req.GetTaskID(), req.GetCollectionID(), storageprofile.WorkloadSubtypeIngest, storageprofile.WorkloadPhaseReadSource)
+	ctx, cancel := context.WithCancel(profileScope.Context())
 	// During binlog import, even if the primary key's autoID is set to true,
 	// the primary key from the binlog should be used instead of being reassigned.
 	if importutilv2.IsBackup(req.GetOptions()) {
@@ -83,6 +86,7 @@ func NewImportTask(req *datapb.ImportRequest,
 		manager:      manager,
 		syncMgr:      syncMgr,
 		cm:           cm,
+		profileScope: profileScope,
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -157,8 +161,11 @@ func (t *ImportTask) Clone() Task {
 		syncMgr:      t.syncMgr,
 		cm:           t.cm,
 		metaCaches:   t.metaCaches,
+		profileScope: t.profileScope,
 	}
 }
+
+func (t *ImportTask) FinishStorageProfile() { t.profileScope.Finish() }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := t.GetBufferSize()
@@ -297,13 +304,14 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 					bm25Stats[outputSparseFieldId].AppendFieldData(data.Data[outputSparseFieldId].(*storage.SparseFloatVectorFieldData))
 				}
 			}
-			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
+			outputCtx := storageprofile.WithPhase(t.ctx, storageprofile.WorkloadPhaseWriteOutput, storageprofile.StorageRolePersistent)
+			syncTask, err := NewSyncTask(outputCtx, t.allocator, t.metaCaches, t.req.GetTs(),
 				segmentID, partitionID, t.GetCollectionID(), channel, data, nil,
 				bm25Stats, t.req.GetStorageVersion(), t.req.GetUseLoonFfi(), t.req.GetStorageConfig())
 			if err != nil {
 				return nil, nil, err
 			}
-			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
+			future, err := t.syncMgr.SyncDataWithChunkManager(outputCtx, syncTask, t.cm)
 			if err != nil {
 				mlog.Error(context.TODO(), "sync data failed", WrapLogFields(t, mlog.Err(err))...)
 				return nil, nil, err

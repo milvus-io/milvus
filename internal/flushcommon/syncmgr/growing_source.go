@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -537,6 +538,24 @@ func (t *GrowingSourceSyncTask) ReleaseSource() {
 }
 
 func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
+	attribution := storageprofile.Attribution{
+		ScopeType:       storageprofile.ScopeTypeTask,
+		TaskID:          fmt.Sprint(t.segmentID),
+		Component:       "streamingnode",
+		NodeID:          paramtable.GetNodeID(),
+		CollectionID:    t.collectionID,
+		WorkloadClass:   storageprofile.WorkloadClassBackground,
+		WorkloadKind:    storageprofile.WorkloadKindFlush,
+		WorkloadSubtype: storageprofile.WorkloadSubtypeStreaming,
+		Phase:           storageprofile.WorkloadPhaseWriteOutput,
+		StorageRole:     storageprofile.StorageRolePersistent,
+	}
+	ctx = storageprofile.WithDefaultAttribution(ctx, attribution)
+	if !storageprofile.HasActiveRecorder(ctx) {
+		profileScope := storageprofile.NewTaskScope(attribution)
+		ctx = profileScope.Bind(ctx)
+		defer profileScope.Finish()
+	}
 	t.tr = timerecord.NewTimeRecorder("growingSourceSyncTask")
 	log := mlog.With(
 		mlog.Int64("collectionID", t.collectionID),

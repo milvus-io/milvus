@@ -19,8 +19,10 @@ package packed
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -90,9 +92,18 @@ func (u *ManifestUpdates) isEmpty() bool {
 func CommitManifestUpdates(basePath string, baseVersion int64,
 	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
 ) (string, error) {
+	return CommitManifestUpdatesWithContext(context.Background(), basePath, baseVersion, storageConfig, updates)
+}
+
+func CommitManifestUpdatesWithContext(ctx context.Context, basePath string, baseVersion int64,
+	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
+) (manifestPath string, err error) {
 	if updates.isEmpty() {
 		return MarshalManifestPath(basePath, baseVersion), nil
 	}
+	ctx = packedProfileContext(ctx, storageConfig)
+	operation := beginPackedOperation(ctx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteMetadata, 0, false)
+	defer func() { operation.Finish(storageprofile.OperationResult{Err: err}) }()
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {

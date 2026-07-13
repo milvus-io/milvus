@@ -31,6 +31,7 @@
 #include "common/FieldMeta.h"
 #include "common/ArrayOffsets.h"
 #include "common/OffsetMapping.h"
+#include "common/StorageProfile.h"
 #include "common/Types.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
@@ -325,6 +326,7 @@ struct SearchResult {
         vector_iterators_;
     // record the storage usage in search
     StorageCost search_storage_cost_;
+    StorageProfileSnapshot storage_profile_;
 
     bool element_level_{false};
     std::vector<int32_t> element_indices_;
@@ -360,6 +362,7 @@ struct RetrieveResult {
     bool has_more_result = true;
     // record the storage usage in retrieve
     StorageCost retrieve_storage_cost_;
+    StorageProfileSnapshot storage_profile_;
 
     // Element-level query support
     // When element_level_ is true:

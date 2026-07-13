@@ -2,6 +2,8 @@ package flusherimpl
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
@@ -99,7 +102,20 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	impl.logger.Info(context.TODO(), "wal ready for flusher recovery")
 
 	var checkpoint message.MessageID
-	impl.flusherComponents, checkpoint, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot)
+	recoveryAttribution := storageprofile.Attribution{
+		ScopeType:     storageprofile.ScopeTypeTask,
+		TaskID:        fmt.Sprintf("wal-recovery/%d", time.Now().UnixNano()),
+		Component:     "streamingnode",
+		NodeID:        paramtable.GetNodeID(),
+		WorkloadClass: storageprofile.WorkloadClassRecovery,
+		WorkloadKind:  storageprofile.WorkloadKindRecovery,
+		Phase:         storageprofile.WorkloadPhaseReadMetadata,
+		StorageRole:   storageprofile.StorageRolePersistent,
+	}
+	recoveryScope := storageprofile.NewTaskScope(recoveryAttribution)
+	recoveryCtx := recoveryScope.Bind(storageprofile.WithDefaultAttribution(impl.notifier.Context(), recoveryAttribution))
+	impl.flusherComponents, checkpoint, err = impl.buildFlusherComponents(recoveryCtx, l, recoverSnapshot)
+	recoveryScope.Finish()
 	if err != nil {
 		return errors.Wrap(err, "when build flusher components")
 	}

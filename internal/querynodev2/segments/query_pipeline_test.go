@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -106,16 +107,21 @@ func TestRunDelegatorQueryPipeline(t *testing.T) {
 			Ids:              makeInternalIntIDs([]int64{1, 3}),
 			FieldsData:       []*schemapb.FieldData{makeInt64Field(999, "dummy", []int64{10, 30}), makeInt64Field(100, "pk_sort_col", []int64{1, 3})},
 			AllRetrieveCount: 2,
+			StorageProfile:   makeStorageProfileContribution(t, 1, "query-scope", 100),
 		}
 		res2 := &internalpb.RetrieveResults{
 			Ids:              makeInternalIntIDs([]int64{2, 3}),
 			FieldsData:       []*schemapb.FieldData{makeInt64Field(999, "dummy", []int64{20, 300}), makeInt64Field(100, "pk_sort_col", []int64{2, 3})},
 			AllRetrieveCount: 3,
+			StorageProfile:   makeStorageProfileContribution(t, 2, "query-scope", 200),
 		}
 		out, err := RunDelegatorQueryPipeline(ctx, req, schema, []*internalpb.RetrieveResults{res1, res2})
 		require.NoError(t, err)
 		assert.Equal(t, []int64{1, 2, 3}, out.GetIds().GetIntId().GetData())
 		assert.Equal(t, int64(5), out.GetAllRetrieveCount())
+		profile := mergedStorageProfileFromPayload(t, out.GetStorageProfile())
+		assert.Equal(t, uint64(2), profile.Operations[storageprofile.StorageOperationRead].Count)
+		assert.Equal(t, uint64(300), profile.Operations[storageprofile.StorageOperationRead].BytesCompleted)
 	})
 
 	t.Run("order by query", func(t *testing.T) {

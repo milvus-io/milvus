@@ -180,7 +180,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// packed.ErrLoonTransient; loon's own optimistic retry covers
 	// manifest-version conflicts within a single attempt.
 	err = retry.Do(ctx, func() error {
-		newPath, commitErr := packed.CommitManifestUpdates(basePath, baseVersion, bw.storageConfig, updates)
+		newPath, commitErr := packed.CommitManifestUpdatesWithContext(ctx, basePath, baseVersion, bw.storageConfig, updates)
 		if commitErr != nil {
 			return classifyLoonErr(commitErr)
 		}
@@ -245,10 +245,10 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 			mlog.Int("textFieldCount", len(textColumnConfigs)),
 			mlog.String("basePath", basePath))
 		w, err = storage.NewPackedTextBatchWriter("", basePath, bw.schema,
-			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, writerFormat, schemaBasedFormats)
+			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, writerFormat, schemaBasedFormats, ctx)
 	} else {
 		w, err = storage.NewPackedRecordBatchWriter(basePath, bw.schema,
-			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr, writerFormat, schemaBasedFormats)
+			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr, writerFormat, schemaBasedFormats, ctx)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -479,7 +479,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 	}
 	relPath := fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id)
 	fullPath := path.Join(basePath, relPath)
-	if err := packed.WriteFile(bw.storageConfig, fullPath, batchStatsBlob.Value); err != nil {
+	if err := packed.WriteFileWithContext(ctx, bw.storageConfig, fullPath, batchStatsBlob.Value); err != nil {
 		return nil, nil, err
 	}
 	bw.sizeWritten += int64(len(batchStatsBlob.Value))
@@ -496,7 +496,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 		}
 		mergedRelPath := fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, int64(storage.CompoundStatsType))
 		mergedFullPath := path.Join(basePath, mergedRelPath)
-		if err := packed.WriteFile(bw.storageConfig, mergedFullPath, mergedStatsBlob.Value); err != nil {
+		if err := packed.WriteFileWithContext(ctx, bw.storageConfig, mergedFullPath, mergedStatsBlob.Value); err != nil {
 			return nil, nil, err
 		}
 		bw.sizeWritten += int64(len(mergedStatsBlob.Value))
@@ -562,7 +562,7 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 
 		relPath := fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id)
 		fullPath := path.Join(basePath, relPath)
-		if err := packed.WriteFile(bw.storageConfig, fullPath, blob.Value); err != nil {
+		if err := packed.WriteFileWithContext(ctx, bw.storageConfig, fullPath, blob.Value); err != nil {
 			return nil, nil, err
 		}
 		bw.sizeWritten += int64(len(blob.Value))
@@ -594,7 +594,7 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 		for fieldID, blob := range mergedBM25Blob {
 			mergedRelPath := fmt.Sprintf("_stats/bm25.%d/%d", fieldID, int64(storage.CompoundStatsType))
 			mergedFullPath := path.Join(basePath, mergedRelPath)
-			if err := packed.WriteFile(bw.storageConfig, mergedFullPath, blob.Value); err != nil {
+			if err := packed.WriteFileWithContext(ctx, bw.storageConfig, mergedFullPath, blob.Value); err != nil {
 				return nil, nil, err
 			}
 			bw.sizeWritten += int64(len(blob.Value))

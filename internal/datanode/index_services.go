@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -71,7 +73,14 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 	defer sp.End()
 	metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.TotalLabel).Inc()
 
-	taskCtx, taskCancel := context.WithCancel(node.ctx)
+	attribution, profileScope := newIndexStorageProfile(req.GetBuildID(), req.GetCollectionID(), node.GetNodeID(), storageprofile.WorkloadSubtypeBuild)
+	profileHandedOff := false
+	defer func() {
+		if !profileHandedOff {
+			profileScope.Finish()
+		}
+	}()
+	taskCtx, taskCancel := context.WithCancel(profileScope.Bind(node.ctx))
 	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
 		Cancel: taskCancel,
 		State:  commonpb.IndexState_InProgress,
@@ -93,11 +102,12 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
+	cm = storage.WithAttribution(cm, attribution)
 	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext).WithStorageProfile(profileScope)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
@@ -106,6 +116,7 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
+	profileHandedOff = true
 	metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel).Inc()
 	mlog.Info(context.TODO(), "DataNode successfully scheduled",
 		mlog.String("indexName", req.GetIndexName()))
@@ -273,7 +284,14 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		mlog.Warn(ctx, "receive index task with invalid slot, set to 64", mlog.Int64("taskSlot", req.GetTaskSlot()))
 		req.TaskSlot = 64
 	}
-	taskCtx, taskCancel := context.WithCancel(node.ctx)
+	attribution, profileScope := newIndexStorageProfile(req.GetBuildID(), req.GetCollectionID(), node.GetNodeID(), storageprofile.WorkloadSubtypeBuild)
+	profileHandedOff := false
+	defer func() {
+		if !profileHandedOff {
+			profileScope.Finish()
+		}
+	}()
+	taskCtx, taskCancel := context.WithCancel(profileScope.Bind(node.ctx))
 	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
 		Cancel:                taskCancel,
 		State:                 commonpb.IndexState_InProgress,
@@ -295,13 +313,14 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
+	cm = storage.WithAttribution(cm, attribution)
 
 	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
 
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext).WithStorageProfile(profileScope)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
@@ -310,6 +329,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
+	profileHandedOff = true
 	metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel).Inc()
 	mlog.Info(context.TODO(), "DataNode index job enqueued successfully",
 		mlog.String("indexName", req.GetIndexName()))
@@ -337,7 +357,14 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		req.TaskSlot = 65535
 	}
 
-	taskCtx, taskCancel := context.WithCancel(node.ctx)
+	_, profileScope := newIndexStorageProfile(req.GetTaskID(), req.GetCollectionID(), node.GetNodeID(), storageprofile.WorkloadSubtypeAnalyze)
+	profileHandedOff := false
+	defer func() {
+		if !profileHandedOff {
+			profileScope.Finish()
+		}
+	}()
+	taskCtx, taskCancel := context.WithCancel(profileScope.Bind(node.ctx))
 	if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(req.GetClusterID(), req.GetTaskID(), &index.AnalyzeTaskInfo{
 		Cancel: taskCancel,
 		State:  indexpb.JobState_JobStateInProgress,
@@ -347,13 +374,14 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		mlog.Warn(context.TODO(), "duplicated analyze task", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager)
+	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager).WithStorageProfile(profileScope)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
 		return ret, nil
 	}
+	profileHandedOff = true
 	mlog.Info(context.TODO(), "DataNode analyze job enqueued successfully")
 	return ret, nil
 }
@@ -378,7 +406,25 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		req.TaskSlot = 64
 	}
 
-	taskCtx, taskCancel := context.WithCancel(node.ctx)
+	statsSubtype := storageprofile.WorkloadSubtypeUnknown
+	switch req.GetSubJobType() {
+	case indexpb.StatsSubJob_TextIndexJob:
+		statsSubtype = storageprofile.WorkloadSubtypeStatsText
+	case indexpb.StatsSubJob_BM25Job:
+		statsSubtype = storageprofile.WorkloadSubtypeStatsBM25
+	case indexpb.StatsSubJob_JsonKeyIndexJob:
+		statsSubtype = storageprofile.WorkloadSubtypeStatsJSONKey
+	case indexpb.StatsSubJob_Sort:
+		statsSubtype = storageprofile.WorkloadSubtypeSort
+	}
+	attribution, profileScope := newIndexStorageProfile(req.GetTaskID(), req.GetCollectionID(), node.GetNodeID(), statsSubtype)
+	profileHandedOff := false
+	defer func() {
+		if !profileHandedOff {
+			profileScope.Finish()
+		}
+	}()
+	taskCtx, taskCancel := context.WithCancel(profileScope.Bind(node.ctx))
 	if oldInfo := node.taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), &index.StatsTaskInfo{
 		Cancel: taskCancel,
 		State:  indexpb.JobState_JobStateInProgress,
@@ -397,14 +443,16 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		node.taskManager.DeleteStatsTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
 		return merr.Status(err), nil
 	}
+	cm = storage.WithAttribution(cm, attribution)
 
-	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm)
+	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm).WithStorageProfile(profileScope)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
 		return ret, nil
 	}
+	profileHandedOff = true
 	mlog.Info(context.TODO(), "DataNode stats job enqueued successfully")
 	return ret, nil
 }

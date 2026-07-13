@@ -28,6 +28,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"strings"
 	"unsafe"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -81,6 +83,10 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 // groups, which the caller passes to packed.CommitManifestUpdates to
 // register them with a manifest version.
 func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, extraProperties ...map[string]string) (*FFIPackedWriter, error) {
+	return NewFFIPackedWriterWithContext(context.Background(), basePath, schema, columnGroups, storageConfig, storagePluginContext, extraProperties...)
+}
+
+func NewFFIPackedWriterWithContext(profileCtx context.Context, basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, extraProperties ...map[string]string) (*FFIPackedWriter, error) {
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -92,6 +98,7 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 	if storageConfig == nil {
 		storageConfig = CreateStorageConfig()
 	}
+	profileCtx = packedProfileContext(profileCtx, storageConfig)
 
 	pattern, err := SchemaBasedPattern(schema, columnGroups)
 	if err != nil {
@@ -144,21 +151,25 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 
 	var writerHandle C.LoonWriterHandle
 
+	operation := beginPackedOperation(profileCtx, storageprofile.StorageOperationStat, storageprofile.WorkloadPhaseWriteMetadata, 0, false)
 	result := C.loon_writer_new(cBasePath, cSchema, cProperties, &writerHandle)
 
 	err = HandleLoonFFIResult(result)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		if writerHandle != 0 {
 			C.loon_writer_destroy(writerHandle)
 		}
 		FreeProperties(cProperties)
 		return nil, err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 
 	return &FFIPackedWriter{
 		basePath:      basePath,
 		cWriterHandle: writerHandle,
 		cProperties:   cProperties,
+		profileCtx:    profileCtx,
 	}, nil
 }
 
@@ -199,6 +210,8 @@ func (pw *FFIPackedWriter) Destroy() {
 }
 
 func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
+	size := arrowRecordBytes(recordBatch)
+	operation := beginPackedOperation(pw.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, size, true)
 	var caa cdata.CArrowArray
 	var cas cdata.CArrowSchema
 
@@ -211,7 +224,12 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	cArray := (*C.struct_ArrowArray)(unsafe.Pointer(&caa))
 
 	result := C.loon_writer_write(pw.cWriterHandle, cArray)
-	return HandleLoonFFIResult(result)
+	err := HandleLoonFFIResult(result)
+	if err == nil {
+		operation.AddCompletedBytes(size)
+	}
+	operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
+	return err
 }
 
 // ColumnGroups is the data carrier returned by FFIPackedWriter.Close. It
@@ -284,10 +302,13 @@ func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 		}
 	}()
 	var cColumnGroups *C.LoonColumnGroups
+	operation := beginPackedOperation(pw.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, 0, false)
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return &ColumnGroups{
 		cColumnGroups:      cColumnGroups,
 		addNewColumnGroups: pw.addNewColumnGroups,

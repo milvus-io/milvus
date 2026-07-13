@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -47,11 +48,12 @@ type L0ImportTask struct {
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
 
-	allocator  allocator.Interface
-	manager    TaskManager
-	syncMgr    syncmgr.SyncManager
-	cm         storage.ChunkManager
-	metaCaches map[string]metacache.MetaCache
+	allocator    allocator.Interface
+	manager      TaskManager
+	syncMgr      syncmgr.SyncManager
+	cm           storage.ChunkManager
+	metaCaches   map[string]metacache.MetaCache
+	profileScope *storageprofile.Scope
 }
 
 func NewL0ImportTask(req *datapb.ImportRequest,
@@ -59,7 +61,8 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
 ) Task {
-	ctx, cancel := context.WithCancel(context.Background())
+	profileScope := newImportStorageScope(req.GetTaskID(), req.GetCollectionID(), storageprofile.WorkloadSubtypeL0Ingest, storageprofile.WorkloadPhaseReadSource)
+	ctx, cancel := context.WithCancel(profileScope.Context())
 	// Allocator for autoIDs and logIDs.
 	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), req.GetIDRange().GetEnd())
 	task := &L0ImportTask{
@@ -77,6 +80,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 		manager:      manager,
 		syncMgr:      syncMgr,
 		cm:           cm,
+		profileScope: profileScope,
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -132,8 +136,11 @@ func (t *L0ImportTask) Clone() Task {
 		syncMgr:      t.syncMgr,
 		cm:           t.cm,
 		metaCaches:   t.metaCaches,
+		profileScope: t.profileScope,
 	}
 }
+
+func (t *L0ImportTask) FinishStorageProfile() { t.profileScope.Finish() }
 
 func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())
@@ -250,13 +257,14 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		if err != nil {
 			return nil, nil, err
 		}
-		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
+		outputCtx := storageprofile.WithPhase(t.ctx, storageprofile.WorkloadPhaseWriteOutput, storageprofile.StorageRolePersistent)
+		syncTask, err := NewSyncTask(outputCtx, t.allocator, t.metaCaches, t.req.GetTs(),
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
 			nil, t.req.GetStorageVersion(), false, t.req.GetStorageConfig())
 		if err != nil {
 			return nil, nil, err
 		}
-		future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
+		future, err := t.syncMgr.SyncDataWithChunkManager(outputCtx, syncTask, t.cm)
 		if err != nil {
 			mlog.Error(t.ctx, "failed to sync l0 delete data", WrapLogFields(t, mlog.Err(err))...)
 			return nil, nil, err

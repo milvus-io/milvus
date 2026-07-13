@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -49,8 +50,9 @@ type PreImportTask struct {
 	options      []*commonpb.KeyValuePair
 	req          *datapb.PreImportRequest
 
-	manager TaskManager
-	cm      storage.ChunkManager
+	manager      TaskManager
+	cm           storage.ChunkManager
+	profileScope *storageprofile.Scope
 }
 
 func NewPreImportTask(req *datapb.PreImportRequest,
@@ -62,7 +64,8 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 			ImportFile: file,
 		}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	profileScope := newImportStorageScope(req.GetTaskID(), req.GetCollectionID(), storageprofile.WorkloadSubtypePreImport, storageprofile.WorkloadPhaseReadSource)
+	ctx, cancel := context.WithCancel(profileScope.Context())
 	// During binlog import, even if the primary key's autoID is set to true,
 	// the primary key from the binlog should be used instead of being reassigned.
 	if importutilv2.IsBackup(req.GetOptions()) {
@@ -85,6 +88,7 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 		req:          req,
 		manager:      manager,
 		cm:           cm,
+		profileScope: profileScope,
 	}
 }
 
@@ -130,8 +134,11 @@ func (t *PreImportTask) Clone() Task {
 		req:           t.req,
 		manager:       t.manager,
 		cm:            t.cm,
+		profileScope:  t.profileScope,
 	}
 }
+
+func (t *PreImportTask) FinishStorageProfile() { t.profileScope.Finish() }
 
 func (t *PreImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())

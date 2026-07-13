@@ -19,10 +19,12 @@ package common
 import (
 	"context"
 	"io"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -48,6 +50,7 @@ type offsetReader interface {
 // NewChunkManagerReopenReaderFunc creates a reopen function that resumes reading at the given offset.
 func NewChunkManagerReopenReaderFunc(cm storage.ChunkManager) ReopenReaderFunc {
 	return func(ctx context.Context, path string, offset int64) (storage.FileReader, error) {
+		ctx = storageprofile.WithSuppressed(ctx)
 		if reader, ok := cm.(offsetReader); ok {
 			return reader.ReaderAtOffset(ctx, path, offset)
 		}
@@ -75,6 +78,10 @@ type retryableReader struct {
 	sizeFunc      ReaderSizeFunc
 	offset        int64
 	size          int64
+	operation     storageprofile.OperationRecorder
+	retryCount    uint64
+	retryReason   storageprofile.ErrorCategory
+	finishOnce    sync.Once
 }
 
 // NewRetryableReader creates a new RetryableReader.
@@ -87,6 +94,7 @@ func NewRetryableReaderWithReopen(ctx context.Context, path string, reader stora
 }
 
 func newRetryableReader(ctx context.Context, path string, reader storage.FileReader, reopen ReopenReaderFunc, sizeFunc ReaderSizeFunc) RetryableReader {
+	reader = storage.DetachProfiledFileReader(reader)
 	size := int64(-1)
 	if reader != nil {
 		var err error
@@ -103,6 +111,11 @@ func newRetryableReader(ctx context.Context, path string, reader storage.FileRea
 		reopen:        reopen,
 		sizeFunc:      sizeFunc,
 		size:          size,
+		operation: storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+			Operation:               storageprofile.StorageOperationRead,
+			AccessLayer:             storageprofile.AccessLayerMilvus,
+			StreamingTTFBObservable: true,
+		}),
 	}
 }
 
@@ -131,10 +144,10 @@ func (r *retryableReader) reopenAtOffset() error {
 		return nil
 	}
 	if r.FileReader != nil {
-		_ = r.Close()
+		_ = r.FileReader.Close()
 		r.FileReader = nil
 	}
-	reader, err := r.reopen(r.ctx, r.path, r.offset)
+	reader, err := r.reopen(storageprofile.WithSuppressed(r.ctx), r.path, r.offset)
 	if err != nil {
 		return storage.ToMilvusIoError(r.path, err)
 	}
@@ -149,7 +162,11 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 	err = retry.Handle(r.ctx, func() (bool, error) {
 		if r.FileReader == nil {
 			if reopenErr := r.reopenAtOffset(); reopenErr != nil {
-				return !merr.IsNonRetryableErr(reopenErr), reopenErr
+				retryable := !merr.IsNonRetryableErr(reopenErr)
+				if retryable {
+					r.noteRetry(reopenErr)
+				}
+				return retryable, reopenErr
 			}
 			if r.FileReader == nil {
 				err = storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
@@ -175,8 +192,13 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 					mlog.Int64("size", size),
 				)
 				if reopenErr := r.reopenAtOffset(); reopenErr != nil {
-					return !merr.IsNonRetryableErr(reopenErr), reopenErr
+					retryable := !merr.IsNonRetryableErr(reopenErr)
+					if retryable {
+						r.noteRetry(reopenErr)
+					}
+					return retryable, reopenErr
 				}
+				r.noteRetry(err)
 				return true, err
 			}
 			return false, err
@@ -195,10 +217,63 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 			return false, err
 		}
 		if reopenErr := r.reopenAtOffset(); reopenErr != nil {
-			return !merr.IsNonRetryableErr(reopenErr), reopenErr
+			retryable := !merr.IsNonRetryableErr(reopenErr)
+			if retryable {
+				r.noteRetry(reopenErr)
+			}
+			return retryable, reopenErr
 		}
 		// Retry everything else (network errors, timeouts, 500s, etc.)
+		r.noteRetry(err)
 		return true, err
 	}, retry.Attempts(r.retryAttempts))
+	if n > 0 {
+		if r.operation != nil {
+			r.operation.AddCompletedBytes(uint64(n))
+			r.operation.FirstByte()
+		}
+	}
+	if errors.Is(err, io.EOF) {
+		r.finishOperation(storageprofile.OperationResult{
+			RetryCount:  r.retryCount,
+			RetryReason: r.retryReason,
+			SizeKnown:   r.size >= 0,
+		})
+	} else if err != nil {
+		r.finishOperation(storageprofile.OperationResult{
+			Err:         err,
+			RetryCount:  r.retryCount,
+			RetryReason: r.retryReason,
+			SizeKnown:   r.size >= 0,
+		})
+	}
 	return n, err
+}
+
+func (r *retryableReader) Close() error {
+	var err error
+	if r.FileReader != nil {
+		err = r.FileReader.Close()
+		r.FileReader = nil
+	}
+	r.finishOperation(storageprofile.OperationResult{
+		Err:         err,
+		RetryCount:  r.retryCount,
+		RetryReason: r.retryReason,
+		SizeKnown:   r.size >= 0,
+	})
+	return err
+}
+
+func (r *retryableReader) noteRetry(err error) {
+	r.retryCount++
+	r.retryReason = storageprofile.ClassifyError(storage.ToMilvusIoError(r.path, err))
+}
+
+func (r *retryableReader) finishOperation(result storageprofile.OperationResult) {
+	r.finishOnce.Do(func() {
+		if r.operation != nil {
+			r.operation.Finish(result)
+		}
+	})
 }

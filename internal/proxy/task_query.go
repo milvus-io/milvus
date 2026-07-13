@@ -1004,6 +1004,11 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 			return true
 		})
 	}
+	payloads := make([][]byte, 0, len(toReduceResults))
+	for _, result := range toReduceResults {
+		payloads = append(payloads, result.GetStorageProfile())
+	}
+	publishMergedStorageProfiles(ctx, payloads...)
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")

@@ -5406,6 +5406,7 @@ ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
                 // and index reverse-lookup overhead. Storage-cost accounting
                 // can differ if both index raw data and the column are
                 // resident, but returned PK values are identical.
+                auto storage_start = std::chrono::steady_clock::now();
                 column->BulkRawStringAt(
                     &local_ctx,
                     [&results](
@@ -5415,10 +5416,17 @@ ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
                     },
                     results.seg_offsets_.data(),
                     size);
-                results.search_storage_cost_.scanned_remote_bytes +=
+                auto cold_bytes =
                     local_ctx.storage_usage.scanned_cold_bytes.load();
+                results.search_storage_cost_.scanned_remote_bytes +=
+                    cold_bytes;
                 results.search_storage_cost_.scanned_total_bytes +=
                     local_ctx.storage_usage.scanned_total_bytes.load();
+                if (cold_bytes > 0) {
+                    results.storage_profile_.ObserveRead(
+                        std::chrono::steady_clock::now() - storage_start,
+                        static_cast<uint64_t>(cold_bytes));
+                }
                 return;
             }
         }
@@ -8430,6 +8438,7 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
         local_ctx.cancellation_token = op_ctx->cancellation_token;
         local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
     }
+    auto storage_start = std::chrono::steady_clock::now();
     for (auto field_id : plan->target_entries_) {
         // Skip fields already filled by take
         if (used_take && results.output_fields_data_.count(field_id) > 0) {
@@ -8455,10 +8464,15 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
-    results.search_storage_cost_.scanned_remote_bytes +=
-        local_ctx.storage_usage.scanned_cold_bytes.load();
+    auto cold_bytes = local_ctx.storage_usage.scanned_cold_bytes.load();
+    results.search_storage_cost_.scanned_remote_bytes += cold_bytes;
     results.search_storage_cost_.scanned_total_bytes +=
         local_ctx.storage_usage.scanned_total_bytes.load();
+    if (cold_bytes > 0) {
+        results.storage_profile_.ObserveRead(
+            std::chrono::steady_clock::now() - storage_start,
+            static_cast<uint64_t>(cold_bytes));
+    }
 }
 
 // ---- Shared helpers for TryTakeForRetrieve / TryTakeForSearch ----

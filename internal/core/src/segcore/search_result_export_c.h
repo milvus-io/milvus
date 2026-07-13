@@ -106,6 +106,17 @@ GetSearchResultMetadata(CSearchResult c_search_result,
                         int64_t* scanned_remote_bytes,
                         int64_t* scanned_total_bytes);
 
+// Export bounded Milvus-owned C++ storage observations accumulated while
+// materializing this SearchResult. durations must have capacity for at least
+// duration_capacity uint64_t values; out_count never exceeds that capacity.
+void
+GetSearchResultStorageProfile(CSearchResult c_search_result,
+                              uint64_t* durations,
+                              int64_t duration_capacity,
+                              int64_t* out_count,
+                              uint64_t* completed_bytes,
+                              uint64_t* dropped_observations);
+
 #ifdef __cplusplus
 }
 #endif

@@ -26,18 +26,21 @@ package packed
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
+func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, profileContexts ...context.Context) (*PackedWriter, error) {
+	profileCtx := packedProfileContext(firstProfileContext(profileContexts), storageConfig)
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -84,6 +87,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		pluginContextPtr = &pluginContext
 	}
 
+	operation := beginPackedOperation(profileCtx, storageprofile.StorageOperationStat, storageprofile.WorkloadPhaseWriteMetadata, 0, false)
 	if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
 			address:                C.CString(storageConfig.GetAddress()),
@@ -125,9 +129,11 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, &cPackedWriter, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
-	return &PackedWriter{cPackedWriter: cPackedWriter}, nil
+	operation.Finish(storageprofile.OperationResult{})
+	return &PackedWriter{cPackedWriter: cPackedWriter, profileCtx: profileCtx}, nil
 }
 
 func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
@@ -137,6 +143,8 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	if pw.cPackedWriter == nil {
 		return merr.WrapErrStorageMsg("packed writer is closed")
 	}
+	size := arrowRecordBytes(recordBatch)
+	operation := beginPackedOperation(pw.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, size, true)
 
 	cArrays := make([]CArrowArray, recordBatch.NumCols())
 	cSchemas := make([]CArrowSchema, recordBatch.NumCols())
@@ -155,8 +163,11 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 
 	status := C.WriteRecordBatch(pw.cPackedWriter, &cArrays[0], &cSchemas[0], cSchema)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
 		return err
 	}
+	operation.AddCompletedBytes(size)
+	operation.Finish(storageprofile.OperationResult{SizeKnown: true})
 
 	return nil
 }
@@ -167,10 +178,13 @@ func (pw *PackedWriter) Close() error {
 	}
 	cPackedWriter := pw.cPackedWriter
 	pw.cPackedWriter = nil
+	operation := beginPackedOperation(pw.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, 0, false)
 	status := C.CloseWriter(cPackedWriter)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	return nil
 }
 
@@ -188,10 +202,13 @@ func (pw *PackedWriter) CloseAndTell(numGroups int) ([]int64, error) {
 	sizes := make([]int64, numGroups)
 	cPackedWriter := pw.cPackedWriter
 	pw.cPackedWriter = nil
+	operation := beginPackedOperation(pw.profileCtx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteOutput, 0, false)
 	status := C.CloseAndTell(cPackedWriter, (*C.int64_t)(unsafe.Pointer(&sizes[0])), C.size_t(numGroups))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
+	operation.Finish(storageprofile.OperationResult{})
 	pw.closedSizes = append([]int64(nil), sizes...)
 	return sizes, nil
 }

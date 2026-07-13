@@ -775,6 +775,7 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
         search_result->get_total_result_count() > 0) {
         auto size = search_result->seg_offsets_.size();
         milvus::OpContext op_ctx(cancel_token);
+        auto storage_start = std::chrono::steady_clock::now();
         for (int64_t i = 0; i < num_extra_fields; i++) {
             milvus::futures::throwIfCancelled(cancel_token);
             auto field_id = milvus::FieldId(extra_field_ids[i]);
@@ -782,10 +783,16 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
                 &op_ctx, field_id, search_result->seg_offsets_.data(), size);
             extra_fields[field_id] = std::move(field_data);
         }
+        auto cold_bytes = op_ctx.storage_usage.scanned_cold_bytes.load();
         search_result->search_storage_cost_.scanned_remote_bytes +=
-            op_ctx.storage_usage.scanned_cold_bytes.load();
+            cold_bytes;
         search_result->search_storage_cost_.scanned_total_bytes +=
             op_ctx.storage_usage.scanned_total_bytes.load();
+        if (cold_bytes > 0) {
+            search_result->storage_profile_.ObserveRead(
+                std::chrono::steady_clock::now() - storage_start,
+                static_cast<uint64_t>(cold_bytes));
+        }
     }
 
     milvus::futures::throwIfCancelled(cancel_token);
@@ -989,6 +996,7 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 seg_res.temp_result.search_storage_cost_.scanned_remote_bytes;
             sr->search_storage_cost_.scanned_total_bytes +=
                 seg_res.temp_result.search_storage_cost_.scanned_total_bytes;
+            sr->storage_profile_.Merge(seg_res.temp_result.storage_profile_);
         }
 
         std::vector<milvus::segcore::MergeBase> result_pairs(total_rows);
@@ -1099,6 +1107,35 @@ GetSearchResultMetadata(CSearchResult c_search_result,
         search_result->search_storage_cost_.scanned_remote_bytes;
     *scanned_total_bytes =
         search_result->search_storage_cost_.scanned_total_bytes;
+}
+
+void
+GetSearchResultStorageProfile(CSearchResult c_search_result,
+                              uint64_t* durations,
+                              int64_t duration_capacity,
+                              int64_t* out_count,
+                              uint64_t* completed_bytes,
+                              uint64_t* dropped_observations) {
+    auto search_result = static_cast<SearchResult*>(c_search_result);
+    if (search_result == nullptr || out_count == nullptr ||
+        completed_bytes == nullptr || dropped_observations == nullptr) {
+        return;
+    }
+    auto count = std::min<int64_t>(
+        search_result->storage_profile_.read_count,
+        std::max<int64_t>(duration_capacity, 0));
+    if (durations != nullptr) {
+        for (int64_t i = 0; i < count; ++i) {
+            durations[i] =
+                search_result->storage_profile_.read_duration_nanos[i];
+        }
+    }
+    *out_count = count;
+    *completed_bytes =
+        search_result->storage_profile_.read_completed_bytes;
+    *dropped_observations =
+        search_result->storage_profile_.dropped_read_observations +
+        (search_result->storage_profile_.read_count - count);
 }
 
 CStatus

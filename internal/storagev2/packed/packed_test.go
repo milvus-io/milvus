@@ -15,6 +15,7 @@
 package packed
 
 import (
+	"context"
 	"io"
 	"testing"
 
@@ -25,6 +26,7 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -99,6 +101,43 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	suite.NoError(err)
 	defer rr.Release()
 	suite.Equal(int64(3*batches), rr.NumRows())
+}
+
+func (suite *PackedTestSuite) TestPackedProfileContextCoversOpenReadAndWrite() {
+	attribution := storageprofile.Attribution{
+		ScopeType:     storageprofile.ScopeTypeTask,
+		Component:     "datanode",
+		WorkloadClass: storageprofile.WorkloadClassBackground,
+		WorkloadKind:  storageprofile.WorkloadKindFlush,
+		Phase:         storageprofile.WorkloadPhaseWriteOutput,
+		StorageRole:   storageprofile.StorageRolePersistent,
+	}
+	recorder := storageprofile.NewRecorder(attribution)
+	ctx := storageprofile.WithRecorder(storageprofile.WithAttribution(context.Background(), attribution), recorder)
+	paths := []string{suite.T().TempDir() + "/profile.parquet"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+
+	writer, err := NewPackedWriter(paths, suite.schema, 10*1024*1024, 0, columnGroups, nil, nil, ctx)
+	suite.Require().NoError(err)
+	suite.Require().NoError(writer.WriteRecordBatch(suite.rec))
+	suite.Require().NoError(writer.Close())
+
+	reader, err := NewPackedReader(paths, suite.schema, 10*1024*1024, nil, nil, ctx)
+	suite.Require().NoError(err)
+	record, err := reader.ReadNext()
+	suite.Require().NoError(err)
+	record.Release()
+	_, err = reader.ReadNext()
+	suite.Require().ErrorIs(err, io.EOF)
+	suite.Require().NoError(reader.Close())
+
+	profile := recorder.Snapshot()
+	suite.Equal(uint64(2), profile.Operations[storageprofile.StorageOperationStat].Count)
+	suite.Equal(uint64(2), profile.Operations[storageprofile.StorageOperationWrite].Count)
+	suite.Equal(uint64(1), profile.Operations[storageprofile.StorageOperationRead].Count)
+	suite.Greater(profile.Operations[storageprofile.StorageOperationWrite].BytesCompleted, uint64(0))
+	suite.Greater(profile.Operations[storageprofile.StorageOperationRead].BytesCompleted, uint64(0))
+	suite.Equal(storageprofile.CoverageInstrumented, profile.Coverage.CppStorageOperations)
 }
 
 func (suite *PackedTestSuite) TestPackedMultiFiles() {

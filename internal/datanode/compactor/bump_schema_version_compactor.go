@@ -696,7 +696,7 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	columnGroups = storagecommon.FillColumnGroupFormats(columnGroups, writerFormat)
 	schemaBasedFormats := storagecommon.ColumnGroupFormats(columnGroups, writerFormat)
-	writer, err := storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+	writer, err := storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats, t.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -731,7 +731,7 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 
 	statsRelPath := fmt.Sprintf("_stats/%s.%d/%d", prefix, fieldID, statsID)
 	absStatsPath := path.Join(writerResult.basePath, statsRelPath)
-	if err := packed.WriteFile(t.compactionParams.StorageConfig, absStatsPath, bytes); err != nil {
+	if err := packed.WriteFileWithContext(t.ctx, t.compactionParams.StorageConfig, absStatsPath, bytes); err != nil {
 		return merr.Wrap(err, "failed to write V3 stats")
 	}
 	writerResult.v3Stats = append(writerResult.v3Stats, packed.FieldBinlogStatEntry(prefix, fieldID, &datapb.FieldBinlog{
@@ -987,7 +987,8 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		defer writerOutput.Destroy()
 	}
 
-	manifestPath, err := packed.CommitManifestUpdates(
+	manifestPath, err := packed.CommitManifestUpdatesWithContext(
+		ctx,
 		writerResult.basePath,
 		writerResult.baseVersion,
 		t.compactionParams.StorageConfig,

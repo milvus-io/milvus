@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
@@ -293,6 +294,11 @@ func RunDelegatorQueryPipeline(
 	output.HasMoreResult = anyFieldTrueInternal(results, func(r *internalpb.RetrieveResults) bool { return r.GetHasMoreResult() })
 	output.ScannedRemoteBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedRemoteBytes() })
 	output.ScannedTotalBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedTotalBytes() })
+	profilePayloads := make([][]byte, 0, len(results))
+	for _, result := range results {
+		profilePayloads = append(profilePayloads, result.GetStorageProfile())
+	}
+	output.StorageProfile, _ = storageprofile.MergeContributionPayloads(profilePayloads...)
 
 	// Only fill empty fields when result has no data at all (same guard as QN level).
 	if len(output.GetFieldsData()) == 0 {

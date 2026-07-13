@@ -34,6 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -218,6 +220,43 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		)
 		return merr.Status(err), err
 	}
+	compactionSubtype := storageprofile.WorkloadSubtypeUnknown
+	switch req.GetType() {
+	case datapb.CompactionType_Level0DeleteCompaction:
+		compactionSubtype = storageprofile.WorkloadSubtypeLevel0Delete
+	case datapb.CompactionType_MixCompaction:
+		compactionSubtype = storageprofile.WorkloadSubtypeMix
+	case datapb.CompactionType_ClusteringCompaction:
+		compactionSubtype = storageprofile.WorkloadSubtypeClustering
+	case datapb.CompactionType_SortCompaction:
+		compactionSubtype = storageprofile.WorkloadSubtypeSort
+	case datapb.CompactionType_BumpSchemaVersionCompaction:
+		compactionSubtype = storageprofile.WorkloadSubtypeBumpSchemaVersion
+	}
+	var collectionID int64
+	if len(req.GetSegmentBinlogs()) > 0 {
+		collectionID = req.GetSegmentBinlogs()[0].GetCollectionID()
+	}
+	attribution := storageprofile.Attribution{
+		ScopeType:       storageprofile.ScopeTypeTask,
+		TaskID:          fmt.Sprint(req.GetPlanID()),
+		Component:       "datanode",
+		NodeID:          node.GetNodeID(),
+		CollectionID:    collectionID,
+		WorkloadClass:   storageprofile.WorkloadClassBackground,
+		WorkloadKind:    storageprofile.WorkloadKindCompaction,
+		WorkloadSubtype: compactionSubtype,
+		StorageRole:     storageprofile.StorageRolePersistent,
+	}
+	profileScope := storageprofile.NewTaskScope(attribution)
+	profileHandedOff := false
+	defer func() {
+		if !profileHandedOff {
+			profileScope.Finish()
+		}
+	}()
+	taskCtx = profileScope.Bind(storageprofile.WithDefaultAttribution(taskCtx, attribution))
+	cm = storage.WithAttribution(cm, attribution)
 	var task compactor.Compactor
 	binlogIO := io.NewBinlogIO(cm)
 	namespaceEnabled := req.GetSchema().GetEnableNamespace()
@@ -308,9 +347,11 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		mlog.Warn(context.TODO(), "Unknown compaction type", mlog.String("type", req.GetType().String()))
 		return merr.Status(merr.WrapErrServiceInternalMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
+	task = compactor.WithStorageProfile(task, profileScope)
 
 	succeed, err := node.compactionExecutor.Enqueue(task)
 	if succeed {
+		profileHandedOff = true
 		return merr.Success(), nil
 	} else {
 		return merr.Status(err), nil

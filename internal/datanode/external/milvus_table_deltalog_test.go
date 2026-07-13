@@ -466,8 +466,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	})
 	s.Require().NoError(err)
 
-	mockReadMetadata := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(storageConfig *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+	mockReadMetadata := mockey.Mock(packed.ReadFileWithExternalSpecContext).
+		To(func(_ context.Context, storageConfig *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
 			s.Equal(s.collectionID, extfs.CollectionID)
 			s.Equal(metadataPath, extfs.Source)
 			s.Equal(externalSpec, extfs.Spec)
@@ -516,6 +516,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 			storageConfig *indexpb.StorageConfig,
 			storagePluginContext *indexcgopb.StoragePluginContext,
 			extfs packed.ExternalSpecContext,
+			_ ...context.Context,
 		) (*storage.ManifestReader, error) {
 			gotExtfs = extfs
 			return nil, readerErr

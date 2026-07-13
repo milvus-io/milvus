@@ -23,10 +23,12 @@ package packed
 import "C"
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -38,6 +40,23 @@ func WriteFile(
 	filePath string,
 	data []byte,
 ) error {
+	return WriteFileWithContext(context.Background(), storageConfig, filePath, data)
+}
+
+func WriteFileWithContext(
+	ctx context.Context,
+	storageConfig *indexpb.StorageConfig,
+	filePath string,
+	data []byte,
+) (err error) {
+	ctx = packedProfileContext(ctx, storageConfig)
+	operation := beginPackedOperation(ctx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseUnknown, uint64(len(data)), true)
+	defer func() {
+		if err == nil {
+			operation.AddCompletedBytes(uint64(len(data)))
+		}
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: true})
+	}()
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return merr.WrapErrStorage(err, "failed to create properties")
@@ -82,7 +101,8 @@ func WriteFile(
 		dataPtr, C.uint64_t(len(data)),
 		nil, 0, // no file metadata
 	)
-	return HandleLoonFFIResult(result)
+	err = HandleLoonFFIResult(result)
+	return err
 }
 
 // ReadFile reads an entire file using milvus-storage filesystem FFI.
@@ -90,7 +110,11 @@ func ReadFile(
 	storageConfig *indexpb.StorageConfig,
 	filePath string,
 ) ([]byte, error) {
-	return ReadFileWithExternalSpec(storageConfig, filePath, ExternalSpecContext{})
+	return ReadFileWithExternalSpecContext(context.Background(), storageConfig, filePath, ExternalSpecContext{})
+}
+
+func ReadFileWithContext(ctx context.Context, storageConfig *indexpb.StorageConfig, filePath string) ([]byte, error) {
+	return ReadFileWithExternalSpecContext(ctx, storageConfig, filePath, ExternalSpecContext{})
 }
 
 // ReadFileWithExternalSpec reads an entire file after injecting external spec
@@ -101,6 +125,23 @@ func ReadFileWithExternalSpec(
 	filePath string,
 	extfs ExternalSpecContext,
 ) ([]byte, error) {
+	return ReadFileWithExternalSpecContext(context.Background(), storageConfig, filePath, extfs)
+}
+
+func ReadFileWithExternalSpecContext(
+	ctx context.Context,
+	storageConfig *indexpb.StorageConfig,
+	filePath string,
+	extfs ExternalSpecContext,
+) (data []byte, err error) {
+	ctx = packedProfileContext(ctx, storageConfig)
+	operation := beginPackedOperation(ctx, storageprofile.StorageOperationRead, storageprofile.WorkloadPhaseUnknown, 0, false)
+	defer func() {
+		if len(data) > 0 {
+			operation.AddCompletedBytes(uint64(len(data)))
+		}
+		operation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: err == nil})
+	}()
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to create properties")
@@ -137,7 +178,8 @@ func ReadFileWithExternalSpec(
 		return nil, nil
 	}
 	defer C.free(unsafe.Pointer(outData))
-	return C.GoBytes(unsafe.Pointer(outData), C.int(outSize)), nil
+	data = C.GoBytes(unsafe.Pointer(outData), C.int(outSize))
+	return data, nil
 }
 
 func normalizeExternalPathForFilesystem(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, string, error) {

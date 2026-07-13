@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -107,6 +108,7 @@ type RefreshExternalCollectionTask struct {
 	// Pre-allocated segment IDs
 	preallocatedIDRange *datapb.IDRange // pre-allocated segment ID range (begin, end)
 	nextAllocID         int64           // next available segment ID from pre-allocated range
+	profileScope        *storageprofile.Scope
 }
 
 // NewRefreshExternalCollectionTask creates a new refresh-external-collection task.
@@ -116,11 +118,24 @@ func NewRefreshExternalCollectionTask(
 	ctx context.Context,
 	req *datapb.RefreshExternalCollectionTaskRequest,
 ) *RefreshExternalCollectionTask {
+	attribution := storageprofile.Attribution{
+		ScopeType:     storageprofile.ScopeTypeTask,
+		TaskID:        fmt.Sprint(req.GetTaskID()),
+		Component:     "datanode",
+		NodeID:        paramtable.GetNodeID(),
+		CollectionID:  req.GetCollectionID(),
+		WorkloadClass: storageprofile.WorkloadClassBackground,
+		WorkloadKind:  storageprofile.WorkloadKindExternalSync,
+		Phase:         storageprofile.WorkloadPhaseReadSource,
+		StorageRole:   storageprofile.StorageRoleSource,
+	}
+	profileScope := storageprofile.NewTaskScope(attribution)
 	return &RefreshExternalCollectionTask{
-		ctx:   ctx,
-		req:   req,
-		tr:    timerecord.NewTimeRecorder(fmt.Sprintf("RefreshExternalCollectionTask: %d", req.GetTaskID())),
-		state: indexpb.JobState_JobStateInit,
+		ctx:          profileScope.Bind(storageprofile.WithDefaultAttribution(ctx, attribution)),
+		req:          req,
+		tr:           timerecord.NewTimeRecorder(fmt.Sprintf("RefreshExternalCollectionTask: %d", req.GetTaskID())),
+		state:        indexpb.JobState_JobStateInit,
+		profileScope: profileScope,
 	}
 }
 
@@ -154,11 +169,15 @@ func (t *RefreshExternalCollectionTask) GetSlot() int64 {
 }
 
 func (t *RefreshExternalCollectionTask) Reset() {
+	if t.profileScope != nil {
+		t.profileScope.Finish()
+	}
 	t.ctx = nil
 	t.req = nil
 	t.tr = nil
 	t.keptSegmentIDs = nil
 	t.updatedSegments = nil
+	t.profileScope = nil
 }
 
 func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {

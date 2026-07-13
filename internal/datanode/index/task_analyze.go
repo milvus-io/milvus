@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+
+	"github.com/milvus-io/milvus/internal/storageprofile"
 )
 
 var _ Task = (*analyzeTask)(nil)
@@ -40,10 +42,17 @@ type analyzeTask struct {
 	cancel context.CancelFunc
 	req    *workerpb.AnalyzeRequest
 
-	tr       *timerecord.TimeRecorder
-	queueDur time.Duration
-	manager  *TaskManager
-	analyze  analyzecgowrapper.CodecAnalyze
+	tr           *timerecord.TimeRecorder
+	queueDur     time.Duration
+	manager      *TaskManager
+	analyze      analyzecgowrapper.CodecAnalyze
+	profileScope *storageprofile.Scope
+	writeProfile storageprofile.OperationRecorder
+}
+
+func (at *analyzeTask) WithStorageProfile(scope *storageprofile.Scope) *analyzeTask {
+	at.profileScope = scope
+	return at
 }
 
 func NewAnalyzeTask(ctx context.Context,
@@ -160,11 +169,28 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		FieldSchema:     field,
 	}
 
+	readOperation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		AccessLayer: storageprofile.AccessLayerMilvus,
+		Operation:   storageprofile.StorageOperationRead,
+		Phase:       storageprofile.WorkloadPhaseReadSource,
+		StorageRole: storageprofile.StorageRolePersistent,
+		CppBoundary: true,
+	})
+	at.writeProfile = storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		AccessLayer: storageprofile.AccessLayerMilvus,
+		Operation:   storageprofile.StorageOperationWrite,
+		Phase:       storageprofile.WorkloadPhaseWriteOutput,
+		StorageRole: storageprofile.StorageRolePersistent,
+		CppBoundary: true,
+	})
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
 	if err != nil {
+		readOperation.Finish(storageprofile.OperationResult{Err: err})
+		at.writeProfile.Finish(storageprofile.OperationResult{Err: err})
 		log.Error(ctx, "failed to analyze data", mlog.Err(err))
 		return err
 	}
+	readOperation.Finish(storageprofile.OperationResult{})
 
 	analyzeLatency := at.tr.RecordSpan()
 	log.Info(ctx, "analyze done", mlog.Int64("analyze cost", analyzeLatency.Milliseconds()))
@@ -182,10 +208,21 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 	}
 	defer gc()
 
-	centroidsFile, _, _, _, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
+	centroidsFile, centroidsSize, _, offsetMappingSizes, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
 	if err != nil {
+		if at.writeProfile != nil {
+			at.writeProfile.Finish(storageprofile.OperationResult{Err: err})
+		}
 		log.Error(ctx, "failed to upload index", mlog.Err(err))
 		return err
+	}
+	if at.writeProfile != nil {
+		writtenBytes := uint64(max(centroidsSize, 0))
+		for _, size := range offsetMappingSizes {
+			writtenBytes += uint64(max(size, 0))
+		}
+		at.writeProfile.AddCompletedBytes(writtenBytes)
+		at.writeProfile.Finish(storageprofile.OperationResult{SizeKnown: true})
 	}
 	log.Info(ctx, "analyze result", mlog.String("centroidsFile", centroidsFile))
 
@@ -215,6 +252,12 @@ func (at *analyzeTask) GetState() indexpb.JobState {
 }
 
 func (at *analyzeTask) Reset() {
+	if at.writeProfile != nil {
+		at.writeProfile.Finish(storageprofile.OperationResult{Err: context.Canceled})
+	}
+	if at.profileScope != nil {
+		at.profileScope.Finish()
+	}
 	at.ident = ""
 	at.ctx = nil
 	at.cancel = nil
@@ -222,4 +265,6 @@ func (at *analyzeTask) Reset() {
 	at.tr = nil
 	at.queueDur = 0
 	at.manager = nil
+	at.profileScope = nil
+	at.writeProfile = nil
 }

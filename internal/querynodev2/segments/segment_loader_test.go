@@ -1084,8 +1084,8 @@ func TestReadExternalFiles(t *testing.T) {
 
 	var gotPaths []string
 	var gotExtfs []packed.ExternalSpecContext
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, ctx packed.ExternalSpecContext) ([]byte, error) {
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpecContext).
+		To(func(_ context.Context, sc *indexpb.StorageConfig, filePath string, ctx packed.ExternalSpecContext) ([]byte, error) {
 			assert.Same(t, storageConfig, sc)
 			gotPaths = append(gotPaths, filePath)
 			gotExtfs = append(gotExtfs, ctx)
@@ -1154,8 +1154,8 @@ func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKUsesE
 
 	readCalls := atomic.NewInt32(0)
 	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpecContext).
+		To(func(_ context.Context, sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
 			readCalls.Inc()
 			gotPaths = append(gotPaths, filePath)
 			suite.Equal(suite.collectionID, extfs.CollectionID)
@@ -1183,8 +1183,8 @@ func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKIgnor
 
 	readCalls := atomic.NewInt32(0)
 	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpecContext).
+		To(func(_ context.Context, sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
 			readCalls.Inc()
 			gotPaths = append(gotPaths, filePath)
 			return payload, nil
@@ -1206,8 +1206,8 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExterna
 
 	readCalls := atomic.NewInt32(0)
 	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpecContext).
+		To(func(_ context.Context, sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
 			readCalls.Inc()
 			gotPaths = append(gotPaths, filePath)
 			suite.Equal(suite.collectionID, extfs.CollectionID)
@@ -1236,8 +1236,8 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKIgnoresBloo
 
 	readCalls := atomic.NewInt32(0)
 	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpecContext).
+		To(func(_ context.Context, sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
 			readCalls.Inc()
 			gotPaths = append(gotPaths, filePath)
 			return payload, nil

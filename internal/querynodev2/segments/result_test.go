@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -289,16 +290,21 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
 	suite.NoError(err)
 	rEnc1.ScannedRemoteBytes = 111
 	rEnc1.ScannedTotalBytes = 222
+	rEnc1.StorageProfile = makeStorageProfileContribution(suite.T(), 1, "search-scope", 100)
 	rEnc2, err := EncodeSearchResultData(ctx, srd2, nq, topK, metricType)
 	suite.NoError(err)
 	rEnc2.ScannedRemoteBytes = 333
 	rEnc2.ScannedTotalBytes = 444
+	rEnc2.StorageProfile = makeStorageProfileContribution(suite.T(), 2, "search-scope", 200)
 
 	out, err := ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{rEnc1, rEnc2}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
 	suite.NoError(err)
 	// costs should aggregate across both included results
 	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
 	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
+	profile := mergedStorageProfileFromPayload(suite.T(), out.GetStorageProfile())
+	suite.Equal(uint64(2), profile.Operations[storageprofile.StorageOperationRead].Count)
+	suite.Equal(uint64(300), profile.Operations[storageprofile.StorageOperationRead].BytesCompleted)
 }
 
 func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvancedKeepsZeroHitWorkerMetadata() {

@@ -15,11 +15,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -53,6 +55,23 @@ func ExecuteFunctionsForSegment(
 	basePath string,
 	clusterID string,
 ) (string, error) {
+	attribution := storageprofile.Attribution{
+		ScopeType:     storageprofile.ScopeTypeTask,
+		TaskID:        strconv.FormatInt(segmentID, 10),
+		Component:     "datanode",
+		NodeID:        paramtable.GetNodeID(),
+		CollectionID:  collectionID,
+		WorkloadClass: storageprofile.WorkloadClassBackground,
+		WorkloadKind:  storageprofile.WorkloadKindExternalSync,
+		Phase:         storageprofile.WorkloadPhaseReadSource,
+		StorageRole:   storageprofile.StorageRoleSource,
+	}
+	ctx = storageprofile.WithDefaultAttribution(ctx, attribution)
+	if !storageprofile.HasActiveRecorder(ctx) {
+		profileScope := storageprofile.NewTaskScope(attribution)
+		ctx = profileScope.Bind(ctx)
+		defer profileScope.Finish()
+	}
 	log := mlog.With()
 	log.Info(ctx, "executing functions for external table segment",
 		mlog.FieldSegmentID(segmentID),
@@ -104,7 +123,8 @@ func ExecuteFunctionsForSegment(
 	defer reader.Close()
 
 	colGroups := []storagecommon.ColumnGroup{{Columns: lo.Range(len(outputFields))}}
-	writer, err := packed.NewFFIPackedWriter(basePath, outputArrow, colGroups, storageConfig, nil)
+	outputCtx := storageprofile.WithPhase(ctx, storageprofile.WorkloadPhaseWriteOutput, storageprofile.StorageRolePersistent)
+	writer, err := packed.NewFFIPackedWriterWithContext(outputCtx, basePath, outputArrow, colGroups, storageConfig, nil)
 	if err != nil {
 		return "", merr.Wrap(err, "open output writer")
 	}
@@ -130,7 +150,7 @@ func ExecuteFunctionsForSegment(
 	if err := appendBM25Stats(ctx, bm25Acc, storageConfig, basePath, updates); err != nil {
 		return "", err
 	}
-	manifestPath, err := packed.CommitManifestUpdates(basePath, inputVersion, storageConfig, updates)
+	manifestPath, err := packed.CommitManifestUpdatesWithContext(outputCtx, basePath, inputVersion, storageConfig, updates)
 	if err != nil {
 		return "", merr.Wrap(err, "commit function output manifest")
 	}
@@ -453,7 +473,7 @@ func appendBM25Stats(
 			return merr.Wrapf(err, "serialize bm25 stats for field %d", outID)
 		}
 		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", outID, 0))
-		if err := packed.WriteFile(storageConfig, fullPath, blob); err != nil {
+		if err := packed.WriteFileWithContext(storageprofile.WithPhase(ctx, storageprofile.WorkloadPhaseWriteMetadata, storageprofile.StorageRolePersistent), storageConfig, fullPath, blob); err != nil {
 			return merr.Wrapf(err, "write bm25 stats file %s", fullPath)
 		}
 		entries = append(entries, packed.StatEntry{
@@ -500,5 +520,5 @@ func finalizeBM25Stats(
 	if err := appendBM25Stats(ctx, acc, storageConfig, basePath, updates); err != nil {
 		return "", err
 	}
-	return packed.CommitManifestUpdates(basePath, version, storageConfig, updates)
+	return packed.CommitManifestUpdatesWithContext(storageprofile.WithPhase(ctx, storageprofile.WorkloadPhaseWriteMetadata, storageprofile.StorageRolePersistent), basePath, version, storageConfig, updates)
 }

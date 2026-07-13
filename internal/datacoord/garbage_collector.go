@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -483,7 +484,20 @@ func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name s
 			}
 			logger.Info(ctx, "garbage collector recycle task start...")
 			start := time.Now()
-			task(ctx, signal)
+			attribution := storageprofile.Attribution{
+				ScopeType:       storageprofile.ScopeTypeTask,
+				TaskID:          fmt.Sprintf("%s/%d", name, start.UnixNano()),
+				Component:       "datacoord",
+				NodeID:          paramtable.GetNodeID(),
+				WorkloadClass:   storageprofile.WorkloadClassBackground,
+				WorkloadKind:    storageprofile.WorkloadKindGC,
+				WorkloadSubtype: storageprofile.WorkloadSubtypeUnknown,
+				Phase:           storageprofile.WorkloadPhaseCleanup,
+				StorageRole:     storageprofile.StorageRolePersistent,
+			}
+			profileScope := storageprofile.NewTaskScope(attribution)
+			task(profileScope.Bind(storageprofile.WithDefaultAttribution(ctx, attribution)), signal)
+			profileScope.Finish()
 			logger.Info(ctx, "garbage collector recycle task done", mlog.Duration("timeCost", time.Since(start)))
 		}
 	}

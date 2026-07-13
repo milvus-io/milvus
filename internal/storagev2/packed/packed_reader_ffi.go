@@ -44,6 +44,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -57,7 +58,7 @@ type ExternalReaderContext = ExternalSpecContext
 
 // NewFFIPackedReader opens a StorageV3 manifest reader with optional external
 // reader context.
-func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
+func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext, profileContexts ...context.Context) (*FFIPackedReader, error) {
 	return NewFFIPackedReaderWithExtfs(
 		manifestPath,
 		schema,
@@ -66,6 +67,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		storageConfig,
 		storagePluginContext,
 		ext,
+		profileContexts...,
 	)
 }
 
@@ -80,14 +82,18 @@ func NewFFIPackedReaderWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalSpecContext,
+	profileContexts ...context.Context,
 ) (*FFIPackedReader, error) {
+	profileCtx := packedProfileContext(firstProfileContext(profileContexts), storageConfig)
+	operation := beginPackedOperation(profileCtx, storageprofile.StorageOperationStat, storageprofile.WorkloadPhaseReadMetadata, 0, false)
 	cLoonManifest, err := GetManifestHandleWithExtfs(manifestPath, storageConfig, extfs)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cLoonManifest)
 
-	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
+	reader, err := openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs, profileCtx,
 		func(cSchema *C.struct_ArrowSchema,
 			cNeededColumnArray **C.char,
 			cNumColumns C.int64_t,
@@ -111,6 +117,8 @@ func NewFFIPackedReaderWithExtfs(
 				cExternalSpec,
 			)
 		})
+	operation.Finish(storageprofile.OperationResult{Err: err})
+	return reader, err
 }
 
 // NewFFIPackedReaderWithFragments opens a packed reader from explicit physical
@@ -127,18 +135,23 @@ func NewFFIPackedReaderWithFragments(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalSpecContext,
+	profileContexts ...context.Context,
 ) (*FFIPackedReader, error) {
+	profileCtx := packedProfileContext(firstProfileContext(profileContexts), storageConfig)
+	operation := beginPackedOperation(profileCtx, storageprofile.StorageOperationStat, storageprofile.WorkloadPhaseReadMetadata, 0, false)
 	readerFragments, err := resolveFFIReaderFragments(fragments, storageConfig, extfs)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
 	cColumnGroups, err := createColumnGroups(columns, format, readerFragments)
 	if err != nil {
+		operation.Finish(storageprofile.OperationResult{Err: err})
 		return nil, err
 	}
 	defer C.loon_column_groups_destroy(cColumnGroups)
 
-	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
+	reader, err := openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs, profileCtx,
 		func(cSchema *C.struct_ArrowSchema,
 			cNeededColumnArray **C.char,
 			cNumColumns C.int64_t,
@@ -162,6 +175,8 @@ func NewFFIPackedReaderWithFragments(
 				cExternalSpec,
 			)
 		})
+	operation.Finish(storageprofile.OperationResult{Err: err})
+	return reader, err
 }
 
 type ffiReaderOpenFunc func(
@@ -183,6 +198,7 @@ func openFFIPackedReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalSpecContext,
+	profileCtx context.Context,
 	open ffiReaderOpenFunc,
 ) (*FFIPackedReader, error) {
 	var cas cdata.CArrowSchema
@@ -241,6 +257,7 @@ func openFFIPackedReader(
 		cPackedReader: cPackedReader,
 		recordReader:  recordReader,
 		schema:        schema,
+		profileCtx:    profileCtx,
 	}, nil
 }
 
@@ -366,14 +383,21 @@ func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 	if r.recordReader == nil {
 		return nil, io.EOF
 	}
+	operation := beginPackedOperation(r.profileCtx, storageprofile.StorageOperationRead, storageprofile.WorkloadPhaseReadSource, 0, false)
 
 	rec, err = r.recordReader.Read()
 	if err != nil {
 		if err == io.EOF {
+			operation.Finish(storageprofile.OperationResult{Ignored: true})
 			return nil, io.EOF
 		}
-		return nil, merr.WrapErrStorage(err, "failed to read next record")
+		err = merr.WrapErrStorage(err, "failed to read next record")
+		operation.Finish(storageprofile.OperationResult{Err: err})
+		return nil, err
 	}
+	size := arrowRecordBytes(rec)
+	operation.AddCompletedBytes(size)
+	operation.Finish(storageprofile.OperationResult{SizeKnown: true})
 
 	return rec, nil
 }

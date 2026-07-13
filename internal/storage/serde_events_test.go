@@ -479,6 +479,7 @@ func TestManifestReaderExternalContext(t *testing.T) {
 			cfg *indexpb.StorageConfig,
 			pluginContext *indexcgopb.StoragePluginContext,
 			ext packed.ExternalReaderContext,
+			_ ...context.Context,
 		) (*packed.FFIPackedReader, error) {
 			capturedManifest = manifestPath
 			capturedColumns = append([]string(nil), neededColumns...)
@@ -535,6 +536,7 @@ func TestDeltalogReaderExternalContext(t *testing.T) {
 			cfg *indexpb.StorageConfig,
 			pluginContext *indexcgopb.StoragePluginContext,
 			ext packed.ExternalReaderContext,
+			_ ...context.Context,
 		) (*packed.PackedReader, error) {
 			require.NotNil(t, arrowSchema)
 			capturedPaths = append([]string(nil), paths...)

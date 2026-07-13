@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
@@ -453,6 +454,21 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
 	segment := req.GetInfos()[0]
+	attribution := storageprofile.Attribution{
+		ScopeType:       storageprofile.ScopeTypeTask,
+		TaskID:          fmt.Sprintf("%d/%d", segment.GetSegmentID(), req.GetVersion()),
+		Component:       "querynode",
+		NodeID:          node.GetNodeID(),
+		CollectionID:    segment.GetCollectionID(),
+		WorkloadClass:   storageprofile.WorkloadClassBackground,
+		WorkloadKind:    storageprofile.WorkloadKindLoad,
+		WorkloadSubtype: storageprofile.WorkloadSubtypeSegmentLoad,
+		Phase:           storageprofile.WorkloadPhaseReadSource,
+		StorageRole:     storageprofile.StorageRolePersistent,
+	}
+	profileScope := storageprofile.NewTaskScope(attribution)
+	ctx = profileScope.Bind(storageprofile.WithDefaultAttribution(ctx, attribution))
+	defer profileScope.Finish()
 
 	log := mlog.With(
 		mlog.Int64("collectionID", segment.GetCollectionID()),
@@ -809,6 +825,25 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	resp := &internalpb.SearchResults{
 		ChannelsMvcc: channelsMvcc,
 	}
+	ctx, profileScope := node.beginRequestStorageContribution(
+		ctx,
+		req.GetReq().GetStorageProfile().GetLevel(),
+		req.GetReq().GetStorageProfile().GetScopeId(),
+		req.GetReq().GetReqID(),
+		req.GetReq().GetCollectionID(),
+		storageprofile.WorkloadKindSearch,
+	)
+	defer func() {
+		resp.StorageProfile = finishRequestStorageContribution(
+			ctx,
+			profileScope,
+			req.GetReq().GetStorageProfile().GetScopeId(),
+			fmt.Sprintf("%d/%s/%v", req.GetReq().GetReqID(), channel, req.GetSegmentIDs()),
+			node.GetNodeID(),
+			resp.GetScannedRemoteBytes(),
+			resp.GetScannedTotalBytes(),
+		)
+	}()
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -945,6 +980,31 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	resp := &internalpb.RetrieveResults{
 		Status: merr.Success(),
 	}
+	workloadKind := storageprofile.WorkloadKindQuery
+	if req.GetReq().GetQueryLabel() == metrics.UpsertLabel || req.GetReq().GetQueryLabel() == "upsert_query" {
+		workloadKind = storageprofile.WorkloadKindUpsert
+	} else if req.GetReq().GetQueryLabel() == metrics.DeleteLabel {
+		workloadKind = storageprofile.WorkloadKindDelete
+	}
+	ctx, profileScope := node.beginRequestStorageContribution(
+		ctx,
+		req.GetReq().GetStorageProfile().GetLevel(),
+		req.GetReq().GetStorageProfile().GetScopeId(),
+		req.GetReq().GetReqID(),
+		req.GetReq().GetCollectionID(),
+		workloadKind,
+	)
+	defer func() {
+		resp.StorageProfile = finishRequestStorageContribution(
+			ctx,
+			profileScope,
+			req.GetReq().GetStorageProfile().GetScopeId(),
+			fmt.Sprintf("%d/%s/%v", req.GetReq().GetReqID(), req.GetDmlChannels()[0], req.GetSegmentIDs()),
+			node.GetNodeID(),
+			resp.GetScannedRemoteBytes(),
+			resp.GetScannedTotalBytes(),
+		)
+	}()
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 	channel := req.GetDmlChannels()[0]
@@ -1016,10 +1076,10 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
-	result := task.Result()
-	result.GetCostAggregation().ResponseTime = latency.Milliseconds()
-	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
-	return result, nil
+	resp = task.Result()
+	resp.GetCostAggregation().ResponseTime = latency.Milliseconds()
+	resp.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	return resp, nil
 }
 
 // Query performs replica query tasks.

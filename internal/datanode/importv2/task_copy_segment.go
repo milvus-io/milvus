@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -86,6 +87,7 @@ type CopySegmentTask struct {
 	req            *datapb.CopySegmentRequest          // Original request with source/target pairs
 	manager        TaskManager                         // Task manager for state updates and coordination
 	cm             storage.ChunkManager                // ChunkManager for file copy operations
+	profileScope   *storageprofile.Scope
 
 	// Cleanup tracking: records all successfully copied files for cleanup on failure
 	copiedFilesMu sync.Mutex // Protects copiedFiles for concurrent segment copies
@@ -118,8 +120,6 @@ func NewCopySegmentTask(
 	manager TaskManager,
 	cm storage.ChunkManager,
 ) Task {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// Step 1: Initialize empty result structures for each target segment
 	// These will be populated during execution with binlog/index metadata
 	segmentResults := make(map[int64]*datapb.CopySegmentResult)
@@ -152,6 +152,9 @@ func NewCopySegmentTask(
 			partitionIDs = append(partitionIDs, pid)
 		}
 	}
+	profileScope := newImportStorageScope(req.GetTaskID(), collectionID, storageprofile.WorkloadSubtypeCopySegment, storageprofile.WorkloadPhaseCopyObject)
+	profileCtx := storageprofile.WithPhase(profileScope.Context(), storageprofile.WorkloadPhaseCopyObject, storageprofile.StorageRolePersistent)
+	ctx, cancel := context.WithCancel(profileCtx)
 
 	// Step 3: Create task with all components
 	task := &CopySegmentTask{
@@ -168,6 +171,7 @@ func NewCopySegmentTask(
 		req:            req,
 		manager:        manager,
 		cm:             cm,
+		profileScope:   profileScope,
 	}
 	return task
 }
@@ -252,8 +256,11 @@ func (t *CopySegmentTask) Clone() Task {
 		req:            t.req,
 		manager:        t.manager,
 		cm:             t.cm,
+		profileScope:   t.profileScope,
 	}
 }
+
+func (t *CopySegmentTask) FinishStorageProfile() { t.profileScope.Finish() }
 
 // GetSegmentResults returns the copy results for all target segments.
 // This is called by DataCoord to retrieve binlog/index metadata after task completion.

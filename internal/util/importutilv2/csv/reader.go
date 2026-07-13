@@ -55,6 +55,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	retryableReader := common.NewRetryableReaderWithReopen(ctx, path, cmReader, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
+		_ = retryableReader.Close()
 		return nil, err
 	}
 
@@ -64,11 +65,13 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	header, err := csvReader.Read()
 	mlog.Info(ctx, "csv header parsed", mlog.Strings("header", header))
 	if err != nil {
+		_ = retryableReader.Close()
 		return nil, merr.WrapErrImportSysFailedMsg("failed to read csv header, error: %v", err)
 	}
 
 	rowParser, err := NewRowParser(schema, header, nullkey)
 	if err != nil {
+		_ = retryableReader.Close()
 		return nil, err
 	}
 	return &reader{

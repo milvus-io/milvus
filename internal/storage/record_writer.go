@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -138,6 +139,7 @@ func NewPackedRecordWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	profileContexts ...context.Context,
 ) (*packedRecordWriter, error) {
 	// Validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -150,7 +152,7 @@ func NewPackedRecordWriter(
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
-	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, profileContexts...)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
@@ -287,8 +289,9 @@ func NewPackedRecordBatchWriter(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
 	schemaBasedFormats []string,
+	profileContexts ...context.Context,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, writerFormat, schemaBasedFormats)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, writerFormat, schemaBasedFormats, profileContexts...)
 }
 
 func NewPartialPackedRecordBatchWriter(
@@ -301,8 +304,9 @@ func NewPartialPackedRecordBatchWriter(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
 	schemaBasedFormats []string,
+	profileContexts ...context.Context,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats, profileContexts...)
 }
 
 func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) error {
@@ -329,6 +333,7 @@ func newPackedRecordBatchWriter(
 	textRefsAsBinary bool,
 	writerFormat string,
 	schemaBasedFormats []string,
+	profileContexts ...context.Context,
 ) (*packedRecordBatchWriter, error) {
 	if validatePK {
 		_, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -362,7 +367,11 @@ func newPackedRecordBatchWriter(
 	if len(schemaBasedFormats) > 0 {
 		extraProperties[packed.PropertyWriterSchemaBasedFormats] = strings.Join(schemaBasedFormats, ",")
 	}
-	writer, err := packed.NewFFIPackedWriter(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
+	writer, err := packed.NewFFIPackedWriterWithContext(profileCtx, basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
@@ -517,6 +526,7 @@ func NewPackedTextBatchWriter(
 	textColumnConfigs []packed.TextColumnConfig,
 	writerFormat string,
 	schemaBasedFormats []string,
+	profileContexts ...context.Context,
 ) (*packedTextBatchWriter, error) {
 	// validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -562,7 +572,7 @@ func NewPackedTextBatchWriter(
 		SchemaBasedFormats: schemaBasedFormats,
 	}
 
-	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
+	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig, profileContexts...)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "can not new segment writer")
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -383,6 +384,10 @@ func (sm *snapshotManager) CreateSnapshot(
 	name, description string,
 	compactionProtectionSeconds int64,
 ) (int64, error) {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, name, collectionID,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypeCreate,
+		storageprofile.WorkloadPhaseWriteMetadata, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	sm.createSnapshotMu.Lock()
 	defer sm.createSnapshotMu.Unlock()
@@ -442,6 +447,10 @@ func (sm *snapshotManager) CreateSnapshot(
 // DropSnapshot deletes an existing snapshot by name.
 // This operation is idempotent - if the snapshot doesn't exist, it returns nil.
 func (sm *snapshotManager) DropSnapshot(ctx context.Context, collectionID int64, name string) error {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, name, collectionID,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypeUnknown,
+		storageprofile.WorkloadPhaseCleanup, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	mlog.Info(context.TODO(), "drop snapshot request received")
 
 	// Check if snapshot exists first (idempotent for not-found, propagate other errors)
@@ -470,6 +479,10 @@ func (sm *snapshotManager) DropSnapshot(ctx context.Context, collectionID int64,
 // successfully dropped (pinned/not-found/failed ones are excluded), so metric
 // cleanup is symmetric with the per-snapshot DropSnapshot path.
 func (sm *snapshotManager) DropSnapshotsByCollection(ctx context.Context, collectionID int64) error {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, fmt.Sprint(collectionID), collectionID,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypeUnknown,
+		storageprofile.WorkloadPhaseCleanup, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	mlog.Info(context.TODO(), "drop all snapshots for collection")
 
 	dropped, err := sm.snapshotMeta.DropSnapshotsByCollection(ctx, collectionID)
@@ -494,6 +507,10 @@ func (sm *snapshotManager) GetSnapshot(ctx context.Context, collectionID int64, 
 
 // DescribeSnapshot retrieves detailed information about a snapshot within a collection.
 func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, name, collectionID,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypeUnknown,
+		storageprofile.WorkloadPhaseReadMetadata, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	mlog.Info(context.TODO(), "describe snapshot request received")
 
 	// Read snapshot data with full segment information
@@ -616,6 +633,10 @@ func (sm *snapshotManager) RestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, snapshotName, sourceCollectionID,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypeRestore,
+		storageprofile.WorkloadPhaseReadMetadata, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	// ========================================================================
 	// Phase 0: Acquire serialization lock + claim restore reference
 	//
@@ -1293,6 +1314,10 @@ func (sm *snapshotManager) createRestoreJob(
 // ReadSnapshotData reads snapshot data from storage.
 // This is a convenience wrapper for snapshotMeta.ReadSnapshotData.
 func (sm *snapshotManager) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string) (*SnapshotData, error) {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, snapshotName, collectionID,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypeRestore,
+		storageprofile.WorkloadPhaseReadMetadata, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	return sm.snapshotMeta.ReadSnapshotData(ctx, collectionID, snapshotName, true)
 }
 
@@ -1355,6 +1380,10 @@ func (sm *snapshotManager) ListRestoreJobs(
 
 // PinSnapshotData pins a snapshot and returns a unique pin ID.
 func (sm *snapshotManager) PinSnapshotData(ctx context.Context, collectionID int64, name string, ttlSeconds int64) (int64, error) {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, name, collectionID,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypePin,
+		storageprofile.WorkloadPhaseReadMetadata, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	pinID, active, err := sm.snapshotMeta.PinSnapshot(ctx, collectionID, name, ttlSeconds)
 	if err != nil {
 		return 0, err
@@ -1365,6 +1394,10 @@ func (sm *snapshotManager) PinSnapshotData(ctx context.Context, collectionID int
 
 // UnpinSnapshotData removes a pin by ID.
 func (sm *snapshotManager) UnpinSnapshotData(ctx context.Context, pinID int64) error {
+	ctx, finishStorageProfile := beginDataCoordStorageTask(ctx, fmt.Sprint(pinID), 0,
+		storageprofile.WorkloadKindSnapshot, storageprofile.WorkloadSubtypeUnpin,
+		storageprofile.WorkloadPhaseWriteMetadata, storageprofile.StorageRolePersistent)
+	defer finishStorageProfile()
 	collID, name, active, err := sm.snapshotMeta.UnpinSnapshot(ctx, pinID)
 	if err != nil {
 		return err

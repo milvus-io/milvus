@@ -62,6 +62,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	retryableReader := common.NewRetryableReaderWithReopen(ctx, path, r, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
+		_ = retryableReader.Close()
 		return nil, err
 	}
 	reader := &reader{
@@ -78,10 +79,12 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	}
 	reader.parser, err = NewRowParser(schema)
 	if err != nil {
+		_ = retryableReader.Close()
 		return nil, err
 	}
 	err = reader.Init()
 	if err != nil {
+		_ = retryableReader.Close()
 		return nil, err
 	}
 	return reader, nil

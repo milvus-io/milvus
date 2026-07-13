@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -46,8 +47,9 @@ type L0PreImportTask struct {
 	schema       *schemapb.CollectionSchema
 	req          *datapb.PreImportRequest
 
-	manager TaskManager
-	cm      storage.ChunkManager
+	manager      TaskManager
+	cm           storage.ChunkManager
+	profileScope *storageprofile.Scope
 }
 
 func NewL0PreImportTask(req *datapb.PreImportRequest,
@@ -59,7 +61,8 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 			ImportFile: file,
 		}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	profileScope := newImportStorageScope(req.GetTaskID(), req.GetCollectionID(), storageprofile.WorkloadSubtypeL0PreImport, storageprofile.WorkloadPhaseReadSource)
+	ctx, cancel := context.WithCancel(profileScope.Context())
 	return &L0PreImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:        req.GetJobID(),
@@ -76,6 +79,7 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 		req:          req,
 		manager:      manager,
 		cm:           cm,
+		profileScope: profileScope,
 	}
 }
 
@@ -120,8 +124,11 @@ func (t *L0PreImportTask) Clone() Task {
 		req:           t.req,
 		manager:       t.manager,
 		cm:            t.cm,
+		profileScope:  t.profileScope,
 	}
 }
+
+func (t *L0PreImportTask) FinishStorageProfile() { t.profileScope.Finish() }
 
 func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())

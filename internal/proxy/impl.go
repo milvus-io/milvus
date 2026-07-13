@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -3007,6 +3008,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}, false, false, false, nil
 	}
 
+	ctx, storageProfileScope, storageProfileLevel, storageProfileScopeID := beginProxyStorageProfile(ctx, storageprofile.WorkloadKindSearch)
+	defer storageProfileScope.Finish()
 	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3018,6 +3021,10 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			ReqID:              paramtable.GetNodeID(),
 			IsTopkReduce:       optimizedSearch,
 			IsRecallEvaluation: isRecallEvaluation,
+			StorageProfile: &internalpb.StorageProfileContext{
+				Level:   int32(storageProfileLevel),
+				ScopeId: storageProfileScopeID,
+			},
 		},
 		request:                request,
 		tr:                     timerecord.NewTimeRecorder("search"),
@@ -3236,6 +3243,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
+	ctx, storageProfileScope, storageProfileLevel, storageProfileScopeID := beginProxyStorageProfile(ctx, storageprofile.WorkloadKindSearch)
+	defer storageProfileScope.Finish()
 	newSearchReq := convertHybridSearchToSearch(request)
 	qt := &searchTask{
 		ctx:       ctx,
@@ -3247,6 +3256,10 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			),
 			ReqID:        paramtable.GetNodeID(),
 			IsTopkReduce: optimizedSearch,
+			StorageProfile: &internalpb.StorageProfileContext{
+				Level:   int32(storageProfileLevel),
+				ScopeId: storageProfileScopeID,
+			},
 		},
 		request:             newSearchReq,
 		tr:                  timerecord.NewTimeRecorder(method),
@@ -3546,6 +3559,10 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			ReqID:            paramtable.GetNodeID(),
 			ConsistencyLevel: request.ConsistencyLevel,
 			QueryLabel:       metrics.QueryLabel,
+			StorageProfile: &internalpb.StorageProfileContext{
+				Level:   int32(storageprofile.ProfileLevelFromContext(ctx)),
+				ScopeId: storageprofile.AttributionFromContext(ctx).RequestID,
+			},
 		},
 		request:             queryReq,
 		plan:                plan,
@@ -3815,6 +3832,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ctx, storageProfileScope, storageProfileLevel, storageProfileScopeID := beginProxyStorageProfile(ctx, storageprofile.WorkloadKindQuery)
+	defer storageProfileScope.Finish()
 	qt := &queryTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3826,6 +3845,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			ReqID:            paramtable.GetNodeID(),
 			ConsistencyLevel: request.ConsistencyLevel,
 			QueryLabel:       metrics.QueryLabel,
+			StorageProfile: &internalpb.StorageProfileContext{
+				Level:   int32(storageProfileLevel),
+				ScopeId: storageProfileScopeID,
+			},
 		},
 		request:             request,
 		mixCoord:            node.mixCoord,

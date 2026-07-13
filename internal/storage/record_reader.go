@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"strconv"
 
@@ -72,7 +73,12 @@ func newPackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
+	profileContexts ...context.Context,
 ) (*packedRecordReader, error) {
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
@@ -82,7 +88,7 @@ func newPackedRecordReader(
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
-	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader)
+	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader, profileCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +106,12 @@ func newFFIPackedRecordReaderFromFragments(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
+	profileContexts ...context.Context,
 ) (*ffiPackedRecordReader, error) {
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
@@ -122,6 +133,7 @@ func newFFIPackedRecordReaderFromFragments(
 		storageConfig,
 		storagePluginContext,
 		externalReader,
+		profileCtx,
 	)
 	if err != nil {
 		return nil, err
@@ -192,7 +204,12 @@ func newIterativePackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
+	profileContexts ...context.Context,
 ) *IterativeRecordReader {
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
 	chunk := 0
 	return &IterativeRecordReader{
 		iterate: func() (RecordReader, error) {
@@ -201,7 +218,7 @@ func newIterativePackedRecordReader(
 			}
 			currentPaths := paths[chunk]
 			chunk++
-			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext, externalReader)
+			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext, externalReader, profileCtx)
 		},
 	}
 }
@@ -219,6 +236,7 @@ type ManifestReader struct {
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
 	externalSpecContext  packed.ExternalSpecContext
+	storageProfileCtx    context.Context
 
 	neededColumns []string
 }
@@ -285,6 +303,7 @@ func NewManifestReader(manifest string,
 		storageConfig,
 		storagePluginContext,
 		rwOptions.externalReader,
+		rwOptions.storageProfileCtx,
 	)
 }
 
@@ -297,7 +316,12 @@ func NewManifestReaderWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs packed.ExternalSpecContext,
+	profileContexts ...context.Context,
 ) (*ManifestReader, error) {
+	profileCtx := context.Background()
+	if len(profileContexts) > 0 && profileContexts[0] != nil {
+		profileCtx = profileContexts[0]
+	}
 	columnResolver := typeutil.NewStorageColumnResolver(schema, typeutil.WithStorageColumnExternalSpec(extfs.Spec))
 	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(
 		schema,
@@ -348,6 +372,7 @@ func NewManifestReaderWithExtfs(
 		storageConfig:        storageConfig,
 		storagePluginContext: storagePluginContext,
 		externalSpecContext:  extfs,
+		storageProfileCtx:    profileCtx,
 
 		neededColumns: neededColumns,
 	}
@@ -366,6 +391,7 @@ func (mr *ManifestReader) init() error {
 		mr.storageConfig,
 		mr.storagePluginContext,
 		mr.externalSpecContext,
+		mr.storageProfileCtx,
 	)
 	if err != nil {
 		return err

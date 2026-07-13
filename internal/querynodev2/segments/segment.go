@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -820,6 +821,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan)
 		log.Warn(ctx, "unmarshal retrieve result failed", mlog.Err(err))
 		return nil, err
 	}
+	observeRetrieveStorageProfile(ctx, retrieveResult)
 	log.Debug(ctx, "retrieve segment done", mlog.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
 }
@@ -866,8 +868,22 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.Retr
 		log.Warn(ctx, "unmarshal retrieve by offsets result failed", mlog.Err(err))
 		return nil, err
 	}
+	observeRetrieveStorageProfile(ctx, retrieveResult)
 	log.Debug(ctx, "retrieve by segment offsets done", mlog.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
+}
+
+func observeRetrieveStorageProfile(ctx context.Context, result *segcorepb.RetrieveResults) {
+	if result == nil || result.GetStorageProfile() == nil {
+		return
+	}
+	profile := result.GetStorageProfile()
+	storageprofile.ObserveCppReadProfile(
+		ctx,
+		profile.GetReadDurationNanos(),
+		profile.GetReadCompletedBytes(),
+		profile.GetDroppedReadObservations(),
+	)
 }
 
 func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
@@ -1003,6 +1019,19 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		LoadPriority:   s.LoadInfo().GetPriority(),
 		Shard:          s.LoadInfo().GetInsertChannel(),
 	}
+	var requestedBytes uint64
+	for _, binlog := range field.GetBinlogs() {
+		requestedBytes += uint64(max(binlog.GetLogSize(), 0))
+	}
+	storageOperation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		AccessLayer:         storageprofile.AccessLayerMilvus,
+		Operation:           storageprofile.StorageOperationRead,
+		Phase:               storageprofile.WorkloadPhaseReadSource,
+		StorageRole:         storageprofile.StorageRolePersistent,
+		CppBoundary:         true,
+		BytesRequested:      requestedBytes,
+		RequestedBytesKnown: requestedBytes > 0,
+	})
 
 	GetLoadPool().Submit(func() (any, error) {
 		start := time.Now()
@@ -1019,9 +1048,14 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	}).Await()
 
 	if err != nil {
+		storageOperation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: requestedBytes > 0})
 		log.Warn(ctx, "LoadFieldData failed", mlog.Err(err))
 		return err
 	}
+	if requestedBytes > 0 {
+		storageOperation.AddCompletedBytes(requestedBytes)
+	}
+	storageOperation.Finish(storageprofile.OperationResult{SizeKnown: requestedBytes > 0})
 	log.Info(ctx, "load field done")
 	return nil
 }
@@ -1242,7 +1276,18 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 		s.LoadInfo(), indexInfo, func(loadIndexInfo *LoadIndexInfo) error {
 			newLoadIndexInfoSpan := tr.RecordSpan()
 
+			indexBytes := uint64(max(indexInfo.GetIndexSize(), 0))
+			storageOperation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+				AccessLayer:         storageprofile.AccessLayerMilvus,
+				Operation:           storageprofile.StorageOperationRead,
+				Phase:               storageprofile.WorkloadPhaseReadSource,
+				StorageRole:         storageprofile.StorageRolePersistent,
+				CppBoundary:         true,
+				BytesRequested:      indexBytes,
+				RequestedBytesKnown: indexBytes > 0,
+			})
 			if err := loadIndexInfo.loadIndex(ctx); err != nil {
+				storageOperation.Finish(storageprofile.OperationResult{Err: err, SizeKnown: indexBytes > 0})
 				if loadIndexInfo.cleanLocalData(ctx) != nil {
 					mlog.Warn(ctx, "failed to clean cached data on disk after append index failed",
 						mlog.FieldBuildID(indexInfo.BuildID),
@@ -1250,6 +1295,10 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				}
 				return err
 			}
+			if indexBytes > 0 {
+				storageOperation.AddCompletedBytes(indexBytes)
+			}
+			storageOperation.Finish(storageprofile.OperationResult{SizeKnown: indexBytes > 0})
 			if s.Type() != SegmentTypeSealed {
 				return merr.WrapErrServiceInternalMsg("updateSegmentIndex failed, illegal segment type %s, segmentID = %d", s.segmentType, s.ID())
 			}
@@ -1459,9 +1508,18 @@ func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadI
 }
 
 func (s *LocalSegment) Load(ctx context.Context) error {
+	storageOperation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		AccessLayer: storageprofile.AccessLayerMilvus,
+		Operation:   storageprofile.StorageOperationRead,
+		Phase:       storageprofile.WorkloadPhaseReadSource,
+		StorageRole: storageprofile.StorageRolePersistent,
+		CppBoundary: true,
+	})
 	if err := s.csegment.Load(ctx); err != nil {
+		storageOperation.Finish(storageprofile.OperationResult{Err: err})
 		return err
 	}
+	storageOperation.Finish(storageprofile.OperationResult{})
 	s.syncFieldJSONStatsFromLoadInfo(ctx, s.LoadInfo())
 	return nil
 }
@@ -1473,14 +1531,23 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	defer s.ptrLock.Unpin()
 
 	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	storageOperation := storageprofile.BeginOperation(ctx, storageprofile.OperationMeta{
+		AccessLayer: storageprofile.AccessLayerMilvus,
+		Operation:   storageprofile.StorageOperationRead,
+		Phase:       storageprofile.WorkloadPhaseReadMetadata,
+		StorageRole: storageprofile.StorageRolePersistent,
+		CppBoundary: true,
+	})
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,
 		SchemaVersion: schemaVersion,
 	})
 	if err != nil {
+		storageOperation.Finish(storageprofile.OperationResult{Err: err})
 		return err
 	}
+	storageOperation.Finish(storageprofile.OperationResult{})
 	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
 	s.loadInfo.Store(newLoadInfo)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)

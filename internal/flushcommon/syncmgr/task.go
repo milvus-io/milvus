@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/samber/lo"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -113,6 +115,38 @@ func (t *SyncTask) HandleError(err error) {
 }
 
 func (t *SyncTask) Run(ctx context.Context) (err error) {
+	flushSubtype := storageprofile.WorkloadSubtypeAuto
+	if t.pack != nil && t.pack.isFlush {
+		flushSubtype = storageprofile.WorkloadSubtypeManual
+	}
+	component := "datanode"
+	if t.dataSource == metrics.StreamingDataSourceLabel {
+		component = "streamingnode"
+		flushSubtype = storageprofile.WorkloadSubtypeStreaming
+	}
+	attribution := storageprofile.Attribution{
+		ScopeType:       storageprofile.ScopeTypeTask,
+		TaskID:          strconv.FormatInt(t.segmentID, 10),
+		Component:       component,
+		NodeID:          paramtable.GetNodeID(),
+		CollectionID:    t.collectionID,
+		WorkloadClass:   storageprofile.WorkloadClassBackground,
+		WorkloadKind:    storageprofile.WorkloadKindFlush,
+		WorkloadSubtype: flushSubtype,
+		Phase:           storageprofile.WorkloadPhaseWriteOutput,
+		StorageRole:     storageprofile.StorageRolePersistent,
+	}
+	if t.dataSource == metrics.BulkinsertDataSourceLabel {
+		attribution.WorkloadKind = storageprofile.WorkloadKindImport
+		attribution.WorkloadSubtype = storageprofile.WorkloadSubtypeIngest
+	}
+	ctx = storageprofile.WithDefaultAttribution(ctx, attribution)
+	var profileScope *storageprofile.Scope
+	if !storageprofile.HasActiveRecorder(ctx) {
+		profileScope = storageprofile.NewTaskScope(attribution)
+		ctx = profileScope.Bind(ctx)
+		defer profileScope.Finish()
+	}
 	t.tr = timerecord.NewTimeRecorder("syncTask")
 
 	logger := t.getLogger()

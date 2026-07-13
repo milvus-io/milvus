@@ -91,6 +91,21 @@ localStorage:
   # It is recommended to change this parameter before starting Milvus for the first time.
   path: /var/lib/milvus/data/
 
+storage:
+  profile:
+    enabled: false
+    level: summary
+    request:
+      allowExplicit: false
+    task:
+      enabled: false
+      types: []
+    cache:
+      enabled: true
+    maxActiveScopes: 1024
+    maxProfiledRequestsPerSecond: 10
+    maxProfiledTasks: 128
+
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
 minio:

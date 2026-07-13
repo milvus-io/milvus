@@ -1607,7 +1607,7 @@ func readExternalFiles(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		content, err := packed.ReadFileWithExternalSpec(storageConfig, path, extfs)
+		content, err := packed.ReadFileWithExternalSpecContext(ctx, storageConfig, path, extfs)
 		if err != nil {
 			return nil, err
 		}

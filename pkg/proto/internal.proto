@@ -132,6 +132,14 @@ message SubSearchRequest {
   SearchType search_type = 15;
 }
 
+// StorageProfileContext carries opt-in profiling controls on internal RPCs.
+// Keeping the controls in one optional message makes omission by older nodes
+// unambiguous and leaves room for versioned control metadata.
+message StorageProfileContext {
+  int32 level = 1;
+  string scope_id = 2;
+}
+
 message SearchRequest {
   common.MsgBase base = 1;
   int64 reqID = 2;
@@ -170,6 +178,7 @@ message SearchRequest {
   int32 pk_filter = 32;
   SearchType search_type = 33;
   repeated int64 group_by_field_ids = 34;
+  StorageProfileContext storage_profile = 35;
 }
 
 message SubSearchResults {
@@ -216,6 +225,7 @@ message SearchResults {
   // Per-segment filter valid counts for two-stage search (filter-only mode).
   // Index corresponds to sealed_segmentIDs_searched.
   repeated int64 filter_valid_counts = 23;
+  bytes storage_profile = 24;
 }
 
 message CostAggregation {
@@ -257,6 +267,7 @@ message RetrieveRequest {
   // PK filter from proxy: 0 = not checked (backward compat), 1 = has optimizable PK predicate, 2 = no PK predicate.
   // When 2, delegator can skip plan unmarshal for segment filter optimization.
   int32 pk_filter = 26;
+  StorageProfileContext storage_profile = 27;
 }
 
 // Element indices for element-level query results
@@ -284,6 +295,7 @@ message RetrieveResults {
    // Element-level query support
   bool element_level = 18;
   repeated ElementIndices element_indices = 19;
+  bytes storage_profile = 20;
 }
 
 message LoadIndex {

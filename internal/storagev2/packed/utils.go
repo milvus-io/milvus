@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storageprofile"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -344,18 +345,21 @@ func CreateSegmentManifestWithBasePathAndExtfs(
 	fragments []Fragment,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
-) (string, error) {
+) (manifestPath string, err error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	default:
 	}
+	ctx = packedProfileContext(ctx, storageConfig)
+	operation := beginPackedOperation(ctx, storageprofile.StorageOperationWrite, storageprofile.WorkloadPhaseWriteMetadata, 0, false)
+	defer func() { operation.Finish(storageprofile.OperationResult{Err: err}) }()
 
 	if isMilvusTableFormat(format) {
 		return CreateMilvusTableManifestFromSegmentManifests(basePath, columns, fragments, storageConfig, extfs)
 	}
 
-	manifestPath, err := CreateManifestForSegment(
+	manifestPath, err = CreateManifestForSegment(
 		basePath,
 		columns,
 		format,

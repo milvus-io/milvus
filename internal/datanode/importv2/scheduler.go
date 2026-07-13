@@ -88,13 +88,20 @@ func (s *scheduler) scheduleTasks() {
 	mlog.Info(context.TODO(), "processing tasks...", mlog.Int64s("taskIDs", taskIDs))
 
 	futures := make(map[int64][]*conc.Future[any])
+	profiledTasks := make(map[int64]profiledImportTask)
 	for _, task := range tasks {
 		fs := task.Execute()
 		futures[task.GetTaskID()] = fs
+		if profiledTask, ok := task.(profiledImportTask); ok {
+			profiledTasks[task.GetTaskID()] = profiledTask
+		}
 	}
 
 	for taskID, fs := range futures {
 		err := conc.AwaitAll(fs...)
+		if profiledTask := profiledTasks[taskID]; profiledTask != nil {
+			profiledTask.FinishStorageProfile()
+		}
 		if err != nil {
 			continue
 		}
