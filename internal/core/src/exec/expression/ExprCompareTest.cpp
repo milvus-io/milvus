@@ -952,6 +952,9 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     auto str3_fid = schema->AddDebugField("string3", DataType::VARCHAR);
+    auto string_fid = schema->AddDebugField("string", DataType::STRING);
+    auto string_1_fid =
+        schema->AddDebugField("string1_internal", DataType::STRING);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -1034,6 +1037,15 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
                                                         OpType::LessThan);
                 return compare_expr;
             }
+            case DataType::STRING: {
+                auto compare_expr =
+                    std::make_shared<expr::CompareExpr>(string_fid,
+                                                        string_1_fid,
+                                                        DataType::STRING,
+                                                        DataType::STRING,
+                                                        OpType::LessThan);
+                return compare_expr;
+            }
             default:
                 return std::make_shared<expr::CompareExpr>(int8_fid,
                                                            int8_1_fid,
@@ -1063,6 +1075,12 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     expr = build_expr(DataType::DOUBLE);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    expr = build_expr(DataType::VARCHAR);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    expr = build_expr(DataType::STRING);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
 }
