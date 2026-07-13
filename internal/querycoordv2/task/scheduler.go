@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -299,6 +300,35 @@ type ChannelTaskDeltaSnapshot struct {
 
 type ChannelTaskDeltaProvider interface {
 	GetChannelTaskDeltaSnapshot(nodeIDs []int64, collectionID int64) *ChannelTaskDeltaSnapshot
+}
+
+type PendingBalanceActionSnapshot struct {
+	NodeID    int64
+	Type      ActionType
+	SegmentID int64
+	Channel   string
+	Shard     string
+	Scope     querypb.DataScope
+	Workload  int
+}
+
+type PendingBalanceTaskSnapshot struct {
+	TaskID        int64
+	CollectionID  int64
+	ReplicaID     int64
+	ResourceGroup string
+	Epoch         BalanceEpochMeta
+	Status        Status
+	Actions       []PendingBalanceActionSnapshot
+}
+
+type PendingBalanceSnapshot struct {
+	Revision uint64
+	Tasks    []PendingBalanceTaskSnapshot
+}
+
+type BalanceTaskInspector interface {
+	GetPendingBalanceTasks() PendingBalanceSnapshot
 }
 
 func NewSegmentTaskDeltaSnapshot(nodeDeltas, nodeCollectionDeltas map[int64]int) *SegmentTaskDeltaSnapshot {
@@ -643,13 +673,15 @@ type taskScheduler struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	scheduleMu   sync.Mutex           // guards schedule() and RemoveByNode()
-	collKeyLock  *lock.KeyLock[int64] // guards Add() and AdmitBalanceTask()
-	tasks        *ConcurrentMap[UniqueID, struct{}]
-	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
-	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
-	processQueue *nodeTaskQueue
-	waitQueue    *taskQueue
+	scheduleMu      sync.Mutex           // guards schedule() and RemoveByNode()
+	collKeyLock     *lock.KeyLock[int64] // guards Add() and AdmitBalanceTask()
+	pendingMu       sync.RWMutex         // guards pending indexes, deltas, and pendingRevision
+	pendingRevision uint64
+	tasks           *ConcurrentMap[UniqueID, struct{}]
+	segmentTasks    *ConcurrentMap[replicaSegmentIndex, Task]
+	channelTasks    *ConcurrentMap[replicaChannelIndex, Task]
+	processQueue    *nodeTaskQueue
+	waitQueue       *taskQueue
 
 	taskStats            *expirable.LRU[UniqueID, Task]
 	lastUpdateMetricTime atomic.Time
@@ -782,6 +814,9 @@ func (scheduler *taskScheduler) addLocked(task Task) error {
 }
 
 func (scheduler *taskScheduler) commitAddLocked(task Task) {
+	scheduler.pendingMu.Lock()
+	defer scheduler.pendingMu.Unlock()
+
 	scheduler.replaceLowerPriorityTaskLocked(task)
 
 	task.SetID(scheduler.idAllocator())
@@ -806,6 +841,68 @@ func (scheduler *taskScheduler) commitAddLocked(task Task) {
 	scheduler.updateTaskMetrics()
 	mlog.Info(task.Context(), "task added", mlog.String("task", task.String()))
 	task.RecordStartTs()
+	scheduler.pendingRevision++
+}
+
+func (scheduler *taskScheduler) GetPendingBalanceTasks() PendingBalanceSnapshot {
+	for {
+		scheduler.pendingMu.RLock()
+		before := scheduler.pendingRevision
+		byID := make(map[int64]PendingBalanceTaskSnapshot)
+		copyTask := func(task Task) bool {
+			byID[task.ID()] = copyPendingBalanceTask(task)
+			return true
+		}
+		scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool { return copyTask(task) })
+		scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool { return copyTask(task) })
+		after := scheduler.pendingRevision
+		scheduler.pendingMu.RUnlock()
+		if before != after {
+			continue
+		}
+
+		tasks := make([]PendingBalanceTaskSnapshot, 0, len(byID))
+		for _, pending := range byID {
+			tasks = append(tasks, pending)
+		}
+		sort.Slice(tasks, func(i, j int) bool { return tasks[i].TaskID < tasks[j].TaskID })
+		return PendingBalanceSnapshot{Revision: after, Tasks: tasks}
+	}
+}
+
+func copyPendingBalanceTask(task Task) PendingBalanceTaskSnapshot {
+	pending := PendingBalanceTaskSnapshot{
+		TaskID:        task.ID(),
+		CollectionID:  task.CollectionID(),
+		ReplicaID:     task.ReplicaID(),
+		ResourceGroup: task.ResourceGroup(),
+		Epoch:         task.BalanceEpoch(),
+		Status:        task.Status(),
+		Actions:       make([]PendingBalanceActionSnapshot, 0, len(task.Actions())),
+	}
+	for _, action := range task.Actions() {
+		primitive := PendingBalanceActionSnapshot{
+			NodeID:   action.Node(),
+			Type:     action.Type(),
+			Workload: action.WorkLoadEffect(),
+		}
+		switch action := action.(type) {
+		case *SegmentAction:
+			primitive.SegmentID = action.GetSegmentID()
+			primitive.Shard = action.GetShard()
+			primitive.Scope = action.GetScope()
+		case *ChannelAction:
+			primitive.Channel = action.ChannelName()
+			primitive.Shard = action.GetShard()
+		case *LeaderAction:
+			primitive.SegmentID = action.SegmentID()
+			primitive.Shard = action.GetShard()
+		case *DropIndexAction:
+			primitive.Shard = action.GetShard()
+		}
+		pending.Actions = append(pending.Actions, primitive)
+	}
+	return pending
 }
 
 func (scheduler *taskScheduler) updateTaskMetrics() {
@@ -996,7 +1093,7 @@ func (scheduler *taskScheduler) replaceLowerPriorityTaskLocked(task Task) {
 		mlog.String("newPriority", task.Priority().String()),
 	)
 	old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-	scheduler.remove(old)
+	scheduler.removePendingLocked(old)
 }
 
 func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
@@ -1401,6 +1498,12 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 }
 
 func (scheduler *taskScheduler) remove(task Task) {
+	scheduler.pendingMu.Lock()
+	defer scheduler.pendingMu.Unlock()
+	scheduler.removePendingLocked(task)
+}
+
+func (scheduler *taskScheduler) removePendingLocked(task Task) {
 	log := mlog.With(
 		mlog.Int64("taskID", task.ID()),
 		mlog.Int64("collectionID", task.CollectionID()),
@@ -1472,6 +1575,9 @@ func (scheduler *taskScheduler) remove(task Task) {
 	if scheduler.meta.Exist(task.Context(), task.CollectionID()) {
 		metrics.QueryCoordTaskLatency.WithLabelValues(fmt.Sprint(task.CollectionID()),
 			scheduler.getTaskMetricsLabel(task), task.Shard()).Observe(float64(task.GetTaskLatency()))
+	}
+	if ok {
+		scheduler.pendingRevision++
 	}
 }
 

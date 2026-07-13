@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -264,6 +265,91 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 
 	// Clean up: Remove the test metric to avoid affecting other tests
 	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
+}
+
+func TestDistHandlerPublishesResponseAtomically(t *testing.T) {
+	ctx := context.Background()
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	distribution := meta.NewDistributionManager(nodeManager)
+	distribution.PublishNodeDistribution(1,
+		[]*meta.Segment{meta.SegmentFromInfo(&datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "channel-old",
+		})},
+		[]*meta.DmChannel{{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-old"},
+			View: &meta.LeaderView{
+				ID:           1,
+				CollectionID: 100,
+				Channel:      "channel-old",
+				Status:       &querypb.LeaderViewStatus{Serviceable: true},
+			},
+		}},
+	)
+
+	enteredChannelBuild := make(chan struct{})
+	releaseChannelBuild := make(chan struct{})
+	target := meta.NewMockTargetManager(t)
+	target.EXPECT().GetSealedSegment(mock.Anything, int64(100), int64(2), meta.CurrentTargetFirst).Return(nil).Once()
+	target.EXPECT().GetDmChannel(mock.Anything, int64(100), "channel-new", meta.CurrentTarget).
+		Run(func(context.Context, int64, string, meta.TargetScope) {
+			close(enteredChannelBuild)
+			<-releaseChannelBuild
+		}).
+		Return(nil).
+		Once()
+
+	handler := &distHandler{
+		nodeID:      1,
+		nodeManager: nodeManager,
+		dist:        distribution,
+		target:      target,
+	}
+	resp := &querypb.GetDataDistributionResponse{
+		NodeID:       1,
+		LastModifyTs: 1,
+		Segments: []*querypb.SegmentVersionInfo{{
+			ID:         2,
+			Collection: 100,
+			Partition:  20,
+			Channel:    "channel-new",
+			Version:    2,
+		}},
+		Channels: []*querypb.ChannelVersionInfo{{
+			Channel:    "channel-new",
+			Collection: 100,
+			Version:    2,
+		}},
+		LeaderViews: []*querypb.LeaderView{{
+			Collection: 100,
+			Channel:    "channel-new",
+			Status:     &querypb.LeaderViewStatus{Serviceable: true},
+		}},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.handleDistResp(ctx, resp)
+	}()
+	<-enteredChannelBuild
+
+	duringBuild := distribution.Capture()
+	require.Len(t, duringBuild.Segments, 1)
+	require.Len(t, duringBuild.Channels, 1)
+	require.Equal(t, int64(1), duringBuild.Segments[0].SegmentID)
+	require.Equal(t, "channel-old", duringBuild.Channels[0].Channel)
+
+	close(releaseChannelBuild)
+	<-done
+	afterPublish := distribution.Capture()
+	require.Len(t, afterPublish.Segments, 1)
+	require.Len(t, afterPublish.Channels, 1)
+	require.Equal(t, int64(2), afterPublish.Segments[0].SegmentID)
+	require.Equal(t, "channel-new", afterPublish.Channels[0].Channel)
 }
 
 // Helper function to get the current metric value for a specific nodeID

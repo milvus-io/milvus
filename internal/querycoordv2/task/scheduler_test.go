@@ -32,6 +32,7 @@ import (
 const balanceAdmissionShard = "balance-admission-shard"
 
 var _ BalanceTaskAdmitter = (*taskScheduler)(nil)
+var _ BalanceTaskInspector = (*taskScheduler)(nil)
 
 func (suite *TaskSuite) newSegmentMoveTask(segmentID, sourceNode, targetNode int64) *SegmentTask {
 	task, err := NewSegmentTask(
@@ -356,6 +357,79 @@ func (suite *TaskSuite) TestBalanceEpochMetaDiagnostics() {
 	suite.True(strings.Contains(text, "[balanceResourceGroup=rg1]"))
 	suite.True(strings.Contains(text, "[balanceLeaderTerm=7]"))
 	suite.True(strings.Contains(text, "[balanceSequence=11]"))
+}
+
+func (suite *TaskSuite) TestPendingBalanceTaskInspectorCopiesPrimitiveActionsAndRevision() {
+	segmentID := int64(2001)
+	segmentSource := int64(1)
+	suite.setSegmentMovePrerequisites(segmentID, segmentSource)
+	segmentTask := suite.newSegmentMoveTask(segmentID, segmentSource, 2)
+	segmentTask.SetBalanceEpoch(BalanceEpochMeta{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		LeaderTerm:    7,
+		Sequence:      9,
+	})
+	suite.Require().NoError(suite.scheduler.Add(segmentTask))
+
+	channelName := "pending-inspector-channel"
+	suite.dist.ChannelDistManager.Update(
+		segmentSource,
+		suite.channel(suite.collection, channelName, segmentSource),
+	)
+	channelTask := suite.newChannelMoveTask(
+		suite.collection,
+		suite.replica.GetID(),
+		suite.replica.GetResourceGroup(),
+		channelName,
+		segmentSource,
+		3,
+	)
+	suite.Require().NoError(suite.scheduler.Add(channelTask))
+
+	snapshot := suite.scheduler.GetPendingBalanceTasks()
+	suite.Positive(snapshot.Revision)
+	suite.Len(snapshot.Tasks, 2)
+	byID := make(map[int64]PendingBalanceTaskSnapshot, len(snapshot.Tasks))
+	for _, pending := range snapshot.Tasks {
+		byID[pending.TaskID] = pending
+	}
+
+	segmentPending := byID[segmentTask.ID()]
+	suite.Equal(suite.collection, segmentPending.CollectionID)
+	suite.Equal(suite.replica.GetID(), segmentPending.ReplicaID)
+	suite.Equal(suite.replica.GetResourceGroup(), segmentPending.ResourceGroup)
+	suite.Equal(segmentTask.BalanceEpoch(), segmentPending.Epoch)
+	suite.Equal(TaskStatusStarted, segmentPending.Status)
+	suite.Len(segmentPending.Actions, 2)
+	suite.Equal(ActionTypeGrow, segmentPending.Actions[0].Type)
+	suite.Equal(int64(2), segmentPending.Actions[0].NodeID)
+	suite.Equal(segmentID, segmentPending.Actions[0].SegmentID)
+	suite.Equal(balanceAdmissionShard, segmentPending.Actions[0].Shard)
+	suite.Equal(querypb.DataScope_Historical, segmentPending.Actions[0].Scope)
+	suite.Equal(100, segmentPending.Actions[0].Workload)
+
+	channelPending := byID[channelTask.ID()]
+	suite.Len(channelPending.Actions, 2)
+	suite.Equal(ActionTypeGrow, channelPending.Actions[0].Type)
+	suite.Equal(int64(3), channelPending.Actions[0].NodeID)
+	suite.Equal(channelName, channelPending.Actions[0].Channel)
+	suite.Equal(channelName, channelPending.Actions[0].Shard)
+	suite.Equal(1, channelPending.Actions[0].Workload)
+
+	snapshot.Tasks[0].Actions[0].NodeID = 999
+	secondCopy := suite.scheduler.GetPendingBalanceTasks()
+	for _, pending := range secondCopy.Tasks {
+		for _, action := range pending.Actions {
+			suite.NotEqual(int64(999), action.NodeID)
+		}
+	}
+
+	revisionBeforeRemove := secondCopy.Revision
+	suite.scheduler.remove(segmentTask)
+	afterRemove := suite.scheduler.GetPendingBalanceTasks()
+	suite.Greater(afterRemove.Revision, revisionBeforeRemove)
+	suite.Len(afterRemove.Tasks, 1)
+	suite.Equal(channelTask.ID(), afterRemove.Tasks[0].TaskID)
 }
 
 func (suite *TaskSuite) TestBalanceAdmissionReasonSemantics() {

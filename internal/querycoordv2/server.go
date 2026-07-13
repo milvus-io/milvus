@@ -100,8 +100,9 @@ type Server struct {
 	queryNodeCreator session.QueryNodeCreator
 
 	// Schedulers
-	jobScheduler  *job.Scheduler
-	taskScheduler task.Scheduler
+	jobScheduler             *job.Scheduler
+	taskScheduler            task.Scheduler
+	placementSnapshotBuilder *balance.PlacementSnapshotBuilder
 
 	// HeartBeat
 	distController dist.Controller
@@ -313,7 +314,7 @@ func (s *Server) initQueryCoord() error {
 	// Init schedulers
 	mlog.Info(s.ctx, "init schedulers")
 	s.jobScheduler = job.NewScheduler()
-	s.taskScheduler = task.NewScheduler(
+	concreteTaskScheduler := task.NewScheduler(
 		s.ctx,
 		s.meta,
 		s.dist,
@@ -321,6 +322,14 @@ func (s *Server) initQueryCoord() error {
 		s.broker,
 		s.cluster,
 		s.nodeMgr,
+	)
+	s.taskScheduler = concreteTaskScheduler
+	s.placementSnapshotBuilder = balance.NewPlacementSnapshotBuilder(
+		s.meta,
+		s.dist,
+		s.targetMgr,
+		s.nodeMgr,
+		concreteTaskScheduler,
 	)
 
 	// init proxy client manager
@@ -779,8 +788,7 @@ func (s *Server) handleNodeDown(node int64) {
 	s.distController.Remove(node)
 
 	// Clear dist
-	s.dist.ChannelDistManager.Update(node)
-	s.dist.SegmentDistManager.Update(node)
+	s.dist.RemoveNodeDistribution(node)
 
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
