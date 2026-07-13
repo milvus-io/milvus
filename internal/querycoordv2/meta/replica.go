@@ -289,6 +289,17 @@ func (replica *Replica) GetChannelRWNodes(channelName string) []int64 {
 	return replica.replicaPB.ChannelNodeInfos[channelName].GetRwNodes()
 }
 
+// GetChannelRWNodeMappings returns a primitive deep copy of the replica's
+// complete channel-to-RW-node mapping, including stale-only mappings that are
+// not currently present in target or distribution metadata.
+func (replica *Replica) GetChannelRWNodeMappings() map[string][]int64 {
+	mappings := make(map[string][]int64, len(replica.replicaPB.GetChannelNodeInfos()))
+	for channel, info := range replica.replicaPB.GetChannelNodeInfos() {
+		mappings[channel] = append([]int64(nil), info.GetRwNodes()...)
+	}
+	return mappings
+}
+
 // CopyForWrite returns a mutable replica for write operations.
 func (replica *Replica) CopyForWrite() *mutableReplica {
 	exclusiveRWNodeToChannel := make(map[int64]string)

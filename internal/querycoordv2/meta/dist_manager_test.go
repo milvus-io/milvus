@@ -1,9 +1,12 @@
 package meta
 
 import (
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -12,6 +15,101 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
+	manager := NewDistributionManager(session.NewNodeManager())
+	oldSegments := []*Segment{SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "channel-old",
+		NumOfRows:     100,
+	})}
+	oldChannels := []*DmChannel{{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-old"},
+		Version:      1,
+		View: &LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "channel-old",
+			Version:      1,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	}}
+	manager.PublishNodeDistribution(1, oldSegments, oldChannels)
+
+	newSegments := []*Segment{SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  100,
+		PartitionID:   20,
+		InsertChannel: "channel-new",
+		NumOfRows:     200,
+	})}
+	newChannels := []*DmChannel{{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-new"},
+		Version:      2,
+		View: &LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "channel-new",
+			Version:      2,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	}}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	manager.publishHook = func(stage publishStage) {
+		if stage == publishStageSegmentsWritten {
+			close(entered)
+			<-release
+		}
+	}
+	published := make(chan struct{})
+	go func() {
+		defer close(published)
+		manager.PublishNodeDistribution(1, newSegments, newChannels)
+	}()
+	<-entered
+
+	captured := make(chan DistributionSnapshot, 1)
+	go func() {
+		captured <- manager.Capture()
+	}()
+	select {
+	case <-captured:
+		require.Fail(t, "Capture returned while a node distribution was half-published")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	snapshot := <-captured
+	<-published
+
+	segmentIDs, channelNames := distributionRecordsForNode(snapshot, 1)
+	wholeOld := assert.ObjectsAreEqual([]int64{1}, segmentIDs) &&
+		assert.ObjectsAreEqual([]string{"channel-old"}, channelNames)
+	wholeNew := assert.ObjectsAreEqual([]int64{2}, segmentIDs) &&
+		assert.ObjectsAreEqual([]string{"channel-new"}, channelNames)
+	require.True(t, wholeOld || wholeNew, "captured mixed node distribution: segments=%v channels=%v", segmentIDs, channelNames)
+}
+
+func distributionRecordsForNode(snapshot DistributionSnapshot, nodeID int64) ([]int64, []string) {
+	segmentIDs := make([]int64, 0)
+	for _, segment := range snapshot.Segments {
+		if segment.NodeID == nodeID {
+			segmentIDs = append(segmentIDs, segment.SegmentID)
+		}
+	}
+	channelNames := make([]string, 0)
+	for _, channel := range snapshot.Channels {
+		if channel.NodeID == nodeID {
+			channelNames = append(channelNames, channel.Channel)
+		}
+	}
+	sort.Slice(segmentIDs, func(i, j int) bool { return segmentIDs[i] < segmentIDs[j] })
+	sort.Strings(channelNames)
+	return segmentIDs, channelNames
+}
 
 func TestGetDistributionJSON(t *testing.T) {
 	// Initialize DistributionManager
