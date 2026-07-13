@@ -19,12 +19,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <limits>
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -284,8 +286,13 @@ class HybridIndexTestV1 : public testing::Test {
              index_version_);
     }
 
+    void
+    TearDown() override {
+        CleanupLocalRoot(/*report_error=*/true);
+    }
+
     virtual ~HybridIndexTestV1() override {
-        boost::filesystem::remove_all(chunk_manager_->GetRootPath());
+        CleanupLocalRoot(/*report_error=*/false);
     }
 
  public:
@@ -568,6 +575,37 @@ class HybridIndexTestV1 : public testing::Test {
     bool has_lack_binlog_row_{false};
     size_t lack_binlog_row_{100};
     std::string hybrid_high_cardinality_index_type_;
+
+ private:
+    void
+    CleanupLocalRoot(bool report_error) {
+        index_.reset();
+        if (chunk_manager_ == nullptr) {
+            return;
+        }
+
+        const auto root_path = chunk_manager_->GetRootPath();
+        boost::system::error_code ec;
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            ec.clear();
+            boost::filesystem::remove_all(root_path, ec);
+            if (!ec) {
+                return;
+            }
+
+            boost::system::error_code exists_ec;
+            if (!boost::filesystem::exists(root_path, exists_ec) &&
+                !exists_ec) {
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        if (report_error) {
+            ADD_FAILURE() << "failed to remove hybrid index test root "
+                          << root_path << ": " << ec.message();
+        }
+    }
 };
 
 TYPED_TEST_SUITE_P(HybridIndexTestV1);
