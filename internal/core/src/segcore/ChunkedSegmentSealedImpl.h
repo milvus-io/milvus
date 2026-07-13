@@ -258,51 +258,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
                       info_proto) override;
 
-    void
-    LoadJsonKeyIndex(
-        milvus::OpContext* op_ctx,
-        std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>
-            info_proto);
-
-    void
-    LoadBatchJsonKeyIndexes(
-        milvus::OpContext* op_ctx,
-        const std::unordered_map<
-            FieldId,
-            std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>&
-            infos,
-        const SchemaPtr& schema_snapshot);
-
-    void
-    LoadBatchJsonKeyIndexes(
-        milvus::OpContext* op_ctx,
-        const std::unordered_map<
-            FieldId,
-            std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>&
-            infos);
-
-    void
-    RemoveJsonStats(FieldId field_id) override {
-        std::unique_lock lck(mutex_);
-        json_stats_.erase(field_id);
-    }
-
-    void
-    LoadJsonStats(FieldId field_id,
-                  std::shared_ptr<index::JsonKeyStats> stats) override {
-        std::unique_lock lck(mutex_);
-        json_stats_[field_id] = stats;
-    }
-
     std::shared_ptr<index::JsonKeyStats>
-    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override {
-        std::shared_lock lck(mutex_);
-        auto iter = json_stats_.find(field_id);
-        if (iter == json_stats_.end()) {
-            return nullptr;
-        }
-        return iter->second;
-    }
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
@@ -383,6 +340,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             std::unordered_map<std::string, index::CacheIndexBasePtr>>
             ngram_indexings;
         std::unordered_map<FieldId, std::string> text_lob_paths;
+        std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
+            json_stats;
         std::shared_ptr<milvus_storage::api::Reader> reader;
         std::shared_ptr<TimestampData> timestamps;
         std::shared_ptr<const TimestampIndex> timestamp_index;
@@ -1559,6 +1518,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     PublishState(std::shared_ptr<PublishedSegmentState> state);
 
+    std::shared_ptr<index::JsonKeyStats>
+    BuildJsonKeyStatsIndex(
+        milvus::OpContext* op_ctx,
+        const std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>&
+            info_proto);
+
+    void
+    LoadBatchJsonKeyIndexes(
+        milvus::OpContext* op_ctx,
+        const std::unordered_map<
+            FieldId,
+            std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>&
+            infos,
+        const SchemaPtr& schema_snapshot,
+        StagedStateCommitter& committer);
+
     template <typename Mutator>
     void
     MutatePublishedStateLocked(Mutator&& mutator) {
@@ -2477,6 +2452,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto runtime = CloneRuntimeResourceState(current->runtime);
         runtime->text_lob_paths[field_id] = std::move(lob_base_path);
         next->runtime = ToConstRuntimeState(std::move(runtime));
+        PublishState(std::move(next));
+    }
+
+    void
+    SetJsonStatsForTesting(FieldId field_id,
+                           std::shared_ptr<index::JsonKeyStats> stats) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto next = ClonePublishedState(current);
+        auto runtime = CloneRuntimeResourceState(current->runtime);
+        runtime->json_stats[field_id] = std::move(stats);
+        next->runtime = ToConstRuntimeState(std::move(runtime));
+        NormalizePublishedState(*next);
         PublishState(std::move(next));
     }
 
