@@ -1178,7 +1178,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             load_priority_,
             /*eager_load=*/true,
             warmup_policy,
-            fmt::format("jks_{}", field_id_));
+            fmt::format("jks_{}", field_id_),
+            /*fallback_bytes_per_row=*/0,
+            shard_);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -1243,7 +1245,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             load_priority_,
             eager_load,
             warmup_policy,
-            fmt::format("jks_{}_{}", field_id_, inner_field_id.get()));
+            fmt::format("jks_{}_{}", field_id_, inner_field_id.get()),
+            /*fallback_bytes_per_row=*/0,
+            shard_);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
