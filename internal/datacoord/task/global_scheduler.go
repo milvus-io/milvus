@@ -308,6 +308,19 @@ func (s *globalTaskScheduler) schedule() {
 					// the very failure storms this backoff exists to relieve.
 					s.backoffs.Remove(task.GetTaskID())
 				}
+			} else {
+				// The task is no longer Init by the time it is dispatched.
+				// pendingTasks only holds Init or Retry tasks (Enqueue and check()
+				// route InProgress to runningTasks), and index/stats/analyze reset
+				// a queried Retry back to Init before re-queueing. Compaction
+				// instead keeps a worker-reported timeout in Retry: check() records
+				// a failure (creating a backoff entry) and re-queues the task, but
+				// this path only dispatches Init, so the task leaves the scheduler
+				// here without ever clearing that entry. The owning inspector cleans
+				// the task but never calls AbortAndRemoveTask, so drop the backoff
+				// now; otherwise it leaks until datacoord restarts, exactly under
+				// the timeout storms the backoff exists to relieve.
+				s.backoffs.Remove(task.GetTaskID())
 			}
 			return struct{}{}, nil
 		})

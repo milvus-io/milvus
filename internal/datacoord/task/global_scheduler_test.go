@@ -492,3 +492,43 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	assert.Equal(t, 0, scheduler.runningTasks.Len())
 	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
 }
+
+// TestGlobalScheduler_RetryPoppedTaskClearsBackoff guards against a backoff-entry
+// leak on the dispatch path when a task is already in a non-Init state as it is
+// picked up. Compaction hits this: a worker-reported timeout is kept in Retry by
+// QueryTaskOnWorker (unlike index/stats/analyze, which reset to Init), so check()
+// records a failure — creating a backoff entry — and re-queues the task. Because
+// schedule() only dispatches Init tasks, such a task leaves the scheduler without
+// entering runningTasks; its backoff entry must still be dropped, otherwise it
+// lives until datacoord restarts.
+func TestGlobalScheduler_RetryPoppedTaskClearsBackoff(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+	}).Maybe()
+
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(11).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+
+	// The task stays Retry the whole time — check() re-queued it after the worker
+	// reported a compaction timeout. CreateTaskOnWorker must never be called
+	// (schedule() only dispatches Init tasks), so no expectation is set for it.
+	task.EXPECT().GetTaskState().Return(taskcommon.Retry).Maybe()
+
+	// Seed the backoff entry check() would have created, with an already-elapsed
+	// delay so the task is eligible for dispatch this round rather than deferred.
+	scheduler.backoffs.Insert(11, &taskBackoff{failures: 2, notBefore: time.Now().Add(-time.Second)})
+	scheduler.pendingTasks.Push(task)
+
+	scheduler.schedule()
+
+	_, ok := scheduler.backoffs.Get(11)
+	assert.False(t, ok, "backoff entry for a non-Init popped task must be cleared")
+	assert.Equal(t, 0, scheduler.runningTasks.Len())
+	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
+}
