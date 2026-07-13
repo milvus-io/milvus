@@ -233,9 +233,10 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         } else {
             // No geometry cache: fetch WKB once and construct each row geometry
             // ONCE, then evaluate all predicates against it (the K->1 win).
-            milvus::OpContext op_ctx;
+            // Thread the operator's op_ctx_ so tracing / tiered-storage
+            // accounting survives this bulk_subscript.
             auto data_array = segment_->bulk_subscript(
-                &op_ctx, st_->field_id, hit_abs.data(), hit_abs.size());
+                op_ctx_, st_->field_id, hit_abs.data(), hit_abs.size());
             auto geometry_array =
                 static_cast<const milvus::proto::schema::GeometryArray*>(
                     &data_array->scalars().geometry_data());
