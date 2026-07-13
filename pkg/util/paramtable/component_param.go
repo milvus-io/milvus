@@ -6647,7 +6647,7 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Key:          "dataCoord.externalCollectionJobTimeout",
 		Version:      "2.6.8",
 		Doc:          "The timeout in seconds for external collection refresh jobs. Jobs exceeding this duration will be marked as failed.",
-		DefaultValue: "3600",
+		DefaultValue: "86400",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionJobTimeout.Init(base.mgr)

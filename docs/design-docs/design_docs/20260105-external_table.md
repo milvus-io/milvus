@@ -1104,7 +1104,7 @@ func ReadFragmentsFromManifest(
 | `external.collection.worker.pool.size` | DataNode worker pool size | 4 |
 | `external.collection.job.retention.duration` | How long to keep completed/failed jobs | 24h |
 | `external.collection.job.max.concurrent` | Max concurrent refresh jobs | 2 |
-| `external.collection.job.timeout` | Timeout for a single refresh job | 1h |
+| `dataCoord.externalCollectionJobTimeout` | Overall refresh job timeout; also bounds external source exploration | 86,400 seconds (24 hours) |
 
 ---
 
