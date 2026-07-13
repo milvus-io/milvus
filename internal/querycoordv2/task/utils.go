@@ -135,10 +135,6 @@ func packLoadSegmentRequest(
 	indexInfo []*indexpb.IndexInfo,
 ) *querypb.LoadSegmentsRequest {
 	loadScope := querypb.LoadScope_Full
-	if action.Type() == ActionTypeUpdate {
-		loadScope = querypb.LoadScope_Index
-	}
-
 	if action.Type() == ActionTypeStatsUpdate {
 		loadScope = querypb.LoadScope_Stats
 	}

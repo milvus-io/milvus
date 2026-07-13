@@ -2323,6 +2323,55 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplaceDropConflict) {
     EXPECT_TRUE(actually_dropped.empty());
 }
 
+TEST_F(SegmentLoadInfoTest, ComputeDiffDropsJsonIndexByNestedPath) {
+    auto add_json_index = [](proto::segcore::SegmentLoadInfo& proto,
+                             int64_t index_id,
+                             const std::string& nested_path) {
+        auto* index = proto.add_index_infos();
+        index->set_fieldid(102);
+        index->set_indexid(index_id);
+        index->add_index_file_paths("/path/to/json_index_" +
+                                    std::to_string(index_id));
+        auto* type = index->add_index_params();
+        type->set_key(milvus::index::INDEX_TYPE);
+        type->set_value(milvus::index::INVERTED_INDEX_TYPE);
+        auto* path = index->add_index_params();
+        path->set_key(JSON_PATH);
+        path->set_value(nested_path);
+        auto* cast = index->add_index_params();
+        cast->set_key(JSON_CAST_TYPE);
+        cast->set_value("DOUBLE");
+    };
+
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    current_proto.set_manifest_path("/path/to/manifest");
+    add_json_index(current_proto, 5001, "a");
+    add_json_index(current_proto, 5002, "b");
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    new_proto.set_manifest_path("/path/to/manifest");
+    add_json_index(new_proto, 5002, "b");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    current_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+    new_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+    current_info.CompactRuntimeInfoForManifest();
+    EXPECT_EQ(current_info.GetIndexInfoCount(), 0);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.json_indexes_to_drop.count(FieldId(102)), 1);
+    EXPECT_EQ(diff.json_indexes_to_drop.at(FieldId(102)).count("a"), 1);
+    EXPECT_EQ(diff.json_indexes_to_drop.at(FieldId(102)).count("b"), 0);
+    EXPECT_EQ(diff.indexes_to_drop.count(FieldId(102)), 0);
+}
+
 TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogReplace) {
     // When a field's binlog group changes, it goes to binlogs_to_replace
 

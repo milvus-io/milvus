@@ -4702,6 +4702,72 @@ TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {
     EXPECT_FALSE(GetFieldBit(after->field_data_ready_bitset, payload));
 }
 
+TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto json = schema->AddDebugField("payload", DataType::JSON);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    std::array<int64_t, 4> values = {1, 2, 3, 4};
+    auto indexing = GenScalarIndexing<int64_t>(values.size(), values.data());
+    LoadIndexInfo load_info;
+    load_info.field_id = json.get();
+    load_info.field_type = DataType::JSON;
+    load_info.index_params = {
+        {index::INDEX_TYPE, index::INVERTED_INDEX_TYPE},
+        {JSON_PATH, "a"},
+        {JSON_CAST_TYPE, "DOUBLE"},
+    };
+    load_info.cache_index =
+        CreateTestCacheIndex("json-runtime", std::move(indexing));
+    auto loaded_index = load_info.cache_index;
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_TRUE(current->runtime->json_indices.empty());
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    ChunkedSegmentSealedImpl::StateDelta initial_delta;
+    initial_delta.schema = current->schema;
+    initial_delta.load_info = current->load_info;
+    initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial_delta.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
+
+    ChunkedSegmentSealedImpl::StateDelta final_delta;
+    final_delta.schema = current->schema;
+    final_delta.load_info = current->load_info;
+    final_delta.commit_ts = current->commit_ts;
+    sealed->TestStageLoadIndexThenPublish(
+        load_info,
+        false,
+        schema,
+        runtime,
+        staged.get(),
+        current,
+        final_delta,
+        [&] {
+            EXPECT_EQ(runtime->json_indices.size(), 1);
+            EXPECT_TRUE(current->runtime->json_indices.empty());
+            EXPECT_FALSE(sealed->HasJsonIndex(json));
+        });
+
+    auto published = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(published->runtime->json_indices.size(), 1);
+    EXPECT_EQ(published->runtime->json_indices.front().index, loaded_index);
+    EXPECT_TRUE(sealed->HasJsonIndex(json));
+
+    sealed->DropJSONIndex(json, "a");
+    auto after_drop = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(after_drop->runtime->json_indices.empty());
+    EXPECT_FALSE(sealed->HasJsonIndex(json));
+
+    ASSERT_EQ(published->runtime->json_indices.size(), 1);
+    EXPECT_EQ(published->runtime->json_indices.front().index, loaded_index);
+}
+
 TEST(SealedSegmentCowState, JsonStatsLivesInRuntimeSnapshot) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);

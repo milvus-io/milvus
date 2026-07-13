@@ -290,32 +290,6 @@ cancel_and_clear_ngram_indexings(
     ngram_indexings.clear();
 }
 
-template <typename JsonIndexT>
-static void
-cancel_and_erase_json_indices(std::vector<JsonIndexT>& json_indices,
-                              FieldId field_id,
-                              std::string_view nested_path) {
-    auto new_end = std::remove_if(
-        json_indices.begin(), json_indices.end(), [&](auto& index) {
-            auto matched =
-                index.field_id == field_id && index.nested_path == nested_path;
-            if (matched) {
-                cancel_warmup(index.index);
-            }
-            return matched;
-        });
-    json_indices.erase(new_end, json_indices.end());
-}
-
-template <typename JsonIndexT>
-static void
-cancel_and_clear_json_indices(std::vector<JsonIndexT>& json_indices) {
-    for (auto& index : json_indices) {
-        cancel_warmup(index.index);
-    }
-    json_indices.clear();
-}
-
 PinWrapper<const storagev2translator::TimestampIndexCell*>
 ChunkedSegmentSealedImpl::PinTimestampIndex(
     const std::shared_ptr<const RuntimeResourceState>& runtime,
@@ -368,6 +342,84 @@ ChunkedSegmentSealedImpl::PinPkIndex(milvus::OpContext* op_ctx) const {
     auto* cell = ca->get_cell_of(0);
     AssertInfo(cell != nullptr, "pk index cache is corrupted, segment {}", id_);
     return PinWrapper<const storagev2translator::PkIndexCell*>(ca, cell);
+}
+
+std::vector<PinWrapper<const index::IndexBase*>>
+ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
+                                       FieldId field_id,
+                                       const std::string& path,
+                                       DataType data_type,
+                                       bool any_type,
+                                       bool is_array) const {
+    auto runtime = CaptureRuntimeResourceState();
+    int path_len_diff = std::numeric_limits<int>::max();
+    index::CacheIndexBasePtr best_match = nullptr;
+    std::string_view path_view = path;
+    for (const auto& index : runtime->json_indices) {
+        if (index.field_id != field_id) {
+            continue;
+        }
+        switch (index.cast_type.data_type()) {
+            case JsonCastType::DataType::JSON:
+                if (path_view.length() < index.nested_path.length()) {
+                    continue;
+                }
+                if (path_view.substr(0, index.nested_path.length()) ==
+                    index.nested_path) {
+                    int current_len_diff =
+                        path_view.length() - index.nested_path.length();
+                    if (current_len_diff < path_len_diff) {
+                        path_len_diff = current_len_diff;
+                        best_match = index.index;
+                    }
+                    if (path_len_diff == 0) {
+                        break;
+                    }
+                }
+                break;
+            default:
+                if (index.nested_path != path) {
+                    continue;
+                }
+                if (any_type || milvus::index::json::IsDataTypeSupported(
+                                    index.cast_type, data_type, is_array)) {
+                    best_match = index.index;
+                }
+                break;
+        }
+    }
+    if (best_match == nullptr) {
+        return {};
+    }
+    auto ca = SemiInlineGet(best_match->PinCells(op_ctx, {0}));
+    auto pinned_index = ca->get_cell_of(0);
+    return {PinWrapper<const index::IndexBase*>(std::move(ca), pinned_index)};
+}
+
+std::string
+ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
+    FieldId field_id, std::string_view query_path) const {
+    auto runtime = CaptureRuntimeResourceState();
+    std::string best_path;
+    int path_len_diff = std::numeric_limits<int>::max();
+    for (const auto& index : runtime->json_indices) {
+        if (index.field_id != field_id ||
+            index.cast_type.data_type() != JsonCastType::DataType::JSON ||
+            query_path.length() < index.nested_path.length() ||
+            query_path.substr(0, index.nested_path.length()) !=
+                index.nested_path) {
+            continue;
+        }
+        int current_len_diff = query_path.length() - index.nested_path.length();
+        if (current_len_diff < path_len_diff) {
+            path_len_diff = current_len_diff;
+            best_path = index.nested_path;
+        }
+        if (path_len_diff == 0) {
+            break;
+        }
+    }
+    return best_path;
 }
 
 bool
@@ -593,8 +645,12 @@ ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info,
         LoadVecIndex(
             info, schema_snapshot, is_replace, staged_state, committer);
     } else {
-        LoadScalarIndex(
-            info, schema_snapshot, is_replace, runtime, staged_state);
+        LoadScalarIndex(info,
+                        schema_snapshot,
+                        is_replace,
+                        runtime,
+                        staged_state,
+                        committer);
     }
 }
 
@@ -705,7 +761,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
                                           const SchemaPtr& schema_snapshot,
                                           bool is_replace,
                                           RuntimeResourceState* runtime,
-                                          PublishedSegmentState* staged_state) {
+                                          PublishedSegmentState* staged_state,
+                                          StagedStateCommitter* committer) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto snapshot = CapturePublishedState();
@@ -716,6 +773,26 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
 
     RuntimeResourceState* target_runtime = runtime;
     std::shared_ptr<RuntimeResourceState> owned_runtime;
+    std::vector<index::CacheIndexBasePtr> retired_indexings;
+
+    auto retire_indexing = [&](index::CacheIndexBasePtr indexing) {
+        if (indexing == nullptr) {
+            return;
+        }
+        if (committer != nullptr) {
+            committer->RetireCacheIndexingLocked(std::move(indexing));
+        } else if (owned_runtime != nullptr) {
+            retired_indexings.push_back(std::move(indexing));
+        }
+    };
+
+    auto cancel_retired_indexings = [&] {
+        for (auto& indexing : retired_indexings) {
+            if (indexing != nullptr) {
+                indexing->CancelWarmup();
+            }
+        }
+    };
 
     LOG_INFO("LoadScalarIndex, fieldID:{}. segmentID:{}, is_pk:{}",
              info.field_id,
@@ -754,19 +831,17 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
 
     if (field_meta.get_data_type() == DataType::JSON) {
         auto path = info.index_params.at(JSON_PATH);
+        if (target_runtime == nullptr) {
+            owned_runtime = CloneMutableRuntimeResourceState();
+            target_runtime = owned_runtime.get();
+        }
         if (auto it = info.index_params.find(index::INDEX_TYPE);
             it != info.index_params.end() &&
             it->second == index::NGRAM_INDEX_TYPE) {
-            if (target_runtime == nullptr) {
-                owned_runtime = CloneMutableRuntimeResourceState();
-                target_runtime = owned_runtime.get();
-            }
-            auto& path_indexings = target_runtime->ngram_indexings[field_id];
-            if (auto path_it = path_indexings.find(path);
-                path_it != path_indexings.end()) {
-                cancel_warmup(path_it->second);
-            }
-            path_indexings[path] = std::move(info.cache_index);
+            retire_indexing(
+                EraseJsonNgramIndexing(*target_runtime, field_id, path));
+            target_runtime->ngram_indexings[field_id][path] =
+                std::move(info.cache_index);
             if (staged_state != nullptr) {
                 clear_bit_if_present(
                     staged_state->published_binlog_index_ready_bitset,
@@ -781,6 +856,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
                         ? ToConstRuntimeState(std::move(owned_runtime))
                         : FreezeRuntimeResourceState(*target_runtime);
                 PublishIndexReadyLocked(field_id, false, published_runtime);
+                cancel_retired_indexings();
             }
             return;
         } else {
@@ -790,10 +866,16 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
             index.index = std::move(info.cache_index);
             index.cast_type =
                 JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
-            json_indices.withWLock([&](auto& json_indexings) {
-                cancel_and_erase_json_indices(json_indexings, field_id, path);
-                json_indexings.push_back(std::move(index));
-            });
+            for (auto& retired :
+                 EraseJsonIndexings(*target_runtime, field_id, path)) {
+                retire_indexing(std::move(retired));
+            }
+            target_runtime->json_indices.push_back(std::move(index));
+            if (owned_runtime != nullptr) {
+                PublishRuntimeStateLocked(
+                    ToConstRuntimeState(std::move(owned_runtime)));
+                cancel_retired_indexings();
+            }
             return;
         }
     }
@@ -904,6 +986,7 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
     state->ngram_indexings = current->ngram_indexings;
     state->text_lob_paths = current->text_lob_paths;
     state->text_indexes = current->text_indexes;
+    state->json_indices = current->json_indices;
     state->json_stats = current->json_stats;
     state->reader = current->reader;
     state->timestamps = current->timestamps;
@@ -1013,6 +1096,55 @@ ChunkedSegmentSealedImpl::DropVectorIndexing(RuntimeResourceState& runtime,
     }
 }
 
+std::vector<index::CacheIndexBasePtr>
+ChunkedSegmentSealedImpl::EraseJsonIndexings(RuntimeResourceState& runtime,
+                                             FieldId field_id,
+                                             std::string_view nested_path) {
+    std::vector<index::CacheIndexBasePtr> retired;
+    auto new_end = std::remove_if(runtime.json_indices.begin(),
+                                  runtime.json_indices.end(),
+                                  [&](JsonIndex& index) {
+                                      if (index.field_id != field_id ||
+                                          index.nested_path != nested_path) {
+                                          return false;
+                                      }
+                                      retired.push_back(std::move(index.index));
+                                      return true;
+                                  });
+    runtime.json_indices.erase(new_end, runtime.json_indices.end());
+    return retired;
+}
+
+index::CacheIndexBasePtr
+ChunkedSegmentSealedImpl::EraseJsonNgramIndexing(RuntimeResourceState& runtime,
+                                                 FieldId field_id,
+                                                 std::string_view nested_path) {
+    auto field_it = runtime.ngram_indexings.find(field_id);
+    if (field_it == runtime.ngram_indexings.end()) {
+        return nullptr;
+    }
+
+    auto& path_indexings = field_it->second;
+    auto path_it = path_indexings.find(std::string(nested_path));
+    if (path_it == path_indexings.end()) {
+        return nullptr;
+    }
+
+    auto retired = std::move(path_it->second);
+    path_indexings.erase(path_it);
+    if (path_indexings.empty()) {
+        runtime.ngram_indexings.erase(field_it);
+    }
+    return retired;
+}
+
+bool
+ChunkedSegmentSealedImpl::RuntimeJsonNgramIndexReady(
+    const RuntimeResourceState& runtime, FieldId field_id) {
+    auto it = runtime.ngram_indexings.find(field_id);
+    return it != runtime.ngram_indexings.end() && !it->second.empty();
+}
+
 std::shared_ptr<ChunkedSegmentSealedImpl::PublishedSegmentState>
 ChunkedSegmentSealedImpl::ClonePublishedState(
     const std::shared_ptr<const PublishedSegmentState>& current) const {
@@ -1114,6 +1246,16 @@ ChunkedSegmentSealedImpl::NormalizePublishedState(
                     state.index_has_raw_data[field_id] = raw_it->second;
                 }
             }
+
+            for (const auto& [field_id, path_indexings] :
+                 state.runtime->ngram_indexings) {
+                if (path_indexings.empty() ||
+                    !field_exists_in_schema(state.schema, field_id)) {
+                    continue;
+                }
+                set_bit(state.index_ready_bitset, field_id, true);
+                state.index_has_raw_data[field_id] = false;
+            }
         }
 
         for (size_t i = 0; i < state.published_index_ready_bitset.size(); ++i) {
@@ -1206,6 +1348,7 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     runtime->ngram_indexings = current.ngram_indexings;
     runtime->text_lob_paths = current.text_lob_paths;
     runtime->text_indexes = current.text_indexes;
+    runtime->json_indices = current.json_indices;
     runtime->json_stats = current.json_stats;
     runtime->reader = current.reader;
     runtime->timestamps = current.timestamps;
@@ -3682,28 +3825,35 @@ void
 ChunkedSegmentSealedImpl::DropJSONIndex(const FieldId field_id,
                                         const std::string& nested_path) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
-    {
-        std::unique_lock lck(mutex_);
-        json_indices.withWLock([&](auto& json_indexings) {
-            cancel_and_erase_json_indices(
-                json_indexings, field_id, nested_path);
-        });
-    }
-
+    std::vector<index::CacheIndexBasePtr> retired_indexings;
     auto next_runtime = CloneMutableRuntimeResourceState();
-    auto field_it = next_runtime->ngram_indexings.find(field_id);
-    if (field_it != next_runtime->ngram_indexings.end()) {
-        auto& path_indexings = field_it->second;
-        if (auto path_it = path_indexings.find(nested_path);
-            path_it != path_indexings.end()) {
-            cancel_warmup(path_it->second);
-            path_indexings.erase(path_it);
+    for (auto& retired :
+         EraseJsonIndexings(*next_runtime, field_id, nested_path)) {
+        retired_indexings.push_back(std::move(retired));
+    }
+    if (auto retired =
+            EraseJsonNgramIndexing(*next_runtime, field_id, nested_path);
+        retired != nullptr) {
+        retired_indexings.push_back(std::move(retired));
+    }
+    auto json_ngram_ready = RuntimeJsonNgramIndexReady(*next_runtime, field_id);
+    auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
+    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
+        state.runtime = published_runtime;
+        if (!json_ngram_ready) {
+            clear_bit_if_present(state.published_index_ready_bitset, field_id);
+            clear_bit_if_present(state.index_ready_bitset, field_id);
+            if (!get_bit_if_present(state.binlog_index_bitset, field_id)) {
+                ClearPublishedIndexRawDataInState(state, field_id);
+                ClearIndexRawDataInState(state, field_id);
+            }
         }
-        if (path_indexings.empty()) {
-            next_runtime->ngram_indexings.erase(field_it);
+    });
+    for (auto& indexing : retired_indexings) {
+        if (indexing != nullptr) {
+            indexing->CancelWarmup();
         }
     }
-    PublishRuntimeStateLocked(ToConstRuntimeState(std::move(next_runtime)));
 }
 
 void
@@ -4763,6 +4913,15 @@ ChunkedSegmentSealedImpl::ClearData() {
                 entry->indexing_->CancelWarmup();
             }
         }
+        for (const auto& json_index : runtime_snapshot->json_indices) {
+            cancel_warmup(json_index.index);
+        }
+        for (const auto& [_, path_indexings] :
+             runtime_snapshot->ngram_indexings) {
+            for (const auto& [__, indexing] : path_indexings) {
+                cancel_warmup(indexing);
+            }
+        }
     }
     {
         std::unique_lock lck(mutex_);
@@ -4773,9 +4932,6 @@ ChunkedSegmentSealedImpl::ClearData() {
         });
         ngram_indexings_.withWLock([&](auto& ngram_indexings) {
             cancel_and_clear_ngram_indexings(ngram_indexings);
-        });
-        json_indices.withWLock([&](auto& json_indexings) {
-            cancel_and_clear_json_indices(json_indexings);
         });
         insert_record_.clear();
         timestamp_index_slot_.wlock()->reset();
@@ -5821,18 +5977,16 @@ ChunkedSegmentSealedImpl::HasIndex(FieldId field_id) const {
 
 bool
 ChunkedSegmentSealedImpl::HasJsonIndex(FieldId field_id) const {
-    // JSON indexes (JsonFlatIndex + JSON-cast) live in a separate per-segment
-    // vector rather than in either index bitset. Kept as a distinct API so
-    // HasIndex() preserves its narrower "scalar/vector/binlog index exists"
-    // semantics for ReorderConjunctExpr and other consumers.
-    return json_indices.withRLock([&](const auto& vec) {
-        for (const auto& index : vec) {
-            if (index.field_id == field_id) {
-                return true;
-            }
+    // JSON indexes (JsonFlatIndex + JSON-cast) remain distinct from the
+    // scalar/vector/binlog readiness bitsets, but their ownership now follows
+    // the published runtime snapshot.
+    auto runtime = CaptureRuntimeResourceState();
+    for (const auto& index : runtime->json_indices) {
+        if (index.field_id == field_id) {
+            return true;
         }
-        return false;
-    });
+    }
+    return false;
 }
 
 bool
@@ -6803,6 +6957,34 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
                 DropIndex(field_id, schema_snapshot, &runtime);
                 committer.StageVectorIndexDropLocked(field_id);
                 DropIndexFromState(staged_state, field_id);
+            });
+        }
+    }
+
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+    for (const auto& [field_id, nested_paths] : diff.json_indexes_to_drop) {
+        for (const auto& nested_path : nested_paths) {
+            committer.Commit([&, field_id, nested_path](
+                                 RuntimeResourceState& runtime,
+                                 PublishedSegmentState& staged_state) {
+                for (auto& retired :
+                     EraseJsonIndexings(runtime, field_id, nested_path)) {
+                    committer.RetireCacheIndexingLocked(std::move(retired));
+                }
+                committer.RetireCacheIndexingLocked(
+                    EraseJsonNgramIndexing(runtime, field_id, nested_path));
+                if (!RuntimeJsonNgramIndexReady(runtime, field_id)) {
+                    clear_bit_if_present(
+                        staged_state.published_index_ready_bitset, field_id);
+                    clear_bit_if_present(staged_state.index_ready_bitset,
+                                         field_id);
+                    if (!get_bit_if_present(staged_state.binlog_index_bitset,
+                                            field_id)) {
+                        ClearPublishedIndexRawDataInState(staged_state,
+                                                          field_id);
+                        ClearIndexRawDataInState(staged_state, field_id);
+                    }
+                }
             });
         }
     }

@@ -692,10 +692,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
-	// load index segment need no stream delete and distribution change
-	if req.GetLoadScope() == querypb.LoadScope_Index {
-		return nil
-	}
 	if req.GetLoadScope() == querypb.LoadScope_Reopen {
 		return sd.handleReopenPostLoad(ctx, req)
 	}

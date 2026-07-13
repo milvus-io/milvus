@@ -574,11 +574,6 @@ func (s *UtilsSuite) TestPackLoadSegmentRequestLoadScope() {
 		wantScope querypb.LoadScope
 	}{
 		{
-			name:      "index update",
-			action:    ActionTypeUpdate,
-			wantScope: querypb.LoadScope_Index,
-		},
-		{
 			name:      "legacy stats update",
 			action:    ActionTypeStatsUpdate,
 			wantScope: querypb.LoadScope_Stats,

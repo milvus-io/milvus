@@ -252,7 +252,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
-        UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+        segment->LoadIndex(load_index_info);
 
         auto unary_range_expr = test::GenUnaryRangeExpr(op_type, literal);
         auto column_info = test::GenColumnInfo(
@@ -530,7 +530,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
-        UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+        segment->LoadIndex(load_index_info);
 
         // Test: TermFilterExpr (IN operator)
         {

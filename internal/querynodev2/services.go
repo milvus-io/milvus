@@ -536,12 +536,16 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	switch req.GetLoadScope() {
 	case querypb.LoadScope_Delta:
 		return node.loadDeltaLogs(ctx, req), nil
-	case querypb.LoadScope_Index:
-		return node.loadIndex(ctx, req), nil
 	case querypb.LoadScope_Stats:
 		return node.reopenSegments(ctx, req), nil
 	case querypb.LoadScope_Reopen:
 		return node.reopenSegments(ctx, req), nil
+	case querypb.LoadScope_Full:
+		// Continue with the full segment load below.
+	default:
+		err := merr.WrapErrServiceInternalMsg(
+			"unsupported segment load scope %d", req.GetLoadScope())
+		return merr.Status(err), nil
 	}
 
 	// Actual load segment
