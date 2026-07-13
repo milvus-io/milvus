@@ -1207,6 +1207,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     // Lazy JSON stats columns are loaded through per-column projected readers,
     // same as lazy storage-v2 column-group entries. This avoids co-loading
     // sibling JSON paths when a query touches only one shredding column.
+    auto all_columns = std::make_shared<std::vector<std::string>>(column_names);
+    auto reader = milvus_storage::api::Reader::create(
+        column_groups, nullptr, all_columns, properties);
     for (size_t i = 0; i < milvus_field_ids.size(); ++i) {
         const auto& inner_field_id = milvus_field_ids[i];
         const auto& column_name = column_names[i];
@@ -1214,8 +1217,6 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             std::make_shared<std::vector<std::string>>(std::vector<std::string>{
                 column_name,
             });
-        auto reader = milvus_storage::api::Reader::create(
-            column_groups, nullptr, needed_columns, properties);
         auto chunk_reader_result = reader->get_chunk_reader(0, needed_columns);
         AssertInfo(chunk_reader_result.ok(),
                    "[JsonStats] failed to create projected chunk reader for "
