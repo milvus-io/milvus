@@ -550,9 +550,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     }
                 }
             } else {
-                milvus::OpContext op_ctx;
                 auto data_array = segment_->bulk_subscript(
-                    &op_ctx, field_id_, hit_offsets.data(), hit_offsets.size());
+                    op_ctx_, field_id_, hit_offsets.data(), hit_offsets.size());
 
                 auto geometry_array =
                     static_cast<const milvus::proto::schema::GeometryArray*>(
