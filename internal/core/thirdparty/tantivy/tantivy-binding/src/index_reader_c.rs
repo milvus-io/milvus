@@ -3,6 +3,7 @@ use std::ffi::{c_char, c_void, CStr};
 use crate::{
     array::RustResult,
     convert_to_rust_slice, cstr_to_str,
+    data_type::JsonExistValueType,
     index_reader::IndexReaderWrapper,
     ptr_to_str,
     util::{create_binding, free_binding},
@@ -500,11 +501,17 @@ pub extern "C" fn tantivy_json_terms_query_keyword(
 pub extern "C" fn tantivy_json_exist_query(
     ptr: *mut c_void,
     json_path: *const c_char,
+    json_subpaths: bool,
+    value_type: JsonExistValueType,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let json_path = cstr_to_str!(json_path);
-    unsafe { (*real).json_exist_query(json_path, bitset).into() }
+    unsafe {
+        (*real)
+            .json_exist_query(json_path, json_subpaths, value_type, bitset)
+            .into()
+    }
 }
 
 #[no_mangle]

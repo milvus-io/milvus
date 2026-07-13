@@ -83,8 +83,15 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
+	if err := c.validateSchemaChange(ctx, coll, schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, coll, schema)
 	if err != nil {
 		return err
 	}
@@ -110,5 +117,9 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-	return c.broadcastSchemaChange(ctx, broadcaster, coll, schema, msg)
+	if err := c.broadcastValidatedSchemaChange(ctx, broadcaster, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
+		return err
+	}
+	return nil
 }

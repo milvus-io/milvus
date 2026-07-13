@@ -104,17 +104,17 @@ VecIndexConfig::GetBuildThreshold() const noexcept {
 }
 
 knowhere::IndexType
-VecIndexConfig::GetIndexType() noexcept {
+VecIndexConfig::GetIndexType() const noexcept {
     return index_type_;
 }
 
 knowhere::MetricType
-VecIndexConfig::GetMetricType() noexcept {
+VecIndexConfig::GetMetricType() const noexcept {
     return metric_type_;
 }
 
 knowhere::Json
-VecIndexConfig::GetBuildBaseParams(DataType data_type) {
+VecIndexConfig::GetBuildBaseParams(DataType data_type) const {
     if (data_type == DataType::VECTOR_BFLOAT16 &&
         build_params_[knowhere::indexparam::REFINE_TYPE] ==
             knowhere::RefineType::FLOAT16_QUANT) {
@@ -135,7 +135,7 @@ VecIndexConfig::GetBuildBaseParams(DataType data_type) {
 }
 
 SearchInfo
-VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
+VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) const {
     SearchInfo searchParam(searchInfo);
     searchParam.metric_type_ = metric_type_;
     searchParam.search_params_ = search_params_;

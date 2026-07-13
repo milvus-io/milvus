@@ -2497,6 +2497,8 @@ var allowedAlterProps = []string{
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
 	common.FieldDescriptionKey,
+	common.EnableAnalyzerKey,
+	common.AnalyzerParamKey,
 	common.WarmupKey,
 	common.WarmupScalarFieldKey,
 	common.WarmupScalarIndexKey,
@@ -2506,6 +2508,8 @@ var allowedAlterProps = []string{
 
 var allowedDropProps = []string{
 	common.MmapEnabledKey,
+	common.EnableAnalyzerKey,
+	common.AnalyzerParamKey,
 	common.WarmupKey,
 	common.WarmupScalarFieldKey,
 	common.WarmupScalarIndexKey,
@@ -2559,6 +2563,38 @@ func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValu
 	return propKV
 }
 
+func isAnalyzerFieldParam(key string) bool {
+	return key == common.EnableAnalyzerKey || key == common.AnalyzerParamKey
+}
+
+func getAlterCollectionFieldTarget(schema *schemapb.CollectionSchema, fieldName string) *schemapb.FieldSchema {
+	for _, field := range schema.GetFields() {
+		if field.GetName() == fieldName {
+			return field
+		}
+	}
+	return nil
+}
+
+func validateAlterAnalyzerFieldParam(collSchema *schemapb.CollectionSchema, fieldName string) error {
+	field := getAlterCollectionFieldTarget(collSchema, fieldName)
+	if field == nil {
+		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+
+	if !typeutil.IsStringType(field.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
+	}
+
+	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, field) {
+		return merr.WrapErrParameterInvalidMsg(
+			"can not alter analyzer params for field %s after text match is enabled or BM25 function depends on it",
+			fieldName,
+		)
+	}
+	return nil
+}
+
 func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -2584,6 +2620,16 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		}
 		// Check the value type based on the key
 		switch prop.Key {
+		case common.EnableAnalyzerKey, common.AnalyzerParamKey:
+			if err := validateAlterAnalyzerFieldParam(collSchema.CollectionSchema, t.FieldName); err != nil {
+				return err
+			}
+			if prop.Key == common.EnableAnalyzerKey {
+				if _, err := strconv.ParseBool(prop.Value); err != nil {
+					return merr.WrapErrParameterInvalidMsg("%s should be a boolean, but got %s", prop.Key, prop.Value)
+				}
+			}
+
 		case common.MmapEnabledKey:
 			loaded, err := isCollectionLoadedFn()
 			if err != nil {
@@ -2684,6 +2730,11 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		updatedKey := updateKey(key)
 		if !IsKeyAllowDrop(updatedKey) {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
+		}
+		if isAnalyzerFieldParam(updatedKey) {
+			if err := validateAlterAnalyzerFieldParam(collSchema.CollectionSchema, t.FieldName); err != nil {
+				return err
+			}
 		}
 
 		if updatedKey == common.MmapEnabledKey || common.IsFieldWarmupKey(updatedKey) {

@@ -42,11 +42,14 @@ func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema)
 	return nil
 }
 
-func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, oldColl, coll *model.Collection, dbName string, collectionName string) error {
+func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, oldColl *model.Collection, newColl *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
-	schema := coll.ToCollectionSchemaPB()
-	schema.Version = coll.SchemaVersion + 1
+	schema := newColl.ToCollectionSchemaPB()
+	schema.Version = newColl.SchemaVersion + 1
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
+		return err
+	}
+	if err := c.validateSchemaChange(ctx, oldColl, schema); err != nil {
 		return err
 	}
 
@@ -56,8 +59,8 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 	}
 
 	header := &messagespb.AlterCollectionMessageHeader{
-		DbId:         coll.DBID,
-		CollectionId: coll.CollectionID,
+		DbId:         newColl.DBID,
+		CollectionId: newColl.CollectionID,
 		UpdateMask: &fieldmaskpb.FieldMask{
 			Paths: []string{message.FieldMaskCollectionSchema},
 		},
@@ -69,15 +72,24 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 		},
 	}
 
-	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, oldColl, schema)
+	if err != nil {
+		return err
+	}
+
+	channels := make([]string, 0, len(newColl.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.VirtualChannelNames...)
+	channels = append(channels, newColl.VirtualChannelNames...)
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(body).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
-	return c.broadcastSchemaChange(ctx, broadcaster, oldColl, schema, msg)
+	if err := c.broadcastValidatedSchemaChange(ctx, broadcaster, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, newColl.CollectionID, addedFileResourceIds, err)
+		return err
+	}
+	return nil
 }
 
 func alterFunctionGenNewCollection(ctx context.Context, fSchema *schemapb.FunctionSchema, collection *model.Collection) error {

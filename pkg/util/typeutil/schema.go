@@ -4067,9 +4067,25 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 }
 
 func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	if coll == nil || field == nil {
+		return false
+	}
 	for _, fn := range coll.GetFunctions() {
-		if fn.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fn.GetInputFieldNames()[0] {
-			return true
+		if fn.GetType() != schemapb.FunctionType_BM25 {
+			continue
+		}
+		if field.GetFieldID() != 0 && len(fn.GetInputFieldIds()) > 0 {
+			for _, id := range fn.GetInputFieldIds() {
+				if field.GetFieldID() == id {
+					return true
+				}
+			}
+			continue
+		}
+		for _, name := range fn.GetInputFieldNames() {
+			if field.GetName() == name {
+				return true
+			}
 		}
 	}
 	return false

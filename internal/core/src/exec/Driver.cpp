@@ -25,6 +25,7 @@
 #include <memory>
 #include <string>
 
+#include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
 #include "common/Tracer.h"
@@ -284,7 +285,9 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                     RowVectorPtr& result) {
     try {
         initializeOperators();
-        std::call_once(self->once_, [self]() { self->PrefetchAsync(); });
+        if (ENABLE_DRIVER_PREFETCH.load(std::memory_order_relaxed)) {
+            std::call_once(self->once_, [self]() { self->PrefetchAsync(); });
+        }
         int num_operators = operators_.size();
         ContinueFuture future;
 

@@ -26,23 +26,34 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// broadcastSchemaChange is the SINGLE admission + broadcast path for every schema-mutating
-// DDL (add/drop field, add struct field, add/drop/alter function, enable/disable dynamic
-// field). It runs the structural admission gate (schemautil.ValidateSchemaEvolution) on
-// newSchema against the committed schema, and only if that passes does it put the already
-// built message on the WAL.
+// broadcastSchemaChange is the default admission + broadcast path for schema-mutating DDLs
+// that have no pre-broadcast side effects. It runs the structural admission gate
+// (schemautil.ValidateSchemaEvolution) on newSchema against the committed schema, and only if
+// that passes does it put the already built message on the WAL.
 //
-// Every schema-changing callback broadcasts through here instead of calling the broadcaster
-// directly. That is what makes the gate impossible to bypass: no callback can land a schema
-// change on the WAL that the gate has not vetted, and a callback added later gets the gate
-// for free instead of having to remember to insert it (the bug this replaced -- add-field,
-// add-struct-field and the dynamic-field paths each reached the WAL ungated).
+// Callbacks that reserve analyzer file-resource references first call validateSchemaChange,
+// then perform the reservation, and finally call broadcastValidatedSchemaChange. This keeps
+// admission ahead of side effects while ensuring every schema change is vetted before WAL.
 func (c *Core) broadcastSchemaChange(
 	ctx context.Context,
 	bc broadcaster.BroadcastAPI,
 	oldColl *model.Collection,
 	newSchema *schemapb.CollectionSchema,
 	msg message.BroadcastMutableMessage,
+) error {
+	if err := c.validateSchemaChange(ctx, oldColl, newSchema); err != nil {
+		return err
+	}
+	return c.broadcastValidatedSchemaChange(ctx, bc, msg)
+}
+
+// validateSchemaChange runs admission before callers perform any pre-broadcast side effects,
+// such as reserving analyzer file-resource references. Callers with such side effects must use
+// this method first, then call broadcastValidatedSchemaChange after building the final message.
+func (c *Core) validateSchemaChange(
+	ctx context.Context,
+	oldColl *model.Collection,
+	newSchema *schemapb.CollectionSchema,
 ) error {
 	// Environment precondition: refuse the change outright while the cluster still has a
 	// pre-3.0 component (e.g. mid rolling upgrade) that cannot honor the write/read/DDL
@@ -54,6 +65,14 @@ func (c *Core) broadcastSchemaChange(
 	if err := schemautil.ValidateSchemaEvolution(oldColl.ToCollectionSchemaPB(), newSchema); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (c *Core) broadcastValidatedSchemaChange(
+	ctx context.Context,
+	bc broadcaster.BroadcastAPI,
+	msg message.BroadcastMutableMessage,
+) error {
 	if _, err := bc.Broadcast(ctx, msg); err != nil {
 		return err
 	}

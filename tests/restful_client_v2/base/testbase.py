@@ -52,6 +52,15 @@ class Base:
 class TestBase(Base):
     req = None
 
+    @pytest.fixture(scope="class", autouse=True)
+    def init_class_config(self, endpoint, token):
+        self.endpoint = f"{endpoint}"
+        self.api_key = f"{token}" if token is not None else None
+        self.invalid_api_key = "invalid_token"
+
+    def _class_scope_clients(self):
+        return CollectionClient(self.endpoint, self.api_key), VectorClient(self.endpoint, self.api_key)
+
     def teardown_method(self):
         # Clean up collections
         if hasattr(self, "api_key") and self.api_key:

@@ -18,14 +18,17 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <exception>
+#include <future>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -99,6 +102,100 @@ GetFieldBit(const BitsetType& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
     return bitset[pos];
+}
+
+class CancellationObservingIndexTranslator
+    : public cachinglayer::Translator<index::IndexBase> {
+ public:
+    CancellationObservingIndexTranslator(
+        std::string key,
+        std::unique_ptr<index::IndexBase> index,
+        folly::CancellationToken* observed_token,
+        std::promise<void>* warmup_started)
+        : key_(std::move(key)),
+          index_(std::move(index)),
+          observed_token_(observed_token),
+          warmup_started_(warmup_started),
+          meta_(cachinglayer::StorageType::MEMORY,
+                cachinglayer::CellIdMappingMode::IDENTICAL,
+                cachinglayer::CellDataType::OTHER,
+                CacheWarmupPolicy::CacheWarmupPolicy_Async,
+                false) {
+    }
+
+    size_t
+    num_cells() const override {
+        return 1;
+    }
+
+    cachinglayer::cid_t
+    cell_id_of(cachinglayer::uid_t uid) const override {
+        return uid;
+    }
+
+    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
+    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+        return {{0, 0}, {0, 0}};
+    }
+
+    int64_t
+    cells_storage_bytes(
+        const std::vector<cachinglayer::cid_t>&) const override {
+        return 0;
+    }
+
+    const std::string&
+    key() const override {
+        return key_;
+    }
+
+    cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
+
+    std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<index::IndexBase>>>
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<cachinglayer::cid_t>& cids) override {
+        AssertInfo(ctx != nullptr, "warmup context must not be null");
+        *observed_token_ = ctx->cancellation_token;
+        warmup_started_->set_value();
+        std::vector<
+            std::pair<cachinglayer::cid_t, std::unique_ptr<index::IndexBase>>>
+            result;
+        result.reserve(cids.size());
+        for (auto cid : cids) {
+            AssertInfo(cid == 0, "test index translator has one cell");
+            result.emplace_back(cid, std::move(index_));
+        }
+        return result;
+    }
+
+ private:
+    std::string key_;
+    std::unique_ptr<index::IndexBase> index_;
+    folly::CancellationToken* observed_token_;
+    std::promise<void>* warmup_started_;
+    cachinglayer::Meta meta_;
+};
+
+index::CacheIndexBasePtr
+CreateCancellationObservingCacheIndex(std::string key,
+                                      std::unique_ptr<index::IndexBase> index,
+                                      folly::CancellationToken* observed_token,
+                                      std::promise<void>* warmup_started,
+                                      cachinglayer::internal::DList* dlist) {
+    auto translator = std::make_unique<CancellationObservingIndexTranslator>(
+        std::move(key), std::move(index), observed_token, warmup_started);
+    return std::make_shared<cachinglayer::CacheSlot<index::IndexBase>>(
+        std::move(translator),
+        dlist,
+        false,
+        false,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
 }
 
 }  // namespace
@@ -3758,7 +3855,7 @@ TEST(SealedSegmentReopen, TextIndexCancellationGuardDoesNotLeakPendingState) {
     EXPECT_FALSE(
         sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
 
-    sealed->TestRegisterPendingTextIndex(text_fid, true);
+    sealed->TestRegisterPendingTextIndex(text_fid);
 
     EXPECT_FALSE(sealed->TestHasPendingTextIndex(text_fid));
     EXPECT_FALSE(
@@ -3905,6 +4002,81 @@ TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
 
     EXPECT_TRUE(
         sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+}
+
+TEST(SealedSegmentCowState, StagedTextIndexIsInvisibleBeforePublish) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text = schema->AddDebugVarcharField(FieldName("text"),
+                                             DataType::VARCHAR,
+                                             /*max_length=*/65535,
+                                             /*nullable=*/false,
+                                             /*enable_match=*/true,
+                                             /*enable_analyzer=*/true,
+                                             analyzer_params,
+                                             std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    auto dataset = DataGen(schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto published_before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(published_before->runtime->text_indexes.count(text), 0);
+
+    auto staged_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    sealed->TestCreateTextIndexWithSchema(
+        text, schema, nullptr, false, staged_runtime.get());
+
+    EXPECT_EQ(staged_runtime->text_indexes.count(text), 1);
+    EXPECT_EQ(published_before->runtime->text_indexes.count(text), 0);
+    EXPECT_ANY_THROW(sealed->GetTextIndex(nullptr, text));
+    EXPECT_FALSE(sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text));
+}
+
+TEST(SealedSegmentCowState, PublishedTextIndexFollowsSnapshotLifetime) {
+    auto old_schema = std::make_shared<Schema>();
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text = old_schema->AddDebugVarcharField(FieldName("text"),
+                                                 DataType::VARCHAR,
+                                                 /*max_length=*/65535,
+                                                 /*nullable=*/false,
+                                                 /*enable_match=*/true,
+                                                 /*enable_analyzer=*/true,
+                                                 analyzer_params,
+                                                 std::nullopt);
+    old_schema->set_primary_field_id(pk);
+    old_schema->set_schema_version(100);
+
+    auto dataset = DataGen(old_schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto before_create = sealed->TestGetPublishedStateSnapshot();
+    sealed->CreateTextIndex(text);
+    auto published_with_index = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(before_create->runtime->text_indexes.count(text), 0);
+    ASSERT_EQ(published_with_index->runtime->text_indexes.count(text), 1);
+    EXPECT_TRUE(published_with_index->load_info->HasTextIndexCreated(text));
+
+    auto old_pin = sealed->GetTextIndex(nullptr, text);
+    ASSERT_NE(old_pin.get(), nullptr);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk);
+    new_schema->set_schema_version(200);
+    sealed->Reopen(new_schema);
+
+    auto published_after_drop = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(published_after_drop->runtime->text_indexes.count(text), 0);
+    EXPECT_ANY_THROW(sealed->GetTextIndex(nullptr, text));
+    EXPECT_NE(old_pin.get(), nullptr);
+    EXPECT_EQ(published_with_index->runtime->text_indexes.count(text), 1);
 }
 
 TEST(SealedSegmentCowState,
@@ -4250,6 +4422,130 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     EXPECT_FALSE(GetFieldBit(final_state->binlog_index_bitset, vec));
     EXPECT_TRUE(final_state->index_has_raw_data.at(vec));
     EXPECT_TRUE(sealed->TestVectorIndexReady(vec));
+}
+
+TEST(SealedSegmentCowState,
+     StagedVectorIndexRetiresPublishedWarmupOnlyAfterPublish) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    auto warmup_limit = cachinglayer::ResourceUsage{1024 * 1024, 0};
+    auto warmup_dlist = std::make_shared<cachinglayer::internal::DList>(
+        false,
+        warmup_limit,
+        warmup_limit,
+        warmup_limit,
+        cachinglayer::EvictionConfig{});
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto create_index = [] {
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = DataType::VECTOR_FLOAT;
+        create_index_info.metric_type = knowhere::metric::L2;
+        create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        create_index_info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        return milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info, milvus::storage::FileManagerContext());
+    };
+
+    folly::CancellationToken published_warmup_token;
+    std::promise<void> warmup_started;
+    auto warmup_started_future = warmup_started.get_future();
+    auto published_index_impl = create_index();
+    auto published_index_params = GenIndexParams(published_index_impl.get());
+    auto published_cache_index =
+        CreateCancellationObservingCacheIndex("published-vector",
+                                              std::move(published_index_impl),
+                                              &published_warmup_token,
+                                              &warmup_started,
+                                              warmup_dlist.get());
+    auto warmup_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    published_cache_index->Warmup(nullptr, warmup_pool);
+    ASSERT_EQ(warmup_started_future.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    ASSERT_FALSE(published_warmup_token.isCancellationRequested());
+
+    LoadIndexInfo published_index;
+    published_index.field_id = vec.get();
+    published_index.index_params = std::move(published_index_params);
+    published_index.index_params["metric_type"] = knowhere::metric::L2;
+    published_index.cache_index = published_cache_index;
+    published_index.load_resource_request =
+        LoadResourceRequest{0, 0, 0, 0, true};
+    sealed->LoadIndex(published_index);
+
+    auto stage_replacement = [&](bool fail_before_publish) {
+        auto current = sealed->TestGetPublishedStateSnapshot();
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        auto staged = sealed->TestBuildNextPublishedState(
+            current,
+            {current->schema,
+             current->load_info,
+             sealed->TestFreezeRuntimeResourceState(runtime),
+             current->commit_ts});
+
+        auto replacement_impl = create_index();
+        LoadIndexInfo replacement;
+        replacement.field_id = vec.get();
+        replacement.index_params = GenIndexParams(replacement_impl.get());
+        replacement.index_params["metric_type"] = knowhere::metric::L2;
+        replacement.cache_index = CreateTestCacheIndex(
+            fail_before_publish ? "rolled-back-vector" : "replacement-vector",
+            std::move(replacement_impl));
+        replacement.load_resource_request =
+            LoadResourceRequest{0, 0, 0, 0, true};
+
+        ChunkedSegmentSealedImpl::StateDelta final_delta;
+        final_delta.schema = current->schema;
+        final_delta.load_info = current->load_info;
+        final_delta.commit_ts = current->commit_ts;
+
+        auto stage_and_publish = [&] {
+            sealed->TestStageLoadIndexThenPublish(
+                replacement,
+                true,
+                current->schema,
+                runtime,
+                staged.get(),
+                current,
+                final_delta,
+                [&] {
+                    auto published = sealed->TestGetPublishedStateSnapshot();
+                    ASSERT_EQ(
+                        published->runtime->vector_indexings.at(vec)->indexing_,
+                        published_cache_index);
+                    EXPECT_FALSE(
+                        published_warmup_token.isCancellationRequested());
+                    if (fail_before_publish) {
+                        throw std::runtime_error("abort staged publish");
+                    }
+                });
+        };
+
+        if (fail_before_publish) {
+            EXPECT_THROW(stage_and_publish(), std::runtime_error);
+        } else {
+            EXPECT_NO_THROW(stage_and_publish());
+        }
+    };
+
+    stage_replacement(true);
+    EXPECT_FALSE(published_warmup_token.isCancellationRequested());
+    auto after_rollback = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(after_rollback->runtime->vector_indexings.at(vec)->indexing_,
+              published_cache_index);
+
+    stage_replacement(false);
+    EXPECT_TRUE(published_warmup_token.isCancellationRequested());
+    auto after_publish = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(after_publish->runtime->vector_indexings.at(vec)->indexing_,
+              published_cache_index);
 }
 
 TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
