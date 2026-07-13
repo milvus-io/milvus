@@ -59,7 +59,7 @@ jobs:
       - name: Setup mold
         uses: rui314/setup-mold@v1
       - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@c28619d8999a147d5e09c1199f84ff6af6ad5794 # master
         if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
@@ -120,7 +120,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@c28619d8999a147d5e09c1199f84ff6af6ad5794 # master
         if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
@@ -172,7 +172,7 @@ jobs:
     timeout-minutes: 150
     steps:
       - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@c28619d8999a147d5e09c1199f84ff6af6ad5794 # master
         if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
@@ -224,7 +224,7 @@ jobs:
     timeout-minutes: 150
     steps:
       - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@c28619d8999a147d5e09c1199f84ff6af6ad5794 # master
         if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
           root-reserve-mb: 20480
