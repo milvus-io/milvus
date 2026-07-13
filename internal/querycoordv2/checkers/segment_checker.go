@@ -470,10 +470,12 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 			// Protect the segment whenever the delegator's readable target version differs
 			// from the current target version, in EITHER direction:
 			//   - view < current: delegator lags, hasn't caught up to current yet (original case)
-			//   - view > current: delegator's readable view is AHEAD of current (promote race,
-			//     e.g. an out-of-band UpdateCollectionNextTarget on a load failure). The segment
-			//     may still be in the delegator's readable set; releasing it drops loadedRatio
-			//     below 1.0 and makes the shard unserviceable.
+			//   - view > current: the target was synced to this delegator but the current-target
+			//     promote was withheld because another delegator was not ready, so the readable
+			//     view runs ahead of current while next churns further ahead. The segment can
+			//     then be absent from both current and next yet still be in this delegator's
+			//     readable set; releasing it drops loadedRatio below 1.0 and makes the shard
+			//     unserviceable.
 			// Only release when view == current, where the delegator's readable set already
 			// matches current and the redundant segment is provably not in use.
 			readableVersionMismatch := delegator.View.TargetVersion != initialTargetVersion && delegator.View.TargetVersion != currentTargetVersion
