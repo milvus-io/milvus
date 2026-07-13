@@ -205,7 +205,6 @@ woodpecker:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
       maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
-      maxIntervalForService: 10ms # Maximum interval between two sync operations for woodpecker service-storage mode (woodpecker.storage.type=service), default is 10 milliseconds. Only takes effect on standalone woodpecker log-store servers (staged-storage writer); it is not consumed by milvus embedded mode. A larger interval coalesces more entries per flush to raise QPS under small-batch high-concurrency writes, at the cost of up to that much extra durability latency. Note this raises the interval from woodpecker's built-in 1ms default, changing the sync cadence for existing service-mode deployments.
       maxBytes: 256M # Maximum size of write buffer in bytes.
       maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
