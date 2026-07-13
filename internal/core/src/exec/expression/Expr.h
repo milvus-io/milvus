@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -119,6 +120,152 @@ ApplyValidMask(const bool* valid_data,
             res[i] = valid_res[i] = false;
         }
     }
+}
+
+struct RowIdScanBitmaps {
+    TargetBitmap result;
+    TargetBitmap validity;
+};
+
+struct RowIdScanEntry {
+    int64_t row_id;
+    bool valid;
+};
+
+inline RowIdScanBitmaps
+RowIdScanToBitmaps(ChunkedColumnInterface::ScanCursor* cursor,
+                   std::deque<RowIdScanEntry>& buffered_entries,
+                   ChunkedColumnInterface::ScanBatch& scan_batch,
+                   int64_t batch_start,
+                   int64_t batch_size,
+                   const TargetBitmap& bitmap_input,
+                   bool mask_validity_by_bitmap_input = true) {
+    AssertInfo(cursor != nullptr, "row id scan cursor is null");
+    const int64_t batch_end = batch_start + batch_size;
+    RowIdScanBitmaps bitmaps{TargetBitmap(batch_size, false),
+                             TargetBitmap(batch_size, true)};
+
+    auto apply_entry = [&](const RowIdScanEntry& entry) {
+        const auto row_id = entry.row_id;
+        if (row_id < batch_start || row_id >= batch_end) {
+            return;
+        }
+        const auto local_index = static_cast<size_t>(row_id - batch_start);
+        if (!entry.valid) {
+            if (!mask_validity_by_bitmap_input || bitmap_input.empty() ||
+                bitmap_input[local_index]) {
+                bitmaps.validity[local_index] = false;
+            }
+            return;
+        }
+        if (bitmap_input.empty() || bitmap_input[local_index]) {
+            bitmaps.result[local_index] = true;
+        }
+    };
+
+    auto buffer_scan_batch_entries = [&]() {
+        AssertInfo(scan_batch.values.empty(),
+                   "row id payload scan batch should not contain values");
+        AssertInfo(scan_batch.validity.size ==
+                       static_cast<int64_t>(scan_batch.row_ids.size()),
+                   "row id payload scan validity size {} does not match "
+                   "row ids size {}",
+                   scan_batch.validity.size,
+                   scan_batch.row_ids.size());
+        AssertInfo(
+            scan_batch.size == static_cast<int64_t>(scan_batch.row_ids.size()),
+            "row id payload scan size {} does not match row ids size {}",
+            scan_batch.size,
+            scan_batch.row_ids.size());
+        for (size_t i = 0; i < scan_batch.row_ids.size(); ++i) {
+            const auto row_id = scan_batch.row_ids[i];
+            if (!buffered_entries.empty()) {
+                AssertInfo(buffered_entries.back().row_id <= row_id,
+                           "row id payload is not ordered: {} before {}",
+                           buffered_entries.back().row_id,
+                           row_id);
+            }
+            buffered_entries.push_back(RowIdScanEntry{
+                row_id, scan_batch.validity.IsValid(static_cast<int64_t>(i))});
+        }
+    };
+
+    auto apply_all_valid_scan_batch_entries = [&]() {
+        AssertInfo(scan_batch.values.empty(),
+                   "row id payload scan batch should not contain values");
+        AssertInfo(scan_batch.validity.size ==
+                       static_cast<int64_t>(scan_batch.row_ids.size()),
+                   "row id payload scan validity size {} does not match "
+                   "row ids size {}",
+                   scan_batch.validity.size,
+                   scan_batch.row_ids.size());
+        AssertInfo(
+            scan_batch.size == static_cast<int64_t>(scan_batch.row_ids.size()),
+            "row id payload scan size {} does not match row ids size {}",
+            scan_batch.size,
+            scan_batch.row_ids.size());
+
+        std::optional<int64_t> previous_row_id;
+        size_t i = 0;
+        for (; i < scan_batch.row_ids.size(); ++i) {
+            const auto row_id = scan_batch.row_ids[i];
+            if (previous_row_id.has_value()) {
+                AssertInfo(previous_row_id.value() <= row_id,
+                           "row id payload is not ordered: {} before {}",
+                           previous_row_id.value(),
+                           row_id);
+            }
+            previous_row_id = row_id;
+            if (row_id < batch_start) {
+                continue;
+            }
+            if (row_id >= batch_end) {
+                break;
+            }
+            const auto local_index = static_cast<size_t>(row_id - batch_start);
+            if (bitmap_input.empty() || bitmap_input[local_index]) {
+                bitmaps.result[local_index] = true;
+            }
+        }
+
+        for (; i < scan_batch.row_ids.size(); ++i) {
+            const auto row_id = scan_batch.row_ids[i];
+            if (previous_row_id.has_value()) {
+                AssertInfo(previous_row_id.value() <= row_id,
+                           "row id payload is not ordered: {} before {}",
+                           previous_row_id.value(),
+                           row_id);
+            }
+            previous_row_id = row_id;
+            buffered_entries.push_back(RowIdScanEntry{row_id, true});
+        }
+        return !buffered_entries.empty();
+    };
+
+    while (true) {
+        while (!buffered_entries.empty()) {
+            const auto entry = buffered_entries.front();
+            if (entry.row_id >= batch_end) {
+                return bitmaps;
+            }
+            buffered_entries.pop_front();
+            apply_entry(entry);
+        }
+        if (!cursor->Next(&scan_batch)) {
+            break;
+        }
+        AssertInfo(scan_batch.size > 0, "invalid row id scan batch");
+        if (scan_batch.validity.encoding ==
+                ChunkedColumnInterface::ValidityEncoding::AllValid ||
+            scan_batch.validity.all_valid) {
+            if (apply_all_valid_scan_batch_entries()) {
+                return bitmaps;
+            }
+            continue;
+        }
+        buffer_scan_batch_entries();
+    }
+    return bitmaps;
 }
 
 class Expr : public std::enable_shared_from_this<Expr> {
@@ -494,7 +641,10 @@ class SegmentExpr : public Expr {
 
     void
     PrefetchRawDataChunksForScanIfNeeded(const ChunkedColumnInterface* column) {
-        if (column == nullptr || prefetched_ || !segment_->is_chunked()) {
+        if (column == nullptr ||
+            column->GetLocalFormat() !=
+                ChunkedColumnInterface::LocalFormat::Raw ||
+            prefetched_ || !segment_->is_chunked()) {
             return;
         }
         std::vector<int64_t> chunk_ids;
@@ -1085,7 +1235,7 @@ class SegmentExpr : public Expr {
     }
 
     // accept sorted offsets array and process with one continuous Scan.
-    // TODO: push the offset selection into Scan when the interface supports it.
+    // TODO: push the offset bitmap down into Scan when Vortex supports bitmap scan.
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
     ProcessSortedDataByOffsetsByScan(

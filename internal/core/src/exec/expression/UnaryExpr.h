@@ -19,6 +19,7 @@
 #include <fmt/core.h>
 #include <folly/Unit.h>
 
+#include <deque>
 #include <optional>
 #include <utility>
 
@@ -39,6 +40,7 @@
 #include "index/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
 #include "index/NgramInvertedIndex.h"
+#include "mmap/ChunkedColumnInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -1216,6 +1218,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         auto pattern = GetValueFromProto<std::string>(expr_->val_);
         cached_like_matcher_ = std::make_unique<LikePatternMatcher>(pattern);
     }
+
+    bool row_id_scan_initialized_{false};
+    std::unique_ptr<ChunkedColumnInterface::ScanCursor> row_id_scan_cursor_{
+        nullptr};
+    ChunkedColumnInterface::ScanBatch row_id_scan_batch_;
+    std::deque<RowIdScanEntry> buffered_scan_entries_;
 };
 }  // namespace exec
 }  // namespace milvus

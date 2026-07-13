@@ -1505,6 +1505,10 @@ VortexColumn::BuildVortexPredicate(const ScanOptions& options) const {
 
 bool
 VortexColumn::SupportsScanPushdown(const ScanOptions& options) const {
+    if (!ENABLE_VORTEX_SCAN_PUSHDOWN.load()) {
+        return false;
+    }
+
     switch (data_type_) {
         case DataType::STRING:
         case DataType::VARCHAR:

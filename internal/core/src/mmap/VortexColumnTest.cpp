@@ -202,6 +202,21 @@ IsVortexStringPushdownType(DataType type) {
     return type == DataType::STRING || type == DataType::VARCHAR;
 }
 
+class ScopedVortexScanPushdownEnable {
+ public:
+    explicit ScopedVortexScanPushdownEnable(bool enable)
+        : old_(ENABLE_VORTEX_SCAN_PUSHDOWN.load()) {
+        SetDefaultVortexScanPushdownEnable(enable);
+    }
+
+    ~ScopedVortexScanPushdownEnable() {
+        SetDefaultVortexScanPushdownEnable(old_);
+    }
+
+ private:
+    bool old_;
+};
+
 void
 CheckNullableFilteredScanReturnsValidity(VortexColumn& column, DataType type) {
     const auto value = StringValue(ExpectedString(type, 8));
@@ -977,6 +992,14 @@ TEST(VortexColumnTest, MultiFieldColumnsShareColumnGroup) {
 
     auto string_filter_options = ChunkedColumnInterface::ScanOptions::ForUnary(
         0, 16, proto::plan::OpType::Equal, StringValue("v4"));
+    EXPECT_TRUE(string_column.SupportsScanPushdown(string_filter_options));
+    {
+        ScopedVortexScanPushdownEnable disable_pushdown(false);
+        EXPECT_FALSE(string_column.SupportsScanPushdown(string_filter_options));
+        EXPECT_THROW(
+            CollectFilteredRowIdPayload(string_column, string_filter_options),
+            std::exception);
+    }
     EXPECT_TRUE(string_column.SupportsScanPushdown(string_filter_options));
 
     auto filter_options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(

@@ -654,6 +654,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.EnableVortexScanPushdown.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultVortexScanPushdownEnable(enable)
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.EnableLatestDeleteSnapshotOptimization.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
