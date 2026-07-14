@@ -5643,6 +5643,65 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "order_by and function rerank cannot be used together")
 	})
+
+	t.Run("ordinary search rejects search iterator with l0 function chain", func(t *testing.T) {
+		request, _ := newL0FunctionChainRequest()
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not permitted when using a search iterator")
+	})
+
+	t.Run("ordinary search rejects search iterator v2 with l0 function chain", func(t *testing.T) {
+		request, _ := newL0FunctionChainRequest()
+		request.SearchParams = append(request.SearchParams,
+			&commonpb.KeyValuePair{Key: IteratorField, Value: "True"},
+			&commonpb.KeyValuePair{Key: SearchIterV2Key, Value: "True"},
+			&commonpb.KeyValuePair{Key: SearchIterBatchSizeKey, Value: "10"},
+		)
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not permitted when using a search iterator")
+	})
+
+	t.Run("ordinary search rejects search iterator with l2 function chain", func(t *testing.T) {
+		request := newFunctionChainRequest()
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not permitted when using a search iterator")
+	})
+
+	t.Run("ordinary search rejects search iterator with function score", func(t *testing.T) {
+		request := newRequest()
+		request.FunctionScore = &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "decay",
+					Type:             schemapb.FunctionType_Rerank,
+					InputFieldNames:  []string{"ts"},
+					OutputFieldNames: []string{},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "reranker", Value: "decay"},
+						{Key: "origin", Value: "100"},
+						{Key: "scale", Value: "10"},
+					},
+				},
+			},
+		}
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+		task := newTask(request)
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not permitted when using a search iterator")
+	})
 }
 
 func TestSearchTask_AddHighlightTask(t *testing.T) {
