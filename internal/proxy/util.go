@@ -3128,6 +3128,12 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		return dbInfo.dbID, map[int64][]int64{
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil
+	case *milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest,
+		*milvuspb.ListFileResourcesRequest:
+		// File resources are cluster-scoped metadata used by collection
+		// analyzers. Charge the cluster collection-DDL limiter without
+		// attributing the request to an arbitrary database.
+		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.CreateDatabaseRequest:
 		mlog.Info(context.TODO(), "rate limiter CreateDatabaseRequest")
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
@@ -3168,8 +3174,13 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.LoadPartitionsRequest, *milvuspb.ReleasePartitionsRequest,
 		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest,
 		*milvuspb.CreateDatabaseRequest, *milvuspb.DropDatabaseRequest,
-		*milvuspb.AlterDatabaseRequest:
+		*milvuspb.AlterDatabaseRequest,
+		*milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest:
 		return merr.Status(err)
+	case *milvuspb.ListFileResourcesRequest:
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.RestoreExternalSnapshotRequest:
 		return &milvuspb.RestoreExternalSnapshotResponse{
 			Status: merr.Status(err),
