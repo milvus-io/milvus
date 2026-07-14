@@ -859,6 +859,35 @@ func (suite *ServiceSuite) TestLoadSegmentsRejectsUnknownScope() {
 	suite.Contains(status.GetReason(), "unsupported segment load scope")
 }
 
+func (suite *ServiceSuite) TestLoadSegmentsRejectsLegacyIndexScope() {
+	ctx := context.Background()
+	schema := mock_segcore.GenTestCollectionSchema(
+		suite.collectionName, schemapb.DataType_Int64, false)
+	req := &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID:  suite.collectionID,
+		DstNodeID:     suite.node.session.ServerID,
+		Infos:         suite.genSegmentLoadInfos(schema, nil),
+		Schema:        schema,
+		NeedTransfer:  false,
+		LoadScope:     legacyLoadScopeIndex,
+		IndexInfoList: []*indexpb.IndexInfo{{}},
+	}
+
+	loader := suite.node.loader
+	suite.node.loader = segments.NewMockLoader(suite.T())
+	defer func() { suite.node.loader = loader }()
+
+	status, err := suite.node.LoadSegments(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceInternal)
+	suite.Contains(status.GetReason(), "legacy segment index load scope 2")
+	suite.Contains(status.GetReason(), "use LoadScope_Reopen")
+}
+
 func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	ctx := context.Background()
 	// data

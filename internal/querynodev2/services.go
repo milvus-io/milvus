@@ -66,6 +66,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// legacyLoadScopeIndex is the retired wire value emitted by QueryCoord
+// versions that predate LoadScope_Reopen. Keep the value out of the proto enum
+// so it cannot be reused, while recognizing it here to return a precise
+// mixed-version protocol error.
+const legacyLoadScopeIndex = querypb.LoadScope(2)
+
 type segmentDetacher interface {
 	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
 }
@@ -542,6 +548,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return node.reopenSegments(ctx, req), nil
 	case querypb.LoadScope_Full:
 		// Continue with the full segment load below.
+	case legacyLoadScopeIndex:
+		err := merr.WrapErrServiceInternalMsg(
+			"legacy segment index load scope %d is no longer supported; upgrade QueryCoord to use LoadScope_Reopen before routing requests to this QueryNode",
+			req.GetLoadScope())
+		return merr.Status(err), nil
 	default:
 		err := merr.WrapErrServiceInternalMsg(
 			"unsupported segment load scope %d", req.GetLoadScope())
