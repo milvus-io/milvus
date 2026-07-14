@@ -21,9 +21,12 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sys/mman.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
+#include "common/ChunkTarget.h"
 #include "common/EasyAssert.h"
 #include "gtest/gtest.h"
 #include "storage/FileWriter.h"
@@ -57,6 +60,17 @@ class FileWriterTest : public testing::Test {
     const size_t kBufferSize = 4096;  // 4KB buffer size
 };
 
+namespace {
+
+std::string
+ReadFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file),
+            std::istreambuf_iterator<char>()};
+}
+
+}  // namespace
+
 // Test basic file writing functionality with buffered IO
 TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
@@ -73,6 +87,58 @@ TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
     std::string content((std::istreambuf_iterator<char>(file)),
                         std::istreambuf_iterator<char>());
     EXPECT_EQ(content, test_data);
+}
+
+TEST_F(FileWriterTest, FinishWithFdatasyncWriteback) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "fdatasync_writeback.txt").string();
+    FileWriter writer(filename);
+    writer.SetFdatasyncOnFinish();
+
+    std::string test_data(kBufferSize + 17, 'x');
+    writer.Write(test_data.data(), test_data.size());
+    writer.Finish();
+
+    EXPECT_EQ(ReadFile(filename), test_data);
+}
+
+TEST_F(FileWriterTest, MmapChunkTargetWithWriteback) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "mmap_chunk_target").string();
+    MmapChunkTarget target(filename,
+                           /*populate=*/false,
+                           kBufferSize,
+                           io::Priority::LOW,
+                           MmapChunkWritebackMode::FdatasyncOnFinish);
+
+    std::string test_data = "mmap writeback";
+    target.write(test_data.data(), test_data.size());
+    auto* data = target.release();
+    ASSERT_NE(data, nullptr);
+    EXPECT_EQ(std::string(data, test_data.size()), test_data);
+    target.TransferOwnership();
+
+    EXPECT_EQ(munmap(data, kBufferSize), 0);
+    EXPECT_EQ(unlink(filename.c_str()), 0);
+}
+
+TEST_F(FileWriterTest, MmapChunkTargetCleansUpFileWhenReleaseFails) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "mmap_release_failure").string();
+    {
+        MmapChunkTarget target(filename,
+                               /*populate=*/false,
+                               /*cap=*/0,
+                               io::Priority::LOW,
+                               MmapChunkWritebackMode::FdatasyncOnFinish);
+        ASSERT_TRUE(std::filesystem::exists(filename));
+        EXPECT_ANY_THROW(target.release());
+    }
+
+    EXPECT_FALSE(std::filesystem::exists(filename));
 }
 
 // Test basic file writing functionality with direct IO

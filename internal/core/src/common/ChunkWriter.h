@@ -342,12 +342,14 @@ struct ChunkBuffer {
 // object yet. This is useful when multiple Chunk instances need to share
 // the same underlying memory.
 ChunkBuffer
-create_chunk_buffer(const FieldMeta& field_meta,
-                    const arrow::ArrayVector& array_vec,
-                    bool mmap_populate = true,
-                    const std::string& file_path = "",
-                    proto::common::LoadPriority load_priority =
-                        proto::common::LoadPriority::HIGH);
+create_chunk_buffer(
+    const FieldMeta& field_meta,
+    const arrow::ArrayVector& array_vec,
+    bool mmap_populate = true,
+    const std::string& file_path = "",
+    proto::common::LoadPriority load_priority =
+        proto::common::LoadPriority::HIGH,
+    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled);
 
 // Create a Chunk view from an existing ChunkBuffer. Multiple Chunk instances
 // created from the same buffer will share the same underlying memory via
@@ -358,21 +360,25 @@ make_chunk_from_buffer(const FieldMeta& field_meta,
                        size_t row_nums_override = 0);
 
 std::unique_ptr<Chunk>
-create_chunk(const FieldMeta& field_meta,
-             const arrow::ArrayVector& array_vec,
-             bool mmap_populate = true,
-             const std::string& file_path = "",
-             proto::common::LoadPriority load_priority =
-                 proto::common::LoadPriority::HIGH);
+create_chunk(
+    const FieldMeta& field_meta,
+    const arrow::ArrayVector& array_vec,
+    bool mmap_populate = true,
+    const std::string& file_path = "",
+    proto::common::LoadPriority load_priority =
+        proto::common::LoadPriority::HIGH,
+    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled);
 
 std::unordered_map<FieldId, std::shared_ptr<Chunk>>
-create_group_chunk(const std::vector<FieldId>& field_ids,
-                   const std::vector<FieldMeta>& field_metas,
-                   const std::vector<arrow::ArrayVector>& array_vec,
-                   bool mmap_populate = true,
-                   const std::string& file_path = "",
-                   proto::common::LoadPriority load_priority =
-                       proto::common::LoadPriority::HIGH);
+create_group_chunk(
+    const std::vector<FieldId>& field_ids,
+    const std::vector<FieldMeta>& field_metas,
+    const std::vector<arrow::ArrayVector>& array_vec,
+    bool mmap_populate = true,
+    const std::string& file_path = "",
+    proto::common::LoadPriority load_priority =
+        proto::common::LoadPriority::HIGH,
+    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled);
 
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader);
