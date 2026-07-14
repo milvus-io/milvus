@@ -63,6 +63,7 @@ func UnmarshalFieldData(b []byte, fd *schemapb.FieldData) error {
 func (d dec) fieldData(b []byte, fd *schemapb.FieldData) error {
 	full := b
 	var rest []byte
+	oneofNum := 0
 	for len(b) > 0 {
 		start := b
 		num, wtype, n := consumeTag(b)
@@ -85,6 +86,12 @@ func (d dec) fieldData(b []byte, fd *schemapb.FieldData) error {
 		}
 		if num == 7 && wtype != 0 && wtype != 2 {
 			return fallbackUnmarshal(full, fd)
+		}
+		if num == 3 || num == 4 || num == 8 {
+			if oneofNum == num {
+				return fallbackUnmarshal(full, fd)
+			}
+			oneofNum = num
 		}
 		switch num {
 		case 1: // Type (enum, varint)
@@ -190,7 +197,9 @@ func (d dec) fieldData(b []byte, fd *schemapb.FieldData) error {
 // Hot array types (bool/int/long/float/double/string/bytes/json) are hand-decoded;
 // rarer variants (array/geometry/timestamptz/mol/...) fall back to the official codec.
 func (d dec) scalarField(b []byte, sf *schemapb.ScalarField) error {
+	full := b
 	var rest []byte
+	oneofNum := 0
 	for len(b) > 0 {
 		start := b
 		num, wtype, tn := consumeTag(b)
@@ -215,6 +224,12 @@ func (d dec) scalarField(b []byte, sf *schemapb.ScalarField) error {
 			return errMalformed
 		}
 		b = b[vn:]
+		if num >= 1 && num <= 14 {
+			if oneofNum == num {
+				return fallbackUnmarshal(full, sf)
+			}
+			oneofNum = num
+		}
 		switch num {
 		case 1: // BoolData
 			a := &schemapb.BoolArray{}
@@ -300,6 +315,7 @@ func (d dec) stringArray(b []byte, sa *schemapb.StringArray) error {
 func unmarshalVectorField(b []byte, vf *schemapb.VectorField) error {
 	full := b
 	var rest []byte
+	oneofNum := 0
 	for len(b) > 0 {
 		start := b
 		num, wtype, n := consumeTag(b)
@@ -314,6 +330,12 @@ func unmarshalVectorField(b []byte, vf *schemapb.VectorField) error {
 		// → official codec, to match proto.Unmarshal instead of misdecoding it.
 		if (num == 1 && wtype != 0) || (num >= 2 && num <= 8 && wtype != 2) {
 			return fallbackUnmarshal(full, vf)
+		}
+		if num >= 2 && num <= 8 {
+			if oneofNum == num && (num == 2 || num == 6 || num == 8) {
+				return fallbackUnmarshal(full, vf)
+			}
+			oneofNum = num
 		}
 		switch num {
 		case 1: // Dim (varint)

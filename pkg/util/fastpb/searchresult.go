@@ -1,6 +1,8 @@
 package fastpb
 
 import (
+	"math"
+
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -34,6 +36,22 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 		b = b[tn:]
 		if isProto2Group(wtype) {
 			return errProto2
+		}
+		if wtype == 5 && (num == 4 || num == 10 || num == 12) {
+			if len(b) < 4 {
+				return errMalformed
+			}
+			value := math.Float32frombits(le32(b))
+			switch num {
+			case 4:
+				srd.Scores = append(srd.Scores, value)
+			case 10:
+				srd.Distances = append(srd.Distances, value)
+			case 12:
+				srd.Recalls = append(srd.Recalls, value)
+			}
+			b = b[4:]
+			continue
 		}
 
 		// varint-typed fields
@@ -153,7 +171,11 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 			if err := decodePackedI64(v, &la.Data, la); err != nil {
 				return err
 			}
-			srd.ElementIndices = la
+			if srd.ElementIndices == nil {
+				srd.ElementIndices = la
+			} else {
+				proto.Merge(srd.ElementIndices, la)
+			}
 		case 17: // group_by_field_values (repeated FieldData)
 			fd := &schemapb.FieldData{}
 			if err := d.fieldData(v, fd); err != nil {
@@ -182,7 +204,9 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 
 // unmarshalIDs decodes schemapb.IDs: oneof int_id (LongArray, 1) / str_id (StringArray, 2).
 func (d dec) ids(b []byte, ids *schemapb.IDs) error {
+	full := b
 	var rest []byte
+	oneofNum := 0
 	for len(b) > 0 {
 		start := b
 		num, wtype, tn := consumeTag(b)
@@ -207,6 +231,12 @@ func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 			return errMalformed
 		}
 		b = b[vn:]
+		if num == 1 || num == 2 {
+			if oneofNum == num {
+				return fallbackUnmarshal(full, ids)
+			}
+			oneofNum = num
+		}
 		switch num {
 		case 1:
 			la := &schemapb.LongArray{}

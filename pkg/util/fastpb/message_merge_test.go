@@ -1,10 +1,12 @@
 package fastpb
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -87,4 +89,111 @@ func TestSingularMessageMerge(t *testing.T) {
 		require.NoError(t, UnmarshalSearchResultData(wire, got))
 		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
 	})
+}
+
+func TestRepeatedMessageOneofMerge(t *testing.T) {
+	t.Run("FieldData.Scalars", func(t *testing.T) {
+		wire := concat(t,
+			&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}},
+			}}},
+			&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{2}}},
+			}}},
+		)
+		want := &schemapb.FieldData{}
+		require.NoError(t, proto.Unmarshal(wire, want))
+		got := &schemapb.FieldData{}
+		require.NoError(t, UnmarshalFieldData(wire, got))
+		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+	})
+
+	t.Run("ScalarField.LongData", func(t *testing.T) {
+		wire := concat(t,
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}},
+			&schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{2}}}},
+		)
+		want := &schemapb.ScalarField{}
+		require.NoError(t, proto.Unmarshal(wire, want))
+		got := &schemapb.ScalarField{}
+		require.NoError(t, dec{}.scalarField(wire, got))
+		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+	})
+
+	t.Run("VectorField.FloatVector", func(t *testing.T) {
+		wire := concat(t,
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1}}}},
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{2}}}},
+		)
+		want := &schemapb.VectorField{}
+		require.NoError(t, proto.Unmarshal(wire, want))
+		got := &schemapb.VectorField{}
+		require.NoError(t, unmarshalVectorField(wire, got))
+		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+	})
+
+	t.Run("IDs.IntId", func(t *testing.T) {
+		wire := concat(t,
+			&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+			&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{2}}}},
+		)
+		want := &schemapb.IDs{}
+		require.NoError(t, proto.Unmarshal(wire, want))
+		got := &schemapb.IDs{}
+		require.NoError(t, dec{}.ids(wire, got))
+		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+	})
+
+	t.Run("different variants remain last-wins", func(t *testing.T) {
+		wire := concat(t,
+			&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}}},
+			&schemapb.FieldData{Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 8}}},
+		)
+		want := &schemapb.FieldData{}
+		require.NoError(t, proto.Unmarshal(wire, want))
+		got := &schemapb.FieldData{}
+		require.NoError(t, UnmarshalFieldData(wire, got))
+		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+	})
+}
+
+func TestElementIndicesMerge(t *testing.T) {
+	wire := concat(t,
+		&schemapb.SearchResultData{ElementIndices: &schemapb.LongArray{Data: []int64{1}}},
+		&schemapb.SearchResultData{ElementIndices: &schemapb.LongArray{Data: []int64{2}}},
+	)
+	want := &schemapb.SearchResultData{}
+	require.NoError(t, proto.Unmarshal(wire, want))
+	got := &schemapb.SearchResultData{}
+	require.NoError(t, UnmarshalSearchResultData(wire, got))
+	assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+}
+
+func TestMixedPackedUnpackedFixed32Order(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field protowire.Number
+	}{
+		{name: "scores", field: 4},
+		{name: "distances", field: 10},
+		{name: "recalls", field: 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			packedFirst := protowire.AppendFixed32(nil, math.Float32bits(1))
+			packedLast := protowire.AppendFixed32(nil, math.Float32bits(3))
+			var wire []byte
+			wire = protowire.AppendTag(wire, tc.field, protowire.BytesType)
+			wire = protowire.AppendBytes(wire, packedFirst)
+			wire = protowire.AppendTag(wire, tc.field, protowire.Fixed32Type)
+			wire = protowire.AppendFixed32(wire, math.Float32bits(2))
+			wire = protowire.AppendTag(wire, tc.field, protowire.BytesType)
+			wire = protowire.AppendBytes(wire, packedLast)
+
+			want := &schemapb.SearchResultData{}
+			require.NoError(t, proto.Unmarshal(wire, want))
+			got := &schemapb.SearchResultData{}
+			require.NoError(t, UnmarshalSearchResultData(wire, got))
+			assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+		})
+	}
 }
