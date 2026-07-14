@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func receiveBalanceTestSignal[T any](t *testing.T, ch <-chan T, label string) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		var zero T
+		return zero
+	}
+}
+
+func closeBalanceTestChannelOnCleanup(t *testing.T, ch chan struct{}) func() {
+	t.Helper()
+	var once sync.Once
+	closeChannel := func() { once.Do(func() { close(ch) }) }
+	t.Cleanup(closeChannel)
+	return closeChannel
+}
 
 const (
 	testSnapshotRG      = "rg-snapshot"
@@ -576,6 +597,7 @@ func TestPlacementSnapshotTargetScopeCaptureIsGenerationConsistent(t *testing.T)
 			fixture := newPlacementSnapshotFixture(t)
 			oldSegmentsRead := make(chan struct{})
 			releaseOldSegments := make(chan struct{})
+			releaseTargetRead := closeBalanceTestChannelOnCleanup(t, releaseOldSegments)
 			var once sync.Once
 			fixture.targetState.mu.Lock()
 			fixture.targetState.segmentsHook = func(collectionID int64, scope int32) {
@@ -598,7 +620,7 @@ func TestPlacementSnapshotTargetScopeCaptureIsGenerationConsistent(t *testing.T)
 				resultCh <- result{snapshot: snapshot, err: err}
 			}()
 
-			<-oldSegmentsRead
+			receiveBalanceTestSignal(t, oldSegmentsRead, "old target segment read")
 			fixture.targetState.mu.Lock()
 			newVersion := int64(4000)
 			newSegments := map[int64]*datapb.SegmentInfo{
@@ -617,9 +639,9 @@ func TestPlacementSnapshotTargetScopeCaptureIsGenerationConsistent(t *testing.T)
 				fixture.targetState.nextChannels[100] = newChannels
 			}
 			fixture.targetState.mu.Unlock()
-			close(releaseOldSegments)
+			releaseTargetRead()
 
-			capturedResult := <-resultCh
+			capturedResult := receiveBalanceTestSignal(t, resultCh, "generation-consistent snapshot result")
 			require.NoError(t, capturedResult.err)
 			var captured TargetScopeSnapshot
 			if tc.scope == meta.CurrentTarget {

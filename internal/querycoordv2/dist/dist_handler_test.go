@@ -19,6 +19,7 @@ package dist
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +41,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func receiveDistTestSignal[T any](t *testing.T, ch <-chan T, label string) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		var zero T
+		return zero
+	}
+}
+
+func closeDistTestChannelOnCleanup(t *testing.T, ch chan struct{}) func() {
+	t.Helper()
+	var once sync.Once
+	closeChannel := func() { once.Do(func() { close(ch) }) }
+	t.Cleanup(closeChannel)
+	return closeChannel
+}
 
 type DistHandlerSuite struct {
 	suite.Suite
@@ -292,6 +313,7 @@ func TestDistHandlerPublishesResponseAtomically(t *testing.T) {
 
 	enteredChannelBuild := make(chan struct{})
 	releaseChannelBuild := make(chan struct{})
+	releaseChannelBuilder := closeDistTestChannelOnCleanup(t, releaseChannelBuild)
 	target := meta.NewMockTargetManager(t)
 	target.EXPECT().GetSealedSegment(mock.Anything, int64(100), int64(2), meta.CurrentTargetFirst).Return(nil).Once()
 	target.EXPECT().GetDmChannel(mock.Anything, int64(100), "channel-new", meta.CurrentTarget).
@@ -335,7 +357,7 @@ func TestDistHandlerPublishesResponseAtomically(t *testing.T) {
 		defer close(done)
 		handler.handleDistResp(ctx, resp)
 	}()
-	<-enteredChannelBuild
+	receiveDistTestSignal(t, enteredChannelBuild, "channel build blocker")
 
 	duringBuild := distribution.Capture()
 	require.Len(t, duringBuild.Segments, 1)
@@ -343,8 +365,8 @@ func TestDistHandlerPublishesResponseAtomically(t *testing.T) {
 	require.Equal(t, int64(1), duringBuild.Segments[0].SegmentID)
 	require.Equal(t, "channel-old", duringBuild.Channels[0].Channel)
 
-	close(releaseChannelBuild)
-	<-done
+	releaseChannelBuilder()
+	receiveDistTestSignal(t, done, "atomic response publication")
 	afterPublish := distribution.Capture()
 	require.Len(t, afterPublish.Segments, 1)
 	require.Len(t, afterPublish.Channels, 1)

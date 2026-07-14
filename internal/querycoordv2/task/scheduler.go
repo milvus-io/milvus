@@ -897,8 +897,8 @@ func (scheduler *taskScheduler) admitBalanceTask(
 	scheduler.cancelReplacementLocked(replaced, task)
 	scheduler.scheduleMu.Unlock()
 
-	scheduler.finishReplacement(replaced)
 	scheduler.finishTaskAddition(task)
+	scheduler.finishReplacement(replaced)
 	return BalanceAdmissionResult{
 		TaskID:          task.ID(),
 		Reason:          BalanceAdmissionAccepted,
@@ -934,8 +934,8 @@ func (scheduler *taskScheduler) commitAddLocked(task Task) {
 	scheduler.cancelReplacementLocked(replaced, task)
 	scheduler.scheduleMu.Unlock()
 
-	scheduler.finishReplacement(replaced)
 	scheduler.finishTaskAddition(task)
+	scheduler.finishReplacement(replaced)
 }
 
 func (scheduler *taskScheduler) registerPendingLocked(task Task, resourceGroups []string, expectedAdmission bool) {
