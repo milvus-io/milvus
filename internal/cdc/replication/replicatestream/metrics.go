@@ -61,6 +61,31 @@ func (m *replicateMetrics) UpdateLastReplicatedTimeTick(ts uint64) {
 	).Set(tsoutil.PhysicalTimeSeconds(ts))
 }
 
+// InitLastReplicatedTimeTick initializes the last replicated time tick gauge
+// from a known checkpoint. Callers may seed it conservatively and later
+// overwrite it with the target-confirmed position.
+func InitLastReplicatedTimeTick(info *streamingpb.ReplicatePChannelMeta, ts uint64) {
+	if info == nil || ts == 0 {
+		return
+	}
+	metrics.CDCLastReplicatedTimeTick.WithLabelValues(
+		info.GetSourceChannelName(),
+		info.GetTargetChannelName(),
+	).Set(tsoutil.PhysicalTimeSeconds(ts))
+}
+
+// DeleteLastReplicatedTimeTick deletes the lag series for a replication task
+// that has been genuinely removed.
+func DeleteLastReplicatedTimeTick(info *streamingpb.ReplicatePChannelMeta) {
+	if info == nil {
+		return
+	}
+	metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(
+		info.GetSourceChannelName(),
+		info.GetTargetChannelName(),
+	)
+}
+
 func (m *replicateMetrics) StartReplicate(msg message.ImmutableMessage) {
 	msgID := msg.MessageID().String()
 	m.msgsMetrics.Insert(msgID, msgMetrics{
@@ -134,6 +159,7 @@ func (m *replicateMetrics) OnConnect() {
 	).Inc()
 }
 
+// OnClose cleans up the connection metrics owned by this stream instance.
 func (m *replicateMetrics) OnClose() {
 	metrics.CDCStreamRPCConnections.DeletePartialMatch(prometheus.Labels{
 		metrics.CDCLabelTargetCluster: m.replicateInfo.GetTargetCluster().GetClusterId(),

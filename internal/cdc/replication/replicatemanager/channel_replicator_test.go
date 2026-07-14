@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 
@@ -32,8 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func newMockPulsarMessageID() *commonpb.MessageID {
@@ -92,4 +95,27 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	replicator.StartReplication()
 	time.Sleep(200 * time.Millisecond)
 	replicator.StopReplication()
+}
+
+func TestChannelReplicatorInitMetricFromInitializedCheckpoint(t *testing.T) {
+	source, target := "TestInitMetric-source", "TestInitMetric-target"
+	checkpoint := tsoutil.ComposeTSByTime(time.Now().Add(-5 * time.Minute))
+	defer metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(source, target)
+
+	replicator := NewChannelReplicator(&meta.ReplicateChannel{
+		Value: &streamingpb.ReplicatePChannelMeta{
+			SourceChannelName: source,
+			TargetChannelName: target,
+			InitializedCheckpoint: &commonpb.ReplicateCheckpoint{
+				TimeTick: checkpoint,
+			},
+		},
+	})
+	channelReplicator, ok := replicator.(*channelReplicator)
+	assert.True(t, ok)
+
+	channelReplicator.initLastReplicatedTimeTickMetric()
+
+	got := testutil.ToFloat64(metrics.CDCLastReplicatedTimeTick.WithLabelValues(source, target))
+	assert.InDelta(t, tsoutil.PhysicalTimeSeconds(checkpoint), got, 1)
 }

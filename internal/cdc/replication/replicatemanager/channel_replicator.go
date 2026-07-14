@@ -76,6 +76,7 @@ func NewChannelReplicator(channel *meta.ReplicateChannel) Replicator {
 }
 
 func (r *channelReplicator) StartReplication() {
+	r.initLastReplicatedTimeTickMetric()
 	logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("modRevision", r.channel.ModRevision))
 	logger.Info(context.TODO(), "start replicate channel")
 	go func() {
@@ -109,6 +110,14 @@ func (r *channelReplicator) StartReplication() {
 	}()
 }
 
+func (r *channelReplicator) initLastReplicatedTimeTickMetric() {
+	checkpoint := r.channel.Value.GetInitializedCheckpoint()
+	if checkpoint == nil {
+		return
+	}
+	replicatestream.InitLastReplicatedTimeTick(r.channel.Value, checkpoint.GetTimeTick())
+}
+
 func (r *channelReplicator) init() error {
 	logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("modRevision", r.channel.ModRevision))
 	// init target client
@@ -138,6 +147,11 @@ func (r *channelReplicator) init() error {
 		})
 		r.msgScanner = scanner
 		r.msgChan = ch
+		// Seed the last replicated time tick from the resume checkpoint so that
+		// after a CDC pod restart the lag metric reports the real backlog
+		// immediately, instead of the series being absent (which reads as 0)
+		// until the first message is replicated.
+		replicatestream.InitLastReplicatedTimeTick(r.channel.Value, cp.TimeTick)
 		logger.Info(context.TODO(), "scanner initialized", mlog.Any("checkpoint", cp))
 	}
 	// init replicate stream client
