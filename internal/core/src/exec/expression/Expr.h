@@ -890,90 +890,130 @@ class SegmentExpr : public Expr {
                           field_id_.get());
             }
 
-            // Batch process consecutive elements belonging to the same chunk
+            // The element ids arriving here come from
+            // RowOffsetsToElementOffsets, which emits each row's element ids
+            // CONSECUTIVELY ASCENDING. Exploit that: resolve (row, elem_idx)
+            // ONCE per run of consecutive ids inside one row, instead of one
+            // binary search + one chunk lookup + one ArrayView fetch per
+            // element. The run assumption is guarded per element (any id
+            // that is not the expected consecutive one simply starts a fresh
+            // run), so correctness never depends on the input being sorted.
             size_t processed_size = 0;
             size_t i = 0;
 
-            // Reuse these vectors to avoid repeated heap allocations
+            // Reuse these vectors to avoid repeated heap allocations.
+            // One entry per RUN (not per element): the run's row chunk
+            // offset, the run's first element index within the row, and the
+            // run length in elements.
             FixedVector<int32_t> offsets;
-            FixedVector<int32_t> elem_indices;
+            FixedVector<int32_t> first_elem_indices;
+            FixedVector<int32_t> run_lengths;
+
+            struct RunInfo {
+                int32_t row_id;
+                int32_t first_elem_idx;
+                int32_t length;
+            };
+            // Resolve the run starting at input position pos: one row
+            // resolution covers every consecutive element id of that row.
+            auto resolve_run = [&](size_t pos) -> RunInfo {
+                int32_t element_id = (*element_ids)[pos];
+                auto [row_id, elem_idx] =
+                    array_offsets->ElementIDToRowID(element_id);
+                const int32_t row_last =
+                    array_offsets->ElementIDRangeOfRow(row_id).second;
+                int64_t max_run = std::min<int64_t>(row_last - element_id,
+                                                    element_ids->size() - pos);
+                int64_t run_len = 1;
+                while (run_len < max_run &&
+                       (*element_ids)[pos + run_len] == element_id + run_len) {
+                    ++run_len;
+                }
+                return {row_id, elem_idx, static_cast<int32_t>(run_len)};
+            };
 
             while (i < element_ids->size()) {
                 // Start of a new chunk batch
-                int64_t element_id = (*element_ids)[i];
-                auto [doc_id, elem_idx] =
-                    array_offsets->ElementIDToRowID(element_id);
+                auto run = resolve_run(i);
                 auto [chunk_id, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, doc_id);
+                    segment_->get_chunk_by_offset(field_id_, run.row_id);
 
-                // Collect consecutive elements belonging to the same chunk
+                // Collect consecutive runs belonging to the same chunk
                 offsets.clear();
-                elem_indices.clear();
+                first_elem_indices.clear();
+                run_lengths.clear();
                 offsets.push_back(chunk_offset);
-                elem_indices.push_back(elem_idx);
+                first_elem_indices.push_back(run.first_elem_idx);
+                run_lengths.push_back(run.length);
 
                 size_t batch_start = i;
-                i++;
+                i += run.length;
 
-                // Look ahead for more elements in the same chunk
+                // Look ahead for more runs in the same chunk
                 while (i < element_ids->size()) {
-                    int64_t next_element_id = (*element_ids)[i];
-                    auto [next_doc_id, next_elem_idx] =
-                        array_offsets->ElementIDToRowID(next_element_id);
+                    auto next_run = resolve_run(i);
                     auto [next_chunk_id, next_chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, next_doc_id);
+                        segment_->get_chunk_by_offset(field_id_,
+                                                      next_run.row_id);
 
                     if (next_chunk_id != chunk_id) {
                         break;  // Different chunk, process current batch
                     }
 
                     offsets.push_back(next_chunk_offset);
-                    elem_indices.push_back(next_elem_idx);
-                    i++;
+                    first_elem_indices.push_back(next_run.first_elem_idx);
+                    run_lengths.push_back(next_run.length);
+                    i += next_run.length;
                 }
 
-                // Batch fetch all ArrayViews for this chunk
+                // Batch fetch ONE ArrayView per run (per row) in this chunk
                 auto pw = segment_->get_views_by_offsets<ArrayView>(
                     op_ctx_, field_id_, chunk_id, offsets);
 
                 auto [array_vec, valid_data] = pw.get();
 
-                // Process each element in this batch
+                const bool chunk_active =
+                    !skip_func || !skip_func(*skip_index, field_id_, chunk_id);
+
+                // Process each run's elements in this batch
+                size_t result_idx = batch_start;
                 for (size_t j = 0; j < offsets.size(); j++) {
-                    size_t result_idx = batch_start + j;
+                    for (int32_t t = 0; t < run_lengths[j]; ++t, ++result_idx) {
+                        if (chunk_active) {
+                            // Extract element from ArrayView
+                            auto value =
+                                array_vec[j].template get_data<ElementType>(
+                                    first_elem_indices[j] + t);
+                            bool is_valid = !valid_data.data() || valid_data[j];
 
-                    if (!skip_func ||
-                        !skip_func(*skip_index, field_id_, chunk_id)) {
-                        // Extract element from ArrayView
-                        auto value =
-                            array_vec[j].template get_data<ElementType>(
-                                elem_indices[j]);
-                        bool is_valid = !valid_data.data() || valid_data[j];
-
-                        evaluate_batch.template operator()<FilterType::random>(
-                            &value,
-                            &is_valid,
-                            nullptr,
-                            1,
-                            res + result_idx,
-                            valid_res + result_idx,
-                            values...);
-                    } else {
-                        // Keep cursor-tracking evaluators aligned with offset input.
-                        if (valid_data.size() > j && !valid_data[j]) {
-                            res[result_idx] = valid_res[result_idx] = false;
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    &value,
+                                    &is_valid,
+                                    nullptr,
+                                    1,
+                                    res + result_idx,
+                                    valid_res + result_idx,
+                                    values...);
+                        } else {
+                            // Keep cursor-tracking evaluators aligned with
+                            // offset input.
+                            if (valid_data.size() > j && !valid_data[j]) {
+                                res[result_idx] = valid_res[result_idx] = false;
+                            }
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    1,
+                                    res + result_idx,
+                                    valid_res + result_idx,
+                                    values...);
                         }
-                        evaluate_batch.template operator()<FilterType::random>(
-                            nullptr,
-                            nullptr,
-                            nullptr,
-                            1,
-                            res + result_idx,
-                            valid_res + result_idx,
-                            values...);
-                    }
 
-                    processed_size++;
+                        processed_size++;
+                    }
                 }
             }
             return processed_size;
@@ -987,12 +1027,29 @@ class SegmentExpr : public Expr {
 
             auto skip_index = segment_->GetSkipIndex();
             size_t processed_size = 0;
+            size_t i = 0;
 
-            for (size_t i = 0; i < element_ids->size(); i++) {
-                int64_t element_id = (*element_ids)[i];
+            // Same run exploitation as the sealed branch: element ids from
+            // RowOffsetsToElementOffsets list each row's elements
+            // consecutively ascending, so resolve the row with two virtual
+            // calls against published growing-offset snapshots and pin the
+            // Array chunk ONCE per run instead of once per element. The
+            // consecutive-id guard below keeps this correct for arbitrary
+            // input orders.
+            while (i < element_ids->size()) {
+                int32_t element_id = (*element_ids)[i];
 
                 auto [doc_id, elem_idx] =
                     array_offsets->ElementIDToRowID(element_id);
+                const int32_t row_last =
+                    array_offsets->ElementIDRangeOfRow(doc_id).second;
+                int64_t max_run = std::min<int64_t>(row_last - element_id,
+                                                    element_ids->size() - i);
+                int64_t run_len = 1;
+                while (run_len < max_run &&
+                       (*element_ids)[i + run_len] == element_id + run_len) {
+                    ++run_len;
+                }
 
                 // Calculate chunk_id and chunk_offset for this doc
                 auto chunk_id = doc_id / size_per_chunk_;
@@ -1008,36 +1065,44 @@ class SegmentExpr : public Expr {
                     valid_data += chunk_offset;
                 }
 
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
-                    // Extract element from Array
-                    auto value = array_ptr->get_data<ElementType>(elem_idx);
-                    bool is_valid = !valid_data || valid_data[0];
+                const bool chunk_active =
+                    !skip_func || !skip_func(*skip_index, field_id_, chunk_id);
 
-                    evaluate_batch.template operator()<FilterType::random>(
-                        &value,
-                        &is_valid,
-                        nullptr,
-                        1,
-                        res + processed_size,
-                        valid_res + processed_size,
-                        values...);
-                } else {
-                    // Keep cursor-tracking evaluators aligned with offset input.
-                    if (valid_data && !valid_data[0]) {
-                        res[processed_size] = valid_res[processed_size] = false;
+                for (int64_t t = 0; t < run_len; ++t) {
+                    if (chunk_active) {
+                        // Extract element from Array
+                        auto value =
+                            array_ptr->get_data<ElementType>(elem_idx + t);
+                        bool is_valid = !valid_data || valid_data[0];
+
+                        evaluate_batch.template operator()<FilterType::random>(
+                            &value,
+                            &is_valid,
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
+                    } else {
+                        // Keep cursor-tracking evaluators aligned with offset
+                        // input.
+                        if (valid_data && !valid_data[0]) {
+                            res[processed_size] = valid_res[processed_size] =
+                                false;
+                        }
+                        evaluate_batch.template operator()<FilterType::random>(
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
                     }
-                    evaluate_batch.template operator()<FilterType::random>(
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        1,
-                        res + processed_size,
-                        valid_res + processed_size,
-                        values...);
-                }
 
-                processed_size++;
+                    processed_size++;
+                }
+                i += run_len;
             }
 
             return processed_size;
