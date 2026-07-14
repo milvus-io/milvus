@@ -772,18 +772,21 @@ create_chunk_buffer(const FieldMeta& field_meta,
                     const arrow::ArrayVector& array_vec,
                     bool mmap_populate,
                     const std::string& file_path,
-                    proto::common::LoadPriority load_priority) {
+                    proto::common::LoadPriority load_priority,
+                    MmapChunkWritebackMode writeback_mode) {
     auto cw = create_chunk_writer(field_meta);
     auto [size, row_nums] = cw->calculate_size(array_vec);
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
                           ~(ChunkTarget::ALIGNED_SIZE - 1);
     std::shared_ptr<ChunkTarget> target;
+    std::shared_ptr<MmapChunkTarget> mmap_target;
     if (file_path.empty()) {
         target = std::make_shared<MemChunkTarget>(aligned_size, mmap_populate);
     } else {
         auto io_prio = storage::io::GetPriorityFromLoadPriority(load_priority);
-        target = std::make_shared<MmapChunkTarget>(
-            file_path, mmap_populate, aligned_size, io_prio);
+        mmap_target = std::make_shared<MmapChunkTarget>(
+            file_path, mmap_populate, aligned_size, io_prio, writeback_mode);
+        target = mmap_target;
     }
     cw->write_to_target(array_vec, target);
     // The writer is one-shot. Release its scratch buffers before a
@@ -794,6 +797,7 @@ create_chunk_buffer(const FieldMeta& field_meta,
     if (!file_path.empty()) {
         chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(data, size, file_path);
+        mmap_target->TransferOwnership();
     } else {
         chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(data, size, "");
     }
@@ -820,9 +824,14 @@ create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
              bool mmap_populate,
              const std::string& file_path,
-             proto::common::LoadPriority load_priority) {
-    auto buffer = create_chunk_buffer(
-        field_meta, array_vec, mmap_populate, file_path, load_priority);
+             proto::common::LoadPriority load_priority,
+             MmapChunkWritebackMode writeback_mode) {
+    auto buffer = create_chunk_buffer(field_meta,
+                                      array_vec,
+                                      mmap_populate,
+                                      file_path,
+                                      load_priority,
+                                      writeback_mode);
     return make_chunk_from_buffer(field_meta, buffer, 0);
 }
 
@@ -832,7 +841,8 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<arrow::ArrayVector>& array_vec,
                    bool mmap_populate,
                    const std::string& file_path,
-                   proto::common::LoadPriority load_priority) {
+                   proto::common::LoadPriority load_priority,
+                   MmapChunkWritebackMode writeback_mode) {
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
     size_t total_aligned_size = 0, final_row_nums = 0;
@@ -865,15 +875,18 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
         }
     }
     std::shared_ptr<ChunkTarget> target;
+    std::shared_ptr<MmapChunkTarget> mmap_target;
     if (file_path.empty()) {
         target =
             std::make_shared<MemChunkTarget>(total_aligned_size, mmap_populate);
     } else {
-        target = std::make_shared<MmapChunkTarget>(
+        mmap_target = std::make_shared<MmapChunkTarget>(
             file_path,
             mmap_populate,
             total_aligned_size,
-            storage::io::GetPriorityFromLoadPriority(load_priority));
+            storage::io::GetPriorityFromLoadPriority(load_priority),
+            writeback_mode);
+        target = mmap_target;
     }
     for (size_t i = 0; i < field_ids.size(); i++) {
         auto start_off = target->tell();
@@ -910,6 +923,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     if (!file_path.empty()) {
         chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(
             data, total_aligned_size, file_path);
+        mmap_target->TransferOwnership();
     } else {
         chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(data, total_aligned_size, "");
