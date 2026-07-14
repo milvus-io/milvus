@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -2908,6 +2909,228 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		// Should still be catching up (threshold disabled)
 		assert.True(t, sd.CatchingUpStreamingData())
 	})
+}
+
+func TestExternalCollectionDelegatorDoesNotCatchUpStreamingData(t *testing.T) {
+	paramtable.Init()
+
+	collectionID := int64(1000)
+	replicaID := int64(65535)
+	vchannelName := "rootcoord-dml_1000_v0"
+	version := int64(2000)
+	startTs := tsoutil.ComposeTSByTime(time.Now().Add(-48 * time.Hour))
+
+	manager := segments.NewManager()
+	loader := &segments.MockLoader{}
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+
+	err := manager.Collection.PutOrRef(collectionID, &schemapb.CollectionSchema{
+		Name:           "ExternalCollection",
+		ExternalSource: "s3://bucket/path/",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:          "id",
+				FieldID:       100,
+				IsPrimaryKey:  true,
+				DataType:      schemapb.DataType_Int64,
+				ExternalField: "id",
+			},
+			{
+				Name:          "vector",
+				FieldID:       101,
+				DataType:      schemapb.DataType_FloatVector,
+				ExternalField: "vector",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}, &segcorepb.CollectionIndexMeta{}, &querypb.LoadMetaInfo{
+		PartitionIDs:    []int64{500},
+		SchemaBarrierTs: startTs,
+	})
+	require.NoError(t, err)
+
+	delegator, err := NewShardDelegator(
+		context.Background(),
+		collectionID,
+		replicaID,
+		vchannelName,
+		version,
+		&cluster.MockManager{},
+		manager,
+		loader,
+		startTs,
+		nil,
+		chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil,
+	)
+	require.NoError(t, err)
+	defer delegator.Close()
+
+	assert.False(t, delegator.CatchingUpStreamingData())
+	assert.Equal(t, startTs, delegator.GetTSafe())
+	assert.Zero(t, delegator.GetLatestRequiredMVCCTimeTick())
+}
+
+func TestExternalCollectionWaitTSafeUsesFullSnapshotTimestamp(t *testing.T) {
+	oldTSafe := tsoutil.ComposeTSByTime(time.Now().Add(-365 * 24 * time.Hour))
+	guaranteeTS := uint64(1)
+
+	sd := &shardDelegator{
+		skipStreamingForExternalTable: true,
+		latestTsafe:                   atomic.NewUint64(oldTSafe),
+	}
+
+	tSafe, err := sd.waitTSafe(context.Background(), guaranteeTS)
+	require.NoError(t, err)
+	assert.Equal(t, typeutil.MaxTimestamp, tSafe)
+	assert.Equal(t, oldTSafe, sd.GetTSafe())
+}
+
+func newExternalReadTestDelegator(t *testing.T) (*shardDelegator, string) {
+	channel := "rootcoord-dml_1000_v0"
+	distribution := NewDistribution(channel, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	t.Cleanup(distribution.Close)
+	return &shardDelegator{
+		vchannelName:                  channel,
+		lifetime:                      lifetime.NewLifetime(lifetime.Working),
+		distribution:                  distribution,
+		skipStreamingForExternalTable: true,
+	}, channel
+}
+
+func TestExternalCollectionPartialSearchUsesFullSnapshotTimestamp(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryNodeCfg.PartialResultRequiredDataRatio.Key, "0.8"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.QueryNodeCfg.PartialResultRequiredDataRatio.Key))
+	})
+
+	sd, channel := newExternalReadTestDelegator(t)
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			GuaranteeTimestamp: 1,
+			MvccTimestamp:      100,
+		},
+		DmlChannels: []string{channel},
+	}
+
+	_, err := sd.Search(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, typeutil.MaxTimestamp, req.Req.GetMvccTimestamp())
+}
+
+func TestExternalCollectionQueryUsesFullSnapshotTimestamp(t *testing.T) {
+	paramtable.Init()
+	sd, channel := newExternalReadTestDelegator(t)
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			GuaranteeTimestamp: 1,
+			MvccTimestamp:      100,
+		},
+		DmlChannels: []string{channel},
+	}
+
+	_, err := sd.Query(context.Background(), req)
+	require.Error(t, err)
+	assert.Equal(t, typeutil.MaxTimestamp, req.Req.GetMvccTimestamp())
+}
+
+func TestExternalCollectionQueryStreamUsesFullSnapshotTimestamp(t *testing.T) {
+	paramtable.Init()
+	sd, channel := newExternalReadTestDelegator(t)
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			GuaranteeTimestamp: 1,
+			MvccTimestamp:      100,
+		},
+		DmlChannels: []string{channel},
+	}
+
+	err := sd.QueryStream(context.Background(), req, nil)
+	require.Error(t, err)
+	assert.Equal(t, typeutil.MaxTimestamp, req.Req.GetMvccTimestamp())
+}
+
+func TestExternalCollectionStrongConsistencyDoesNotRequestWALMVCC(t *testing.T) {
+	guaranteeTS := tsoutil.ComposeTSByTime(time.Now())
+	sd := &shardDelegator{
+		skipStreamingForExternalTable: true,
+		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
+	}
+
+	actual := sd.speedupGuranteeTS(
+		context.Background(),
+		commonpb.ConsistencyLevel_Strong,
+		guaranteeTS,
+		0,
+		false,
+	)
+
+	assert.Equal(t, guaranteeTS, actual)
+	assert.Zero(t, sd.latestRequiredMVCCTimeTick.Load())
+}
+
+func TestNormalCollectionDelegatorCatchesUpStreamingData(t *testing.T) {
+	paramtable.Init()
+
+	collectionID := int64(1001)
+	replicaID := int64(65535)
+	vchannelName := "rootcoord-dml_1001_v0"
+	version := int64(2001)
+	startTs := tsoutil.ComposeTSByTime(time.Now().Add(-48 * time.Hour))
+
+	manager := segments.NewManager()
+	loader := &segments.MockLoader{}
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+
+	err := manager.Collection.PutOrRef(collectionID, &schemapb.CollectionSchema{
+		Name: "NormalCollection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "id",
+				FieldID:      100,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				Name:     "vector",
+				FieldID:  101,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}, &segcorepb.CollectionIndexMeta{}, &querypb.LoadMetaInfo{
+		PartitionIDs:    []int64{500},
+		SchemaBarrierTs: startTs,
+	})
+	require.NoError(t, err)
+
+	delegator, err := NewShardDelegator(
+		context.Background(),
+		collectionID,
+		replicaID,
+		vchannelName,
+		version,
+		&cluster.MockManager{},
+		manager,
+		loader,
+		startTs,
+		nil,
+		chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil,
+	)
+	require.NoError(t, err)
+	defer delegator.Close()
+
+	assert.True(t, delegator.CatchingUpStreamingData())
 }
 
 // MinHash Function test
