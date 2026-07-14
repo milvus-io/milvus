@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -128,6 +129,29 @@ func (f *BalancerFactory) GetBalancer() Balance {
 
 	f.balancerMap[balanceKey] = balancer
 	return balancer
+}
+
+// GetEpochPolicy returns a snapshot-only policy when the configured balancer
+// can preserve its semantics without consulting live managers during planning.
+func (f *BalancerFactory) GetEpochPolicy() (EpochBalancePolicy, bool) {
+	params := paramtable.Get()
+	balanceKey := params.QueryCoordCfg.Balancer.GetValue()
+	streamingEnabled := streamingutil.IsStreamingServiceEnabled()
+
+	switch balanceKey {
+	case meta.ScoreBasedBalancerName:
+		if streamingEnabled && params.QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+			return nil, false
+		}
+		return newScoreEpochPolicy(false), true
+	case meta.ChannelLevelScoreBalancerName:
+		if streamingEnabled {
+			return nil, false
+		}
+		return newScoreEpochPolicy(true), true
+	default:
+		return nil, false
+	}
 }
 
 // GetStoppingBalancer returns a stopping balancer instance based on the current configuration.
