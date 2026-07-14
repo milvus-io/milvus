@@ -129,6 +129,7 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.mmap_writeback = c_mmap_config.mmap_writeback;
         mmap_config.json_stats_enable_mmap =
             c_mmap_config.json_stats_enable_mmap;
         mmap_config.json_stats_mmap_path =

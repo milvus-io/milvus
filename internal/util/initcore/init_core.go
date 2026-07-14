@@ -297,6 +297,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
+		mmap_writeback:           C.bool(params.QueryNodeCfg.MmapWriteback.GetAsBool()),
 		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
 		json_stats_mmap_path:     cJSONStatsMmapPath,
 	}
