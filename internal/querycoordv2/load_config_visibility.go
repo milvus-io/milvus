@@ -35,16 +35,17 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 	if len(replicas) == 0 {
 		return
 	}
-	for _, replica := range replicas {
-		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
-			return
-		}
-	}
-
 	replicaIDs := make([]typeutil.UniqueID, 0, len(replicas))
 	for _, replica := range replicas {
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			continue
+		}
 		replicaIDs = append(replicaIDs, replica.GetID())
 	}
+	if len(replicaIDs) == 0 {
+		return
+	}
+
 	collections := s.meta.SetReplicasQueryVisible(ctx, replicaIDs...)
 	if len(collections) == 0 {
 		return
