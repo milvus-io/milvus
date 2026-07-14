@@ -4914,6 +4914,80 @@ func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {
 	})
 }
 
+func (s *CollectionFunctionSuite) TestAddCollectionFunctionFieldNormal() {
+	s.Run("success", func() {
+		addFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}, "indexParams": {"fieldName": "sparse", "indexName": "sparse_idx", "metricType": "BM25", "indexType": "SPARSE_INVERTED_INDEX"}}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+		}
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionFieldTestCases, false)
+	})
+
+	s.Run("bad_request", func() {
+		addFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}, "indexParams": {"fieldName": "sparse"}}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters, error: Key: 'CollectionAddFunctionField.CollectionName' Error:Field validation for 'CollectionName' failed on the 'required' tag",
+			},
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "bm25_fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse"]}, "outputField": {"fieldName": "sparse", "dataType": "SparseFloatVector"}, "indexParams": {"fieldName": "wrong_field", "indexName": "sparse_idx", "metricType": "BM25", "indexType": "SPARSE_INVERTED_INDEX"}}`),
+				errCode:     1100,
+				errMsg:      `indexParams.fieldName "wrong_field" must match outputField.fieldName "sparse": invalid parameter`,
+			},
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody: []byte(`invalid json`),
+				errCode:     1801,
+				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionFieldTestCases, false)
+	})
+}
+
+func (s *CollectionFunctionSuite) TestDropCollectionFunctionFieldNormal() {
+	s.Run("success", func() {
+		dropFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, DropFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": "bm25_fn"}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+		}
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, dropFunctionFieldTestCases, false)
+	})
+
+	s.Run("bad_request", func() {
+		dropFunctionFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, DropFunctionFieldAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": ""}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters, error: Key: 'CollectionDropFunctionField.FunctionName' Error:Field validation for 'FunctionName' failed on the 'required' tag",
+			},
+			{
+				path:        versionalV2(CollectionCategory, DropFunctionFieldAction),
+				requestBody: []byte(`invalid json`),
+				errCode:     1801,
+				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, dropFunctionFieldTestCases, false)
+	})
+}
+
 func TestTruncateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit

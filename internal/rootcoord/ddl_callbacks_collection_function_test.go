@@ -235,6 +235,28 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 	suite.Len(coll.Functions, 1) // Original + new
 }
 
+func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCollection_DiscardsClientFieldIds() {
+	ctx := context.Background()
+	coll := suite.createTestCollection()
+
+	// Client injects bogus field IDs (output_field_ids points at the unrelated
+	// "vector" field 102). Only the name-resolved IDs must persist, else a later
+	// drop_function_field would delete field 102.
+	fSchema := &schemapb.FunctionSchema{
+		Name:             "test_function",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text_field"},
+		InputFieldIds:    []int64{999},
+		OutputFieldNames: []string{"output_field"},
+		OutputFieldIds:   []int64{102},
+	}
+
+	err := alterFunctionGenNewCollection(ctx, fSchema, coll)
+	suite.NoError(err)
+	suite.Equal([]int64{103}, fSchema.InputFieldIds)  // text_field only, 999 discarded
+	suite.Equal([]int64{104}, fSchema.OutputFieldIds) // output_field only, 102 discarded
+}
+
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCollection_FunctionNotExists() {
 	ctx := context.Background()
 	coll := suite.createTestCollection()
@@ -275,126 +297,6 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 	err := alterFunctionGenNewCollection(ctx, fSchema, coll)
 	suite.Error(err)
 	suite.Contains(err.Error(), "function's output field non_existent_field not exists")
-}
-
-func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForAddFunction_FunctionNameExists() {
-	coll := suite.createTestCollection()
-
-	// Create request with existing function name
-	req := &milvuspb.AddCollectionFunctionRequest{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		FunctionSchema: &schemapb.FunctionSchema{
-			Name: "test_function", // Same as existing function
-		},
-	}
-
-	newColl := coll.Clone()
-	fSchema := req.FunctionSchema
-
-	// Check for function name conflict
-	for _, f := range newColl.Functions {
-		if f.Name == fSchema.Name {
-			err := errors.New("function name already exists")
-			suite.Error(err)
-			return
-		}
-	}
-}
-
-// Test broadcastAlterCollectionForDropFunction
-func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForDropFunction_Success() {
-	coll := suite.createTestCollection()
-	req := &milvuspb.DropCollectionFunctionRequest{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		FunctionName:   "test_function",
-	}
-
-	// Find function to delete
-	var needDelFunc *model.Function
-	for _, f := range coll.Functions {
-		if f.Name == req.FunctionName {
-			needDelFunc = f
-			break
-		}
-	}
-	suite.NotNil(needDelFunc, "Function should exist")
-
-	newColl := coll.Clone()
-
-	// Remove function from collection
-	newFuncs := []*model.Function{}
-	for _, f := range newColl.Functions {
-		if f.Name != needDelFunc.Name {
-			newFuncs = append(newFuncs, f)
-		}
-	}
-	newColl.Functions = newFuncs
-
-	// Reset output field flags
-	fieldMapping := map[int64]*model.Field{}
-	for _, field := range newColl.Fields {
-		fieldMapping[field.FieldID] = field
-	}
-	for _, id := range needDelFunc.OutputFieldIDs {
-		field, exists := fieldMapping[id]
-		suite.True(exists, "Output field should exist")
-		field.IsFunctionOutput = false
-	}
-
-	// Verify function was removed
-	suite.Len(newColl.Functions, 0)
-
-	// Verify output field is no longer marked as function output
-	outputField := fieldMapping[104] // output_field
-	suite.False(outputField.IsFunctionOutput)
-}
-
-func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForDropFunction_FunctionNotExists() {
-	coll := suite.createTestCollection()
-	req := &milvuspb.DropCollectionFunctionRequest{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		FunctionName:   "non_existent_function",
-	}
-
-	// Find function to delete
-	var needDelFunc *model.Function
-	for _, f := range coll.Functions {
-		if f.Name == req.FunctionName {
-			needDelFunc = f
-			break
-		}
-	}
-	suite.Nil(needDelFunc, "Function should not exist")
-	// This should return nil (no error) as per the original implementation
-}
-
-func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForDropFunction_OutputFieldNotExists() {
-	coll := suite.createTestCollection()
-
-	// Create a function with non-existent output field ID
-	needDelFunc := &model.Function{
-		ID:             1001,
-		Name:           "test_function",
-		OutputFieldIDs: []int64{999}, // Non-existent field ID
-	}
-
-	newColl := coll.Clone()
-	fieldMapping := map[int64]*model.Field{}
-	for _, field := range newColl.Fields {
-		fieldMapping[field.FieldID] = field
-	}
-
-	for _, id := range needDelFunc.OutputFieldIDs {
-		_, exists := fieldMapping[id]
-		if !exists {
-			err := errors.New("function's output field not exists")
-			suite.Error(err)
-			return
-		}
-	}
 }
 
 // Test edge cases and error conditions
@@ -468,9 +370,14 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 			CollectionName: "test_collection",
 			FunctionSchema: &schemapb.FunctionSchema{
 				Name:             "test_function",
-				Type:             schemapb.FunctionType_BM25,
+				Type:             schemapb.FunctionType_TextEmbedding,
 				InputFieldNames:  []string{"text_field"},
-				OutputFieldNames: []string{"vector"},
+				OutputFieldNames: []string{"output_field"},
+				// identity unchanged; only a whitelisted connection param ("url") is altered
+				Params: []*commonpb.KeyValuePair{
+					{Key: "param1", Value: "value1"},
+					{Key: "url", Value: "http://new-endpoint"},
+				},
 			},
 		}
 		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
@@ -478,6 +385,30 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
 		suite.NoError(err)
+	})
+
+	suite.Run("altering non-whitelisted param rejected", func() {
+		coll := suite.createTestCollection()
+
+		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		suite.core.meta = mockMeta
+
+		req := &milvuspb.AlterCollectionFunctionRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{"text_field"},
+				OutputFieldNames: []string{"output_field"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: "param1", Value: "changed"},
+				},
+			},
+		}
+		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
+		suite.ErrorContains(err, "cannot be altered")
 	})
 
 	suite.Run("external collection rejected", func() {
@@ -500,143 +431,5 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		}
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
 		suite.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
-	})
-}
-
-func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForDropFunction() {
-	suite.Run("success", func() {
-		coll := suite.createTestCollection()
-
-		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
-		suite.core.meta = mockMeta
-
-		req := &milvuspb.DropCollectionFunctionRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			FunctionName:   "test_function",
-		}
-
-		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
-		defer mocker.UnPatch()
-
-		err := suite.core.broadcastAlterCollectionForDropFunction(context.Background(), req)
-		suite.NoError(err)
-	})
-
-	suite.Run("external collection rejected", func() {
-		coll := suite.createTestCollection()
-		coll.Fields[2].ExternalField = "text_col"
-
-		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
-		suite.core.meta = mockMeta
-
-		req := &milvuspb.DropCollectionFunctionRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			FunctionName:   "test_function",
-		}
-
-		err := suite.core.broadcastAlterCollectionForDropFunction(context.Background(), req)
-		suite.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
-	})
-
-	suite.Run("function not exists", func() {
-		coll := suite.createTestCollection()
-
-		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
-		suite.core.meta = mockMeta
-
-		req := &milvuspb.DropCollectionFunctionRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			FunctionName:   "non_existent_function",
-		}
-
-		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
-		defer mocker.UnPatch()
-
-		err := suite.core.broadcastAlterCollectionForDropFunction(context.Background(), req)
-		suite.NoError(err)
-	})
-}
-
-func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForAddFunction() {
-	suite.Run("function name already exists", func() {
-		coll := suite.createTestCollection()
-
-		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
-		suite.core.meta = mockMeta
-
-		req := &milvuspb.AddCollectionFunctionRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			FunctionSchema: &schemapb.FunctionSchema{
-				Name:             "test_function",
-				Type:             schemapb.FunctionType_TextEmbedding,
-				InputFieldNames:  []string{"text_field"},
-				OutputFieldNames: []string{"vector"},
-			},
-		}
-
-		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
-		defer mocker.UnPatch()
-
-		err := suite.core.broadcastAlterCollectionForAddFunction(context.Background(), req)
-		suite.Error(err)
-	})
-
-	suite.Run("function input field not exists", func() {
-		coll := suite.createTestCollection()
-		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
-		suite.core.meta = mockMeta
-
-		req := &milvuspb.AddCollectionFunctionRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			FunctionSchema: &schemapb.FunctionSchema{
-				Name:             "new_function",
-				Type:             schemapb.FunctionType_TextEmbedding,
-				InputFieldNames:  []string{"non_existent_field"},
-				OutputFieldNames: []string{"vector"},
-			},
-		}
-
-		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
-		defer mocker.UnPatch()
-
-		err := suite.core.broadcastAlterCollectionForAddFunction(context.Background(), req)
-		suite.Error(err)
-		suite.Contains(err.Error(), "function's input field non_existent_field not exists")
-	})
-
-	suite.Run("function output field not exists", func() {
-		coll := suite.createTestCollection()
-
-		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
-		suite.core.meta = mockMeta
-
-		req := &milvuspb.AddCollectionFunctionRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			FunctionSchema: &schemapb.FunctionSchema{
-				Name:             "new_function2",
-				Type:             schemapb.FunctionType_TextEmbedding,
-				InputFieldNames:  []string{"text_field"},
-				OutputFieldNames: []string{"non_existent_field"},
-			},
-		}
-
-		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
-		defer mocker.UnPatch()
-
-		err := suite.core.broadcastAlterCollectionForAddFunction(context.Background(), req)
-		suite.Error(err)
-		suite.Contains(err.Error(), "function's output field non_existent_field not exists")
 	})
 }

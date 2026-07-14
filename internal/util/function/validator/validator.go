@@ -87,6 +87,17 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 			return err
 		}
 	}
+	// No cascade: a function's input must not be another function's output. A field
+	// cannot be a function's own input and output (rejected above), so any input in
+	// usedOutputField belongs to a different function. Enforced here so it holds on
+	// every path (create, legacy add, alter), not only add_function_field.
+	for _, function := range coll.GetFunctions() {
+		for _, name := range function.GetInputFieldNames() {
+			if usedOutputField.Contain(name) {
+				return merr.WrapErrParameterInvalidMsg("function %s input field %s is the output of another function; function cascade is not supported", function.GetName(), name)
+			}
+		}
+	}
 	if !disableRuntimeCheck {
 		if err := embedding.ValidateFunctions(coll, needValidateFunctionName, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
 			return err

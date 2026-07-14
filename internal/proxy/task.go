@@ -114,9 +114,7 @@ const (
 	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
 	AlterCollectionFieldTaskName  = "AlterCollectionFieldTask"
-	AddCollectionFunctionTask     = "AddCollectionFunctionTask"
 	AlterCollectionFunctionTask   = "AlterCollectionFunctionTask"
-	DropCollectionFunctionTask    = "DropCollectionFunctionTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
 	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
@@ -1182,6 +1180,9 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
 			return err
 		}
+		if err := schemautil.CheckNoFunctionCascade(t.oldSchema.GetFunctions(), plan.Function); err != nil {
+			return err
+		}
 	}
 
 	// Validate the bound index params against the new field, mirroring the
@@ -1418,18 +1419,15 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 	}
 
 	if !dropOutputFields {
-		if targetFunc.GetType() == schemapb.FunctionType_BM25 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
-		}
-		return nil
+		// A function is coupled to its output field for all types: detaching (removing
+		// the function but keeping the field) is never allowed. drop_function always
+		// removes the function together with its output field.
+		return merr.WrapErrParameterInvalidMsg(
+			"detaching a function without dropping its output field is not supported; drop_function always removes the function together with its output field: %s", functionName)
 	}
 
-	switch targetFunc.GetType() {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
-	default:
-		return merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
-	}
-
+	// Drop is uniform across function types (no backfill); unlike add_function_field
+	// it is not type-restricted.
 	removedVectors := 0
 	for _, name := range targetFunc.OutputFieldNames {
 		if f := typeutil.GetFieldByName(schema, name); f != nil && typeutil.IsVectorType(f.DataType) {
@@ -2580,9 +2578,11 @@ func validateAlterAnalyzerFieldParam(collSchema *schemapb.CollectionSchema, fiel
 		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
 	}
 
-	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, field) {
+	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() ||
+		typeutil.IsBm25FunctionInputField(collSchema, field) ||
+		typeutil.IsMinHashFunctionInputField(collSchema, field) {
 		return merr.WrapErrParameterInvalidMsg(
-			"can not alter analyzer params for field %s after text match is enabled or BM25 function depends on it",
+			"can not alter analyzer params for field %s after text match is enabled or a BM25/MinHash function depends on it",
 			fieldName,
 		)
 	}
