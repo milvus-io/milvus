@@ -134,6 +134,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
@@ -8391,7 +8392,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
             std::nullopt,
-            writeback_mode);
+            writeback_mode,
+            storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -8539,7 +8541,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
             std::move(column_size_estimate),
-            writeback_mode);
+            writeback_mode,
+            storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
