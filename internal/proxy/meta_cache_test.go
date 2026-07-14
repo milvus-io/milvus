@@ -1178,6 +1178,159 @@ func TestMetaCache_InitCache(t *testing.T) {
 	})
 }
 
+// TestMetaCache_ByIDIndexRealDBBucket verifies that by-id lookups are served
+// from the cluster-wide id index and that fills land under the collection's
+// actual database: same-name collections in different databases no longer
+// evict each other, and a by-id fill is shared with later by-name lookups.
+func TestMetaCache_ByIDIndexRealDBBucket(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+	describeCount := int32(0)
+	mix.SetDescribeCollectionFunc(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		atomic.AddInt32(&describeCount, 1)
+		resp := &milvuspb.DescribeCollectionResponse{Status: merr.Success(), RequestTime: 100}
+		switch {
+		case req.GetCollectionID() == 101 || (req.GetDbName() == "db1" && req.GetCollectionName() == "foo"):
+			resp.CollectionID = 101
+			resp.DbName = "db1"
+			resp.DbId = 1
+			resp.Schema = &schemapb.CollectionSchema{Name: "foo"}
+		case req.GetCollectionID() == 202 || (req.GetDbName() == "db2" && req.GetCollectionName() == "foo"):
+			resp.CollectionID = 202
+			resp.DbName = "db2"
+			resp.DbId = 2
+			resp.Schema = &schemapb.CollectionSchema{Name: "foo"}
+		default:
+			return nil, merr.WrapErrCollectionNotFound(req.GetCollectionName())
+		}
+		return resp, nil
+	})
+	cache, err := NewMetaCache(mix)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// two same-name collections in different databases, both filled by id only
+	name, err := cache.GetCollectionName(ctx, "", 101)
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", name)
+	name, err = cache.GetCollectionName(ctx, "", 202)
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", name)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
+
+	// repeated by-id lookups hit the id index; the entries do not evict each
+	// other even though the names collide
+	for i := 0; i < 3; i++ {
+		_, err = cache.GetCollectionName(ctx, "", 101)
+		assert.NoError(t, err)
+		_, err = cache.GetCollectionName(ctx, "", 202)
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
+
+	// entries live under their real databases; no "" bucket exists
+	cache.mu.RLock()
+	assert.Nil(t, cache.collInfo[""])
+	assert.NotNil(t, cache.collInfo["db1"]["foo"])
+	assert.NotNil(t, cache.collInfo["db2"]["foo"])
+	assert.Same(t, cache.collInfo["db1"]["foo"], cache.collInfoByID[101])
+	assert.Same(t, cache.collInfo["db2"]["foo"], cache.collInfoByID[202])
+	cache.mu.RUnlock()
+
+	// a by-name lookup reuses the by-id fill, no extra RPC
+	id, err := cache.GetCollectionID(ctx, "db1", "foo")
+	assert.NoError(t, err)
+	assert.Equal(t, UniqueID(101), id)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
+
+	// removal by id drops the index entry, next by-id lookup goes remote
+	cache.RemoveCollectionsByID(ctx, 101, 0, false)
+	name, err = cache.GetCollectionName(ctx, "", 101)
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", name)
+	assert.Equal(t, int32(3), atomic.LoadInt32(&describeCount))
+
+	// dropping a database drops its entries from the index too
+	cache.RemoveDatabase(ctx, "db2")
+	cache.mu.RLock()
+	assert.Nil(t, cache.collInfoByID[202])
+	assert.NotNil(t, cache.collInfoByID[101])
+	cache.mu.RUnlock()
+}
+
+// TestMetaCache_EmptyDBNameSharesDefaultEntry verifies the proxy mirrors
+// rootcoord's normalization of an empty db name to the default database for
+// name lookups, so empty-db and explicit-default callers share one entry.
+// TestMetaCache_ByIDEmptyDBNameNotCached verifies that when an id-only describe
+// comes back without a real db name (e.g. an older rootcoord during a rolling
+// upgrade), the entry is returned but NOT cached under a guessed database.
+// Guessing "default" would let a later default.<name> lookup silently hit a
+// collection that actually lives in another database.
+func TestMetaCache_ByIDEmptyDBNameNotCached(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+	describeCount := int32(0)
+	mix.SetDescribeCollectionFunc(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		atomic.AddInt32(&describeCount, 1)
+		// older rootcoord: resolves the name but does not report the real db
+		return &milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 101,
+			DbName:       "",
+			Schema:       &schemapb.CollectionSchema{Name: "foo"},
+			RequestTime:  100,
+		}, nil
+	})
+	cache, err := NewMetaCache(mix)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// the id-only lookup still resolves the name from the response
+	name, err := cache.GetCollectionName(ctx, "", 101)
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", name)
+
+	// nothing was cached under a guessed bucket: neither "" nor "default", and
+	// the by-id index stays empty, so a later default.foo lookup cannot mis-hit
+	cache.mu.RLock()
+	assert.Nil(t, cache.collInfo[""]["foo"])
+	assert.Nil(t, cache.collInfo["default"]["foo"])
+	assert.Nil(t, cache.collInfoByID[101])
+	cache.mu.RUnlock()
+
+	// re-describes on each call (no cache) — acceptable for the upgrade window,
+	// correctness is preferred over a cache hit built on a guessed database
+	_, err = cache.GetCollectionName(ctx, "", 101)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
+}
+
+func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockMixCoordClientInterface{}
+	err := InitMetaCache(ctx, rootCoord)
+	assert.NoError(t, err)
+
+	id, err := globalMetaCache.GetCollectionID(ctx, "", "collection1")
+	assert.NoError(t, err)
+	assert.Equal(t, UniqueID(1), id)
+	assert.Equal(t, 1, rootCoord.GetAccessCount())
+
+	// explicit default db, by-id with empty db, and by-id with an unrelated db
+	// (ids are cluster-unique, rootcoord ignores the db for by-id describes)
+	// are all served by the same entry without further RPCs
+	id, err = globalMetaCache.GetCollectionID(ctx, "default", "collection1")
+	assert.NoError(t, err)
+	assert.Equal(t, UniqueID(1), id)
+	name, err := globalMetaCache.GetCollectionName(ctx, "", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, "collection1", name)
+	name, err = globalMetaCache.GetCollectionName(ctx, "some_other_db", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, "collection1", name)
+	assert.Equal(t, 1, rootCoord.GetAccessCount())
+}
+
 func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}

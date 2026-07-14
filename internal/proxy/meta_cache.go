@@ -357,9 +357,10 @@ var _ Cache = (*MetaCache)(nil)
 type MetaCache struct {
 	mixCoord types.MixCoordClient
 
-	dbInfo    map[string]*databaseInfo              // database -> db_info
-	collInfo  map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
-	aliasInfo map[string]map[string]*aliasEntry     // database -> alias -> entry
+	dbInfo       map[string]*databaseInfo              // database -> db_info
+	collInfo     map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
+	collInfoByID map[UniqueID]*collectionInfo          // collection id -> entry; ids are cluster-unique, mirrors collInfo
+	aliasInfo    map[string]map[string]*aliasEntry     // database -> alias -> entry
 
 	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
 	privilegeInfos map[string]struct{}                   // privileges cache
@@ -421,6 +422,7 @@ func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 		dbInfo:                  map[string]*databaseInfo{},
 		aliasInfo:               map[string]map[string]*aliasEntry{},
 		collInfo:                map[string]map[string]*collectionInfo{},
+		collInfoByID:            map[UniqueID]*collectionInfo{},
 		credMap:                 map[string]*internalpb.CredentialInfo{},
 		privilegeInfos:          map[string]struct{}{},
 		userToRoles:             map[string]map[string]struct{}{},
@@ -438,26 +440,28 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	if collectionName == "" {
+		// By-id lookup: collection ids are cluster-unique and rootcoord ignores
+		// the db name when describing by id, so serve straight from the id index.
+		if collection, ok := m.collInfoByID[collectionID]; ok {
+			return collection, collection.isCollectionCached()
+		}
+		return nil, false
+	}
+
+	database = normalizeDBName(database)
 	db, ok := m.collInfo[database]
 	if !ok {
 		return nil, false
 	}
-	if collectionName == "" {
-		for _, collection := range db {
-			if collection.collID == collectionID {
+	if collection, ok := db[collectionName]; ok {
+		return collection, collection.isCollectionCached()
+	}
+	// update() stores alias requests under the real collection name.
+	if aliasDB, ok := m.aliasInfo[database]; ok {
+		if entry, ok := aliasDB[collectionName]; ok && entry.collectionName != "" {
+			if collection, ok := db[entry.collectionName]; ok {
 				return collection, collection.isCollectionCached()
-			}
-		}
-	} else {
-		if collection, ok := db[collectionName]; ok {
-			return collection, collection.isCollectionCached()
-		}
-		// update() stores alias requests under the real collection name.
-		if aliasDB, ok := m.aliasInfo[database]; ok {
-			if entry, ok := aliasDB[collectionName]; ok && entry.collectionName != "" {
-				if collection, ok := db[entry.collectionName]; ok {
-					return collection, collection.isCollectionCached()
-				}
 			}
 		}
 	}
@@ -481,9 +485,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	if collectionName == "" || isAlias {
 		collectionName = realName
 	}
-	if database == "" {
-		mlog.Warn(ctx, "database is empty, use default database name", mlog.String("collectionName", collectionName), mlog.Stack("stack"))
-	}
 	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
 	if err != nil {
 		return nil, err
@@ -491,6 +492,30 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	queryMode := common.GetQueryMode(collection.Properties...)
 
 	schemaInfo := newSchemaInfo(collection.Schema)
+
+	// Cache under the collection's actual database, carried in the describe
+	// response, so a collection has exactly one cache location no matter how
+	// it was looked up (by name, or by id without a db name).
+	bucketDB := collection.GetDbName()
+	if bucketDB == "" {
+		if database == "" {
+			// The describe response carries no real db (older rootcoord) and
+			// the request had no db either — this is an external id-only lookup
+			// with no db context. Guessing a bucket (e.g. default) could shadow
+			// a real same-name collection of another database on a later
+			// by-name lookup, so return the info without caching rather than
+			// risk a cross-database mis-hit. The by-id index stays clean too.
+			// Name lookups always carry a db (normalized in UpdateByName) and
+			// internal by-id refreshes pass their real db, so both still cache.
+			mlog.Warn(ctx, "describe by id returned empty db name with no request db; skipping cache to avoid guessing the database",
+				mlog.String("collectionName", collectionName),
+				mlog.Int64("collectionID", collection.GetCollectionID()))
+			return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
+		}
+		// The request database is authoritative (by-name lookup, or an internal
+		// by-id refresh that passed a real db).
+		bucketDB = normalizeDBName(database)
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -500,40 +525,58 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		mlog.Debug(ctx, "describe collection timestamp less than version, don't update cache",
 			mlog.String("collectionName", collectionName),
 			mlog.Uint64("version", collection.GetRequestTime()), mlog.Uint64("cache version", curVersion))
-		return &collectionInfo{
-			collID:                collection.CollectionID,
-			dbID:                  collection.GetDbId(),
-			dbName:                collection.GetDbName(),
-			schema:                schemaInfo,
-			createdTimestamp:      collection.CreatedTimestamp,
-			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
-			consistencyLevel:      collection.ConsistencyLevel,
-			partitionKeyIsolation: isolation,
-			queryMode:             queryMode,
-			updateTimestamp:       collection.UpdateTimestamp,
-			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
-			vChannels:             collection.VirtualChannelNames,
-			pChannels:             collection.PhysicalChannelNames,
-			numPartitions:         collection.NumPartitions,
-			shardsNum:             collection.ShardsNum,
-			aliases:               collection.Aliases,
-			properties:            collection.Properties,
-		}, nil
+		return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
 	}
-	_, dbOk := m.collInfo[database]
+	_, dbOk := m.collInfo[bucketDB]
 	if !dbOk {
-		m.collInfo[database] = make(map[string]*collectionInfo)
+		m.collInfo[bucketDB] = make(map[string]*collectionInfo)
 	}
 
 	if isAlias {
 		// Caller passed an alias; record the alias→realName mapping so
 		// subsequent ResolveCollectionAlias calls hit Level 2 cache.
-		m.setAliasLocked(database, originalName, &aliasEntry{collectionName: realName, cachedAt: time.Now()})
+		m.setAliasLocked(bucketDB, originalName, &aliasEntry{collectionName: realName, cachedAt: time.Now()})
 		// Remove any stale collInfo entry that was previously cached under the alias key.
-		delete(m.collInfo[database], originalName)
+		if stale, ok := m.collInfo[bucketDB][originalName]; ok {
+			m.unindexCollInfoLocked(stale)
+			delete(m.collInfo[bucketDB], originalName)
+		}
 	}
 
-	m.collInfo[database][collectionName] = &collectionInfo{
+	if old, ok := m.collInfo[bucketDB][collectionName]; ok {
+		m.unindexCollInfoLocked(old)
+	}
+	m.collInfo[bucketDB][collectionName] = newCollectionInfo(collection, schemaInfo, isolation, queryMode)
+
+	mlog.Info(ctx, "meta update success", mlog.String("requestDatabase", database), mlog.String("database", bucketDB),
+		mlog.String("collectionName", collectionName),
+		mlog.String("actual collection Name", collection.Schema.GetName()), mlog.Int64("collectionID", collection.CollectionID),
+		mlog.Uint64("version", collection.GetRequestTime()), mlog.Any("aliases", collection.Aliases),
+		mlog.Bool("partition key isolation", isolation), mlog.String("queryMode", queryMode),
+	)
+
+	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()
+	collInfo := m.collInfo[bucketDB][collectionName]
+	m.indexCollInfoLocked(collInfo)
+
+	return collInfo, nil
+}
+
+// normalizeDBName maps an empty database name to the default database,
+// mirroring rootcoord's backward-compat normalization for name lookups
+// (meta_table.getCollectionByNameInternal).
+func normalizeDBName(database string) string {
+	if database == "" {
+		return defaultDB
+	}
+	return database
+}
+
+// newCollectionInfo builds a collectionInfo from a describe response. It does
+// not touch any cache map, so it is safe to use for entries that are returned
+// without being cached.
+func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaInfo *schemaInfo, isolation bool, queryMode string) *collectionInfo {
+	return &collectionInfo{
 		collID:                collection.CollectionID,
 		dbID:                  collection.GetDbId(),
 		dbName:                collection.GetDbName(),
@@ -552,17 +595,23 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		aliases:               collection.Aliases,
 		properties:            collection.Properties,
 	}
+}
 
-	mlog.Info(ctx, "meta update success", mlog.String("database", database), mlog.String("collectionName", collectionName),
-		mlog.String("actual collection Name", collection.Schema.GetName()), mlog.Int64("collectionID", collection.CollectionID),
-		mlog.Uint64("version", collection.GetRequestTime()), mlog.Any("aliases", collection.Aliases),
-		mlog.Bool("partition key isolation", isolation), mlog.String("queryMode", queryMode),
-	)
+// indexCollInfoLocked records info in the by-id index. Caller must hold m.mu write lock.
+func (m *MetaCache) indexCollInfoLocked(info *collectionInfo) {
+	m.collInfoByID[info.collID] = info
+}
 
-	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()
-	collInfo := m.collInfo[database][collectionName]
-
-	return collInfo, nil
+// unindexCollInfoLocked drops entry from the by-id index only when the index
+// still points at this exact entry, so removing a stale duplicate name key
+// cannot drop the index of the live entry. Caller must hold m.mu write lock.
+func (m *MetaCache) unindexCollInfoLocked(entry *collectionInfo) {
+	if entry == nil {
+		return
+	}
+	if cur, ok := m.collInfoByID[entry.collID]; ok && cur == entry {
+		delete(m.collInfoByID, entry.collID)
+	}
 }
 
 func buildSfKeyByName(database, collectionName string) string {
@@ -578,6 +627,7 @@ func buildPartitionSfKey(database, collectionName, partitionName string) string 
 }
 
 func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName string) (*collectionInfo, error) {
+	database = normalizeDBName(database)
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyByName(database, collectionName), func() (*collectionInfo, error) {
 		return m.update(ctx, database, collectionName, 0)
 	})
@@ -594,6 +644,9 @@ func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName s
 }
 
 func (m *MetaCache) UpdateByID(ctx context.Context, database string, collectionID UniqueID) (*collectionInfo, error) {
+	// Do not normalize an empty db to default here: update() needs to tell an
+	// external id-only lookup (no db context) apart from an internal by-id
+	// refresh that carries a real db, to decide whether it may cache by name.
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyById(database, collectionID), func() (*collectionInfo, error) {
 		return m.update(ctx, database, "", collectionID)
 	})
@@ -700,7 +753,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 func (m *MetaCache) getAlias(database, alias string) (*aliasEntry, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if db, ok := m.aliasInfo[database]; ok {
+	if db, ok := m.aliasInfo[normalizeDBName(database)]; ok {
 		if entry, ok := db[alias]; ok {
 			// Expire negative cache entries after TTL
 			if entry.collectionName == "" && time.Since(entry.cachedAt) > aliasCacheNegativeTTL {
@@ -714,6 +767,7 @@ func (m *MetaCache) getAlias(database, alias string) (*aliasEntry, bool) {
 
 // setAliasLocked sets an alias cache entry. Caller must hold m.mu write lock.
 func (m *MetaCache) setAliasLocked(database, alias string, entry *aliasEntry) {
+	database = normalizeDBName(database)
 	if _, ok := m.aliasInfo[database]; !ok {
 		m.aliasInfo[database] = make(map[string]*aliasEntry)
 	}
@@ -722,7 +776,7 @@ func (m *MetaCache) setAliasLocked(database, alias string, entry *aliasEntry) {
 
 // removeAliasLocked removes an alias cache entry. Caller must hold m.mu write lock.
 func (m *MetaCache) removeAliasLocked(database, alias string) {
-	if db, ok := m.aliasInfo[database]; ok {
+	if db, ok := m.aliasInfo[normalizeDBName(database)]; ok {
 		delete(db, alias)
 	}
 }
@@ -1112,6 +1166,7 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 		for k, v := range db {
 			if v.collID == collectionID {
 				if version == 0 || curVersion <= version {
+					m.unindexCollInfoLocked(v)
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
 					collectionKey := buildSfKeyByName(database, k)
@@ -1152,10 +1207,11 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 
 	// Forget singleflight keys for all collections in this database
 	if db, ok := m.collInfo[database]; ok {
-		for collectionName := range db {
+		for collectionName, entry := range db {
 			collectionKey := buildSfKeyByName(database, collectionName)
 			m.sfCollLevelPartitionCache.Forget(collectionKey)
 			m.sfPartitionCache.Forget(collectionKey)
+			m.unindexCollInfoLocked(entry)
 		}
 	}
 
@@ -1415,7 +1471,10 @@ func (m *MetaCache) shouldStaleCollectionInfoLocked(collectionID UniqueID, versi
 
 func (m *MetaCache) staleCollectionInfoByNameLocked(database, collectionName string) {
 	if db, ok := m.collInfo[database]; ok {
-		delete(db, collectionName)
+		if entry, ok := db[collectionName]; ok {
+			m.unindexCollInfoLocked(entry)
+			delete(db, collectionName)
+		}
 	}
 
 	m.sfGlobal.Forget(buildSfKeyByName(database, collectionName))
