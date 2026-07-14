@@ -3068,6 +3068,18 @@ void
 SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 const DataArray* data_array,
                                                 int64_t num_rows) {
+    // ORDERING DEPENDENCY: this appends rows to the TAIL of the cache
+    // (SimpleGeometryCache::AppendData carries no offset), while readers
+    // address the cache by absolute segment offset (GetByOffsetUnsafe).
+    // Tail-append lines up with segment offsets only because Insert() is
+    // serialized per growing segment (one flowgraph consumer per vchannel;
+    // recovery load completes before consumption starts) and rows arrive in
+    // reserved-offset order. Unlike the R-Tree index path -- AddGeometry is
+    // offset-addressed and tolerates any arrival order -- this cache does
+    // NOT support concurrent inserts: interleaved appends would bind
+    // geometries to wrong offsets and silently corrupt query results. If
+    // Insert() ever becomes concurrent per segment, AppendData must take the
+    // reserved offset and place rows at absolute indices.
     try {
         // Get geometry cache for this segment+field
         auto geometry_cache =

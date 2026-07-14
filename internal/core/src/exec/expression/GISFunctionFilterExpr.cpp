@@ -626,9 +626,11 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 // (RTreeIndex::Count()), while `size` is driven by the
                 // segment's active rows. The Insert path indexes a row
                 // (AppendingIndex) before the ack-responder makes it
-                // searchable, and add_geometry never drops a row (unparseable
-                // WKB gets a placeholder MBR), so active_count <= index
-                // Count() must always hold. Guard it explicitly: a violated
+                // searchable, and the growing add_geometry path never drops a
+                // row (unparseable WKB gets a placeholder MBR; sealed
+                // bulk-load differs but sizes Count() from the real row
+                // count, see bulk_load_from_field_data), so active_count <=
+                // index Count() must always hold. Guard it explicitly: a violated
                 // invariant must surface as a clear error, never as an
                 // out-of-bounds read or fabricated results (a row reported
                 // result=false is a silent wrong answer, and flips to a false

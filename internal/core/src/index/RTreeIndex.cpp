@@ -73,11 +73,16 @@ template <typename T>
 void
 RTreeIndex<T>::InitForBuildIndex(bool is_growing) {
     if (is_growing) {
-        // A growing segment may build its index from multiple concurrent
-        // writers (IndexingRecord::AppendingIndex is documented "concurrent,
-        // reentrant"). Make the lazy first-time init idempotent under the
-        // write lock so the wrapper is created exactly once and concurrent
-        // readers never observe a torn shared_ptr.
+        // Concurrency model: production currently serializes writes to a
+        // growing segment (one flowgraph consumer per vchannel drives
+        // SegmentGrowingImpl::Insert, and recovery's LoadGrowing completes
+        // before consumption starts). The locking here is defense-in-depth
+        // honoring the segcore-level IndexingRecord::AppendingIndex contract
+        // ("concurrent, reentrant"), not a claim that production exercises
+        // multi-writer inserts today. Writers may still race concurrent
+        // READERS (search on the growing index), so the lazy first-time init
+        // stays idempotent under the write lock: the wrapper is created
+        // exactly once and readers never observe a torn shared_ptr.
         std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
         if (wrapper_) {
             return;
@@ -456,11 +461,14 @@ RTreeIndex<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
     std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
-    // null_offset_ is not guaranteed to be sorted: the concurrent multi-writer
-    // AddGeometry path appends offsets in completion order, so a std::lower_bound
-    // shortcut would be undefined and could leave in-range offsets past the
-    // bound (or, worse, iterate offsets >= count). Bounds-check each element
-    // instead so an out-of-range offset can never write past the bitset.
+    // null_offset_ is not guaranteed to be sorted by construction: AddGeometry
+    // appends offsets in arrival order, and while production currently
+    // serializes inserts per growing segment (so the order is monotonic
+    // today), nothing in this class enforces it. A std::lower_bound shortcut
+    // would silently rely on that external property and could leave in-range
+    // offsets past the bound (or, worse, iterate offsets >= count).
+    // Bounds-check each element instead so an out-of-range offset can never
+    // write past the bitset.
     for (auto off : null_offset_) {
         if (off < static_cast<size_t>(count)) {
             bitset.set(off);
@@ -475,7 +483,7 @@ RTreeIndex<T>::IsNotNull() {
     int64_t count = Count();
     TargetBitmap bitset(count, true);
     std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
-    // See IsNull(): null_offset_ may be unsorted under concurrent writers, so
+    // See IsNull(): null_offset_ is not sorted by construction, so
     // bounds-check every offset rather than relying on a sorted-range shortcut.
     for (auto off : null_offset_) {
         if (off < static_cast<size_t>(count)) {
@@ -644,8 +652,10 @@ template <typename T>
 void
 RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
     // Snapshot wrapper_ under the lock; lazily (and idempotently) initialize it
-    // if this is the first insert. AddGeometry may run from multiple concurrent
-    // writers, so wrapper_ must never be read or published unlocked.
+    // if this is the first insert. Production serializes inserts per growing
+    // segment (see InitForBuildIndex), but AddGeometry races concurrent
+    // READERS and the AppendingIndex contract permits concurrent writers, so
+    // wrapper_ must never be read or published unlocked.
     std::shared_ptr<RTreeIndexWrapper> wrapper;
     {
         std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);

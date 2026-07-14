@@ -971,11 +971,15 @@ TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
     EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kRows + 1));
 }
 
-// Multiple concurrent writers building the same growing index. This mirrors
-// IndexingRecord::AppendingIndex's documented "concurrent, reentrant" contract:
-// several threads may race on the first-time wrapper_ initialization and then
-// keep inserting. Run under ASAN/TSAN this asserts the lazy init is idempotent
-// and wrapper_/total_num_rows_/null_offset_ are never touched unsynchronized.
+// Multiple concurrent writers building the same growing index. This exercises
+// IndexingRecord::AppendingIndex's documented "concurrent, reentrant" contract
+// as defense-in-depth: production currently serializes inserts per growing
+// segment (one flowgraph consumer per vchannel), so this shape is not driven
+// by production today -- the test pins the class-level contract so a future
+// caller change fails here instead of in release. Several threads race on the
+// first-time wrapper_ initialization and then keep inserting. Run under
+// ASAN/TSAN this asserts the lazy init is idempotent and
+// wrapper_/total_num_rows_/null_offset_ are never touched unsynchronized.
 TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriter) {
     milvus::storage::FileManagerContext ctx_build(
         field_meta_, index_meta_, chunk_manager_, fs_);
