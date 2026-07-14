@@ -202,6 +202,132 @@ func TestWaveLedgerRejectsInvalidPlansWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestWaveLedgerAndProjectionRejectMismatchedAdmissionIdentityAtomically(t *testing.T) {
+	tests := []struct {
+		name string
+		plan EpochPlan
+	}{
+		{
+			name: "collection",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.CollectionID++
+			}),
+		},
+		{
+			name: "replica",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.ReplicaID++
+			}),
+		},
+		{
+			name: "expected source",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.ExpectedSourceNode++
+			}),
+		},
+		{
+			name: "segment object missing",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Segment = nil
+			}),
+		},
+		{
+			name: "segment has both objects",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Channel = &ChannelObjectKey{ReplicaID: 1000, Channel: "by-dev"}
+			}),
+		},
+		{
+			name: "segment object mismatch",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Segment = &SegmentObjectKey{ReplicaID: 1000, SegmentID: 101, Scope: querypb.DataScope_Historical}
+			}),
+		},
+		{
+			name: "segment scope mismatch",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Segment = &SegmentObjectKey{ReplicaID: 1000, SegmentID: 100, Scope: querypb.DataScope_Streaming}
+			}),
+		},
+		{
+			name: "segment key replica mismatch",
+			plan: mutatePlanToken(segmentPlan(100, 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Segment = &SegmentObjectKey{ReplicaID: 1001, SegmentID: 100, Scope: querypb.DataScope_Historical}
+			}),
+		},
+		{
+			name: "channel object missing",
+			plan: mutatePlanToken(channelPlan("by-dev", 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Channel = nil
+			}),
+		},
+		{
+			name: "channel has both objects",
+			plan: mutatePlanToken(channelPlan("by-dev", 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Segment = &SegmentObjectKey{ReplicaID: 1000, SegmentID: 100, Scope: querypb.DataScope_Historical}
+			}),
+		},
+		{
+			name: "channel object mismatch",
+			plan: mutatePlanToken(channelPlan("by-dev", 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Channel = &ChannelObjectKey{ReplicaID: 1000, Channel: "by-prod"}
+			}),
+		},
+		{
+			name: "channel key replica mismatch",
+			plan: mutatePlanToken(channelPlan("by-dev", 10, 1000, 1, 2), func(token *AdmissionToken) {
+				token.Channel = &ChannelObjectKey{ReplicaID: 1001, Channel: "by-dev"}
+			}),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ledger := NewWaveLedger(BalanceWaveBudget{
+				MaxSegmentTasks:       1,
+				MaxChannelTasks:       1,
+				MaxTasksPerNode:       1,
+				MaxTasksPerCollection: 1,
+			}, EpochPlanningConstraints{})
+			require.False(t, ledger.TryReserve(test.plan))
+			require.Equal(t, 0, ledger.SegmentTasks())
+			require.Equal(t, 0, ledger.ChannelTasks())
+			require.Equal(t, 0, ledger.CollectionTasks(test.plan.CollectionID))
+			require.Equal(t, 0, ledger.NodeActions(test.plan.From))
+			require.Equal(t, 0, ledger.NodeActions(test.plan.To))
+
+			projection := NewProjectedPlacement(projectedPlacementFixture())
+			before := projection.Snapshot()
+			require.Error(t, projection.Apply(test.plan))
+			require.Equal(t, before, projection.Snapshot())
+		})
+	}
+}
+
+func TestWaveLedgerReleaseUsesImmutableMutationIdentity(t *testing.T) {
+	ledger := NewWaveLedger(BalanceWaveBudget{
+		MaxSegmentTasks:       1,
+		MaxChannelTasks:       1,
+		MaxTasksPerNode:       1,
+		MaxTasksPerCollection: 1,
+	}, EpochPlanningConstraints{})
+	reserved := diagnosticSegmentPlan()
+	original := diagnosticSegmentPlan()
+
+	require.True(t, ledger.TryReserve(reserved))
+	reserved.Token.Snapshot.CurrentTargetVersion[10] = 99
+	reserved.Token.Segment.SegmentID = 999
+	original.Shard = "changed-diagnostic"
+	original.RowCount = 999
+	original.Token.Snapshot.RGHash = 999
+
+	require.NotPanics(t, func() { ledger.Release(original) })
+	require.Equal(t, 0, ledger.SegmentTasks())
+	require.Equal(t, 0, ledger.CollectionTasks(10))
+	require.Equal(t, 0, ledger.NodeActions(1))
+	require.Equal(t, 0, ledger.NodeActions(2))
+}
+
 func TestWaveLedgerOldWorkDoesNotConsumeNewWaveKindOrCollectionCaps(t *testing.T) {
 	oldPlan := segmentPlan(100, 10, 1000, 9, 10)
 	constraints := EpochPlanningConstraints{Objects: map[BalanceObjectKey]EpochObjectConstraint{
@@ -675,6 +801,24 @@ func TestProjectedPlacementUndoRequiresMatchingSuccessfulApply(t *testing.T) {
 	})
 }
 
+func TestProjectedPlacementUndoUsesImmutableMutationIdentity(t *testing.T) {
+	projection := NewProjectedPlacement(projectedPlacementFixture())
+	applied := diagnosticSegmentPlan()
+	original := diagnosticSegmentPlan()
+	key := SegmentObjectKey{ReplicaID: 1000, SegmentID: 100, Scope: querypb.DataScope_Historical}
+	before := projection.SegmentPlacements(key)
+
+	require.NoError(t, projection.Apply(applied))
+	applied.Token.Snapshot.CurrentTargetVersion[10] = 99
+	applied.Token.Segment.SegmentID = 999
+	original.Shard = "changed-diagnostic"
+	original.RowCount = 999
+	original.Token.Snapshot.RGHash = 999
+
+	require.NotPanics(t, func() { projection.Undo(original) })
+	require.Equal(t, before, projection.SegmentPlacements(key))
+}
+
 func projectedPlacementFixture() PlacementSnapshot {
 	segmentKey := SegmentObjectKey{ReplicaID: 1000, SegmentID: 100, Scope: querypb.DataScope_Historical}
 	channelKey := ChannelObjectKey{ReplicaID: 1000, Channel: "by-dev"}
@@ -764,17 +908,30 @@ func projectedPlacementFixture() PlacementSnapshot {
 }
 
 func segmentPlan(segmentID, collectionID, replicaID, from, to int64) EpochPlan {
+	segment := &SegmentObjectKey{
+		ReplicaID: replicaID,
+		SegmentID: segmentID,
+		Scope:     querypb.DataScope_Historical,
+	}
 	return EpochPlan{
 		Kind:         PlanKindSegment,
 		CollectionID: collectionID,
 		ReplicaID:    replicaID,
 		SegmentID:    segmentID,
+		Scope:        querypb.DataScope_Historical,
 		From:         from,
 		To:           to,
+		Token: AdmissionToken{
+			CollectionID:       collectionID,
+			ReplicaID:          replicaID,
+			ExpectedSourceNode: from,
+			Segment:            segment,
+		},
 	}
 }
 
 func channelPlan(channel string, collectionID, replicaID, from, to int64) EpochPlan {
+	channelKey := &ChannelObjectKey{ReplicaID: replicaID, Channel: channel}
 	return EpochPlan{
 		Kind:         PlanKindChannel,
 		CollectionID: collectionID,
@@ -782,7 +939,27 @@ func channelPlan(channel string, collectionID, replicaID, from, to int64) EpochP
 		Channel:      channel,
 		From:         from,
 		To:           to,
+		Token: AdmissionToken{
+			CollectionID:       collectionID,
+			ReplicaID:          replicaID,
+			ExpectedSourceNode: from,
+			Channel:            channelKey,
+		},
 	}
+}
+
+func diagnosticSegmentPlan() EpochPlan {
+	plan := segmentPlan(100, 10, 1000, 1, 2)
+	plan.Shard = "by-dev"
+	plan.RowCount = 1000
+	plan.Token.Snapshot.CurrentTargetVersion = map[int64]int64{10: 11}
+	plan.Token.Snapshot.NextTargetVersion = map[int64]int64{10: 12}
+	return plan
+}
+
+func mutatePlanToken(plan EpochPlan, mutate func(*AdmissionToken)) EpochPlan {
+	mutate(&plan.Token)
+	return plan
 }
 
 func replaceKind(plan EpochPlan, kind PlanKind) EpochPlan {
@@ -791,27 +968,57 @@ func replaceKind(plan EpochPlan, kind PlanKind) EpochPlan {
 }
 
 func replaceSegmentID(plan EpochPlan, segmentID int64) EpochPlan {
+	plan = clonePlanObjectPointers(plan)
 	plan.SegmentID = segmentID
+	if plan.Token.Segment != nil {
+		plan.Token.Segment.SegmentID = segmentID
+	}
 	return plan
 }
 
 func replaceChannel(plan EpochPlan, channel string) EpochPlan {
+	plan = clonePlanObjectPointers(plan)
 	plan.Channel = channel
+	if plan.Token.Channel != nil {
+		plan.Token.Channel.Channel = channel
+	}
 	return plan
 }
 
 func replaceEndpoints(plan EpochPlan, from, to int64) EpochPlan {
 	plan.From = from
 	plan.To = to
+	plan.Token.ExpectedSourceNode = from
 	return plan
 }
 
 func replaceCollection(plan EpochPlan, collectionID int64) EpochPlan {
 	plan.CollectionID = collectionID
+	plan.Token.CollectionID = collectionID
 	return plan
 }
 
 func replaceReplica(plan EpochPlan, replicaID int64) EpochPlan {
+	plan = clonePlanObjectPointers(plan)
 	plan.ReplicaID = replicaID
+	plan.Token.ReplicaID = replicaID
+	if plan.Token.Segment != nil {
+		plan.Token.Segment.ReplicaID = replicaID
+	}
+	if plan.Token.Channel != nil {
+		plan.Token.Channel.ReplicaID = replicaID
+	}
+	return plan
+}
+
+func clonePlanObjectPointers(plan EpochPlan) EpochPlan {
+	if plan.Token.Segment != nil {
+		segment := *plan.Token.Segment
+		plan.Token.Segment = &segment
+	}
+	if plan.Token.Channel != nil {
+		channel := *plan.Token.Channel
+		plan.Token.Channel = &channel
+	}
 	return plan
 }

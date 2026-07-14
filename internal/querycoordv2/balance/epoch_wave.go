@@ -18,7 +18,6 @@ package balance
 
 import (
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -141,6 +140,28 @@ func (p ScorePotential) Improves(other ScorePotential) bool {
 	return p.Value+epsilon < other.Value
 }
 
+type planMutationIdentity struct {
+	Kind         PlanKind
+	Object       BalanceObjectKey
+	CollectionID int64
+	From         int64
+	To           int64
+}
+
+func mutationIdentity(plan EpochPlan) planMutationIdentity {
+	return planMutationIdentity{
+		Kind:         plan.Kind,
+		Object:       plan.ObjectKey(),
+		CollectionID: plan.CollectionID,
+		From:         plan.From,
+		To:           plan.To,
+	}
+}
+
+func (i planMutationIdentity) NodeActions() []int64 {
+	return []int64{i.From, i.To}
+}
+
 type WaveLedger struct {
 	budget BalanceWaveBudget
 
@@ -151,7 +172,7 @@ type WaveLedger struct {
 
 	persistentObjects     map[BalanceObjectKey]struct{}
 	persistentNodeActions map[int64]int
-	reservations          map[BalanceObjectKey]EpochPlan
+	reservations          map[BalanceObjectKey]planMutationIdentity
 }
 
 func NewWaveLedger(budget BalanceWaveBudget, constraints EpochPlanningConstraints) *WaveLedger {
@@ -161,7 +182,7 @@ func NewWaveLedger(budget BalanceWaveBudget, constraints EpochPlanningConstraint
 		nodeActions:           make(map[int64]int),
 		persistentObjects:     make(map[BalanceObjectKey]struct{}, len(constraints.Objects)),
 		persistentNodeActions: make(map[int64]int),
-		reservations:          make(map[BalanceObjectKey]EpochPlan),
+		reservations:          make(map[BalanceObjectKey]planMutationIdentity),
 	}
 
 	for key, constraint := range constraints.Objects {
@@ -210,21 +231,22 @@ func (l *WaveLedger) TryReserve(plan EpochPlan) bool {
 }
 
 func (l *WaveLedger) Release(plan EpochPlan) {
-	key := plan.ObjectKey()
+	identity := mutationIdentity(plan)
+	key := identity.Object
 	reserved, ok := l.reservations[key]
-	if !ok || !reflect.DeepEqual(reserved, plan) {
+	if !ok || reserved != identity {
 		panic(fmt.Sprintf("release of unreserved balance plan for object %v", key))
 	}
 
-	if l.collectionTask[plan.CollectionID] <= 0 {
-		panic(fmt.Sprintf("negative collection reservation for collection %d", plan.CollectionID))
+	if l.collectionTask[reserved.CollectionID] <= 0 {
+		panic(fmt.Sprintf("negative collection reservation for collection %d", reserved.CollectionID))
 	}
-	for _, nodeID := range plan.NodeActions() {
+	for _, nodeID := range reserved.NodeActions() {
 		if l.nodeActions[nodeID] <= 0 {
 			panic(fmt.Sprintf("negative node reservation for node %d", nodeID))
 		}
 	}
-	switch plan.Kind {
+	switch reserved.Kind {
 	case PlanKindSegment:
 		if l.segmentTasks <= 0 {
 			panic("negative segment reservation")
@@ -234,15 +256,15 @@ func (l *WaveLedger) Release(plan EpochPlan) {
 			panic("negative channel reservation")
 		}
 	default:
-		panic(fmt.Sprintf("invalid reserved plan kind %d", plan.Kind))
+		panic(fmt.Sprintf("invalid reserved plan kind %d", reserved.Kind))
 	}
 
 	delete(l.reservations, key)
-	l.collectionTask[plan.CollectionID]--
-	for _, nodeID := range plan.NodeActions() {
+	l.collectionTask[reserved.CollectionID]--
+	for _, nodeID := range reserved.NodeActions() {
 		l.nodeActions[nodeID]--
 	}
-	if plan.Kind == PlanKindSegment {
+	if reserved.Kind == PlanKindSegment {
 		l.segmentTasks--
 	} else {
 		l.channelTasks--
@@ -302,13 +324,13 @@ func (l *WaveLedger) withinNodeLimits(nodeIDs []int64) bool {
 }
 
 func (l *WaveLedger) commit(plan EpochPlan) {
-	key := plan.ObjectKey()
-	l.reservations[key] = plan
-	l.collectionTask[plan.CollectionID]++
-	for _, nodeID := range plan.NodeActions() {
+	identity := mutationIdentity(plan)
+	l.reservations[identity.Object] = identity
+	l.collectionTask[identity.CollectionID]++
+	for _, nodeID := range identity.NodeActions() {
 		l.nodeActions[nodeID]++
 	}
-	if plan.Kind == PlanKindSegment {
+	if identity.Kind == PlanKindSegment {
 		l.segmentTasks++
 	} else {
 		l.channelTasks++
@@ -319,11 +341,33 @@ func validEpochPlan(plan EpochPlan) bool {
 	if plan.From <= 0 || plan.To <= 0 || plan.From == plan.To {
 		return false
 	}
+	if plan.Token.CollectionID != plan.CollectionID ||
+		plan.Token.ReplicaID != plan.ReplicaID ||
+		plan.Token.ExpectedSourceNode != plan.From {
+		return false
+	}
 	switch plan.Kind {
 	case PlanKindSegment:
-		return plan.SegmentID != 0 && plan.Channel == ""
+		if plan.SegmentID == 0 || plan.Channel != "" ||
+			plan.Token.Segment == nil || plan.Token.Channel != nil {
+			return false
+		}
+		expected := SegmentObjectKey{
+			ReplicaID: plan.ReplicaID,
+			SegmentID: plan.SegmentID,
+			Scope:     plan.Scope,
+		}
+		return *plan.Token.Segment == expected
 	case PlanKindChannel:
-		return plan.Channel != "" && plan.SegmentID == 0
+		if plan.Channel == "" || plan.SegmentID != 0 ||
+			plan.Token.Channel == nil || plan.Token.Segment != nil {
+			return false
+		}
+		expected := ChannelObjectKey{
+			ReplicaID: plan.ReplicaID,
+			Channel:   plan.Channel,
+		}
+		return *plan.Token.Channel == expected
 	default:
 		return false
 	}
@@ -346,7 +390,7 @@ type ProjectedPlacement struct {
 }
 
 type projectedApplyRecord struct {
-	plan           EpochPlan
+	identity       planMutationIdentity
 	segmentsBefore []SegmentPlacement
 	channelsBefore []ChannelPlacement
 }
@@ -398,28 +442,29 @@ func (p *ProjectedPlacement) Apply(plan EpochPlan) error {
 }
 
 func (p *ProjectedPlacement) Undo(plan EpochPlan) {
-	key := plan.ObjectKey()
+	identity := mutationIdentity(plan)
+	key := identity.Object
 	record, ok := p.applied[key]
-	if !ok || !reflect.DeepEqual(record.plan, plan) {
+	if !ok || record.identity != identity {
 		panic(fmt.Sprintf("undo of unapplied projected balance plan for object %v", key))
 	}
 
-	switch plan.Kind {
+	switch record.identity.Kind {
 	case PlanKindSegment:
 		segmentKey := SegmentObjectKey{
-			ReplicaID: plan.ReplicaID,
-			SegmentID: plan.SegmentID,
-			Scope:     plan.Scope,
+			ReplicaID: record.identity.Object.ReplicaID,
+			SegmentID: record.identity.Object.SegmentID,
+			Scope:     record.identity.Object.Scope,
 		}
 		p.snapshot.Segments[segmentKey] = cloneSlice(record.segmentsBefore)
 	case PlanKindChannel:
 		channelKey := ChannelObjectKey{
-			ReplicaID: plan.ReplicaID,
-			Channel:   plan.Channel,
+			ReplicaID: record.identity.Object.ReplicaID,
+			Channel:   record.identity.Object.Channel,
 		}
 		p.snapshot.Channels[channelKey] = cloneSlice(record.channelsBefore)
 	default:
-		panic(fmt.Sprintf("invalid applied projected balance plan kind %d", plan.Kind))
+		panic(fmt.Sprintf("invalid applied projected balance plan kind %d", record.identity.Kind))
 	}
 	delete(p.applied, key)
 }
@@ -448,7 +493,7 @@ func (p *ProjectedPlacement) applySegment(plan EpochPlan) error {
 	next = append(next, moved)
 
 	p.applied[plan.ObjectKey()] = projectedApplyRecord{
-		plan:           plan,
+		identity:       mutationIdentity(plan),
 		segmentsBefore: before,
 	}
 	p.snapshot.Segments[segmentKey] = next
@@ -478,7 +523,7 @@ func (p *ProjectedPlacement) applyChannel(plan EpochPlan) error {
 	next = append(next, moved)
 
 	p.applied[plan.ObjectKey()] = projectedApplyRecord{
-		plan:           plan,
+		identity:       mutationIdentity(plan),
 		channelsBefore: before,
 	}
 	p.snapshot.Channels[channelKey] = next
