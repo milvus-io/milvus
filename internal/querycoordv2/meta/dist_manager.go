@@ -37,7 +37,10 @@ const (
 
 type captureStage int
 
-const captureStageLocked captureStage = iota + 1
+const (
+	captureStageBeforeLock captureStage = iota + 1
+	captureStageLocked
+)
 
 type DistributionManager struct {
 	publishMu          *sync.RWMutex
@@ -127,6 +130,9 @@ func (dm *DistributionManager) RemoveNodeDistribution(nodeID int64) {
 }
 
 func (dm *DistributionManager) Capture() DistributionSnapshot {
+	if dm.captureHook != nil {
+		dm.captureHook(captureStageBeforeLock)
+	}
 	dm.publishMu.RLock()
 	defer dm.publishMu.RUnlock()
 	if dm.captureHook != nil {

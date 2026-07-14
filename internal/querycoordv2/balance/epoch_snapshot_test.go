@@ -77,6 +77,7 @@ func clonePendingSnapshot(snapshot task.PendingBalanceSnapshot) task.PendingBala
 			cloned.EpochRevisions[epoch] = revision
 		}
 	}
+	cloned.UnscopedRevision = snapshot.UnscopedRevision
 	for i, pending := range snapshot.Tasks {
 		cloned.Tasks[i] = pending
 		cloned.Tasks[i].Actions = append([]task.PendingBalanceActionSnapshot(nil), pending.Actions...)
@@ -431,6 +432,92 @@ func TestPlacementSnapshotRetriesWhenTargetOrReplicaDigestChanges(t *testing.T) 
 		snapshot := buildSnapshot(t, fixture)
 		require.GreaterOrEqual(t, attempts, 2)
 		require.Equal(t, []int64{1}, snapshot.Replicas[testEligibleReplica].RWNodes)
+	})
+}
+
+func TestPlacementSnapshotStopsAfterThreeUnstableAttempts(t *testing.T) {
+	fixture := newPlacementSnapshotFixture(t)
+	attempts := make([]int, 0, 3)
+	fixture.builder.buildHook = func(attempt int) {
+		attempts = append(attempts, attempt)
+		fixture.targetState.mu.Lock()
+		fixture.targetState.currentVersion[100]++
+		fixture.targetState.mu.Unlock()
+	}
+
+	snapshot, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
+	require.Nil(t, snapshot)
+	require.EqualError(t, err, "placement snapshot changed during all capture attempts")
+	require.Equal(t, []int{0, 1, 2}, attempts)
+}
+
+func TestPlacementSnapshotRetriesForNilReplicaUnscopedMutations(t *testing.T) {
+	pendingTask := task.PendingBalanceTaskSnapshot{
+		TaskID:        71,
+		CollectionID:  100,
+		ReplicaID:     meta.NilReplica.GetID(),
+		ResourceGroup: "",
+		Actions: []task.PendingBalanceActionSnapshot{{
+			NodeID: 2, Type: task.ActionTypeReduce, SegmentID: 102,
+			Shard: "channel-a", Scope: querypb.DataScope_Historical, Workload: -50,
+		}},
+	}
+
+	t.Run("removal retries and invalidates old token", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               1,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 0},
+			UnscopedRevision:       1,
+			Tasks:                  []task.PendingBalanceTaskSnapshot{pendingTask},
+		})
+		oldSnapshot := buildSnapshot(t, fixture)
+		require.Len(t, oldSnapshot.PendingWork.Tasks, 1)
+
+		attempts := 0
+		fixture.builder.buildHook = func(attempt int) {
+			attempts++
+			if attempt == 0 {
+				fixture.inspector.set(task.PendingBalanceSnapshot{
+					Revision:               2,
+					ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 0},
+					UnscopedRevision:       2,
+				})
+			}
+		}
+
+		newSnapshot := buildSnapshot(t, fixture)
+		require.Equal(t, 2, attempts)
+		require.Empty(t, newSnapshot.PendingWork.Tasks)
+		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(AdmissionToken{
+			Snapshot: oldSnapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica,
+		}))
+	})
+
+	t.Run("add retries and cannot omit committed task", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               0,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 0},
+			UnscopedRevision:       0,
+		})
+		attempts := 0
+		fixture.builder.buildHook = func(attempt int) {
+			attempts++
+			if attempt == 0 {
+				fixture.inspector.set(task.PendingBalanceSnapshot{
+					Revision:               1,
+					ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 0},
+					UnscopedRevision:       1,
+					Tasks:                  []task.PendingBalanceTaskSnapshot{pendingTask},
+				})
+			}
+		}
+
+		snapshot := buildSnapshot(t, fixture)
+		require.Equal(t, 2, attempts)
+		require.Len(t, snapshot.PendingWork.Tasks, 1)
+		require.Equal(t, pendingTask.TaskID, snapshot.PendingWork.Tasks[0].TaskID)
 	})
 }
 

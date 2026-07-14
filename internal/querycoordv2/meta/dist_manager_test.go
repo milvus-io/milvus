@@ -2,7 +2,9 @@ package meta
 
 import (
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +16,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+func receiveMetaTestSignal[T any](t *testing.T, ch <-chan T, label string) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		var zero T
+		return zero
+	}
+}
+
+func closeMetaTestChannelOnCleanup(t *testing.T, ch chan struct{}) func() {
+	t.Helper()
+	var once sync.Once
+	closeChannel := func() { once.Do(func() { close(ch) }) }
+	t.Cleanup(closeChannel)
+	return closeChannel
+}
 
 func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
 	manager := NewDistributionManager(session.NewNodeManager())
@@ -56,24 +78,13 @@ func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
 		},
 	}}
 
-	captureLocked := make(chan struct{})
-	releaseCapture := make(chan struct{})
-	manager.captureHook = func(stage captureStage) {
-		if stage == captureStageLocked {
-			close(captureLocked)
-			<-releaseCapture
-		}
-	}
-	captured := make(chan DistributionSnapshot, 1)
-	go func() {
-		captured <- manager.Capture()
-	}()
-	<-captureLocked
-
-	publishAttempted := make(chan struct{})
+	segmentsWritten := make(chan struct{})
+	releasePublish := make(chan struct{})
+	releasePublisher := closeMetaTestChannelOnCleanup(t, releasePublish)
 	manager.publishHook = func(stage publishStage) {
-		if stage == publishStageBeforeLock {
-			close(publishAttempted)
+		if stage == publishStageSegmentsWritten {
+			close(segmentsWritten)
+			<-releasePublish
 		}
 	}
 	published := make(chan struct{})
@@ -81,14 +92,27 @@ func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
 		defer close(published)
 		manager.PublishNodeDistribution(1, newSegments, newChannels)
 	}()
-	<-publishAttempted
-	close(releaseCapture)
-	snapshot := <-captured
-	<-published
+	receiveMetaTestSignal(t, segmentsWritten, "segments-written hook")
+
+	captureAttempted := make(chan struct{})
+	manager.captureHook = func(stage captureStage) {
+		if stage == captureStageBeforeLock {
+			close(captureAttempted)
+		}
+	}
+	captured := make(chan DistributionSnapshot, 1)
+	go func() {
+		captured <- manager.Capture()
+	}()
+	receiveMetaTestSignal(t, captureAttempted, "capture-before-lock hook")
+	releasePublisher()
+	snapshot := receiveMetaTestSignal(t, captured, "atomic distribution capture")
+	receiveMetaTestSignal(t, published, "distribution publisher completion")
 
 	segmentIDs, channelNames := distributionRecordsForNode(snapshot, 1)
-	require.Equal(t, []int64{1}, segmentIDs)
-	require.Equal(t, []string{"channel-old"}, channelNames)
+	wholeOld := assert.ObjectsAreEqual([]int64{1}, segmentIDs) && assert.ObjectsAreEqual([]string{"channel-old"}, channelNames)
+	wholeNew := assert.ObjectsAreEqual([]int64{2}, segmentIDs) && assert.ObjectsAreEqual([]string{"channel-new"}, channelNames)
+	require.True(t, wholeOld || wholeNew, "capture returned a mixed segment/channel pair")
 }
 
 func distributionRecordsForNode(snapshot DistributionSnapshot, nodeID int64) ([]int64, []string) {

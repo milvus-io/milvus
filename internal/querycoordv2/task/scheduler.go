@@ -323,7 +323,11 @@ type PendingBalanceTaskSnapshot struct {
 }
 
 type PendingBalanceSnapshot struct {
-	Revision               uint64
+	Revision uint64
+	// UnscopedRevision fences NilReplica cleanup mutations independently of
+	// their action nodes' current RG mapping. RevisionFor is the authoritative
+	// admission generation; ResourceGroupRevisions alone is diagnostic.
+	UnscopedRevision       uint64
 	ResourceGroupRevisions map[string]uint64
 	EpochRevisions         map[BalanceEpochMeta]uint64
 	Tasks                  []PendingBalanceTaskSnapshot
@@ -332,7 +336,7 @@ type PendingBalanceSnapshot struct {
 func (snapshot PendingBalanceSnapshot) RevisionFor(resourceGroup string, epoch BalanceEpochMeta) BalancePendingRevision {
 	revision := snapshot.Revision
 	if snapshot.ResourceGroupRevisions != nil {
-		revision = snapshot.ResourceGroupRevisions[resourceGroup]
+		revision = snapshot.ResourceGroupRevisions[resourceGroup] + snapshot.UnscopedRevision
 	}
 	epochRevision := uint64(0)
 	if epoch.ResourceGroup == resourceGroup && epoch.ResourceGroup != "" &&
@@ -350,6 +354,13 @@ func (snapshot PendingBalanceSnapshot) RevisionFor(resourceGroup string, epoch B
 type BalanceTaskInspector interface {
 	GetPendingBalanceTasks() PendingBalanceSnapshot
 }
+
+type pendingMutationStage int
+
+const (
+	pendingMutationStageAddScopeResolved pendingMutationStage = iota + 1
+	pendingMutationStageRemoveScopeResolved
+)
 
 func NewSegmentTaskDeltaSnapshot(nodeDeltas, nodeCollectionDeltas map[int64]int) *SegmentTaskDeltaSnapshot {
 	if nodeDeltas == nil {
@@ -693,19 +704,22 @@ type taskScheduler struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	scheduleMu             sync.Mutex           // guards schedule() and RemoveByNode()
-	collKeyLock            *lock.KeyLock[int64] // guards Add() and AdmitBalanceTask()
-	pendingMu              sync.RWMutex         // guards pending indexes, deltas, and pendingRevision
-	pendingRevision        uint64
-	pendingRevisionByRG    map[string]uint64
-	pendingRevisionByEpoch map[BalanceEpochMeta]uint64
-	pendingTaskIDsByEpoch  map[BalanceEpochMeta]map[UniqueID]struct{}
-	pendingTaskRGs         map[UniqueID][]string
-	tasks                  *ConcurrentMap[UniqueID, struct{}]
-	segmentTasks           *ConcurrentMap[replicaSegmentIndex, Task]
-	channelTasks           *ConcurrentMap[replicaChannelIndex, Task]
-	processQueue           *nodeTaskQueue
-	waitQueue              *taskQueue
+	scheduleMu              sync.Mutex           // guards schedule() and RemoveByNode()
+	collKeyLock             *lock.KeyLock[int64] // guards Add() and AdmitBalanceTask()
+	pendingMu               sync.RWMutex         // guards pending indexes, deltas, and pendingRevision
+	pendingRevision         uint64
+	pendingUnscopedRevision uint64
+	pendingRevisionByRG     map[string]uint64
+	pendingRevisionByEpoch  map[BalanceEpochMeta]uint64
+	pendingTaskIDsByEpoch   map[BalanceEpochMeta]map[UniqueID]struct{}
+	pendingTaskRGs          map[UniqueID][]string
+	pendingMutationHook     func(pendingMutationStage, Task)
+	finalizationHook        func(Task)
+	tasks                   *ConcurrentMap[UniqueID, struct{}]
+	segmentTasks            *ConcurrentMap[replicaSegmentIndex, Task]
+	channelTasks            *ConcurrentMap[replicaChannelIndex, Task]
+	processQueue            *nodeTaskQueue
+	waitQueue               *taskQueue
 
 	taskStats            *expirable.LRU[UniqueID, Task]
 	lastUpdateMetricTime atomic.Time
@@ -842,6 +856,9 @@ func (scheduler *taskScheduler) admitBalanceTask(
 	}
 
 	resourceGroups := scheduler.resolveTaskResourceGroups(task)
+	if scheduler.pendingMutationHook != nil {
+		scheduler.pendingMutationHook(pendingMutationStageAddScopeResolved, task)
+	}
 	if expected != nil && (task.BalanceEpoch() != expected.Epoch || !containsString(resourceGroups, expected.ResourceGroup)) {
 		err := merr.WrapErrServiceInternal(BalanceAdmissionRGChanged.String())
 		task.Cancel(err)
@@ -876,6 +893,7 @@ func (scheduler *taskScheduler) admitBalanceTask(
 		pendingRevision = scheduler.pendingRevisionLocked(expected.ResourceGroup, expected.Epoch)
 	}
 	scheduler.pendingMu.Unlock()
+	scheduler.applyTaskRemovalPenalty(replaced)
 	scheduler.cancelReplacementLocked(replaced, task)
 	scheduler.scheduleMu.Unlock()
 
@@ -899,6 +917,9 @@ func (scheduler *taskScheduler) addLocked(task Task) error {
 
 func (scheduler *taskScheduler) commitAddLocked(task Task) {
 	resourceGroups := scheduler.resolveTaskResourceGroups(task)
+	if scheduler.pendingMutationHook != nil {
+		scheduler.pendingMutationHook(pendingMutationStageAddScopeResolved, task)
+	}
 	scheduler.scheduleMu.Lock()
 	replacementCandidate := scheduler.getLowerPriorityTask(task)
 	var replacementResourceGroups []string
@@ -909,6 +930,7 @@ func (scheduler *taskScheduler) commitAddLocked(task Task) {
 	replaced := scheduler.replaceLowerPriorityTaskLocked(replacementCandidate, replacementResourceGroups)
 	scheduler.registerPendingLocked(task, resourceGroups, false)
 	scheduler.pendingMu.Unlock()
+	scheduler.applyTaskRemovalPenalty(replaced)
 	scheduler.cancelReplacementLocked(replaced, task)
 	scheduler.scheduleMu.Unlock()
 
@@ -1020,6 +1042,13 @@ func validBalanceEpoch(epoch BalanceEpochMeta) bool {
 
 func (scheduler *taskScheduler) incrementPendingRevisionsLocked(task Task, resourceGroups []string, expectedAdmission bool) {
 	scheduler.pendingRevision++
+	if isUnscopedPendingTask(task) {
+		// NilReplica cleanup tasks are projected into RG snapshots by their
+		// action nodes. Topology may change between RG resolution and this
+		// pendingMu-protected commit, so every such mutation also advances a
+		// topology-independent fence observed by every RG admission.
+		scheduler.pendingUnscopedRevision++
+	}
 	epoch := task.BalanceEpoch()
 	for _, resourceGroup := range resourceGroups {
 		scheduler.pendingRevisionByRG[resourceGroup]++
@@ -1029,11 +1058,15 @@ func (scheduler *taskScheduler) incrementPendingRevisionsLocked(task Task, resou
 	}
 }
 
+func isUnscopedPendingTask(task Task) bool {
+	return task.ResourceGroup() == "" && task.ReplicaID() == meta.NilReplica.GetID()
+}
+
 func (scheduler *taskScheduler) pendingRevisionLocked(resourceGroup string, epoch BalanceEpochMeta) BalancePendingRevision {
 	revision := BalancePendingRevision{
 		ResourceGroup: resourceGroup,
 		Epoch:         epoch,
-		Revision:      scheduler.pendingRevisionByRG[resourceGroup],
+		Revision:      scheduler.pendingRevisionByRG[resourceGroup] + scheduler.pendingUnscopedRevision,
 	}
 	if validBalanceEpoch(epoch) && epoch.ResourceGroup == resourceGroup {
 		revision.EpochRevision = scheduler.pendingRevisionByEpoch[epoch]
@@ -1045,6 +1078,7 @@ func (scheduler *taskScheduler) GetPendingBalanceTasks() PendingBalanceSnapshot 
 	for {
 		scheduler.pendingMu.RLock()
 		before := scheduler.pendingRevision
+		unscopedRevision := scheduler.pendingUnscopedRevision
 		rgRevisions := make(map[string]uint64, len(scheduler.pendingRevisionByRG))
 		for resourceGroup, revision := range scheduler.pendingRevisionByRG {
 			rgRevisions[resourceGroup] = revision
@@ -1073,6 +1107,7 @@ func (scheduler *taskScheduler) GetPendingBalanceTasks() PendingBalanceSnapshot 
 		sort.Slice(tasks, func(i, j int) bool { return tasks[i].TaskID < tasks[j].TaskID })
 		return PendingBalanceSnapshot{
 			Revision:               after,
+			UnscopedRevision:       unscopedRevision,
 			ResourceGroupRevisions: rgRevisions,
 			EpochRevisions:         epochRevisions,
 			Tasks:                  tasks,
@@ -1336,7 +1371,7 @@ func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replic
 	return scheduler.distMgr.ChannelDistManager.GetShardLeader(channelName, replica)
 }
 
-func (scheduler *taskScheduler) tryPromoteAll() {
+func (scheduler *taskScheduler) tryPromoteAll() []Task {
 	// Promote waiting tasks
 	toPromote := make([]Task, 0, scheduler.waitQueue.Len())
 	toRemove := make([]Task, 0)
@@ -1359,8 +1394,11 @@ func (scheduler *taskScheduler) tryPromoteAll() {
 	for _, task := range toPromote {
 		scheduler.waitQueue.Remove(task)
 	}
+	removed := make([]Task, 0, len(toRemove))
 	for _, task := range toRemove {
-		scheduler.remove(task)
+		if scheduler.prepareTaskRemoval(task) {
+			removed = append(removed, task)
+		}
 	}
 
 	if len(toPromote) > 0 || len(toRemove) > 0 {
@@ -1368,6 +1406,7 @@ func (scheduler *taskScheduler) tryPromoteAll() {
 			mlog.Int("promotedNum", len(toPromote)),
 			mlog.Int("toRemoveNum", len(toRemove)))
 	}
+	return removed
 }
 
 func (scheduler *taskScheduler) promote(task Task) error {
@@ -1394,9 +1433,12 @@ func (scheduler *taskScheduler) Dispatch(node int64) {
 		mlog.Info(scheduler.ctx, "scheduler stopped")
 
 	default:
-		scheduler.scheduleMu.Lock()
-		defer scheduler.scheduleMu.Unlock()
-		scheduler.schedule(node)
+		removed := func() []Task {
+			scheduler.scheduleMu.Lock()
+			defer scheduler.scheduleMu.Unlock()
+			return scheduler.schedule(node)
+		}()
+		scheduler.finishTaskRemovals(removed)
 	}
 }
 
@@ -1507,10 +1549,10 @@ func (scheduler *taskScheduler) GetTasksJSON() string {
 // 1. check whether this task is stale, set status to canceled if stale
 // 2. step up the task's actions, set status to succeeded if all actions finished
 // 3. execute the current action of task
-func (scheduler *taskScheduler) schedule(node int64) {
+func (scheduler *taskScheduler) schedule(node int64) []Task {
 	if scheduler.tasks.Len() == 0 {
 		scheduler.updateTaskMetrics()
-		return
+		return nil
 	}
 
 	tr := timerecord.NewTimeRecorder("")
@@ -1518,7 +1560,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		mlog.Int64("nodeID", node),
 	)
 
-	scheduler.tryPromoteAll()
+	removed := scheduler.tryPromoteAll()
 	promoteDur := tr.RecordSpan()
 
 	log.Debug(scheduler.ctx, "process tasks related to node",
@@ -1555,7 +1597,9 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	processDur := tr.RecordSpan()
 
 	for _, task := range toRemove {
-		scheduler.remove(task)
+		if scheduler.prepareTaskRemoval(task) {
+			removed = append(removed, task)
+		}
 	}
 
 	scheduler.updateTaskMetrics()
@@ -1576,6 +1620,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		mlog.Int("segmentTaskNum", scheduler.segmentTasks.Len()),
 		mlog.Int("channelTaskNum", scheduler.channelTasks.Len()),
 	)
+	return removed
 }
 
 func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
@@ -1700,21 +1745,26 @@ func (scheduler *taskScheduler) check(task Task, checkDistExist bool) error {
 }
 
 func (scheduler *taskScheduler) RemoveByNode(node int64) {
-	scheduler.scheduleMu.Lock()
-	defer scheduler.scheduleMu.Unlock()
+	removed := func() []Task {
+		scheduler.scheduleMu.Lock()
+		defer scheduler.scheduleMu.Unlock()
+		removed := make([]Task, 0)
 
-	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
-		if scheduler.isRelated(task, node) {
-			scheduler.remove(task)
-		}
-		return true
-	})
-	scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
-		if scheduler.isRelated(task, node) {
-			scheduler.remove(task)
-		}
-		return true
-	})
+		scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
+			if scheduler.isRelated(task, node) && scheduler.prepareTaskRemoval(task) {
+				removed = append(removed, task)
+			}
+			return true
+		})
+		scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
+			if scheduler.isRelated(task, node) && scheduler.prepareTaskRemoval(task) {
+				removed = append(removed, task)
+			}
+			return true
+		})
+		return removed
+	}()
+	scheduler.finishTaskRemovals(removed)
 }
 
 func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
@@ -1730,11 +1780,55 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 }
 
 func (scheduler *taskScheduler) remove(task Task) {
+	removed := func() bool {
+		scheduler.scheduleMu.Lock()
+		defer scheduler.scheduleMu.Unlock()
+		return scheduler.prepareTaskRemoval(task)
+	}()
+	if removed {
+		scheduler.finishTaskRemoval(task)
+	}
+}
+
+// prepareTaskRemoval performs the schedule-gated part of removal. Every caller
+// must hold scheduleMu; the synchronous remove wrapper acquires it before
+// entering this identity-safe mutation path.
+func (scheduler *taskScheduler) prepareTaskRemoval(task Task) bool {
 	resourceGroups := scheduler.resolveTaskResourceGroups(task)
+	if scheduler.pendingMutationHook != nil {
+		scheduler.pendingMutationHook(pendingMutationStageRemoveScopeResolved, task)
+	}
 	scheduler.pendingMu.Lock()
 	removed := scheduler.removePendingLocked(task, resourceGroups)
 	scheduler.pendingMu.Unlock()
-	if removed {
+	if !removed {
+		return false
+	}
+
+	scheduler.applyTaskRemovalPenalty(task)
+
+	// Closing Done and stopping a started task are part of the schedule-gated
+	// removal boundary. Slow target refresh, cache, logging, and latency work
+	// is deferred until after scheduleMu is released.
+	task.Cancel(nil)
+	return removed
+}
+
+func (scheduler *taskScheduler) applyTaskRemovalPenalty(task Task) {
+	if task == nil || !errors.Is(task.Err(), merr.ErrSegmentRequestResourceFailed) {
+		return
+	}
+	for _, action := range task.Actions() {
+		if action.Type() == ActionTypeGrow {
+			nodeID := action.Node()
+			duration := paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.GetAsDuration(time.Second)
+			scheduler.nodeMgr.MarkResourceExhaustion(nodeID, duration)
+		}
+	}
+}
+
+func (scheduler *taskScheduler) finishTaskRemovals(tasks []Task) {
+	for _, task := range tasks {
 		scheduler.finishTaskRemoval(task)
 	}
 }
@@ -1789,6 +1883,9 @@ func (scheduler *taskScheduler) removePendingEpochTaskLocked(task Task) {
 }
 
 func (scheduler *taskScheduler) finishTaskRemoval(task Task) {
+	if scheduler.finalizationHook != nil {
+		scheduler.finalizationHook(task)
+	}
 	log := mlog.With(
 		mlog.Int64("taskID", task.ID()),
 		mlog.Int64("collectionID", task.CollectionID()),
@@ -1805,15 +1902,16 @@ func (scheduler *taskScheduler) finishTaskRemoval(task Task) {
 	if errors.Is(task.Err(), merr.ErrSegmentRequestResourceFailed) {
 		for _, action := range task.Actions() {
 			if action.Type() == ActionTypeGrow {
-				nodeID := action.Node()
 				duration := paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.GetAsDuration(time.Second)
-				scheduler.nodeMgr.MarkResourceExhaustion(nodeID, duration)
-				log.Info(task.Context(), "mark resource exhaustion for node", mlog.Int64("nodeID", nodeID), mlog.Duration("duration", duration), mlog.Err(task.Err()))
+				log.Info(task.Context(), "marked resource exhaustion for node",
+					mlog.Int64("nodeID", action.Node()),
+					mlog.Duration("duration", duration),
+					mlog.Err(task.Err()),
+				)
 			}
 		}
 	}
 
-	task.Cancel(nil)
 	switch task := task.(type) {
 	case *SegmentTask:
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
