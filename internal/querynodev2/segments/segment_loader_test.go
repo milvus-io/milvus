@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1395,69 +1394,6 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsChildManifestReadError() {
 	})
 	suite.Error(err)
 	suite.Contains(err.Error(), "manifest read failed")
-}
-
-func (suite *SegmentLoaderSuite) TestLoadIndex() {
-	ctx := context.Background()
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		IndexInfos: []*querypb.FieldIndexInfo{
-			{
-				IndexFilePaths: []string{},
-			},
-		},
-		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	}
-	segment := &LocalSegment{
-		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
-		bm25StatsHolder: newBM25StatsHolder(),
-	}
-
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.ErrorIs(err, merr.ErrIndexNotFound)
-}
-
-func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
-	ctx := context.Background()
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		IndexInfos: []*querypb.FieldIndexInfo{
-			{
-				FieldID:        1,
-				IndexFilePaths: []string{},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: indexparamcheck.IndexINVERTED,
-					},
-				},
-			},
-		},
-		BinlogPaths: []*datapb.FieldBinlog{
-			{
-				FieldID: 1,
-				Binlogs: []*datapb.Binlog{
-					{
-						LogSize:    1000000000,
-						MemorySize: 1000000000,
-					},
-				},
-			},
-		},
-	}
-
-	segment := &LocalSegment{
-		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
-		bm25StatsHolder: newBM25StatsHolder(),
-	}
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
-	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.Error(err)
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {

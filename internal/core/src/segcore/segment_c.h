@@ -244,16 +244,6 @@ CStatus
 LoadDeletedRecord(CSegmentInterface c_segment,
                   CLoadDeletedRecordInfo deleted_record_info);
 
-CStatus
-UpdateSealedSegmentIndex(CSegmentInterface c_segment,
-                         CLoadIndexInfo c_load_index_info);
-
-CStatus
-UpdateFieldRawDataSize(CSegmentInterface c_segment,
-                       int64_t field_id,
-                       int64_t num_rows,
-                       int64_t field_data_size);
-
 // This function is currently used only in test.
 // Current implement supports only dropping of non-system fields.
 CStatus

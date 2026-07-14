@@ -184,6 +184,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return {PinWrapper<const index::IndexBase*>(std::move(ca), index)};
     }
 
+    std::vector<PinWrapper<const index::IndexBase*>>
+    PinJsonIndex(milvus::OpContext* op_ctx,
+                 FieldId field_id,
+                 const std::string& path,
+                 DataType data_type,
+                 bool any_type,
+                 bool is_array) const override;
+
+    std::string
+    GetJsonFlatIndexNestedPath(FieldId field_id,
+                               std::string_view query_path) const override;
+
     bool
     Contain(const PkType& pk) const override;
 
@@ -322,6 +334,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      std::shared_ptr<milvus::cachinglayer::CacheSlot<
                          milvus::index::TextMatchIndex>>>;
 
+    struct JsonIndex {
+        FieldId field_id;
+        std::string nested_path;
+        JsonCastType cast_type{JsonCastType::UNKNOWN};
+        index::CacheIndexBasePtr index;
+    };
+
     // When non-zero commit_ts is active, every row in this segment carries it
     // as its effective row timestamp (load-time overwrite). All timestamp
     // consumers must route through this so the override applies uniformly on
@@ -347,6 +366,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             ngram_indexings;
         std::unordered_map<FieldId, std::string> text_lob_paths;
         std::unordered_map<FieldId, TextIndexVariant> text_indexes;
+        std::vector<JsonIndex> json_indices;
         std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
             json_stats;
         std::shared_ptr<milvus_storage::api::Reader> reader;
@@ -1314,7 +1334,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     const SchemaPtr& schema_snapshot,
                     bool is_replace = false,
                     RuntimeResourceState* runtime = nullptr,
-                    PublishedSegmentState* staged_state = nullptr);
+                    PublishedSegmentState* staged_state = nullptr,
+                    StagedStateCommitter* committer = nullptr);
 
     void
     LoadIndex(LoadIndexInfo& info, bool is_replace);
@@ -1408,6 +1429,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     static void
     DropVectorIndexing(RuntimeResourceState& runtime, FieldId field_id);
 
+    static std::vector<index::CacheIndexBasePtr>
+    EraseJsonIndexings(RuntimeResourceState& runtime,
+                       FieldId field_id,
+                       std::string_view nested_path);
+
+    static index::CacheIndexBasePtr
+    EraseJsonNgramIndexing(RuntimeResourceState& runtime,
+                           FieldId field_id,
+                           std::string_view nested_path);
+
+    static std::vector<index::CacheIndexBasePtr>
+    EraseJsonIndexesAtPath(RuntimeResourceState& runtime,
+                           FieldId field_id,
+                           std::string_view nested_path);
+
+    static bool
+    RuntimeJsonNgramIndexReady(const RuntimeResourceState& runtime,
+                               FieldId field_id);
+
+    static void
+    SyncJsonNgramIndexState(PublishedSegmentState& state,
+                            const RuntimeResourceState& runtime,
+                            FieldId field_id);
+
     std::shared_ptr<PublishedSegmentState>
     BuildNextPublishedState(
         const std::shared_ptr<const PublishedSegmentState>& current,
@@ -1489,16 +1534,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         Publish(const std::shared_ptr<const PublishedSegmentState>& current,
                 const StateDelta& delta) {
             std::vector<SealedIndexingEntryPtr> retired_indexings;
+            std::vector<index::CacheIndexBasePtr> retired_cache_indexings;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 segment_.PublishState(
                     segment_.BuildNextPublishedState(current, delta));
                 retired_indexings.swap(retired_vector_indexings_);
+                retired_cache_indexings.swap(retired_cache_indexings_);
             }
             for (auto& entry : retired_indexings) {
                 if (entry != nullptr && entry->indexing_ != nullptr) {
                     entry->indexing_->CancelWarmup();
                 }
+            }
+            for (auto& indexing : retired_cache_indexings) {
+                if (indexing != nullptr) {
+                    indexing->CancelWarmup();
+                }
+            }
+        }
+
+        void
+        RetireCacheIndexingLocked(index::CacheIndexBasePtr indexing) {
+            if (indexing != nullptr) {
+                retired_cache_indexings_.push_back(std::move(indexing));
             }
         }
 
@@ -1515,6 +1574,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         RuntimeResourceState* runtime_;
         PublishedSegmentState* staged_state_;
         std::vector<SealedIndexingEntryPtr> retired_vector_indexings_;
+        std::vector<index::CacheIndexBasePtr> retired_cache_indexings_;
         std::mutex mutex_;
     };
 
