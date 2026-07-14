@@ -153,6 +153,24 @@ func validateKeptEvolutionFields(oldFields, newFields *evolutionFieldMaps) error
 		if oldField.GetNullable() != newField.GetNullable() {
 			return merr.WrapErrParameterInvalidMsg("cannot change the nullability of struct field %q in place", oldField.GetName())
 		}
+		oldChildren := make(map[int64]struct{}, len(oldField.GetFields()))
+		for _, child := range oldField.GetFields() {
+			oldChildren[child.GetFieldID()] = struct{}{}
+		}
+		newChildren := make(map[int64]struct{}, len(newField.GetFields()))
+		for _, child := range newField.GetFields() {
+			newChildren[child.GetFieldID()] = struct{}{}
+		}
+		for childID := range oldChildren {
+			if _, kept := newChildren[childID]; !kept {
+				return merr.WrapErrParameterInvalidMsg("cannot drop sub-field id %d from kept struct field %q", childID, oldField.GetName())
+			}
+		}
+		for childID := range newChildren {
+			if _, existed := oldChildren[childID]; !existed {
+				return merr.WrapErrParameterInvalidMsg("cannot add sub-field id %d to kept struct field %q", childID, oldField.GetName())
+			}
+		}
 		if err := validateMonotonicNumericBounds(oldField.GetName(), oldField.GetTypeParams(), newField.GetTypeParams()); err != nil {
 			return err
 		}
@@ -189,8 +207,15 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 			continue
 		}
 		if _, isSubField := newFields.structSubFields[id]; isSubField {
+			parentID := newFields.structParents[id]
+			if _, parentExisted := oldFields.structFields[parentID]; parentExisted {
+				return merr.WrapErrParameterInvalidMsg("cannot add sub-field %q to kept struct field id %d", field.GetName(), parentID)
+			}
 			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() {
 				return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
+			}
+			if !field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("cannot add non-nullable sub-field %q in a new struct field", field.GetName())
 			}
 			continue
 		}
@@ -207,6 +232,9 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 		}
 		if !structField.GetNullable() {
 			return merr.WrapErrParameterInvalidMsg("cannot add non-nullable struct field %q online", structField.GetName())
+		}
+		if len(structField.GetFields()) == 0 {
+			return merr.WrapErrParameterInvalidMsg("new struct field %q must contain at least one sub-field", structField.GetName())
 		}
 	}
 	return nil
@@ -242,6 +270,11 @@ func validateDroppedEvolutionFields(oldFields, newFields *evolutionFieldMaps, ne
 	for id, field := range oldFields.fields {
 		if _, kept := newFields.allIDs[id]; kept {
 			continue
+		}
+		if parentID, isSubField := oldFields.structParents[id]; isSubField {
+			if _, parentKept := newFields.structFields[parentID]; parentKept {
+				return merr.WrapErrParameterInvalidMsg("cannot drop sub-field %q from kept struct field id %d", field.GetName(), parentID)
+			}
 		}
 		if err := validateDroppedEvolutionField(field, newSchema); err != nil {
 			return err
@@ -286,6 +319,7 @@ func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema,
 	}
 
 	newFunctions := make(map[int64]*schemapb.FunctionSchema)
+	functionNames := make(map[string]struct{})
 	outputOwners := make(map[int64]string)
 	for _, function := range newSchema.GetFunctions() {
 		if function == nil {
@@ -295,6 +329,10 @@ func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema,
 			return merr.WrapErrParameterInvalidMsg("new schema contains duplicate function id %d", function.GetId())
 		}
 		newFunctions[function.GetId()] = function
+		if _, duplicate := functionNames[function.GetName()]; duplicate {
+			return merr.WrapErrParameterInvalidMsg("duplicate function name: %s", function.GetName())
+		}
+		functionNames[function.GetName()] = struct{}{}
 
 		if len(function.GetInputFieldIds()) != len(function.GetInputFieldNames()) || len(function.GetOutputFieldIds()) != len(function.GetOutputFieldNames()) {
 			return merr.WrapErrParameterInvalidMsg("function %q has mismatched field id and name lists", function.GetName())
@@ -302,12 +340,17 @@ func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema,
 		if len(function.GetOutputFieldIds()) == 0 {
 			return merr.WrapErrParameterInvalidMsg("function %q has no output field", function.GetName())
 		}
+		inputFields := make([]*schemapb.FieldSchema, 0, len(function.GetInputFieldIds()))
+		inputIDs := make(map[int64]struct{}, len(function.GetInputFieldIds()))
 		for index, id := range function.GetInputFieldIds() {
 			field, ok := newFields.fields[id]
 			if !ok || field.GetName() != function.GetInputFieldNames()[index] {
 				return merr.WrapErrParameterInvalidMsg("function %q references a missing input field", function.GetName())
 			}
+			inputFields = append(inputFields, field)
+			inputIDs[id] = struct{}{}
 		}
+		outputFields := make([]*schemapb.FieldSchema, 0, len(function.GetOutputFieldIds()))
 		for index, id := range function.GetOutputFieldIds() {
 			field, ok := newFields.fields[id]
 			if !ok || field.GetName() != function.GetOutputFieldNames()[index] {
@@ -316,10 +359,20 @@ func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema,
 			if !field.GetIsFunctionOutput() {
 				return merr.WrapErrParameterInvalidMsg("output field %q of function %q is not marked as a function output", field.GetName(), function.GetName())
 			}
+			if _, isInput := inputIDs[id]; isInput {
+				return merr.WrapErrParameterInvalidMsg("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), field.GetName())
+			}
+			if field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("function output field cannot be nullable: function %s, field %s", function.GetName(), field.GetName())
+			}
 			if owner, duplicate := outputOwners[id]; duplicate {
 				return merr.WrapErrParameterInvalidMsg("output field %q is produced by both %q and %q", field.GetName(), owner, function.GetName())
 			}
 			outputOwners[id] = function.GetName()
+			outputFields = append(outputFields, field)
+		}
+		if err := validateEvolutionFunctionStaticInvariants(function, inputFields, outputFields); err != nil {
+			return err
 		}
 
 		if oldFunction, existed := oldFunctions[function.GetId()]; existed {
@@ -343,6 +396,94 @@ func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema,
 		}
 	}
 	return nil
+}
+
+// validateEvolutionFunctionStaticInvariants mirrors the authoritative static
+// checks in internal/util/function/validator without importing that package.
+// Importing it would pull the function runtime and libmilvus_core into this
+// low-level validation-only package.
+func validateEvolutionFunctionStaticInvariants(function *schemapb.FunctionSchema, inputFields, outputFields []*schemapb.FieldSchema) error {
+	if function.GetName() == "" {
+		return merr.WrapErrParameterMissingMsg("function name cannot be empty")
+	}
+	if len(inputFields) == 0 {
+		return merr.WrapErrParameterMissingMsg("function input field names cannot be empty, function: %s", function.GetName())
+	}
+	seenInputs := make(map[string]struct{}, len(function.GetInputFieldNames()))
+	for _, name := range function.GetInputFieldNames() {
+		if name == "" {
+			return merr.WrapErrParameterMissingMsg("function input field name cannot be empty string, function: %s", function.GetName())
+		}
+		if _, duplicate := seenInputs[name]; duplicate {
+			return merr.WrapErrParameterInvalidMsg("each function input field should be used exactly once in the same function, function: %s, input field: %s", function.GetName(), name)
+		}
+		seenInputs[name] = struct{}{}
+	}
+	seenOutputs := make(map[string]struct{}, len(function.GetOutputFieldNames()))
+	for _, name := range function.GetOutputFieldNames() {
+		if name == "" {
+			return merr.WrapErrParameterMissingMsg("function output field name cannot be empty string, function: %s", function.GetName())
+		}
+		if _, isInput := seenInputs[name]; isInput {
+			return merr.WrapErrParameterInvalidMsg("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), name)
+		}
+		if _, duplicate := seenOutputs[name]; duplicate {
+			return merr.WrapErrParameterInvalidMsg("each function output field should be used exactly once in the same function, function: %s, output field: %s", function.GetName(), name)
+		}
+		seenOutputs[name] = struct{}{}
+	}
+
+	for _, field := range outputFields {
+		if field.GetIsPrimaryKey() {
+			return merr.WrapErrParameterInvalidMsg("function output field cannot be primary key: function %s, field %s", function.GetName(), field.GetName())
+		}
+		if field.GetIsPartitionKey() || field.GetIsClusteringKey() {
+			return merr.WrapErrParameterInvalidMsg("function output field cannot be partition key or clustering key: function %s, field %s", function.GetName(), field.GetName())
+		}
+	}
+
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25:
+		if len(function.GetParams()) != 0 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function accepts no params")
+		}
+		if len(inputFields) != 1 || !isEvolutionFunctionStringInput(inputFields[0].GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("BM25 function input field must be a VARCHAR/TEXT field")
+		}
+		if !typeutil.CreateFieldSchemaHelper(inputFields[0]).EnableAnalyzer() {
+			return merr.WrapErrParameterInvalidMsg("BM25 function input field must set enable_analyzer to true")
+		}
+		if len(outputFields) != 1 || !typeutil.IsSparseFloatVectorType(outputFields[0].GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("BM25 function output field must be a SparseFloatVector field, but got %s", outputFields[0].GetDataType().String())
+		}
+	case schemapb.FunctionType_TextEmbedding:
+		if len(function.GetParams()) == 0 {
+			return merr.WrapErrParameterInvalidMsg("TextEmbedding function accepts no params")
+		}
+		if len(inputFields) != 1 || !isEvolutionFunctionStringInput(inputFields[0].GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("TextEmbedding function input field must be a VARCHAR/TEXT field")
+		}
+		if inputFields[0].GetNullable() {
+			return merr.WrapErrParameterInvalidMsg("function input field cannot be nullable: function %s, field %s", function.GetName(), inputFields[0].GetName())
+		}
+		if len(outputFields) != 1 || (outputFields[0].GetDataType() != schemapb.DataType_FloatVector && outputFields[0].GetDataType() != schemapb.DataType_Int8Vector) {
+			return merr.WrapErrParameterInvalidMsg("TextEmbedding function output field must be a FloatVector or Int8Vector field")
+		}
+	case schemapb.FunctionType_MinHash:
+		if len(inputFields) != 1 || !isEvolutionFunctionStringInput(inputFields[0].GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR/TEXT field")
+		}
+		if len(outputFields) != 1 || outputFields[0].GetDataType() != schemapb.DataType_BinaryVector {
+			return merr.WrapErrParameterInvalidMsg("MinHash function output field must be a BinaryVector field, but got %s", outputFields[0].GetDataType().String())
+		}
+	default:
+		return merr.WrapErrParameterInvalidMsg("check function params with unknown function type")
+	}
+	return nil
+}
+
+func isEvolutionFunctionStringInput(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_VarChar || dataType == schemapb.DataType_Text
 }
 
 func validateEvolutionDynamicGraph(schema *schemapb.CollectionSchema) error {
@@ -418,62 +559,33 @@ func evolutionNumericValue(params []*commonpb.KeyValuePair, key string) (int64, 
 }
 
 func validateMaxFieldIDEvolution(oldSchema, newSchema *schemapb.CollectionSchema, oldFields, newFields *evolutionFieldMaps) error {
-	oldMax, oldHasMax, err := evolutionSchemaPropertyInt(oldSchema, common.MaxFieldIDKey)
+	oldProperty, err := evolutionSchemaIntProperty(oldSchema, common.MaxFieldIDKey)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("old schema has an invalid %s property", common.MaxFieldIDKey)
+		return err
 	}
-	newMax, newHasMax, err := evolutionSchemaPropertyInt(newSchema, common.MaxFieldIDKey)
+	newProperty, err := evolutionSchemaIntProperty(newSchema, common.MaxFieldIDKey)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("new schema has an invalid %s property", common.MaxFieldIDKey)
+		return err
 	}
-	if oldHasMax {
-		if !newHasMax {
-			return merr.WrapErrParameterInvalidMsg("cannot remove the %s property", common.MaxFieldIDKey)
+
+	oldFloor := maxEvolutionFieldID(oldFields)
+	if oldProperty.valid && oldProperty.value > oldFloor {
+		oldFloor = oldProperty.value
+	}
+	expectedMax := oldFloor
+	if newLiveMax := maxEvolutionFieldID(newFields); newLiveMax > expectedMax {
+		expectedMax = newLiveMax
+	}
+	if !proto.Equal(oldSchema, newSchema) || oldProperty.present {
+		if !newProperty.present || !newProperty.valid {
+			return merr.WrapErrParameterInvalidMsg("schema evolution must contain a valid %s property", common.MaxFieldIDKey)
 		}
-		if newMax < oldMax {
-			return merr.WrapErrParameterInvalidMsg("cannot decrease %s", common.MaxFieldIDKey)
-		}
-		for id := range oldFields.allIDs {
-			if id > oldMax {
-				return merr.WrapErrParameterInvalidMsg("old field id %d exceeds %s %d", id, common.MaxFieldIDKey, oldMax)
-			}
-		}
-		expectedMax := oldMax
-		for id := range newFields.allIDs {
-			if id > expectedMax {
-				expectedMax = id
-			}
-		}
-		if newMax != expectedMax {
-			return merr.WrapErrParameterInvalidMsg("%s must be %d after this evolution, got %d", common.MaxFieldIDKey, expectedMax, newMax)
-		}
-	} else if !proto.Equal(oldSchema, newSchema) {
-		if !newHasMax {
-			return merr.WrapErrParameterInvalidMsg("schema evolution must establish the %s property", common.MaxFieldIDKey)
-		}
-		expectedMax := int64(0)
-		for id := range newFields.allIDs {
-			if id > expectedMax {
-				expectedMax = id
-			}
-		}
-		if newMax != expectedMax {
-			return merr.WrapErrParameterInvalidMsg("%s must be %d after this evolution, got %d", common.MaxFieldIDKey, expectedMax, newMax)
+		if newProperty.value != expectedMax {
+			return merr.WrapErrParameterInvalidMsg("%s must be %d after this evolution, got %d", common.MaxFieldIDKey, expectedMax, newProperty.value)
 		}
 	}
 
-	oldFloor := oldMax
-	if !oldHasMax {
-		for id := range oldFields.allIDs {
-			if id > oldFloor {
-				oldFloor = id
-			}
-		}
-	}
 	for id := range newFields.allIDs {
-		if newHasMax && id > newMax {
-			return merr.WrapErrParameterInvalidMsg("field id %d exceeds %s %d", id, common.MaxFieldIDKey, newMax)
-		}
 		if _, existed := oldFields.allIDs[id]; !existed && id <= oldFloor {
 			return merr.WrapErrParameterInvalidMsg("new field id %d reuses an already allocated field id", id)
 		}
@@ -481,24 +593,40 @@ func validateMaxFieldIDEvolution(oldSchema, newSchema *schemapb.CollectionSchema
 	return nil
 }
 
-func evolutionSchemaPropertyInt(schema *schemapb.CollectionSchema, key string) (int64, bool, error) {
-	var value int64
-	found := false
+type evolutionIntProperty struct {
+	value   int64
+	present bool
+	valid   bool
+}
+
+func evolutionSchemaIntProperty(schema *schemapb.CollectionSchema, key string) (evolutionIntProperty, error) {
+	result := evolutionIntProperty{}
 	for _, property := range schema.GetProperties() {
 		if property.GetKey() != key {
 			continue
 		}
-		if found {
-			return 0, false, merr.WrapErrParameterInvalidMsg("schema contains duplicate property %q", key)
+		if result.present {
+			return evolutionIntProperty{}, merr.WrapErrParameterInvalidMsg("schema contains duplicate property %q", key)
 		}
+		result.present = true
 		parsed, err := strconv.ParseInt(property.GetValue(), 10, 64)
 		if err != nil {
-			return 0, false, err
+			continue
 		}
-		value = parsed
-		found = true
+		result.value = parsed
+		result.valid = true
 	}
-	return value, found, nil
+	return result, nil
+}
+
+func maxEvolutionFieldID(fields *evolutionFieldMaps) int64 {
+	maxID := int64(common.StartOfUserFieldID)
+	for id := range fields.allIDs {
+		if id > maxID {
+			maxID = id
+		}
+	}
+	return maxID
 }
 
 func isReservedEvolutionFieldName(name string) bool {

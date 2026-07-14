@@ -45,6 +45,9 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 			setMaxFieldID(schema, 106)
 		}},
 		{name: "add nullable struct container", mutate: func(schema *schemapb.CollectionSchema) {
+			child := evolutionField(107, "profile[values]", schemapb.DataType_Array, true)
+			child.ElementType = schemapb.DataType_Int64
+			child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
 			schema.StructArrayFields = append(schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
 				FieldID:  106,
 				Name:     "profile",
@@ -52,9 +55,7 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.MaxCapacityKey, Value: "32"},
 				},
-				Fields: []*schemapb.FieldSchema{
-					evolutionField(107, "profile[age]", schemapb.DataType_Int64, true),
-				},
+				Fields: []*schemapb.FieldSchema{child},
 			})
 			setMaxFieldID(schema, 107)
 		}},
@@ -96,6 +97,50 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
 		newSchema.EnableDynamicField = false
 		newSchema.Fields = removeEvolutionField(newSchema.Fields, 106)
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("drop whole struct container", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields = nil
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	for _, test := range []struct {
+		name     string
+		oldValue string
+	}{
+		{name: "repair missing max field id", oldValue: ""},
+		{name: "repair malformed max field id", oldValue: "not-a-number"},
+		{name: "repair stale low max field id", oldValue: "102"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			oldSchema := evolutionBaseSchema()
+			if test.oldValue == "" {
+				removeEvolutionProperty(oldSchema, common.MaxFieldIDKey)
+			} else {
+				setEvolutionProperty(oldSchema, common.MaxFieldIDKey, test.oldValue)
+			}
+			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+			setMaxFieldID(newSchema, 105)
+			require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+		})
+	}
+
+	t.Run("repair stale low max field id using struct child floor", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		setMaxFieldID(oldSchema, 102)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		setMaxFieldID(newSchema, 107)
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("preserve stale high max field id", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		setMaxFieldID(oldSchema, 120)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.Fields = removeEvolutionField(newSchema.Fields, 105)
 		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
 	})
 }
@@ -255,6 +300,49 @@ func TestValidateSchemaEvolutionRejectsStructSubFieldReparenting(t *testing.T) {
 	require.Error(t, ValidateSchemaEvolution(oldSchema, newSchema))
 }
 
+func TestValidateSchemaEvolutionRejectsIndependentStructSubFieldMutation(t *testing.T) {
+	t.Run("add child to kept container", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		child := evolutionField(108, "profile[extra]", schemapb.DataType_Array, true)
+		child.ElementType = schemapb.DataType_Int64
+		child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}
+		newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
+		setMaxFieldID(newSchema, 108)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot add sub-field")
+	})
+
+	t.Run("drop child from kept container", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = nil
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot drop sub-field")
+	})
+
+	t.Run("add whole container with non-nullable child", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		child := evolutionField(107, "profile[values]", schemapb.DataType_Array, false)
+		child.ElementType = schemapb.DataType_Int64
+		child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}
+		newSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+			{FieldID: 106, Name: "profile", Nullable: true, Fields: []*schemapb.FieldSchema{child}},
+		}
+		setMaxFieldID(newSchema, 107)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "non-nullable sub-field")
+	})
+
+	t.Run("add empty whole container", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+			{FieldID: 106, Name: "profile", Nullable: true},
+		}
+		setMaxFieldID(newSchema, 106)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "must contain at least one sub-field")
+	})
+}
+
 func TestValidateSchemaEvolutionRejectsProtectedDrops(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -353,6 +441,76 @@ func TestValidateSchemaEvolutionRejectsInvalidFunctionGraphs(t *testing.T) {
 		err := ValidateSchemaEvolution(oldSchema, newSchema)
 		require.ErrorContains(t, err, "reuses an existing output field")
 	})
+
+	t.Run("duplicate function names", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		firstOutput := evolutionField(106, "sparse", schemapb.DataType_SparseFloatVector, false)
+		firstOutput.IsFunctionOutput = true
+		secondOutput := evolutionField(107, "sparse_two", schemapb.DataType_SparseFloatVector, false)
+		secondOutput.IsFunctionOutput = true
+		newSchema.Fields = append(newSchema.Fields, firstOutput, secondOutput)
+		first := evolutionFunction(200, 102, 106)
+		second := evolutionFunction(201, 102, 107)
+		second.Name = first.Name
+		second.OutputFieldNames = []string{"sparse_two"}
+		newSchema.Functions = []*schemapb.FunctionSchema{first, second}
+		setMaxFieldID(newSchema, 107)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "duplicate function name")
+	})
+
+	t.Run("nullable function output", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		output := evolutionField(106, "sparse", schemapb.DataType_SparseFloatVector, true)
+		output.IsFunctionOutput = true
+		newSchema.Fields = append(newSchema.Fields, output)
+		newSchema.Functions = []*schemapb.FunctionSchema{evolutionFunction(200, 102, 106)}
+		setMaxFieldID(newSchema, 106)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "function output field cannot be nullable")
+	})
+
+	t.Run("function output type incompatible", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		output := evolutionField(106, "sparse", schemapb.DataType_FloatVector, false)
+		output.IsFunctionOutput = true
+		output.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
+		newSchema.Fields = append(newSchema.Fields, output)
+		newSchema.Functions = []*schemapb.FunctionSchema{evolutionFunction(200, 102, 106)}
+		setMaxFieldID(newSchema, 106)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "BM25 function output field must be a SparseFloatVector field")
+	})
+
+	t.Run("same field is function input and output", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		field := evolutionField(106, "same", schemapb.DataType_Text, false)
+		field.IsFunctionOutput = true
+		field.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}}
+		newSchema.Fields = append(newSchema.Fields, field)
+		function := evolutionFunction(200, 106, 106)
+		function.InputFieldNames = []string{"same"}
+		function.OutputFieldNames = []string{"same"}
+		newSchema.Functions = []*schemapb.FunctionSchema{function}
+		setMaxFieldID(newSchema, 106)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "a single field cannot be both input and output")
+	})
+
+	t.Run("deprecated string function input", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		input := evolutionField(106, "legacy_string", schemapb.DataType_String, true)
+		input.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}}
+		output := evolutionField(107, "sparse", schemapb.DataType_SparseFloatVector, false)
+		output.IsFunctionOutput = true
+		newSchema.Fields = append(newSchema.Fields, input, output)
+		function := evolutionFunction(200, 106, 107)
+		function.InputFieldNames = []string{"legacy_string"}
+		newSchema.Functions = []*schemapb.FunctionSchema{function}
+		setMaxFieldID(newSchema, 107)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "BM25 function input field must be a VARCHAR/TEXT field")
+	})
 }
 
 func TestValidateSchemaEvolutionRejectsMalformedDynamicGraphs(t *testing.T) {
@@ -409,6 +567,7 @@ func evolutionBaseSchema() *schemapb.CollectionSchema {
 	pk := evolutionField(100, "pk", schemapb.DataType_Int64, false)
 	pk.IsPrimaryKey = true
 	body := evolutionField(102, "body", schemapb.DataType_Text, true)
+	body.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}}
 	vector := evolutionField(103, "embedding", schemapb.DataType_FloatVector, false)
 	vector.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
 	title := evolutionField(104, "title", schemapb.DataType_VarChar, true)
@@ -433,6 +592,26 @@ func evolutionSchemaWithFunction() *schemapb.CollectionSchema {
 	schema.Fields = append(schema.Fields, output)
 	schema.Functions = []*schemapb.FunctionSchema{evolutionFunction(200, 102, 106)}
 	setMaxFieldID(schema, 106)
+	return schema
+}
+
+func evolutionSchemaWithStruct() *schemapb.CollectionSchema {
+	schema := evolutionBaseSchema()
+	child := evolutionField(107, "profile[values]", schemapb.DataType_Array, true)
+	child.ElementType = schemapb.DataType_Int64
+	child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+		{
+			FieldID:  106,
+			Name:     "profile",
+			Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "64"},
+			},
+			Fields: []*schemapb.FieldSchema{child},
+		},
+	}
+	setMaxFieldID(schema, 107)
 	return schema
 }
 
@@ -512,4 +691,14 @@ func removeEvolutionProperty(schema *schemapb.CollectionSchema, key string) {
 		}
 	}
 	schema.Properties = properties
+}
+
+func setEvolutionProperty(schema *schemapb.CollectionSchema, key, value string) {
+	for _, property := range schema.GetProperties() {
+		if property.GetKey() == key {
+			property.Value = value
+			return
+		}
+	}
+	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{Key: key, Value: value})
 }
