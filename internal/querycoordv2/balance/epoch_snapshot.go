@@ -73,9 +73,12 @@ func (b *PlacementSnapshotBuilder) Build(
 	for attempt := 0; attempt < maxPlacementSnapshotAttempts; attempt++ {
 		distribution := b.dist.Capture()
 		pending := b.capturePending()
-		snapshot, err := b.buildFromCapture(ctx, resourceGroup, eligibleReplicaIDs, distribution, pending, carryOver)
+		snapshot, stable, err := b.buildFromCapture(ctx, resourceGroup, eligibleReplicaIDs, distribution, pending, carryOver)
 		if err != nil {
 			return nil, err
+		}
+		if !stable {
+			continue
 		}
 		if b.buildHook != nil {
 			b.buildHook(attempt)
@@ -83,9 +86,12 @@ func (b *PlacementSnapshotBuilder) Build(
 
 		afterDistribution := b.dist.Capture()
 		afterPending := b.capturePending()
-		after, err := b.captureToken(ctx, resourceGroup, afterDistribution, afterPending.Revision)
+		after, stable, err := b.captureToken(ctx, resourceGroup, afterDistribution, afterPending)
 		if err != nil {
 			return nil, err
+		}
+		if !stable {
+			continue
 		}
 		if snapshot.Token.Equal(after) {
 			return snapshot, nil
@@ -100,9 +106,12 @@ func (b *PlacementSnapshotBuilder) Validate(token AdmissionToken) task.BalanceAd
 	}
 	distribution := b.dist.Capture()
 	pending := b.capturePending()
-	current, err := b.captureToken(context.Background(), token.Snapshot.ResourceGroup, distribution, pending.Revision)
+	current, stable, err := b.captureToken(context.Background(), token.Snapshot.ResourceGroup, distribution, pending)
 	if err != nil {
 		return task.BalanceAdmissionInternalError
+	}
+	if !stable {
+		return task.BalanceAdmissionTargetChanged
 	}
 	if current.RGHash != token.Snapshot.RGHash {
 		return task.BalanceAdmissionRGChanged
@@ -120,7 +129,7 @@ func (b *PlacementSnapshotBuilder) Validate(token AdmissionToken) task.BalanceAd
 	if current.LeaderHash != token.Snapshot.LeaderHash {
 		return task.BalanceAdmissionLeaderMissing
 	}
-	if current.PendingTaskRevision != token.Snapshot.PendingTaskRevision {
+	if current.PendingRevision(token.Epoch).EffectiveRevision() != token.Snapshot.PendingRevision(token.Epoch).EffectiveRevision() {
 		return task.BalanceAdmissionStaleEpoch
 	}
 	if !sourcePresent(distribution, token) {
@@ -140,13 +149,16 @@ func (b *PlacementSnapshotBuilder) captureToken(
 	ctx context.Context,
 	resourceGroup string,
 	distribution meta.DistributionSnapshot,
-	pendingRevision uint64,
-) (SnapshotToken, error) {
-	snapshot, err := b.buildFromCapture(ctx, resourceGroup, nil, distribution, task.PendingBalanceSnapshot{Revision: pendingRevision}, nil)
+	pending task.PendingBalanceSnapshot,
+) (SnapshotToken, bool, error) {
+	snapshot, stable, err := b.buildFromCapture(ctx, resourceGroup, nil, distribution, pending, nil)
 	if err != nil {
-		return SnapshotToken{}, err
+		return SnapshotToken{}, false, err
 	}
-	return snapshot.Token, nil
+	if !stable {
+		return SnapshotToken{}, false, nil
+	}
+	return snapshot.Token, true, nil
 }
 
 func (b *PlacementSnapshotBuilder) buildFromCapture(
@@ -156,10 +168,10 @@ func (b *PlacementSnapshotBuilder) buildFromCapture(
 	distribution meta.DistributionSnapshot,
 	pending task.PendingBalanceSnapshot,
 	carryOver []task.PendingBalanceTaskSnapshot,
-) (*PlacementSnapshot, error) {
+) (*PlacementSnapshot, bool, error) {
 	rg := b.meta.ResourceManager.GetResourceGroup(ctx, resourceGroup)
 	if rg == nil {
-		return nil, fmt.Errorf("resource group %q not found", resourceGroup)
+		return nil, false, fmt.Errorf("resource group %q not found", resourceGroup)
 	}
 
 	replicas := append([]*meta.Replica(nil), b.meta.ReplicaManager.GetByResourceGroup(ctx, resourceGroup)...)
@@ -185,7 +197,10 @@ func (b *PlacementSnapshotBuilder) buildFromCapture(
 	}
 
 	nodeSnapshots := b.copyNodeSnapshots(rg, scopeNodes, physicalNodes)
-	collectionTargets, currentVersions, nextVersions := b.copyTargets(ctx, collections)
+	collectionTargets, currentVersions, nextVersions, targetsStable := b.copyTargets(ctx, collections)
+	if !targetsStable {
+		return nil, false, nil
+	}
 	segments, channels := projectDistribution(distribution, replicas, physicalNodes)
 	eligible := make(map[int64]struct{}, len(eligibleReplicaIDs))
 	for _, replicaID := range eligibleReplicaIDs {
@@ -193,20 +208,30 @@ func (b *PlacementSnapshotBuilder) buildFromCapture(
 			eligible[replicaID] = struct{}{}
 		}
 	}
-	mergedPending := mergePendingTasks(resourceGroup, pending.Tasks, carryOver)
+	mergedPending := mergePendingTasks(resourceGroup, scopeNodes, pending.Tasks, carryOver)
 	pendingWork := projectPendingWork(pending.Revision, mergedPending, distribution)
+	pendingRevision := pending.RevisionFor(resourceGroup, task.BalanceEpochMeta{})
+	pendingEpochRevisions := make(map[task.BalanceEpochMeta]uint64)
+	for epoch, revision := range pending.EpochRevisions {
+		if epoch.ResourceGroup == resourceGroup {
+			pendingEpochRevisions[epoch] = revision
+		}
+	}
 
 	token := SnapshotToken{
-		ResourceGroup:        resourceGroup,
-		RGHash:               hashResourceGroup(rg),
-		ReplicaHash:          hashReplicas(replicaSnapshots),
-		NodeHash:             hashNodes(nodeSnapshots),
-		LeaderHash:           hashLeaders(distribution, replicas, physicalNodes),
-		SegmentRevision:      distribution.SegmentVersion,
-		ChannelRevision:      distribution.ChannelVersion,
-		PendingTaskRevision:  pending.Revision,
-		CurrentTargetVersion: currentVersions,
-		NextTargetVersion:    nextVersions,
+		ResourceGroup:         resourceGroup,
+		RGHash:                hashResourceGroup(rg),
+		ReplicaHash:           hashReplicas(replicaSnapshots),
+		NodeHash:              hashNodes(nodeSnapshots),
+		LeaderHash:            hashLeaders(distribution, replicas, physicalNodes),
+		PlacementHash:         hashPlacements(segments, channels),
+		SegmentRevision:       distribution.SegmentVersion,
+		ChannelRevision:       distribution.ChannelVersion,
+		PendingTaskRevision:   pendingRevision.Revision,
+		PendingGlobalRevision: pending.Revision,
+		CurrentTargetVersion:  currentVersions,
+		NextTargetVersion:     nextVersions,
+		pendingEpochRevisions: pendingEpochRevisions,
 	}
 	return &PlacementSnapshot{
 		Token:             token,
@@ -218,7 +243,7 @@ func (b *PlacementSnapshotBuilder) buildFromCapture(
 		CollectionTargets: collectionTargets,
 		PendingWork:       pendingWork,
 		EligibleReplicas:  eligible,
-	}, nil
+	}, true, nil
 }
 
 func copyReplicaSnapshot(replica *meta.Replica) ReplicaSnapshot {
@@ -269,25 +294,32 @@ func (b *PlacementSnapshotBuilder) copyNodeSnapshots(
 func (b *PlacementSnapshotBuilder) copyTargets(
 	ctx context.Context,
 	collections map[int64]struct{},
-) (map[int64]CollectionTargetSnapshot, map[int64]int64, map[int64]int64) {
+) (map[int64]CollectionTargetSnapshot, map[int64]int64, map[int64]int64, bool) {
 	targets := make(map[int64]CollectionTargetSnapshot, len(collections))
 	currentVersions := make(map[int64]int64, len(collections))
 	nextVersions := make(map[int64]int64, len(collections))
 	for collectionID := range collections {
-		current := b.copyTargetScope(ctx, collectionID, meta.CurrentTarget)
-		next := b.copyTargetScope(ctx, collectionID, meta.NextTarget)
+		current, stable := b.copyTargetScope(ctx, collectionID, meta.CurrentTarget)
+		if !stable {
+			return nil, nil, nil, false
+		}
+		next, stable := b.copyTargetScope(ctx, collectionID, meta.NextTarget)
+		if !stable {
+			return nil, nil, nil, false
+		}
 		targets[collectionID] = CollectionTargetSnapshot{Current: current, Next: next}
 		currentVersions[collectionID] = current.Version
 		nextVersions[collectionID] = next.Version
 	}
-	return targets, currentVersions, nextVersions
+	return targets, currentVersions, nextVersions, true
 }
 
-func (b *PlacementSnapshotBuilder) copyTargetScope(ctx context.Context, collectionID int64, scope meta.TargetScope) TargetScopeSnapshot {
+func (b *PlacementSnapshotBuilder) copyTargetScope(ctx context.Context, collectionID int64, scope meta.TargetScope) (TargetScopeSnapshot, bool) {
+	versionBefore := b.target.GetCollectionTargetVersion(ctx, collectionID, scope)
 	segments := b.target.GetSealedSegmentsByCollection(ctx, collectionID, scope)
 	channels := b.target.GetDmChannelsByCollection(ctx, collectionID, scope)
 	snapshot := TargetScopeSnapshot{
-		Version:  b.target.GetCollectionTargetVersion(ctx, collectionID, scope),
+		Version:  versionBefore,
 		Segments: make(map[int64]TargetSegmentSnapshot, len(segments)),
 		Channels: make(map[string]TargetChannelSnapshot, len(channels)),
 	}
@@ -307,7 +339,11 @@ func (b *PlacementSnapshotBuilder) copyTargetScope(ctx context.Context, collecti
 		}
 		snapshot.Channels[channelName] = primitive
 	}
-	return snapshot
+	versionAfter := b.target.GetCollectionTargetVersion(ctx, collectionID, scope)
+	if versionBefore != versionAfter {
+		return TargetScopeSnapshot{}, false
+	}
+	return snapshot, true
 }
 
 func targetSegmentFrom(segment *datapb.SegmentInfo) TargetSegmentSnapshot {
@@ -328,8 +364,8 @@ func projectDistribution(
 	segments := make(map[SegmentObjectKey][]SegmentPlacement)
 	channels := make(map[ChannelObjectKey][]ChannelPlacement)
 	for _, record := range distribution.Segments {
-		for _, replica := range matchingReplicas(replicas, record.CollectionID, record.NodeID, physicalNodes) {
-			key := SegmentObjectKey{ReplicaID: replica.GetID(), SegmentID: record.SegmentID, Scope: record.Scope}
+		for _, replicaID := range placementReplicaIDs(replicas, record.CollectionID, record.NodeID, physicalNodes) {
+			key := SegmentObjectKey{ReplicaID: replicaID, SegmentID: record.SegmentID, Scope: record.Scope}
 			segments[key] = append(segments[key], SegmentPlacement{
 				NodeID: record.NodeID, CollectionID: record.CollectionID, PartitionID: record.PartitionID,
 				Channel: record.Channel, RowCount: record.RowCount, Version: record.Version, Present: record.Present,
@@ -337,8 +373,8 @@ func projectDistribution(
 		}
 	}
 	for _, record := range distribution.Channels {
-		for _, replica := range matchingReplicas(replicas, record.CollectionID, record.NodeID, physicalNodes) {
-			channelKey := ChannelObjectKey{ReplicaID: replica.GetID(), Channel: record.Channel}
+		for _, replicaID := range placementReplicaIDs(replicas, record.CollectionID, record.NodeID, physicalNodes) {
+			channelKey := ChannelObjectKey{ReplicaID: replicaID, Channel: record.Channel}
 			channels[channelKey] = append(channels[channelKey], ChannelPlacement{
 				NodeID: record.NodeID, CollectionID: record.CollectionID, Version: record.Version, Present: record.Present,
 				Serviceable: record.Serviceable, LeaderID: record.LeaderID, LeaderVersion: record.LeaderVersion,
@@ -349,7 +385,7 @@ func projectDistribution(
 				if nodeID == 0 {
 					nodeID = record.NodeID
 				}
-				key := SegmentObjectKey{ReplicaID: replica.GetID(), SegmentID: growing.SegmentID, Scope: querypb.DataScope_Streaming}
+				key := SegmentObjectKey{ReplicaID: replicaID, SegmentID: growing.SegmentID, Scope: querypb.DataScope_Streaming}
 				segments[key] = append(segments[key], SegmentPlacement{
 					NodeID: nodeID, CollectionID: record.CollectionID, Channel: record.Channel,
 					RowCount: growing.RowCount, Version: record.Version, Present: true,
@@ -366,6 +402,20 @@ func projectDistribution(
 	return segments, channels
 }
 
+func placementReplicaIDs(replicas []*meta.Replica, collectionID, nodeID int64, physicalNodes map[int64]struct{}) []int64 {
+	matched := matchingReplicas(replicas, collectionID, nodeID, physicalNodes)
+	ids := make([]int64, 0, len(matched))
+	for _, replica := range matched {
+		ids = append(ids, replica.GetID())
+	}
+	if len(ids) == 0 {
+		if _, physical := physicalNodes[nodeID]; physical {
+			ids = append(ids, meta.NilReplica.GetID())
+		}
+	}
+	return ids
+}
+
 func matchingReplicas(replicas []*meta.Replica, collectionID, nodeID int64, physicalNodes map[int64]struct{}) []*meta.Replica {
 	matched := make([]*meta.Replica, 0, 1)
 	for _, replica := range replicas {
@@ -380,12 +430,18 @@ func matchingReplicas(replicas []*meta.Replica, collectionID, nodeID int64, phys
 	return matched
 }
 
-func mergePendingTasks(resourceGroup string, scheduler, carryOver []task.PendingBalanceTaskSnapshot) []task.PendingBalanceTaskSnapshot {
+func mergePendingTasks(
+	resourceGroup string,
+	scopeNodes map[int64]struct{},
+	scheduler, carryOver []task.PendingBalanceTaskSnapshot,
+) []task.PendingBalanceTaskSnapshot {
 	merged := make(map[string]task.PendingBalanceTaskSnapshot)
 	add := func(pending task.PendingBalanceTaskSnapshot) {
-		if pending.ResourceGroup != resourceGroup {
+		filtered, ok := filterPendingTask(resourceGroup, scopeNodes, pending)
+		if !ok {
 			return
 		}
+		pending = filtered
 		key := fmt.Sprintf("task/%d", pending.TaskID)
 		if pending.TaskID == 0 {
 			key = fmt.Sprintf("anonymous/%d/%d/%v", pending.CollectionID, pending.ReplicaID, pending.Actions)
@@ -416,6 +472,32 @@ func mergePendingTasks(resourceGroup string, scheduler, carryOver []task.Pending
 		return tasks[i].ReplicaID < tasks[j].ReplicaID
 	})
 	return tasks
+}
+
+func filterPendingTask(
+	resourceGroup string,
+	scopeNodes map[int64]struct{},
+	pending task.PendingBalanceTaskSnapshot,
+) (task.PendingBalanceTaskSnapshot, bool) {
+	if pending.ResourceGroup == resourceGroup {
+		pending.Actions = append([]task.PendingBalanceActionSnapshot(nil), pending.Actions...)
+		return pending, true
+	}
+	if pending.ResourceGroup != "" || pending.ReplicaID != meta.NilReplica.GetID() {
+		return task.PendingBalanceTaskSnapshot{}, false
+	}
+
+	actions := make([]task.PendingBalanceActionSnapshot, 0, len(pending.Actions))
+	for _, action := range pending.Actions {
+		if _, ok := scopeNodes[action.NodeID]; ok {
+			actions = append(actions, action)
+		}
+	}
+	if len(actions) == 0 {
+		return task.PendingBalanceTaskSnapshot{}, false
+	}
+	pending.Actions = actions
+	return pending, true
 }
 
 func projectPendingWork(
@@ -569,11 +651,82 @@ func hashReplicas(replicas map[int64]ReplicaSnapshot) uint64 {
 			channels = append(channels, channel)
 		}
 		sort.Strings(channels)
+		digest.writeInt64(int64(len(channels)))
 		for _, channel := range channels {
 			digest.writeString(channel)
+			digest.writeInt64(int64(len(replica.ChannelRWNodes[channel])))
 			for _, nodeID := range replica.ChannelRWNodes[channel] {
 				digest.writeInt64(nodeID)
 			}
+		}
+	}
+	return digest.sum64()
+}
+
+func hashPlacements(
+	segments map[SegmentObjectKey][]SegmentPlacement,
+	channels map[ChannelObjectKey][]ChannelPlacement,
+) uint64 {
+	digest := newDigestWriter()
+	segmentKeys := make([]SegmentObjectKey, 0, len(segments))
+	for key := range segments {
+		segmentKeys = append(segmentKeys, key)
+	}
+	sort.Slice(segmentKeys, func(i, j int) bool {
+		left, right := segmentKeys[i], segmentKeys[j]
+		if left.ReplicaID != right.ReplicaID {
+			return left.ReplicaID < right.ReplicaID
+		}
+		if left.SegmentID != right.SegmentID {
+			return left.SegmentID < right.SegmentID
+		}
+		return left.Scope < right.Scope
+	})
+	digest.writeInt64(int64(len(segmentKeys)))
+	for _, key := range segmentKeys {
+		digest.writeInt64(key.ReplicaID)
+		digest.writeInt64(key.SegmentID)
+		digest.writeInt64(int64(key.Scope))
+		placements := segments[key]
+		digest.writeInt64(int64(len(placements)))
+		for _, placement := range placements {
+			digest.writeInt64(placement.NodeID)
+			digest.writeInt64(placement.CollectionID)
+			digest.writeInt64(placement.PartitionID)
+			digest.writeString(placement.Channel)
+			digest.writeInt64(placement.RowCount)
+			digest.writeInt64(placement.Version)
+			digest.writeBool(placement.Present)
+		}
+	}
+
+	channelKeys := make([]ChannelObjectKey, 0, len(channels))
+	for key := range channels {
+		channelKeys = append(channelKeys, key)
+	}
+	sort.Slice(channelKeys, func(i, j int) bool {
+		left, right := channelKeys[i], channelKeys[j]
+		if left.ReplicaID != right.ReplicaID {
+			return left.ReplicaID < right.ReplicaID
+		}
+		return left.Channel < right.Channel
+	})
+	digest.writeInt64(int64(len(channelKeys)))
+	for _, key := range channelKeys {
+		digest.writeInt64(key.ReplicaID)
+		digest.writeString(key.Channel)
+		placements := channels[key]
+		digest.writeInt64(int64(len(placements)))
+		for _, placement := range placements {
+			digest.writeInt64(placement.NodeID)
+			digest.writeInt64(placement.CollectionID)
+			digest.writeInt64(placement.Version)
+			digest.writeBool(placement.Present)
+			digest.writeBool(placement.Serviceable)
+			digest.writeInt64(placement.LeaderID)
+			digest.writeInt64(placement.LeaderVersion)
+			digest.writeInt64(placement.LeaderTargetVersion)
+			digest.writeInt64(placement.NumOfGrowingRows)
 		}
 	}
 	return digest.sum64()

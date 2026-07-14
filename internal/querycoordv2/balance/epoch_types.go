@@ -45,16 +45,20 @@ func (k ChannelObjectKey) MarshalText() ([]byte, error) {
 }
 
 type SnapshotToken struct {
-	ResourceGroup        string
-	RGHash               uint64
-	ReplicaHash          uint64
-	NodeHash             uint64
-	LeaderHash           uint64
-	SegmentRevision      int64
-	ChannelRevision      int64
-	PendingTaskRevision  uint64
-	CurrentTargetVersion map[int64]int64
-	NextTargetVersion    map[int64]int64
+	ResourceGroup         string
+	RGHash                uint64
+	ReplicaHash           uint64
+	NodeHash              uint64
+	LeaderHash            uint64
+	PlacementHash         uint64
+	SegmentRevision       int64
+	ChannelRevision       int64
+	PendingTaskRevision   uint64
+	PendingGlobalRevision uint64
+	CurrentTargetVersion  map[int64]int64
+	NextTargetVersion     map[int64]int64
+
+	pendingEpochRevisions map[task.BalanceEpochMeta]uint64
 }
 
 func (t SnapshotToken) Equal(other SnapshotToken) bool {
@@ -63,11 +67,24 @@ func (t SnapshotToken) Equal(other SnapshotToken) bool {
 		t.ReplicaHash == other.ReplicaHash &&
 		t.NodeHash == other.NodeHash &&
 		t.LeaderHash == other.LeaderHash &&
-		t.SegmentRevision == other.SegmentRevision &&
-		t.ChannelRevision == other.ChannelRevision &&
+		t.PlacementHash == other.PlacementHash &&
 		t.PendingTaskRevision == other.PendingTaskRevision &&
 		equalInt64Map(t.CurrentTargetVersion, other.CurrentTargetVersion) &&
 		equalInt64Map(t.NextTargetVersion, other.NextTargetVersion)
+}
+
+func (t SnapshotToken) PendingRevision(epoch task.BalanceEpochMeta) task.BalancePendingRevision {
+	epochRevision := uint64(0)
+	if epoch.ResourceGroup == t.ResourceGroup && epoch.ResourceGroup != "" &&
+		(epoch.LeaderTerm != 0 || epoch.Sequence != 0) {
+		epochRevision = t.pendingEpochRevisions[epoch]
+	}
+	return task.BalancePendingRevision{
+		ResourceGroup: t.ResourceGroup,
+		Epoch:         epoch,
+		Revision:      t.PendingTaskRevision,
+		EpochRevision: epochRevision,
+	}
 }
 
 func equalInt64Map(left, right map[int64]int64) bool {
@@ -85,6 +102,7 @@ func equalInt64Map(left, right map[int64]int64) bool {
 
 type AdmissionToken struct {
 	Snapshot           SnapshotToken
+	Epoch              task.BalanceEpochMeta
 	CollectionID       int64
 	ReplicaID          int64
 	ExpectedSourceNode int64

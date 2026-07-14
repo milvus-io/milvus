@@ -39,15 +39,39 @@ const (
 )
 
 type BalanceAdmissionResult struct {
-	TaskID int64
-	Reason BalanceAdmissionReason
-	Err    error
+	TaskID          int64
+	Reason          BalanceAdmissionReason
+	Err             error
+	PendingRevision BalancePendingRevision
+}
+
+type BalancePendingRevision struct {
+	ResourceGroup string
+	Epoch         BalanceEpochMeta
+	Revision      uint64
+	EpochRevision uint64
+}
+
+func (r BalancePendingRevision) EffectiveRevision() uint64 {
+	if r.EpochRevision > r.Revision {
+		return 0
+	}
+	return r.Revision - r.EpochRevision
 }
 
 type BalanceAdmissionValidator func() BalanceAdmissionReason
 
 type BalanceTaskAdmitter interface {
 	AdmitBalanceTask(task Task, validate BalanceAdmissionValidator) BalanceAdmissionResult
+}
+
+// BalanceTaskGenerationAdmitter atomically compares the expected RG-scoped
+// pending generation and commits the task under the scheduler pending lock.
+// The epoch-owned portion counts only expected generation-aware commits and is
+// subtracted so independent admissions from the same wave do not invalidate
+// each other. Legacy adds, removals, and failures remain visible mutations.
+type BalanceTaskGenerationAdmitter interface {
+	AdmitBalanceTaskAtPendingRevision(task Task, expected BalancePendingRevision, validate BalanceAdmissionValidator) BalanceAdmissionResult
 }
 
 func (r BalanceAdmissionReason) String() string {
