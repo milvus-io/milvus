@@ -46,7 +46,7 @@ trace semantics, not their implementation.
 | `wal.append` | WAL adaptor append boundary for one concrete message append. | A logical write span such as `wal.autocommit`, `wal.txn`, `wal.broadcast`, `replicate.secondary`, or `wal.dist_append`. | Covers adaptor-level append work. |
 | `wal.appendimpl` | WAL implementation append boundary where the concrete backend persists the message. | `wal.append`. | Covers backend append and persistence. |
 | `wal.dist_append` | Distributed append marker when a producer writes through a remote WAL. | The logical write span, usually `wal.autocommit` or `wal.txn`. | Covers the remote append request until append completion. |
-| `wal.consume` | Durable backend consume marker for a message read from the local backend scanner. | Message-carried trace. | Short marker span. |
+| `wal.catchup_consume` | Durable backend consume marker for a message read from the local backend scanner during catchup. | Message-carried trace. | Short marker span. |
 | `wal.dist_consume` | Distributed or non-local consume marker for a message read through a remote scanner or remote WAL path. | Message-carried trace. | Short marker span. |
 | `replicate.secondary` | Secondary cluster receive and re-append boundary for a replicated primary WAL message. | Primary-side consumed message trace, usually under `wal.dist_consume`. | Covers secondary-side replicate handling until append. |
 | `wal.bc_callback` | Broadcast ACK callback processing after broadcast message persistence and acknowledgement. | Broadcast message trace. | Covers callback handling such as task completion and cache invalidation. |
@@ -57,9 +57,15 @@ represent user-visible or system-visible WAL write intent.
 `wal.append` and `wal.appendimpl` are physical append boundaries. They should
 not become logical roots unless the upstream context is missing.
 
-`wal.consume` and `wal.dist_consume` are resume markers. They are usually short
-and exist to reconnect downstream asynchronous work to the message trace that
-was stored in WAL.
+`wal.catchup_consume` and `wal.dist_consume` are resume markers. They are
+usually short and exist to reconnect downstream asynchronous work to the
+message trace that was stored in WAL.
+
+`wal.catchup_consume` is emitted only when the scanner reads from the durable
+backend scanner in catchup mode. It is intentionally absent in tailing mode:
+tailing readers consume the same immutable message instance from the
+WriteAheadBuffer, and that shared message's properties must not be mutated to
+overwrite `_tc`.
 
 `replicate.secondary` is the only replication ownership span. There is no
 `replicate.primary` span.
@@ -105,7 +111,7 @@ request span
     wal.dist_append                       # remote append only
       wal.append
         wal.appendimpl
-          wal.consume / wal.dist_consume  # consume marker
+          wal.catchup_consume / wal.dist_consume  # consume marker, catchup/remote only
             replicate.secondary           # replication only
               wal.autocommit              # secondary re-append
                 wal.append
@@ -114,9 +120,10 @@ request span
 
 If the producer already owns a local WAL, `wal.dist_append` is absent and
 `wal.append` is directly under `wal.autocommit`. If the message is consumed from
-a local durable backend scanner, the consume marker is `wal.consume`; if it is
-consumed through a remote or distributed scanner path, the marker is
-`wal.dist_consume`.
+a local durable backend scanner during catchup, the consume marker is
+`wal.catchup_consume`; if it is consumed through a remote or distributed
+scanner path, the marker is `wal.dist_consume`. A steady-state local tailing
+consumer emits no consume marker.
 
 The secondary-side `wal.autocommit` is the local append of a replicated concrete
 message into the secondary WAL. It does not mean the original client request was
@@ -169,6 +176,9 @@ Downstream consumption uses the transaction assembled at CommitTxn. The
 synthetic transaction message is the downstream semantic unit. When that
 transaction is expanded later, BeginTxn, body messages, and CommitTxn should use
 the transaction-level trace rather than preserving unrelated body-level traces.
+This means the expanded child messages may have their `_tc` overwritten from
+the assembled transaction's CommitTxn trace; repeated copying of that
+transaction trace is intentional.
 
 Txn tracing should stay flat at the logical level. Do not add a separate
 `client.append` span or independent per-body logical roots.

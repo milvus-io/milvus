@@ -134,12 +134,12 @@ func TestCatchupScannerOverwritesTraceContextWithConsumeSpan(t *testing.T) {
 	spans := exporter.GetSpans()
 	var consume tracetest.SpanStub
 	for _, s := range spans {
-		if s.Name == message.SpanNameWALConsume {
+		if s.Name == message.SpanNameWALCatchupConsume {
 			consume = s
 			break
 		}
 	}
-	require.Equal(t, message.SpanNameWALConsume, consume.Name)
+	require.Equal(t, message.SpanNameWALCatchupConsume, consume.Name)
 
 	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsgs[0]))
 	assert.Equal(t, consume.SpanContext.TraceID(), msgSC.TraceID())
@@ -167,7 +167,7 @@ func TestCatchupScannerSkipsTraceForTimeTickMessage(t *testing.T) {
 	capturedMsgs := runTraceTestCatchupScanner(t, immutableMsg)
 	require.Len(t, capturedMsgs, 1)
 	for _, s := range exporter.GetSpans() {
-		assert.NotEqual(t, message.SpanNameWALConsume, s.Name)
+		assert.NotEqual(t, message.SpanNameWALCatchupConsume, s.Name)
 	}
 
 	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsgs[0]))
@@ -202,7 +202,7 @@ func TestCatchupScannerStartsConsumeSpanOnlyOnTxnCommit(t *testing.T) {
 	timeTickMsg := message.CreateTestTimeTickSyncMessage(t, 1, 102, walimplstest.NewTestMessageID(4)).IntoImmutableMessage(walimplstest.NewTestMessageID(4))
 	scanner.handleUpstream(timeTickMsg)
 
-	consumes := findTraceTestSpansByName(exporter.GetSpans(), message.SpanNameWALConsume)
+	consumes := findTraceTestSpansByName(exporter.GetSpans(), message.SpanNameWALCatchupConsume)
 	require.Len(t, consumes, 1)
 	assert.Equal(t, sourceSC.TraceID(), consumes[0].SpanContext.TraceID())
 	assert.Equal(t, sourceSC.SpanID(), consumes[0].Parent.SpanID())
@@ -241,7 +241,7 @@ func TestScannerAdaptorSkipsConsumeSpanForTailingMessage(t *testing.T) {
 	scanner.handleUpstream(tailingImmutableMesasge{timeTickMsg})
 
 	for _, s := range exporter.GetSpans() {
-		assert.NotEqual(t, message.SpanNameWALConsume, s.Name)
+		assert.NotEqual(t, message.SpanNameWALCatchupConsume, s.Name)
 	}
 
 	capturedMsg := scanner.pendingQueue.Next()

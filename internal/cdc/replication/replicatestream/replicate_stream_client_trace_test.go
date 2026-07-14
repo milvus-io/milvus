@@ -71,7 +71,7 @@ func TestSendMessage_PreservesTraceContextWithoutPrimarySpan(t *testing.T) {
 
 	spans := exporter.GetSpans()
 	for _, s := range spans {
-		assert.NotEqual(t, "replicate.primary", s.Name, "CDC send should be represented by wal.consume")
+		assert.NotEqual(t, "replicate.primary", s.Name, "CDC send should be represented by wal.catchup_consume")
 	}
 
 	outMsg := message.MilvusMessageToImmutableMessage(capturedReq.GetReplicateMessage().GetMessage())

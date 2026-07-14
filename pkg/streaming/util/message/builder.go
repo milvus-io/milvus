@@ -1,7 +1,6 @@
 package message
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"reflect"
@@ -465,7 +464,10 @@ func newImmutableTxnMesasgeFromWAL(
 		WithTxnContext(*commit.TxnContext()).
 		WithReplicateHeader(commit.ReplicateHeader()).
 		IntoImmutableMessage(commit.MessageID())
-	OverwriteTraceContext(ExtractTraceContext(context.Background(), commit), immutableMessage)
+	// The assembled txn message uses CommitTxn's trace as the txn-level trace.
+	if traceContext, ok := commit.Properties().Get(messageTraceContext); ok {
+		immutableMessage.(*immutableMessageImpl).properties.Set(messageTraceContext, traceContext)
+	}
 	return &immutableTxnMessageImpl{
 		immutableMessageImpl: *immutableMessage.(*immutableMessageImpl),
 		begin:                MustAsImmutableBeginTxnMessageV2(beginImmutable),

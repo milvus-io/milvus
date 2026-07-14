@@ -209,7 +209,7 @@ func TestImmutableTxnMessageBuildCopiesCommitTraceContext(t *testing.T) {
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(prev)
 
-	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), SpanNameWALConsume)
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), SpanNameWALCatchupConsume)
 	sourceSC := trace.SpanContextFromContext(sourceCtx)
 	sourceSpan.End()
 

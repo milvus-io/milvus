@@ -6358,11 +6358,12 @@ func (x *CipherHeader) GetPayloadBytes() int64 {
 	return 0
 }
 
-// TraceContextHeader carries W3C trace context (trace_id, span_id, flags)
-// on a message. Serialized into Properties under reserved key `_tc` so
-// that consumers on the other side of an RPC / persistence boundary can
-// stitch spans into the correct parent-child tree.
-// See docs/plans/2026-04-13-wal-append-trace-design.md for details.
+// TraceContextHeader carries the trace context subset (trace_id, span_id,
+// flags) stored on a message. Tracestate is intentionally not persisted.
+// Serialized into Properties under reserved key `_tc` so that consumers on
+// the other side of an RPC / persistence boundary can stitch spans into the
+// correct parent-child tree.
+// See docs/agent_guides/streaming-system/wal/tracing.md for details.
 type TraceContextHeader struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

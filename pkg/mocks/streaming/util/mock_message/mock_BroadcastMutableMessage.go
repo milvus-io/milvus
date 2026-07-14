@@ -3,8 +3,6 @@
 package mock_message
 
 import (
-	context "context"
-
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -683,39 +681,6 @@ func (_c *MockBroadcastMutableMessage_SplitIntoMutableMessage_Call) Return(_a0 [
 
 func (_c *MockBroadcastMutableMessage_SplitIntoMutableMessage_Call) RunAndReturn(run func() []message.MutableMessage) *MockBroadcastMutableMessage_SplitIntoMutableMessage_Call {
 	_c.Call.Return(run)
-	return _c
-}
-
-// WithTraceContext provides a mock function with given fields: ctx
-func (_m *MockBroadcastMutableMessage) WithTraceContext(ctx context.Context) {
-	_m.Called(ctx)
-}
-
-// MockBroadcastMutableMessage_WithTraceContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithTraceContext'
-type MockBroadcastMutableMessage_WithTraceContext_Call struct {
-	*mock.Call
-}
-
-// WithTraceContext is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockBroadcastMutableMessage_Expecter) WithTraceContext(ctx interface{}) *MockBroadcastMutableMessage_WithTraceContext_Call {
-	return &MockBroadcastMutableMessage_WithTraceContext_Call{Call: _e.mock.On("WithTraceContext", ctx)}
-}
-
-func (_c *MockBroadcastMutableMessage_WithTraceContext_Call) Run(run func(ctx context.Context)) *MockBroadcastMutableMessage_WithTraceContext_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockBroadcastMutableMessage_WithTraceContext_Call) Return() *MockBroadcastMutableMessage_WithTraceContext_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockBroadcastMutableMessage_WithTraceContext_Call) RunAndReturn(run func(context.Context)) *MockBroadcastMutableMessage_WithTraceContext_Call {
-	_c.Run(run)
 	return _c
 }
 

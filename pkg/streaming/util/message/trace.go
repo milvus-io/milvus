@@ -31,7 +31,7 @@ const (
 	SpanNameWALAppend          = "wal.append"
 	SpanNameWALAppendImpl      = "wal.appendimpl"
 	SpanNameWALDistAppend      = "wal.dist_append"
-	SpanNameWALConsume         = "wal.consume"
+	SpanNameWALCatchupConsume  = "wal.catchup_consume"
 	SpanNameWALDistConsume     = "wal.dist_consume"
 	SpanNameReplicateSecondary = "replicate.secondary"
 	SpanNameWALBCCallback      = "wal.bc_callback"
@@ -97,9 +97,10 @@ type traceContextOverwriter interface {
 	overwriteTraceContext(context.Context)
 }
 
-// InjectTraceContext writes the current span context into msg under the
+// InjectTraceContext writes the current span context subset into msg under the
 // reserved key _tc as a base64-encoded marshaled TraceContextHeader.
 // No-op when _tc already exists or no active / valid span is present on ctx.
+// The caller must exclusively own msg because injection mutates Properties.
 func InjectTraceContext(ctx context.Context, msg BasicMessage) {
 	if !shouldTraceMessage(msg) {
 		return
@@ -109,8 +110,9 @@ func InjectTraceContext(ctx context.Context, msg BasicMessage) {
 	}
 }
 
-// OverwriteTraceContext writes the current span context into msg under the
-// reserved key _tc even when a trace context already exists.
+// OverwriteTraceContext writes the current span context subset into msg under
+// the reserved key _tc even when a trace context already exists.
+// The caller must exclusively own msg because overwrite mutates Properties.
 func OverwriteTraceContext(ctx context.Context, msg BasicMessage) {
 	if !shouldTraceMessage(msg) {
 		return
@@ -139,9 +141,9 @@ func overwriteTraceContext(ctx context.Context, p Properties) {
 	p.Set(messageTraceContext, val)
 }
 
-// ExtractTraceContext reads _tc from msg and returns ctx with the
-// extracted remote span context attached. Returns ctx unchanged when _tc is
-// absent or malformed — trace propagation is never a correctness dependency.
+// ExtractTraceContext reads _tc from msg and returns ctx with the extracted
+// remote span context attached. Returns ctx unchanged when _tc is absent or
+// malformed — trace propagation is never a correctness dependency.
 func ExtractTraceContext(ctx context.Context, msg BasicMessage) context.Context {
 	sc := extractSpanContext(msg)
 	if !sc.IsValid() {
@@ -182,7 +184,7 @@ func extractSpanContextFromProperties(p RProperties) trace.SpanContext {
 }
 
 // encodeTraceContextHeader returns the base64-encoded TraceContextHeader for
-// the given span context. ok=false when the proto marshal fails.
+// the given span context subset. ok=false when the proto marshal fails.
 func encodeTraceContextHeader(sc trace.SpanContext) (string, bool) {
 	tid := sc.TraceID()
 	sid := sc.SpanID()

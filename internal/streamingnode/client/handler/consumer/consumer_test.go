@@ -125,7 +125,7 @@ func TestRemoteConsumerOverwritesTraceContextWithDistConsumeSpan(t *testing.T) {
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(prev)
 
-	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALConsume)
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALCatchupConsume)
 	sourceSC := trace.SpanContextFromContext(sourceCtx)
 	sourceSpan.End()
 
@@ -182,7 +182,7 @@ func TestRemoteConsumerSkipsTraceForTimeTickMessage(t *testing.T) {
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(prev)
 
-	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALConsume)
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALCatchupConsume)
 	sourceSpan.End()
 
 	h := &captureTraceHandler{ch: make(chan message.HandleParam, 1)}
@@ -225,7 +225,7 @@ func TestRemoteConsumerStartsDistConsumeSpanOnlyOnTxnCommit(t *testing.T) {
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(prev)
 
-	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALConsume)
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALCatchupConsume)
 	sourceSC := trace.SpanContextFromContext(sourceCtx)
 	sourceSpan.End()
 
