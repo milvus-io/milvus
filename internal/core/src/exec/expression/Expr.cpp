@@ -555,6 +555,18 @@ SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             state->is_and = is_and;
             for (auto& g : leaves) {
                 auto le = g->GetGISExpr();
+                // Guard at the point of use, independent of the
+                // as_groupable_gis whitelist above: the split path drops
+                // DWithin's distance (Pred carries no distance,
+                // EvalPrepared hardcodes 0.0) and RunRTreeQuery performs no
+                // bbox expansion, so a grouped DWithin would silently
+                // under-match. Fail loudly if a future whitelist edit ever
+                // lets it through.
+                AssertInfo(
+                    le->op_ != proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+                    "DWithin must not enter the GIS split/fusion group: the "
+                    "grouped path drops its distance and skips the coarse "
+                    "bbox expansion");
                 GISGroupState::Pred p;
                 p.op = le->op_;
                 p.query_wkt = le->geometry_wkt_;

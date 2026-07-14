@@ -174,6 +174,18 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
         current_pos_ += NextBatchSize();
     }
 
+    // The refine node always reads the raw geometry column (geometry cache or
+    // bulk_subscript) and never touches pinned_index_ -- only the Coarse node
+    // queries the R-Tree, via its own EnsurePinnedIndex() in RunRTreeQuery().
+    // The SegmentExpr default would see HasIndex() == true, pin an index cell
+    // this node never reads (a pointless cold fetch under tiered storage), and
+    // commit to ScalarIndex -- which also makes PrefetchAsync() skip the
+    // raw-data prefetch this node actually needs. Commit to RawData instead.
+    void
+    DetermineExecPath() override {
+        exec_path_ = ExprExecPath::RawData;
+    }
+
  private:
     int64_t
     NextBatchSize() const {
