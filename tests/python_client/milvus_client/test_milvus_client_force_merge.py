@@ -623,13 +623,10 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         )
         max_output_size = max(output_sizes.values())
         assert target_size_bytes * (1 - actual_output_size_tolerance) <= max_output_size
-        assert all(
-            size <= target_size_bytes * (1 + actual_output_size_tolerance)
-            for size in output_sizes.values()
-        ), f"Output insert-log size exceeded target tolerance: target={target_size_bytes}, sizes={output_sizes}"
-        log.info(
-            f"Force Merge target-size evidence: input={input_sizes}, output={output_sizes}, plans={plans}"
+        assert all(size <= target_size_bytes * (1 + actual_output_size_tolerance) for size in output_sizes.values()), (
+            f"Output insert-log size exceeded target tolerance: target={target_size_bytes}, sizes={output_sizes}"
         )
+        log.info(f"Force Merge target-size evidence: input={input_sizes}, output={output_sizes}, plans={plans}")
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_max_int64_overflow(self):

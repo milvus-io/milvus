@@ -540,9 +540,7 @@ class TestMilvusClientOptimizeValid(TestMilvusClientV2Base):
         while time.time() < deadline:
             segments_after = client.list_loaded_segments(collection_name)
             segment_ids_after = {segment.segment_id for segment in segments_after}
-            if len(segment_ids_after) < len(segment_ids_before) and segment_ids_after.isdisjoint(
-                segment_ids_before
-            ):
+            if len(segment_ids_after) < len(segment_ids_before) and segment_ids_after.isdisjoint(segment_ids_before):
                 break
             time.sleep(2)
         else:
@@ -693,8 +691,7 @@ class TestAsyncMilvusClientOptimizeValid(TestMilvusClientV2Base):
 
             segments_after, _ = await async_client.list_persistent_segments(collection_name)
             assert len(segments_after) < len(segments_before), (
-                f"Async optimize did not reduce persistent segments: "
-                f"before={segments_before}, after={segments_after}"
+                f"Async optimize did not reduce persistent segments: before={segments_before}, after={segments_after}"
             )
             count_result, _ = await async_client.query(
                 collection_name,
