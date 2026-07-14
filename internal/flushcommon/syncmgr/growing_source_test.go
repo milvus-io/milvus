@@ -50,6 +50,10 @@ type fakeCommitGrowingFlushSource struct {
 	commits []int64
 }
 
+func (s *fakeCommitGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
+	return []int64{0, 1, 100, 101, 102}, nil
+}
+
 func (s *fakeCommitGrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
@@ -508,6 +512,10 @@ type fakeBM25GrowingFlushSource struct {
 	stats map[int64]*storage.BM25Stats
 }
 
+func (s *fakeBM25GrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
+	return []int64{0, 1, 100, 101, 102}, nil
+}
+
 func (s *fakeBM25GrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
@@ -580,4 +588,99 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, restored.NumRow())
 	require.EqualValues(t, 2, restored.NumToken())
+}
+
+type fakeMaterializedGrowingFlushSource struct {
+	materialized []int64
+}
+
+func (s *fakeMaterializedGrowingFlushSource) CurrentOffset() int64 { return 0 }
+
+func (s *fakeMaterializedGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
+	return s.materialized, nil
+}
+
+func (s *fakeMaterializedGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
+	return nil, nil
+}
+
+func (s *fakeMaterializedGrowingFlushSource) Release() {}
+
+func TestTrimColumnGroupsToMaterialized(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "fn_sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+	}
+	groups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Fields: []int64{0, 1, 100, 101, 102}, Columns: []int{0, 1, 2, 3, 4}},
+		{GroupID: 1, Fields: []int64{102}, Columns: []int{4}},
+	}
+
+	// A non-materialized column (function output here) is dropped; a group
+	// left empty vanishes; the parallel Columns array is trimmed in lockstep
+	// so the writer pattern never names the dropped column.
+	task := NewGrowingSourceSyncTask().WithSchema(schema).
+		WithSource(&fakeMaterializedGrowingFlushSource{materialized: []int64{0, 1, 100, 101}})
+	trimmed, err := task.trimColumnGroupsToMaterialized(context.Background(), groups)
+	require.NoError(t, err)
+	require.Len(t, trimmed, 1)
+	require.Equal(t, []int64{0, 1, 100, 101}, trimmed[0].Fields)
+	require.Equal(t, []int{0, 1, 2, 3}, trimmed[0].Columns)
+
+	// A materialized function output is kept.
+	task = NewGrowingSourceSyncTask().WithSchema(schema).
+		WithSource(&fakeMaterializedGrowingFlushSource{materialized: []int64{0, 1, 100, 101, 102}})
+	trimmed, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
+	require.NoError(t, err)
+	require.Len(t, trimmed, 2)
+
+	// A non-materialized dropped ordinary field is trimmed the same way;
+	// system fields stay even though they live outside the insert record.
+	task = NewGrowingSourceSyncTask().WithSchema(schema).
+		WithSource(&fakeMaterializedGrowingFlushSource{materialized: []int64{100}})
+	trimmed, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
+	require.NoError(t, err)
+	require.Len(t, trimmed, 1)
+	require.Equal(t, []int64{0, 1, 100}, trimmed[0].Fields)
+	require.Equal(t, []int{0, 1, 2}, trimmed[0].Columns)
+
+	// An empty materialized report has no legal meaning: error out instead
+	// of writing a layout that may disagree with the data.
+	task = NewGrowingSourceSyncTask().WithSchema(schema).
+		WithSource(&fakeMaterializedGrowingFlushSource{})
+	_, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
+	require.Error(t, err)
+
+	// On a committed-flush ack retry the source is gone: the layout is
+	// trimmed to the committed binlogs, the persisted truth. The binlog map
+	// is keyed by column group id; flushed fields live in ChildFields.
+	task = NewGrowingSourceSyncTask().WithSchema(schema).
+		WithCommittedFlush("manifest", nil, map[int64]*datapb.FieldBinlog{
+			0: {ChildFields: []int64{0, 1, 100, 101}},
+		})
+	trimmed, err = task.trimColumnGroupsToMaterialized(context.Background(), groups)
+	require.NoError(t, err)
+	require.Len(t, trimmed, 1)
+	require.Equal(t, []int64{0, 1, 100, 101}, trimmed[0].Fields)
+	require.Equal(t, []int{0, 1, 2, 3}, trimmed[0].Columns)
+}
+
+func TestBuildGrowingSourceInsertBinlogsTrimsToFlushedFields(t *testing.T) {
+	groups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Fields: []int64{0, 1, 100, 102}},
+		{GroupID: 5, Fields: []int64{102}},
+	}
+	result := &GrowingFlushResult{
+		NumRows:                3,
+		FlushedFieldIDs:        []int64{0, 1, 100},
+		ColumnGroupMemorySizes: map[int64]int64{0: 10, 5: 0},
+		FieldNullCounts:        map[int64]int64{0: 0, 1: 0, 100: 0},
+	}
+	binlogs, err := buildGrowingSourceInsertBinlogs(groups, result, []int64{7, 8})
+	require.NoError(t, err)
+	require.Len(t, binlogs, 1)
+	require.Equal(t, []int64{0, 1, 100}, binlogs[0].GetChildFields())
 }

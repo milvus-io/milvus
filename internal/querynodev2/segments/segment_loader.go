@@ -418,6 +418,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
+		if localSegment, ok := segment.(*LocalSegment); ok {
+			localSegment.compactLoadInfoForRuntime()
+		}
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
@@ -1139,6 +1142,8 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		}
 	}
 
+	relatedDataSize := calculateSegmentLogSize(segment.LoadInfo())
+	segment.relatedDataSize.Store(relatedDataSize)
 	binlogSize := calculateSegmentMemorySize(segment.LoadInfo())
 	segment.manager.AddLoadedBinlogSize(binlogSize)
 	segment.binlogSize.Store(binlogSize)
@@ -1453,7 +1458,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return readDeltaRecords(reader)
 	}
 
-	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" && !useExplicitDeltalogs {
+	// Manifest-backed delta loading is shared by the parent segment and by
+	// compact-to child manifests carried as a load-time delete overlay.
+	readManifestDeltas := func(manifestPath string) error {
 		if isMilvusTableRealPK {
 			// Real-PK milvus-table manifests keep source deltalogs. Target-owned
 			// deltalogs are only valid for virtual-PK translation.
@@ -1530,9 +1537,16 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				return err
 			}
 		}
+		return nil
+	}
+
+	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" && !useExplicitDeltalogs {
+		if err := readManifestDeltas(manifestPath); err != nil {
+			return err
+		}
 	} else {
 		// V1: delta data referenced by Deltalogs entries
-		var paths []string
+		paths := make([]string, 0)
 		for _, deltalog := range deltaLogs {
 			for _, binlog := range lo.Filter(deltalog.Binlogs, valid) {
 				if p := binlog.GetLogPath(); p != "" {
@@ -1545,6 +1559,14 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				return loader.cm.MultiRead(ctx, paths)
 			}),
 		); err != nil {
+			return err
+		}
+	}
+
+	// Child manifests are loaded after the parent delete source so all delete
+	// records are folded into the same DeltaData before segcore sees the segment.
+	for _, manifestPath := range loadInfo.GetChildManifestPaths() {
+		if err := readManifestDeltas(manifestPath); err != nil {
 			return err
 		}
 	}

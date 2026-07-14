@@ -349,13 +349,16 @@ type ExportSnapshotReq struct {
 func (req *ExportSnapshotReq) GetDbName() string { return req.DbName }
 
 type QueryReqV2 struct {
-	DbName           string                 `json:"dbName"`
-	CollectionName   string                 `json:"collectionName" binding:"required"`
-	PartitionNames   []string               `json:"partitionNames"`
-	OutputFields     []string               `json:"outputFields"`
-	Filter           string                 `json:"filter"`
-	Limit            int32                  `json:"limit"`
-	Offset           int32                  `json:"offset"`
+	DbName         string   `json:"dbName"`
+	CollectionName string   `json:"collectionName" binding:"required"`
+	PartitionNames []string `json:"partitionNames"`
+	OutputFields   []string `json:"outputFields"`
+	Filter         string   `json:"filter"`
+	Limit          int32    `json:"limit"`
+	Offset         int32    `json:"offset"`
+	// OrderByFields sorts query results by scalar fields; each item is
+	// "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
+	OrderByFields    []string               `json:"orderByFields"`
 	ExprParams       map[string]interface{} `json:"exprParams"`
 	ConsistencyLevel string                 `json:"consistencyLevel"`
 }

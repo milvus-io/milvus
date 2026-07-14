@@ -16,6 +16,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -231,6 +233,29 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 	return msg.OverwriteBroadcastHeader(0, rks...)
 }
 
+func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
+	locker := newResourceKeyLocker()
+	rk := message.NewExclusiveCollectionNameResourceKey("db", "collection")
+	guards := locker.Lock(rk)
+	bm := &broadcastTaskManager{
+		lifetime: typeutil.NewLifetime(),
+		mu:       &sync.Mutex{},
+		tasks:    map[uint64]*broadcastTask{},
+	}
+	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
+
+	_, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards)
+
+	require.Error(t, err)
+	require.True(t, IsBroadcastTaskNotCreated(err))
+	require.True(t, streamingstatus.AsStreamingError(err).IsOnShutdown())
+	require.Empty(t, bm.tasks)
+
+	nextGuards, lockErr := locker.FastLock(rk)
+	require.NoError(t, lockErr)
+	nextGuards.Unlock()
+}
+
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {
 	msg := createNewBroadcastMsg(vchannels).OverwriteBroadcastHeader(broadcastID, rks...)
 	pb := msg.IntoMessageProto()
@@ -409,6 +434,62 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 	assert.Contains(t, resultIDs, uint64(2), "REPLICATED task with pending messages should be returned")
 	assert.NotContains(t, resultIDs, uint64(3), "PENDING task with all vchannels acked should not be returned")
 	assert.NotContains(t, resultIDs, uint64(4), "TOMBSTONE task should not be returned")
+}
+
+func TestGetPendingSchemaFileResources(t *testing.T) {
+	paramtable.Init()
+
+	metrics := newBroadcasterMetrics()
+	ackScheduler := newAckCallbackScheduler(mlog.With())
+
+	createCollectionMsg := func(collectionID int64, fileResourceIDs []int64) message.BroadcastMutableMessage {
+		return message.NewCreateCollectionMessageBuilderV1().
+			WithHeader(&message.CreateCollectionMessageHeader{
+				CollectionId: collectionID,
+			}).
+			WithBody(&msgpb.CreateCollectionRequest{
+				CollectionSchema: &schemapb.CollectionSchema{
+					FileResourceIds: fileResourceIDs,
+				},
+			}).
+			WithBroadcast([]string{"v1"}).
+			MustBuildBroadcast()
+	}
+	alterCollectionMsg := func(collectionID int64, fileResourceIDs []int64) message.BroadcastMutableMessage {
+		return message.NewAlterCollectionMessageBuilderV2().
+			WithHeader(&message.AlterCollectionMessageHeader{
+				CollectionId: collectionID,
+			}).
+			WithBody(&message.AlterCollectionMessageBody{
+				Updates: &message.AlterCollectionMessageUpdates{
+					Schema: &schemapb.CollectionSchema{
+						FileResourceIds: fileResourceIDs,
+					},
+				},
+			}).
+			WithBroadcast([]string{"v1"}).
+			MustBuildBroadcast()
+	}
+	newTask := func(broadcastID uint64, msg message.BroadcastMutableMessage, state streamingpb.BroadcastTaskState) *broadcastTask {
+		proto := createNewWaitAckBroadcastTaskFromMessage(msg.WithBroadcastID(broadcastID), state, []byte{0x00})
+		return newBroadcastTaskFromProto(proto, metrics, ackScheduler)
+	}
+
+	bm := &broadcastTaskManager{
+		mu: &sync.Mutex{},
+		tasks: map[uint64]*broadcastTask{
+			1: newTask(1, createCollectionMsg(100, []int64{10, 20}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			2: newTask(2, alterCollectionMsg(100, []int64{20, 30}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			3: newTask(3, alterCollectionMsg(200, nil), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			4: newTask(4, alterCollectionMsg(300, []int64{40}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE),
+			5: newTask(5, createNewBroadcastMsg([]string{"v1"}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+		},
+	}
+
+	result := bm.GetPendingSchemaFileResources()
+
+	require.Len(t, result, 1)
+	assert.ElementsMatch(t, []int64{10, 20, 30}, result[100])
 }
 
 func TestWithSecondaryClusterResourceKey(t *testing.T) {

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -94,9 +95,11 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		WithBroadcast(broadcastChannel).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		// Do NOT release file resources here: the broadcast task is already in the
-		// scheduler and will retry until success. refCnt will be decremented when
-		// the collection is eventually dropped.
+		// Once the broadcast task is created, it will retry until success and owns
+		// the reserved refs. If the task was not created, release the reservation.
+		if streamingbroadcaster.IsBroadcastTaskNotCreated(err) {
+			createCollectionTask.releaseFileResources()
+		}
 		return err
 	}
 	return nil

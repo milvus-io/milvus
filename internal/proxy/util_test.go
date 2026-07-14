@@ -808,6 +808,21 @@ func TestValidateFieldType(t *testing.T) {
 	}
 }
 
+func TestValidateFieldAllowsAnalyzerParamsWithoutEnableAnalyzer(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name:     "text_field",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+		},
+	}
+	schema := &schemapb.CollectionSchema{Name: "test_collection"}
+
+	err := ValidateField(field, schema)
+	require.NoError(t, err)
+}
+
 func TestValidateMultipleVectorFields(t *testing.T) {
 	// case1, no vector field
 	schema1 := &schemapb.CollectionSchema{}

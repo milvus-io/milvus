@@ -43,7 +43,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -724,6 +726,72 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+}
+
+func TestDDLCallbacksAlterCollectionSchemaAnalyzerFileResourceRefs(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	fieldName := "schema_text_with_dict"
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	meta := core.meta.(*MetaTable)
+	resourceID := int64(10002)
+	meta.fileResourceName2Meta = map[string]*internalpb.FileResourceInfo{
+		"schema_dict": {Id: resourceID, Name: "schema_dict", Path: "schema_dict.txt"},
+	}
+	meta.fileResourceID2Meta = map[int64]*internalpb.FileResourceInfo{
+		resourceID: {Id: resourceID, Name: "schema_dict", Path: "schema_dict.txt"},
+	}
+	meta.fileResourceRefCnt = map[int64]int{}
+
+	mixCoord := core.mixCoord.(*imocks.MixCoord)
+	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
+		infos := req.GetAnalyzerInfos()
+		return len(infos) == 1 &&
+			infos[0].GetField() == fieldName &&
+			infos[0].GetParams() == `{"tokenizer":"standard"}`
+	})).Return(&querypb.ValidateAnalyzerResponse{
+		Status:      merr.Success(),
+		ResourceIds: []int64{resourceID},
+	}, nil).Once()
+
+	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
+		Name:     fieldName,
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "128"},
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+		},
+	}, false))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []int64{resourceID}, coll.FileResourceIds)
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: fieldName},
+				},
+			},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Empty(t, coll.FileResourceIds)
+	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
+	assertFieldNotExists(t, ctx, core, dbName, collectionName, fieldName)
 }
 
 func TestDDLCallbacksAlterCollectionSchemaValidatesFunctionOnlyFinalSchema(t *testing.T) {

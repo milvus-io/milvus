@@ -55,6 +55,26 @@ SegmentLoadInfo::GetColumnGroups() const {
     return column_groups_;
 }
 
+// Looks up a storage column in the cached manifest column groups only.
+bool
+SegmentLoadInfo::HasManifestColumn(const std::string& column_name) const {
+    auto column_groups = column_groups_;
+    if (column_groups == nullptr) {
+        return false;
+    }
+    for (const auto& group : *column_groups) {
+        if (group == nullptr) {
+            continue;
+        }
+        for (const auto& column : group->columns) {
+            if (column == column_name) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 LoadIndexInfo
 SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     const proto::segcore::FieldIndexInfo* field_index_info,
@@ -251,16 +271,26 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
 
 void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
-    // Get current index IDs from converted cache
+    // Get current index IDs from the lightweight identity cache.
     std::set<int64_t> current_index_ids;
     // Build a set of field IDs that currently have indexes loaded
     std::set<FieldId> current_indexed_fields;
-    for (const auto& load_index_info : converted_index_infos_) {
-        current_index_ids.insert(load_index_info.index_id);
-        current_indexed_fields.insert(FieldId(load_index_info.field_id));
+    for (const auto& [field_id, index_ids] : field_index_id_cache_) {
+        current_indexed_fields.insert(field_id);
+        for (auto index_id : index_ids) {
+            current_index_ids.insert(index_id);
+        }
     }
 
     std::set<int64_t> new_index_ids;
+    for (const auto& [field_id, index_ids] : new_info.field_index_id_cache_) {
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
+        for (auto index_id : index_ids) {
+            new_index_ids.insert(index_id);
+        }
+    }
     // Find indexes to load/replace: indexes in new_info but not in current
     // Only consider fields that exist in the current schema (skip dropped fields)
     for (const auto& [field_id, load_index_infos] :
@@ -272,7 +302,6 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
             continue;
         }
         for (const auto& load_index_info : load_index_infos) {
-            new_index_ids.insert(load_index_info.index_id);
             if (current_index_ids.find(load_index_info.index_id) ==
                 current_index_ids.end()) {
                 // New index_id: check if field already has an index loaded
@@ -288,12 +317,12 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     }
 
     // Find indexes to drop: fields that have indexes in current but not in new_info
-    for (const auto& load_index_info : converted_index_infos_) {
-        auto field_id = FieldId(load_index_info.field_id);
-        if (!new_info.HasFieldInSchema(field_id) ||
-            new_index_ids.find(load_index_info.index_id) ==
-                new_index_ids.end()) {
-            diff.indexes_to_drop.insert(field_id);
+    for (const auto& [field_id, index_ids] : field_index_id_cache_) {
+        for (auto index_id : index_ids) {
+            if (!new_info.HasFieldInSchema(field_id) ||
+                new_index_ids.find(index_id) == new_index_ids.end()) {
+                diff.indexes_to_drop.insert(field_id);
+            }
         }
     }
 }

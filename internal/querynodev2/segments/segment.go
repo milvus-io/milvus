@@ -175,6 +175,66 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 	return s.loadInfo.Load()
 }
 
+func cloneMsgPosition(position *msgpb.MsgPosition) *msgpb.MsgPosition {
+	if position == nil {
+		return nil
+	}
+	return proto.Clone(position).(*msgpb.MsgPosition)
+}
+
+// compactSegmentLoadInfoForRuntime retains runtime identity/version metadata,
+// positions, deltalogs, and manifest/resource estimate fields; callers must
+// consume binlog, index, and stats metadata before compaction.
+func compactSegmentLoadInfoForRuntime(loadInfo *querypb.SegmentLoadInfo) *querypb.SegmentLoadInfo {
+	if loadInfo == nil {
+		return nil
+	}
+	return &querypb.SegmentLoadInfo{
+		SegmentID:            loadInfo.GetSegmentID(),
+		PartitionID:          loadInfo.GetPartitionID(),
+		CollectionID:         loadInfo.GetCollectionID(),
+		DbID:                 loadInfo.GetDbID(),
+		FlushTime:            loadInfo.GetFlushTime(),
+		NumOfRows:            loadInfo.GetNumOfRows(),
+		Deltalogs:            loadInfo.GetDeltalogs(),
+		CompactionFrom:       append([]int64(nil), loadInfo.GetCompactionFrom()...),
+		SegmentSize:          loadInfo.GetSegmentSize(),
+		InsertChannel:        loadInfo.GetInsertChannel(),
+		StartPosition:        cloneMsgPosition(loadInfo.GetStartPosition()),
+		DeltaPosition:        cloneMsgPosition(loadInfo.GetDeltaPosition()),
+		ReadableVersion:      loadInfo.GetReadableVersion(),
+		Level:                loadInfo.GetLevel(),
+		StorageVersion:       loadInfo.GetStorageVersion(),
+		IsSorted:             loadInfo.GetIsSorted(),
+		Priority:             loadInfo.GetPriority(),
+		ManifestPath:         loadInfo.GetManifestPath(),
+		DataVersion:          loadInfo.GetDataVersion(),
+		UseTakeForOutput:     loadInfo.GetUseTakeForOutput(),
+		CommitTimestamp:      loadInfo.GetCommitTimestamp(),
+		EstimatedBytesPerRow: loadInfo.GetEstimatedBytesPerRow(),
+	}
+}
+
+func (s *baseSegment) compactLoadInfoForRuntime() {
+	if s.segmentType != SegmentTypeSealed || s.Level() == datapb.SegmentLevel_L0 {
+		return
+	}
+	loadInfo := s.LoadInfo()
+	usage, err := estimateLogicalResourceUsageOfSegment(s.collection.Schema(), loadInfo, resourceEstimateFactor{
+		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
+	})
+	if err != nil {
+		s.resourceUsageCache.Store(nil)
+		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))
+		return
+	}
+	s.resourceUsageCache.Store(usage)
+	s.loadInfo.Store(compactSegmentLoadInfoForRuntime(loadInfo))
+}
+
 func (s *baseSegment) SetPKCandidate(candidate pkoracle.Candidate) {
 	s.pkCandidate = candidate
 }
@@ -354,10 +414,6 @@ func (s *baseSegment) NeedUpdatedVersion() int64 {
 	return s.needUpdatedVersion.Load()
 }
 
-func (s *baseSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
-	s.loadInfo.Store(loadInfo)
-}
-
 func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
 	s.needUpdatedVersion.Store(version)
 }
@@ -381,10 +437,11 @@ type LocalSegment struct {
 	csegment segcore.CSegment
 
 	// cached results, to avoid too many CGO calls
-	memSize     *atomic.Int64
-	binlogSize  *atomic.Int64
-	rowNum      *atomic.Int64
-	insertCount *atomic.Int64
+	memSize         *atomic.Int64
+	binlogSize      *atomic.Int64
+	relatedDataSize *atomic.Int64
+	rowNum          *atomic.Int64
+	insertCount     *atomic.Int64
 
 	deltaMut           sync.Mutex
 	lastDeltaTimestamp *atomic.Uint64
@@ -460,10 +517,11 @@ func NewSegment(ctx context.Context,
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
 
-		memSize:     atomic.NewInt64(-1),
-		binlogSize:  atomic.NewInt64(0),
-		rowNum:      atomic.NewInt64(-1),
-		insertCount: atomic.NewInt64(0),
+		memSize:         atomic.NewInt64(-1),
+		binlogSize:      atomic.NewInt64(0),
+		relatedDataSize: atomic.NewInt64(-1),
+		rowNum:          atomic.NewInt64(-1),
+		insertCount:     atomic.NewInt64(0),
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -1402,8 +1460,12 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
+	if s.relatedDataSize != nil {
+		s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
+	}
 	s.loadInfo.Store(newLoadInfo)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
+	s.compactLoadInfoForRuntime()
 	return nil
 }
 
@@ -1521,33 +1583,6 @@ func (s *LocalSegment) RemoveFieldFile(fieldId int64) {
 	}).Await()
 }
 
-func (s *LocalSegment) RemoveUnusedFieldFiles() error {
-	schema := s.collection.Schema()
-	indexInfos, _ := separateIndexAndBinlog(s.LoadInfo())
-	for _, indexInfo := range indexInfos {
-		need, err := s.indexNeedLoadRawData(schema, indexInfo)
-		if err != nil {
-			return err
-		}
-		if !need {
-			s.RemoveFieldFile(indexInfo.IndexInfo.FieldID)
-		}
-	}
-	return nil
-}
-
-func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, indexInfo *IndexedFieldInfo) (bool, error) {
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return false, err
-	}
-	fieldSchema, err := schemaHelper.GetFieldFromID(indexInfo.IndexInfo.FieldID)
-	if err != nil {
-		return false, err
-	}
-	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
-}
-
 func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	s.fieldJSONStatsMu.RLock()
 	defer s.fieldJSONStatsMu.RUnlock()
@@ -1560,6 +1595,40 @@ func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
 		stats[fieldID] = proto.Clone(info).(*querypb.JsonStatsInfo)
 	}
 	return stats
+}
+
+// MaterializedFieldIDs returns the field ids with materialized columns in the
+// growing segment's insert record. The flush layout must be trimmed to this
+// set; a non-materialized column is legally absent (a dropped field or a
+// function output backfilled by bump-schema compaction).
+func (s *LocalSegment) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
+	if s.Type() != SegmentTypeGrowing {
+		return nil, merr.WrapErrServiceInternalMsg("unexpected segmentType for MaterializedFieldIDs, segmentType = %s", s.segmentType.String())
+	}
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	var cIDs *C.int64_t
+	var cCount C.int64_t
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.GetGrowingSegmentMaterializedFieldIDs(s.ptr, &cIDs, &cCount)
+		return nil, nil
+	}).Await()
+	if err := HandleCStatus(ctx, &status, "GetGrowingSegmentMaterializedFieldIDs"); err != nil {
+		return nil, err
+	}
+	if cIDs == nil || cCount == 0 {
+		return nil, nil
+	}
+	defer C.free(unsafe.Pointer(cIDs))
+	ids := make([]int64, 0, int(cCount))
+	for _, id := range unsafe.Slice(cIDs, int(cCount)) {
+		ids = append(ids, int64(id))
+	}
+	return ids, nil
 }
 
 // FlushData flushes data from the growing segment directly to storage via C++ milvus-storage.
@@ -1771,6 +1840,13 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 			fieldNullCounts[fieldID] = int64(nullCounts[i])
 		}
 	}
+	flushedFieldIDs := make([]int64, 0, int(cResult.num_flushed_fields))
+	if cResult.num_flushed_fields > 0 {
+		ids := unsafe.Slice(cResult.flushed_field_ids, int(cResult.num_flushed_fields))
+		for i := 0; i < int(cResult.num_flushed_fields); i++ {
+			flushedFieldIDs = append(flushedFieldIDs, int64(ids[i]))
+		}
+	}
 	columnGroupMemorySizes := make(map[int64]int64, int(cResult.num_column_groups))
 	if cResult.num_column_groups > 0 {
 		columnGroupIDs := unsafe.Slice(cResult.column_group_ids, int(cResult.num_column_groups))
@@ -1799,6 +1875,7 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		NumRows:                int64(cResult.num_rows),
 		TimestampFrom:          uint64(cResult.timestamp_from),
 		TimestampTo:            uint64(cResult.timestamp_to),
+		FlushedFieldIDs:        flushedFieldIDs,
 		ColumnGroupMemorySizes: columnGroupMemorySizes,
 		FieldNullCounts:        fieldNullCounts,
 		BM25Stats:              bm25Stats,

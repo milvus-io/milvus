@@ -51,7 +51,7 @@ namespace milvus::query {
 
 void
 SearchOnSealedIndex(const Schema& schema,
-                    const segcore::SealedIndexingRecord& record,
+                    const segcore::SealedIndexingEntry& entry,
                     const SearchInfo& search_info,
                     const void* query_data,
                     const size_t* query_offsets,
@@ -68,13 +68,10 @@ SearchOnSealedIndex(const Schema& schema,
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
 
-    AssertInfo(record.is_ready(field_id), "[SearchOnSealed]Record isn't ready");
-    // Keep the field_indexing smart pointer, until all reference by raw dropped.
-    auto field_indexing = record.get_field_indexing(field_id);
-    AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
+    AssertInfo(entry.metric_type_ == search_info.metric_type_,
                "Metric type of field index isn't the same with search info,"
                "field index: {}, search info: {}",
-               field_indexing->metric_type_,
+               entry.metric_type_,
                search_info.metric_type_);
 
     knowhere::DataSetPtr dataset;
@@ -91,8 +88,7 @@ SearchOnSealedIndex(const Schema& schema,
     }
 
     dataset->SetIsSparse(is_sparse);
-    auto accessor =
-        SemiInlineGet(field_indexing->indexing_->PinCells(op_context, {0}));
+    auto accessor = SemiInlineGet(entry.indexing_->PinCells(op_context, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 

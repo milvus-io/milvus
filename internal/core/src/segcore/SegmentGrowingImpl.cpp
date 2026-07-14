@@ -2381,8 +2381,15 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
     CheckCancellation(
         op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
 
+    auto index = BuildTextIndexForMeta(schema_->operator[](field_id));
     std::unique_lock lock(mutex_);
-    const auto& field_meta = schema_->operator[](field_id);
+    text_indexes_[field_id] = std::move(index);
+}
+
+// Builds a standalone index without publishing it into text_indexes_; the
+// meta is passed in because Reopen runs before the field is in schema_.
+std::unique_ptr<index::TextMatchIndex>
+SegmentGrowingImpl::BuildTextIndexForMeta(const FieldMeta& field_meta) {
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
                "cannot create text index on non-string type");
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
@@ -2397,7 +2404,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer",
                             field_meta.get_analyzer_params().c_str());
-    text_indexes_[field_id] = std::move(index);
+    return index;
 }
 
 void
@@ -2552,9 +2559,52 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             fill_empty_field(field_meta);
         }
 
+        auto row_count = insert_record_.row_count();
+        // #50484: build text indexes for new enable_match fields BEFORE
+        // publishing schema_ -- readers skip Reopen once the new schema_ is
+        // visible. Backfill every pre-existing row (default value or nulls,
+        // same as fill_empty_field): doc offsets must stay dense and aligned
+        // with insert_record_ rows. Commit+Reload so the triggering query
+        // sees the backfill. Stage all fields locally and publish together
+        // only after every one succeeds: a present text_indexes_ entry is
+        // always complete, and a mid-build throw publishes nothing (schema_
+        // un-advanced, so the next query rebuilds from scratch).
+        std::vector<std::pair<FieldId, std::unique_ptr<index::TextMatchIndex>>>
+            staged_text_indexes;
+        for (const auto& field_meta : *absent_fields) {
+            if (sch->is_function_output(field_meta.get_id())) {
+                continue;
+            }
+            auto field_id = field_meta.get_id();
+            if (IsStringDataType(field_meta.get_data_type()) &&
+                field_meta.enable_match() &&
+                text_indexes_.find(field_id) == text_indexes_.end()) {
+                auto index = BuildTextIndexForMeta(field_meta);
+                if (row_count > 0) {
+                    const bool has_default =
+                        field_meta.default_value().has_value();
+                    std::vector<std::string> texts(
+                        row_count,
+                        has_default ? field_meta.default_value()->string_data()
+                                    : std::string());
+                    FixedVector<bool> texts_valid_data(row_count, has_default);
+                    index->AddTextsGrowing(
+                        row_count, texts.data(), texts_valid_data.data(), 0);
+                }
+                index->Commit();
+                index->Reload();
+                staged_text_indexes.emplace_back(field_id, std::move(index));
+            }
+        }
+        if (!staged_text_indexes.empty()) {
+            std::unique_lock lock(mutex_);
+            for (auto& [field_id, index] : staged_text_indexes) {
+                text_indexes_[field_id] = std::move(index);
+            }
+        }
+
         schema_ = sch;
 
-        auto row_count = insert_record_.row_count();
         for (const auto& field_meta : *absent_fields) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
@@ -2702,11 +2752,37 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
+    // A column group whose fields were all dropped from the segment schema
+    // has an empty read projection; opening it violates the reader contract
+    // (ChunkReaderImpl::open rejects a group containing none of the needed
+    // columns). Such a group is a legal leftover of drop semantics — skip it
+    // and let compaction remove it from the manifest.
+    auto schema_snapshot = schema_;
+    auto group_has_live_field = [&](int64_t group_index) {
+        for (const auto& column : column_groups->at(group_index)->columns) {
+            // An untranslatable column name is a broken manifest and throws
+            // (same contract as the sealed loader).
+            auto field_id = schema_snapshot->ResolveColumnFieldId(column);
+            if (schema_snapshot->has_field(field_id)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
+        if (!group_has_live_field(i)) {
+            LOG_INFO(
+                "skip loading column group {} of segment {}: all of its "
+                "fields are dropped from the schema",
+                i,
+                id_);
+            continue;
+        }
         auto future =
             pool.Submit([this, column_groups, properties, i, num_rows] {
                 return LoadColumnGroup(column_groups, properties, i, num_rows);

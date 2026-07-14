@@ -18,6 +18,22 @@
 
 package fileresource
 
+type ResolvedFileResource struct {
+	ID        int64
+	Name      string
+	Path      string
+	LocalPath string
+}
+
+type SyncEvent struct {
+	Version   uint64
+	Resources []*ResolvedFileResource
+}
+
+type Listener interface {
+	OnFileResourceSync(event SyncEvent) error
+}
+
 const (
 	SyncModeStr  string = "sync"
 	RefModeStr   string = "ref"

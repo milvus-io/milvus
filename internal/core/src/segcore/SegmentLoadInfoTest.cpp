@@ -318,6 +318,181 @@ TEST_F(SegmentLoadInfoTest, BuildCacheSkipsHybridScalarResourceEstimate) {
     EXPECT_TRUE(inverted_infos[0].load_resource_request.has_value());
 }
 
+TEST_F(SegmentLoadInfoTest, CompactRuntimeInfoForManifest) {
+    auto proto = proto_;
+    for (int i = 0; i < 16; ++i) {
+        proto.add_index_infos()->CopyFrom(proto.index_infos(0));
+        proto.add_binlog_paths()->CopyFrom(proto.binlog_paths(0));
+        proto.add_statslogs()->CopyFrom(proto.statslogs(0));
+        proto.add_deltalogs()->CopyFrom(proto.deltalogs(0));
+        proto.add_bm25logs()->CopyFrom(proto.bm25logs(0));
+    }
+    SegmentLoadInfo info(proto, schema_);
+    auto index_capacity = info.GetProto().index_infos().Capacity();
+    auto binlog_capacity = info.GetProto().binlog_paths().Capacity();
+    auto stats_capacity = info.GetProto().statslogs().Capacity();
+    auto delta_capacity = info.GetProto().deltalogs().Capacity();
+    auto bm25_capacity = info.GetProto().bm25logs().Capacity();
+
+    info.CompactRuntimeInfoForManifest();
+
+    EXPECT_EQ(info.GetIndexInfoCount(), 0);
+    EXPECT_FALSE(info.HasIndexInfo(FieldId(101)));
+    EXPECT_FALSE(info.HasIndexInfo(FieldId(102)));
+    auto index_infos = info.GetFieldIndexInfos(FieldId(101));
+    EXPECT_TRUE(index_infos.empty());
+    EXPECT_EQ(info.GetBinlogPathCount(), 0);
+    EXPECT_FALSE(info.HasBinlogPath(FieldId(101)));
+    EXPECT_EQ(info.GetStatslogCount(), 0);
+    EXPECT_EQ(info.GetDeltalogCount(), 0);
+    EXPECT_EQ(info.GetBm25logCount(), 0);
+    EXPECT_LT(info.GetProto().index_infos().Capacity(), index_capacity);
+    EXPECT_LT(info.GetProto().binlog_paths().Capacity(), binlog_capacity);
+    EXPECT_LT(info.GetProto().statslogs().Capacity(), stats_capacity);
+    EXPECT_LT(info.GetProto().deltalogs().Capacity(), delta_capacity);
+    EXPECT_LT(info.GetProto().bm25logs().Capacity(), bm25_capacity);
+    EXPECT_LE(info.GetProto().index_infos().Capacity(), 1);
+    EXPECT_LE(info.GetProto().binlog_paths().Capacity(), 1);
+    EXPECT_LE(info.GetProto().statslogs().Capacity(), 1);
+    EXPECT_LE(info.GetProto().deltalogs().Capacity(), 1);
+    EXPECT_LE(info.GetProto().bm25logs().Capacity(), 1);
+    EXPECT_TRUE(info.HasTextStatsLog(101));
+    EXPECT_TRUE(info.HasJsonKeyStatsLog(102));
+    EXPECT_EQ(info.GetManifestPath(), "/path/to/manifest");
+}
+
+TEST_F(SegmentLoadInfoTest,
+       CompactRuntimeInfoForManifestKeepsIndexDiffIdentity) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    current_proto.set_manifest_path("/path/to/current_manifest");
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(101);
+    cur_index->set_indexid(1001);
+    cur_index->add_index_file_paths("/path/to/old_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    new_proto.set_manifest_path("/path/to/current_manifest");
+    auto* new_index = new_proto.add_index_infos();
+    new_index->set_fieldid(101);
+    new_index->set_indexid(2001);
+    new_index->add_index_file_paths("/path/to/new_index");
+    auto* new_param = new_index->add_index_params();
+    new_param->set_key("index_type");
+    new_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    current_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+    new_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+
+    current_info.CompactRuntimeInfoForManifest();
+    EXPECT_EQ(current_info.GetIndexInfoCount(), 0);
+    EXPECT_FALSE(current_info.HasIndexInfo(FieldId(101)));
+    EXPECT_TRUE(current_info.GetFieldIndexInfos(FieldId(101)).empty());
+
+    auto diff = current_info.ComputeDiff(new_info);
+    EXPECT_EQ(diff.indexes_to_replace.size(), 1);
+    ASSERT_TRUE(diff.indexes_to_replace.count(FieldId(101)) > 0);
+    ASSERT_EQ(diff.indexes_to_replace[FieldId(101)].size(), 1);
+    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)][0].index_id, 2001);
+    EXPECT_EQ(diff.indexes_to_drop.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(101)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       CompactRuntimeInfoForManifestSchemaCopyKeepsIndexIdentity) {
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    current_proto.set_manifest_path("/path/to/current_manifest");
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(101);
+    cur_index->set_indexid(1001);
+    cur_index->add_index_file_paths("/path/to/index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    current_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+    current_info.CompactRuntimeInfoForManifest();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(FieldId(100));
+    new_schema->set_schema_version(schema_->get_schema_version() + 1);
+
+    SegmentLoadInfo new_info(current_info);
+    new_info.ReplaceSchemaForReopen(new_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_replace.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_NE(std::find(diff.fields_to_fill_default.begin(),
+                        diff.fields_to_fill_default.end(),
+                        FieldId(102)),
+              diff.fields_to_fill_default.end());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ReplaceSchemaForReopenPrunesDroppedFieldRuntimeState) {
+    SegmentLoadInfo current_info(proto_, schema_);
+    current_info.SetColumnGroupsForTesting(
+        std::make_shared<milvus_storage::api::ColumnGroups>());
+    current_info.SetFieldFilledWithDefault(FieldId(101));
+    current_info.SetFieldFilledWithDefault(FieldId(102));
+    current_info.SetTextIndexCreated(FieldId(101));
+    current_info.SetTextIndexCreated(FieldId(102));
+    current_info.CompactRuntimeInfoForManifest();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddField(
+        FieldName("pk"), FieldId(100), DataType::INT64, false, std::nullopt);
+    new_schema->AddField(FieldName("json_field"),
+                         FieldId(102),
+                         DataType::JSON,
+                         false,
+                         std::nullopt);
+    new_schema->set_primary_field_id(FieldId(100));
+    new_schema->set_schema_version(schema_->get_schema_version() + 1);
+
+    SegmentLoadInfo new_info(current_info);
+    new_info.ReplaceSchemaForReopen(new_schema);
+
+    EXPECT_FALSE(new_info.HasIndexInfo(FieldId(101)));
+    EXPECT_FALSE(new_info.HasIndexInfo(FieldId(102)));
+    EXPECT_FALSE(new_info.IsFieldFilledWithDefault(FieldId(101)));
+    EXPECT_TRUE(new_info.IsFieldFilledWithDefault(FieldId(102)));
+    EXPECT_FALSE(new_info.HasTextIndexCreated(FieldId(101)));
+    EXPECT_TRUE(new_info.HasTextIndexCreated(FieldId(102)));
+
+    auto diff = current_info.ComputeDiff(new_info);
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_replace.empty());
+    EXPECT_EQ(diff.indexes_to_drop, std::set<FieldId>({FieldId(101)}));
+
+    SegmentLoadInfo next_info(new_info);
+    next_info.ReplaceSchemaForReopen(new_schema);
+    auto second_diff = new_info.ComputeDiff(next_info);
+    EXPECT_TRUE(second_diff.indexes_to_load.empty());
+    EXPECT_TRUE(second_diff.indexes_to_replace.empty());
+    EXPECT_TRUE(second_diff.indexes_to_drop.empty());
+}
+
 TEST_F(SegmentLoadInfoTest, BinlogInfo) {
     SegmentLoadInfo info(proto_, schema_);
 
@@ -3173,6 +3348,37 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_TRUE(diff.column_groups_to_replace.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, HasManifestColumnUsesManifestColumnNames) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    SegmentLoadInfo info(MakeManifestProto("/manifest/v1"), schema_);
+    info.SetColumnGroupsForTesting(MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id.parquet"}},
+         {{"vector", "tenant"}, {"/external/data.parquet"}}}));
+
+    EXPECT_TRUE(info.HasManifestColumn("id"));
+    EXPECT_TRUE(info.HasManifestColumn("vector"));
+    EXPECT_TRUE(info.HasManifestColumn("tenant"));
+    EXPECT_FALSE(info.HasManifestColumn("missing"));
+    EXPECT_FALSE(info.HasManifestColumn("101"));
+}
+
+TEST_F(SegmentLoadInfoTest, CachedManifestColumnsCanBeInherited) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    SegmentLoadInfo current(MakeManifestProto("/manifest/v1"), schema_);
+    current.SetColumnGroupsForTesting(MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id.parquet"}},
+         {{"vector", "tenant"}, {"/external/data.parquet"}}}));
+
+    SegmentLoadInfo next(current.GetProto(), schema_);
+    next.InheritCachedColumnGroupsFrom(current);
+
+    EXPECT_TRUE(next.HasManifestColumn("id"));
+    EXPECT_TRUE(next.HasManifestColumn("vector"));
+    EXPECT_TRUE(next.HasManifestColumn("tenant"));
 }
 
 TEST_F(SegmentLoadInfoTest,
