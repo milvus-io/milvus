@@ -149,6 +149,23 @@ RTreeIndexWrapper::bulk_load_from_field_data(
         return;
     }
 
+    // NOTE: unlike the growing path (add_geometry), this SEALED bulk-load
+    // intentionally DROPS empty-payload and unparseable rows (`continue`
+    // below) instead of indexing a placeholder MBR. The asymmetry is safe and
+    // deliberate:
+    //  - The growing placeholder exists only to keep the index row count in
+    //    lockstep with the segment's active rows, which the coarse-bitmap
+    //    bounds assertion in EvalForIndexSegment depends on. Sealed has no
+    //    such invariant: Count() returns total_num_rows_, which
+    //    BuildWithFieldData sets to the real field-data row count regardless
+    //    of how many rows enter the rtree.
+    //  - Query results are identical either way: a corrupt/empty row can
+    //    never satisfy exact refinement, so "placeholder candidate that
+    //    always refines out" and "never a candidate" produce the same bitset.
+    //  - Keeping such rows out of the candidate set matters on sealed because
+    //    sealed refinement re-parses the raw WKB (Geometry's ctor asserts on
+    //    parse failure); a placeholder candidate would turn a corrupt row
+    //    from "never matches" into a query-time error.
     std::vector<Value> local_values;
     local_values.reserve(1024);
     int64_t absolute_offset = 0;
