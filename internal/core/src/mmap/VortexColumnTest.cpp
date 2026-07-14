@@ -631,6 +631,20 @@ CheckNoDataScan(VortexColumn& column) {
     EXPECT_EQ(seen, kNullableRows);
 }
 
+void
+CheckApplyValidDataInChunk(VortexColumn& column) {
+    constexpr int64_t offset = 3;
+    constexpr int64_t size = 9;
+    TargetBitmap valid(size, true);
+    TargetBitmapView valid_view(valid);
+
+    column.ApplyValidDataInChunk(nullptr, 0, offset, size, valid_view);
+
+    for (int64_t i = 0; i < size; ++i) {
+        EXPECT_EQ(valid[i], ExpectedValid(offset + i)) << offset + i;
+    }
+}
+
 template <typename T>
 void
 CheckFixedWidthBatch(DataType type,
@@ -1014,6 +1028,7 @@ TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
         ASSERT_EQ(column.NumRows(), kNullableRows);
         ASSERT_TRUE(column.IsNullable());
         CheckNoDataScan(column);
+        CheckApplyValidDataInChunk(column);
         CheckDataScan(column, type);
         if (IsVortexStringPushdownType(type)) {
             CheckNullableFilteredScanReturnsValidity(column, type);

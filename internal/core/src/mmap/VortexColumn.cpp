@@ -1264,6 +1264,59 @@ VortexColumn::GetAllChunks(milvus::OpContext*) const {
               "materializes Vortex data; use column view/bulk APIs instead");
 }
 
+void
+VortexColumn::ApplyValidDataInChunk(milvus::OpContext* op_ctx,
+                                    int64_t chunk_id,
+                                    int64_t offset,
+                                    int64_t size,
+                                    TargetBitmapView valid_result) const {
+    if (!IsNullable() || size == 0) {
+        return;
+    }
+
+    CheckChunkId(chunk_id);
+    const auto chunk_rows = files_[chunk_id].rows;
+    AssertInfo(offset >= 0 && size >= 0 && offset + size <= chunk_rows,
+               "vortex valid-data range [{}, {}) out of chunk rows {}",
+               offset,
+               offset + size,
+               chunk_rows);
+
+    const auto global_start = GetNumRowsUntilChunk(chunk_id) + offset;
+    auto cursor = Scan(op_ctx, ScanOptions::ForNoData(global_start, size));
+    AssertInfo(cursor != nullptr,
+               "failed to create vortex validity scan for field {} chunk {}",
+               field_id_.get(),
+               chunk_id);
+
+    ScanBatch batch;
+    int64_t processed = 0;
+    while (cursor->Next(&batch)) {
+        AssertInfo(batch.row_id_start == global_start + processed,
+                   "vortex validity scan returned row {} after processing {} "
+                   "rows from {}",
+                   batch.row_id_start,
+                   processed,
+                   global_start);
+        AssertInfo(batch.size > 0 && processed + batch.size <= size,
+                   "vortex validity scan returned invalid batch size {}, "
+                   "processed {}, expected {}",
+                   batch.size,
+                   processed,
+                   size);
+        for (int64_t i = 0; i < batch.size; ++i) {
+            if (!batch.validity.IsValid(i)) {
+                valid_result[processed + i] = false;
+            }
+        }
+        processed += batch.size;
+    }
+    AssertInfo(processed == size,
+               "vortex validity scan returned {} rows, expected {}",
+               processed,
+               size);
+}
+
 int64_t
 VortexColumn::GetNumRowsUntilChunk(int64_t chunk_id) const {
     AssertInfo(chunk_id >= 0 && chunk_id < static_cast<int64_t>(
