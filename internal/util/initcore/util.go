@@ -83,6 +83,10 @@ func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }
 
+func UpdateDefaultDriverPrefetchEnable(enable bool) {
+	C.SetDefaultDriverPrefetchEnable(C.bool(enable))
+}
+
 func UpdateDefaultJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultJSONKeyStatsEnable(C.bool(enable))
 }

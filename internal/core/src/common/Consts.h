@@ -112,6 +112,7 @@ const std::string JSON_CAST_TYPE = "json_cast_type";
 const std::string JSON_PATH = "json_path";
 const std::string JSON_CAST_FUNCTION = "json_cast_function";
 const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
+const bool DEFAULT_ENABLE_DRIVER_PREFETCH = true;
 const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
 const bool DEFAULT_JSON_KEY_STATS_ENABLED = true;
