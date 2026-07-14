@@ -91,16 +91,18 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}()
 
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
-	currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
-	schemaVersion := currentSchema.GetVersion()
-	functionOutputFieldIDs, err := wNode.functionStore.OutputFieldIDs(currentSchema)
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.Err(err))
-		panic(err)
-	}
+	// The schema version is only consumed while buffering insert data.
+	schemaVersion := int32(0)
 
 	insertData := make([]*writebuffer.InsertData, 0)
 	if len(fgMsg.InsertMessages) > 0 {
+		currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
+		schemaVersion = currentSchema.GetVersion()
+		functionOutputFieldIDs, err := wNode.functionStore.OutputFieldIDs(currentSchema)
+		if err != nil {
+			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.Err(err))
+			panic(err)
+		}
 		for _, msg := range fgMsg.InsertMessages {
 			if len(functionOutputFieldIDs) == 0 || function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
 				continue
@@ -119,8 +121,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}
 	fgMsg.InsertData = insertData
 
-	err = wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion)
-	if err != nil {
+	if err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion); err != nil {
 		mlog.Error(context.TODO(), "failed to buffer data", mlog.Err(err))
 		panic(err)
 	}
