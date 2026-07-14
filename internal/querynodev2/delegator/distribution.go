@@ -345,6 +345,30 @@ func (d *distribution) Serviceable() bool {
 	return d.queryView.Serviceable()
 }
 
+// NotServingSealedSegments returns the sealed segments which are loaded under this delegator
+// but are no longer part of its readable snapshot, so the delegator is not serving them.
+// QueryCoord uses this to release redundant segments from the holder's own fact instead of
+// inferring it from target version arithmetic.
+//
+// The second return value is false while the query view has not been synced by coord yet:
+// the readable set is empty then, which would make every loaded segment look "not serving".
+func (d *distribution) NotServingSealedSegments() ([]int64, bool) {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	if !d.queryView.syncedByCoord || d.queryView.version == initialTargetVersion {
+		return nil, false
+	}
+
+	notServing := make([]int64, 0)
+	for segmentID := range d.sealedSegments {
+		if _, readable := d.queryView.sealedSegmentRowCount[segmentID]; !readable {
+			notServing = append(notServing, segmentID)
+		}
+	}
+	return notServing, true
+}
+
 // for now, delegator become serviceable only when watchDmChannel is done
 // so we regard all needed growing is loaded and we compute loadRatio based on sealed segments
 func (d *distribution) updateServiceable(triggerAction string) {

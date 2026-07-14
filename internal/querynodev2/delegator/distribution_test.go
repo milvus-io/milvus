@@ -788,6 +788,64 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.Error(err)
 }
 
+// NotServingSealedSegments reports the loaded sealed segments that are no longer part of the
+// delegator's readable snapshot -- the fact QueryCoord uses to release redundant segments
+// instead of inferring it from target versions.
+func (s *DistributionSuite) TestNotServingSealedSegments() {
+	s.Run("not_synced_by_coord_yet", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 1},
+			SegmentEntry{NodeID: 1, SegmentID: 2},
+		)
+
+		// The query view has not been synced yet: the readable set is empty, so every loaded
+		// segment would look "not serving". The delegator must decline to answer instead.
+		_, ok := s.dist.NotServingSealedSegments()
+		s.False(ok, "an unsynced delegator must not report a serving set")
+	})
+
+	s.Run("reports_loaded_minus_readable", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 1},
+			SegmentEntry{NodeID: 1, SegmentID: 2},
+			SegmentEntry{NodeID: 2, SegmentID: 3},
+		)
+		// coord syncs a readable set that only contains segments 1 and 3: segment 2 is loaded
+		// but no longer served (e.g. compacted away in the synced target version).
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         1000,
+			SealedInTarget:        []int64{1, 3},
+			SealedSegmentRowCount: map[int64]int64{1: 100, 3: 100},
+		}, []int64{1})
+
+		notServing, ok := s.dist.NotServingSealedSegments()
+		s.True(ok, "a synced delegator must report its serving set")
+		s.ElementsMatch([]int64{2}, notServing, "only the loaded segment outside the readable set is not served")
+	})
+
+	s.Run("all_loaded_segments_still_served", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1})
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         1000,
+			SealedInTarget:        []int64{1},
+			SealedSegmentRowCount: map[int64]int64{1: 100},
+		}, []int64{1})
+
+		notServing, ok := s.dist.NotServingSealedSegments()
+		s.True(ok)
+		s.Empty(notServing, "nothing to release while every loaded segment is in the readable set")
+	})
+}
+
 func TestDistributionSuite(t *testing.T) {
 	suite.Run(t, new(DistributionSuite))
 }

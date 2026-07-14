@@ -44,6 +44,14 @@ type LeaderView struct {
 	NumOfGrowingRows       int64
 	PartitionStatsVersions map[int64]int64
 	Status                 *querypb.LeaderViewStatus
+
+	// ReportsServingSet is true when the delegator reports which loaded sealed segments it is
+	// no longer serving. On older QueryNodes it is false and the checker falls back to the
+	// target-version guard.
+	ReportsServingSet bool
+	// NotServingSegments holds the sealed segments the delegator reported as no longer served.
+	// Only meaningful when ReportsServingSet is true.
+	NotServingSegments typeutil.UniqueSet
 }
 
 func (view *LeaderView) Clone() *LeaderView {
@@ -67,6 +75,8 @@ func (view *LeaderView) Clone() *LeaderView {
 		TargetVersion:          view.TargetVersion,
 		NumOfGrowingRows:       view.NumOfGrowingRows,
 		PartitionStatsVersions: view.PartitionStatsVersions,
+		ReportsServingSet:      view.ReportsServingSet,
+		NotServingSegments:     view.NotServingSegments,
 	}
 }
 

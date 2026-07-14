@@ -287,6 +287,8 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 				PartitionStatsVersions: lview.PartitionStatsVersions,
 				TargetVersion:          lview.GetTargetVersion(),
 				Status:                 lview.GetStatus(),
+				ReportsServingSet:      lview.GetStatus().GetReportsServingSet(),
+				NotServingSegments:     typeutil.NewUniqueSet(lview.GetNotServingSegmentIDs()...),
 			},
 		}
 		updates = append(updates, dmChannel)
