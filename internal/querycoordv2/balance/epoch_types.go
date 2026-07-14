@@ -87,6 +87,16 @@ func (t SnapshotToken) PendingRevision(epoch task.BalanceEpochMeta) task.Balance
 	}
 }
 
+func (t SnapshotToken) WithPendingRevision(revision task.BalancePendingRevision) SnapshotToken {
+	clone := cloneSnapshotToken(t)
+	clone.PendingTaskRevision = revision.Revision
+	if clone.pendingEpochRevisions == nil {
+		clone.pendingEpochRevisions = make(map[task.BalanceEpochMeta]uint64)
+	}
+	clone.pendingEpochRevisions[revision.Epoch] = revision.EpochRevision
+	return clone
+}
+
 func equalInt64Map(left, right map[int64]int64) bool {
 	if len(left) != len(right) {
 		return false
