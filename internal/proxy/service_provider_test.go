@@ -142,3 +142,43 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 	_, hasID := fieldNames["id"]
 	assert.True(t, hasID)
 }
+
+func TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName(t *testing.T) {
+	ctx := context.Background()
+
+	origCache := globalMetaCache
+	defer func() { globalMetaCache = origCache }()
+
+	collectionID := int64(2000)
+	schema := &schemapb.CollectionSchema{
+		Name: "coll1",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      common.StartOfUserFieldID,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	}
+
+	mockCache := &MockCache{}
+	mockCache.EXPECT().GetCollectionName(mock.Anything, "", collectionID).Return("coll1", nil)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, "", "coll1").Return(collectionID, nil)
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "coll1", collectionID).Return(&collectionInfo{
+		collID: collectionID,
+		// resolved by the coordinator and carried in the cache entry
+		dbID:      7,
+		dbName:    "db1",
+		schema:    newSchemaInfo(schema),
+		shardsNum: common.DefaultShardsNum,
+	}, nil)
+	globalMetaCache = mockCache
+
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	// the monitoring http path passes only the collection id, both db name and
+	// collection name are empty
+	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionID: collectionID})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, "db1", resp.GetDbName())
+	assert.Equal(t, int64(7), resp.GetDbId())
+}

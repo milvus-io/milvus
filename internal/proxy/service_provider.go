@@ -229,6 +229,12 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		return nil, err
 	}
 
+	// prefer the actual database resolved by the coordinator and carried in the
+	// cache, the request db name may be empty/default when querying by collection id
+	if c.dbName != "" {
+		resp.DbName = c.dbName
+	}
+	resp.DbId = c.dbID
 	resp.CollectionID = c.collID
 	resp.UpdateTimestamp = c.updateTimestamp
 	resp.UpdateTimestampStr = fmt.Sprintf("%d", c.updateTimestamp)
