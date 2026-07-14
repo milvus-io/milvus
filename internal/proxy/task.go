@@ -1780,6 +1780,9 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		}
 		return nil
 	}
+	if t.result.CollectionName == "" {
+		t.result.CollectionName = result.GetCollectionName()
+	}
 
 	t.result.Schema.Name = result.Schema.Name
 	t.result.Schema.Description = result.Schema.Description

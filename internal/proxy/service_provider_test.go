@@ -119,6 +119,7 @@ func TestCachedProxyServiceProvider_DescribeCollection_FillsDbFromCacheWhenQueri
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, collectionName, resp.GetCollectionName())
 	assert.Equal(t, collectionID, resp.GetCollectionID())
 	assert.Equal(t, dbName, resp.GetDbName())
 	assert.Equal(t, dbID, resp.GetDbId())

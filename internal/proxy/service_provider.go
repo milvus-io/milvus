@@ -197,6 +197,9 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		resp.Status = wrapErrorStatus(err)
 		return resp, nil
 	}
+	if resp.CollectionName == "" {
+		resp.CollectionName = c.schema.Name
+	}
 
 	// skip dynamic fields, see describeCollectionTask.Execute
 	resp.Schema = &schemapb.CollectionSchema{
