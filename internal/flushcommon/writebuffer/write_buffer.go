@@ -77,7 +77,8 @@ type WriteBuffer interface {
 	UseGrowingSourceFlush() bool
 	// GetGrowingFlushProgress returns growing-source progress for the given
 	// segments after this write buffer has processed up to fenceTs. If segmentIDs
-	// is empty, all tracked growing-source segments are returned.
+	// is empty, all tracked growing-source segments are returned. Otherwise,
+	// tracked growing-source segments are added to the requested segmentIDs.
 	GetGrowingFlushProgress(ctx context.Context, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error)
 	// Close is the method to close and sink current buffer data.
 	Close(ctx context.Context, drop bool)
@@ -439,6 +440,8 @@ func (wb *writeBufferBase) GetGrowingFlushProgress(ctx context.Context, segmentI
 	wb.mut.RLock()
 	if len(segmentIDs) == 0 {
 		segmentIDs = lo.Keys(wb.growingSourceProgress)
+	} else {
+		segmentIDs = lo.Uniq(append(segmentIDs, lo.Keys(wb.growingSourceProgress)...))
 	}
 
 	progresses := make([]GrowingFlushSegmentProgress, 0, len(segmentIDs))

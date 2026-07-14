@@ -716,9 +716,6 @@ func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collection
 	segmentIDs = lo.Uniq(lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
 		return segmentID > 0 && !syncmgr.DefaultGrowingSourceRegistry().IsReleasePrepared(channel, segmentID, 0)
 	}))
-	if len(segmentIDs) == 0 {
-		return false, nil
-	}
 	wal := streaming.WAL()
 	if wal == nil {
 		return false, merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
@@ -731,6 +728,7 @@ func isReleaseManualFlushPrepareUnavailable(err error) bool {
 		return false
 	}
 	if errors.Is(err, merr.ErrServiceUnavailable) ||
+		errors.Is(err, merr.ErrChannelNotAvailable) ||
 		errors.Is(err, handler.ErrClientClosed) ||
 		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {

@@ -25,15 +25,20 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var errGrowingSourceProviderClosed = errors.New("growing source provider is closed")
 
+const unknownGrowingSourceChannel = "unknown"
+
 type delegatorGrowingSourceProvider struct {
 	segmentManager  segments.SegmentManager
 	waitFence       func(context.Context, uint64) error
-	currentTSafe    func() uint64
+	getTSafe        func() uint64
+	channelName     string
 	mu              sync.Mutex
 	cond            *sync.Cond
 	closing         bool
@@ -47,20 +52,35 @@ type delegatorGrowingSourceProvider struct {
 	handoffAllowed  map[int64]struct{}
 }
 
-func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, waitFence func(context.Context, uint64) error, currentTSafe ...func() uint64) *delegatorGrowingSourceProvider {
+func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, waitFence func(context.Context, uint64) error, getTSafe ...func() uint64) *delegatorGrowingSourceProvider {
 	provider := &delegatorGrowingSourceProvider{
 		segmentManager:  segmentManager,
 		waitFence:       waitFence,
+		channelName:     unknownGrowingSourceChannel,
 		retained:        make(map[int64]*retainedGrowingFlushSource),
 		releaseAllowed:  make(map[int64]uint64),
 		releasePrepared: make(map[int64]int64),
 		handoffAllowed:  make(map[int64]struct{}),
 	}
-	if len(currentTSafe) > 0 {
-		provider.currentTSafe = currentTSafe[0]
+	if len(getTSafe) > 0 {
+		provider.getTSafe = getTSafe[0]
 	}
 	provider.cond = sync.NewCond(&provider.mu)
 	return provider
+}
+
+func (p *delegatorGrowingSourceProvider) SetChannelName(channelName string) {
+	if channelName == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.channelName == channelName {
+		return
+	}
+	p.deleteRetainedMetricsLocked()
+	p.channelName = channelName
+	p.observeRetainedMetricsLocked()
 }
 
 func (p *delegatorGrowingSourceProvider) SetRegistration(registration *syncmgr.GrowingSourceRegistration) {
@@ -75,7 +95,12 @@ func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, 
 	}
 	segment := p.segmentManager.GetGrowing(segmentID)
 	retained := false
-	if segment == nil {
+	if segment != nil {
+		if p.isDeactivated() {
+			p.releaseLease()
+			return nil, syncmgr.GrowingSourceUnavailable
+		}
+	} else {
 		var ok bool
 		segment, ok = p.getRetained(segmentID)
 		if !ok {
@@ -86,9 +111,6 @@ func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, 
 			return nil, syncmgr.GrowingSourceUnavailable
 		}
 		retained = true
-	} else if p.isDeactivated() {
-		p.releaseLease()
-		return nil, syncmgr.GrowingSourceUnavailable
 	}
 	if err := segment.PinIfNotReleased(); err != nil {
 		p.releaseLease()
@@ -102,14 +124,27 @@ func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, 
 }
 
 func (p *delegatorGrowingSourceProvider) activeProviderBehind(endPos *msgpb.MsgPosition) bool {
-	if endPos == nil || endPos.GetTimestamp() == 0 || p.currentTSafe == nil {
+	if endPos == nil || endPos.GetTimestamp() == 0 || p.getTSafe == nil {
 		return false
 	}
 	p.mu.Lock()
 	closing := p.closing
 	deactivated := p.deactivated
 	p.mu.Unlock()
-	return !closing && !deactivated && p.currentTSafe() < endPos.GetTimestamp()
+	return !closing && !deactivated && p.getTSafe() < endPos.GetTimestamp()
+}
+
+func (p *delegatorGrowingSourceProvider) BeginGrowingSourceReleaseHandoff(segmentIDs []int64) func() {
+	segments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segments = append(segments, syncmgr.GrowingSourceReleaseHandoffSegment{
+			SegmentID: segmentID,
+		})
+	}
+	snapshot := p.enterHandoffOnly(segments)
+	return func() {
+		p.rollbackHandoffOnly(snapshot)
+	}
 }
 
 func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx context.Context, fenceTs uint64, segments []syncmgr.GrowingSourceReleaseHandoffSegment) error {
@@ -180,6 +215,7 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 	if retained, ok := p.retained[segmentID]; ok {
 		if retained.targetOffset < targetOffset {
 			retained.targetOffset = targetOffset
+			p.observeRetainedMetricsLocked()
 		}
 		p.mu.Unlock()
 		return nil
@@ -210,12 +246,15 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 			retained.targetOffset = targetOffset
 		}
 		segment.Unpin()
+		p.observeRetainedMetricsLocked()
 		return nil
 	}
 	p.retained[segmentID] = &retainedGrowingFlushSource{
 		segment:      segment,
 		targetOffset: targetOffset,
+		bytes:        segmentMemSize(segment),
 	}
+	p.observeRetainedMetricsLocked()
 	return nil
 }
 
@@ -268,6 +307,7 @@ func (p *delegatorGrowingSourceProvider) rollbackRetained(snapshot map[int64]ret
 			toUnpin = append(toUnpin, current.segment)
 		}
 	}
+	p.observeRetainedMetricsLocked()
 	p.mu.Unlock()
 	for _, segment := range toUnpin {
 		segment.Unpin()
@@ -379,6 +419,7 @@ func (p *delegatorGrowingSourceProvider) MarkReleaseDetached(segmentID int64) {
 	}
 	retained.detached = true
 	registration, released := p.tryReleaseRetainedLocked(segmentID, retained)
+	p.observeRetainedMetricsLocked()
 	p.mu.Unlock()
 	p.releaseRetained(registration, released)
 }
@@ -404,6 +445,7 @@ func (p *delegatorGrowingSourceProvider) releaseRetainedIfComplete(segmentID int
 		retained.committedOffset = targetOffset
 	}
 	registration, released := p.tryReleaseRetainedLocked(segmentID, retained)
+	p.observeRetainedMetricsLocked()
 	p.mu.Unlock()
 	p.releaseRetained(registration, released)
 }
@@ -490,6 +532,7 @@ func (p *delegatorGrowingSourceProvider) Close() {
 	p.handoffAllowed = make(map[int64]struct{})
 	registration := p.registration
 	p.registration = nil
+	p.deleteRetainedMetricsLocked()
 	p.mu.Unlock()
 	for _, source := range retained {
 		source.segment.Unpin()
@@ -507,6 +550,7 @@ func (p *delegatorGrowingSourceProvider) unregisterIfInactiveLocked() *syncmgr.G
 	p.releasePrepared = make(map[int64]int64)
 	p.handoffOnly = false
 	p.handoffAllowed = make(map[int64]struct{})
+	p.deleteRetainedMetricsLocked()
 	return registration
 }
 
@@ -517,11 +561,43 @@ func (p *delegatorGrowingSourceProvider) currentOffset(segment segments.Segment)
 	return segment.InsertCount()
 }
 
+func (p *delegatorGrowingSourceProvider) observeRetainedMetricsLocked() {
+	if len(p.retained) == 0 {
+		p.deleteRetainedMetricsLocked()
+		return
+	}
+	var retainedBytes int64
+	for _, retained := range p.retained {
+		retainedBytes += retained.bytes
+	}
+	nodeID := paramtable.GetStringNodeID()
+	metrics.QueryNodeGrowingSourceRetainedBytes.WithLabelValues(nodeID, p.channelName).Set(float64(retainedBytes))
+	metrics.QueryNodeGrowingSourceRetainedSegments.WithLabelValues(nodeID, p.channelName).Set(float64(len(p.retained)))
+}
+
+func (p *delegatorGrowingSourceProvider) deleteRetainedMetricsLocked() {
+	nodeID := paramtable.GetStringNodeID()
+	metrics.QueryNodeGrowingSourceRetainedBytes.DeleteLabelValues(nodeID, p.channelName)
+	metrics.QueryNodeGrowingSourceRetainedSegments.DeleteLabelValues(nodeID, p.channelName)
+}
+
+func segmentMemSize(segment segments.Segment) int64 {
+	if segment == nil {
+		return 0
+	}
+	size := segment.MemSize()
+	if size < 0 {
+		return 0
+	}
+	return size
+}
+
 type retainedGrowingFlushSource struct {
 	segment         segments.Segment
 	targetOffset    int64
 	committedOffset int64
 	detached        bool
+	bytes           int64
 }
 
 type delegatorGrowingFlushSource struct {

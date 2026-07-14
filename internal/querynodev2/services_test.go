@@ -582,6 +582,11 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "channel not available",
+			err:  merr.WrapErrChannelNotAvailable("vchannel", "no local growing-source release handoff provider"),
+			want: true,
+		},
+		{
 			name: "handler client closed",
 			err:  handler.ErrClientClosed,
 			want: true,
@@ -2598,6 +2603,7 @@ func TestQueryNodeService(t *testing.T) {
 	scanner.EXPECT().Error().Return(nil).Maybe()
 	scanner.EXPECT().Close().Return().Maybe()
 	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner).Maybe()
+	wal.EXPECT().PrepareReleaseManualFlush(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	paramtable.SetRole(typeutil.StandaloneRole)
 	paramtable.Get().MQCfg.Type.SwapTempValue(message.WALNameRocksmq.String())
 	util.InitAndSelectWALName()
