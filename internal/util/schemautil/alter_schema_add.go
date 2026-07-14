@@ -113,8 +113,9 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 	function := plan.Function
 	switch plan.Kind {
 	case AlterSchemaAddFunction:
-		if function.GetType() == schemapb.FunctionType_BM25 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function must be added with its output field in add_function_field interface")
+		switch function.GetType() {
+		case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash, schemapb.FunctionType_TextEmbedding:
+			return merr.WrapErrParameterInvalidMsg("%s function cannot be added through function-only schema evolution because its output field must be newly created", function.GetType().String())
 		}
 		return nil
 	case AlterSchemaAddFunctionField:

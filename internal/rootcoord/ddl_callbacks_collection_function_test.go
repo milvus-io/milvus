@@ -23,6 +23,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,6 +34,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -468,7 +470,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 			CollectionName: "test_collection",
 			FunctionSchema: &schemapb.FunctionSchema{
 				Name:             "test_function",
-				Type:             schemapb.FunctionType_BM25,
+				Type:             schemapb.FunctionType_Unknown,
 				InputFieldNames:  []string{"text_field"},
 				OutputFieldNames: []string{"vector"},
 			},
@@ -576,7 +578,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 			CollectionName: "test_collection",
 			FunctionSchema: &schemapb.FunctionSchema{
 				Name:             "test_function",
-				Type:             schemapb.FunctionType_TextEmbedding,
+				Type:             schemapb.FunctionType_Unknown,
 				InputFieldNames:  []string{"text_field"},
 				OutputFieldNames: []string{"vector"},
 			},
@@ -600,7 +602,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 			CollectionName: "test_collection",
 			FunctionSchema: &schemapb.FunctionSchema{
 				Name:             "new_function",
-				Type:             schemapb.FunctionType_TextEmbedding,
+				Type:             schemapb.FunctionType_Unknown,
 				InputFieldNames:  []string{"non_existent_field"},
 				OutputFieldNames: []string{"vector"},
 			},
@@ -626,7 +628,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 			CollectionName: "test_collection",
 			FunctionSchema: &schemapb.FunctionSchema{
 				Name:             "new_function2",
-				Type:             schemapb.FunctionType_TextEmbedding,
+				Type:             schemapb.FunctionType_Unknown,
 				InputFieldNames:  []string{"text_field"},
 				OutputFieldNames: []string{"non_existent_field"},
 			},
@@ -639,4 +641,69 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		suite.Error(err)
 		suite.Contains(err.Error(), "function's output field non_existent_field not exists")
 	})
+}
+
+func TestLegacyMaterializedFunctionRoutingRejected(t *testing.T) {
+	for _, functionType := range []schemapb.FunctionType{
+		schemapb.FunctionType_BM25,
+		schemapb.FunctionType_MinHash,
+		schemapb.FunctionType_TextEmbedding,
+	} {
+		functionType := functionType
+		t.Run("add "+functionType.String(), func(t *testing.T) {
+			coll := new(DDLCallbacksCollectionFunctionTestSuite).createTestCollection()
+			mockMeta := mockrootcoord.NewIMetaTable(t)
+			mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+			core := newTestCore(withHealthyCode(), withMeta(mockMeta))
+
+			mockBroadcaster := mock_broadcaster.NewMockBroadcastAPI(t)
+			mockBroadcaster.EXPECT().Close().Maybe()
+			lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcaster, nil).Build()
+			defer lockMocker.UnPatch()
+
+			mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
+			defer mocker.UnPatch()
+
+			err := core.broadcastAlterCollectionForAddFunction(context.Background(), &milvuspb.AddCollectionFunctionRequest{
+				DbName:         "test_db",
+				CollectionName: "test_collection",
+				FunctionSchema: &schemapb.FunctionSchema{
+					Name:             "new_function",
+					Type:             functionType,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"vector"},
+				},
+			})
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "output field")
+		})
+
+		t.Run("alter "+functionType.String(), func(t *testing.T) {
+			coll := new(DDLCallbacksCollectionFunctionTestSuite).createTestCollection()
+			mockMeta := mockrootcoord.NewIMetaTable(t)
+			mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+			core := newTestCore(withHealthyCode(), withMeta(mockMeta))
+
+			mockBroadcaster := mock_broadcaster.NewMockBroadcastAPI(t)
+			mockBroadcaster.EXPECT().Close().Maybe()
+			lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcaster, nil).Build()
+			defer lockMocker.UnPatch()
+
+			mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
+			defer mocker.UnPatch()
+
+			err := core.broadcastAlterCollectionForAlterFunction(context.Background(), &milvuspb.AlterCollectionFunctionRequest{
+				DbName:         "test_db",
+				CollectionName: "test_collection",
+				FunctionSchema: &schemapb.FunctionSchema{
+					Name:             "test_function",
+					Type:             functionType,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"vector"},
+				},
+			})
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "output field")
+		})
+	}
 }

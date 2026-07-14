@@ -44,6 +44,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return merr.WrapErrParameterInvalidMsg("can not provide properties and deletekeys at the same time")
 	}
 
+	if err := validateReservedCollectionProperties(req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
 		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
 	}
@@ -208,6 +212,18 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateReservedCollectionProperties(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == common.MaxFieldIDKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter reserved collection property %s", common.MaxFieldIDKey)
+		}
+	}
+	if funcutil.SliceContain(deleteKeys, common.MaxFieldIDKey) {
+		return merr.WrapErrParameterInvalidMsg("cannot delete reserved collection property %s", common.MaxFieldIDKey)
 	}
 	return nil
 }

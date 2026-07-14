@@ -35,6 +35,22 @@ import (
 
 const externalCollectionFunctionMutationUnsupportedMsg = "external collection does not support altering or dropping functions"
 
+func rejectLegacyMaterializedFunctionRouting(function *schemapb.FunctionSchema) error {
+	if function == nil {
+		return nil
+	}
+
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash, schemapb.FunctionType_TextEmbedding:
+		return merr.WrapErrParameterInvalidMsg(
+			"%s function cannot bind an existing output field through legacy AddCollectionFunction or AlterCollectionFunction",
+			function.GetType().String(),
+		)
+	default:
+		return nil
+	}
+}
+
 func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema) error {
 	if typeutil.IsExternalCollection(schema) {
 		return merr.WrapErrParameterInvalidMsg(externalCollectionFunctionMutationUnsupportedMsg)
@@ -168,6 +184,9 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
 		return err
 	}
+	if err := rejectLegacyMaterializedFunctionRouting(req.GetFunctionSchema()); err != nil {
+		return err
+	}
 
 	newColl := oldColl.Clone()
 	if err := alterFunctionGenNewCollection(ctx, req.FunctionSchema, newColl); err != nil {
@@ -243,6 +262,9 @@ func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *
 	fSchema := req.FunctionSchema
 	if fSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("function schema is empty")
+	}
+	if err := rejectLegacyMaterializedFunctionRouting(fSchema); err != nil {
+		return err
 	}
 
 	nextFunctionID := int64(StartOfUserFunctionID)
