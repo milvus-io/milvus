@@ -316,8 +316,8 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 // TestSnapshotRestoreWithMultiShardMultiPartition tests the complete snapshot restore workflow with data operations
 func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	// This resource-intensive case creates indexes across 3 shards and 10
-	// partitions. Keep it serial so package-level parallel tests do not starve
-	// the shared index and snapshot restore workers.
+	// partitions. Keep it serial so it is not starved by package-level parallel
+	// tests competing for the shared index and snapshot restore workers.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
