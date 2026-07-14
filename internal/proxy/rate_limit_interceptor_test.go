@@ -377,6 +377,9 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.ExportSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "exportSnapshot")
 		testGetFailedResponse(&milvuspb.FlushRequest{}, internalpb.RateType_DDLFlush, merr.ErrServiceRateLimit, "flush")
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
+		testGetFailedResponse(&milvuspb.AddFileResourceRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "addFileResource")
+		testGetFailedResponse(&milvuspb.RemoveFileResourceRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "removeFileResource")
+		testGetFailedResponse(&milvuspb.ListFileResourcesRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "listFileResources")
 
 		// test illegal
 		rsp := GetFailedResponse(&milvuspb.SearchResults{}, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
@@ -671,6 +674,22 @@ func TestGetInfo(t *testing.T) {
 			assert.Equal(t, util.InvalidDBID, dbID)
 			assert.Equal(t, 0, len(collectionInfos))
 			assert.Equal(t, internalpb.RateType_DDLDB, rateType)
+			assert.Equal(t, 1, cost)
+		}
+	})
+
+	t.Run("get file resource request info", func(t *testing.T) {
+		requests := []proto.Message{
+			&milvuspb.AddFileResourceRequest{},
+			&milvuspb.RemoveFileResourceRequest{},
+			&milvuspb.ListFileResourcesRequest{},
+		}
+		for _, request := range requests {
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, request)
+			assert.NoError(t, err)
+			assert.Equal(t, util.InvalidDBID, dbID)
+			assert.Empty(t, collectionInfos)
+			assert.Equal(t, internalpb.RateType_DDLCollection, rateType)
 			assert.Equal(t, 1, cost)
 		}
 	})

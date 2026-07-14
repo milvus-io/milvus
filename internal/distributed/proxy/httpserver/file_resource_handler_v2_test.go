@@ -18,6 +18,7 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,9 +30,30 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type rejectingFileResourceLimiter struct {
+	t          *testing.T
+	checkCount int
+}
+
+func (l *rejectingFileResourceLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
+	l.t.Helper()
+	require.Equal(l.t, util.InvalidDBID, dbID)
+	require.Empty(l.t, collectionIDToPartIDs)
+	require.Equal(l.t, internalpb.RateType_DDLCollection, rateType)
+	require.Equal(l.t, 1, n)
+	l.checkCount++
+	return merr.ErrServiceRateLimit
+}
+
+func (l *rejectingFileResourceLimiter) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
+	return l.Check(dbID, collectionIDToPartIDs, rateType, n)
+}
 
 func postFileResourceRequest(t *testing.T, server http.Handler, path, body string) map[string]interface{} {
 	t.Helper()
@@ -188,4 +210,30 @@ func TestFileResourceHandlerV2ReturnsEmptyList(t *testing.T) {
 	response := postFileResourceRequest(t, server, versionalV2(FileResourceCategory, ListAction), `{}`)
 	assert.EqualValues(t, 0, response[HTTPReturnCode])
 	assert.Empty(t, response[HTTPReturnData].([]interface{}))
+}
+
+func TestFileResourceHandlerV2ChecksQuota(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	limiter := &rejectingFileResourceLimiter{t: t}
+	mockProxy := mocks.NewMockProxy(t)
+	mockProxy.EXPECT().GetRateLimiter().Return(limiter, nil).Times(3)
+	server := initHTTPServerV2(mockProxy, false)
+
+	testCases := []struct {
+		path string
+		body string
+	}{
+		{path: versionalV2(FileResourceCategory, AddAction), body: `{"name":"synonyms","path":"synonyms.txt"}`},
+		{path: versionalV2(FileResourceCategory, RemoveAction), body: `{"name":"synonyms"}`},
+		{path: versionalV2(FileResourceCategory, ListAction), body: `{}`},
+	}
+	for _, testCase := range testCases {
+		response := postFileResourceRequest(t, server, testCase.path, testCase.body)
+		assert.EqualValues(t, merr.Code(merr.ErrHTTPRateLimit), response[HTTPReturnCode])
+		assert.Contains(t, response[HTTPReturnMessage], merr.ErrServiceRateLimit.Error())
+	}
+	require.Equal(t, len(testCases), limiter.checkCount)
 }
