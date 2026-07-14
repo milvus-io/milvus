@@ -495,6 +495,14 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::JsonStats;
             return;
         }
+        if (expr_->column_.data_type_ == DataType::ARRAY &&
+            expr_->vals_.empty() &&
+            expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
+            // Empty-set ARRAY ContainsAll needs row validity to distinguish
+            // NULL from [], which the scalar-index result cannot provide.
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
         SegmentExpr::DetermineExecPath();
     }
 
@@ -525,6 +533,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     template <typename ExprValueType>
     VectorPtr
     ExecArrayContainsAll(EvalCtx& context);
+
+    // Empty-set ARRAY ContainsAll is TRUE for every real array (including [])
+    // and UNKNOWN for NULL rows.
+    VectorPtr
+    ExecEmptyArrayContainsAll(EvalCtx& context);
 
     VectorPtr
     ExecJsonContainsArray(EvalCtx& context);

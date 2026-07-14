@@ -7313,7 +7313,10 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
 
     auto it = runtime.struct_to_array_offsets.find(*struct_name);
     if (it == runtime.struct_to_array_offsets.end()) {
-        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(row_count);
+        // Backfilled rows of a schema-evolved struct array are NULL, not empty
+        // arrays: retain an explicit all-false row-valid bitmap so row-level
+        // consumers do not mistake historical NULLs for [].
+        auto array_offsets = ArrayOffsetsSealed::BuildAllNulls(row_count);
         it =
             runtime.struct_to_array_offsets.emplace(*struct_name, array_offsets)
                 .first;

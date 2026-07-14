@@ -136,6 +136,11 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     if (expr_->vals_.empty()) {
+        if (expr_->column_.data_type_ == DataType::ARRAY &&
+            expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
+            result = ExecEmptyArrayContainsAll(context);
+            return;
+        }
         auto real_batch_size = has_offset_input_
                                    ? context.get_offset_input()->size()
                                    : GetNextBatchSize();
@@ -1048,6 +1053,76 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+    }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
+}
+
+VectorPtr
+PhyJsonContainsFilterExpr::ExecEmptyArrayContainsAll(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
+    AssertInfo(expr_->column_.nested_path_.size() == 0,
+               "[ExecEmptyArrayContainsAll]nested path must be null");
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+    int processed_cursor = 0;
+    auto execute_sub_batch =
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::ArrayView* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            // A real array — even an empty one — vacuously contains all
+            // zero requested elements.
+            res[i] = true;
+        }
+        processed_cursor += size;
+    };
+
+    int64_t processed_size;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<milvus::ArrayView>(
+            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+    } else {
+        processed_size = ProcessDataChunks<milvus::ArrayView>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

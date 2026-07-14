@@ -578,7 +578,10 @@ TEST(BitmapIndexArrayNestedTest, BuildAndLoadElementLevelBitmap) {
     auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
     index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
     ASSERT_TRUE(index->IsNestedIndex());
-    ASSERT_TRUE(index->HasRawData());
+    // Array bitmap indexes (nested or not) report HasRawData()==false so the
+    // segment loader keeps the raw array data that IArrayOffsets/MATCH_* need;
+    // an index-only load would otherwise leave MATCH_* with no offsets.
+    ASSERT_FALSE(index->HasRawData());
     ASSERT_EQ(index->Count(), 4);
 
     auto binary_set = index->Serialize({});

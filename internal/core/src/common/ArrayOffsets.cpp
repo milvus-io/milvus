@@ -331,6 +331,11 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     auto data_type = field_meta.get_data_type();
 
     std::vector<int32_t> row_to_element_start(row_count + 1);
+    // Retain per-row NULL info so row-level consumers (e.g. array_contains via a
+    // nested index) can exclude NULL rows -- a NULL row has zero elements and is
+    // otherwise indistinguishable from an empty array at element level.
+    TargetBitmap row_valid(row_count, true);
+    bool nullable_seen = false;
 
     auto temp_op_ctx = std::make_unique<OpContext>();
     auto op_ctx_ptr = temp_op_ctx.get();
@@ -349,6 +354,9 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -366,6 +374,9 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -393,6 +404,11 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
+    if (nullable_seen) {
+        result->has_row_valid_ = true;
+        result->row_valid_ = std::move(row_valid);
+        result->resource_size_ += (row_count + 7) / 8;
+    }
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
@@ -413,6 +429,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
     auto data_type = field_meta.get_data_type();
 
     std::vector<int32_t> row_to_element_start(row_count + 1);
+    // See BuildFromSegment: retain per-row NULL info for row-level consumers.
+    TargetBitmap row_valid(row_count, true);
+    bool nullable_seen = false;
 
     auto temp_op_ctx = std::make_unique<OpContext>();
     auto op_ctx_ptr = temp_op_ctx.get();
@@ -431,6 +450,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -448,6 +470,9 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 int32_t array_len = 0;
                 if (valid_flags.empty() || valid_flags[i]) {
                     array_len = array_views[i].length();
+                } else {
+                    nullable_seen = true;
+                    row_valid[current_row_id] = false;
                 }
 
                 row_to_element_start[current_row_id] = total_elements;
@@ -475,6 +500,11 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
     auto result =
         std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
     result->resource_size_ = 4 * (row_count + 1);
+    if (nullable_seen) {
+        result->has_row_valid_ = true;
+        result->row_valid_ = std::move(row_valid);
+        result->resource_size_ += (row_count + 7) / 8;
+    }
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
@@ -731,38 +761,75 @@ ArrayOffsetsGrowing::Insert(int64_t row_id_start,
     for (int64_t i = 0; i < count; ++i) {
         int32_t row_id = row_id_start + i;
         int32_t array_len = array_lengths[i];
+        // Negative length marks a NULL row: zero elements + row-invalid.
+        bool valid = array_len >= 0;
+        if (!valid) {
+            array_len = 0;
+        }
 
         if (row_id == committed_row_count_) {
-            // Get current total element count (from sentinel or compute)
-            int32_t current_total = row_to_element_start_.empty()
-                                        ? 0
-                                        : row_to_element_start_.back();
-
-            // Record the start position for this row
-            if (row_to_element_start_.size() >
-                static_cast<size_t>(committed_row_count_)) {
-                // Sentinel exists, overwrite it with row start
-                row_to_element_start_[committed_row_count_] = current_total;
-            } else {
-                row_to_element_start_.push_back(current_total);
-            }
-
-            // Update sentinel (new total after this row)
-            int32_t new_total = current_total + array_len;
-            if (row_to_element_start_.size() >
-                static_cast<size_t>(committed_row_count_ + 1)) {
-                row_to_element_start_[committed_row_count_ + 1] = new_total;
-            } else {
-                row_to_element_start_.push_back(new_total);
-            }
-
-            committed_row_count_++;
+            CommitRow(array_len, valid);
         } else {
-            pending_rows_[row_id] = {row_id, array_len};
+            pending_rows_[row_id] = {row_id, array_len, valid};
         }
     }
 
     DrainPendingRows();
+}
+
+void
+ArrayOffsetsGrowing::InsertNulls(int64_t row_id_start, int64_t count) {
+    std::unique_lock lock(mutex_);
+
+    for (int64_t i = 0; i < count; ++i) {
+        int64_t row_id = row_id_start + i;
+        if (row_id == committed_row_count_) {
+            CommitRow(/*array_len=*/0, /*valid=*/false);
+        } else {
+            pending_rows_[row_id] = {row_id, 0, false};
+        }
+    }
+
+    DrainPendingRows();
+}
+
+// Commit one row at committed_row_count_. Caller must hold the unique lock.
+void
+ArrayOffsetsGrowing::CommitRow(int32_t array_len, bool valid) {
+    // Get current total element count (from sentinel or compute)
+    int32_t current_total =
+        row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
+
+    // Record the start position for this row
+    if (row_to_element_start_.size() >
+        static_cast<size_t>(committed_row_count_)) {
+        // Sentinel exists, overwrite it with row start
+        row_to_element_start_[committed_row_count_] = current_total;
+    } else {
+        row_to_element_start_.push_back(current_total);
+    }
+
+    // Update sentinel (new total after this row)
+    int32_t new_total = current_total + array_len;
+    if (row_to_element_start_.size() >
+        static_cast<size_t>(committed_row_count_ + 1)) {
+        row_to_element_start_[committed_row_count_ + 1] = new_total;
+    } else {
+        row_to_element_start_.push_back(new_total);
+    }
+
+    // Row validity is materialized lazily on the first NULL row (all prior
+    // committed rows were valid); from then on it stays lockstep with
+    // committed_row_count_.
+    if (!valid && !has_row_valid_) {
+        row_valid_.assign(static_cast<size_t>(committed_row_count_), 1);
+        has_row_valid_ = true;
+    }
+    if (has_row_valid_) {
+        row_valid_.push_back(valid ? 1 : 0);
+    }
+
+    committed_row_count_++;
 }
 
 void
@@ -774,33 +841,28 @@ ArrayOffsetsGrowing::DrainPendingRows() {
         }
 
         const auto& pending = it->second;
-
-        // Get current total element count
-        int32_t current_total =
-            (committed_row_count_ > 0)
-                ? row_to_element_start_[committed_row_count_]
-                : 0;
-
-        // If sentinel exists at current position, overwrite it; otherwise push_back
-        if (row_to_element_start_.size() >
-            static_cast<size_t>(committed_row_count_)) {
-            row_to_element_start_[committed_row_count_] = current_total;
-        } else {
-            row_to_element_start_.push_back(current_total);
-        }
-
-        // Update sentinel for next row
-        int32_t new_total = current_total + pending.array_len;
-        if (row_to_element_start_.size() >
-            static_cast<size_t>(committed_row_count_ + 1)) {
-            row_to_element_start_[committed_row_count_ + 1] = new_total;
-        } else {
-            row_to_element_start_.push_back(new_total);
-        }
-
-        committed_row_count_++;
-
+        CommitRow(pending.array_len, pending.valid);
         pending_rows_.erase(it);
+    }
+}
+
+void
+ArrayOffsetsGrowing::AndRowValidBitmap(TargetBitmapView result,
+                                       int64_t row_start,
+                                       int64_t row_count) const {
+    std::shared_lock lock(mutex_);
+    if (!has_row_valid_) {
+        return;
+    }
+    auto rows = static_cast<int64_t>(row_valid_.size());
+    for (int64_t i = 0; i < row_count; ++i) {
+        auto row = row_start + i;
+        if (row >= rows) {
+            break;
+        }
+        if (row_valid_[row] == 0) {
+            result[i] = false;
+        }
     }
 }
 
