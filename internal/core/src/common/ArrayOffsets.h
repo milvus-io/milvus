@@ -55,6 +55,29 @@ class IArrayOffsets {
     virtual std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const = 0;
 
+    // Batched form of ElementIDRangeOfRow: out[i] = element range of
+    // row_ids[i]. Semantics per entry match the per-row method, but the
+    // growing implementation takes ONE shared lock (and the caller pays one
+    // virtual call) for the whole batch instead of one per row. A row id
+    // outside [0, committed rows] yields {0, 0} on growing (out-of-range
+    // insurance: a not-yet-committed row has no range yet).
+    virtual void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const = 0;
+
+    // Contiguous form for the common sequential-batch case: copy
+    // starts[row_start .. row_start + row_count] into out (row_count + 1
+    // entries), so [out[i], out[i+1]) is row (row_start + i)'s element
+    // range. Sealed is a straight memcpy; growing takes one shared lock and
+    // clamps rows beyond the committed count to the last committed total
+    // (equivalent to the per-row method's {total, total} for row ==
+    // committed_row_count_, extended to any not-yet-committed row).
+    virtual void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const = 0;
+
     // Convert row-level bitsets to element-level bitsets
     // row_start: starting row index (0-based)
     // row_bitset.size(): number of rows to process
@@ -87,6 +110,21 @@ class IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const = 0;
+
+    // Word-wise ANY-semantics reduction of an element-level bitmap to row
+    // level. Bit j of elem_bitset corresponds to global element id
+    // (elem_offset + j). For each i in [0, row_result.size()), sets
+    // row_result[i] = true iff any element bit of row (row_start + i) is set.
+    // Bits in row_result are only ever set, never cleared. elem_bitset must
+    // cover the element ranges of all addressed rows.
+    // This is the hot path used to fold element-level match bits back to
+    // rows (MATCH_ANY over an all-valid element bitmap); it skips zero words
+    // instead of testing element bits one by one.
+    virtual void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -138,6 +176,16 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
 
+    void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const override;
+
+    void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const override;
+
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
                              const TargetBitmapView& valid_row_bitset,
@@ -155,6 +203,12 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const override;
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
 
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
@@ -194,6 +248,16 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     std::pair<int32_t, int32_t>
     ElementIDRangeOfRow(int32_t row_id) const override;
 
+    void
+    CopyRowElementRanges(const int32_t* row_ids,
+                         int64_t count,
+                         std::pair<int32_t, int32_t>* out) const override;
+
+    void
+    CopyRowElementStarts(int64_t row_start,
+                         int64_t row_count,
+                         int32_t* out) const override;
+
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
                              const TargetBitmapView& valid_row_bitset,
@@ -211,6 +275,12 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
                            int64_t row_count) const override;
+
+    void
+    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
+                                int64_t elem_offset,
+                                int64_t row_start,
+                                TargetBitmapView row_result) const override;
 
  private:
     struct PendingRow {

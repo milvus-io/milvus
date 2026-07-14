@@ -17,7 +17,9 @@
 #include "ArrayOffsets.h"
 
 #include <assert.h>
+#include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <type_traits>
 
 #include "bitset/bitset.h"
@@ -34,6 +36,82 @@
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
+
+namespace {
+
+// Word-wise ANY-semantics reduction shared by the sealed and growing
+// implementations of ElementBitsetToRowBitsetAny.
+//
+// `starts` is the row -> element-start table, indexable over
+// [row_start, row_start + row_count]. Bit j of `elem_bitset` corresponds to
+// global element id (elem_offset + j).
+//
+// Linear merge of the element bitmap (consumed one 64-bit word at a time)
+// with the sorted row-start table: zero words are skipped with a single
+// compare, a set bit advances the monotone row cursor (amortized
+// O(row_count) over the whole call, no binary search), and once a row is
+// marked the scan jumps directly to the row's end, skipping its remaining
+// words. Complexity is O(total_elements / 64 + row_count + hit_rows)
+// instead of the per-bit O(total_elements).
+void
+ElementBitsetAnyReduce(const int32_t* starts,
+                       const TargetBitmapView& elem_bitset,
+                       int64_t elem_offset,
+                       int64_t row_start,
+                       int64_t row_count,
+                       TargetBitmapView row_result) {
+    using word_t = TargetBitmapView::policy_type::data_type;
+    constexpr int64_t kWordBits = static_cast<int64_t>(8 * sizeof(word_t));
+
+    if (row_count == 0) {
+        return;
+    }
+    const int64_t first_bit = starts[row_start] - elem_offset;
+    const int64_t last_bit = starts[row_start + row_count] - elem_offset;
+    AssertInfo(
+        first_bit >= 0 && last_bit <= static_cast<int64_t>(elem_bitset.size()),
+        "element bitset does not cover rows [{}, {}): bits [{}, {}), "
+        "bitset size {}",
+        row_start,
+        row_start + row_count,
+        first_bit,
+        last_bit,
+        elem_bitset.size());
+
+    int64_t pos = first_bit;
+    int64_t row = row_start;
+    while (pos < last_bit) {
+        const int64_t n = std::min(kWordBits, last_bit - pos);
+        word_t word =
+            elem_bitset.read(static_cast<size_t>(pos), static_cast<size_t>(n));
+        if (word == 0) {
+            pos += n;
+            continue;
+        }
+        int64_t next_pos = pos + n;
+        do {
+            const int64_t bit = pos + __builtin_ctzll(word);
+            const int32_t elem_id = static_cast<int32_t>(bit + elem_offset);
+            // Monotone row cursor; empty rows are skipped by the same loop.
+            while (starts[row + 1] <= elem_id) {
+                ++row;
+            }
+            row_result[row - row_start] = true;
+            // Skip the rest of this row's elements.
+            const int64_t row_end = starts[row + 1] - elem_offset;
+            if (row_end >= pos + n) {
+                next_pos = row_end;
+                break;
+            }
+            // row_end falls inside the current word: clear bits below it.
+            // (0 < row_end - pos < kWordBits, so the shift is well-defined.)
+            word &= ~word_t(0) << (row_end - pos);
+        } while (word != 0);
+        pos = next_pos;
+    }
+}
+
+}  // namespace
 
 std::pair<int32_t, int32_t>
 ArrayOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
@@ -60,6 +138,40 @@ ArrayOffsetsSealed::ElementIDRangeOfRow(int32_t row_id) const {
         return {total, total};
     }
     return {row_to_element_start_[row_id], row_to_element_start_[row_id + 1]};
+}
+
+void
+ArrayOffsetsSealed::CopyRowElementRanges(
+    const int32_t* row_ids,
+    int64_t count,
+    std::pair<int32_t, int32_t>* out) const {
+    const auto row_count = static_cast<int32_t>(GetRowCount());
+    const int32_t* starts = row_to_element_start_.data();
+    for (int64_t i = 0; i < count; ++i) {
+        const int32_t row_id = row_ids[i];
+        assert(row_id >= 0 && row_id <= row_count);
+        if (row_id == row_count) {
+            out[i] = {starts[row_count], starts[row_count]};
+        } else {
+            out[i] = {starts[row_id], starts[row_id + 1]};
+        }
+    }
+}
+
+void
+ArrayOffsetsSealed::CopyRowElementStarts(int64_t row_start,
+                                         int64_t row_count,
+                                         int32_t* out) const {
+    AssertInfo(row_start >= 0 && row_count >= 0 &&
+                   row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+    std::memcpy(out,
+                row_to_element_start_.data() + row_start,
+                sizeof(int32_t) * (row_count + 1));
 }
 
 std::pair<TargetBitmap, TargetBitmap>
@@ -177,6 +289,28 @@ ArrayOffsetsSealed::ForEachRowElementRange(
     }
 
     return result;
+}
+
+void
+ArrayOffsetsSealed::ElementBitsetToRowBitsetAny(
+    const TargetBitmapView& elem_bitset,
+    int64_t elem_offset,
+    int64_t row_start,
+    TargetBitmapView row_result) const {
+    const int64_t row_count = row_result.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    ElementBitsetAnyReduce(row_to_element_start_.data(),
+                           elem_bitset,
+                           elem_offset,
+                           row_start,
+                           row_count,
+                           row_result);
 }
 
 std::shared_ptr<ArrayOffsetsSealed>
@@ -375,6 +509,64 @@ ArrayOffsetsGrowing::ElementIDRangeOfRow(int32_t row_id) const {
     return {row_to_element_start_[row_id], row_to_element_start_[row_id + 1]};
 }
 
+void
+ArrayOffsetsGrowing::CopyRowElementRanges(
+    const int32_t* row_ids,
+    int64_t count,
+    std::pair<int32_t, int32_t>* out) const {
+    // ONE shared lock for the whole batch (the per-row method locks per
+    // call, which contends with Insert's unique lock on hot scan paths).
+    std::shared_lock lock(mutex_);
+    const int32_t* starts = row_to_element_start_.data();
+    for (int64_t i = 0; i < count; ++i) {
+        const int32_t row_id = row_ids[i];
+        // Out-of-range insurance: with zero committed rows the vector is
+        // empty, and a not-yet-committed row has no range yet.
+        if (row_id < 0 || row_id > committed_row_count_ ||
+            row_to_element_start_.empty()) {
+            out[i] = {0, 0};
+            continue;
+        }
+        if (row_id == committed_row_count_) {
+            auto total = starts[committed_row_count_];
+            out[i] = {total, total};
+        } else {
+            out[i] = {starts[row_id], starts[row_id + 1]};
+        }
+    }
+}
+
+void
+ArrayOffsetsGrowing::CopyRowElementStarts(int64_t row_start,
+                                          int64_t row_count,
+                                          int32_t* out) const {
+    AssertInfo(row_start >= 0 && row_count >= 0,
+               "invalid row range: row_start={}, row_count={}",
+               row_start,
+               row_count);
+    std::shared_lock lock(mutex_);
+    if (row_to_element_start_.empty()) {
+        // No committed rows yet: every requested row clamps to total == 0.
+        std::fill(out, out + row_count + 1, 0);
+        return;
+    }
+    const int32_t* starts = row_to_element_start_.data();
+    const int64_t committed = committed_row_count_;
+    if (row_start + row_count <= committed) {
+        // Fast path: fully committed range, straight copy under the lock.
+        std::memcpy(
+            out, starts + row_start, sizeof(int32_t) * (row_count + 1));
+        return;
+    }
+    // Rows at or beyond the committed count clamp to the committed total
+    // ({total, total}-style safety: not-yet-committed rows read as empty).
+    const int32_t total = starts[committed];
+    for (int64_t i = 0; i <= row_count; ++i) {
+        const int64_t row = row_start + i;
+        out[i] = row <= committed ? starts[row] : total;
+    }
+}
+
 std::pair<TargetBitmap, TargetBitmap>
 ArrayOffsetsGrowing::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
@@ -501,13 +693,41 @@ ArrayOffsetsGrowing::ForEachRowElementRange(
 }
 
 void
+ArrayOffsetsGrowing::ElementBitsetToRowBitsetAny(
+    const TargetBitmapView& elem_bitset,
+    int64_t elem_offset,
+    int64_t row_start,
+    TargetBitmapView row_result) const {
+    std::shared_lock lock(mutex_);
+
+    const int64_t row_count = row_result.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed_row_count_);
+
+    ElementBitsetAnyReduce(row_to_element_start_.data(),
+                           elem_bitset,
+                           elem_offset,
+                           row_start,
+                           row_count,
+                           row_result);
+}
+
+void
 ArrayOffsetsGrowing::Insert(int64_t row_id_start,
                             const int32_t* array_lengths,
                             int64_t count) {
     std::unique_lock lock(mutex_);
 
-    row_to_element_start_.reserve(row_id_start + count + 1);
-
+    // NOTE: no reserve() here on purpose. An exact-size reserve per insert
+    // batch (row_id_start + count + 1) defeats the vector's geometric growth:
+    // every batch whose target exceeded the previous exact capacity forced a
+    // full reallocation + memcpy of the whole table while holding the writer
+    // lock, turning N batched inserts into O(N^2) copied bytes. push_back's
+    // amortized doubling is the right behavior.
     for (int64_t i = 0; i < count; ++i) {
         int32_t row_id = row_id_start + i;
         int32_t array_len = array_lengths[i];
