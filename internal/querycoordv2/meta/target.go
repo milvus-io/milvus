@@ -38,7 +38,12 @@ type CollectionTarget struct {
 	partition2Segments map[int64][]*datapb.SegmentInfo
 	dmChannels         map[string]*DmChannel
 	partitions         typeutil.Set[int64] // stores target partitions info
-	version            int64
+
+	// Channels advance independently: each one carries its own target version. The
+	// collection-level version is kept as the oldest of them, so collection-scoped callers keep
+	// seeing a version that no channel has moved past yet.
+	channelVersions map[string]int64
+	version         int64
 
 	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
 	lackSegmentInfo bool
@@ -64,13 +69,19 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		partition2Segments[partitionID] = append(partition2Segments[partitionID], segment)
 		totalRowCount += segment.GetNumOfRows()
 	}
+	version := time.Now().UnixNano()
+	channelVersions := make(map[string]int64, len(dmChannels))
+	for channel := range dmChannels {
+		channelVersions[channel] = version
+	}
 	return &CollectionTarget{
 		segments:           segments,
 		channel2Segments:   channel2Segments,
 		partition2Segments: partition2Segments,
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitionIDs...),
-		version:            time.Now().UnixNano(),
+		channelVersions:    channelVersions,
+		version:            version,
 		totalRowCount:      totalRowCount,
 	}
 }
@@ -84,6 +95,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 
 	lackSegmentInfo := false
 	totalRowCount := int64(0)
+	channelVersions := make(map[string]int64, len(target.GetChannelTargets()))
 	for _, t := range target.GetChannelTargets() {
 		if _, ok := channel2Segments[t.GetChannelName()]; !ok {
 			channel2Segments[t.GetChannelName()] = make([]*datapb.SegmentInfo, 0)
@@ -122,6 +134,14 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 				DeleteCheckpoint:    t.GetDeleteCheckpoint(),
 			},
 		}
+
+		// Targets persisted before channel-level versions carry none: they were promoted as a
+		// whole, so the collection version is every channel's version.
+		channelVersion := t.GetVersion()
+		if channelVersion == 0 {
+			channelVersion = target.GetVersion()
+		}
+		channelVersions[t.GetChannelName()] = channelVersion
 	}
 
 	if lackSegmentInfo {
@@ -134,6 +154,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		partition2Segments: partition2Segments,
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitions...),
+		channelVersions:    channelVersions,
 		version:            target.GetVersion(),
 		lackSegmentInfo:    lackSegmentInfo,
 		totalRowCount:      totalRowCount,
@@ -184,6 +205,7 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 			DroppedSegmentIDs: channel.GetDroppedSegmentIds(),
 			PartitionTargets:  lo.Values(partitionTargets),
 			DeleteCheckpoint:  channel.GetDeleteCheckpoint(),
+			Version:           p.channelVersions[channel.GetChannelName()],
 		}
 	}
 
@@ -204,6 +226,74 @@ func (p *CollectionTarget) GetChannelSegments(channel string) []*datapb.SegmentI
 
 func (p *CollectionTarget) GetPartitionSegments(partitionID int64) []*datapb.SegmentInfo {
 	return p.partition2Segments[partitionID]
+}
+
+// GetChannelTargetVersion returns the target version of one channel. Channels advance
+// independently, so this -- not the collection version -- is what a delegator's readable view is
+// compared against.
+func (p *CollectionTarget) GetChannelTargetVersion(channel string) int64 {
+	return p.channelVersions[channel]
+}
+
+func (p *CollectionTarget) GetChannelVersions() map[string]int64 {
+	versions := make(map[string]int64, len(p.channelVersions))
+	for channel, version := range p.channelVersions {
+		versions[channel] = version
+	}
+	return versions
+}
+
+// WithChannelFrom returns a copy of this target with one channel replaced by that channel's content
+// (segments, dm channel and version) taken from src. This is how a single channel is promoted:
+// current is rebuilt with the promoted channel taken from next, leaving the other channels alone.
+func (p *CollectionTarget) WithChannelFrom(src *CollectionTarget, channel string) *CollectionTarget {
+	segments := make(map[int64]*datapb.SegmentInfo, len(p.segments))
+	for id, segment := range p.segments {
+		if segment.GetInsertChannel() != channel {
+			segments[id] = segment
+		}
+	}
+	for _, segment := range src.GetChannelSegments(channel) {
+		segments[segment.GetID()] = segment
+	}
+
+	dmChannels := make(map[string]*DmChannel, len(p.dmChannels))
+	for name, dmChannel := range p.dmChannels {
+		dmChannels[name] = dmChannel
+	}
+	if srcChannel, ok := src.dmChannels[channel]; ok {
+		dmChannels[channel] = srcChannel
+	} else {
+		delete(dmChannels, channel)
+	}
+
+	partitions := make([]int64, 0, p.partitions.Len())
+	partitions = append(partitions, p.partitions.Collect()...)
+	promoted := NewCollectionTarget(segments, dmChannels, partitions)
+
+	// keep the untouched channels on the versions they already had; the promoted one takes src's
+	for name, version := range p.channelVersions {
+		if _, ok := promoted.channelVersions[name]; ok {
+			promoted.channelVersions[name] = version
+		}
+	}
+	promoted.channelVersions[channel] = src.GetChannelTargetVersion(channel)
+	promoted.version = promoted.oldestChannelVersion()
+	return promoted
+}
+
+// oldestChannelVersion is what collection-scoped callers see: the version no channel has moved past.
+func (p *CollectionTarget) oldestChannelVersion() int64 {
+	oldest := int64(0)
+	for _, version := range p.channelVersions {
+		if oldest == 0 || version < oldest {
+			oldest = version
+		}
+	}
+	if oldest == 0 {
+		return p.version
+	}
+	return oldest
 }
 
 func (p *CollectionTarget) GetTargetVersion() int64 {
@@ -255,6 +345,16 @@ func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTa
 		return
 	}
 
+	t.collectionTargetMap.Insert(collectionID, target)
+}
+
+// replaceCollectionTarget stores a target unconditionally. Promoting a single channel leaves the
+// other channels on their versions, so the collection-level version (the oldest of them) does not
+// have to move -- the monotonicity that updateCollectionTarget enforces now holds per channel, not
+// per collection.
+func (t *target) replaceCollectionTarget(collectionID int64, target *CollectionTarget) {
+	t.keyLock.Lock(collectionID)
+	defer t.keyLock.Unlock(collectionID)
 	t.collectionTargetMap.Insert(collectionID, target)
 }
 

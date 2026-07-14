@@ -515,6 +515,80 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	suite.Equal(addedTasks[1].Priority(), task.TaskPriorityNormal)
 }
 
+// A channel that has been promoted on its own must keep releasing growing segments. Comparing the
+// delegator's readable version against the COLLECTION version (the oldest channel's) would make an
+// already-promoted channel look permanently behind, and it would never release anything again.
+func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegmentsOnIndependentlyPromotedChannel() {
+	ctx := context.Background()
+	checker := suite.checker
+	const chA, chB = "channel-a", "channel-b"
+
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+
+	segments := []*datapb.SegmentInfo{
+		{ID: 3, PartitionID: 1, InsertChannel: chA},
+	}
+	channels := []*datapb.VchannelInfo{
+		{CollectionID: 1, ChannelName: chA, SeekPosition: &msgpb.MsgPosition{Timestamp: 10}},
+		{CollectionID: 1, ChannelName: chB, SeekPosition: &msgpb.MsgPosition{Timestamp: 10}},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
+
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+	// only channel A is promoted; channel B stays behind, so the collection version stays at B's
+	suite.True(checker.targetMgr.UpdateChannelCurrentTarget(ctx, int64(1), chA))
+
+	versionA := checker.targetMgr.GetChannelTargetVersion(ctx, int64(1), chA, meta.CurrentTarget)
+	versionColl := checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget)
+	suite.Greater(versionA, versionColl, "channel A must be ahead of the collection view")
+
+	growingSegments := map[int64]*meta.Segment{
+		2: utils.CreateTestSegment(1, 1, 2, 2, 0, chA),
+	}
+	growingSegments[2].StartPosition = &msgpb.MsgPosition{Timestamp: 2}
+
+	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 2, chA))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID:        1,
+			ChannelName:         chA,
+			UnflushedSegmentIds: []int64{2},
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:              2,
+			CollectionID:    1,
+			Channel:         chA,
+			TargetVersion:   versionA,
+			Segments:        map[int64]*querypb.SegmentDist{3: {NodeID: 2}},
+			GrowingSegments: growingSegments,
+			Status:          &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
+	checker.Check(context.TODO())
+
+	reduced := lo.FilterMap(addedTasks, func(t task.Task, _ int) (int64, bool) {
+		action, ok := t.Actions()[0].(*task.SegmentAction)
+		if !ok || action.Type() != task.ActionTypeReduce {
+			return 0, false
+		}
+		return action.GetSegmentID(), true
+	})
+	suite.ElementsMatch([]int64{2}, reduced, "the growing segment on the promoted channel must be released")
+}
+
 func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 	ctx := context.Background()
 	checker := suite.checker

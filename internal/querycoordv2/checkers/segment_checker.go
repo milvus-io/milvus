@@ -265,7 +265,11 @@ func (c *SegmentChecker) getGrowingSegmentDiff(ctx context.Context, collectionID
 
 	for _, d := range delegatorList {
 		view := d.View
-		targetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+		// Channels are promoted one by one, so the delegator's readable version must be compared
+		// against the current version of ITS channel. Comparing against the collection version
+		// (the oldest of all channels) would keep every already-promoted channel from ever
+		// releasing a growing segment.
+		targetVersion := c.targetMgr.GetChannelTargetVersion(ctx, collectionID, view.Channel, meta.CurrentTarget)
 		if view.TargetVersion != targetVersion {
 			// before shard delegator update it's readable version, skip release segment
 			log.RatedInfo(ctx, rate.Limit(20), "before shard delegator update it's readable version, skip release segment",
@@ -455,21 +459,23 @@ func (c *SegmentChecker) filterOutExistedOnLeader(replica *meta.Replica, segment
 func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment, ch2DelegatorList map[string][]*meta.DmChannel) []*meta.Segment {
 	notUsed := make([]*meta.Segment, 0, len(segments))
 	for _, s := range segments {
-		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
 		partition := c.meta.GetPartition(ctx, s.PartitionID)
+		if partition == nil {
+			notUsed = append(notUsed, s)
+			continue
+		}
 
-		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
+		channel := s.GetInsertChannel()
+		delegatorList := ch2DelegatorList[channel]
 		if len(delegatorList) == 0 {
+			// no delegator to serve this shard: nothing to protect the segment from, but nothing
+			// proves it is unused either -- keep the existing behavior and skip it.
 			continue
 		}
 
 		stillInUseByDelegator := false
-		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
 		for _, delegator := range delegatorList {
-			// Notice: if syncTargetVersion stuck, segment on delegator won't be released
-			readableVersionNotUpdate := delegator.View.TargetVersion != initialTargetVersion && delegator.View.TargetVersion < currentTargetVersion
-			if partition != nil && readableVersionNotUpdate {
-				// leader view version hasn't been updated, segment maybe still in use
+			if c.servesSegment(ctx, delegator.View, s) {
 				stillInUseByDelegator = true
 				break
 			}
@@ -480,6 +486,46 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 		}
 	}
 	return notUsed
+}
+
+// servesSegment reports whether a delegator's readable view still contains a redundant segment
+// (one that is in neither the current nor the next target of its channel).
+//
+// A delegator serves the segment set of the target version it was last synced to. That version is
+// the channel's current or next target, or an older version QueryCoord retains precisely because a
+// delegator is still reading it. In all three cases coord holds the segment set and can answer
+// exactly; releasing a segment the delegator still serves drops loadedRatio below 1.0 and makes the
+// shard unserviceable, so a version coord cannot resolve (it was dropped before a restart) means the
+// segment is kept.
+func (c *SegmentChecker) servesSegment(ctx context.Context, view *meta.LeaderView, segment *meta.Segment) bool {
+	channel := segment.GetInsertChannel()
+	version := view.TargetVersion
+
+	// not synced by coord yet: the delegator serves nothing, so it cannot be serving this segment
+	if version == initialTargetVersion {
+		return false
+	}
+
+	// current / next: the readable set is that target's segment set, and a redundant segment is by
+	// definition absent from both
+	if version == c.targetMgr.GetChannelTargetVersion(ctx, segment.CollectionID, channel, meta.CurrentTarget) ||
+		version == c.targetMgr.GetChannelTargetVersion(ctx, segment.CollectionID, channel, meta.NextTarget) {
+		return false
+	}
+
+	// an older version the delegator is still reading: coord kept its segment set, so ask it
+	inVersion, known := c.targetMgr.IsSegmentInLiveVersion(segment.CollectionID, channel, version, segment.GetID())
+	if !known {
+		// coord does not hold this version (e.g. it restarted): it cannot prove the segment is
+		// unused, so it must not release it
+		mlog.RatedWarn(ctx, 60, "delegator reads a target version coord no longer holds, keeping segment",
+			mlog.FieldCollectionID(segment.CollectionID),
+			mlog.FieldSegmentID(segment.GetID()),
+			mlog.String("channel", channel),
+			mlog.Int64("leaderView", version))
+		return true
+	}
+	return inVersion
 }
 
 func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, replica *meta.Replica) []task.Task {

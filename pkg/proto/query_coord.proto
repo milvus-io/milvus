@@ -934,6 +934,9 @@ message ChannelTarget {
   repeated PartitionTarget partition_targets = 4;
   msg.MsgPosition seek_position = 5;
   msg.MsgPosition delete_checkpoint = 6;
+  // Target version of this channel. Channels advance independently, so the version is per channel.
+  // Absent (0) in targets persisted before channel-level targets: fall back to CollectionTarget.version.
+  int64 version = 7;
 }
 
 message CollectionTarget {

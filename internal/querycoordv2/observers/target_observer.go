@@ -86,12 +86,9 @@ type TargetObserver struct {
 	initChan chan initRequest
 	// nextTargetLastUpdate map[int64]time.Time
 	nextTargetLastUpdate *typeutil.ConcurrentMap[int64, time.Time]
-	// nextTargetSyncStarted records the NextTarget version after the observer
-	// enters SyncTargetVersion commit phase for a collection.
-	nextTargetSyncStarted *typeutil.ConcurrentMap[int64, int64]
-	updateChan            chan targetUpdateRequest
-	mut                   sync.Mutex                // Guard readyNotifiers
-	readyNotifiers        map[int64][]chan struct{} // CollectionID -> Notifiers
+	updateChan           chan targetUpdateRequest
+	mut                  sync.Mutex                // Guard readyNotifiers
+	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
 
 	// loadingDispatcher updates targets for collections that are loading (also collections without a current target).
 	loadingDispatcher *taskDispatcher[int64]
@@ -113,18 +110,17 @@ func NewTargetObserver(
 	nodeMgr *session.NodeManager,
 ) *TargetObserver {
 	result := &TargetObserver{
-		meta:                  meta,
-		targetMgr:             targetMgr,
-		distMgr:               distMgr,
-		broker:                broker,
-		cluster:               cluster,
-		nodeMgr:               nodeMgr,
-		nextTargetLastUpdate:  typeutil.NewConcurrentMap[int64, time.Time](),
-		nextTargetSyncStarted: typeutil.NewConcurrentMap[int64, int64](),
-		updateChan:            make(chan targetUpdateRequest, 10),
-		readyNotifiers:        make(map[int64][]chan struct{}),
-		initChan:              make(chan initRequest),
-		keylocks:              lock.NewKeyLock[int64](),
+		meta:                 meta,
+		targetMgr:            targetMgr,
+		distMgr:              distMgr,
+		broker:               broker,
+		cluster:              cluster,
+		nodeMgr:              nodeMgr,
+		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
+		updateChan:           make(chan targetUpdateRequest, 10),
+		readyNotifiers:       make(map[int64][]chan struct{}),
+		initChan:             make(chan initRequest),
+		keylocks:             lock.NewKeyLock[int64](),
 	}
 
 	result.loadingDispatcher = newTaskDispatcher(result.check)
@@ -311,8 +307,8 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 		return
 	}
 
-	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
-		ob.updateCurrentTarget(ctx, collectionID)
+	if ob.syncAndPromoteChannels(ctx, collectionID) {
+		ob.notifyCurrentTargetReady(collectionID)
 	}
 
 	if ob.shouldUpdateNextTarget(ctx, collectionID) {
@@ -321,8 +317,7 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 
 		// sync next target to delegator if current target not exist, to support partial search
 		if !ob.targetMgr.IsCurrentTargetExist(ctx, collectionID, -1) {
-			newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
-			ob.syncNextTargetToDelegator(ctx, collectionID, ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)), newVersion)
+			ob.syncNextTargetToDelegator(ctx, collectionID, ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)))
 		}
 	}
 
@@ -336,9 +331,9 @@ func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
 		ob.updateNextTarget(ctx, collectionID)
 	}
 
-	// try to update current target if all segment/channel are ready
-	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
-		ob.updateCurrentTarget(ctx, collectionID)
+	// promote whatever channels are already ready
+	if ob.syncAndPromoteChannels(ctx, collectionID) {
+		ob.notifyCurrentTargetReady(collectionID)
 	}
 	// refresh collection loading status upon restart
 	ob.check(ctx, collectionID)
@@ -404,7 +399,6 @@ func (ob *TargetObserver) clean() {
 	ob.nextTargetLastUpdate.Range(func(collectionID int64, _ time.Time) bool {
 		if !collectionSet.Contain(collectionID) {
 			ob.nextTargetLastUpdate.Remove(collectionID)
-			ob.nextTargetSyncStarted.Remove(collectionID)
 		}
 		return true
 	})
@@ -422,14 +416,10 @@ func (ob *TargetObserver) clean() {
 }
 
 func (ob *TargetObserver) shouldUpdateNextTarget(ctx context.Context, collectionID int64) bool {
-	if !ob.targetMgr.IsNextTargetExist(ctx, collectionID) {
-		return true
-	}
-	if !ob.isNextTargetExpired(collectionID) {
-		return false
-	}
-
-	return !ob.isNextTargetSyncStarted(ctx, collectionID)
+	// Replacing the next target no longer strands anybody: the version a delegator is synced to is
+	// retained by the TargetManager for as long as that delegator reads it, so there is nothing to
+	// pin. Refresh it whenever it is missing or has expired.
+	return !ob.targetMgr.IsNextTargetExist(ctx, collectionID) || ob.isNextTargetExpired(collectionID)
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
@@ -451,7 +441,6 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
-	ob.nextTargetSyncStarted.Remove(collectionID)
 	return nil
 }
 
@@ -459,152 +448,136 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 	ob.nextTargetLastUpdate.Insert(collectionID, time.Now())
 }
 
-func (ob *TargetObserver) isNextTargetSyncStarted(ctx context.Context, collectionID int64) bool {
-	startedVersion, hasStartedVersion := ob.nextTargetSyncStarted.Get(collectionID)
-	delegators := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID))
-	if !hasStartedVersion && len(delegators) == 0 {
-		return false
-	}
+// syncAndPromoteChannels advances every channel of a collection independently: a channel whose
+// delegators are all ready for its next target is synced to that version and promoted, no matter
+// what the other channels are doing. A channel that cannot become ready (a segment that will not
+// load, a node under pressure) therefore no longer freezes the rest of the collection.
+//
+// Promoting a channel does not discard the version it replaces: the TargetManager keeps that
+// version's segment set alive for as long as a delegator is still reading it, so the release path
+// can always tell whether a redundant segment is still being served.
+//
+// Returns true when every channel of the collection is now on the next target.
+func (ob *TargetObserver) syncAndPromoteChannels(ctx context.Context, collectionID int64) bool {
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
-	nextVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
-	if nextVersion <= 0 {
-		return false
-	}
-	if hasStartedVersion && startedVersion == nextVersion {
-		return true
-	}
-
-	return lo.ContainsBy(delegators, func(delegator *meta.DmChannel) bool {
-		return delegator != nil &&
-			delegator.View != nil &&
-			delegator.View.TargetVersion == nextVersion
-	})
-}
-
-func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
-	replicaNum := ob.meta.GetReplicaNumber(ctx, collectionID)
-	log := mlog.With(
-		mlog.FieldCollectionID(collectionID),
-		mlog.Int32("replicaNum", replicaNum),
-	)
-
-	// check channel first
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
-		// next target is empty, no need to update
 		log.RatedInfo(ctx, rate.Limit(10), "next target is empty, no need to update")
 		return false
 	}
-
-	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
-
-	// checkDelegatorDataReady checks if a delegator is ready for the next target.
-	// A delegator is considered ready if:
-	// 1. Its target version matches the new version and it is serviceable, OR
-	// 2. Its data is ready for the next target (all segments and channels are loaded)
-	checkDelegatorDataReady := func(replica *meta.Replica, channel *meta.DmChannel) bool {
-		err := utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, channel.View, meta.NextTarget)
-		dataReadyForNextTarget := err == nil
-		if !dataReadyForNextTarget {
-			log.Info(ctx, "check delegator",
-				mlog.FieldCollectionID(collectionID),
-				mlog.Int64("replicaID", replica.GetID()),
-				mlog.FieldNodeID(channel.Node),
-				mlog.String("channelName", channel.GetChannelName()),
-				mlog.Int64("targetVersion", channel.View.TargetVersion),
-				mlog.Int64("newTargetVersion", newVersion),
-				mlog.Bool("isServiceable", channel.IsServiceable()),
-				mlog.Int64("version", channel.Version),
-				mlog.Err(err),
-			)
-		}
-		return (newVersion == channel.View.TargetVersion && channel.IsServiceable()) || dataReadyForNextTarget
-	}
-
 	replicas := ob.meta.GetByCollection(ctx, collectionID)
 	if len(replicas) == 0 {
 		return false
 	}
 
-	// Prepare phase: verify all required replica/channel delegators are ready
-	// before SyncTargetVersion changes any readable view. This prevents a
-	// partially-synced NextTarget from being discarded later as an orphan.
-	readyDelegatorsToSync := make([]*meta.DmChannel, 0)
-	for _, replica := range replicas {
-		for channel := range channelNames {
-			// Filter delegators by replica to ensure we only check delegators belonging to this replica
-			delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channel))
-			if len(delegatorList) == 0 {
-				return false
-			}
-			for _, delegator := range delegatorList {
-				if delegator == nil || delegator.View == nil {
-					return false
-				}
-				if delegator.View.TargetVersion == newVersion && delegator.IsServiceable() {
-					continue
-				}
-				if checkDelegatorDataReady(replica, delegator) {
-					readyDelegatorsToSync = append(readyDelegatorsToSync, delegator)
-					continue
-				}
-				return false
-			}
-		}
-	}
-
-	// Collection-level segment readiness is the final prepare barrier. Do not
-	// sync readable views until the target can be promoted if sync succeeds.
 	if paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() &&
 		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) != nil {
 		return false
 	}
 
-	syncSuccess, syncStarted := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsToSync, newVersion)
-	if syncStarted {
-		ob.nextTargetSyncStarted.Insert(collectionID, newVersion)
+	allPromoted := true
+	for channel := range channelNames {
+		if !ob.syncAndPromoteChannel(ctx, collectionID, channel, replicas) {
+			allPromoted = false
+		}
 	}
-	return syncSuccess
+	return allPromoted
+}
+
+// syncAndPromoteChannel handles one channel: every delegator serving it (one per replica) must be
+// ready for the channel's next target; then they are synced to it and the channel is promoted.
+func (ob *TargetObserver) syncAndPromoteChannel(ctx context.Context, collectionID int64, channel string, replicas []*meta.Replica) bool {
+	log := mlog.With(mlog.FieldCollectionID(collectionID), mlog.String("channel", channel))
+
+	newVersion := ob.targetMgr.GetChannelTargetVersion(ctx, collectionID, channel, meta.NextTarget)
+	if newVersion <= 0 {
+		return false
+	}
+
+	toSync := make([]*meta.DmChannel, 0, len(replicas))
+	for _, replica := range replicas {
+		delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channel))
+		if len(delegatorList) == 0 {
+			return false
+		}
+		for _, delegator := range delegatorList {
+			if delegator == nil || delegator.View == nil {
+				return false
+			}
+			if delegator.View.TargetVersion == newVersion && delegator.IsServiceable() {
+				continue // already serving the next target
+			}
+			err := utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, delegator.View, meta.NextTarget)
+			if err != nil {
+				log.Info(ctx, "check delegator",
+					mlog.Int64("replicaID", replica.GetID()),
+					mlog.FieldNodeID(delegator.Node),
+					mlog.Int64("targetVersion", delegator.View.TargetVersion),
+					mlog.Int64("newTargetVersion", newVersion),
+					mlog.Bool("isServiceable", delegator.IsServiceable()),
+					mlog.Err(err))
+				return false
+			}
+			toSync = append(toSync, delegator)
+		}
+	}
+
+	if len(toSync) > 0 && !ob.syncNextTargetToDelegator(ctx, collectionID, toSync) {
+		return false
+	}
+
+	promoted := ob.targetMgr.UpdateChannelCurrentTarget(ctx, collectionID, channel)
+	if promoted {
+		log.Info(ctx, "channel promoted to its next target",
+			mlog.Int64("version", newVersion), mlog.Int("syncedDelegators", len(toSync)))
+	}
+	return promoted
 }
 
 // sync next target info to delegator as readable snapshot
 // 1. if next target is changed before delegator becomes serviceable, we need to sync the new next target to delegator to support partial search
 // 2. if next target is ready to read, we need to sync the next target to delegator to support full search
-func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel, newVersion int64) (bool, bool) {
+func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel) bool {
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
 	var err error
-	syncStarted := false
 	for _, d := range collReadyDelegatorList {
+		// the version a delegator is synced to is its own channel's next version
+		newVersion := ob.targetMgr.GetChannelTargetVersion(ctx, collectionID, d.View.Channel, meta.NextTarget)
+		if newVersion <= 0 {
+			mlog.Warn(ctx, "no next target version for channel, skip sync",
+				mlog.FieldCollectionID(collectionID), mlog.String("channel", d.View.Channel))
+			return false
+		}
 		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
 		replica := ob.meta.GetByCollectionAndNode(ctx, collectionID, d.Node)
 		if replica == nil {
 			mlog.Warn(ctx, "replica not found", mlog.FieldNodeID(d.Node), mlog.FieldCollectionID(collectionID))
 			// should not happen, don't update current target if replica not found
-			return false, syncStarted
+			return false
 		}
 		// init all the meta information
 		if partitions == nil {
 			partitions, err = utils.GetPartitions(ctx, ob.targetMgr, collectionID)
 			if err != nil {
 				mlog.Warn(ctx, "failed to get partitions", mlog.Err(err))
-				return false, syncStarted
+				return false
 			}
 
 			// Get collection index info
 			indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
 			if err != nil {
 				mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
-				return false, syncStarted
+				return false
 			}
 		}
 
 		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, partitions, indexInfo) {
-			return false, syncStarted
+			return false
 		}
-		syncStarted = true
 	}
-	return true, syncStarted
+	return true
 }
 
 func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
@@ -695,16 +668,17 @@ func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context,
 	if len(channels) == 0 {
 		return
 	}
-	currentVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
-	if currentVersion == 0 {
-		return
-	}
 	replicas := ob.meta.GetByCollection(ctx, collectionID)
 	if len(replicas) == 0 {
 		return
 	}
 
 	for channelName, dmlChannel := range channels {
+		// each channel has its own current version
+		currentVersion := ob.targetMgr.GetChannelTargetVersion(ctx, collectionID, channelName, meta.CurrentTarget)
+		if currentVersion == 0 {
+			continue
+		}
 		allReady := true
 		for _, replica := range replicas {
 			delegators := ob.distMgr.ChannelDistManager.GetByFilter(
@@ -731,19 +705,17 @@ func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context,
 	}
 }
 
-func (ob *TargetObserver) updateCurrentTarget(ctx context.Context, collectionID int64) {
-	mlog.RatedInfo(ctx, rate.Limit(10), "observer trigger update current target", mlog.FieldCollectionID(collectionID))
-	if ob.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID) {
-		ob.nextTargetSyncStarted.Remove(collectionID)
-		ob.mut.Lock()
-		defer ob.mut.Unlock()
-		notifiers := ob.readyNotifiers[collectionID]
-		for _, notifier := range notifiers {
-			close(notifier)
-		}
-		// Reuse the capacity of notifiers slice
-		if notifiers != nil {
-			ob.readyNotifiers[collectionID] = notifiers[:0]
-		}
+// notifyCurrentTargetReady wakes up the waiters of a collection whose channels have all reached the
+// next target. Channels are promoted individually by syncAndPromoteChannel.
+func (ob *TargetObserver) notifyCurrentTargetReady(collectionID int64) {
+	ob.mut.Lock()
+	defer ob.mut.Unlock()
+	notifiers := ob.readyNotifiers[collectionID]
+	for _, notifier := range notifiers {
+		close(notifier)
+	}
+	// Reuse the capacity of notifiers slice
+	if notifiers != nil {
+		ob.readyNotifiers[collectionID] = notifiers[:0]
 	}
 }
