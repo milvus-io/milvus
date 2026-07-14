@@ -347,7 +347,8 @@ create_chunk_buffer(const FieldMeta& field_meta,
                     bool mmap_populate = true,
                     const std::string& file_path = "",
                     proto::common::LoadPriority load_priority =
-                        proto::common::LoadPriority::HIGH);
+                        proto::common::LoadPriority::HIGH,
+                    MmapChunkWritebackConfig writeback_config = {});
 
 // Create a Chunk view from an existing ChunkBuffer. Multiple Chunk instances
 // created from the same buffer will share the same underlying memory via
@@ -363,7 +364,8 @@ create_chunk(const FieldMeta& field_meta,
              bool mmap_populate = true,
              const std::string& file_path = "",
              proto::common::LoadPriority load_priority =
-                 proto::common::LoadPriority::HIGH);
+                 proto::common::LoadPriority::HIGH,
+             MmapChunkWritebackConfig writeback_config = {});
 
 std::unordered_map<FieldId, std::shared_ptr<Chunk>>
 create_group_chunk(const std::vector<FieldId>& field_ids,
@@ -372,7 +374,8 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                    bool mmap_populate = true,
                    const std::string& file_path = "",
                    proto::common::LoadPriority load_priority =
-                       proto::common::LoadPriority::HIGH);
+                       proto::common::LoadPriority::HIGH,
+                   MmapChunkWritebackConfig writeback_config = {});
 
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader);
