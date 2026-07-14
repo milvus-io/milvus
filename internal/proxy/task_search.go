@@ -732,6 +732,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 		sp.AddEvent("Call-function-udf")
+		for _, subReq := range t.SubReqs {
+			if err := t.validateFunctionOutputDimensions(subReq.GetPlaceholderGroup(), subReq.GetFieldId()); err != nil {
+				return err
+			}
+		}
 	}
 
 	t.GroupByFieldId = t.rankParams.GetGroupByFieldId()
@@ -939,6 +944,12 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 	t.FieldId = queryInfo.GetQueryFieldId()
+	// Convert and validate query vectors before doing the remaining request setup.
+	var placeholderType commonpb.PlaceholderType
+	t.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.FieldId)
+	if err != nil {
+		return err
+	}
 
 	if err := t.addHighlightTask(t.request.GetHighlighter(), queryInfo.GetMetricType(), queryInfo.GetQueryFieldId(), t.request.GetPlaceholderGroup(), t.GetAnalyzerName()); err != nil {
 		return err
@@ -1048,12 +1059,6 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.FieldId) {
 		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
-	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
-	var placeholderType commonpb.PlaceholderType
-	t.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.FieldId)
-	if err != nil {
-		return err
-	}
 	if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, t.FieldId, placeholderType); err != nil {
 		return err
 	}
@@ -1119,6 +1124,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			return err
 		}
 		sp.AddEvent("Call-function-udf")
+		if err := t.validateFunctionOutputDimensions(t.PlaceholderGroup, t.FieldId); err != nil {
+			return err
+		}
 	}
 
 	log.Debug(ctx, "proxy init search request",
@@ -1137,11 +1145,32 @@ func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
 // Returns converted bytes and the original placeholder type (before any conversion).
 func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) ([]byte, commonpb.PlaceholderType, error) {
-	field := typeutil.GetFieldByID(t.schema.CollectionSchema, fieldID)
-	if field == nil {
-		return phgBytes, 0, nil
+	field, err := t.getSearchFieldSchema(fieldID)
+	if err != nil {
+		return nil, commonpb.PlaceholderType_None, err
 	}
 	return ConvertPlaceholderGroup(phgBytes, field)
+}
+
+func (t *searchTask) validateFunctionOutputDimensions(phgBytes []byte, fieldID int64) error {
+	field, err := t.getSearchFieldSchema(fieldID)
+	if err != nil {
+		return err
+	}
+	return validatePlaceholderGroupDimensions(phgBytes, field, merr.WrapErrFunctionFailedMsg)
+}
+
+func (t *searchTask) getSearchFieldSchema(fieldID int64) (*schemapb.FieldSchema, error) {
+	if t.schema == nil || t.schema.CollectionSchema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("collection schema is unavailable for search field %d", fieldID)
+	}
+
+	field := typeutil.GetFieldByID(t.schema.CollectionSchema, fieldID)
+	if field == nil {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"search field %d not found in collection schema %q", fieldID, t.schema.GetName())
+	}
+	return field, nil
 }
 
 func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
@@ -1314,16 +1343,8 @@ func getLastBound(result *milvuspb.SearchResults, incomingLastBound *float32, me
 }
 
 func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
-	switch pt {
-	case commonpb.PlaceholderType_EmbListFloatVector,
-		commonpb.PlaceholderType_EmbListFloat16Vector,
-		commonpb.PlaceholderType_EmbListBFloat16Vector,
-		commonpb.PlaceholderType_EmbListBinaryVector,
-		commonpb.PlaceholderType_EmbListInt8Vector:
-		return true
-	default:
-		return false
-	}
+	_, ok := embeddingListPlaceholderTypeToDataType[pt]
+	return ok
 }
 
 func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {
