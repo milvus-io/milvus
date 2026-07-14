@@ -1,11 +1,15 @@
 # ruff: noqa: F403, F405
+import random
+
 import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import Function, FunctionType
+from pymilvus import DataType, Function, FunctionType
+from pymilvus.client.embedding_list import EmbeddingList
+from sklearn import preprocessing
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *
 
@@ -209,6 +213,160 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             assert len(result) == default_nb
 
         self.drop_collection(client, collection_name)
+
+    @staticmethod
+    def _make_struct_array_partial_update_vector(seed, dim):
+        return [float((seed + offset) % 97) / 97.0 for offset in range(dim)]
+
+    @classmethod
+    def _make_struct_array_partial_update_events(cls, row_id, state, dim):
+        offset = 100000 if state == "updated" else 0
+        return [
+            {
+                "embedding": cls._make_struct_array_partial_update_vector(row_id * 17 + elem_idx + offset, dim),
+                "score": row_id * 10 + elem_idx + offset,
+                "tag": f"{state}_{row_id}_{elem_idx}",
+            }
+            for elem_idx in range(2)
+        ]
+
+    @classmethod
+    def _make_struct_array_partial_update_rows(cls, start, count, dim):
+        return [
+            {
+                "id": row_id,
+                "vector": cls._make_struct_array_partial_update_vector(row_id, dim),
+                "payload": f"payload_{row_id}",
+                "events": cls._make_struct_array_partial_update_events(row_id, "initial", dim),
+            }
+            for row_id in range(start, start + count)
+        ]
+
+    @staticmethod
+    def _assert_struct_array_partial_update_events_equal(actual, expected):
+        assert len(actual) == len(expected)
+        for actual_event, expected_event in zip(actual, expected):
+            assert actual_event["score"] == expected_event["score"]
+            assert actual_event["tag"] == expected_event["tag"]
+            assert np.allclose(actual_event["embedding"], expected_event["embedding"])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("embedding_index_type", ["HNSW", "DISKANN"])
+    def test_milvus_client_partial_update_struct_array_sealed_growing(self, embedding_index_type):
+        """
+        target: test partial update with a StructArray field
+        method:
+            1. create collection with a StructArray field that has scalar and vector sub-fields
+            2. create HNSW or DISKANN index for the StructArray embedding-list field
+            3. insert more than 3000 rows, flush the first part and keep the second part growing
+            4. partial update only the StructArray field for all rows
+            5. query and search sealed and growing sample rows
+        expected: StructArray values are updated, searchable, and omitted fields are preserved
+        """
+        client = self._client()
+        dim = default_dim
+        sealed_nb = default_nb
+        total_nb = default_nb_medium
+        growing_nb = total_nb - sealed_nb
+        collection_name = cf.gen_unique_str(f"{prefix}_pu_struct_{embedding_index_type.lower()}")
+        embedding_metric_type = "MAX_SIM_COSINE"
+        embedding_index_configs = {
+            "HNSW": {
+                "build_params": {"M": 16, "efConstruction": 96},
+                "search_params": {"ef": 64, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
+            },
+            "DISKANN": {
+                "build_params": {},
+                "search_params": {"search_list": 30, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
+            },
+        }
+        embedding_index_config = embedding_index_configs[embedding_index_type]
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("payload", DataType.VARCHAR, max_length=128)
+
+        struct_schema = self.create_struct_field_schema(client)[0]
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("score", DataType.INT64)
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=128)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+        )
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="L2")
+        index_params.add_index(
+            field_name="events[embedding]",
+            index_type=embedding_index_type,
+            metric_type=embedding_metric_type,
+            params=embedding_index_config["build_params"],
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            consistency_level="Strong",
+            index_params=index_params,
+        )
+
+        self.insert(client, collection_name, self._make_struct_array_partial_update_rows(0, sealed_nb, dim))
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        self.insert(client, collection_name, self._make_struct_array_partial_update_rows(sealed_nb, growing_nb, dim))
+
+        partial_rows = [
+            {
+                "id": row_id,
+                "events": self._make_struct_array_partial_update_events(row_id, "updated", dim),
+            }
+            for row_id in range(total_nb)
+        ]
+        self.upsert(client, collection_name, partial_rows, partial_update=True)
+
+        sample_ids = [0, sealed_nb - 1, sealed_nb, total_nb - 1]
+        results = self.query(
+            client,
+            collection_name,
+            filter=f"id in {sample_ids}",
+            output_fields=["id", "payload", "events"],
+            limit=len(sample_ids),
+        )[0]
+        result_by_id = {row["id"]: row for row in results}
+        assert sorted(result_by_id) == sample_ids
+        for row_id in sample_ids:
+            assert result_by_id[row_id]["payload"] == f"payload_{row_id}"
+            self._assert_struct_array_partial_update_events_equal(
+                result_by_id[row_id]["events"],
+                self._make_struct_array_partial_update_events(row_id, "updated", dim),
+            )
+
+        for row_id in [sample_ids[0], sample_ids[-1]]:
+            expected_events = self._make_struct_array_partial_update_events(row_id, "updated", dim)
+            search_results = self.search(
+                client,
+                collection_name,
+                data=[EmbeddingList([event["embedding"] for event in expected_events])],
+                anns_field="events[embedding]",
+                search_params={
+                    "metric_type": embedding_metric_type,
+                    "params": embedding_index_config["search_params"],
+                },
+                filter=f"id == {row_id}",
+                output_fields=["id", "payload", "events"],
+                limit=1,
+            )[0]
+            assert len(search_results) == 1
+            assert len(search_results[0]) == 1
+            assert search_results[0][0]["id"] == row_id
+            assert search_results[0][0]["payload"] == f"payload_{row_id}"
+            self._assert_struct_array_partial_update_events_equal(search_results[0][0]["events"], expected_events)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partial_update_all_field_types_one_by_one(self):
