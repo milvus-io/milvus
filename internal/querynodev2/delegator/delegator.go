@@ -149,10 +149,12 @@ type shardDelegator struct {
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 
-	sf          conc.Singleflight[struct{}]
-	loader      segments.Loader
-	tsCond      *syncutil.ContextCond
-	latestTsafe *atomic.Uint64
+	sf     conc.Singleflight[struct{}]
+	loader segments.Loader
+	// tsafeNotifier tracks the delegator's latest tSafe and wakes only the
+	// waiters whose guarantee timestamp has been reached, avoiding the
+	// thundering-herd broadcast of a plain condition variable.
+	tsafeNotifier *syncutil.TargetNotifier
 	// queryHook
 	queryHook      optimizers.QueryHook
 	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot
@@ -1067,7 +1069,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	log := sd.getLogger(ctx)
 
 	// Fast path: tSafe already meets the guarantee timestamp.
-	latestTSafe := sd.latestTsafe.Load()
+	latestTSafe := sd.tsafeNotifier.Load()
 	if latestTSafe >= ts {
 		return latestTSafe, nil
 	}
@@ -1101,32 +1103,29 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	// (e.g. forward delete retrying against a dead QueryNode).
 	stallTimeout := paramtable.Get().QueryNodeCfg.WaitTsafeStallTimeout.GetAsDurationByParse()
 
-	// Standard condition variable pattern: Lock → for !condition { Wait } → Unlock
-	sd.tsCond.L.Lock()
-	for sd.latestTsafe.Load() < ts && sd.Serviceable() {
-		stallCtx, stallCancel := context.WithTimeout(ctx, stallTimeout)
-		err := sd.tsCond.Wait(stallCtx)
-		stallCancel()
+	// Wait until tSafe reaches ts. UpdateTSafe only wakes waiters whose target
+	// is satisfied, so a sub-target advance does not wake us; WaitFor reports
+	// whether tSafe advanced at all during the wait, which is what drives stall
+	// detection (an advance that does not reach ts is progress, not a stall).
+	for sd.tsafeNotifier.Load() < ts && sd.Serviceable() {
+		progressed, err := sd.tsafeNotifier.WaitFor(ctx, ts, stallTimeout)
 		if err != nil {
-			// Wait returned without holding the lock.
-			if ctx.Err() != nil {
-				return 0, ctx.Err()
-			}
-			// No broadcast within stallTimeout — tSafe is stalled.
+			// Only ctx cancellation/expiry surfaces here.
+			return 0, err
+		}
+		if !progressed && sd.tsafeNotifier.Load() < ts && sd.Serviceable() {
+			// tSafe did not advance at all within stallTimeout — it is stalled.
 			log.Warn(ctx, "tsafe stall detected, fast-fail to allow proxy failover",
-				mlog.Uint64("currentTsafe", sd.latestTsafe.Load()),
+				mlog.Uint64("currentTsafe", sd.tsafeNotifier.Load()),
 				mlog.Uint64("targetTs", ts),
 				mlog.Duration("stallTimeout", stallTimeout),
 			)
 			return 0, WrapErrTsLagTooLarge(sd.vchannelName, gt.Sub(st), stallTimeout)
 		}
-		// Woken by broadcast with lock re-acquired, loop back to re-check condition.
+		// Woken by a satisfying advance or by Close's WakeAll — re-check the loop.
 	}
-	current := sd.latestTsafe.Load()
-	serviceable := sd.Serviceable()
-	sd.tsCond.L.Unlock()
-
-	if !serviceable {
+	current := sd.tsafeNotifier.Load()
+	if !sd.Serviceable() {
 		return 0, merr.WrapErrChannelNotAvailable(sd.vchannelName, "delegator closed during wait tsafe")
 	}
 	return current, nil
@@ -1165,17 +1164,16 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 		mlog.Int64("collectionID", sd.collectionID),
 		mlog.String("vchannel", sd.vchannelName),
 		mlog.Time("tsafe", tsoutil.PhysicalTime(tsafe)),
-		mlog.Time("latestTSafe", tsoutil.PhysicalTime(sd.latestTsafe.Load())))
-	if tsafe <= sd.latestTsafe.Load() {
+		mlog.Time("latestTSafe", tsoutil.PhysicalTime(sd.tsafeNotifier.Load())))
+
+	// Advance atomically stores the new tSafe and wakes only the waiters whose
+	// target has been reached; it is a monotonic no-op when tsafe does not move
+	// the value forward, so stale updates return early. Doing the compare and
+	// the wakeup under the notifier's lock prevents lost wakeups (a waiter can
+	// no longer observe the old value and then park after the wake fired).
+	if !sd.tsafeNotifier.Advance(tsafe) {
 		return
 	}
-
-	// Store and broadcast under lock to prevent lost wakeups:
-	// without the lock, a waiter could observe the old tSafe, then enter
-	// Wait() after the broadcast has already fired, missing the notification.
-	sd.tsCond.LockAndBroadcast()
-	sd.latestTsafe.Store(tsafe)
-	sd.tsCond.L.Unlock()
 
 	// Check if caught up with streaming data (all fields are atomic, no lock needed)
 	if sd.catchingUpStreamingData.Load() {
@@ -1197,7 +1195,7 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 }
 
 func (sd *shardDelegator) GetTSafe() uint64 {
-	return sd.latestTsafe.Load()
+	return sd.tsafeNotifier.Load()
 }
 
 // CatchingUpStreamingData returns true if delegator is still catching up with streaming data.
@@ -1342,9 +1340,8 @@ func (w *StatusWrapper) GetStatus() *commonpb.Status {
 func (sd *shardDelegator) Close() {
 	sd.lifetime.SetState(lifetime.Stopped)
 	sd.lifetime.Close()
-	// broadcast to all waitTsafe to quit
-	sd.tsCond.LockAndBroadcast()
-	sd.tsCond.L.Unlock()
+	// wake all waitTSafe waiters so they observe !Serviceable and quit
+	sd.tsafeNotifier.WakeAll()
 	sd.lifetime.Wait()
 
 	if sd.growingSourceProvider != nil {
@@ -1503,7 +1500,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		distribution:      NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{paramtable.GetStringNodeID(), channel}),
-		latestTsafe:                atomic.NewUint64(startTs),
+		tsafeNotifier:              syncutil.NewTargetNotifier(startTs),
 		loader:                     loader,
 		queryHook:                  queryHook,
 		chunkManager:               chunkManager,
@@ -1546,7 +1543,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		log.Info(ctx, "registered growing-source source support")
 	}
 
-	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
 	paramtable.Get().Watch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, postLoadConfigHandler)
 	log.Info(ctx, "finish build new shardDelegator")
 	return sd, nil

@@ -20,7 +20,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -2347,7 +2346,7 @@ func TestUpdateSchemaRejectsIncompatibleBM25FunctionChange(t *testing.T) {
 			functionFieldType: map[int64]schemapb.FunctionType{102: schemapb.FunctionType_BM25},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
-		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		tsafeNotifier:              syncutil.NewTargetNotifier(0),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	sd.publishIDFOracle(oldOracle)
@@ -2381,7 +2380,7 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 			functionFieldType: map[int64]schemapb.FunctionType{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
-		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		tsafeNotifier:              syncutil.NewTargetNotifier(0),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	oldOracle := NewIDFOracle("test-channel", oldSchema.GetFunctions())
@@ -2419,7 +2418,7 @@ func TestUpdateSchemaDoesNotSyncIDFOracleWhenWorkerUpdateFails(t *testing.T) {
 			functionFieldType: map[int64]schemapb.FunctionType{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
-		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		tsafeNotifier:              syncutil.NewTargetNotifier(0),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	oldOracle := NewIDFOracle("test-channel", oldSchema.GetFunctions())
@@ -2453,7 +2452,7 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 			functionFieldType: map[int64]schemapb.FunctionType{},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
-		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		tsafeNotifier:              syncutil.NewTargetNotifier(0),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	defer sd.Close()
@@ -2496,7 +2495,7 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 		workerManager:              workerManager,
 		functionState:              functionState,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
-		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		tsafeNotifier:              syncutil.NewTargetNotifier(0),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	defer sd.Close()
@@ -2532,7 +2531,7 @@ func TestUpdateSchemaSyncsFunctionRuntimeMetadata(t *testing.T) {
 			functionFieldType: map[int64]schemapb.FunctionType{999: schemapb.FunctionType_BM25},
 		},
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
-		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		tsafeNotifier:              syncutil.NewTargetNotifier(0),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	defer sd.Close()
@@ -2569,7 +2568,7 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 		functionState:              currentFunctionState,
 		schemaBarrierTs:            100,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
-		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		tsafeNotifier:              syncutil.NewTargetNotifier(0),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 	defer sd.Close()
@@ -2844,9 +2843,8 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 
 		sd := &shardDelegator{
 			vchannelName:               "test-channel",
-			latestTsafe:                atomic.NewUint64(0),
+			tsafeNotifier:              syncutil.NewTargetNotifier(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2868,9 +2866,8 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 
 		sd := &shardDelegator{
 			vchannelName:               "test-channel",
-			latestTsafe:                atomic.NewUint64(0),
+			tsafeNotifier:              syncutil.NewTargetNotifier(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2892,9 +2889,8 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 
 		sd := &shardDelegator{
 			vchannelName:               "test-channel",
-			latestTsafe:                atomic.NewUint64(0),
+			tsafeNotifier:              syncutil.NewTargetNotifier(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
