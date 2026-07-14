@@ -3765,6 +3765,56 @@ TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
     EXPECT_TRUE(snapshot->IsFieldFilledWithDefault(FieldId(101)));
 }
 
+TEST(SealedSegmentLoad, LoadPublishesDefaultFilledStateAfterCompact) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto new_field = schema->AddDebugField("new_field", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    const size_t N = 1;
+    std::vector<int64_t> pks = {1};
+    auto pk_field_data =
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, N);
+    pk_field_data->FillFieldData(pks.data(), N);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto pk_load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                       kPartitionID,
+                                                       kSegmentID,
+                                                       pk_id.get(),
+                                                       {pk_field_data},
+                                                       cm);
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(kSegmentID);
+    proto.set_partitionid(kPartitionID);
+    proto.set_collectionid(kCollectionID);
+    proto.set_num_of_rows(N);
+    for (const auto& [field_id, field_info] : pk_load_info.field_infos) {
+        auto* binlog = proto.add_binlog_paths();
+        binlog->set_fieldid(field_id);
+        for (int i = 0; i < field_info.insert_files.size(); ++i) {
+            auto* log = binlog->add_binlogs();
+            log->set_log_path(field_info.insert_files[i]);
+            log->set_entries_num(field_info.entries_nums[i]);
+            log->set_log_size(field_info.memory_sizes[i]);
+        }
+    }
+
+    sealed->SetLoadInfo(proto);
+
+    milvus::tracer::TraceContext trace_ctx;
+    milvus::OpContext op_ctx;
+    ASSERT_NO_THROW(sealed->Load(trace_ctx, &op_ctx));
+    EXPECT_TRUE(sealed->HasFieldData(new_field));
+    EXPECT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->IsFieldFilledWithDefault(new_field));
+}
+
 TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
     auto old_schema = std::make_shared<Schema>();
     auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
