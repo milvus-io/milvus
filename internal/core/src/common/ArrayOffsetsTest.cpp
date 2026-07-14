@@ -156,6 +156,104 @@ TEST_F(ArrayOffsetsTest, SealedEmptyArrays) {
     }
 }
 
+TEST_F(ArrayOffsetsTest, SealedAllNullArrays) {
+    constexpr int64_t row_count = 4;
+    auto offsets = ArrayOffsetsSealed::BuildAllNulls(row_count);
+
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), row_count);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+    for (int64_t row = 0; row <= row_count; ++row) {
+        auto [start, end] = offsets->ElementIDRangeOfRow(row);
+        EXPECT_EQ(start, 0);
+        EXPECT_EQ(end, 0);
+    }
+
+    milvus::TargetBitmap probe(row_count, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, row_count);
+    EXPECT_TRUE(probe.none());
+}
+
+TEST_F(ArrayOffsetsTest, GrowingRowValidity) {
+    ArrayOffsetsGrowing offsets;
+
+    // -1 marks a NULL row: zero elements + row-invalid; 0 is a real empty
+    // array and stays valid.
+    std::vector<int32_t> lens = {2, -1, 0, 3};
+    offsets.Insert(0, lens.data(), 4);
+
+    EXPECT_EQ(offsets.GetRowCount(), 4);
+    EXPECT_EQ(offsets.GetTotalElementCount(), 5);
+    // NULL row and empty row both have zero-length element ranges...
+    auto [null_start, null_end] = offsets.ElementIDRangeOfRow(1);
+    EXPECT_EQ(null_start, null_end);
+    auto [empty_start, empty_end] = offsets.ElementIDRangeOfRow(2);
+    EXPECT_EQ(empty_start, empty_end);
+
+    // ...but only the NULL row is reported invalid.
+    milvus::TargetBitmap probe(4, true);
+    offsets.AndRowValidBitmap(probe.view(), 0, 4);
+    EXPECT_TRUE(probe[0]);
+    EXPECT_FALSE(probe[1]);
+    EXPECT_TRUE(probe[2]);
+    EXPECT_TRUE(probe[3]);
+
+    // Out-of-order insert keeps validity lockstep: row 5 arrives (pending),
+    // then row 4 (NULL) commits both.
+    std::vector<int32_t> lens5 = {1};
+    offsets.Insert(5, lens5.data(), 1);
+    std::vector<int32_t> lens4 = {-1};
+    offsets.Insert(4, lens4.data(), 1);
+    EXPECT_EQ(offsets.GetRowCount(), 6);
+    milvus::TargetBitmap probe2(6, true);
+    offsets.AndRowValidBitmap(probe2.view(), 0, 6);
+    EXPECT_FALSE(probe2[4]);
+    EXPECT_TRUE(probe2[5]);
+
+    // row_start slicing.
+    milvus::TargetBitmap probe3(2, true);
+    offsets.AndRowValidBitmap(probe3.view(), 4, 2);
+    EXPECT_FALSE(probe3[0]);
+    EXPECT_TRUE(probe3[1]);
+}
+
+TEST_F(ArrayOffsetsTest, GrowingInsertNullsBackfill) {
+    ArrayOffsetsGrowing offsets;
+
+    // Schema-evolution backfill: historical rows are NULL, not empty arrays
+    // (mirrors ArrayOffsetsSealed::BuildAllNulls).
+    offsets.InsertNulls(0, 3);
+    EXPECT_EQ(offsets.GetRowCount(), 3);
+    EXPECT_EQ(offsets.GetTotalElementCount(), 0);
+
+    milvus::TargetBitmap probe(3, true);
+    offsets.AndRowValidBitmap(probe.view(), 0, 3);
+    EXPECT_TRUE(probe.none());
+
+    // Rows inserted after the evolution behave normally.
+    std::vector<int32_t> lens = {2};
+    offsets.Insert(3, lens.data(), 1);
+    milvus::TargetBitmap probe2(4, true);
+    offsets.AndRowValidBitmap(probe2.view(), 0, 4);
+    EXPECT_FALSE(probe2[0]);
+    EXPECT_FALSE(probe2[1]);
+    EXPECT_FALSE(probe2[2]);
+    EXPECT_TRUE(probe2[3]);
+}
+
+TEST_F(ArrayOffsetsTest, GrowingAllValidIsNoop) {
+    ArrayOffsetsGrowing offsets;
+
+    std::vector<int32_t> lens = {1, 0, 2};
+    offsets.Insert(0, lens.data(), 3);
+
+    // No NULL row was ever inserted: validity is not materialized and the
+    // apply is a no-op.
+    milvus::TargetBitmap probe(3, true);
+    offsets.AndRowValidBitmap(probe.view(), 0, 3);
+    EXPECT_TRUE(probe.all());
+}
+
 TEST_F(ArrayOffsetsTest, GrowingBasicInsert) {
     ArrayOffsetsGrowing offsets;
 

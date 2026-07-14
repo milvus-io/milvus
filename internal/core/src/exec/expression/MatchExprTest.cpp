@@ -24,6 +24,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <set>
@@ -485,6 +486,273 @@ TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
     ASSERT_NE(result, nullptr);
     ASSERT_EQ(result->offset_size(), 1);
     EXPECT_EQ(result->offset(0), 2);
+}
+
+namespace {
+
+// Shared helpers for the nullable-struct three-valued-logic tests below.
+
+// Build the insert payload for a schema {id, struct_array[sub_int](nullable)}:
+// row0=[1,2], row1=NULL, row2=[], row3=[9001], row4=NULL. A NULL row and an
+// empty [] row both have zero elements; only three-valued handling
+// (PhyMatchFilterExpr::MaskNullRows) can tell them apart.
+std::unique_ptr<InsertRecordProto>
+BuildNullableStructInsertData(const std::shared_ptr<Schema>& schema,
+                              FieldId int64_fid,
+                              FieldId sub_int_fid,
+                              int64_t N) {
+    auto insert_data = std::make_unique<InsertRecordProto>();
+
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, N, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+    // Dense layout: NULL rows occupy an empty ScalarField slot.
+    std::vector<milvus::proto::schema::ScalarField> sub_int_data(N);
+    sub_int_data[0].mutable_int_data()->add_data(1);
+    sub_int_data[0].mutable_int_data()->add_data(2);
+    sub_int_data[3].mutable_int_data()->add_data(9001);
+    FixedVector<bool> valid = {true, false, true, true, false};
+    auto sub_int_array = CreateDataArrayFrom(
+        sub_int_data.data(), valid.data(), N, schema->operator[](sub_int_fid));
+    insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
+    insert_data->set_num_rows(N);
+    return insert_data;
+}
+
+std::set<int64_t>
+RetrieveOffsets(SegmentInternalInterface* segment,
+                const std::shared_ptr<Schema>& schema,
+                const std::string& expr) {
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.Parse(expr);
+    auto plan =
+        CreateRetrievePlanByExpr(schema, plan_str.data(), plan_str.size());
+    EXPECT_NE(plan, nullptr);
+    auto result = segment->Retrieve(
+        nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_NE(result, nullptr);
+    std::set<int64_t> offsets;
+    for (const auto& offset : result->offset()) {
+        offsets.insert(offset);
+    }
+    return offsets;
+}
+
+// Three-valued MATCH over a NULLABLE struct array: a NULL row yields UNKNOWN
+// and must be excluded from every MATCH_* result -- including under `not`
+// (NOT UNKNOWN is still UNKNOWN) -- while a real empty [] row is a valid
+// zero-element array evaluated vacuously (ALL/EXACT(0) keep it, ANY drops
+// it). At offsets level a NULL row is indistinguishable from []: without
+// PhyMatchFilterExpr::MaskNullRows, MATCH_ALL vacuously matches NULL rows and
+// `not MATCH_ANY` turns their definite-FALSE into TRUE.
+void
+CheckNullableStructMatchThreeValued(SegmentInternalInterface* segment,
+                                    const std::shared_ptr<Schema>& schema) {
+    // Only row3 has a hit; NULL rows have no elements to begin with.
+    EXPECT_EQ(RetrieveOffsets(
+                  segment, schema, "match_any(struct_array, $[sub_int] >= 9000)"),
+              (std::set<int64_t>{3}));
+
+    // Every element of every REAL row satisfies >= 0 ([] vacuously). The NULL
+    // rows (1, 4) have zero elements too: without MaskNullRows they would be
+    // wrongly included as vacuous matches.
+    EXPECT_EQ(RetrieveOffsets(
+                  segment, schema, "match_all(struct_array, $[sub_int] >= 0)"),
+              (std::set<int64_t>{0, 2, 3}));
+
+    // NOT of MATCH_ANY: real zero-hit rows only. Without MaskNullRows the
+    // NULL rows read as definite FALSE and negation wrongly includes them.
+    EXPECT_EQ(
+        RetrieveOffsets(
+            segment, schema, "not match_any(struct_array, $[sub_int] >= 9000)"),
+        (std::set<int64_t>{0, 2}));
+
+    // EXACT(0): zero-hit REAL rows (incl. the empty array), never NULL rows.
+    EXPECT_EQ(RetrieveOffsets(segment,
+                              schema,
+                              "match_exact(struct_array, $[sub_int] == 12345, "
+                              "threshold=0)"),
+              (std::set<int64_t>{0, 2, 3}));
+}
+
+}  // namespace
+
+TEST(MatchExprNullableStruct, SealedNullRowsExcludedIncludingUnderNot) {
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    // Batch size 2 makes the last batch contain ONLY the trailing NULL row
+    // (zero elements), exercising the all-empty-batch path of
+    // PhyMatchFilterExpr::Eval (MatchEmptyElements + MaskNullRows) in
+    // addition to the normal batched path.
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+
+    constexpr int64_t N = 5;
+    auto insert_data =
+        BuildNullableStructInsertData(schema, int64_fid, sub_int_fid, N);
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema;
+    generated_data.raw_ = insert_data.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated_data.row_ids_.push_back(i);
+        generated_data.timestamps_.push_back(i);
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
+    CheckNullableStructMatchThreeValued(segment.get(), schema);
+}
+
+TEST(MatchExprNullableStruct, GrowingNullRowsExcludedIncludingUnderNot) {
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+
+    constexpr int64_t N = 5;
+    auto insert_data =
+        BuildNullableStructInsertData(schema, int64_fid, sub_int_fid, N);
+
+    std::vector<idx_t> row_ids(N);
+    std::vector<Timestamp> timestamps(N);
+    for (int64_t i = 0; i < N; ++i) {
+        row_ids[i] = i;
+        timestamps[i] = i;
+    }
+
+    // The realtime Insert path records the NULL rows through
+    // ExtractArrayLengths' -1 sentinel (zero elements, row-invalid).
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(N);
+    segment->Insert(
+        0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CheckNullableStructMatchThreeValued(segment.get(), schema);
+
+    // The growing offsets table must also report the NULL rows invalid for
+    // row-level consumers (AndRowValidBitmap), not merely zero-length.
+    auto offsets = segment->GetArrayOffsets(sub_int_fid);
+    ASSERT_NE(offsets, nullptr);
+    milvus::TargetBitmap probe(N, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, N);
+    EXPECT_TRUE(probe[0]);
+    EXPECT_FALSE(probe[1]);
+    EXPECT_TRUE(probe[2]);
+    EXPECT_TRUE(probe[3]);
+    EXPECT_FALSE(probe[4]);
+}
+
+// Schema evolution backfill: rows that existed before a nullable struct-array
+// field was added are NULL, not empty arrays. The growing Reopen path must
+// register the field's offsets via InsertNulls so AndRowValidBitmap reports
+// every backfilled row invalid (mirroring ArrayOffsetsSealed::BuildAllNulls).
+TEST(StructArrayNullBackfill, GrowingReopenRecordsBackfilledRowsAsNull) {
+    auto schema_v1 = std::make_shared<Schema>();
+    auto pk_fid = schema_v1->AddDebugField("id", DataType::INT64);
+    schema_v1->set_primary_field_id(pk_fid);
+    schema_v1->set_schema_version(1);
+
+    constexpr int64_t N = 3;
+    auto segment = CreateGrowingSegment(schema_v1, empty_index_meta);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, N, schema_v1->operator[](pk_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+    insert_data->set_num_rows(N);
+
+    std::vector<idx_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {0, 1, 2};
+    segment->PreInsert(N);
+    segment->Insert(
+        0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    ASSERT_EQ(segment->get_row_count(), N);
+
+    // V2 copies V1 (identical ids for shared fields) and adds a nullable
+    // struct-array sub-field, as AddCollectionField would.
+    auto schema_v2 = std::make_shared<Schema>(*schema_v1);
+    auto sub_fid = schema_v2->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+    schema_v2->set_schema_version(2);
+
+    segment->LazyCheckSchema(schema_v2, nullptr);
+
+    auto offsets = segment->GetArrayOffsets(sub_fid);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), N);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+
+    // All backfilled rows must be NULL (row-invalid), not empty arrays.
+    milvus::TargetBitmap probe(N, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, N);
+    EXPECT_TRUE(probe.none());
+}
+
+// Sealed counterpart: the sealed Reopen path must register
+// ArrayOffsetsSealed::BuildAllNulls (all-false row validity), not
+// BuildAllZeros (which would read the backfilled NULLs as empty arrays).
+TEST(StructArrayNullBackfill, SealedReopenRecordsBackfilledRowsAsNull) {
+    auto schema_v1 = std::make_shared<Schema>();
+    auto pk_fid = schema_v1->AddDebugField("id", DataType::INT64);
+    schema_v1->set_primary_field_id(pk_fid);
+    schema_v1->set_schema_version(1);
+
+    constexpr int64_t N = 3;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, N, schema_v1->operator[](pk_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+    insert_data->set_num_rows(N);
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema_v1;
+    generated_data.raw_ = insert_data.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated_data.row_ids_.push_back(i);
+        generated_data.timestamps_.push_back(i);
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema_v1, generated_data);
+
+    auto schema_v2 = std::make_shared<Schema>(*schema_v1);
+    auto sub_fid = schema_v2->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+    schema_v2->set_schema_version(2);
+
+    segment->LazyCheckSchema(schema_v2, nullptr);
+
+    auto offsets = segment->GetArrayOffsets(sub_fid);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), N);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+
+    milvus::TargetBitmap probe(N, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, N);
+    EXPECT_TRUE(probe.none());
 }
 
 class SealedMatchExprTest : public ::testing::Test {

@@ -203,16 +203,29 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
             int64_t physical_row = 0;
             for (int64_t i = 0; i < num_rows; ++i) {
                 if (data->IsNullable() && !data->is_valid(i)) {
-                    array_lengths[offset + i] = 0;
+                    // -1: NULL row (zero elements, row-invalid) -- see
+                    // ArrayOffsetsGrowing::Insert.
+                    array_lengths[offset + i] = -1;
                     continue;
                 }
                 auto source_index = data->IsNullable() ? physical_row++ : i;
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // For regular array types (INT32, FLOAT, etc.)
+            // For regular (scalar) array types (INT32, FLOAT, etc.), nullable
+            // FieldData is stored DENSELY: a NULL row occupies a length-0 Array
+            // slot at its logical position (FieldDataArrayImpl does not pack
+            // valid rows). This differs from the VECTOR_ARRAY branch above,
+            // where FieldDataVectorArrayImpl packs only valid rows and so must
+            // be read by physical index. Read each scalar-array row by its
+            // logical index i; a NULL row is reported as -1 so the offsets
+            // record it as NULL rather than a valid empty array.
             auto* raw_data = static_cast<const ArrayView*>(data->Data());
             for (int64_t i = 0; i < num_rows; ++i) {
+                if (data->IsNullable() && !data->is_valid(i)) {
+                    array_lengths[offset + i] = -1;
+                    continue;
+                }
                 array_lengths[offset + i] = raw_data[i].length();
             }
         }
@@ -268,7 +281,8 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         for (int i = 0; i < num_rows; ++i) {
             if (field_meta.is_nullable() && has_valid_data &&
                 !field_data.valid_data(i)) {
-                array_lengths[i] = 0;
+                // -1: NULL row (zero elements, row-invalid).
+                array_lengths[i] = -1;
                 continue;
             }
 
@@ -319,12 +333,14 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         }
     }
 
-    // Handle nullable fields
+    // Handle nullable fields: -1 marks a NULL row (zero elements,
+    // row-invalid) -- see ArrayOffsetsGrowing::Insert. NULL is NOT an empty
+    // array: MATCH_ALL treats [] as a vacuous match but a NULL row as UNKNOWN.
     if (field_meta.is_nullable() && field_data.valid_data_size() > 0) {
         const auto& valid_data = field_data.valid_data();
         for (int i = 0; i < num_rows; ++i) {
             if (!valid_data[i]) {
-                array_lengths[i] = 0;  // null → empty array
+                array_lengths[i] = -1;
             }
         }
     }
@@ -344,6 +360,8 @@ SchemaHasTextField(const Schema& schema) {
 
 void
 SegmentGrowingImpl::InitializeArrayOffsets() {
+    std::unique_lock lock(array_offsets_map_mutex_);
+
     // Group fields by struct_name
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
@@ -762,8 +780,20 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
 
-        // update ArrayOffsetsGrowing for struct fields
-        if (struct_representative_fields_.count(field_id) > 0) {
+        // update ArrayOffsetsGrowing for struct fields. Copy the shared_ptr
+        // out under the shared lock, then insert without holding it (the
+        // offsets object has its own internal mutex).
+        std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+        {
+            std::shared_lock lock(array_offsets_map_mutex_);
+            if (struct_representative_fields_.count(field_id) > 0) {
+                auto offsets_it = array_offsets_map_.find(field_id);
+                if (offsets_it != array_offsets_map_.end()) {
+                    array_offsets = offsets_it->second;
+                }
+            }
+        }
+        if (array_offsets != nullptr) {
             const auto& field_data =
                 insert_record_proto->fields_data(data_offset);
 
@@ -771,11 +801,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             ExtractArrayLengths(
                 field_data, field_meta, num_rows, array_lengths.data());
 
-            auto offsets_it = array_offsets_map_.find(field_id);
-            if (offsets_it != array_offsets_map_.end()) {
-                offsets_it->second->Insert(
-                    reserved_offset, array_lengths.data(), num_rows);
-            }
+            array_offsets->Insert(
+                reserved_offset, array_lengths.data(), num_rows);
         }
 
         // index text.
@@ -1019,17 +1046,25 @@ SegmentGrowingImpl::load_field_data_common(
         }
     }
 
-    // update ArrayOffsetsGrowing for struct fields
-    if (struct_representative_fields_.count(field_id) > 0) {
+    // update ArrayOffsetsGrowing for struct fields. Copy the shared_ptr out
+    // under the shared lock, then insert without holding it (the offsets
+    // object has its own internal mutex).
+    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+    {
+        std::shared_lock lock(array_offsets_map_mutex_);
+        if (struct_representative_fields_.count(field_id) > 0) {
+            auto offsets_it = array_offsets_map_.find(field_id);
+            if (offsets_it != array_offsets_map_.end()) {
+                array_offsets = offsets_it->second;
+            }
+        }
+    }
+    if (array_offsets != nullptr) {
         std::vector<int32_t> array_lengths(num_rows);
         ExtractArrayLengthsFromFieldData(
             field_data, field_meta, array_lengths.data());
 
-        auto offsets_it = array_offsets_map_.find(field_id);
-        if (offsets_it != array_offsets_map_.end()) {
-            offsets_it->second->Insert(
-                reserved_offset, array_lengths.data(), num_rows);
-        }
+        array_offsets->Insert(reserved_offset, array_lengths.data(), num_rows);
 
         LOG_INFO("Updated ArrayOffsetsGrowing for field {} with {} rows",
                  field_id.get(),
@@ -3009,6 +3044,10 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
 void
 SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
     const FieldMeta& field_meta, int64_t row_count) {
+    // Reopen (schema evolution) runs concurrently with insert/query readers
+    // of array_offsets_map_ / struct_representative_fields_.
+    std::unique_lock lock(array_offsets_map_mutex_);
+
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
         return;
@@ -3032,8 +3071,11 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
     if (!array_offsets) {
         array_offsets = std::make_shared<ArrayOffsetsGrowing>();
         if (row_count > 0) {
-            std::vector<int32_t> empty_lengths(row_count, 0);
-            array_offsets->Insert(0, empty_lengths.data(), row_count);
+            // Backfilled rows of a schema-evolved struct array are NULL, not
+            // empty arrays (mirrors ArrayOffsetsSealed::BuildAllNulls on the
+            // sealed side): the field did not exist when those rows were
+            // written, and an added field must be nullable.
+            array_offsets->InsertNulls(0, row_count);
         }
         struct_representative_fields_.insert(field_meta.get_id());
     }

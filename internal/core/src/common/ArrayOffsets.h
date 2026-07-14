@@ -98,6 +98,22 @@ class IArrayOffsets {
     RowOffsetsToElementOffsets(
         const FixedVector<int32_t>& row_offsets) const = 0;
 
+    // Apply per-row NULL info retained from the raw field: clear result[i]
+    // for every row (row_start + i) whose ARRAY value is NULL. No-op when no
+    // validity was recorded (non-nullable source: every row is valid).
+    //
+    // A nested array index only exposes element-level validity, and a NULL row
+    // has zero elements -- indistinguishable at element level from an empty
+    // array. Row-level consumers (e.g. array_contains over a nullable array via
+    // a nested index) use this to exclude NULL rows exactly as the brute-force
+    // path does. Thread-safe on growing segments (locks internally); exposed
+    // as an apply-operation rather than a raw bitmap pointer because the
+    // growing implementation's bitmap grows concurrently with inserts.
+    virtual void
+    AndRowValidBitmap(TargetBitmapView result,
+                      int64_t row_start,
+                      int64_t row_count) const = 0;
+
     // Iterate over rows and apply predicate with element range
     // predicate: function(element_start, element_end) -> bool
     //   element_start: first element ID of the row (inclusive)
@@ -155,6 +171,23 @@ class ArrayOffsetsSealed : public IArrayOffsets {
         return result;
     }
 
+    // Build zero element ranges for rows whose ARRAY value is NULL. Offsets
+    // alone cannot distinguish NULL from a valid empty array, so retain an
+    // explicit all-false row-valid bitmap for row-level consumers of nested
+    // indexes. Used when schema evolution backfills a nullable ARRAY field
+    // without a default value.
+    static std::shared_ptr<ArrayOffsetsSealed>
+    BuildAllNulls(int64_t row_count) {
+        auto result = std::make_shared<ArrayOffsetsSealed>(
+            std::vector<int32_t>(row_count + 1, 0));
+        result->has_row_valid_ = true;
+        result->row_valid_ = TargetBitmap(row_count, false);
+        result->resource_size_ = 4 * (row_count + 1) + (row_count + 7) / 8;
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            cachinglayer::ResourceUsage{result->resource_size_, 0});
+        return result;
+    }
+
     ~ArrayOffsetsSealed() {
         cachinglayer::Manager::GetInstance().RefundLoadedResource(
             {resource_size_, 0});
@@ -199,6 +232,25 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     RowOffsetsToElementOffsets(
         const FixedVector<int32_t>& row_offsets) const override;
 
+    void
+    AndRowValidBitmap(TargetBitmapView result,
+                      int64_t row_start,
+                      int64_t row_count) const override {
+        if (!has_row_valid_) {
+            return;
+        }
+        auto rows = static_cast<int64_t>(row_valid_.size());
+        for (int64_t i = 0; i < row_count; ++i) {
+            auto row = row_start + i;
+            if (row >= rows) {
+                break;
+            }
+            if (!row_valid_[row]) {
+                result[i] = false;
+            }
+        }
+    }
+
     TargetBitmap
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
@@ -220,6 +272,11 @@ class ArrayOffsetsSealed : public IArrayOffsets {
 
  private:
     const std::vector<int32_t> row_to_element_start_;
+    // Per-row NULL bitmap (bit==true => non-null). Populated by the static
+    // builders when the source field is nullable; empty & has_row_valid_==false
+    // for non-nullable fields (all rows valid).
+    TargetBitmap row_valid_;
+    bool has_row_valid_{false};
     int64_t resource_size_{0};
 };
 
@@ -227,8 +284,20 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
  public:
     ArrayOffsetsGrowing() = default;
 
+    // array_lengths[i] < 0 marks a NULL row: recorded as zero elements AND
+    // row-invalid (see AndRowValidBitmap); >= 0 is a real (possibly empty)
+    // array. The insert extractors emit -1 for NULL rows so offsets-level
+    // consumers can distinguish NULL from [] exactly like sealed segments.
     void
     Insert(int64_t row_id_start, const int32_t* array_lengths, int64_t count);
+
+    // Backfill for schema evolution: `count` rows starting at row_id_start
+    // whose ARRAY value is NULL (zero elements, row-invalid). Mirrors
+    // ArrayOffsetsSealed::BuildAllNulls so growing and sealed segments agree
+    // that historical rows of a backfilled nullable ARRAY field are NULL,
+    // not empty arrays.
+    void
+    InsertNulls(int64_t row_id_start, int64_t count);
 
     int64_t
     GetRowCount() const override {
@@ -271,6 +340,11 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     RowOffsetsToElementOffsets(
         const FixedVector<int32_t>& row_offsets) const override;
 
+    void
+    AndRowValidBitmap(TargetBitmapView result,
+                      int64_t row_start,
+                      int64_t row_count) const override;
+
     TargetBitmap
     ForEachRowElementRange(const ElementRangePredicate& predicate,
                            int64_t row_start,
@@ -286,13 +360,25 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     struct PendingRow {
         int64_t row_id;
         int32_t array_len;
+        bool valid;
     };
+
+    void
+    CommitRow(int32_t array_len, bool valid);
 
     void
     DrainPendingRows();
 
  private:
     std::vector<int32_t> row_to_element_start_;
+
+    // Per-committed-row validity (1 = non-null), lockstep with
+    // committed_row_count_. Lazily materialized on the first NULL row so the
+    // common all-valid case stays overhead-free; has_row_valid_ (not
+    // row_valid_.empty(), which is ambiguous when the first committed row is
+    // itself NULL) tells whether it was materialized.
+    std::vector<uint8_t> row_valid_;
+    bool has_row_valid_{false};
 
     // Number of rows committed (contiguous from 0)
     int32_t committed_row_count_ = 0;

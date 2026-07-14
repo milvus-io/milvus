@@ -308,6 +308,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (MatchEmptyElements(match_type, threshold)) {
             bitset_view.set();
         }
+        MaskNullRows(col_vec.get(), field_meta.get_id(), input, batch_rows);
         if (!has_offset_input_) {
             current_pos_ += batch_rows;
         }
@@ -406,8 +407,35 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         dispatch.template operator()<false>();
     }
 
+    MaskNullRows(col_vec.get(), field_meta.get_id(), input, batch_rows);
     if (!has_offset_input_) {
         current_pos_ += batch_rows;
+    }
+}
+
+void
+PhyMatchFilterExpr::MaskNullRows(ColumnVector* col_vec,
+                                 FieldId field_id,
+                                 const OffsetVector* input,
+                                 int64_t batch_rows) {
+    // Build the physical row-offset list for this batch (offset-input vs
+    // sequential scan), then ask the segment to clear the valid bits of NULL
+    // field rows. ApplyFieldValidDataByOffsets only CLEARS invalid rows and is
+    // a no-op for a non-nullable field, so this is safe for all field kinds and
+    // for both sealed and growing segments.
+    std::vector<int64_t> row_offsets(batch_rows);
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        row_offsets[i] = has_offset_input_ ? static_cast<int64_t>((*input)[i])
+                                           : (current_pos_ + i);
+    }
+    TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
+    TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
+    segment_->ApplyFieldValidDataByOffsets(
+        op_ctx_, field_id, row_offsets.data(), batch_rows, valid_view);
+    for (int64_t i = 0; i < batch_rows; ++i) {
+        if (!valid_view[i]) {
+            bitset_view[i] = false;
+        }
     }
 }
 

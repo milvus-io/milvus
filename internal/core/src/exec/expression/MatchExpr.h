@@ -84,6 +84,16 @@ class PhyMatchFilterExpr : public Expr {
     }
 
  private:
+    // Three-valued MATCH: mask rows whose ARRAY field value is NULL. For each row
+    // in the batch, clears both the valid bit and the match bit when the field is
+    // NULL. Works for both sealed and growing segments (reads field validity via
+    // segment_->ApplyFieldValidDataByOffsets). No-op for a non-nullable field.
+    void
+    MaskNullRows(ColumnVector* col_vec,
+                 FieldId field_id,
+                 const OffsetVector* input,
+                 int64_t batch_rows);
+
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
     int64_t active_count_;

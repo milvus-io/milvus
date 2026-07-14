@@ -1941,7 +1941,24 @@ class SegmentExpr : public Expr {
                         }
                     } else if (cached_is_nested_index_ &&
                                func_returns_row_level) {
+                        // The func already reduced element-level matches to a
+                        // row-level bitset, but a nested index only exposes
+                        // element-level validity (index_ptr->IsNotNull()): a
+                        // NULL row has zero elements and cannot be recovered
+                        // from it. Recover per-row NULL info from the raw field
+                        // (retained by ArrayOffsets at build time) and AND it in
+                        // so NULL rows are excluded exactly as the brute-force
+                        // path does -- otherwise `not array_contains(nullable,
+                        // x)` wrongly includes NULL rows.
                         valid_res = TargetBitmap(active_count_, true);
+                        if (field_type_ == DataType::ARRAY) {
+                            auto array_offsets =
+                                segment_->GetArrayOffsets(field_id_);
+                            if (array_offsets != nullptr) {
+                                array_offsets->AndRowValidBitmap(
+                                    valid_res.view(), 0, active_count_);
+                            }
+                        }
                     } else {
                         valid_res = index_ptr->IsNotNull();
                     }
