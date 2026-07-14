@@ -766,6 +766,16 @@ class RoleClient(Requests):
         res = response.json()
         return res
 
+    def role_grant_v2(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/roles/grant_privilege_v2"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def role_revoke_v2(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/roles/revoke_privilege_v2"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
 
 class IndexClient(Requests):
     def __init__(self, endpoint, token):
@@ -1036,6 +1046,25 @@ class DatabaseClient(Requests):
         payload = {"dbName": db_name, "propertyKeys": property_keys}
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
+
+
+class FileResourceClient(Requests):
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+
+    def file_resource_add(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/file_resources/add"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def file_resource_remove(self, payload):
+        url = f"{self.endpoint}/v2/vectordb/file_resources/remove"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+    def file_resource_list(self):
+        url = f"{self.endpoint}/v2/vectordb/file_resources/list"
+        return self.post(url, headers=self.update_headers(), data={}).json()
 
 
 class StorageClient:

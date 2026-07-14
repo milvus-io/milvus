@@ -40,6 +40,7 @@ const (
 	CollectionFieldCategory       = "/collections/fields/"
 	CollectionStructFieldCategory = "/collections/struct_fields/"
 	ResourceGroupCategory         = "/resource_groups/"
+	FileResourceCategory          = "/file_resources/"
 	SegmentCategory               = "/segments/"
 	QuotaCenterCategory           = "/quotacenter/"
 	CommonCategory                = "/common/"
@@ -79,6 +80,7 @@ const (
 	AddFunctionFieldAction          = "add_function_field"
 	DropFunctionFieldAction         = "drop_function_field"
 	AddAction                       = `add`
+	RemoveAction                    = "remove"
 	DropPropertiesAction            = "drop_properties"
 	CompactAction                   = "compact"
 	CompactionStateAction           = "get_compaction_state"

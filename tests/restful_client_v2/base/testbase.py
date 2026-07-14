@@ -8,6 +8,7 @@ from api.milvus import (
     AliasClient,
     CollectionClient,
     DatabaseClient,
+    FileResourceClient,
     ImportJobClient,
     IndexClient,
     PartitionClient,
@@ -47,6 +48,7 @@ class Base:
     storage_client = None
     milvus_client = None
     database_client = None
+    file_resource_client = None
 
 
 class TestBase(Base):
@@ -115,6 +117,7 @@ class TestBase(Base):
         self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
         self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
         self.database_client = DatabaseClient(self.endpoint, self.api_key)
+        self.file_resource_client = FileResourceClient(self.endpoint, self.api_key)
 
         if token is None:
             self.vector_client.api_key = None
