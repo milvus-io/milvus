@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -472,6 +472,7 @@ func (s *DelegatorSuite) TestSearch() {
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
 		}()
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := &cluster.MockWorker{}
@@ -520,6 +521,7 @@ func (s *DelegatorSuite) TestSearch() {
 	s.Run("partition_not_loaded", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
 		}()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -539,6 +541,7 @@ func (s *DelegatorSuite) TestSearch() {
 	s.Run("worker_return_error", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
 		}()
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := &cluster.MockWorker{}
@@ -574,6 +577,7 @@ func (s *DelegatorSuite) TestSearch() {
 	s.Run("worker_return_failure_code", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
 		}()
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := &cluster.MockWorker{}
@@ -666,6 +670,7 @@ func (s *DelegatorSuite) TestSearch() {
 	s.Run("downgrade_tsafe", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
 		}()
 		pt := paramtable.Get()
 		pt.Save(pt.QueryNodeCfg.DowngradeTsafe.Key, "true")
@@ -756,13 +761,14 @@ func (s *DelegatorSuite) TestQuery() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
 	s.initSegments()
+
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
 		}()
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 
 		workers[1] = worker1
 		workers[2] = worker2
@@ -813,9 +819,8 @@ func (s *DelegatorSuite) TestQuery() {
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
-				QueryLabel: "query",
-				Base:       commonpbutil.NewMsgBase(),
-				// not load partation -1,will return error
+				QueryLabel:   "query",
+				Base:         commonpbutil.NewMsgBase(),
 				PartitionIDs: []int64{-1},
 			},
 			DmlChannels: []string{s.vchannelName},
@@ -828,8 +833,8 @@ func (s *DelegatorSuite) TestQuery() {
 			s.workerManager.ExpectedCalls = nil
 		}()
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 
 		workers[1] = worker1
 		workers[2] = worker2
@@ -838,7 +843,6 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -860,8 +864,8 @@ func (s *DelegatorSuite) TestQuery() {
 
 	s.Run("worker_return_failure_code", func() {
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 
 		workers[1] = worker1
 		workers[2] = worker2
@@ -875,7 +879,6 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -957,8 +960,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 		server := client.CreateServer()
 
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 
 		workers[1] = worker1
 		workers[2] = worker2
@@ -981,32 +984,22 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 				srv.Send(&internalpb.RetrieveResults{
 					Status: merr.Success(),
-					Ids: &schemapb.IDs{
-						IdField: &schemapb.IDs_IntId{
-							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
-						},
-					},
+					Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()}}},
 				})
 			}).Return(nil)
 
 		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 				srv.Send(&internalpb.RetrieveResults{
 					Status: merr.Success(),
-					Ids: &schemapb.IDs{
-						IdField: &schemapb.IDs_IntId{
-							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
-						},
-					},
+					Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()}}},
 				})
 			}).Return(nil)
 
-		// run stream function
 		go func() {
 			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 				Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
@@ -1046,9 +1039,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
-				QueryLabel: "query",
-				Base:       commonpbutil.NewMsgBase(),
-				// not load partation -1,will return error
+				QueryLabel:   "query",
+				Base:         commonpbutil.NewMsgBase(),
 				PartitionIDs: []int64{-1},
 			},
 			DmlChannels: []string{s.vchannelName},
@@ -1087,12 +1079,12 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
+		_ = client
 
 		mockErr := errors.New("mock error")
 
 		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(nil, mockErr)
 
-		// run stream function
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
@@ -1114,8 +1106,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 		server := client.CreateServer()
 
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 		mockErr := errors.New("mock error")
 
 		workers[1] = worker1
@@ -1126,33 +1118,24 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		worker1.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Return(mockErr)
-
 		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
 				srv.Send(&internalpb.RetrieveResults{
 					Status: merr.Success(),
-					Ids: &schemapb.IDs{
-						IdField: &schemapb.IDs_IntId{
-							IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()},
-						},
-					},
+					Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: req.GetSegmentIDs()}}},
 				})
 			}).Return(nil)
 
-		// run stream function
 		go func() {
 			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 				Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 				DmlChannels: []string{s.vchannelName},
 			}, server)
-			server.Send(&internalpb.RetrieveResults{
-				Status: merr.Status(err),
-			})
+			server.Send(&internalpb.RetrieveResults{Status: merr.Status(err)})
 		}()
 
 		resultIDs := []int64{1002, 1003}
@@ -1182,6 +1165,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
+		_ = client
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
@@ -1202,8 +1186,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
+		_ = client
 
-		// run stream function
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
@@ -1219,6 +1203,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
+		_ = client
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
@@ -1231,9 +1216,6 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 func (s *DelegatorSuite) TestGetStats() {
 	s.delegator.Start()
-	// 1 => sealed segment 1000, 1001
-	// 1 => growing segment 1004
-	// 2 => sealed segment 1002, 1003
 	paramtable.SetNodeID(1)
 	s.initSegments()
 
@@ -1242,8 +1224,8 @@ func (s *DelegatorSuite) TestGetStats() {
 			s.workerManager.ExpectedCalls = nil
 		}()
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 
 		workers[1] = worker1
 		workers[2] = worker2
@@ -1290,8 +1272,8 @@ func (s *DelegatorSuite) TestGetStats() {
 			s.workerManager.ExpectedCalls = nil
 		}()
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 
 		workers[1] = worker1
 		workers[2] = worker2
@@ -1322,8 +1304,8 @@ func (s *DelegatorSuite) TestGetStats() {
 
 	s.Run("worker_return_failure_code", func() {
 		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
 
 		workers[1] = worker1
 		workers[2] = worker2
@@ -1407,6 +1389,10 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 	s.initSegments()
 
 	s.Run("normal", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
+		}()
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := cluster.NewMockWorker(s.T())
 		worker2 := cluster.NewMockWorker(s.T())
@@ -1428,7 +1414,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 
 		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
-		}, nil).Times(3) // currently node 1 will be called twice for growing & sealed
+		}, nil).Times(3)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -1439,45 +1425,78 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 	})
 
 	s.Run("worker_return_error", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
+		}()
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := cluster.NewMockWorker(s.T())
 		worker2 := cluster.NewMockWorker(s.T())
+		worker1Attempts := atomic.NewInt32(0)
 
 		workers[1] = worker1
 		workers[2] = worker2
 
 		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
-			return merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")
-		}).Maybe()
+			attempt := worker1Attempts.Inc()
+			s.Equal(uint64(100), usr.GetSchemaBarrierTs())
+			if attempt == 1 {
+				return merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")
+			}
+			return merr.Success(), nil
+		}).Times(4)
 
 		worker2.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+			s.Equal(uint64(100), usr.GetSchemaBarrierTs())
 			return merr.Success(), nil
-		}).Maybe()
+		}).Times(2)
 
 		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 			return workers[nodeID]
-		}, nil).Times(3)
+		}, nil).Times(6)
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
-		s.Error(err)
+		s.NoError(err)
 	})
 
 	s.Run("worker_manager_error", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
+		}()
 		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).RunAndReturn(func(ctx context.Context, i int64) (cluster.Worker, error) {
 			return nil, merr.WrapErrServiceInternal("mocked")
 		})
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
 
 		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)
+		s.True(errors.Is(err, merr.ErrServiceInternal) || errors.Is(err, context.DeadlineExceeded))
 	})
 
 	s.Run("distribution_not_serviceable", func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.workerManager.Calls = nil
+		}()
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Maybe()
+		worker2.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Maybe()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
 
 		sd, ok := s.delegator.(*shardDelegator)
@@ -1487,6 +1506,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 
 		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)
+		s.True(errors.Is(err, merr.ErrServiceInternal) || errors.Is(err, context.DeadlineExceeded))
 	})
 
 	s.Run("cluster_not_serviceable", func() {
@@ -2368,7 +2388,7 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 	worker := cluster.NewMockWorker(t)
 	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
 	workerManager := cluster.NewMockManager(t)
-	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Maybe()
 	oldSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
 	sd := &shardDelegator{
 		collectionID:  1000,
@@ -2390,7 +2410,7 @@ func TestUpdateSchemaSyncsAdditiveIDFOracleFunctions(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newAdditionalBM25FunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(true, nil).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
@@ -2404,7 +2424,7 @@ func TestUpdateSchemaDoesNotSyncIDFOracleWhenWorkerUpdateFails(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	worker := cluster.NewMockWorker(t)
-	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")).Once()
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")).Maybe()
 	workerManager := cluster.NewMockManager(t)
 	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 	oldSchema := newFunctionRuntimeTestSchema(newBM25FunctionSchema())
@@ -2427,7 +2447,9 @@ func TestUpdateSchemaDoesNotSyncIDFOracleWhenWorkerUpdateFails(t *testing.T) {
 	defer sd.Close()
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newAdditionalBM25FunctionSchema())
-	err := sd.UpdateSchema(context.Background(), newSchema, 100)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := sd.UpdateSchema(ctx, newSchema, 100)
 	require.Error(t, err)
 
 	_, _, err = sd.getIDFOracle().BuildIDF(105, &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}, Dim: 1})
@@ -2460,7 +2482,7 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(true, nil).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
@@ -2539,7 +2561,7 @@ func TestUpdateSchemaSyncsFunctionRuntimeMetadata(t *testing.T) {
 
 	newSchema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema(), newMinHashFunctionSchema())
 	collectionManager := segments.NewMockCollectionManager(t)
-	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(nil).Once()
+	collectionManager.EXPECT().UpdateSchema(int64(1000), newSchema, uint64(100)).Return(true, nil).Once()
 	sd.collectionManager = collectionManager
 
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)

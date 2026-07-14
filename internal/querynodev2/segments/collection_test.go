@@ -112,8 +112,9 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			Nullable: true,
 		})
 
-		err := s.cm.UpdateSchema(1, schema, 100)
+		changed, err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
+		s.True(changed)
 		s.Equal(uint64(100), s.cm.Get(1).SchemaVersion())
 	})
 
@@ -122,8 +123,9 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 		staleSchema := mock_segcore.GenTestCollectionSchema("stale_collection", schemapb.DataType_Int64, false)
 		staleSchema.Version = int32(currentVersion - 1)
 
-		err := s.cm.UpdateSchema(1, staleSchema, currentVersion+1)
+		changed, err := s.cm.UpdateSchema(1, staleSchema, currentVersion+1)
 		s.NoError(err)
+		s.False(changed)
 
 		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
 		s.Equal(currentVersion, updatedVersion)
@@ -150,15 +152,17 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			Nullable: true,
 		})
 
-		err = cm.UpdateSchema(10, schemaV8, 8)
+		changed, err := cm.UpdateSchema(10, schemaV8, 8)
 		s.NoError(err)
+		s.True(changed)
 		s.Equal(uint64(8), cm.Get(10).SchemaVersion())
 
 		schemaV7 := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
 		schemaV7.Version = 7
 
-		err = cm.UpdateSchema(10, schemaV7, 200)
+		changed, err = cm.UpdateSchema(10, schemaV7, 200)
 		s.NoError(err)
+		s.False(changed)
 
 		updatedSchema, updatedVersion := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(8), updatedVersion)
@@ -181,8 +185,9 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			{Key: common.CollectionTTLFieldKey, Value: "int64Field"},
 		}
 
-		err = cm.UpdateSchema(10, updatedSchema, 100)
+		changed, err := cm.UpdateSchema(10, updatedSchema, 100)
 		s.NoError(err)
+		s.True(changed)
 
 		schema, version := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(0), version)
@@ -229,8 +234,9 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		schema := mock_segcore.GenTestCollectionSchema("collection_v2", schemapb.DataType_Int64, false)
 		schema.Version = 2
-		err = cm.UpdateSchema(10, schema, 2)
+		changed, err := cm.UpdateSchema(10, schema, 2)
 		s.NoError(err)
+		s.True(changed)
 
 		_, version := cm.Get(10).SchemaAndVersion()
 		s.Equal(uint64(2), version)
@@ -245,13 +251,15 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			Nullable: true,
 		})
 
-		err := s.cm.UpdateSchema(2, schema, 100)
+		changed, err := s.cm.UpdateSchema(2, schema, 100)
+		s.False(changed)
 		s.Error(err)
 	})
 
 	s.Run("nil_schema", func() {
 		s.NotPanics(func() {
-			err := s.cm.UpdateSchema(1, nil, 101)
+			changed, err := s.cm.UpdateSchema(1, nil, 101)
+			s.False(changed)
 			s.Error(err)
 		})
 	})
@@ -471,8 +479,9 @@ func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersion
 
 	updatedSchema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	updatedSchema.Version = 1
-	err = cm.UpdateSchema(10, updatedSchema, 200)
+	changed, err := cm.UpdateSchema(10, updatedSchema, 200)
 	s.Require().NoError(err)
+	s.True(changed)
 
 	schema, version := cm.Get(10).SchemaAndVersion()
 	s.Equal(uint64(1), version)

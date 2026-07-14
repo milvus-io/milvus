@@ -2489,15 +2489,19 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		SchemaBarrierTs: uint64(100),
 	}
 	manager := suite.node.manager.Collection
+	loader := suite.node.loader
+	segmentManager := suite.node.manager.Segment
 	// reset manager to align default teardown logic
 	defer func() {
 		suite.node.manager.Collection = manager
+		suite.node.loader = loader
+		suite.node.manager.Segment = segmentManager
 	}()
 	mockManager := segments.NewMockCollectionManager(suite.T())
 	suite.node.manager.Collection = mockManager
 
 	suite.Run("normal", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(false, nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
@@ -2511,14 +2515,48 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 			Schema:          schema,
 			SchemaBarrierTs: uint64(100),
 		}
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(false, nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
+	suite.Run("reopen_loaded_segments", func() {
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(true, nil).Once()
+
+		mockLoader := segments.NewMockLoader(suite.T())
+		mockLoader.EXPECT().ReopenLoadedSealedSegmentsForSchemaUpdate(mock.Anything, suite.collectionID).Return(nil).Once()
+
+		suite.node.loader = mockLoader
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("skip_reopen_when_schema_is_noop", func() {
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(false, nil).Once()
+
+		mockLoader := segments.NewMockLoader(suite.T())
+		suite.node.loader = mockLoader
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("reopen_loaded_segments_failed", func() {
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(true, nil).Once()
+
+		mockLoader := segments.NewMockLoader(suite.T())
+		mockLoader.EXPECT().ReopenLoadedSealedSegmentsForSchemaUpdate(mock.Anything, suite.collectionID).Return(merr.WrapErrServiceInternal("mocked")).Once()
+
+		suite.node.loader = mockLoader
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.Error(merr.CheckRPCCall(status, err))
+	})
+
 	suite.Run("manager_returns_error", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(false, merr.WrapErrServiceInternal("mocked")).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.Error(merr.CheckRPCCall(status, err))
