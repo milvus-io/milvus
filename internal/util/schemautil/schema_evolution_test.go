@@ -143,6 +143,21 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 		newSchema.Fields = removeEvolutionField(newSchema.Fields, 105)
 		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
 	})
+
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "unchanged malformed max field id", value: "not-a-number"},
+		{name: "unchanged stale low max field id", value: "102"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			oldSchema := evolutionBaseSchema()
+			setEvolutionProperty(oldSchema, common.MaxFieldIDKey, test.value)
+			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+			require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+		})
+	}
 }
 
 func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
@@ -457,6 +472,25 @@ func TestValidateSchemaEvolutionRejectsInvalidFunctionGraphs(t *testing.T) {
 		newSchema.Functions = []*schemapb.FunctionSchema{first, second}
 		setMaxFieldID(newSchema, 107)
 		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "duplicate function name")
+	})
+
+	t.Run("duplicate function output names with different ids", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		firstOutput := evolutionField(106, "shared_output", schemapb.DataType_SparseFloatVector, false)
+		firstOutput.IsFunctionOutput = true
+		secondOutput := evolutionField(107, "shared_output", schemapb.DataType_SparseFloatVector, false)
+		secondOutput.IsFunctionOutput = true
+		newSchema.Fields = append(newSchema.Fields, firstOutput, secondOutput)
+		first := evolutionFunction(200, 102, 106)
+		first.Name = "first"
+		first.OutputFieldNames = []string{"shared_output"}
+		second := evolutionFunction(201, 102, 107)
+		second.Name = "second"
+		second.OutputFieldNames = []string{"shared_output"}
+		newSchema.Functions = []*schemapb.FunctionSchema{first, second}
+		setMaxFieldID(newSchema, 107)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "duplicate function output field")
 	})
 
 	t.Run("nullable function output", func(t *testing.T) {

@@ -321,6 +321,7 @@ func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema,
 	newFunctions := make(map[int64]*schemapb.FunctionSchema)
 	functionNames := make(map[string]struct{})
 	outputOwners := make(map[int64]string)
+	outputNameOwners := make(map[string]string)
 	for _, function := range newSchema.GetFunctions() {
 		if function == nil {
 			return merr.WrapErrParameterInvalidMsg("new schema contains a nil function")
@@ -368,7 +369,11 @@ func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema,
 			if owner, duplicate := outputOwners[id]; duplicate {
 				return merr.WrapErrParameterInvalidMsg("output field %q is produced by both %q and %q", field.GetName(), owner, function.GetName())
 			}
+			if _, duplicate := outputNameOwners[field.GetName()]; duplicate {
+				return merr.WrapErrParameterInvalidMsg("duplicate function output field: function %s, field %s", function.GetName(), field.GetName())
+			}
 			outputOwners[id] = function.GetName()
+			outputNameOwners[field.GetName()] = function.GetName()
 			outputFields = append(outputFields, field)
 		}
 		if err := validateEvolutionFunctionStaticInvariants(function, inputFields, outputFields); err != nil {
@@ -567,6 +572,9 @@ func validateMaxFieldIDEvolution(oldSchema, newSchema *schemapb.CollectionSchema
 	if err != nil {
 		return err
 	}
+	if proto.Equal(oldSchema, newSchema) {
+		return nil
+	}
 
 	oldFloor := maxEvolutionFieldID(oldFields)
 	if oldProperty.valid && oldProperty.value > oldFloor {
@@ -576,13 +584,11 @@ func validateMaxFieldIDEvolution(oldSchema, newSchema *schemapb.CollectionSchema
 	if newLiveMax := maxEvolutionFieldID(newFields); newLiveMax > expectedMax {
 		expectedMax = newLiveMax
 	}
-	if !proto.Equal(oldSchema, newSchema) || oldProperty.present {
-		if !newProperty.present || !newProperty.valid {
-			return merr.WrapErrParameterInvalidMsg("schema evolution must contain a valid %s property", common.MaxFieldIDKey)
-		}
-		if newProperty.value != expectedMax {
-			return merr.WrapErrParameterInvalidMsg("%s must be %d after this evolution, got %d", common.MaxFieldIDKey, expectedMax, newProperty.value)
-		}
+	if !newProperty.present || !newProperty.valid {
+		return merr.WrapErrParameterInvalidMsg("schema evolution must contain a valid %s property", common.MaxFieldIDKey)
+	}
+	if newProperty.value != expectedMax {
+		return merr.WrapErrParameterInvalidMsg("%s must be %d after this evolution, got %d", common.MaxFieldIDKey, expectedMax, newProperty.value)
 	}
 
 	for id := range newFields.allIDs {
