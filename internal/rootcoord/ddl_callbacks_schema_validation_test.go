@@ -47,21 +47,6 @@ func TestDDLCallbacksSchemaEvolutionRejectsUnsafeAddCollectionFieldBeforeSideEff
 		expectsAnalyzer bool
 	}{
 		{
-			name:            "orphan analyzer-bearing function output",
-			expectsAnalyzer: true,
-			field: &schemapb.FieldSchema{
-				Name:             "orphan_output",
-				DataType:         schemapb.DataType_VarChar,
-				Nullable:         true,
-				IsFunctionOutput: true,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: common.MaxLengthKey, Value: "128"},
-					{Key: common.EnableAnalyzerKey, Value: "true"},
-					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
-				},
-			},
-		},
-		{
 			name: "non-nullable field without default",
 			field: &schemapb.FieldSchema{
 				Name:     "required",

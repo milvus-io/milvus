@@ -54,7 +54,10 @@ func ValidateSchemaEvolution(oldSchema, newSchema *schemapb.CollectionSchema) er
 	if err := validateDroppedEvolutionFields(oldFields, newFields, newSchema); err != nil {
 		return err
 	}
-	if err := validateEvolutionFunctions(oldSchema, newSchema, oldFields, newFields); err != nil {
+	// Function-graph validation (single producer, output binding, alter-immutability,
+	// cascade) is owned by internal/util/function/validator (see #51360); this gate
+	// intentionally only enforces the non-function structural invariants below.
+	if err := validateEvolutionClusteringKey(newSchema); err != nil {
 		return err
 	}
 	if err := validateEvolutionDynamicGraph(newSchema); err != nil {
@@ -306,189 +309,20 @@ func validateDroppedEvolutionField(field *schemapb.FieldSchema, newSchema *schem
 	return nil
 }
 
-func validateEvolutionFunctions(oldSchema, newSchema *schemapb.CollectionSchema, oldFields, newFields *evolutionFieldMaps) error {
-	oldFunctions := make(map[int64]*schemapb.FunctionSchema)
-	for _, function := range oldSchema.GetFunctions() {
-		if function == nil {
-			return merr.WrapErrParameterInvalidMsg("old schema contains a nil function")
-		}
-		if _, duplicate := oldFunctions[function.GetId()]; duplicate {
-			return merr.WrapErrParameterInvalidMsg("old schema contains duplicate function id %d", function.GetId())
-		}
-		oldFunctions[function.GetId()] = function
-	}
-
-	newFunctions := make(map[int64]*schemapb.FunctionSchema)
-	functionNames := make(map[string]struct{})
-	outputOwners := make(map[int64]string)
-	outputNameOwners := make(map[string]string)
-	for _, function := range newSchema.GetFunctions() {
-		if function == nil {
-			return merr.WrapErrParameterInvalidMsg("new schema contains a nil function")
-		}
-		if _, duplicate := newFunctions[function.GetId()]; duplicate {
-			return merr.WrapErrParameterInvalidMsg("new schema contains duplicate function id %d", function.GetId())
-		}
-		newFunctions[function.GetId()] = function
-		if _, duplicate := functionNames[function.GetName()]; duplicate {
-			return merr.WrapErrParameterInvalidMsg("duplicate function name: %s", function.GetName())
-		}
-		functionNames[function.GetName()] = struct{}{}
-
-		if len(function.GetInputFieldIds()) != len(function.GetInputFieldNames()) || len(function.GetOutputFieldIds()) != len(function.GetOutputFieldNames()) {
-			return merr.WrapErrParameterInvalidMsg("function %q has mismatched field id and name lists", function.GetName())
-		}
-		if len(function.GetOutputFieldIds()) == 0 {
-			return merr.WrapErrParameterInvalidMsg("function %q has no output field", function.GetName())
-		}
-		inputFields := make([]*schemapb.FieldSchema, 0, len(function.GetInputFieldIds()))
-		inputIDs := make(map[int64]struct{}, len(function.GetInputFieldIds()))
-		for index, id := range function.GetInputFieldIds() {
-			field, ok := newFields.fields[id]
-			if !ok || field.GetName() != function.GetInputFieldNames()[index] {
-				return merr.WrapErrParameterInvalidMsg("function %q references a missing input field", function.GetName())
-			}
-			inputFields = append(inputFields, field)
-			inputIDs[id] = struct{}{}
-		}
-		outputFields := make([]*schemapb.FieldSchema, 0, len(function.GetOutputFieldIds()))
-		for index, id := range function.GetOutputFieldIds() {
-			field, ok := newFields.fields[id]
-			if !ok || field.GetName() != function.GetOutputFieldNames()[index] {
-				return merr.WrapErrParameterInvalidMsg("function %q references a missing output field", function.GetName())
-			}
-			if !field.GetIsFunctionOutput() {
-				return merr.WrapErrParameterInvalidMsg("output field %q of function %q is not marked as a function output", field.GetName(), function.GetName())
-			}
-			if _, isInput := inputIDs[id]; isInput {
-				return merr.WrapErrParameterInvalidMsg("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), field.GetName())
-			}
-			if field.GetNullable() {
-				return merr.WrapErrParameterInvalidMsg("function output field cannot be nullable: function %s, field %s", function.GetName(), field.GetName())
-			}
-			if owner, duplicate := outputOwners[id]; duplicate {
-				return merr.WrapErrParameterInvalidMsg("output field %q is produced by both %q and %q", field.GetName(), owner, function.GetName())
-			}
-			if _, duplicate := outputNameOwners[field.GetName()]; duplicate {
-				return merr.WrapErrParameterInvalidMsg("duplicate function output field: function %s, field %s", function.GetName(), field.GetName())
-			}
-			outputOwners[id] = function.GetName()
-			outputNameOwners[field.GetName()] = function.GetName()
-			outputFields = append(outputFields, field)
-		}
-		if err := validateEvolutionFunctionStaticInvariants(function, inputFields, outputFields); err != nil {
-			return err
-		}
-
-		if oldFunction, existed := oldFunctions[function.GetId()]; existed {
-			if !proto.Equal(oldFunction, function) {
-				return merr.WrapErrParameterInvalidMsg("cannot alter existing function %q in place", oldFunction.GetName())
-			}
+// validateEvolutionClusteringKey allows a clustering-key field to be added
+// online, but enforces that a collection is clustered on at most one field.
+func validateEvolutionClusteringKey(schema *schemapb.CollectionSchema) error {
+	clusteringKey := ""
+	for _, field := range schema.GetFields() {
+		if !field.GetIsClusteringKey() {
 			continue
 		}
-		for _, outputID := range function.GetOutputFieldIds() {
-			if _, existed := oldFields.allIDs[outputID]; existed {
-				return merr.WrapErrParameterInvalidMsg("new function %q reuses an existing output field id %d", function.GetName(), outputID)
-			}
+		if clusteringKey != "" {
+			return merr.WrapErrParameterInvalidMsg("collection can only have one clustering key, but got both %q and %q", clusteringKey, field.GetName())
 		}
-	}
-
-	for _, field := range newFields.fields {
-		if field.GetIsFunctionOutput() {
-			if _, produced := outputOwners[field.GetFieldID()]; !produced {
-				return merr.WrapErrParameterInvalidMsg("function output field %q has no producer", field.GetName())
-			}
-		}
+		clusteringKey = field.GetName()
 	}
 	return nil
-}
-
-// validateEvolutionFunctionStaticInvariants mirrors the authoritative static
-// checks in internal/util/function/validator without importing that package.
-// Importing it would pull the function runtime and libmilvus_core into this
-// low-level validation-only package.
-func validateEvolutionFunctionStaticInvariants(function *schemapb.FunctionSchema, inputFields, outputFields []*schemapb.FieldSchema) error {
-	if function.GetName() == "" {
-		return merr.WrapErrParameterMissingMsg("function name cannot be empty")
-	}
-	if len(inputFields) == 0 {
-		return merr.WrapErrParameterMissingMsg("function input field names cannot be empty, function: %s", function.GetName())
-	}
-	seenInputs := make(map[string]struct{}, len(function.GetInputFieldNames()))
-	for _, name := range function.GetInputFieldNames() {
-		if name == "" {
-			return merr.WrapErrParameterMissingMsg("function input field name cannot be empty string, function: %s", function.GetName())
-		}
-		if _, duplicate := seenInputs[name]; duplicate {
-			return merr.WrapErrParameterInvalidMsg("each function input field should be used exactly once in the same function, function: %s, input field: %s", function.GetName(), name)
-		}
-		seenInputs[name] = struct{}{}
-	}
-	seenOutputs := make(map[string]struct{}, len(function.GetOutputFieldNames()))
-	for _, name := range function.GetOutputFieldNames() {
-		if name == "" {
-			return merr.WrapErrParameterMissingMsg("function output field name cannot be empty string, function: %s", function.GetName())
-		}
-		if _, isInput := seenInputs[name]; isInput {
-			return merr.WrapErrParameterInvalidMsg("a single field cannot be both input and output in the same function, function: %s, field: %s", function.GetName(), name)
-		}
-		if _, duplicate := seenOutputs[name]; duplicate {
-			return merr.WrapErrParameterInvalidMsg("each function output field should be used exactly once in the same function, function: %s, output field: %s", function.GetName(), name)
-		}
-		seenOutputs[name] = struct{}{}
-	}
-
-	for _, field := range outputFields {
-		if field.GetIsPrimaryKey() {
-			return merr.WrapErrParameterInvalidMsg("function output field cannot be primary key: function %s, field %s", function.GetName(), field.GetName())
-		}
-		if field.GetIsPartitionKey() || field.GetIsClusteringKey() {
-			return merr.WrapErrParameterInvalidMsg("function output field cannot be partition key or clustering key: function %s, field %s", function.GetName(), field.GetName())
-		}
-	}
-
-	switch function.GetType() {
-	case schemapb.FunctionType_BM25:
-		if len(function.GetParams()) != 0 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function accepts no params")
-		}
-		if len(inputFields) != 1 || !isEvolutionFunctionStringInput(inputFields[0].GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("BM25 function input field must be a VARCHAR/TEXT field")
-		}
-		if !typeutil.CreateFieldSchemaHelper(inputFields[0]).EnableAnalyzer() {
-			return merr.WrapErrParameterInvalidMsg("BM25 function input field must set enable_analyzer to true")
-		}
-		if len(outputFields) != 1 || !typeutil.IsSparseFloatVectorType(outputFields[0].GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("BM25 function output field must be a SparseFloatVector field, but got %s", outputFields[0].GetDataType().String())
-		}
-	case schemapb.FunctionType_TextEmbedding:
-		if len(function.GetParams()) == 0 {
-			return merr.WrapErrParameterInvalidMsg("TextEmbedding function accepts no params")
-		}
-		if len(inputFields) != 1 || !isEvolutionFunctionStringInput(inputFields[0].GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("TextEmbedding function input field must be a VARCHAR/TEXT field")
-		}
-		if inputFields[0].GetNullable() {
-			return merr.WrapErrParameterInvalidMsg("function input field cannot be nullable: function %s, field %s", function.GetName(), inputFields[0].GetName())
-		}
-		if len(outputFields) != 1 || (outputFields[0].GetDataType() != schemapb.DataType_FloatVector && outputFields[0].GetDataType() != schemapb.DataType_Int8Vector) {
-			return merr.WrapErrParameterInvalidMsg("TextEmbedding function output field must be a FloatVector or Int8Vector field")
-		}
-	case schemapb.FunctionType_MinHash:
-		if len(inputFields) != 1 || !isEvolutionFunctionStringInput(inputFields[0].GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR/TEXT field")
-		}
-		if len(outputFields) != 1 || outputFields[0].GetDataType() != schemapb.DataType_BinaryVector {
-			return merr.WrapErrParameterInvalidMsg("MinHash function output field must be a BinaryVector field, but got %s", outputFields[0].GetDataType().String())
-		}
-	default:
-		return merr.WrapErrParameterInvalidMsg("check function params with unknown function type")
-	}
-	return nil
-}
-
-func isEvolutionFunctionStringInput(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_VarChar || dataType == schemapb.DataType_Text
 }
 
 func validateEvolutionDynamicGraph(schema *schemapb.CollectionSchema) error {

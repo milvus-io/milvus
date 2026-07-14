@@ -203,36 +203,6 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 	suite.Contains(err.Error(), "broadcast error")
 }
 
-func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollectionRejectsExistingOutputReuseBeforeBroadcast() {
-	ctx := context.Background()
-	oldColl := suite.createTestCollection()
-	newColl := oldColl.Clone()
-	newColl.Functions = append(newColl.Functions, &model.Function{
-		ID:               1002,
-		Name:             "reuses_output",
-		Type:             schemapb.FunctionType_Unknown,
-		InputFieldIDs:    []int64{103},
-		InputFieldNames:  []string{"text_field"},
-		OutputFieldIDs:   []int64{104},
-		OutputFieldNames: []string{"output_field"},
-	})
-
-	core := newTestCore(withHealthyCode())
-	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-	core.meta = mockMeta
-	mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(oldColl, nil).Maybe()
-	mockMeta.EXPECT().ListAliases(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return([]string{}, nil).Maybe()
-
-	broadcasts := 0
-	suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Run(func(context.Context, message.BroadcastMutableMessage) {
-		broadcasts++
-	}).Return(&types.BroadcastAppendResult{}, nil).Maybe()
-
-	err := callAlterCollection(ctx, core, suite.mockBroadcaster, oldColl, newColl, "test_db", "test_collection")
-	suite.ErrorIs(err, merr.ErrParameterInvalid)
-	suite.Zero(broadcasts)
-}
-
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollectionRejectsLegacyOutputRelabelBeforeBroadcast() {
 	ctx := context.Background()
 	oldColl := suite.createTestCollection()

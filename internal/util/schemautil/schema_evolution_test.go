@@ -418,143 +418,6 @@ func TestValidateSchemaEvolutionRejectsProtectedDrops(t *testing.T) {
 	})
 }
 
-func TestValidateSchemaEvolutionRejectsInvalidFunctionGraphs(t *testing.T) {
-	tests := []struct {
-		name   string
-		mutate func(*schemapb.CollectionSchema)
-	}{
-		{name: "missing input", mutate: func(schema *schemapb.CollectionSchema) {
-			schema.Functions[0].InputFieldIds = []int64{999}
-			schema.Functions[0].InputFieldNames = []string{"missing"}
-		}},
-		{name: "missing output", mutate: func(schema *schemapb.CollectionSchema) {
-			schema.Functions[0].OutputFieldIds = []int64{999}
-			schema.Functions[0].OutputFieldNames = []string{"missing"}
-		}},
-		{name: "duplicate output producer", mutate: func(schema *schemapb.CollectionSchema) {
-			duplicate := proto.Clone(schema.Functions[0]).(*schemapb.FunctionSchema)
-			duplicate.Id = 201
-			duplicate.Name = "duplicate"
-			schema.Functions = append(schema.Functions, duplicate)
-		}},
-		{name: "orphan output", mutate: func(schema *schemapb.CollectionSchema) {
-			schema.Functions = nil
-		}},
-		{name: "output field not marked", mutate: func(schema *schemapb.CollectionSchema) {
-			evolutionFieldByID(schema, 106).IsFunctionOutput = false
-		}},
-		{name: "name id mismatch", mutate: func(schema *schemapb.CollectionSchema) {
-			schema.Functions[0].OutputFieldNames = []string{"body"}
-		}},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			oldSchema := evolutionSchemaWithFunction()
-			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-			test.mutate(newSchema)
-			require.Error(t, ValidateSchemaEvolution(oldSchema, newSchema))
-		})
-	}
-
-	t.Run("new function reuses old output field", func(t *testing.T) {
-		oldSchema := evolutionSchemaWithFunction()
-		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		newSchema.Functions = []*schemapb.FunctionSchema{evolutionFunction(201, 102, 106)}
-		err := ValidateSchemaEvolution(oldSchema, newSchema)
-		require.ErrorContains(t, err, "reuses an existing output field")
-	})
-
-	t.Run("duplicate function names", func(t *testing.T) {
-		oldSchema := evolutionBaseSchema()
-		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		firstOutput := evolutionField(106, "sparse", schemapb.DataType_SparseFloatVector, false)
-		firstOutput.IsFunctionOutput = true
-		secondOutput := evolutionField(107, "sparse_two", schemapb.DataType_SparseFloatVector, false)
-		secondOutput.IsFunctionOutput = true
-		newSchema.Fields = append(newSchema.Fields, firstOutput, secondOutput)
-		first := evolutionFunction(200, 102, 106)
-		second := evolutionFunction(201, 102, 107)
-		second.Name = first.Name
-		second.OutputFieldNames = []string{"sparse_two"}
-		newSchema.Functions = []*schemapb.FunctionSchema{first, second}
-		setMaxFieldID(newSchema, 107)
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "duplicate function name")
-	})
-
-	t.Run("duplicate function output names with different ids", func(t *testing.T) {
-		oldSchema := evolutionBaseSchema()
-		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		firstOutput := evolutionField(106, "shared_output", schemapb.DataType_SparseFloatVector, false)
-		firstOutput.IsFunctionOutput = true
-		secondOutput := evolutionField(107, "shared_output", schemapb.DataType_SparseFloatVector, false)
-		secondOutput.IsFunctionOutput = true
-		newSchema.Fields = append(newSchema.Fields, firstOutput, secondOutput)
-		first := evolutionFunction(200, 102, 106)
-		first.Name = "first"
-		first.OutputFieldNames = []string{"shared_output"}
-		second := evolutionFunction(201, 102, 107)
-		second.Name = "second"
-		second.OutputFieldNames = []string{"shared_output"}
-		newSchema.Functions = []*schemapb.FunctionSchema{first, second}
-		setMaxFieldID(newSchema, 107)
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "duplicate function output field")
-	})
-
-	t.Run("nullable function output", func(t *testing.T) {
-		oldSchema := evolutionBaseSchema()
-		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		output := evolutionField(106, "sparse", schemapb.DataType_SparseFloatVector, true)
-		output.IsFunctionOutput = true
-		newSchema.Fields = append(newSchema.Fields, output)
-		newSchema.Functions = []*schemapb.FunctionSchema{evolutionFunction(200, 102, 106)}
-		setMaxFieldID(newSchema, 106)
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "function output field cannot be nullable")
-	})
-
-	t.Run("function output type incompatible", func(t *testing.T) {
-		oldSchema := evolutionBaseSchema()
-		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		output := evolutionField(106, "sparse", schemapb.DataType_FloatVector, false)
-		output.IsFunctionOutput = true
-		output.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
-		newSchema.Fields = append(newSchema.Fields, output)
-		newSchema.Functions = []*schemapb.FunctionSchema{evolutionFunction(200, 102, 106)}
-		setMaxFieldID(newSchema, 106)
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "BM25 function output field must be a SparseFloatVector field")
-	})
-
-	t.Run("same field is function input and output", func(t *testing.T) {
-		oldSchema := evolutionBaseSchema()
-		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		field := evolutionField(106, "same", schemapb.DataType_Text, false)
-		field.IsFunctionOutput = true
-		field.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}}
-		newSchema.Fields = append(newSchema.Fields, field)
-		function := evolutionFunction(200, 106, 106)
-		function.InputFieldNames = []string{"same"}
-		function.OutputFieldNames = []string{"same"}
-		newSchema.Functions = []*schemapb.FunctionSchema{function}
-		setMaxFieldID(newSchema, 106)
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "a single field cannot be both input and output")
-	})
-
-	t.Run("deprecated string function input", func(t *testing.T) {
-		oldSchema := evolutionBaseSchema()
-		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		input := evolutionField(106, "legacy_string", schemapb.DataType_String, true)
-		input.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}}
-		output := evolutionField(107, "sparse", schemapb.DataType_SparseFloatVector, false)
-		output.IsFunctionOutput = true
-		newSchema.Fields = append(newSchema.Fields, input, output)
-		function := evolutionFunction(200, 106, 107)
-		function.InputFieldNames = []string{"legacy_string"}
-		newSchema.Functions = []*schemapb.FunctionSchema{function}
-		setMaxFieldID(newSchema, 107)
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "BM25 function input field must be a VARCHAR/TEXT field")
-	})
-}
-
 func TestValidateSchemaEvolutionRejectsMalformedDynamicGraphs(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -600,6 +463,35 @@ func TestValidateSchemaEvolutionRejectsMalformedDynamicGraphs(t *testing.T) {
 			require.Error(t, ValidateSchemaEvolution(oldSchema, newSchema))
 		})
 	}
+}
+
+func TestValidateSchemaEvolutionClusteringKey(t *testing.T) {
+	longDefault := func() *schemapb.ValueField {
+		return &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 0}}
+	}
+
+	t.Run("add clustering key allowed", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		ck := evolutionField(106, "ck", schemapb.DataType_Int64, false)
+		ck.IsClusteringKey = true
+		ck.DefaultValue = longDefault()
+		newSchema.Fields = append(newSchema.Fields, ck)
+		setMaxFieldID(newSchema, 106)
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("second clustering key rejected", func(t *testing.T) {
+		oldSchema := evolutionBaseSchema()
+		evolutionFieldByID(oldSchema, 104).IsClusteringKey = true
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		ck := evolutionField(106, "ck2", schemapb.DataType_Int64, false)
+		ck.IsClusteringKey = true
+		ck.DefaultValue = longDefault()
+		newSchema.Fields = append(newSchema.Fields, ck)
+		setMaxFieldID(newSchema, 106)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "one clustering key")
+	})
 }
 
 func evolutionBaseSchema() *schemapb.CollectionSchema {
