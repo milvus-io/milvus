@@ -157,13 +157,19 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		DbName:         request.DbName,
 	}
 
+	// Resolve identifiers on local copies instead of mutating the request: the
+	// access log interceptor and the success metric labels read the request
+	// after the handler returns, and must see what the client actually sent.
+	collectionName := request.CollectionName
+	collectionID := request.CollectionID
+
 	wrapErrorStatus := func(err error) *commonpb.Status {
 		status := &commonpb.Status{}
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			// nolint
 			status.ErrorCode = commonpb.ErrorCode_CollectionNotExists
 			// nolint
-			status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", request.DbName, request.CollectionName)
+			status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", request.DbName, collectionName)
 			status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
 		} else {
 			status = merr.Status(err)
@@ -171,31 +177,42 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		return status
 	}
 
-	if request.CollectionName == "" && request.CollectionID > 0 {
-		collName, err := globalMetaCache.GetCollectionName(ctx, request.DbName, request.CollectionID)
+	resolvedNameByID := collectionName == "" && collectionID > 0
+	if resolvedNameByID {
+		collName, err := globalMetaCache.GetCollectionName(ctx, request.DbName, collectionID)
 		if err != nil {
 			resp.Status = wrapErrorStatus(err)
 			return resp, nil
 		}
-		request.CollectionName = collName
+		collectionName = collName
 	}
 
 	// validate collection name, ref describeCollectionTask.PreExecute
-	if err = validateCollectionName(request.CollectionName); err != nil {
+	if err = validateCollectionName(collectionName); err != nil {
 		resp.Status = wrapErrorStatus(err)
 		return resp, nil
 	}
 
-	request.CollectionID, err = globalMetaCache.GetCollectionID(ctx, request.DbName, request.CollectionName)
+	// Resolve the id from the name only when the caller did not provide one.
+	// For id-only requests the name was just derived from the id; resolving the
+	// id back from that name may hit a same-name collection of another database
+	// (id-only lookups are cached under the request db name, which is empty
+	// here) and would silently describe the wrong collection.
+	if !resolvedNameByID {
+		collectionID, err = globalMetaCache.GetCollectionID(ctx, request.DbName, collectionName)
+		if err != nil {
+			resp.Status = wrapErrorStatus(err)
+			return resp, nil
+		}
+	}
+
+	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, collectionName, collectionID)
 	if err != nil {
 		resp.Status = wrapErrorStatus(err)
 		return resp, nil
 	}
-
-	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, request.CollectionID)
-	if err != nil {
-		resp.Status = wrapErrorStatus(err)
-		return resp, nil
+	if resp.CollectionName == "" {
+		resp.CollectionName = c.schema.Name
 	}
 
 	// skip dynamic fields, see describeCollectionTask.Execute

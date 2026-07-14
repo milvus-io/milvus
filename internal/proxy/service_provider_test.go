@@ -78,6 +78,59 @@ func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBa
 	assert.False(t, resp.GetSchema().GetDoPhysicalBackfill())
 }
 
+func TestCachedProxyServiceProvider_DescribeCollection_ByIDFillsNameAndUsesRequestID(t *testing.T) {
+	ctx := context.Background()
+
+	origCache := globalMetaCache
+	defer func() { globalMetaCache = origCache }()
+
+	dbName := "db1"
+	dbID := int64(3)
+	collectionName := "coll1"
+	collectionID := int64(449574)
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      common.StartOfUserFieldID,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	}
+
+	// Query by collection id only: no collection name, no db name (e.g. the HTTP
+	// management API). The provider must fill the top-level collection_name from
+	// the cache instead of echoing the empty request.CollectionName, and must
+	// keep the caller-provided id: GetCollectionID is intentionally not mocked,
+	// so resolving the id back from the derived name would panic the test.
+	mockCache := &MockCache{}
+	mockCache.EXPECT().GetCollectionName(mock.Anything, "", collectionID).Return(collectionName, nil)
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", collectionName, collectionID).Return(&collectionInfo{
+		collID:    collectionID,
+		dbName:    dbName,
+		dbID:      dbID,
+		schema:    newSchemaInfo(schema),
+		shardsNum: common.DefaultShardsNum,
+	}, nil)
+	globalMetaCache = mockCache
+
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	request := &milvuspb.DescribeCollectionRequest{
+		CollectionID: collectionID,
+	}
+	resp, err := provider.DescribeCollection(ctx, request)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, collectionName, resp.GetCollectionName())
+	assert.Equal(t, collectionID, resp.GetCollectionID())
+	assert.Equal(t, dbName, resp.GetDbName())
+	assert.Equal(t, dbID, resp.GetDbId())
+	// the handler must not rewrite the request in place: access logs and metric
+	// labels serialize it after the call and must see what the client sent
+	assert.Empty(t, request.GetCollectionName())
+	assert.Equal(t, collectionID, request.GetCollectionID())
+}
+
 func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *testing.T) {
 	ctx := context.Background()
 
@@ -162,7 +215,6 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName(t
 
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionName(mock.Anything, "", collectionID).Return("coll1", nil)
-	mockCache.EXPECT().GetCollectionID(mock.Anything, "", "coll1").Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "coll1", collectionID).Return(&collectionInfo{
 		collID: collectionID,
 		// resolved by the coordinator and carried in the cache entry

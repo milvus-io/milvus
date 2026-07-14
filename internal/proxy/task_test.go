@@ -2537,6 +2537,47 @@ func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
 }
 
+func TestDescribeCollectionTask_FillsNameFromResultWhenQueriedByID(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+
+	const (
+		collectionName = "collection_from_result"
+		collectionID   = int64(449574)
+		dbName         = "db_from_result"
+		dbID           = int64(3)
+	)
+	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:         merr.Success(),
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			DbName:         dbName,
+			DbId:           dbID,
+			Schema: &schemapb.CollectionSchema{
+				Name: collectionName,
+			},
+		}, nil
+	})
+
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			CollectionID: collectionID,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.Equal(t, collectionName, task.result.GetCollectionName())
+	assert.Equal(t, collectionID, task.result.GetCollectionID())
+	assert.Equal(t, dbName, task.result.GetDbName())
+	assert.Equal(t, dbID, task.result.GetDbId())
+}
+
 // Security regression: DescribeCollection must redact credentials embedded in
 // ExternalSpec.extfs (access_key_id / access_key_value / ssl_ca_cert) before
 // returning to the client. Any caller with Describe privilege would otherwise

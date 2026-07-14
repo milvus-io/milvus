@@ -747,9 +747,9 @@ func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
 }
 
 func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
-	// Level 1: Found in collection cache — but the key might be an alias because
-	// DescribeCollection accepts aliases and update() caches under the caller's name.
-	// Compare with the schema's real collection name to detect this.
+	// Level 1: Found in collection cache. update() keys entries by the real
+	// collection name, but getCollection may have resolved nameOrAlias through
+	// the alias map, so compare with the schema's real name to return it.
 	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
 		if collInfo.schema != nil {
 			if realName := collInfo.schema.GetName(); realName != "" && realName != nameOrAlias {
