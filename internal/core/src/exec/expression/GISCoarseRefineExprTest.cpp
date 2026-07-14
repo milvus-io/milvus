@@ -25,7 +25,9 @@
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/GeometryCache.h"
+#include "common/IndexMeta.h"
 #include "exec/QueryContext.h"
+#include "index/Meta.h"
 #include "exec/expression/Expr.h"
 #include "plan/PlanNode.h"
 #include "common/Schema.h"
@@ -250,6 +252,57 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionGrowingSegment) {
     ScopedSchemaHandle handle(*schema);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);
+}
+
+// Equivalence on a GROWING segment that DOES carry a geometry R-Tree index.
+// FieldIndexing creates the growing geometry index whenever the collection
+// index meta has the field, and HasIndex() flips true once ingested rows are
+// synced into it -- so "growing never has a geometry index" does NOT hold.
+// This is the production shape for freshly ingested geo data and the only
+// shape where the R-Tree Query() bitmap (sized by rows appended to the index)
+// can be larger than active_count_ (MVCC-visible rows): RunRTreeQuery must
+// normalize the index-sized bitmap into active_count_ space instead of
+// feeding it to a size-checked bitwise combine (a bare assert() compiled out
+// under NDEBUG). Runs equivalence at full visibility AND with
+// active_count < index rows to pin the normalization down.
+TEST(GISCoarseRefineExprTest, EquivalenceFusionGrowingSegmentWithRTreeIndex) {
+    auto schema = MakeGISSchema();
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+
+    auto geo_fid = schema->get_field_id(FieldName("geo"));
+    std::map<FieldId, FieldIndexMeta> field_metas;
+    field_metas.emplace(geo_fid,
+                        FieldIndexMeta(geo_fid,
+                                       {{knowhere::meta::INDEX_TYPE,
+                                         milvus::index::RTREE_INDEX_TYPE}},
+                                       {}));
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        /*max_index_row_cnt=*/N * 2, std::move(field_metas));
+
+    // The growing load path only appends into the indexing record when the
+    // interim segment index is enabled; use a local copy so the global default
+    // config is untouched.
+    SegcoreConfig config = SegcoreConfig::default_config();
+    config.set_enable_interim_segment_index(true);
+    auto seg =
+        CreateGrowingWithFieldDataLoaded(schema, index_meta, config, dataset);
+    ScopedSchemaHandle handle(*schema);
+
+    // Sanity: the growing segment must actually report a synced geometry
+    // index, otherwise this degenerates into the no-index growing test above.
+    auto geo_field_id = schema->get_field_id(FieldName("geo"));
+    ASSERT_TRUE(seg->HasIndex(geo_field_id))
+        << "growing segment did not build/sync the geometry R-Tree index";
+
+    // Full visibility: active_count == rows in the index.
+    AssertFusionEquivalence(schema, handle, seg.get(), N);
+
+    // Partial visibility: active_count < rows in the index -- the concurrent
+    // ingestion shape (the insert path appends to the index before acking
+    // rows; a query ts below the newest inserts lowers active_count too).
+    // RunRTreeQuery must slice its index-sized bitmap down to active_count_.
+    AssertFusionEquivalence(schema, handle, seg.get(), N - 137);
 }
 
 // Equivalence with a small expr batch size, so a single N=1000 segment is
