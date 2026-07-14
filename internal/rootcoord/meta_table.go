@@ -1592,8 +1592,8 @@ func (mt *MetaTable) CheckIfAliasAlterable(ctx context.Context, dbName string, a
 }
 
 func (mt *MetaTable) DescribeAlias(ctx context.Context, dbName string, alias string, ts Timestamp) (string, error) {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
 
 	if dbName == "" {
 		mlog.Warn(ctx, "db name is empty", mlog.String("alias", alias))

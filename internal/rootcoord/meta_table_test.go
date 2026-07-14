@@ -20,6 +20,7 @@ import (
 	"context"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -50,6 +51,46 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestMetaTable_DescribeAliasAllowsConcurrentReaders(t *testing.T) {
+	const (
+		collectionID   = int64(100)
+		collectionName = "test_metatable_describe_alias"
+		aliasName      = "a_alias"
+	)
+	meta := &MetaTable{
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collectionID: {
+				CollectionID: collectionID,
+				Name:         collectionName,
+			},
+		},
+		aliases: newNameDb(),
+	}
+	meta.aliases.insert(util.DefaultDBName, aliasName, collectionID)
+
+	type result struct {
+		collectionName string
+		err            error
+	}
+	resultCh := make(chan result, 1)
+	meta.ddLock.RLock()
+	go func() {
+		collectionName, err := meta.DescribeAlias(context.Background(), util.DefaultDBName, aliasName, 0)
+		resultCh <- result{collectionName: collectionName, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		meta.ddLock.RUnlock()
+		require.NoError(t, result.err)
+		assert.Equal(t, collectionName, result.collectionName)
+	case <-time.After(3 * time.Second):
+		meta.ddLock.RUnlock()
+		<-resultCh
+		t.Fatal("DescribeAlias blocked behind another reader")
+	}
+}
 
 func generateMetaTable(_ *testing.T) *MetaTable {
 	kv, _ := kvfactory.GetEtcdAndPath()

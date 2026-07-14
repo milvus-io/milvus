@@ -789,45 +789,6 @@ LoadDeletedRecord(CSegmentInterface c_segment,
 }
 
 CStatus
-UpdateSealedSegmentIndex(CSegmentInterface c_segment,
-                         CLoadIndexInfo c_load_index_info) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment =
-            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        auto load_index_info =
-            static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
-        segment->LoadIndex(*load_index_info);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-UpdateFieldRawDataSize(CSegmentInterface c_segment,
-                       int64_t field_id,
-                       int64_t num_rows,
-                       int64_t field_data_size) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        AssertInfo(segment_interface != nullptr, "segment conversion failed");
-        segment_interface->set_field_avg_size(
-            milvus::FieldId(field_id), num_rows, field_data_size);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
 DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
     SCOPE_CGO_CALL_METRIC();
 

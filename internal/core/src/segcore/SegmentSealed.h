@@ -59,112 +59,6 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
-    virtual std::vector<PinWrapper<const index::IndexBase*>>
-    PinJsonIndex(milvus::OpContext* op_ctx,
-                 FieldId field_id,
-                 const std::string& path,
-                 DataType data_type,
-                 bool any_type,
-                 bool is_array) const override {
-        int path_len_diff = std::numeric_limits<int>::max();
-        index::CacheIndexBasePtr best_match = nullptr;
-        std::string_view path_view = path;
-        auto res = json_indices.withRLock(
-            [&](auto vec) -> PinWrapper<const index::IndexBase*> {
-                for (const auto& index : vec) {
-                    if (index.field_id != field_id) {
-                        continue;
-                    }
-                    switch (index.cast_type.data_type()) {
-                        case JsonCastType::DataType::JSON:
-                            if (path_view.length() <
-                                index.nested_path.length()) {
-                                continue;
-                            }
-                            if (path_view.substr(0,
-                                                 index.nested_path.length()) ==
-                                index.nested_path) {
-                                int current_len_diff =
-                                    path_view.length() -
-                                    index.nested_path.length();
-                                if (current_len_diff < path_len_diff) {
-                                    path_len_diff = current_len_diff;
-                                    best_match = index.index;
-                                }
-                                if (path_len_diff == 0) {
-                                    break;
-                                }
-                            }
-                            break;
-                        default:
-                            if (index.nested_path != path) {
-                                continue;
-                            }
-                            if (any_type) {
-                                best_match = index.index;
-                                break;
-                            }
-                            if (milvus::index::json::IsDataTypeSupported(
-                                    index.cast_type, data_type, is_array)) {
-                                best_match = index.index;
-                                break;
-                            }
-                    }
-                }
-                if (best_match == nullptr) {
-                    return nullptr;
-                }
-                auto ca = SemiInlineGet(best_match->PinCells(op_ctx, {0}));
-                auto index = ca->get_cell_of(0);
-                return PinWrapper<const index::IndexBase*>(std::move(ca),
-                                                           index);
-            });
-        if (res.get() == nullptr) {
-            return {};
-        }
-        return {res};
-    }
-
-    // Mirror of the JsonFlatIndex prefix-matching loop in PinJsonIndex(),
-    // but only reads the nested_path metadata and returns it -- does not
-    // touch the CacheSlot or pin any cell. Callers can use this to decide
-    // whether a JSON query is compatible with the indexed path before
-    // committing to the ScalarIndex exec path (and paying for a pin).
-    std::string
-    GetJsonFlatIndexNestedPath(FieldId field_id,
-                               std::string_view query_path) const override {
-        return json_indices.withRLock([&](auto& vec) -> std::string {
-            std::string best_path;
-            int path_len_diff = std::numeric_limits<int>::max();
-            for (const auto& index : vec) {
-                if (index.field_id != field_id) {
-                    continue;
-                }
-                if (index.cast_type.data_type() !=
-                    JsonCastType::DataType::JSON) {
-                    continue;
-                }
-                if (query_path.length() < index.nested_path.length()) {
-                    continue;
-                }
-                if (query_path.substr(0, index.nested_path.length()) !=
-                    index.nested_path) {
-                    continue;
-                }
-                int current_len_diff =
-                    query_path.length() - index.nested_path.length();
-                if (current_len_diff < path_len_diff) {
-                    path_len_diff = current_len_diff;
-                    best_path = index.nested_path;
-                }
-                if (path_len_diff == 0) {
-                    break;
-                }
-            }
-            return best_path;
-        });
-    }
-
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(milvus::OpContext* op_ctx,
                   FieldId field_id) const override = 0;
@@ -178,16 +72,6 @@ class SegmentSealed : public SegmentInternalInterface {
     type() const override {
         return SegmentType::Sealed;
     }
-
- protected:
-    struct JsonIndex {
-        FieldId field_id;
-        std::string nested_path;
-        JsonCastType cast_type{JsonCastType::UNKNOWN};
-        index::CacheIndexBasePtr index;
-    };
-
-    folly::Synchronized<std::vector<JsonIndex>> json_indices;
 };
 
 using SegmentSealedSPtr = std::shared_ptr<SegmentSealed>;
