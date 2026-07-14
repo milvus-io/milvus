@@ -291,6 +291,17 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
             new_index_ids.insert(index_id);
         }
     }
+    std::unordered_map<FieldId, std::unordered_set<std::string>>
+        new_json_index_paths;
+    for (const auto& [field_id, index_paths] :
+         new_info.json_index_path_cache_) {
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
+        for (const auto& index_path : index_paths) {
+            new_json_index_paths[field_id].insert(index_path.second);
+        }
+    }
     // Find indexes to load/replace: indexes in new_info but not in current
     // Only consider fields that exist in the current schema (skip dropped fields)
     for (const auto& [field_id, load_index_infos] :
@@ -321,6 +332,18 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
         for (auto index_id : index_ids) {
             if (!new_info.HasFieldInSchema(field_id) ||
                 new_index_ids.find(index_id) == new_index_ids.end()) {
+                auto field_paths = json_index_path_cache_.find(field_id);
+                if (field_paths != json_index_path_cache_.end()) {
+                    auto path = field_paths->second.find(index_id);
+                    if (path != field_paths->second.end()) {
+                        if (new_json_index_paths[field_id].find(path->second) ==
+                            new_json_index_paths[field_id].end()) {
+                            diff.json_indexes_to_drop[field_id].insert(
+                                path->second);
+                        }
+                        continue;
+                    }
+                }
                 diff.indexes_to_drop.insert(field_id);
             }
         }

@@ -1450,8 +1450,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // load vec index
-    status = UpdateSealedSegmentIndex(segment.get(), &load_index_info);
-    ASSERT_EQ(status.error_code, Success);
+    segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(segment.get(),
