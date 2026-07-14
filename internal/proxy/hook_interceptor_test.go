@@ -5,10 +5,13 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -136,4 +139,23 @@ func TestUpdateProxyFunctionCallMetric(t *testing.T) {
 		updateProxyFunctionCallMetric("Flush", merr.WrapErrParameterInvalidMsg("mock input error"))
 		updateProxyFunctionCallMetric("", nil)
 	})
+}
+
+func TestDropCollectionHookDoesNotRecordProxyFunctionCall(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "failure", err: errors.New("mock hook error")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics.ProxyFunctionCall.Reset()
+			t.Cleanup(metrics.ProxyFunctionCall.Reset)
+
+			updateProxyFunctionCallMetric(milvuspb.MilvusService_DropCollection_FullMethodName, tc.err)
+
+			assert.Equal(t, 0, testutil.CollectAndCount(metrics.ProxyFunctionCall))
+		})
+	}
 }
