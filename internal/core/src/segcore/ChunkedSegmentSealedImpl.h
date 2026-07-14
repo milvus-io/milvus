@@ -1439,9 +1439,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                            FieldId field_id,
                            std::string_view nested_path);
 
+    static std::vector<index::CacheIndexBasePtr>
+    EraseJsonIndexesAtPath(RuntimeResourceState& runtime,
+                           FieldId field_id,
+                           std::string_view nested_path);
+
     static bool
     RuntimeJsonNgramIndexReady(const RuntimeResourceState& runtime,
                                FieldId field_id);
+
+    static void
+    SyncJsonNgramIndexState(PublishedSegmentState& state,
+                            const RuntimeResourceState& runtime,
+                            FieldId field_id);
 
     std::shared_ptr<PublishedSegmentState>
     BuildNextPublishedState(
