@@ -15,10 +15,13 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -31,9 +34,11 @@
 #include "common/Types.h"
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnGroup.h"
+#include "milvus-storage/common/extend_status.h"
 #include "pb/common.pb.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
@@ -104,6 +109,92 @@ class ColumnEstimateUnavailableChunkReader
     bool total_estimate_available_;
 };
 
+namespace {
+
+class CountingChunkReader : public milvus_storage::api::ChunkReader {
+ public:
+    explicit CountingChunkReader(
+        std::shared_ptr<milvus_storage::api::ChunkReader> inner)
+        : inner_(std::move(inner)) {
+    }
+
+    size_t
+    total_number_of_chunks() const override {
+        return inner_->total_number_of_chunks();
+    }
+
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>& row_indices) override {
+        return inner_->get_chunk_indices(row_indices);
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t chunk_index) override {
+        return inner_->get_chunk(chunk_index);
+    }
+
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>& chunk_indices,
+               size_t parallelism) override {
+        sync_calls_.fetch_add(1);
+        return inner_->get_chunks(chunk_indices, parallelism);
+    }
+
+    folly::SemiFuture<
+        arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>
+    get_chunks_async(const std::vector<int64_t>& chunk_indices,
+                     size_t parallelism) override {
+        async_calls_.fetch_add(1);
+        return inner_->get_chunks_async(chunk_indices, parallelism);
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_estimated_size() override {
+        return inner_->get_chunk_estimated_size();
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_column_estimated_size(const std::string& field_name) override {
+        return inner_->get_chunk_column_estimated_size(field_name);
+    }
+
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        return inner_->get_chunk_column_estimated_size();
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        if (!chunk_rows_status_.ok()) {
+            return chunk_rows_status_;
+        }
+        return inner_->get_chunk_rows();
+    }
+
+    size_t
+    SyncCalls() const {
+        return sync_calls_.load();
+    }
+
+    size_t
+    AsyncCalls() const {
+        return async_calls_.load();
+    }
+
+    void
+    SetChunkRowsStatus(arrow::Status status) {
+        chunk_rows_status_ = std::move(status);
+    }
+
+ private:
+    std::shared_ptr<milvus_storage::api::ChunkReader> inner_;
+    std::atomic<size_t> sync_calls_{0};
+    std::atomic<size_t> async_calls_{0};
+    arrow::Status chunk_rows_status_;
+};
+
+}  // namespace
+
 class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
@@ -125,8 +216,14 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
 
     // Helper to create a ManifestGroupTranslator for a given column group
     std::unique_ptr<ManifestGroupTranslator>
-    MakeTranslator(int64_t cg_index, bool use_mmap) {
-        auto chunk_reader = test_data_->CreateChunkReader(cg_index);
+    MakeTranslator(int64_t cg_index,
+                   bool use_mmap,
+                   bool enable_async_load = false,
+                   std::shared_ptr<milvus_storage::api::ChunkReader>
+                       chunk_reader = nullptr) {
+        if (chunk_reader == nullptr) {
+            chunk_reader = test_data_->CreateChunkReader(cg_index);
+        }
         auto field_metas = test_data_->GetFieldMetas(cg_index);
         return std::make_unique<ManifestGroupTranslator>(
             segment_id_,
@@ -141,7 +238,12 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             field_metas.size(),
             milvus::proto::common::LoadPriority::LOW,
             /*eager_load=*/true,
-            /*warmup_policy=*/"");
+            /*warmup_policy=*/"",
+            /*cache_key_suffix=*/"",
+            /*fallback_bytes_per_row=*/0,
+            /*shard=*/"",
+            MmapChunkWritebackConfig{},
+            enable_async_load);
     }
 
     SchemaPtr schema_;
@@ -640,6 +742,74 @@ TEST_P(ManifestGroupTranslatorTest, TestGetCellsOrderPreservation) {
         for (size_t i = 0; i < subset_cells.size(); ++i) {
             EXPECT_EQ(subset_cells[i].first, subset_cids[i]);
         }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
+    auto use_mmap = GetParam();
+    auto sync_translator = MakeTranslator(0, use_mmap, false);
+    auto async_translator = MakeTranslator(0, use_mmap, true);
+    ASSERT_EQ(sync_translator->num_cells(), async_translator->num_cells());
+
+    std::vector<milvus::cachinglayer::cid_t> cids(sync_translator->num_cells());
+    std::iota(cids.begin(), cids.end(), 0);
+    std::reverse(cids.begin(), cids.end());
+
+    auto sync_cells = sync_translator->get_cells(nullptr, cids);
+    auto async_cells = async_translator->get_cells(nullptr, cids);
+    ASSERT_EQ(sync_cells.size(), async_cells.size());
+    for (size_t i = 0; i < sync_cells.size(); ++i) {
+        EXPECT_EQ(sync_cells[i].first, async_cells[i].first);
+        const auto& sync_chunks = sync_cells[i].second->GetChunks();
+        const auto& async_chunks = async_cells[i].second->GetChunks();
+        ASSERT_EQ(sync_chunks.size(), async_chunks.size());
+        for (const auto& [field_id, sync_chunk] : sync_chunks) {
+            auto it = async_chunks.find(field_id);
+            ASSERT_NE(it, async_chunks.end());
+            const auto& async_chunk = it->second;
+            ASSERT_EQ(sync_chunk->RowNums(), async_chunk->RowNums());
+            ASSERT_EQ(sync_chunk->Size(), async_chunk->Size());
+            EXPECT_EQ(std::memcmp(sync_chunk->RawData(),
+                                  async_chunk->RawData(),
+                                  sync_chunk->Size()),
+                      0);
+        }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {
+    SetStorageV2AsyncLoadEnabled(false);
+    auto sync_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto sync_translator =
+        MakeTranslator(0, GetParam(), StorageV2AsyncLoadEnabled(), sync_reader);
+    SetStorageV2AsyncLoadEnabled(true);
+    sync_translator->get_cells(nullptr, {0});
+    EXPECT_GT(sync_reader->SyncCalls(), 0);
+    EXPECT_EQ(sync_reader->AsyncCalls(), 0);
+
+    auto async_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto async_translator = MakeTranslator(
+        0, GetParam(), StorageV2AsyncLoadEnabled(), async_reader);
+    SetStorageV2AsyncLoadEnabled(false);
+    async_translator->get_cells(nullptr, {0});
+    EXPECT_EQ(async_reader->SyncCalls(), 0);
+    EXPECT_GT(async_reader->AsyncCalls(), 0);
+}
+
+TEST_P(ManifestGroupTranslatorTest, PreservesMetadataStorageError) {
+    auto reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    reader->SetChunkRowsStatus(milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+        "metadata timeout"));
+
+    try {
+        MakeTranslator(0, GetParam(), true, reader);
+        FAIL() << "expected storage metadata error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageTransientError);
     }
 }
 

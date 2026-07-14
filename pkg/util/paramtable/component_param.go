@@ -3692,6 +3692,7 @@ type queryNodeConfig struct {
 	// Target average byte size per storage v2 cache cell. Parquet row groups
 	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
 	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
+	StorageV2EnableAsyncLoad     ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -4927,6 +4928,15 @@ user-task-polling:
 		},
 	}
 	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
+
+	p.StorageV2EnableAsyncLoad = ParamItem{
+		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Temporary rollout switch for async storage v2 field-data loading. Existing translators keep the mode captured at construction.",
+		Export:       false,
+	}
+	p.StorageV2EnableAsyncLoad.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",

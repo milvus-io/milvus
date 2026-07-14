@@ -100,6 +100,7 @@
 #include "knowhere/version.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -133,6 +134,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
@@ -8205,12 +8207,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         "reader must exist before loading manifest column group, segment {}",
         get_segment_id());
     auto chunk_reader_result = reader->get_chunk_reader(index, needed_columns);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "status msg: {}",
-               get_segment_id(),
-               index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        throw milvus_storage::ToSegcoreError(chunk_reader_result.status());
+    }
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
@@ -8253,7 +8252,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
-            writeback_config);
+            writeback_config,
+            storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -8334,6 +8334,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto writeback_config = CreateMmapChunkWritebackConfig(mmap_config);
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
@@ -8351,12 +8352,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         "reader must exist before loading manifest column group, segment {}",
         get_segment_id());
     auto chunk_reader_result = reader->get_chunk_reader(index, needed_columns);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "status msg: {}",
-               get_segment_id(),
-               index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        throw milvus_storage::ToSegcoreError(chunk_reader_result.status());
+    }
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
@@ -8392,7 +8390,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             warmup_policy,
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
-            segment_load_info.GetInsertChannel());
+            segment_load_info.GetInsertChannel(),
+            writeback_config,
+            storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 

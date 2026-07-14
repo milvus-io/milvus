@@ -23,7 +23,6 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -47,11 +46,14 @@
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
+#include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 #include <atomic>
@@ -78,7 +80,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& cache_key_suffix,
     int64_t fallback_bytes_per_row,
     std::string shard,
-    MmapChunkWritebackConfig writeback_config)
+    MmapChunkWritebackConfig writeback_config,
+    bool enable_async_load)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -131,11 +134,11 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                               DataType::ARRAY;
                                    })),
       writeback_config_(writeback_config),
-      load_priority_(load_priority) {
+      load_priority_(load_priority),
+      enable_async_load_(enable_async_load) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
-        throw std::runtime_error(fmt::format("get row group rows failed: {}",
-                                             rows_result.status().ToString()));
+        throw milvus_storage::ToSegcoreError(rows_result.status());
     }
     const auto& row_group_rows = rows_result.ValueOrDie();
 
@@ -358,10 +361,9 @@ ManifestGroupTranslator::get_cells(
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
 
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::GroupChunk>>>
-        cells;
-    cells.reserve(cids.size());
+    if (cids.empty()) {
+        return {};
+    }
 
     auto max_cid = *std::max_element(cids.begin(), cids.end());
     if (max_cid >= meta_.chunk_memory_size_.size()) {
@@ -386,6 +388,20 @@ ManifestGroupTranslator::get_cells(
              meta_.chunk_memory_size_[cid],
              loading_overhead_bytes(meta_.chunk_memory_size_[cid])});
     }
+
+    if (enable_async_load_) {
+        return get_cells_async(ctx, std::move(cell_specs));
+    }
+    return get_cells_legacy(ctx, cids, std::move(cell_specs));
+}
+
+std::vector<ManifestGroupTranslator::CellResult>
+ManifestGroupTranslator::get_cells_legacy(
+    milvus::OpContext* ctx,
+    const std::vector<milvus::cachinglayer::cid_t>& cids,
+    std::vector<milvus::segcore::CellSpec> cell_specs) {
+    std::vector<CellResult> cells;
+    cells.reserve(cids.size());
 
     // Create factory using ChunkReader — reads a batch of row groups at once
     auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
@@ -479,6 +495,27 @@ ManifestGroupTranslator::get_cells(
     }
 
     return cells;
+}
+
+std::vector<ManifestGroupTranslator::CellResult>
+ManifestGroupTranslator::get_cells_async(
+    milvus::OpContext* ctx, std::vector<milvus::segcore::CellSpec> cell_specs) {
+    AsyncLoadPipelineOptions options{
+        .segment_id = segment_id_,
+        .read_window_bytes = FieldDataReadWindowBytes(),
+        .load_priority = load_priority_,
+    };
+    return LoadCellsAsync(
+               ctx,
+               std::move(cell_specs),
+               chunk_reader_,
+               [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
+                      int64_t cid) {
+                   return load_group_chunk(
+                       tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+               },
+               options)
+        .get();
 }
 
 std::unique_ptr<milvus::GroupChunk>

@@ -78,6 +78,20 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, item.GetAsBool())
 	})
 
+	t.Run("query node storage v2 async load config", func(t *testing.T) {
+		item := params.QueryNodeCfg.StorageV2EnableAsyncLoad
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.segcore.storageV2.enableAsyncLoad", item.Key)
+		assert.False(t, item.Export)
+		assert.False(t, item.GetAsBool())
+
+		params.Save(item.Key, "true")
+		assert.True(t, item.GetAsBool())
+	})
+
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := &params.CommonCfg
 
