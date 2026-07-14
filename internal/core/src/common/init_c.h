@@ -123,6 +123,10 @@ UpdateArrowIOThreadPoolMetrics();
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
 
+// Updates the rollout default used by newly constructed manifest translators.
+void
+SetStorageV2AsyncLoadEnabled(bool enabled);
+
 #ifdef __cplusplus
 };
 #endif
