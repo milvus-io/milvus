@@ -38,11 +38,14 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/packed/writer.h"
+#include "milvus-storage/properties.h"
+#include "milvus-storage/reader.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "mmap/Types.h"
 #include "pb/common.pb.h"
@@ -110,6 +113,89 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
 
     std::vector<std::string> paths_;
     int64_t segment_id_ = 0;
+
+    std::shared_ptr<milvus_storage::api::ChunkReader>
+    CreateChunkReaderForLegacyFiles(
+        const std::vector<std::string>& paths,
+        FieldId column_group_id,
+        const std::vector<milvus_storage::RowGroupMetadataVector>&
+            row_group_meta_list) const {
+        auto file_reader_result =
+            milvus_storage::FileRowGroupReader::Make(fs_, paths[0]);
+        AssertInfo(file_reader_result.ok(),
+                   "failed to create file reader for legacy column group "
+                   "fields: {}",
+                   file_reader_result.status().ToString());
+        auto file_reader = file_reader_result.ValueOrDie();
+        milvus_storage::FieldIDList field_id_list;
+        if (column_group_id >= FieldId(START_USER_FIELDID)) {
+            field_id_list.Add(column_group_id.get());
+        } else {
+            field_id_list = file_reader->file_metadata()
+                                ->GetGroupFieldIDList()
+                                .GetFieldIDList(column_group_id.get());
+        }
+        auto close_status = file_reader->Close();
+        AssertInfo(close_status.ok(), "failed to close file reader");
+
+        std::unordered_map<int64_t, std::string> column_name_by_field_id;
+        for (const auto& field : arrow_schema_->fields()) {
+            auto metadata = field->metadata();
+            if (metadata == nullptr ||
+                !metadata->Contains(milvus_storage::ARROW_FIELD_ID_KEY)) {
+                continue;
+            }
+            auto field_id = std::stoll(
+                metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY)->data());
+            column_name_by_field_id.emplace(field_id, field->name());
+        }
+
+        auto column_group =
+            std::make_shared<milvus_storage::api::ColumnGroup>();
+        column_group->format = LOON_FORMAT_PARQUET;
+        for (int i = 0; i < field_id_list.size(); ++i) {
+            auto field_id = field_id_list.Get(i);
+            auto it = column_name_by_field_id.find(field_id);
+            AssertInfo(it != column_name_by_field_id.end(),
+                       "field id {} does not have an arrow column name",
+                       field_id);
+            column_group->columns.push_back(it->second);
+        }
+
+        AssertInfo(paths.size() == row_group_meta_list.size(),
+                   "paths size {} does not match row group metadata size {}",
+                   paths.size(),
+                   row_group_meta_list.size());
+        for (size_t file_idx = 0; file_idx < paths.size(); ++file_idx) {
+            int64_t rows_in_file = 0;
+            for (int i = 0; i < row_group_meta_list[file_idx].size(); ++i) {
+                rows_in_file += row_group_meta_list[file_idx].Get(i).row_num();
+            }
+            column_group->files.push_back(milvus_storage::api::ColumnGroupFile{
+                paths[file_idx], 0, rows_in_file, {}});
+        }
+
+        auto needed_columns =
+            std::make_shared<std::vector<std::string>>(column_group->columns);
+        auto column_groups =
+            std::make_shared<milvus_storage::api::ColumnGroups>();
+        column_groups->push_back(std::move(column_group));
+
+        milvus_storage::api::Properties reader_properties;
+        milvus_storage::api::SetValue(
+            reader_properties, PROPERTY_FS_STORAGE_TYPE, LOON_FS_TYPE_LOCAL);
+        milvus_storage::api::SetValue(
+            reader_properties, PROPERTY_FS_ROOT_PATH, TestLocalPath.c_str());
+        auto reader = milvus_storage::api::Reader::create(
+            column_groups, arrow_schema_, needed_columns, reader_properties);
+        auto result =
+            reader->get_chunk_reader(/*column_group_index=*/0, needed_columns);
+        AssertInfo(result.ok(),
+                   "failed to create chunk reader for legacy files: {}",
+                   result.status().ToString());
+        return std::shared_ptr<milvus_storage::api::ChunkReader>(
+            std::move(result).ValueOrDie());
+    }
 };
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
@@ -121,13 +207,17 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
     auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
     auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_group_chunk");
+    auto chunk_reader =
+        CreateChunkReaderForLegacyFiles(paths_,
+                                        FieldId(column_group_info.field_id),
+                                        metadata.row_group_meta_list);
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
-        paths_,
+        std::move(chunk_reader),
         std::move(metadata.row_group_meta_list),
         use_mmap,
         true,
@@ -288,13 +378,17 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
     auto metadata =
         LoadGroupChunkMetadata(multi_file_paths, {}, "test_group_chunk");
+    auto chunk_reader =
+        CreateChunkReaderForLegacyFiles(multi_file_paths,
+                                        FieldId(column_group_info.field_id),
+                                        metadata.row_group_meta_list);
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
-        multi_file_paths,
+        std::move(chunk_reader),
         std::move(metadata.row_group_meta_list),
         use_mmap,
         true,
@@ -417,6 +511,47 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
     // Clean up cached column group files
     if (use_mmap && std::filesystem::exists(temp_dir)) {
+        std::filesystem::remove_all(temp_dir);
+    }
+}
+
+TEST_P(GroupChunkTranslatorTest, LoadLegacyPackedFilesThroughChunkReader) {
+    auto use_mmap = GetParam();
+    std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
+    auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_group_chunk");
+    auto chunk_reader = CreateChunkReaderForLegacyFiles(
+        paths_, FieldId(0), metadata.row_group_meta_list);
+
+    auto temp_dir =
+        std::filesystem::path(TestLocalPath) / "gctt_test_chunk_reader_backend";
+    std::filesystem::create_directory(temp_dir);
+    auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
+
+    auto translator = std::make_unique<GroupChunkTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        field_metas,
+        column_group_info,
+        std::move(chunk_reader),
+        std::move(metadata.row_group_meta_list),
+        use_mmap,
+        true,
+        schema_->get_field_ids().size(),
+        milvus::proto::common::LoadPriority::LOW,
+        /* warmup_policy */ "");
+
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        cids.push_back(i);
+    }
+    auto cells = translator->get_cells(nullptr, cids);
+    ASSERT_EQ(cells.size(), cids.size());
+    for (size_t i = 0; i < cells.size(); ++i) {
+        EXPECT_EQ(cells[i].first, cids[i]);
+        EXPECT_NE(cells[i].second, nullptr);
+    }
+
+    if (use_mmap) {
         std::filesystem::remove_all(temp_dir);
     }
 }

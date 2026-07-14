@@ -23,6 +23,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "milvus-storage/common/metadata.h"
+#include "milvus-storage/reader.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/GroupChunk.h"
@@ -39,7 +40,7 @@ class GroupChunkTranslator
         GroupChunkType group_chunk_type,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         FieldDataInfo column_group_info,
-        std::vector<std::string> insert_files,
+        std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         std::vector<milvus_storage::RowGroupMetadataVector>&&
             row_group_meta_list,
         bool use_mmap,
@@ -105,7 +106,7 @@ class GroupChunkTranslator
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
     FieldDataInfo column_group_info_;
-    std::vector<std::string> insert_files_;
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
     std::vector<size_t> file_row_group_prefix_sum_;
     SchemaPtr schema_;
