@@ -38,6 +38,8 @@
 
 namespace milvus::storage {
 
+class FileWriterTestAccessor;
+
 namespace io {
 enum class Priority { HIGH = 0, MIDDLE = 1, LOW = 2, NR_PRIORITY = 3 };
 
@@ -233,6 +235,9 @@ class FileWriter {
     ~FileWriter();
 
     void
+    SetFdatasyncOnFinish();
+
+    void
     Write(const void* data, size_t size);
 
     size_t
@@ -252,8 +257,13 @@ class FileWriter {
     GetBufferSize();
 
  private:
+    friend class FileWriterTestAccessor;
+
     void
     WriteInternal(const void* data, size_t nbyte);
+
+    void
+    SyncFileData();
 
     void
     FlushWithDirectIO();
@@ -283,6 +293,9 @@ class FileWriter {
     void* aligned_buf_{nullptr};
     size_t capacity_{0};
     size_t offset_{0};
+    bool fdatasync_on_finish_{false};
+    // Used by FileWriterTestAccessor to block the sync point deterministically.
+    std::function<void()> sync_file_data_hook_for_test_;
 
     // for global configuration
     static WriteMode
