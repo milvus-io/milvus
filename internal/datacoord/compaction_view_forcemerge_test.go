@@ -400,6 +400,56 @@ func TestAdaptiveGroupSegments(t *testing.T) {
 	})
 }
 
+func TestAdaptiveGroupSegmentsThresholdBoundary(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.CompactionMaxFullSegmentThreshold.Key, "4")
+	t.Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.CompactionMaxFullSegmentThreshold.Key)
+	})
+
+	groupIDs := func(groups [][]*SegmentView) [][]int64 {
+		return lo.Map(groups, func(group []*SegmentView, _ int) []int64 {
+			return lo.Map(group, func(segment *SegmentView, _ int) int64 {
+				return segment.ID
+			})
+		})
+	}
+
+	t.Run("at threshold selects max full grouping", func(t *testing.T) {
+		segments := []*SegmentView{
+			{ID: 1, Size: 1},
+			{ID: 2, Size: 1},
+			{ID: 3, Size: 1},
+			{ID: 4, Size: 8},
+		}
+
+		actual := groupIDs(adaptiveGroupSegments(segments, 10))
+		exact := groupIDs(maxFullSegmentsGrouping(segments, 10))
+		fallback := groupIDs(largerGroupingSegments(segments, 10))
+
+		assert.Equal(t, [][]int64{{1}, {2, 3, 4}}, actual)
+		assert.Equal(t, exact, actual)
+		assert.NotEqual(t, fallback, actual)
+	})
+
+	t.Run("above threshold selects larger grouping", func(t *testing.T) {
+		segments := []*SegmentView{
+			{ID: 1, Size: 1},
+			{ID: 2, Size: 1},
+			{ID: 3, Size: 1},
+			{ID: 4, Size: 1},
+			{ID: 5, Size: 7},
+		}
+
+		actual := groupIDs(adaptiveGroupSegments(segments, 10))
+		exact := groupIDs(maxFullSegmentsGrouping(segments, 10))
+		fallback := groupIDs(largerGroupingSegments(segments, 10))
+
+		assert.Equal(t, [][]int64{{1, 2, 3, 4, 5}}, actual)
+		assert.Equal(t, fallback, actual)
+		assert.NotEqual(t, exact, actual)
+	})
+}
+
 func TestLargerGroupingSegments(t *testing.T) {
 	t.Run("empty segments", func(t *testing.T) {
 		groups := largerGroupingSegments(nil, 5*1024*1024*1024)
@@ -1041,5 +1091,77 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 		_, targetCount := view.calculateTargetSizeCount()
 
 		assert.Equal(t, int64(1), targetCount, "targetCount should not be adjusted when totalSize/desiredCount < configMaxSize")
+	})
+}
+
+func TestCalculateTargetSizeCount_UserTargetAndMemoryClamp(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.Key, "4")
+	Params.Save(Params.DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.Key, "4")
+	t.Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.Key)
+		Params.Reset(Params.DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.Key)
+	})
+
+	const (
+		mb = float64(1024 * 1024)
+		gb = float64(1024 * 1024 * 1024)
+	)
+	newView := func(expectedTargetSize float64) *ForceMergeSegmentView {
+		return &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 2.5 * gb},
+				{ID: 2, Size: 2.5 * gb},
+			},
+			triggerID:          1,
+			configMaxSize:      64 * mb,
+			expectedTargetSize: expectedTargetSize,
+			topology: &CollectionTopology{
+				NumReplicas: 1,
+				NumShards:   1,
+				QueryNodeMemory: map[int64]uint64{
+					1: 8 * 1024 * 1024 * 1024,
+					2: 16 * 1024 * 1024 * 1024,
+				},
+				DataNodeMemory: map[int64]uint64{
+					1: 12 * 1024 * 1024 * 1024,
+					2: 20 * 1024 * 1024 * 1024,
+				},
+			},
+		}
+	}
+
+	t.Run("user target below safe size is preserved", func(t *testing.T) {
+		view := newView(1 * gb)
+
+		targetSize, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, 1*gb, targetSize)
+		assert.Equal(t, int64(5), targetCount)
+	})
+
+	t.Run("user target above smallest node limit is clamped", func(t *testing.T) {
+		view := newView(4 * gb)
+
+		targetSize, targetCount := view.calculateTargetSizeCount()
+
+		// The smallest QueryNode is the limiting resource: 8 GiB / factor 4 = 2 GiB.
+		assert.Equal(t, 2*gb, targetSize)
+		assert.Equal(t, int64(3), targetCount)
+	})
+
+	t.Run("standalone co-location halves the shared memory limit", func(t *testing.T) {
+		view := newView(4 * gb)
+		view.topology.IsStandaloneMode = true
+		view.topology.QueryNodeMemory = map[int64]uint64{1: 8 * 1024 * 1024 * 1024}
+
+		targetSize, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, 1*gb, targetSize)
+		assert.Equal(t, int64(5), targetCount)
 	})
 }

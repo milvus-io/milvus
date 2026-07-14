@@ -133,6 +133,17 @@ class AsyncMilvusClientWrapper:
         return await self.async_milvus_client.list_persistent_segments(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
+    async def optimize(self, collection_name: str, target_size=None, wait=True,
+                       timeout: float | None = None, **kwargs):
+        return await self.async_milvus_client.optimize(
+            collection_name,
+            target_size=target_size,
+            wait=wait,
+            timeout=timeout,
+            **kwargs,
+        )
+
+    @logger_interceptor()
     async def create_index(self, collection_name: str, index_params, timeout: Optional[float] = None,
                            **kwargs):
         return await self.async_milvus_client.create_index(collection_name, index_params, timeout, **kwargs)

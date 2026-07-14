@@ -12,7 +12,10 @@ With maxSize=64MB and auto compaction disabled, small data volumes can trigger
 force merge compaction manually without interference from auto compaction.
 """
 
+import math
+import os
 import time
+from collections import Counter
 
 import numpy as np
 import pytest
@@ -21,6 +24,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa: F403
+from minio import Minio
 from pymilvus import DataType
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
@@ -45,6 +49,44 @@ default_string_field_name = ct.default_string_field_name
 max_int64 = (1 << 63) - 1
 auto_target_size_mb = max_int64 // (1024 * 1024) + 1  # Triggers server auto target-size mode.
 default_max_size_mb = 1024  # Default segment max size in MB
+actual_output_size_tolerance = 0.10
+
+
+def minio_endpoint(minio_host):
+    endpoint = (minio_host or "localhost").strip()
+    if "://" in endpoint:
+        endpoint = endpoint.split("://", 1)[1]
+    endpoint = endpoint.split("/", 1)[0]
+    if ":" not in endpoint:
+        endpoint = f"{endpoint}:9000"
+    return endpoint
+
+
+def new_minio_client(minio_host):
+    return Minio(
+        minio_endpoint(minio_host),
+        access_key=os.getenv("MILVUS_MINIO_ACCESS_KEY", "minioadmin"),
+        secret_key=os.getenv("MILVUS_MINIO_SECRET_KEY", "minioadmin"),
+        secure=os.getenv("MILVUS_MINIO_SECURE", "false").lower() in ["1", "true", "yes"],
+    )
+
+
+def get_insert_log_sizes(minio_client, bucket, collection_id, segment_ids):
+    root_path = os.getenv("MILVUS_MINIO_ROOT_PATH", "files").strip("/")
+    prefix = f"{root_path}/insert_log/{collection_id}/"
+    sizes = {str(segment_id): 0 for segment_id in segment_ids}
+
+    for item in minio_client.list_objects(bucket, prefix=prefix, recursive=True):
+        relative_parts = item.object_name[len(prefix) :].split("/")
+        if len(relative_parts) < 3:
+            continue
+        segment_id = relative_parts[1]
+        if segment_id in sizes:
+            sizes[segment_id] += item.size
+
+    missing = [segment_id for segment_id, size in sizes.items() if size == 0]
+    assert not missing, f"No insert-log objects found for segments {missing} under {prefix}"
+    return {int(segment_id): size for segment_id, size in sizes.items()}
 
 
 class TestMilvusClientForceMergeInvalid(TestMilvusClientV2Base):
@@ -129,12 +171,12 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_force_merge_default_target_size(self):
+    def test_manual_compaction_without_target_size(self):
         """
-        target: test ForceMerge with default target_size (0 or not passed)
+        target: test ordinary manual compaction when target_size is omitted
         method: create collection, insert data, flush, compact without target_size
-        expected: Compaction completes successfully
-        note: L3 - requires config change (segment.maxSize=64MB) to trigger actual force merge
+        expected: Ordinary manual compaction completes successfully
+        note: Omitting target_size does not select Force Merge
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -152,7 +194,7 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        # 3. compact with default target_size (not passed)
+        # 3. compact without target_size; this is ordinary manual compaction
         compact_id = self.compact(client, collection_name)[0]
         # 4. wait for compaction to complete
         cost = 180
@@ -165,7 +207,7 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
                 break
             if time.time() - start > cost:
                 raise Exception(f"Compaction cost more than {cost}s")
-        log.info("ForceMerge with default target_size completed successfully")
+        log.info("Manual compaction without target_size completed successfully")
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_explicit_target_size(self):
@@ -493,11 +535,101 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         segment_count_after = len(segments_after)
         log.info(f"Segment count after ForceMerge: {segment_count_after}")
 
-        # 7. verify segment count reduced (or at least not increased)
-        assert segment_count_after <= segment_count_before, (
+        # 7. verify segment count reduced
+        assert segment_count_after < segment_count_before, (
             f"Expected fewer segments after ForceMerge, got {segment_count_after} >= {segment_count_before}"
         )
         log.info(f"ForceMerge reduced segments from {segment_count_before} to {segment_count_after}")
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_force_merge_target_size_controls_output_segments(self, minio_host, minio_bucket):
+        """
+        target: prove explicit target_size controls Force Merge output count and size
+        method: create a 1.25x-2x target input scope, compact, inspect plans and insert logs
+        expected: rows and sources are conserved; output count matches target and sizes stay within tolerance
+        note: L3 - requires segment.maxSize=64MB, auto compaction disabled, and MinIO access
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 1024
+        batch_size = 2000
+        num_batches = 18
+        total_rows = batch_size * num_batches
+        target_size_mb = 80
+        target_size_bytes = target_size_mb * 1024 * 1024
+        minio_client = new_minio_client(minio_host)
+        assert minio_client.bucket_exists(minio_bucket), f"MinIO bucket {minio_bucket!r} does not exist"
+
+        self.create_collection(client, collection_name, dim)
+        rng = np.random.default_rng(seed=19530)
+        for batch in range(num_batches):
+            vectors = rng.random((batch_size, dim), dtype=np.float32)
+            rows = [
+                {
+                    default_primary_key_field_name: batch * batch_size + index,
+                    default_vector_field_name: vectors[index].tolist(),
+                }
+                for index in range(batch_size)
+            ]
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+
+        segments_before = self.list_persistent_segments(client, collection_name)[0]
+        source_ids = {segment.segment_id for segment in segments_before}
+        assert len(source_ids) >= num_batches, (
+            f"Expected at least {num_batches} sealed inputs, got {len(source_ids)}: {segments_before}"
+        )
+        description = self.describe_collection(client, collection_name)[0]
+        collection_id = description["collection_id"]
+        input_sizes = get_insert_log_sizes(minio_client, minio_bucket, collection_id, source_ids)
+        total_input_size = sum(input_sizes.values())
+        assert target_size_bytes * 1.25 < total_input_size < target_size_bytes * 2, (
+            f"Fixture must produce between 1.25x and 2x target bytes; "
+            f"input={total_input_size}, target={target_size_bytes}, sizes={input_sizes}"
+        )
+
+        compact_id = self.compact(client, collection_name, target_size=target_size_mb)[0]
+        assert self.wait_for_compaction_ready(client, compact_id, timeout=600)
+
+        plans = client.get_compaction_plans(compact_id).plans
+        planned_source_counts = Counter(segment_id for plan in plans for segment_id in plan.sources)
+        planned_source_ids = set(planned_source_counts)
+        assert planned_source_ids == source_ids, (
+            f"Force Merge plans must cover every input: "
+            f"expected={source_ids}, actual={planned_source_ids}, plans={plans}"
+        )
+        assert all(count == 1 for count in planned_source_counts.values()), (
+            f"Force Merge source IDs must occur in exactly one plan: {planned_source_counts}"
+        )
+
+        segments_after = self.list_persistent_segments(client, collection_name)[0]
+        output_ids = {segment.segment_id for segment in segments_after}
+        assert output_ids.isdisjoint(source_ids), (
+            f"Completed Force Merge must replace all source segments: sources={source_ids}, outputs={output_ids}"
+        )
+        assert sum(segment.num_rows for segment in segments_after) == total_rows
+
+        output_sizes = get_insert_log_sizes(minio_client, minio_bucket, collection_id, output_ids)
+        total_output_size = sum(output_sizes.values())
+        rewrite_delta = abs(total_output_size - total_input_size) / total_input_size
+        assert rewrite_delta <= actual_output_size_tolerance, (
+            f"Rewrite changed total insert-log bytes by {rewrite_delta:.2%}: "
+            f"before={total_input_size}, after={total_output_size}"
+        )
+
+        expected_output_count = math.ceil(total_input_size / target_size_bytes)
+        assert len(output_sizes) == expected_output_count == 2, (
+            f"Expected two outputs for target={target_size_bytes}, got sizes={output_sizes}"
+        )
+        max_output_size = max(output_sizes.values())
+        assert target_size_bytes * (1 - actual_output_size_tolerance) <= max_output_size
+        assert all(
+            size <= target_size_bytes * (1 + actual_output_size_tolerance)
+            for size in output_sizes.values()
+        ), f"Output insert-log size exceeded target tolerance: target={target_size_bytes}, sizes={output_sizes}"
+        log.info(
+            f"Force Merge target-size evidence: input={input_sizes}, output={output_sizes}, plans={plans}"
+        )
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_force_merge_max_int64_overflow(self):
@@ -543,95 +675,3 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
             if time.time() - start > cost:
                 raise Exception(f"Compaction cost more than {cost}s")
         log.info("ForceMerge with max_int64 target_size completed (overflow fix verified)")
-
-    @pytest.mark.tags(CaseLabel.L3)
-    def test_force_merge_algorithm_selection_under_threshold(self):
-        """
-        target: test ForceMerge uses maxFullSegmentsGrouping when segment count <= threshold
-        method: create collection, insert data to create 5 segments (< threshold 10),
-                trigger force merge with target_size
-        expected: Compaction completes, algorithm selection logged as maxFullSegmentsGrouping
-        note: L3 - Check Loki logs for 'using maxFullSegmentsGrouping algorithm'
-              Requires config change (segment.maxSize=64MB) to trigger actual force merge
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        dim = 128
-        num_segments = 5  # Under threshold (default 10)
-        # 1. create collection
-        self.create_collection(client, collection_name, dim)
-        # 2. insert data in batches to create multiple segments
-        rng = np.random.default_rng(seed=19530)
-        for batch in range(num_segments):
-            rows = [
-                {
-                    default_primary_key_field_name: batch * 1000 + i,
-                    default_vector_field_name: list(rng.random((1, dim))[0]),
-                }
-                for i in range(1000)
-            ]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
-            log.info(f"Inserted batch {batch + 1}/{num_segments}")
-        # 3. compact with target_size to trigger ForceMerge
-        target_size = 2048
-        compact_id = self.compact(client, collection_name, target_size=target_size)[0]
-        log.info(f"ForceMerge triggered with {num_segments} segments (expect maxFullSegmentsGrouping)")
-        # 4. wait for compaction to complete
-        cost = 300
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id)[0]
-            log.info(f"Compaction state: {res}")
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(f"Compaction cost more than {cost}s")
-        log.info(f"ForceMerge with {num_segments} segments completed (check logs for algorithm)")
-
-    @pytest.mark.tags(CaseLabel.L3)
-    def test_force_merge_algorithm_selection_over_threshold(self):
-        """
-        target: test ForceMerge uses largerGroupingSegments when segment count > threshold
-        method: create collection, insert data to create 15 segments (> threshold 10),
-                trigger force merge with target_size
-        expected: Compaction completes, algorithm selection logged as largerGroupingSegments
-        note: L3 - Check Loki logs for 'using largerGroupingSegments algorithm'
-              Requires config change (segment.maxSize=64MB) to trigger actual force merge
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        dim = 128
-        num_segments = 15  # Over threshold (default 10)
-        # 1. create collection
-        self.create_collection(client, collection_name, dim)
-        # 2. insert data in batches to create multiple segments
-        rng = np.random.default_rng(seed=19530)
-        for batch in range(num_segments):
-            rows = [
-                {
-                    default_primary_key_field_name: batch * 1000 + i,
-                    default_vector_field_name: list(rng.random((1, dim))[0]),
-                }
-                for i in range(1000)
-            ]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
-            log.info(f"Inserted batch {batch + 1}/{num_segments}")
-        # 3. compact with target_size to trigger ForceMerge
-        target_size = 2048
-        compact_id = self.compact(client, collection_name, target_size=target_size)[0]
-        log.info(f"ForceMerge triggered with {num_segments} segments (expect largerGroupingSegments)")
-        # 4. wait for compaction to complete
-        cost = 600  # Longer timeout for more segments
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id)[0]
-            log.info(f"Compaction state: {res}")
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(f"Compaction cost more than {cost}s")
-        log.info(f"ForceMerge with {num_segments} segments completed (check logs for algorithm)")
