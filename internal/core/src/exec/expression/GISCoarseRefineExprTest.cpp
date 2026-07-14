@@ -239,8 +239,10 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionNullableGeometry) {
 // Equivalence on a GROWING segment. The baseline GIS path takes different
 // data-type branches for growing vs. sealed segments (std::string vs.
 // std::string_view chunk access), so the sealed-only tests above cannot lock
-// down the growing path. No R-Tree index exists on a growing segment, so this
-// also covers the Coarse node's "no index -> full coarse set" degenerate path.
+// down the growing path. This variant uses empty_index_meta, so no geometry
+// index is created and it covers the Coarse node's "no index -> full coarse
+// set" degenerate path; growing WITH a geometry R-Tree is covered separately
+// below.
 TEST(GISCoarseRefineExprTest, EquivalenceFusionGrowingSegment) {
     auto schema = MakeGISSchema();
     const int64_t N = 1000;
