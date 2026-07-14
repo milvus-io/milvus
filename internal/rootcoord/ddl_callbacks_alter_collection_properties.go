@@ -309,6 +309,9 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	schema.Fields = append(schema.Fields, fieldSchema)
 	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
 	schema.Properties = properties
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -365,6 +368,9 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 	schema.EnableDynamicField = false
 	schema.Properties = properties
 	schema.Version = coll.SchemaVersion + 1
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())

@@ -189,8 +189,8 @@ func validateKeptEvolutionField(oldField, newField *schemapb.FieldSchema) error 
 		return merr.WrapErrParameterInvalidMsg("cannot change the element type of field %q in place", name)
 	case oldField.GetNullable() != newField.GetNullable():
 		return merr.WrapErrParameterInvalidMsg("cannot change the nullability of field %q in place", name)
-	case oldField.GetIsFunctionOutput() != newField.GetIsFunctionOutput():
-		return merr.WrapErrParameterInvalidMsg("cannot change the function-output role of field %q in place", name)
+	case !oldField.GetIsFunctionOutput() && newField.GetIsFunctionOutput():
+		return merr.WrapErrParameterInvalidMsg("cannot repurpose existing field %q as a function output", name)
 	case oldField.GetIsPrimaryKey() != newField.GetIsPrimaryKey(),
 		oldField.GetIsPartitionKey() != newField.GetIsPartitionKey(),
 		oldField.GetIsClusteringKey() != newField.GetIsClusteringKey(),

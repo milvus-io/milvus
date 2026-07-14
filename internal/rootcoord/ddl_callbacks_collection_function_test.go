@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -108,8 +109,11 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) createTestCollection() *mo
 		},
 		VirtualChannelNames: []string{"test_channel"},
 		EnableDynamicField:  false,
-		Properties:          []*commonpb.KeyValuePair{{Key: "key1", Value: "value1"}},
-		SchemaVersion:       1,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: "key1", Value: "value1"},
+			{Key: common.MaxFieldIDKey, Value: "104"},
+		},
+		SchemaVersion: 1,
 	}
 }
 
@@ -197,6 +201,82 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, coll, dbName, collectionName)
 	suite.Error(err)
 	suite.Contains(err.Error(), "broadcast error")
+}
+
+func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollectionRejectsExistingOutputReuseBeforeBroadcast() {
+	ctx := context.Background()
+	oldColl := suite.createTestCollection()
+	newColl := oldColl.Clone()
+	newColl.Functions = append(newColl.Functions, &model.Function{
+		ID:               1002,
+		Name:             "reuses_output",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldIDs:    []int64{103},
+		InputFieldNames:  []string{"text_field"},
+		OutputFieldIDs:   []int64{104},
+		OutputFieldNames: []string{"output_field"},
+	})
+
+	core := newTestCore(withHealthyCode())
+	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+	core.meta = mockMeta
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(oldColl, nil).Maybe()
+	mockMeta.EXPECT().ListAliases(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return([]string{}, nil).Maybe()
+
+	broadcasts := 0
+	suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Run(func(context.Context, message.BroadcastMutableMessage) {
+		broadcasts++
+	}).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, oldColl, newColl, "test_db", "test_collection")
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
+	suite.Zero(broadcasts)
+}
+
+func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollectionRejectsLegacyOutputRelabelBeforeBroadcast() {
+	ctx := context.Background()
+	oldColl := suite.createTestCollection()
+	newColl := oldColl.Clone()
+	newColl.Fields[1].IsFunctionOutput = true
+
+	core := newTestCore(withHealthyCode())
+	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+	core.meta = mockMeta
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(oldColl, nil).Maybe()
+	mockMeta.EXPECT().ListAliases(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return([]string{}, nil).Maybe()
+
+	broadcasts := 0
+	suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Run(func(context.Context, message.BroadcastMutableMessage) {
+		broadcasts++
+	}).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, oldColl, newColl, "test_db", "test_collection")
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
+	suite.Contains(err.Error(), "cannot repurpose existing field")
+	suite.Zero(broadcasts)
+}
+
+func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollectionAllowsLegacyFunctionDetach() {
+	ctx := context.Background()
+	oldColl := suite.createTestCollection()
+	newColl := oldColl.Clone()
+	newColl.Functions = nil
+	newColl.Fields[3].IsFunctionOutput = false
+
+	core := newTestCore(withHealthyCode())
+	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+	core.meta = mockMeta
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(oldColl, nil)
+	mockMeta.EXPECT().ListAliases(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return([]string{}, nil)
+
+	broadcasts := 0
+	suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Run(func(context.Context, message.BroadcastMutableMessage) {
+		broadcasts++
+	}).Return(&types.BroadcastAppendResult{}, nil)
+
+	err := callAlterCollection(ctx, core, suite.mockBroadcaster, oldColl, newColl, "test_db", "test_collection")
+	suite.NoError(err)
+	suite.Equal(1, broadcasts)
 }
 
 // Test alterFunctionGenNewCollection function
@@ -510,7 +590,8 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil).Twice()
+		mockMeta.EXPECT().ListAliases(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return([]string{}, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.DropCollectionFunctionRequest{
@@ -519,8 +600,10 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 			FunctionName:   "test_function",
 		}
 
-		mocker := mockey.Mock(callAlterCollection).Return(nil).Build()
-		defer mocker.UnPatch()
+		suite.mockBroadcaster.EXPECT().Close().Return()
+		suite.mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
+		lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(suite.mockBroadcaster, nil).Build()
+		defer lockMocker.UnPatch()
 
 		err := suite.core.broadcastAlterCollectionForDropFunction(context.Background(), req)
 		suite.NoError(err)

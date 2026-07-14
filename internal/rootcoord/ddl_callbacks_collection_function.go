@@ -65,6 +65,9 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
 	}
+	if err := validateSchemaEvolution(oldColl, schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, dbName, collectionName)
 	if err != nil {

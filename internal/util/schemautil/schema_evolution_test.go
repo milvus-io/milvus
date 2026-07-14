@@ -100,6 +100,14 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
 	})
 
+	t.Run("drop function and clear former output role", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithFunction()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.Functions = nil
+		evolutionFieldByID(newSchema, 106).IsFunctionOutput = false
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
 	t.Run("drop whole struct container", func(t *testing.T) {
 		oldSchema := evolutionSchemaWithStruct()
 		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
