@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -138,13 +139,15 @@ func (m *meta) GetSnapshotMeta() *snapshotMeta {
 
 type channelCPs struct {
 	lock.RWMutex
-	checkpoints map[string]*msgpb.MsgPosition
-	cond        *syncutil.ContextCond
+	checkpoints  map[string]*msgpb.MsgPosition
+	channelLocks *lock.KeyLock[string]
+	cond         *syncutil.ContextCond
 }
 
 func newChannelCps() *channelCPs {
 	cp := &channelCPs{
-		checkpoints: make(map[string]*msgpb.MsgPosition),
+		checkpoints:  make(map[string]*msgpb.MsgPosition),
+		channelLocks: lock.NewKeyLock[string](),
 	}
 	// use the same lock as channelCPs
 	cp.cond = syncutil.NewContextCond(&cp.RWMutex)
@@ -2722,16 +2725,20 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 		pos = minGrowingCP
 	}
 
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
+	m.channelCPs.channelLocks.Lock(vChannel)
+	defer m.channelCPs.channelLocks.Unlock(vChannel)
 
+	m.channelCPs.RLock()
 	oldPosition, ok := m.channelCPs.checkpoints[vChannel]
+	m.channelCPs.RUnlock()
 	if !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID)) {
 		err := m.catalog.SaveChannelCheckpoint(ctx, vChannel, pos)
 		if err != nil {
 			return err
 		}
+		m.channelCPs.Lock()
 		m.channelCPs.checkpoints[vChannel] = pos
+		m.channelCPs.Unlock()
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		mlog.Info(context.TODO(), "UpdateChannelCheckpoint done",
 			mlog.String("vChannel", vChannel),
@@ -2750,8 +2757,8 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 // UpdateChannelCheckpoint can overwrite it, and removes the channel-checkpoint
 // lag metric.
 func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
+	m.channelCPs.channelLocks.Lock(channel)
+	defer m.channelCPs.channelLocks.Unlock(channel)
 
 	cp := &msgpb.MsgPosition{
 		ChannelName: channel,
@@ -2763,7 +2770,9 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 		return err
 	}
 
+	m.channelCPs.Lock()
 	m.channelCPs.checkpoints[channel] = cp
+	m.channelCPs.Unlock()
 
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	return nil
@@ -2786,24 +2795,52 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		}
 	}
 
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
-	toUpdates := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
+	validPositions := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
 		if pos == nil || (pos.GetMsgID() == nil && pos.GetWALName() != commonpb.WALName_WoodPecker) || pos.GetChannelName() == "" {
 			mlog.Warn(context.TODO(), "illegal channel cp", mlog.Any("pos", pos))
 			return false
 		}
+		return true
+	})
+	channelSet := make(map[string]struct{}, len(validPositions))
+	for _, pos := range validPositions {
+		channelSet[pos.GetChannelName()] = struct{}{}
+	}
+	channels := make([]string, 0, len(channelSet))
+	for channel := range channelSet {
+		channels = append(channels, channel)
+	}
+	sort.Strings(channels)
+	for _, channel := range channels {
+		m.channelCPs.channelLocks.Lock(channel)
+	}
+	defer func() {
+		for i := len(channels) - 1; i >= 0; i-- {
+			m.channelCPs.channelLocks.Unlock(channels[i])
+		}
+	}()
+
+	m.channelCPs.RLock()
+	toUpdates := lo.Filter(validPositions, func(pos *msgpb.MsgPosition, _ int) bool {
 		vChannel := pos.GetChannelName()
 		oldPosition, ok := m.channelCPs.checkpoints[vChannel]
 		return !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID))
 	})
+	m.channelCPs.RUnlock()
 	err := m.catalog.SaveChannelCheckpoints(ctx, toUpdates)
 	if err != nil {
 		return err
 	}
+	m.channelCPs.Lock()
 	for _, pos := range toUpdates {
 		channel := pos.GetChannelName()
 		m.channelCPs.checkpoints[channel] = pos
+	}
+	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
+	m.channelCPs.cond.UnsafeBroadcast()
+	m.channelCPs.Unlock()
+	for _, pos := range toUpdates {
+		channel := pos.GetChannelName()
 		mlog.Info(context.TODO(), "UpdateChannelCheckpoint done", mlog.String("channel", channel),
 			mlog.Stringer("walName", pos.WALName),
 			mlog.Uint64("ts", pos.GetTimestamp()),
@@ -2811,8 +2848,6 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), channel).Set(float64(ts.Unix()))
 	}
-	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
-	m.channelCPs.cond.UnsafeBroadcast()
 	return nil
 }
 
@@ -2827,13 +2862,15 @@ func (m *meta) GetChannelCheckpoint(vChannel string) *msgpb.MsgPosition {
 }
 
 func (m *meta) DropChannelCheckpoint(vChannel string) error {
-	m.channelCPs.Lock()
-	defer m.channelCPs.Unlock()
+	m.channelCPs.channelLocks.Lock(vChannel)
+	defer m.channelCPs.channelLocks.Unlock(vChannel)
 	err := m.catalog.DropChannelCheckpoint(m.ctx, vChannel)
 	if err != nil {
 		return err
 	}
+	m.channelCPs.Lock()
 	delete(m.channelCPs.checkpoints, vChannel)
+	m.channelCPs.Unlock()
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), vChannel)
 	mlog.Info(context.TODO(), "DropChannelCheckpoint done", mlog.String("vChannel", vChannel))
 	return nil

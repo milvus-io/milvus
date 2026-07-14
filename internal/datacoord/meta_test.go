@@ -4746,6 +4746,175 @@ func equalCollectionInfo(t *testing.T, a *collectionInfo, b *collectionInfo) {
 	assert.Equal(t, a.StartPositions, b.StartPositions)
 }
 
+func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing.T) {
+	const (
+		channel1 = "channel-1"
+		channel2 = "channel-2"
+	)
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	channel1Entered := make(chan struct{})
+	releaseChannel1 := make(chan struct{})
+	channel2Entered := make(chan struct{})
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel1, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(channel1Entered)
+			<-releaseChannel1
+			return nil
+		}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel2, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(channel2Entered)
+			return nil
+		}).Once()
+
+	meta := &meta{
+		ctx:         context.Background(),
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+	}
+	channel1Done := make(chan error, 1)
+	go func() {
+		channel1Done <- meta.UpdateChannelCheckpoint(context.Background(), channel1, &msgpb.MsgPosition{
+			ChannelName: channel1,
+			MsgID:       []byte{1},
+			Timestamp:   1,
+		})
+	}()
+
+	select {
+	case <-channel1Entered:
+	case <-time.After(3 * time.Second):
+		close(releaseChannel1)
+		select {
+		case <-channel1Done:
+		case <-time.After(3 * time.Second):
+		}
+		t.Fatal("channel-1 did not enter SaveChannelCheckpoint")
+	}
+
+	channel2Done := make(chan error, 1)
+	go func() {
+		channel2Done <- meta.UpdateChannelCheckpoint(context.Background(), channel2, &msgpb.MsgPosition{
+			ChannelName: channel2,
+			MsgID:       []byte{2},
+			Timestamp:   2,
+		})
+	}()
+
+	channel2PersistedConcurrently := false
+	select {
+	case <-channel2Entered:
+		channel2PersistedConcurrently = true
+	case <-time.After(3 * time.Second):
+	}
+
+	close(releaseChannel1)
+	errs := make(map[string]error, 2)
+	for channel, done := range map[string]<-chan error{
+		channel1: channel1Done,
+		channel2: channel2Done,
+	} {
+		select {
+		case err := <-done:
+			errs[channel] = err
+		case <-time.After(3 * time.Second):
+			assert.Failf(t, "checkpoint update did not finish", "channel: %s", channel)
+		}
+	}
+	for _, err := range errs {
+		assert.NoError(t, err)
+	}
+	require.True(t, channel2PersistedConcurrently, "channel-2 did not enter catalog while channel-1 was blocked")
+}
+
+func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *testing.T) {
+	const channel = "channel-1"
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	batchEntered := make(chan struct{})
+	releaseBatch := make(chan struct{})
+	singleEntered := make(chan struct{})
+	catalog.EXPECT().SaveChannelCheckpoints(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, []*msgpb.MsgPosition) error {
+			close(batchEntered)
+			<-releaseBatch
+			return nil
+		}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(singleEntered)
+			return nil
+		}).Once()
+
+	meta := &meta{
+		ctx:         context.Background(),
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+	}
+	batchDone := make(chan error, 1)
+	go func() {
+		batchDone <- meta.UpdateChannelCheckpoints(context.Background(), []*msgpb.MsgPosition{{
+			ChannelName: channel,
+			MsgID:       []byte{1},
+			Timestamp:   1,
+		}})
+	}()
+
+	select {
+	case <-batchEntered:
+	case <-time.After(3 * time.Second):
+		close(releaseBatch)
+		select {
+		case <-batchDone:
+		case <-time.After(3 * time.Second):
+		}
+		t.Fatal("batch update did not enter SaveChannelCheckpoints")
+	}
+
+	singleStarted := make(chan struct{})
+	singleDone := make(chan error, 1)
+	go func() {
+		close(singleStarted)
+		singleDone <- meta.UpdateChannelCheckpoint(context.Background(), channel, &msgpb.MsgPosition{
+			ChannelName: channel,
+			MsgID:       []byte{2},
+			Timestamp:   2,
+		})
+	}()
+	<-singleStarted
+
+	singleEnteredBeforeBatchRelease := false
+	select {
+	case <-singleEntered:
+		singleEnteredBeforeBatchRelease = true
+	case <-time.After(2 * time.Second):
+	}
+
+	close(releaseBatch)
+	errs := make([]error, 0, 2)
+	for operation, done := range map[string]<-chan error{
+		"batch":  batchDone,
+		"single": singleDone,
+	} {
+		select {
+		case err := <-done:
+			errs = append(errs, err)
+		case <-time.After(3 * time.Second):
+			assert.Failf(t, "checkpoint update did not finish", "operation: %s", operation)
+		}
+	}
+	for _, err := range errs {
+		assert.NoError(t, err)
+	}
+	assert.False(t, singleEnteredBeforeBatchRelease, "single update entered catalog before the overlapping batch completed")
+	require.Equal(t, uint64(2), meta.GetChannelCheckpoint(channel).GetTimestamp())
+}
+
 func TestChannelCP(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
 	mockPChannel := "fake-by-dev-rootcoord-dml-1"
