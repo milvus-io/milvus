@@ -788,6 +788,11 @@ message CompactionSegment {
   string manifest = 12;
   repeated int64 expirQuantiles = 13;
   bool is_sorted_by_namespace = 14;
+  // base_manifest is the manifest the in-place schema-bump result was built
+  // on (the plan-pinned base). DataCoord adopts the result only if it still
+  // equals the segment's current manifest (optimistic-concurrency CAS),
+  // mirroring StatsResult.base_manifest.
+  string base_manifest = 15;
 }
 
 message CompactionPlanResult {
