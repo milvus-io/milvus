@@ -922,11 +922,11 @@ func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Repl
 				replica.GetID(), replica.GetResourceGroup(), channelName)
 		}
 		if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
-			return merr.Wrapf(err, "replica %d (rg=%s) channel %s not serviceable", replica.GetID(), replica.GetResourceGroup(), channelName)
+			return merr.Wrapf(err, "replica %d (rg=%s) not serviceable", replica.GetID(), replica.GetResourceGroup())
 		}
-		if leader.View.Status != nil && !leader.View.Status.GetServiceable() {
+		if !leader.IsServiceable() {
 			err := merr.WrapErrChannelNotAvailable(channelName, "delegator reported not serviceable")
-			return merr.Wrapf(err, "replica %d (rg=%s) channel %s not serviceable", replica.GetID(), replica.GetResourceGroup(), channelName)
+			return merr.Wrapf(err, "replica %d (rg=%s) not serviceable", replica.GetID(), replica.GetResourceGroup())
 		}
 	}
 	return nil

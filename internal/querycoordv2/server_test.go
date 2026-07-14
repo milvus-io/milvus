@@ -70,6 +70,76 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+type noopQueryCoordCatalog struct{}
+
+func (noopQueryCoordCatalog) SaveCollection(ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) SaveReplica(ctx context.Context, replicas ...*querypb.Replica) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) GetCollections(ctx context.Context) ([]*querypb.CollectionLoadInfo, error) {
+	return nil, nil
+}
+
+func (noopQueryCoordCatalog) GetPartitions(ctx context.Context, collectionIDs []int64) (map[int64][]*querypb.PartitionLoadInfo, error) {
+	return nil, nil
+}
+
+func (noopQueryCoordCatalog) GetReplicas(ctx context.Context) ([]*querypb.Replica, error) {
+	return nil, nil
+}
+
+func (noopQueryCoordCatalog) ReleaseCollection(ctx context.Context, collection int64) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) ReleasePartition(ctx context.Context, collection int64, partitions ...int64) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) ReleaseReplicas(ctx context.Context, collectionID int64) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) ReleaseReplica(ctx context.Context, collection int64, replicas ...int64) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) SaveResourceGroup(ctx context.Context, rgs ...*querypb.ResourceGroup) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) RemoveResourceGroup(ctx context.Context, rgName string) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) GetResourceGroups(ctx context.Context) ([]*querypb.ResourceGroup, error) {
+	return nil, nil
+}
+
+func (noopQueryCoordCatalog) SaveCollectionTargets(ctx context.Context, target ...*querypb.CollectionTarget) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) RemoveCollectionTarget(ctx context.Context, collectionID int64) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) RemoveCollectionTargets(ctx context.Context) error {
+	return nil
+}
+
+func (noopQueryCoordCatalog) GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error) {
+	return nil, nil
+}
+
 type ServerSuite struct {
 	suite.Suite
 
@@ -1285,6 +1355,32 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		assert.ErrorContains(t, err, "reported not serviceable")
 	})
 
+	t.Run("nil leader status returns error even when data ready", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+			42: {ID: 42, CollectionID: collectionID},
+		})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Segments: map[int64]*querypb.SegmentDist{42: {NodeID: 10}},
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "reported not serviceable")
+	})
+
 	t.Run("all serviceable returns nil", func(t *testing.T) {
 		s := newServer()
 		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
@@ -1309,4 +1405,41 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
 		assert.NoError(t, err)
 	})
+}
+
+func TestTryPromoteReadyLoadConfigReplicasPromotesReadyReplicasIndependently(t *testing.T) {
+	ctx := context.Background()
+	nodeMgr := session.NewNodeManager()
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	id := int64(0)
+	idAllocator := func() (int64, error) {
+		id++
+		return id, nil
+	}
+	metaMgr := meta.NewMeta(idAllocator, noopQueryCoordCatalog{}, nodeMgr)
+	replicasA, err := metaMgr.Spawn(ctx, 100, map[string]int{"rg-a": 1}, nil, commonpb.LoadPriority_HIGH, meta.WithQueryInvisible())
+	assert.NoError(t, err)
+	replicasB, err := metaMgr.Spawn(ctx, 200, map[string]int{"rg-b": 1}, nil, commonpb.LoadPriority_HIGH, meta.WithQueryInvisible())
+	assert.NoError(t, err)
+	assert.False(t, replicasA[0].IsQueryVisible())
+	assert.False(t, replicasB[0].IsQueryVisible())
+
+	s := &Server{
+		meta:      metaMgr,
+		dist:      distMgr,
+		nodeMgr:   nodeMgr,
+		targetMgr: meta.NewMockTargetManager(t),
+	}
+	mocker := mockey.Mock((*Server).checkReplicaServiceable).To(func(s *Server, ctx context.Context, replica *meta.Replica) error {
+		if replica.GetID() == replicasA[0].GetID() {
+			return fmt.Errorf("replica %d is not ready", replica.GetID())
+		}
+		return nil
+	}).Build()
+	defer mocker.UnPatch()
+
+	s.tryPromoteReadyLoadConfigReplicas(ctx)
+
+	assert.False(t, metaMgr.Get(ctx, replicasA[0].GetID()).IsQueryVisible())
+	assert.True(t, metaMgr.Get(ctx, replicasB[0].GetID()).IsQueryVisible())
 }
