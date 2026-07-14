@@ -17,7 +17,6 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
@@ -46,11 +45,12 @@ type insertNode struct {
 }
 
 func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
+	ctx := msg.TraceCtx()
 	schema := collection.Schema()
 	insertRecord, skippedFields, err := storage.TransferInsertMsgToInsertRecord(schema, msg)
 	if err != nil {
 		err = merr.Wrap(err, "failed to get primary keys")
-		mlog.Error(context.TODO(), err.Error(), mlog.Int64("collectionID", iNode.collectionID), mlog.String("channel", iNode.channel))
+		mlog.Error(ctx, err.Error(), mlog.Int64("collectionID", iNode.collectionID), mlog.String("channel", iNode.channel))
 		panic(err)
 	}
 	if len(skippedFields) > 0 {
@@ -60,7 +60,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		// micro-batcher refuses to merge non-Insert/Delete messages. If that
 		// pack-granularity invariant is ever relaxed, filtering against the current
 		// schema could silently drop fields that exist in a newer schema.
-		mlog.Warn(context.TODO(), "skip insert payload fields absent from current schema, fields are dropped since the message was written",
+		mlog.Warn(ctx, "skip insert payload fields absent from current schema, fields are dropped since the message was written",
 			mlog.FieldCollectionID(iNode.collectionID),
 			mlog.FieldSegmentID(msg.SegmentID),
 			mlog.String("channel", iNode.channel),
@@ -84,27 +84,27 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	} else {
 		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to merge field data", mlog.String("channel", iNode.channel), mlog.Err(err))
+			mlog.Error(ctx, "failed to merge field data", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
 	if err := iNode.appendBM25Stats(iData, msg, schema); err != nil {
-		mlog.Error(context.TODO(), "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
+		mlog.Error(ctx, "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 		panic(err)
 	}
 
 	pks, err := segments.GetPrimaryKeys(msg, schema)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to get primary keys from insert message", mlog.Err(err))
+		mlog.Error(ctx, "failed to get primary keys from insert message", mlog.Err(err))
 		panic(err)
 	}
 
 	iData.PrimaryKeys = append(iData.PrimaryKeys, pks...)
 	iData.RowIDs = append(iData.RowIDs, msg.RowIDs...)
 	iData.Timestamps = append(iData.Timestamps, msg.Timestamps...)
-	mlog.Debug(context.TODO(), "pipeline fetch insert msg",
+	mlog.Debug(ctx, "pipeline fetch insert msg",
 		mlog.Int64("collectionID", iNode.collectionID),
 		mlog.Int64("segmentID", msg.SegmentID),
 		mlog.Int("insertRowNum", len(pks)),
@@ -125,16 +125,17 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		sort.Slice(nodeMsg.insertMsgs, func(i, j int) bool {
 			return nodeMsg.insertMsgs[i].BeginTs() < nodeMsg.insertMsgs[j].BeginTs()
 		})
+		ctx := nodeMsg.insertMsgs[0].TraceCtx()
 
 		collection := iNode.manager.Collection.Get(iNode.collectionID)
 		if collection == nil {
-			mlog.Error(context.TODO(), "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
+			mlog.Error(ctx, "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
 			panic("insertNode with collection not exist")
 		}
 		schema := collection.Schema()
 		functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
+			mlog.Error(ctx, "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 
@@ -142,7 +143,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		for _, msg := range nodeMsg.insertMsgs {
 			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
 				if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
-					mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
+					mlog.Error(msg.TraceCtx(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 					panic(err)
 				}
 			}

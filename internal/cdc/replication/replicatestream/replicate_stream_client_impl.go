@@ -27,7 +27,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
@@ -224,25 +223,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 			}
 			if msg.MessageType() == message.MessageTypeTxn {
 				txnMsg := message.AsImmutableTxnMessage(msg)
-
-				// send txn begin message
-				beginMsg := txnMsg.Begin()
-				err := r.sendMessage(beginMsg)
-				if err != nil {
-					return err
-				}
-
-				// send txn messages
-				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-					return r.sendMessage(msg)
-				})
-				if err != nil {
-					return err
-				}
-
-				// send txn commit message
-				commitMsg := txnMsg.Commit()
-				err = r.sendMessage(commitMsg)
+				err = r.sendTxnMessage(txnMsg)
 				if err != nil {
 					return err
 				}
@@ -257,6 +238,8 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 }
 
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
+	immutableMessage := msg.IntoImmutableMessageProto()
+
 	defer func() {
 		logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("revision", r.channel.ModRevision))
 		if err != nil {
@@ -266,20 +249,34 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 			logger.Debug(r.ctx, "send message success", mlog.FieldMessage(msg))
 		}
 	}()
-	immutableMessage := msg.IntoImmutableMessageProto()
+
 	req := &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
 			ReplicateMessage: &milvuspb.ReplicateMessage{
 				SourceClusterId: r.clusterID,
-				Message: &commonpb.ImmutableMessage{
-					Id:         msg.MessageID().IntoProto(),
-					Payload:    immutableMessage.GetPayload(),
-					Properties: immutableMessage.GetProperties(),
-				},
+				Message:         immutableMessage,
 			},
 		},
 	}
 	return r.client.Send(req)
+}
+
+func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
+	// send txn begin message
+	if err = r.sendMessage(txnMsg.Begin()); err != nil {
+		return err
+	}
+
+	// send txn body messages
+	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+		return r.sendMessage(msg)
+	}); err != nil {
+		return err
+	}
+
+	// send txn commit message
+	err = r.sendMessage(txnMsg.Commit())
+	return
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {

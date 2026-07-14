@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -273,9 +274,11 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 			TimeTick:               result.TimeTick,
 		}
 	}
-	// call the ack callback until done.
+	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
-	if err := s.callMessageAckCallbackUntilDone(s.notifier.Context(), msg, makeMap); err != nil {
+	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
+		return s.callMessageAckCallbackUntilDone(spanCtx, msg, makeMap)
+	}); err != nil {
 		return err
 	}
 	bt.ObserveAckCallbackDone()
@@ -314,6 +317,22 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 		case <-time.After(nextInterval):
 		}
 	}
+}
+
+// runAckCallbackWithTrace extracts the persisted trace context from the
+// broadcast task's message Properties and opens a wal.bc_callback
+// span under it, invoking fn with the new ctx. Span is always ended,
+// and errors are recorded on the span.
+func runAckCallbackWithTrace(baseCtx context.Context, msg message.BroadcastMutableMessage, fn func(ctx context.Context) error) error {
+	parentCtx := message.ExtractTraceContext(baseCtx, msg)
+	ctx, span := message.StartSpanForMessage(parentCtx, msg, message.SpanNameWALBCCallback)
+	defer span.End()
+	err := fn(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
 }
 
 // sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel.

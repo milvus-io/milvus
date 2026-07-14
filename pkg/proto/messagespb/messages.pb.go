@@ -6358,6 +6358,75 @@ func (x *CipherHeader) GetPayloadBytes() int64 {
 	return 0
 }
 
+// TraceContextHeader carries the trace context subset (trace_id, span_id,
+// flags) stored on a message. Tracestate is intentionally not persisted.
+// Serialized into Properties under reserved key `_tc` so that consumers on
+// the other side of an RPC / persistence boundary can stitch spans into the
+// correct parent-child tree.
+// See docs/agent_guides/streaming-system/wal/tracing.md for details.
+type TraceContextHeader struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	TraceId []byte `protobuf:"bytes,1,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"` // 16 bytes
+	SpanId  []byte `protobuf:"bytes,2,opt,name=span_id,json=spanId,proto3" json:"span_id,omitempty"`    // 8 bytes
+	Flags   uint32 `protobuf:"varint,3,opt,name=flags,proto3" json:"flags,omitempty"`                   // W3C TraceFlags (sampled bit)
+}
+
+func (x *TraceContextHeader) Reset() {
+	*x = TraceContextHeader{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[113]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *TraceContextHeader) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TraceContextHeader) ProtoMessage() {}
+
+func (x *TraceContextHeader) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[113]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TraceContextHeader.ProtoReflect.Descriptor instead.
+func (*TraceContextHeader) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *TraceContextHeader) GetTraceId() []byte {
+	if x != nil {
+		return x.TraceId
+	}
+	return nil
+}
+
+func (x *TraceContextHeader) GetSpanId() []byte {
+	if x != nil {
+		return x.SpanId
+	}
+	return nil
+}
+
+func (x *TraceContextHeader) GetFlags() uint32 {
+	if x != nil {
+		return x.Flags
+	}
+	return 0
+}
+
 // TruncateCollectionMessageHeader is the header of truncate collection message.
 type TruncateCollectionMessageHeader struct {
 	state         protoimpl.MessageState
@@ -6372,7 +6441,7 @@ type TruncateCollectionMessageHeader struct {
 func (x *TruncateCollectionMessageHeader) Reset() {
 	*x = TruncateCollectionMessageHeader{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_messages_proto_msgTypes[113]
+		mi := &file_messages_proto_msgTypes[114]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6385,7 +6454,7 @@ func (x *TruncateCollectionMessageHeader) String() string {
 func (*TruncateCollectionMessageHeader) ProtoMessage() {}
 
 func (x *TruncateCollectionMessageHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[113]
+	mi := &file_messages_proto_msgTypes[114]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6398,7 +6467,7 @@ func (x *TruncateCollectionMessageHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TruncateCollectionMessageHeader.ProtoReflect.Descriptor instead.
 func (*TruncateCollectionMessageHeader) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{113}
+	return file_messages_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *TruncateCollectionMessageHeader) GetDbId() int64 {
@@ -6432,7 +6501,7 @@ type TruncateCollectionMessageBody struct {
 func (x *TruncateCollectionMessageBody) Reset() {
 	*x = TruncateCollectionMessageBody{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_messages_proto_msgTypes[114]
+		mi := &file_messages_proto_msgTypes[115]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6445,7 +6514,7 @@ func (x *TruncateCollectionMessageBody) String() string {
 func (*TruncateCollectionMessageBody) ProtoMessage() {}
 
 func (x *TruncateCollectionMessageBody) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[114]
+	mi := &file_messages_proto_msgTypes[115]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6458,7 +6527,7 @@ func (x *TruncateCollectionMessageBody) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TruncateCollectionMessageBody.ProtoReflect.Descriptor instead.
 func (*TruncateCollectionMessageBody) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{114}
+	return file_messages_proto_rawDescGZIP(), []int{115}
 }
 
 // BatchUpdateManifestMessageHeader is the header of batch update manifest message.
@@ -6473,7 +6542,7 @@ type BatchUpdateManifestMessageHeader struct {
 func (x *BatchUpdateManifestMessageHeader) Reset() {
 	*x = BatchUpdateManifestMessageHeader{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_messages_proto_msgTypes[115]
+		mi := &file_messages_proto_msgTypes[116]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6486,7 +6555,7 @@ func (x *BatchUpdateManifestMessageHeader) String() string {
 func (*BatchUpdateManifestMessageHeader) ProtoMessage() {}
 
 func (x *BatchUpdateManifestMessageHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[115]
+	mi := &file_messages_proto_msgTypes[116]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6499,7 +6568,7 @@ func (x *BatchUpdateManifestMessageHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchUpdateManifestMessageHeader.ProtoReflect.Descriptor instead.
 func (*BatchUpdateManifestMessageHeader) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{115}
+	return file_messages_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *BatchUpdateManifestMessageHeader) GetCollectionId() int64 {
@@ -6521,7 +6590,7 @@ type BatchUpdateManifestMessageBody struct {
 func (x *BatchUpdateManifestMessageBody) Reset() {
 	*x = BatchUpdateManifestMessageBody{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_messages_proto_msgTypes[116]
+		mi := &file_messages_proto_msgTypes[117]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6534,7 +6603,7 @@ func (x *BatchUpdateManifestMessageBody) String() string {
 func (*BatchUpdateManifestMessageBody) ProtoMessage() {}
 
 func (x *BatchUpdateManifestMessageBody) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[116]
+	mi := &file_messages_proto_msgTypes[117]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6547,7 +6616,7 @@ func (x *BatchUpdateManifestMessageBody) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchUpdateManifestMessageBody.ProtoReflect.Descriptor instead.
 func (*BatchUpdateManifestMessageBody) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{116}
+	return file_messages_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *BatchUpdateManifestMessageBody) GetItems() []*BatchUpdateManifestItem {
@@ -6575,7 +6644,7 @@ type BatchUpdateManifestItem struct {
 func (x *BatchUpdateManifestItem) Reset() {
 	*x = BatchUpdateManifestItem{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_messages_proto_msgTypes[117]
+		mi := &file_messages_proto_msgTypes[118]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6588,7 +6657,7 @@ func (x *BatchUpdateManifestItem) String() string {
 func (*BatchUpdateManifestItem) ProtoMessage() {}
 
 func (x *BatchUpdateManifestItem) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[117]
+	mi := &file_messages_proto_msgTypes[118]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6601,7 +6670,7 @@ func (x *BatchUpdateManifestItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchUpdateManifestItem.ProtoReflect.Descriptor instead.
 func (*BatchUpdateManifestItem) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{117}
+	return file_messages_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *BatchUpdateManifestItem) GetSegmentId() int64 {
@@ -6638,7 +6707,7 @@ type BatchUpdateManifestV2ColumnGroups struct {
 func (x *BatchUpdateManifestV2ColumnGroups) Reset() {
 	*x = BatchUpdateManifestV2ColumnGroups{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_messages_proto_msgTypes[118]
+		mi := &file_messages_proto_msgTypes[119]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6651,7 +6720,7 @@ func (x *BatchUpdateManifestV2ColumnGroups) String() string {
 func (*BatchUpdateManifestV2ColumnGroups) ProtoMessage() {}
 
 func (x *BatchUpdateManifestV2ColumnGroups) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[118]
+	mi := &file_messages_proto_msgTypes[119]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6664,7 +6733,7 @@ func (x *BatchUpdateManifestV2ColumnGroups) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use BatchUpdateManifestV2ColumnGroups.ProtoReflect.Descriptor instead.
 func (*BatchUpdateManifestV2ColumnGroups) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{118}
+	return file_messages_proto_rawDescGZIP(), []int{119}
 }
 
 func (x *BatchUpdateManifestV2ColumnGroups) GetColumnGroups() map[int64]*datapb.FieldBinlog {
@@ -7406,7 +7475,13 @@ var file_messages_proto_rawDesc = []byte{
 	0x5f, 0x6b, 0x65, 0x79, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x07, 0x73, 0x61, 0x66, 0x65,
 	0x4b, 0x65, 0x79, 0x12, 0x23, 0x0a, 0x0d, 0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x62,
 	0x79, 0x74, 0x65, 0x73, 0x18, 0x04, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x70, 0x61, 0x79, 0x6c,
-	0x6f, 0x61, 0x64, 0x42, 0x79, 0x74, 0x65, 0x73, 0x22, 0x7c, 0x0a, 0x1f, 0x54, 0x72, 0x75, 0x6e,
+	0x6f, 0x61, 0x64, 0x42, 0x79, 0x74, 0x65, 0x73, 0x22, 0x5e, 0x0a, 0x12, 0x54, 0x72, 0x61, 0x63,
+	0x65, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x12, 0x19,
+	0x0a, 0x08, 0x74, 0x72, 0x61, 0x63, 0x65, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c,
+	0x52, 0x07, 0x74, 0x72, 0x61, 0x63, 0x65, 0x49, 0x64, 0x12, 0x17, 0x0a, 0x07, 0x73, 0x70, 0x61,
+	0x6e, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x06, 0x73, 0x70, 0x61, 0x6e,
+	0x49, 0x64, 0x12, 0x14, 0x0a, 0x05, 0x66, 0x6c, 0x61, 0x67, 0x73, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x0d, 0x52, 0x05, 0x66, 0x6c, 0x61, 0x67, 0x73, 0x22, 0x7c, 0x0a, 0x1f, 0x54, 0x72, 0x75, 0x6e,
 	0x63, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x65,
 	0x73, 0x73, 0x61, 0x67, 0x65, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x12, 0x13, 0x0a, 0x05, 0x64,
 	0x62, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x04, 0x64, 0x62, 0x49, 0x64,
@@ -7559,7 +7634,7 @@ func file_messages_proto_rawDescGZIP() []byte {
 }
 
 var file_messages_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 124)
+var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 125)
 var file_messages_proto_goTypes = []interface{}{
 	(MessageType)(0),                               // 0: milvus.proto.messages.MessageType
 	(TxnState)(0),                                  // 1: milvus.proto.messages.TxnState
@@ -7677,91 +7752,92 @@ var file_messages_proto_goTypes = []interface{}{
 	(*ReplicateHeader)(nil),                        // 113: milvus.proto.messages.ReplicateHeader
 	(*ResourceKey)(nil),                            // 114: milvus.proto.messages.ResourceKey
 	(*CipherHeader)(nil),                           // 115: milvus.proto.messages.CipherHeader
-	(*TruncateCollectionMessageHeader)(nil),        // 116: milvus.proto.messages.TruncateCollectionMessageHeader
-	(*TruncateCollectionMessageBody)(nil),          // 117: milvus.proto.messages.TruncateCollectionMessageBody
-	(*BatchUpdateManifestMessageHeader)(nil),       // 118: milvus.proto.messages.BatchUpdateManifestMessageHeader
-	(*BatchUpdateManifestMessageBody)(nil),         // 119: milvus.proto.messages.BatchUpdateManifestMessageBody
-	(*BatchUpdateManifestItem)(nil),                // 120: milvus.proto.messages.BatchUpdateManifestItem
-	(*BatchUpdateManifestV2ColumnGroups)(nil),      // 121: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups
-	nil,                                     // 122: milvus.proto.messages.Message.PropertiesEntry
-	nil,                                     // 123: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
-	nil,                                     // 124: milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
-	nil,                                     // 125: milvus.proto.messages.RMQMessageLayout.PropertiesEntry
-	nil,                                     // 126: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry
-	(datapb.SegmentLevel)(0),                // 127: milvus.proto.data.SegmentLevel
-	(*commonpb.ReplicateConfiguration)(nil), // 128: milvus.proto.common.ReplicateConfiguration
-	(*schemapb.CollectionSchema)(nil),       // 129: milvus.proto.schema.CollectionSchema
-	(*fieldmaskpb.FieldMask)(nil),           // 130: google.protobuf.FieldMask
-	(commonpb.ConsistencyLevel)(0),          // 131: milvus.proto.common.ConsistencyLevel
-	(*commonpb.KeyValuePair)(nil),           // 132: milvus.proto.common.KeyValuePair
-	(*indexpb.FieldIndex)(nil),              // 133: milvus.proto.index.FieldIndex
-	(commonpb.LoadPriority)(0),              // 134: milvus.proto.common.LoadPriority
-	(*milvuspb.UserEntity)(nil),             // 135: milvus.proto.milvus.UserEntity
-	(*internalpb.CredentialInfo)(nil),       // 136: milvus.proto.internal.CredentialInfo
-	(*milvuspb.RoleEntity)(nil),             // 137: milvus.proto.milvus.RoleEntity
-	(*milvuspb.RBACMeta)(nil),               // 138: milvus.proto.milvus.RBACMeta
-	(*milvuspb.GrantEntity)(nil),            // 139: milvus.proto.milvus.GrantEntity
-	(*milvuspb.PrivilegeGroupInfo)(nil),     // 140: milvus.proto.milvus.PrivilegeGroupInfo
-	(commonpb.WALName)(0),                   // 141: milvus.proto.common.WALName
-	(commonpb.MsgType)(0),                   // 142: milvus.proto.common.MsgType
-	(*commonpb.MessageID)(nil),              // 143: milvus.proto.common.MessageID
-	(*rgpb.ResourceGroupConfig)(nil),        // 144: milvus.proto.rg.ResourceGroupConfig
-	(*datapb.FieldBinlog)(nil),              // 145: milvus.proto.data.FieldBinlog
+	(*TraceContextHeader)(nil),                     // 116: milvus.proto.messages.TraceContextHeader
+	(*TruncateCollectionMessageHeader)(nil),        // 117: milvus.proto.messages.TruncateCollectionMessageHeader
+	(*TruncateCollectionMessageBody)(nil),          // 118: milvus.proto.messages.TruncateCollectionMessageBody
+	(*BatchUpdateManifestMessageHeader)(nil),       // 119: milvus.proto.messages.BatchUpdateManifestMessageHeader
+	(*BatchUpdateManifestMessageBody)(nil),         // 120: milvus.proto.messages.BatchUpdateManifestMessageBody
+	(*BatchUpdateManifestItem)(nil),                // 121: milvus.proto.messages.BatchUpdateManifestItem
+	(*BatchUpdateManifestV2ColumnGroups)(nil),      // 122: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups
+	nil,                                     // 123: milvus.proto.messages.Message.PropertiesEntry
+	nil,                                     // 124: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
+	nil,                                     // 125: milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
+	nil,                                     // 126: milvus.proto.messages.RMQMessageLayout.PropertiesEntry
+	nil,                                     // 127: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry
+	(datapb.SegmentLevel)(0),                // 128: milvus.proto.data.SegmentLevel
+	(*commonpb.ReplicateConfiguration)(nil), // 129: milvus.proto.common.ReplicateConfiguration
+	(*schemapb.CollectionSchema)(nil),       // 130: milvus.proto.schema.CollectionSchema
+	(*fieldmaskpb.FieldMask)(nil),           // 131: google.protobuf.FieldMask
+	(commonpb.ConsistencyLevel)(0),          // 132: milvus.proto.common.ConsistencyLevel
+	(*commonpb.KeyValuePair)(nil),           // 133: milvus.proto.common.KeyValuePair
+	(*indexpb.FieldIndex)(nil),              // 134: milvus.proto.index.FieldIndex
+	(commonpb.LoadPriority)(0),              // 135: milvus.proto.common.LoadPriority
+	(*milvuspb.UserEntity)(nil),             // 136: milvus.proto.milvus.UserEntity
+	(*internalpb.CredentialInfo)(nil),       // 137: milvus.proto.internal.CredentialInfo
+	(*milvuspb.RoleEntity)(nil),             // 138: milvus.proto.milvus.RoleEntity
+	(*milvuspb.RBACMeta)(nil),               // 139: milvus.proto.milvus.RBACMeta
+	(*milvuspb.GrantEntity)(nil),            // 140: milvus.proto.milvus.GrantEntity
+	(*milvuspb.PrivilegeGroupInfo)(nil),     // 141: milvus.proto.milvus.PrivilegeGroupInfo
+	(commonpb.WALName)(0),                   // 142: milvus.proto.common.WALName
+	(commonpb.MsgType)(0),                   // 143: milvus.proto.common.MsgType
+	(*commonpb.MessageID)(nil),              // 144: milvus.proto.common.MessageID
+	(*rgpb.ResourceGroupConfig)(nil),        // 145: milvus.proto.rg.ResourceGroupConfig
+	(*datapb.FieldBinlog)(nil),              // 146: milvus.proto.data.FieldBinlog
 }
 var file_messages_proto_depIdxs = []int32{
-	122, // 0: milvus.proto.messages.Message.properties:type_name -> milvus.proto.messages.Message.PropertiesEntry
+	123, // 0: milvus.proto.messages.Message.properties:type_name -> milvus.proto.messages.Message.PropertiesEntry
 	3,   // 1: milvus.proto.messages.TxnMessageBody.messages:type_name -> milvus.proto.messages.Message
 	13,  // 2: milvus.proto.messages.InsertMessageHeader.partitions:type_name -> milvus.proto.messages.PartitionSegmentAssignment
 	14,  // 3: milvus.proto.messages.PartitionSegmentAssignment.segment_assignment:type_name -> milvus.proto.messages.SegmentAssignment
-	127, // 4: milvus.proto.messages.CreateSegmentMessageHeader.level:type_name -> milvus.proto.data.SegmentLevel
-	128, // 5: milvus.proto.messages.AlterReplicateConfigMessageHeader.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
-	129, // 6: milvus.proto.messages.SchemaChangeMessageBody.schema:type_name -> milvus.proto.schema.CollectionSchema
-	130, // 7: milvus.proto.messages.AlterCollectionMessageHeader.update_mask:type_name -> google.protobuf.FieldMask
+	128, // 4: milvus.proto.messages.CreateSegmentMessageHeader.level:type_name -> milvus.proto.data.SegmentLevel
+	129, // 5: milvus.proto.messages.AlterReplicateConfigMessageHeader.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
+	130, // 6: milvus.proto.messages.SchemaChangeMessageBody.schema:type_name -> milvus.proto.schema.CollectionSchema
+	131, // 7: milvus.proto.messages.AlterCollectionMessageHeader.update_mask:type_name -> google.protobuf.FieldMask
 	104, // 8: milvus.proto.messages.AlterCollectionMessageHeader.cache_expirations:type_name -> milvus.proto.messages.CacheExpirations
 	34,  // 9: milvus.proto.messages.AlterCollectionMessageBody.updates:type_name -> milvus.proto.messages.AlterCollectionMessageUpdates
-	129, // 10: milvus.proto.messages.AlterCollectionMessageUpdates.schema:type_name -> milvus.proto.schema.CollectionSchema
-	131, // 11: milvus.proto.messages.AlterCollectionMessageUpdates.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
-	132, // 12: milvus.proto.messages.AlterCollectionMessageUpdates.properties:type_name -> milvus.proto.common.KeyValuePair
+	130, // 10: milvus.proto.messages.AlterCollectionMessageUpdates.schema:type_name -> milvus.proto.schema.CollectionSchema
+	132, // 11: milvus.proto.messages.AlterCollectionMessageUpdates.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
+	133, // 12: milvus.proto.messages.AlterCollectionMessageUpdates.properties:type_name -> milvus.proto.common.KeyValuePair
 	35,  // 13: milvus.proto.messages.AlterCollectionMessageUpdates.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterCollection
-	133, // 14: milvus.proto.messages.AlterCollectionMessageUpdates.bound_field_indexes:type_name -> milvus.proto.index.FieldIndex
+	134, // 14: milvus.proto.messages.AlterCollectionMessageUpdates.bound_field_indexes:type_name -> milvus.proto.index.FieldIndex
 	38,  // 15: milvus.proto.messages.AlterLoadConfigMessageHeader.load_fields:type_name -> milvus.proto.messages.LoadFieldConfig
 	39,  // 16: milvus.proto.messages.AlterLoadConfigMessageHeader.replicas:type_name -> milvus.proto.messages.LoadReplicaConfig
-	134, // 17: milvus.proto.messages.LoadReplicaConfig.priority:type_name -> milvus.proto.common.LoadPriority
-	132, // 18: milvus.proto.messages.CreateDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
-	132, // 19: milvus.proto.messages.AlterDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
+	135, // 17: milvus.proto.messages.LoadReplicaConfig.priority:type_name -> milvus.proto.common.LoadPriority
+	133, // 18: milvus.proto.messages.CreateDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
+	133, // 19: milvus.proto.messages.AlterDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
 	46,  // 20: milvus.proto.messages.AlterDatabaseMessageBody.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterDatabase
-	135, // 21: milvus.proto.messages.CreateUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	136, // 22: milvus.proto.messages.CreateUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
-	135, // 23: milvus.proto.messages.AlterUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	136, // 24: milvus.proto.messages.AlterUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
-	137, // 25: milvus.proto.messages.AlterRoleMessageHeader.role_entity:type_name -> milvus.proto.milvus.RoleEntity
-	135, // 26: milvus.proto.messages.RoleBinding.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	137, // 27: milvus.proto.messages.RoleBinding.role_entity:type_name -> milvus.proto.milvus.RoleEntity
+	136, // 21: milvus.proto.messages.CreateUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	137, // 22: milvus.proto.messages.CreateUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
+	136, // 23: milvus.proto.messages.AlterUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	137, // 24: milvus.proto.messages.AlterUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
+	138, // 25: milvus.proto.messages.AlterRoleMessageHeader.role_entity:type_name -> milvus.proto.milvus.RoleEntity
+	136, // 26: milvus.proto.messages.RoleBinding.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	138, // 27: milvus.proto.messages.RoleBinding.role_entity:type_name -> milvus.proto.milvus.RoleEntity
 	63,  // 28: milvus.proto.messages.AlterUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
 	63,  // 29: milvus.proto.messages.DropUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
-	138, // 30: milvus.proto.messages.RestoreRBACMessageBody.rbac_meta:type_name -> milvus.proto.milvus.RBACMeta
-	139, // 31: milvus.proto.messages.AlterPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
-	139, // 32: milvus.proto.messages.DropPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
-	140, // 33: milvus.proto.messages.AlterPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
-	140, // 34: milvus.proto.messages.DropPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
-	123, // 35: milvus.proto.messages.AlterResourceGroupMessageHeader.resource_group_configs:type_name -> milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
-	133, // 36: milvus.proto.messages.CreateIndexMessageBody.field_index:type_name -> milvus.proto.index.FieldIndex
-	133, // 37: milvus.proto.messages.AlterIndexMessageBody.field_indexes:type_name -> milvus.proto.index.FieldIndex
-	141, // 38: milvus.proto.messages.AlterWALMessageHeader.target_wal_name:type_name -> milvus.proto.common.WALName
-	124, // 39: milvus.proto.messages.AlterWALMessageHeader.config:type_name -> milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
+	139, // 30: milvus.proto.messages.RestoreRBACMessageBody.rbac_meta:type_name -> milvus.proto.milvus.RBACMeta
+	140, // 31: milvus.proto.messages.AlterPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
+	140, // 32: milvus.proto.messages.DropPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
+	141, // 33: milvus.proto.messages.AlterPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
+	141, // 34: milvus.proto.messages.DropPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
+	124, // 35: milvus.proto.messages.AlterResourceGroupMessageHeader.resource_group_configs:type_name -> milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
+	134, // 36: milvus.proto.messages.CreateIndexMessageBody.field_index:type_name -> milvus.proto.index.FieldIndex
+	134, // 37: milvus.proto.messages.AlterIndexMessageBody.field_indexes:type_name -> milvus.proto.index.FieldIndex
+	142, // 38: milvus.proto.messages.AlterWALMessageHeader.target_wal_name:type_name -> milvus.proto.common.WALName
+	125, // 39: milvus.proto.messages.AlterWALMessageHeader.config:type_name -> milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
 	105, // 40: milvus.proto.messages.CacheExpirations.cache_expirations:type_name -> milvus.proto.messages.CacheExpiration
 	106, // 41: milvus.proto.messages.CacheExpiration.legacy_proxy_collection_meta_cache:type_name -> milvus.proto.messages.LegacyProxyCollectionMetaCache
-	142, // 42: milvus.proto.messages.LegacyProxyCollectionMetaCache.msg_type:type_name -> milvus.proto.common.MsgType
-	125, // 43: milvus.proto.messages.RMQMessageLayout.properties:type_name -> milvus.proto.messages.RMQMessageLayout.PropertiesEntry
+	143, // 42: milvus.proto.messages.LegacyProxyCollectionMetaCache.msg_type:type_name -> milvus.proto.common.MsgType
+	126, // 43: milvus.proto.messages.RMQMessageLayout.properties:type_name -> milvus.proto.messages.RMQMessageLayout.PropertiesEntry
 	114, // 44: milvus.proto.messages.BroadcastHeader.Resource_keys:type_name -> milvus.proto.messages.ResourceKey
-	143, // 45: milvus.proto.messages.ReplicateHeader.message_id:type_name -> milvus.proto.common.MessageID
-	143, // 46: milvus.proto.messages.ReplicateHeader.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
+	144, // 45: milvus.proto.messages.ReplicateHeader.message_id:type_name -> milvus.proto.common.MessageID
+	144, // 46: milvus.proto.messages.ReplicateHeader.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
 	2,   // 47: milvus.proto.messages.ResourceKey.domain:type_name -> milvus.proto.messages.ResourceDomain
-	120, // 48: milvus.proto.messages.BatchUpdateManifestMessageBody.items:type_name -> milvus.proto.messages.BatchUpdateManifestItem
-	121, // 49: milvus.proto.messages.BatchUpdateManifestItem.v2_column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups
-	126, // 50: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry
-	144, // 51: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
-	145, // 52: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry.value:type_name -> milvus.proto.data.FieldBinlog
+	121, // 48: milvus.proto.messages.BatchUpdateManifestMessageBody.items:type_name -> milvus.proto.messages.BatchUpdateManifestItem
+	122, // 49: milvus.proto.messages.BatchUpdateManifestItem.v2_column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups
+	127, // 50: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.column_groups:type_name -> milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry
+	145, // 51: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
+	146, // 52: milvus.proto.messages.BatchUpdateManifestV2ColumnGroups.ColumnGroupsEntry.value:type_name -> milvus.proto.data.FieldBinlog
 	53,  // [53:53] is the sub-list for method output_type
 	53,  // [53:53] is the sub-list for method input_type
 	53,  // [53:53] is the sub-list for extension type_name
@@ -9132,7 +9208,7 @@ func file_messages_proto_init() {
 			}
 		}
 		file_messages_proto_msgTypes[113].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*TruncateCollectionMessageHeader); i {
+			switch v := v.(*TraceContextHeader); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -9144,7 +9220,7 @@ func file_messages_proto_init() {
 			}
 		}
 		file_messages_proto_msgTypes[114].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*TruncateCollectionMessageBody); i {
+			switch v := v.(*TruncateCollectionMessageHeader); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -9156,7 +9232,7 @@ func file_messages_proto_init() {
 			}
 		}
 		file_messages_proto_msgTypes[115].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BatchUpdateManifestMessageHeader); i {
+			switch v := v.(*TruncateCollectionMessageBody); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -9168,7 +9244,7 @@ func file_messages_proto_init() {
 			}
 		}
 		file_messages_proto_msgTypes[116].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BatchUpdateManifestMessageBody); i {
+			switch v := v.(*BatchUpdateManifestMessageHeader); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -9180,7 +9256,7 @@ func file_messages_proto_init() {
 			}
 		}
 		file_messages_proto_msgTypes[117].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BatchUpdateManifestItem); i {
+			switch v := v.(*BatchUpdateManifestMessageBody); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -9192,6 +9268,18 @@ func file_messages_proto_init() {
 			}
 		}
 		file_messages_proto_msgTypes[118].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*BatchUpdateManifestItem); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[119].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*BatchUpdateManifestV2ColumnGroups); i {
 			case 0:
 				return &v.state
@@ -9214,7 +9302,7 @@ func file_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_messages_proto_rawDesc,
 			NumEnums:      3,
-			NumMessages:   124,
+			NumMessages:   125,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

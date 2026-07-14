@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -104,6 +105,18 @@ func (m *messageImpl) WithBarrierTimeTick(tt uint64) MutableMessage {
 func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 	m.properties.Set(messageWALTerm, EncodeInt64(term))
 	return m
+}
+
+func (m *messageImpl) injectTraceContext(ctx context.Context) {
+	injectTraceContext(ctx, m.properties)
+}
+
+func (m *messageImpl) overwriteTraceContext(ctx context.Context) {
+	overwriteTraceContext(ctx, m.properties)
+}
+
+func (m *immutableMessageImpl) overwriteTraceContext(ctx context.Context) {
+	overwriteTraceContext(ctx, m.properties)
 }
 
 // WithReplicateHeader sets the replicate header of current message.

@@ -1236,7 +1236,8 @@ func (_c *MockMutableMessage_WithWALTerm_Call) RunAndReturn(run func(int64) mess
 func NewMockMutableMessage(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockMutableMessage {
+},
+) *MockMutableMessage {
 	mock := &MockMutableMessage{}
 	mock.Mock.Test(t)
 
