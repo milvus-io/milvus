@@ -4862,7 +4862,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
     auto old_path = std::find_if(
         current->runtime->json_indices.begin(),
         current->runtime->json_indices.end(),
-        [](const JsonIndex& index) { return index.nested_path == "a"; });
+        [](const auto& index) { return index.nested_path == "a"; });
     ASSERT_NE(old_path, current->runtime->json_indices.end());
     EXPECT_EQ(old_path->index, original_index);
 }
@@ -4939,12 +4939,10 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
         [&] {
             EXPECT_TRUE(runtime->ngram_indexings.empty());
             ASSERT_EQ(runtime->json_indices.size(), 2);
-            auto replacement_path =
-                std::find_if(runtime->json_indices.begin(),
-                             runtime->json_indices.end(),
-                             [](const JsonIndex& index) {
-                                 return index.nested_path == "a";
-                             });
+            auto replacement_path = std::find_if(
+                runtime->json_indices.begin(),
+                runtime->json_indices.end(),
+                [](const auto& index) { return index.nested_path == "a"; });
             ASSERT_NE(replacement_path, runtime->json_indices.end());
             EXPECT_EQ(replacement_path->index, replacement_index);
             EXPECT_FALSE(GetFieldBit(staged->index_ready_bitset, json));
@@ -4960,13 +4958,13 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
     auto sibling_path = std::find_if(
         published->runtime->json_indices.begin(),
         published->runtime->json_indices.end(),
-        [](const JsonIndex& index) { return index.nested_path == "b"; });
+        [](const auto& index) { return index.nested_path == "b"; });
     ASSERT_NE(sibling_path, published->runtime->json_indices.end());
     EXPECT_EQ(sibling_path->index, sibling_index);
     auto replacement_path = std::find_if(
         published->runtime->json_indices.begin(),
         published->runtime->json_indices.end(),
-        [](const JsonIndex& index) { return index.nested_path == "a"; });
+        [](const auto& index) { return index.nested_path == "a"; });
     ASSERT_NE(replacement_path, published->runtime->json_indices.end());
     EXPECT_EQ(replacement_path->index, replacement_index);
     EXPECT_FALSE(GetFieldBit(published->index_ready_bitset, json));
