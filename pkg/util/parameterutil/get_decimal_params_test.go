@@ -118,3 +118,36 @@ func TestValidateDecimalString(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeUnscaledInt64(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		precision int64
+		scale     int64
+		want      int64
+		wantErr   bool
+	}{
+		{"simple", "19.99", 18, 4, 199900, false},
+		{"negative", "-19.99", 18, 4, -199900, false},
+		{"integer only", "1234", 18, 4, 12340000, false},
+		{"zero", "0", 18, 4, 0, false},
+		{"negative zero fraction", "-0.5", 18, 4, -5000, false},
+		{"already at full scale", "1.1234", 18, 4, 11234, false},
+		{"leading zeros", "0007.12", 4, 2, 712, false},
+		{"scale zero", "42", 18, 0, 42, false},
+		{"invalid propagates", "abc", 18, 4, 0, true},
+		{"scale exceeded propagates", "1.99999", 18, 4, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := EncodeUnscaledInt64(tt.value, tt.precision, tt.scale)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

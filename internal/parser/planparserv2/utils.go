@@ -265,6 +265,10 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		return value, nil
 	}
 
+	if typeutil.IsDecimalType(dataType) && IsInteger(value) {
+		return value, nil
+	}
+
 	if typeutil.IsBoolType(dataType) && IsBool(value) {
 		return value, nil
 	}
@@ -484,6 +488,8 @@ func canBeComparedDataType(left, right schemapb.DataType) bool {
 		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_JSON:
 		return true
+	case schemapb.DataType_Decimal:
+		return typeutil.IsDecimalType(right)
 	default:
 		return false
 	}

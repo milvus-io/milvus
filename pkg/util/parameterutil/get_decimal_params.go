@@ -87,6 +87,35 @@ func ValidateDecimalString(s string, precision, scale int64) error {
 	return nil
 }
 
+// EncodeUnscaledInt64 converts a decimal literal (e.g. "19.99") into its unscaled
+// integer representation at the given scale (e.g. scale=4 -> 199900), via pure
+// string/integer arithmetic — never through a float — so it stays exact for every
+// value ValidateDecimalString accepts.
+func EncodeUnscaledInt64(literal string, precision, scale int64) (int64, error) {
+	if err := ValidateDecimalString(literal, precision, scale); err != nil {
+		return 0, err
+	}
+
+	rest := literal
+	negative := false
+	if rest[0] == '-' {
+		negative = true
+		rest = rest[1:]
+	}
+
+	intPart, fracPart, _ := strings.Cut(rest, ".")
+	fracPart += strings.Repeat("0", int(scale)-len(fracPart))
+
+	unscaled, err := strconv.ParseInt(intPart+fracPart, 10, 64)
+	if err != nil {
+		return 0, merr.WrapErrParameterInvalidMsg("decimal value %q overflows the unscaled int64 representation", literal)
+	}
+	if negative {
+		unscaled = -unscaled
+	}
+	return unscaled, nil
+}
+
 func isAllDigits(s string) bool {
 	for _, r := range s {
 		if r < '0' || r > '9' {
