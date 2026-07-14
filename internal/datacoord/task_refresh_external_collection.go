@@ -688,6 +688,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		ExploreManifestPath:    t.GetExploreManifestPath(),
 		FileIndexBegin:         t.GetFileIndexBegin(),
 		FileIndexEnd:           t.GetFileIndexEnd(),
+		TargetRowsPerSegment:   paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64(),
 	}
 
 	// Submit task to worker via unified task system
