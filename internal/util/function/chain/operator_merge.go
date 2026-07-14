@@ -238,6 +238,10 @@ type scoreCollectFunc func(inputs []*DataFrame, chunkIdx int) (map[any]float32, 
 func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*DataFrame, collectFn scoreCollectFunc) (*DataFrame, error) {
 	numChunks := inputs[0].NumChunks()
 
+	// Resolved once for the whole merge: every chunk's $id array must share one
+	// arrow type, otherwise AddColumnFromChunks below cannot chunk them together.
+	idType := resolveIDType(inputs)
+
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
 
@@ -264,7 +268,7 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 		ids, scores, locs := sortAndExtractResults(idScores, idLocs, op.SortDescending())
 		newChunkSizes[chunkIdx] = int64(len(ids))
 
-		idArr, scoreArr, err := op.buildResultArrays(ctx, ids, scores)
+		idArr, scoreArr, err := op.buildResultArrays(ctx, ids, scores, idType)
 		if err != nil {
 			return nil, err
 		}
@@ -709,14 +713,41 @@ func compareIDs(a, b any) int {
 	}
 }
 
+// resolveIDType returns the arrow type of the merged $id column, taken from the
+// first input that actually carries IDs. Zero-row inputs cannot be trusted for
+// this: an empty result carries no ID type of its own and is materialized as an
+// empty Int64 column regardless of the collection's PK type (see importEmptyIDs
+// in converter.go). Falls back to Int64 when every input is empty, which is
+// self-consistent because then every chunk is empty as well.
+func resolveIDType(inputs []*DataFrame) arrow.DataType {
+	for _, df := range inputs {
+		if col := df.Column(types.IDFieldName); col != nil && col.Len() > 0 {
+			return col.DataType()
+		}
+	}
+	return arrow.PrimitiveTypes.Int64
+}
+
 // buildResultArrays builds ID and score arrays from results.
-func (op *MergeOp) buildResultArrays(ctx *types.FuncContext, ids []any, scores []float32) (arrow.Array, arrow.Array, error) {
+// idType types the ID array of a zero-hit chunk, which has no IDs to infer it from.
+func (op *MergeOp) buildResultArrays(ctx *types.FuncContext, ids []any, scores []float32, idType arrow.DataType) (arrow.Array, arrow.Array, error) {
 	if len(ids) == 0 {
-		// Empty result
-		idBuilder := array.NewInt64Builder(ctx.Pool())
+		// Empty result: type the empty array after the other chunks, otherwise
+		// arrow.NewChunked rejects the column (e.g. "mismatch data type int64 vs utf8").
 		scoreBuilder := array.NewFloat32Builder(ctx.Pool())
-		defer idBuilder.Release()
 		defer scoreBuilder.Release()
+
+		var idBuilder array.Builder
+		switch idType.ID() {
+		case arrow.STRING:
+			idBuilder = array.NewStringBuilder(ctx.Pool())
+		case arrow.INT64:
+			idBuilder = array.NewInt64Builder(ctx.Pool())
+		default:
+			return nil, nil, merr.WrapErrFunctionFailedMsg("merge_op: unsupported ID type %s", idType)
+		}
+		defer idBuilder.Release()
+
 		return idBuilder.NewArray(), scoreBuilder.NewArray(), nil
 	}
 
