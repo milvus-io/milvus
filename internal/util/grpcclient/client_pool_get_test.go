@@ -107,3 +107,50 @@ func TestClientBase_GetGrpcClient_GrowsPoolOnSuccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, base.grpcClientPool, 2, "pool stays capped at poolSize")
 }
+
+func TestClientBase_GetGrpcClientAfterCloseReturnsClosing(t *testing.T) {
+	base := &ClientBase[*mockClient]{
+		poolSize: 2,
+		grpcClientPool: []*clientConnWrapper[*mockClient]{
+			{client: &mockClient{}},
+		},
+	}
+	addrCalls := 0
+	base.getAddrFunc = func() (string, error) {
+		addrCalls++
+		return "", assert.AnError
+	}
+
+	require.NoError(t, base.Close())
+	w, err := base.GetGrpcClient(context.Background())
+
+	assert.Nil(t, w)
+	assert.ErrorIs(t, err, grpc.ErrClientConnClosing)
+	assert.Zero(t, addrCalls, "a closed client must not resolve an address or redial")
+}
+
+func TestClientBase_CallAfterCloseFastFails(t *testing.T) {
+	base := &ClientBase[*mockClient]{
+		poolSize:    2,
+		MaxAttempts: 3,
+		grpcClientPool: []*clientConnWrapper[*mockClient]{
+			{client: &mockClient{}},
+		},
+	}
+	addrCalls := 0
+	base.getAddrFunc = func() (string, error) {
+		addrCalls++
+		return "", assert.AnError
+	}
+
+	require.NoError(t, base.Close())
+	callerCalls := 0
+	_, err := base.Call(context.Background(), func(client *mockClient) (any, error) {
+		callerCalls++
+		return struct{}{}, nil
+	})
+
+	assert.ErrorIs(t, err, grpc.ErrClientConnClosing)
+	assert.Zero(t, callerCalls, "the RPC callback must not run after Close")
+	assert.Zero(t, addrCalls, "Call after Close must not attempt to reconnect")
+}

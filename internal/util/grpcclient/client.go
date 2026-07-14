@@ -115,6 +115,7 @@ type ClientBase[T interface {
 	roundRobinIdx         atomic.Uint64
 	dialMtx               sync.Mutex
 	poolSize              int
+	closed                bool // guarded by grpcClientMtx; Close is terminal
 	encryption            bool
 	cpInternalTLS         *x509.CertPool
 	addr                  atomic.String
@@ -235,6 +236,10 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 
 	// Fast path: pool already at target size → round-robin reuse, no lock contention.
 	c.grpcClientMtx.RLock()
+	if c.closed {
+		c.grpcClientMtx.RUnlock()
+		return nil, grpc.ErrClientConnClosing
+	}
 	n := len(c.grpcClientPool)
 	if n >= size {
 		w := c.pickLocked()
@@ -247,6 +252,10 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 	// warm and another caller is growing it, reuse an existing connection instead of waiting.
 	if n > 0 && !c.dialMtx.TryLock() {
 		c.grpcClientMtx.RLock()
+		if c.closed {
+			c.grpcClientMtx.RUnlock()
+			return nil, grpc.ErrClientConnClosing
+		}
 		if len(c.grpcClientPool) > 0 {
 			w := c.pickLocked()
 			c.grpcClientMtx.RUnlock()
@@ -261,6 +270,10 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 
 	// Re-check under dialMtx: another grower may have advanced or filled the pool.
 	c.grpcClientMtx.RLock()
+	if c.closed {
+		c.grpcClientMtx.RUnlock()
+		return nil, grpc.ErrClientConnClosing
+	}
 	n = len(c.grpcClientPool)
 	addr := c.addr.Load()
 	if n >= size && n > 0 {
@@ -295,13 +308,19 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 	w := &clientConnWrapper[T]{client: c.newGrpcClient(conn), conn: conn}
 
 	c.grpcClientMtx.Lock()
-	defer c.grpcClientMtx.Unlock()
+	if c.closed {
+		c.grpcClientMtx.Unlock()
+		_ = conn.Close()
+		return nil, grpc.ErrClientConnClosing
+	}
 	if len(c.grpcClientPool) == 0 {
 		c.addr.Store(addr)
 		c.ctxCounter.Store(0)
 	}
 	c.grpcClientPool = append(c.grpcClientPool, w)
-	return c.pickLocked(), nil
+	w = c.pickLocked()
+	c.grpcClientMtx.Unlock()
+	return w, nil
 }
 
 // pickLocked returns the next pool connection round-robin.
@@ -585,6 +604,9 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	defer cancel()
 	err := retry.Handle(ctx, func() (bool, error) {
 		if wrapper == nil {
+			if IsConnectionClosingErr(clientErr) {
+				return false, clientErr
+			}
 			if ok := c.checkNodeSessionExist(ctx); !ok {
 				// if session doesn't exist, no need to reset connection for datanode/indexnode/querynode
 				return false, merr.ErrNodeNotFound
@@ -701,6 +723,11 @@ func (c *ClientBase[T]) Close() error {
 	// finish; holding grpcClientMtx across that would stall every concurrent
 	// GetGrpcClient on connection acquisition until those RPCs drain.
 	c.grpcClientMtx.Lock()
+	if c.closed {
+		c.grpcClientMtx.Unlock()
+		return nil
+	}
+	c.closed = true
 	pool := c.grpcClientPool
 	c.grpcClientPool = nil
 	c.grpcClientMtx.Unlock()

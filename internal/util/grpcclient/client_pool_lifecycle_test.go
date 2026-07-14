@@ -102,6 +102,71 @@ func TestClientBase_CloseWaitsForInFlightDial(t *testing.T) {
 		"the dialed connection must be drained by Close, not appended after it")
 }
 
+func TestClientBase_GetGrpcClientCannotQueueBehindClose(t *testing.T) {
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	close(proceed)
+	base, stop := startGatedBase(t, started, proceed)
+	defer stop()
+
+	w, err := base.GetGrpcClient(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, w)
+
+	// Keep Close blocked in wrapper.Close after it has detached the pool. While
+	// Close still owns dialMtx, a new GetGrpcClient must observe the terminal
+	// closed state instead of queueing behind Close and redialing afterwards.
+	w.Pin()
+	closeDone := make(chan struct{})
+	go func() {
+		_ = base.Close()
+		close(closeDone)
+	}()
+
+	require.Eventually(t, func() bool {
+		base.grpcClientMtx.RLock()
+		defer base.grpcClientMtx.RUnlock()
+		return len(base.grpcClientPool) == 0
+	}, time.Second, time.Millisecond, "Close did not detach the pool")
+
+	type getResult struct {
+		wrapper *clientConnWrapper[*mockClient]
+		err     error
+	}
+	getDone := make(chan getResult, 1)
+	go func() {
+		got, getErr := base.GetGrpcClient(context.Background())
+		getDone <- getResult{wrapper: got, err: getErr}
+	}()
+
+	var result getResult
+	returnedWhileClosing := false
+	select {
+	case result = <-getDone:
+		returnedWhileClosing = true
+	case <-time.After(time.Second):
+	}
+
+	w.Unpin()
+	select {
+	case <-closeDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not finish after the pinned RPC was released")
+	}
+
+	if !returnedWhileClosing {
+		// Drain and close any connection resurrected by the pre-fix behavior before
+		// failing, so the regression test does not leak resources itself.
+		result = <-getDone
+		if result.wrapper != nil {
+			_ = result.wrapper.Close()
+		}
+		t.Fatal("GetGrpcClient queued behind Close instead of observing the terminal closed state")
+	}
+	require.Nil(t, result.wrapper)
+	require.ErrorIs(t, result.err, grpc.ErrClientConnClosing)
+}
+
 // TestClientBase_ResetWaitsForInFlightDial: same mutual exclusion for
 // resetConnection. Without it, a force reset racing an in-flight dial clears
 // the pool and address, and the dial then re-appends a connection to the
