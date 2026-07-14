@@ -65,8 +65,10 @@ type BalanceTaskAdmitter interface {
 	AdmitBalanceTask(task Task, validate BalanceAdmissionValidator) BalanceAdmissionResult
 }
 
-// BalanceTaskGenerationAdmitter atomically compares the expected RG-scoped
-// pending generation and commits the task under the scheduler pending lock.
+// BalanceTaskGenerationAdmitter atomically compares the expected pending
+// generation and commits the task under the scheduler pending lock. The
+// generation combines the RG-scoped counter with a topology-independent fence
+// for NilReplica cleanup work whose action-node RG mapping may change.
 // The epoch-owned portion counts only expected generation-aware commits and is
 // subtracted so independent admissions from the same wave do not invalidate
 // each other. Legacy adds, removals, and failures remain visible mutations.

@@ -19,6 +19,8 @@ package task
 import (
 	"context"
 	"strings"
+	"sync"
+	"testing"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -40,6 +42,26 @@ const balanceAdmissionShard = "balance-admission-shard"
 var _ BalanceTaskAdmitter = (*taskScheduler)(nil)
 var _ BalanceTaskGenerationAdmitter = (*taskScheduler)(nil)
 var _ BalanceTaskInspector = (*taskScheduler)(nil)
+
+func receiveTaskTestSignal[T any](t *testing.T, ch <-chan T, label string) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		var zero T
+		return zero
+	}
+}
+
+func closeTaskTestChannelOnCleanup(t *testing.T, ch chan struct{}) func() {
+	t.Helper()
+	var once sync.Once
+	closeChannel := func() { once.Do(func() { close(ch) }) }
+	t.Cleanup(closeChannel)
+	return closeChannel
+}
 
 func (suite *TaskSuite) newSegmentMoveTask(segmentID, sourceNode, targetNode int64) *SegmentTask {
 	task, err := NewSegmentTask(
@@ -317,10 +339,11 @@ func (suite *TaskSuite) TestLegacyAdmissionsDoNotAdvanceEpochRevision() {
 	suite.Zero(afterAdmission.EpochRevision)
 }
 
-func (suite *TaskSuite) TestPendingLockDoesNotCoverTargetRefresh() {
+func (suite *TaskSuite) TestDispatchDoesNotHoldScheduleLockDuringTargetRefresh() {
 	blockingTarget := meta.NewMockTargetManager(suite.T())
 	refreshStarted := make(chan struct{})
 	releaseRefresh := make(chan struct{})
+	releaseTargetRefresh := closeTaskTestChannelOnCleanup(suite.T(), releaseRefresh)
 	blockingTarget.EXPECT().UpdateCollectionNextTarget(mock.Anything, suite.collection).
 		Run(func(context.Context, int64) {
 			close(refreshStarted)
@@ -342,20 +365,21 @@ func (suite *TaskSuite) TestPendingLockDoesNotCoverTargetRefresh() {
 	suite.Require().NoError(err)
 	suite.Require().NoError(suite.scheduler.Add(failedTask))
 	failedTask.Fail(merr.ErrSegmentNotFound)
-	removeDone := make(chan struct{})
+	dispatchDone := make(chan struct{})
 	go func() {
-		suite.scheduler.remove(failedTask)
-		close(removeDone)
+		defer close(dispatchDone)
+		suite.scheduler.Dispatch(1)
 	}()
-	<-refreshStarted
+	receiveTaskTestSignal(suite.T(), refreshStarted, "target refresh start")
 
+	addResourceGroup := "target-refresh-add-rg"
 	externalReplica := meta.NewReplica(&querypb.Replica{
 		ID:            100,
 		CollectionID:  suite.collection + 1,
-		ResourceGroup: suite.replica.GetResourceGroup(),
+		ResourceGroup: addResourceGroup,
 		Nodes:         []int64{1, 2, 3},
 	})
-	suite.meta.Put(suite.ctx, externalReplica)
+	suite.Require().NoError(suite.meta.Put(suite.ctx, externalReplica))
 	unrelatedTask, err := NewSegmentTask(
 		context.Background(),
 		time.Second,
@@ -368,6 +392,35 @@ func (suite *TaskSuite) TestPendingLockDoesNotCoverTargetRefresh() {
 	suite.Require().NoError(err)
 	addDone := make(chan error, 1)
 	go func() { addDone <- suite.scheduler.Add(unrelatedTask) }()
+
+	generationResourceGroup := "target-refresh-admission-rg"
+	generationEpoch := BalanceEpochMeta{ResourceGroup: generationResourceGroup, LeaderTerm: 9, Sequence: 1}
+	generationReplica := meta.NewReplica(&querypb.Replica{
+		ID:            101,
+		CollectionID:  suite.collection + 2,
+		ResourceGroup: generationResourceGroup,
+		Nodes:         []int64{1, 2, 3},
+	})
+	suite.Require().NoError(suite.meta.Put(suite.ctx, generationReplica))
+	generationTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection+2,
+		generationReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(3, ActionTypeGrow, balanceAdmissionShard, 9003, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+	generationTask.SetBalanceEpoch(generationEpoch)
+	expected := suite.scheduler.GetPendingBalanceTasks().RevisionFor(generationResourceGroup, generationEpoch)
+	admitDone := make(chan BalanceAdmissionResult, 1)
+	go func() {
+		admitDone <- suite.scheduler.AdmitBalanceTaskAtPendingRevision(generationTask, expected, func() BalanceAdmissionReason {
+			return BalanceAdmissionAccepted
+		})
+	}()
+
 	inspectDone := make(chan PendingBalanceSnapshot, 1)
 	go func() { inspectDone <- suite.scheduler.GetPendingBalanceTasks() }()
 
@@ -378,24 +431,148 @@ func (suite *TaskSuite) TestPendingLockDoesNotCoverTargetRefresh() {
 		addCompleted = true
 	case <-time.After(200 * time.Millisecond):
 	}
+	admitCompleted := false
+	var admitResult BalanceAdmissionResult
+	select {
+	case admitResult = <-admitDone:
+		admitCompleted = true
+	case <-time.After(200 * time.Millisecond):
+	}
 	inspectCompleted := false
 	select {
 	case <-inspectDone:
 		inspectCompleted = true
 	case <-time.After(200 * time.Millisecond):
 	}
-	close(releaseRefresh)
-	<-removeDone
+	releaseTargetRefresh()
+	receiveTaskTestSignal(suite.T(), dispatchDone, "dispatch completion")
 	if !addCompleted {
-		addErr = <-addDone
+		addErr = receiveTaskTestSignal(suite.T(), addDone, "unrelated Add completion")
+	}
+	if !admitCompleted {
+		admitResult = receiveTaskTestSignal(suite.T(), admitDone, "generation admission completion")
 	}
 	if !inspectCompleted {
-		<-inspectDone
+		receiveTaskTestSignal(suite.T(), inspectDone, "pending inspection completion")
 	}
 
 	suite.NoError(addErr)
+	suite.Equal(BalanceAdmissionAccepted, admitResult.Reason)
 	suite.True(addCompleted, "collection-B Add waited for collection-A target refresh")
+	suite.True(admitCompleted, "generation admission waited for collection-A target refresh")
 	suite.True(inspectCompleted, "pending inspection waited for collection-A target refresh")
+}
+
+func (suite *TaskSuite) TestResourceExhaustionPenaltyPrecedesDeferredFinalization() {
+	finalizationStarted := make(chan struct{})
+	releaseFinalization := make(chan struct{})
+	releaseDeferredFinalization := closeTaskTestChannelOnCleanup(suite.T(), releaseFinalization)
+	suite.scheduler.finalizationHook = func(task Task) {
+		close(finalizationStarted)
+		<-releaseFinalization
+	}
+
+	failedTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, balanceAdmissionShard, 9004, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.scheduler.Add(failedTask))
+	failedTask.Fail(merr.ErrSegmentRequestResourceFailed)
+	dispatchDone := make(chan struct{})
+	go func() {
+		defer close(dispatchDone)
+		suite.scheduler.Dispatch(1)
+	}()
+	receiveTaskTestSignal(suite.T(), finalizationStarted, "deferred finalization start")
+
+	suite.True(suite.nodeMgr.IsResourceExhausted(1), "penalty was not visible before deferred finalization")
+	externalReplica := meta.NewReplica(&querypb.Replica{
+		ID:            102,
+		CollectionID:  suite.collection + 3,
+		ResourceGroup: "penalty-finalization-unrelated-rg",
+		Nodes:         []int64{1, 2, 3},
+	})
+	suite.Require().NoError(suite.meta.Put(suite.ctx, externalReplica))
+	unrelatedTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection+3,
+		externalReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(2, ActionTypeGrow, balanceAdmissionShard, 9005, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+	addDone := make(chan error, 1)
+	go func() { addDone <- suite.scheduler.Add(unrelatedTask) }()
+	addCompleted := false
+	var addErr error
+	select {
+	case addErr = <-addDone:
+		addCompleted = true
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	releaseDeferredFinalization()
+	receiveTaskTestSignal(suite.T(), dispatchDone, "penalty dispatch completion")
+	if !addCompleted {
+		addErr = receiveTaskTestSignal(suite.T(), addDone, "penalty test unrelated Add completion")
+	}
+	suite.NoError(addErr)
+	suite.True(addCompleted, "unrelated Add waited for deferred finalization")
+}
+
+func (suite *TaskSuite) TestReplacementPreservesResourceExhaustionPenalty() {
+	segmentID := int64(9006)
+	suite.setSegmentMovePrerequisites(segmentID, 1)
+	oldTask := suite.newSegmentMoveTask(segmentID, 1, 2)
+	suite.Require().NoError(suite.scheduler.Add(oldTask))
+	oldTask.Fail(merr.ErrSegmentRequestResourceFailed)
+
+	replacement := suite.newSegmentMoveTask(segmentID, 1, 3)
+	replacement.SetPriority(TaskPriorityHigh)
+	suite.Require().NoError(suite.scheduler.Add(replacement))
+
+	suite.True(suite.nodeMgr.IsResourceExhausted(2), "replacement skipped the failed task's resource penalty")
+}
+
+func (suite *TaskSuite) TestSynchronousRemoveWaitsForScheduleLock() {
+	removeTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, balanceAdmissionShard, 9007, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.scheduler.Add(removeTask))
+
+	suite.scheduler.scheduleMu.Lock()
+	removeDone := make(chan struct{})
+	go func() {
+		defer close(removeDone)
+		suite.scheduler.remove(removeTask)
+	}()
+	removedWhileLocked := false
+	select {
+	case <-removeDone:
+		removedWhileLocked = true
+	case <-time.After(200 * time.Millisecond):
+	}
+	suite.scheduler.scheduleMu.Unlock()
+	if !removedWhileLocked {
+		receiveTaskTestSignal(suite.T(), removeDone, "synchronous remove after schedule unlock")
+	}
+
+	suite.False(removedWhileLocked, "synchronous remove bypassed scheduleMu")
 }
 
 func (suite *TaskSuite) TestAdmitBalanceTaskReturnsTypedDuplicate() {
@@ -811,11 +988,12 @@ func (suite *TaskSuite) TestPendingRevisionForNilReplicaUsesActionNodeResourceGr
 
 	afterAdd := suite.scheduler.GetPendingBalanceTasks()
 	suite.Equal(uint64(1), afterAdd.ResourceGroupRevisions[resourceGroup])
-	suite.Equal(uint64(1), afterAdd.RevisionFor(resourceGroup, BalanceEpochMeta{}).EffectiveRevision())
+	suite.Equal(uint64(2), afterAdd.RevisionFor(resourceGroup, BalanceEpochMeta{}).EffectiveRevision())
 
 	suite.scheduler.remove(cleanupTask)
 	afterRemove := suite.scheduler.GetPendingBalanceTasks()
 	suite.Equal(uint64(2), afterRemove.ResourceGroupRevisions[resourceGroup])
+	suite.Equal(uint64(4), afterRemove.RevisionFor(resourceGroup, BalanceEpochMeta{}).EffectiveRevision())
 }
 
 func (suite *TaskSuite) TestPendingRevisionForNilReplicaUsesPhysicalResourceGroupMembership() {
@@ -939,6 +1117,180 @@ func (suite *TaskSuite) TestNilReplicaRemovalIncludesNewOutgoingReplicaResourceG
 	afterRemove := suite.scheduler.GetPendingBalanceTasks()
 	suite.Equal(uint64(2), afterRemove.ResourceGroupRevisions[currentResourceGroup])
 	suite.Equal(uint64(1), afterRemove.ResourceGroupRevisions[newOutgoingResourceGroup])
+}
+
+func (suite *TaskSuite) TestNilReplicaRemovalUnscopedRevisionClosesScopeResolutionWindow() {
+	currentResourceGroup := "nil-replica-linearized-current-rg"
+	newOutgoingResourceGroup := "nil-replica-linearized-outgoing-rg"
+	nodeID := int64(94)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: nodeID,
+		Labels: map[string]string{sessionutil.LabelResourceGroup: currentResourceGroup},
+	}))
+	cleanupTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(nodeID, ActionTypeReduce, balanceAdmissionShard, 9910, querypb.DataScope_Historical, -1),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.scheduler.Add(cleanupTask))
+	admissionReplica := meta.NewReplica(&querypb.Replica{
+		ID:            194,
+		CollectionID:  suite.collection + 94,
+		ResourceGroup: newOutgoingResourceGroup,
+		Nodes:         []int64{1, 2, 3},
+	})
+	suite.Require().NoError(suite.meta.Put(suite.ctx, admissionReplica))
+	admissionTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection+94,
+		admissionReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, balanceAdmissionShard, 9912, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+
+	removalScopeResolved := make(chan struct{})
+	releaseRemoval := make(chan struct{})
+	admissionScopeResolved := make(chan struct{})
+	releaseAdmission := make(chan struct{})
+	releaseRemovalCommit := closeTaskTestChannelOnCleanup(suite.T(), releaseRemoval)
+	releaseRemovalAdmission := closeTaskTestChannelOnCleanup(suite.T(), releaseAdmission)
+	suite.scheduler.pendingMutationHook = func(stage pendingMutationStage, task Task) {
+		switch {
+		case stage == pendingMutationStageRemoveScopeResolved && task.ID() == cleanupTask.ID():
+			close(removalScopeResolved)
+			<-releaseRemoval
+		case stage == pendingMutationStageAddScopeResolved && task == admissionTask:
+			close(admissionScopeResolved)
+			<-releaseAdmission
+		}
+	}
+	removeDone := make(chan struct{})
+	go func() {
+		defer close(removeDone)
+		suite.scheduler.remove(cleanupTask)
+	}()
+	receiveTaskTestSignal(suite.T(), removalScopeResolved, "NilReplica removal scope resolution")
+	beforeRemoval := suite.scheduler.GetPendingBalanceTasks().RevisionFor(newOutgoingResourceGroup, BalanceEpochMeta{})
+	suite.Equal(uint64(1), beforeRemoval.EffectiveRevision())
+	admissionDone := make(chan BalanceAdmissionResult, 1)
+	go func() {
+		admissionDone <- suite.scheduler.AdmitBalanceTaskAtPendingRevision(admissionTask, beforeRemoval, func() BalanceAdmissionReason {
+			return BalanceAdmissionAccepted
+		})
+	}()
+	receiveTaskTestSignal(suite.T(), admissionScopeResolved, "removal-race admission scope resolution")
+
+	suite.Require().NoError(suite.meta.Put(suite.ctx, meta.NewReplica(&querypb.Replica{
+		ID:            94,
+		CollectionID:  suite.collection,
+		ResourceGroup: newOutgoingResourceGroup,
+		RoNodes:       []int64{nodeID},
+	})))
+
+	releaseRemovalCommit()
+	receiveTaskTestSignal(suite.T(), removeDone, "NilReplica removal commit")
+	afterRemovalSnapshot := suite.scheduler.GetPendingBalanceTasks()
+	afterRemoval := afterRemovalSnapshot.RevisionFor(newOutgoingResourceGroup, BalanceEpochMeta{})
+	suite.Zero(afterRemovalSnapshot.ResourceGroupRevisions[newOutgoingResourceGroup],
+		"the correctness fence must not depend on a late RG scope resolution")
+	suite.Equal(uint64(2), afterRemoval.EffectiveRevision())
+
+	releaseRemovalAdmission()
+	result := receiveTaskTestSignal(suite.T(), admissionDone, "removal-race admission result")
+	suite.Equal(BalanceAdmissionStaleEpoch, result.Reason)
+	suite.Zero(admissionTask.ID())
+}
+
+func (suite *TaskSuite) TestNilReplicaAddUnscopedRevisionClosesScopeResolutionWindow() {
+	newOutgoingResourceGroup := "nil-replica-add-linearized-outgoing-rg"
+	nodeID := int64(93)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID}))
+	cleanupTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(nodeID, ActionTypeReduce, balanceAdmissionShard, 9911, querypb.DataScope_Historical, -1),
+	)
+	suite.Require().NoError(err)
+	admissionReplica := meta.NewReplica(&querypb.Replica{
+		ID:            193,
+		CollectionID:  suite.collection + 93,
+		ResourceGroup: newOutgoingResourceGroup,
+		Nodes:         []int64{1, 2, 3},
+	})
+	suite.Require().NoError(suite.meta.Put(suite.ctx, admissionReplica))
+	admissionTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection+93,
+		admissionReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, balanceAdmissionShard, 9913, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+
+	cleanupScopeResolved := make(chan struct{})
+	releaseAdd := make(chan struct{})
+	admissionScopeResolved := make(chan struct{})
+	releaseAdmission := make(chan struct{})
+	releaseCleanupAdd := closeTaskTestChannelOnCleanup(suite.T(), releaseAdd)
+	releaseAddAdmission := closeTaskTestChannelOnCleanup(suite.T(), releaseAdmission)
+	suite.scheduler.pendingMutationHook = func(stage pendingMutationStage, task Task) {
+		switch {
+		case stage == pendingMutationStageAddScopeResolved && task == cleanupTask:
+			close(cleanupScopeResolved)
+			<-releaseAdd
+		case stage == pendingMutationStageAddScopeResolved && task == admissionTask:
+			close(admissionScopeResolved)
+			<-releaseAdmission
+		}
+	}
+	addDone := make(chan error, 1)
+	go func() { addDone <- suite.scheduler.Add(cleanupTask) }()
+	receiveTaskTestSignal(suite.T(), cleanupScopeResolved, "NilReplica add scope resolution")
+	beforeAdd := suite.scheduler.GetPendingBalanceTasks().RevisionFor(newOutgoingResourceGroup, BalanceEpochMeta{})
+	suite.Zero(beforeAdd.EffectiveRevision())
+	admissionDone := make(chan BalanceAdmissionResult, 1)
+	go func() {
+		admissionDone <- suite.scheduler.AdmitBalanceTaskAtPendingRevision(admissionTask, beforeAdd, func() BalanceAdmissionReason {
+			return BalanceAdmissionAccepted
+		})
+	}()
+	receiveTaskTestSignal(suite.T(), admissionScopeResolved, "add-race admission scope resolution")
+
+	suite.Require().NoError(suite.meta.Put(suite.ctx, meta.NewReplica(&querypb.Replica{
+		ID:            93,
+		CollectionID:  suite.collection,
+		ResourceGroup: newOutgoingResourceGroup,
+		RoNodes:       []int64{nodeID},
+	})))
+
+	releaseCleanupAdd()
+	suite.Require().NoError(receiveTaskTestSignal(suite.T(), addDone, "NilReplica add commit"))
+	afterAddSnapshot := suite.scheduler.GetPendingBalanceTasks()
+	afterAdd := afterAddSnapshot.RevisionFor(newOutgoingResourceGroup, BalanceEpochMeta{})
+	suite.Zero(afterAddSnapshot.ResourceGroupRevisions[newOutgoingResourceGroup],
+		"the correctness fence must not depend on a late RG scope resolution")
+	suite.Equal(uint64(1), afterAdd.EffectiveRevision())
+	suite.Len(afterAddSnapshot.Tasks, 1)
+	suite.Equal(cleanupTask.ID(), afterAddSnapshot.Tasks[0].TaskID)
+
+	releaseAddAdmission()
+	result := receiveTaskTestSignal(suite.T(), admissionDone, "add-race admission result")
+	suite.Equal(BalanceAdmissionStaleEpoch, result.Reason)
+	suite.Zero(admissionTask.ID())
 }
 
 func (suite *TaskSuite) TestBalanceAdmissionReasonSemantics() {
