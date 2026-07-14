@@ -340,6 +340,10 @@ func (c *ClientBase[T]) resetConnection(wrapper *clientConnWrapper[T], forceRese
 	if !found {
 		return
 	}
+	// Resetting the whole pool is intentional. Errors that reach this path are
+	// treated as target-level failures (server, endpoint, or network), so sibling
+	// connections are likely affected as well. Non-forced resets are throttled by
+	// minResetInterval above to bound connection churn.
 	// wrapper close may block waiting pending request finish, so close the whole pool async.
 	go func(pool []*clientConnWrapper[T], role, addr string) {
 		for _, w := range pool {
