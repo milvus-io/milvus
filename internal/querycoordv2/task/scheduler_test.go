@@ -187,6 +187,7 @@ func (suite *TaskSuite) TestPendingGenerationAdmissionIsWaveAwareAndLinearized()
 
 	finalValidated := make(chan struct{})
 	releaseCommit := make(chan struct{})
+	releaseThirdCommit := closeTaskTestChannelOnCleanup(suite.T(), releaseCommit)
 	third := newGrowTask(suite.collection, 7003, 3, suite.replica, epoch)
 	thirdResultCh := make(chan BalanceAdmissionResult, 1)
 	go func() {
@@ -200,7 +201,7 @@ func (suite *TaskSuite) TestPendingGenerationAdmissionIsWaveAwareAndLinearized()
 			return BalanceAdmissionAccepted
 		})
 	}()
-	<-finalValidated
+	receiveTaskTestSignal(suite.T(), finalValidated, "third wave final validation")
 
 	externalReplica := meta.NewReplica(&querypb.Replica{
 		ID:            99,
@@ -211,9 +212,9 @@ func (suite *TaskSuite) TestPendingGenerationAdmissionIsWaveAwareAndLinearized()
 	suite.meta.Put(suite.ctx, externalReplica)
 	external := newGrowTask(suite.collection+1, 8001, 1, externalReplica, BalanceEpochMeta{})
 	suite.Require().NoError(suite.scheduler.Add(external))
-	close(releaseCommit)
+	releaseThirdCommit()
 
-	thirdResult := <-thirdResultCh
+	thirdResult := receiveTaskTestSignal(suite.T(), thirdResultCh, "third wave admission result")
 	suite.Equal(BalanceAdmissionStaleEpoch, thirdResult.Reason)
 	suite.Zero(third.ID())
 	suite.Equal(TaskStatusCanceled, third.Status())
@@ -798,6 +799,7 @@ func (suite *TaskSuite) TestReplacementCancelsOldUnderScheduleLockOutsidePending
 	originalCancel := oldTask.baseTask.cancel
 	cancelStarted := make(chan struct{})
 	releaseCancel := make(chan struct{})
+	releaseOldCancel := closeTaskTestChannelOnCleanup(suite.T(), releaseCancel)
 	oldTask.baseTask.cancel = func() {
 		close(cancelStarted)
 		<-releaseCancel
@@ -810,11 +812,7 @@ func (suite *TaskSuite) TestReplacementCancelsOldUnderScheduleLockOutsidePending
 	go func() {
 		addResult <- suite.scheduler.Add(replacement)
 	}()
-	select {
-	case <-cancelStarted:
-	case <-time.After(time.Second):
-		suite.FailNow("replacement did not begin canceling the old task")
-	}
+	receiveTaskTestSignal(suite.T(), cancelStarted, "replacement old-task cancellation")
 
 	scheduleLockAvailable := suite.scheduler.scheduleMu.TryLock()
 	if scheduleLockAvailable {
@@ -827,8 +825,94 @@ func (suite *TaskSuite) TestReplacementCancelsOldUnderScheduleLockOutsidePending
 	}
 	suite.True(pendingLockAvailable, "replacement cancellation must not hold the pending lock")
 
-	close(releaseCancel)
-	suite.NoError(<-addResult)
+	releaseOldCancel()
+	suite.NoError(receiveTaskTestSignal(suite.T(), addResult, "replacement Add result"))
+	suite.Equal(TaskStatusCanceled, oldTask.Status())
+	suite.Equal(TaskStatusStarted, replacement.Status())
+}
+
+func (suite *TaskSuite) TestReplacementAdditionBookkeepingPrecedesOldFinalization() {
+	segmentID := int64(1012)
+	sourceNode := int64(1)
+	suite.setSegmentMovePrerequisites(segmentID, sourceNode)
+	oldTask := suite.newSegmentMoveTask(segmentID, sourceNode, 2)
+	suite.Require().NoError(suite.scheduler.Add(oldTask))
+
+	finalizationStarted := make(chan struct{})
+	releaseFinalization := make(chan struct{})
+	releaseOldFinalization := closeTaskTestChannelOnCleanup(suite.T(), releaseFinalization)
+	suite.scheduler.finalizationHook = func(task Task) {
+		if task == oldTask {
+			close(finalizationStarted)
+			<-releaseFinalization
+		}
+	}
+
+	replacement := suite.newSegmentMoveTask(segmentID, sourceNode, 3)
+	replacement.SetPriority(TaskPriorityHigh)
+	replacement.startTs.Store(time.Time{})
+	addResult := make(chan error, 1)
+	go func() { addResult <- suite.scheduler.Add(replacement) }()
+	receiveTaskTestSignal(suite.T(), finalizationStarted, "replacement old-task finalization")
+
+	suite.NotZero(replacement.ID())
+	suite.True(suite.scheduler.taskStats.Contains(replacement.ID()), "replacement taskStats were not published before old finalization")
+	suite.False(replacement.startTs.Load().IsZero(), "replacement start timestamp was not recorded before old finalization")
+	scheduleLockAvailable := suite.scheduler.scheduleMu.TryLock()
+	if scheduleLockAvailable {
+		suite.scheduler.scheduleMu.Unlock()
+	}
+	suite.True(scheduleLockAvailable, "old finalization still held scheduleMu")
+
+	releaseOldFinalization()
+	suite.NoError(receiveTaskTestSignal(suite.T(), addResult, "replacement addition completion"))
+	suite.Equal(TaskStatusCanceled, oldTask.Status())
+	suite.Equal(TaskStatusStarted, replacement.Status())
+}
+
+func (suite *TaskSuite) TestGenerationReplacementAdditionBookkeepingPrecedesOldFinalization() {
+	segmentID := int64(1013)
+	sourceNode := int64(1)
+	suite.setSegmentMovePrerequisites(segmentID, sourceNode)
+	oldTask := suite.newSegmentMoveTask(segmentID, sourceNode, 2)
+	suite.Require().NoError(suite.scheduler.Add(oldTask))
+
+	finalizationStarted := make(chan struct{})
+	releaseFinalization := make(chan struct{})
+	releaseOldFinalization := closeTaskTestChannelOnCleanup(suite.T(), releaseFinalization)
+	suite.scheduler.finalizationHook = func(task Task) {
+		if task == oldTask {
+			close(finalizationStarted)
+			<-releaseFinalization
+		}
+	}
+
+	epoch := BalanceEpochMeta{ResourceGroup: suite.replica.GetResourceGroup(), LeaderTerm: 17, Sequence: 19}
+	replacement := suite.newSegmentMoveTask(segmentID, sourceNode, 3)
+	replacement.SetPriority(TaskPriorityHigh)
+	replacement.SetBalanceEpoch(epoch)
+	replacement.startTs.Store(time.Time{})
+	expected := suite.scheduler.GetPendingBalanceTasks().RevisionFor(epoch.ResourceGroup, epoch)
+	admitResult := make(chan BalanceAdmissionResult, 1)
+	go func() {
+		admitResult <- suite.scheduler.AdmitBalanceTaskAtPendingRevision(replacement, expected, func() BalanceAdmissionReason {
+			return BalanceAdmissionAccepted
+		})
+	}()
+	receiveTaskTestSignal(suite.T(), finalizationStarted, "generation replacement old-task finalization")
+
+	suite.NotZero(replacement.ID())
+	suite.True(suite.scheduler.taskStats.Contains(replacement.ID()), "generation replacement taskStats were not published before old finalization")
+	suite.False(replacement.startTs.Load().IsZero(), "generation replacement start timestamp was not recorded before old finalization")
+	scheduleLockAvailable := suite.scheduler.scheduleMu.TryLock()
+	if scheduleLockAvailable {
+		suite.scheduler.scheduleMu.Unlock()
+	}
+	suite.True(scheduleLockAvailable, "generation replacement old finalization still held scheduleMu")
+
+	releaseOldFinalization()
+	result := receiveTaskTestSignal(suite.T(), admitResult, "generation replacement admission completion")
+	suite.Equal(BalanceAdmissionAccepted, result.Reason)
 	suite.Equal(TaskStatusCanceled, oldTask.Status())
 	suite.Equal(TaskStatusStarted, replacement.Status())
 }
