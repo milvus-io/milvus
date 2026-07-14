@@ -30,7 +30,14 @@ import (
 
 type publishStage int
 
-const publishStageSegmentsWritten publishStage = iota + 1
+const (
+	publishStageBeforeLock publishStage = iota + 1
+	publishStageSegmentsWritten
+)
+
+type captureStage int
+
+const captureStageLocked captureStage = iota + 1
 
 type DistributionManager struct {
 	publishMu          *sync.RWMutex
@@ -39,6 +46,7 @@ type DistributionManager struct {
 	segmentManager     *SegmentDistManager
 	channelManager     *ChannelDistManager
 	publishHook        func(publishStage)
+	captureHook        func(captureStage)
 }
 
 func NewDistributionManager(nodeManager *session.NodeManager) *DistributionManager {
@@ -101,6 +109,9 @@ type DistributionSnapshot struct {
 }
 
 func (dm *DistributionManager) PublishNodeDistribution(nodeID int64, segments []*Segment, channels []*DmChannel) []*DmChannel {
+	if dm.publishHook != nil {
+		dm.publishHook(publishStageBeforeLock)
+	}
 	dm.publishMu.Lock()
 	defer dm.publishMu.Unlock()
 
@@ -118,6 +129,9 @@ func (dm *DistributionManager) RemoveNodeDistribution(nodeID int64) {
 func (dm *DistributionManager) Capture() DistributionSnapshot {
 	dm.publishMu.RLock()
 	defer dm.publishMu.RUnlock()
+	if dm.captureHook != nil {
+		dm.captureHook(captureStageLocked)
+	}
 	return copyPrimitiveDistribution(dm.SegmentDistManager, dm.ChannelDistManager)
 }
 

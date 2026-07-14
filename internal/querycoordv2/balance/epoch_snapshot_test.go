@@ -18,6 +18,7 @@ package balance
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -60,7 +61,22 @@ func (s *pendingInspectorStub) set(snapshot task.PendingBalanceSnapshot) {
 }
 
 func clonePendingSnapshot(snapshot task.PendingBalanceSnapshot) task.PendingBalanceSnapshot {
-	cloned := task.PendingBalanceSnapshot{Revision: snapshot.Revision, Tasks: make([]task.PendingBalanceTaskSnapshot, len(snapshot.Tasks))}
+	cloned := task.PendingBalanceSnapshot{
+		Revision: snapshot.Revision,
+		Tasks:    make([]task.PendingBalanceTaskSnapshot, len(snapshot.Tasks)),
+	}
+	if snapshot.ResourceGroupRevisions != nil {
+		cloned.ResourceGroupRevisions = make(map[string]uint64, len(snapshot.ResourceGroupRevisions))
+		for resourceGroup, revision := range snapshot.ResourceGroupRevisions {
+			cloned.ResourceGroupRevisions[resourceGroup] = revision
+		}
+	}
+	if snapshot.EpochRevisions != nil {
+		cloned.EpochRevisions = make(map[task.BalanceEpochMeta]uint64, len(snapshot.EpochRevisions))
+		for epoch, revision := range snapshot.EpochRevisions {
+			cloned.EpochRevisions[epoch] = revision
+		}
+	}
 	for i, pending := range snapshot.Tasks {
 		cloned.Tasks[i] = pending
 		cloned.Tasks[i].Actions = append([]task.PendingBalanceActionSnapshot(nil), pending.Actions...)
@@ -76,6 +92,7 @@ type snapshotTargetState struct {
 	nextSegments    map[int64]map[int64]*datapb.SegmentInfo
 	currentChannels map[int64]map[string]*meta.DmChannel
 	nextChannels    map[int64]map[string]*meta.DmChannel
+	segmentsHook    func(collectionID int64, scope int32)
 }
 
 func (s *snapshotTargetState) version(collectionID int64, scope int32) int64 {
@@ -89,11 +106,18 @@ func (s *snapshotTargetState) version(collectionID int64, scope int32) int64 {
 
 func (s *snapshotTargetState) segments(collectionID int64, scope int32) map[int64]*datapb.SegmentInfo {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var segments map[int64]*datapb.SegmentInfo
 	if scope == meta.CurrentTarget {
-		return s.currentSegments[collectionID]
+		segments = s.currentSegments[collectionID]
+	} else {
+		segments = s.nextSegments[collectionID]
 	}
-	return s.nextSegments[collectionID]
+	hook := s.segmentsHook
+	s.mu.Unlock()
+	if hook != nil {
+		hook(collectionID, scope)
+	}
+	return segments
 }
 
 func (s *snapshotTargetState) channels(collectionID int64, scope int32) map[string]*meta.DmChannel {
@@ -410,6 +434,123 @@ func TestPlacementSnapshotRetriesWhenTargetOrReplicaDigestChanges(t *testing.T) 
 	})
 }
 
+func TestPlacementSnapshotRetriesOnlyForRelevantRGPlacementChanges(t *testing.T) {
+	t.Run("unrelated resource group", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		attempts := 0
+		fixture.builder.buildHook = func(attempt int) {
+			attempts++
+			if attempt == 0 {
+				fixture.dist.PublishNodeDistribution(4,
+					[]*meta.Segment{{SegmentInfo: &datapb.SegmentInfo{ID: 302, CollectionID: 300, PartitionID: 30, InsertChannel: "channel-c", NumOfRows: 301}, Version: 42}},
+					[]*meta.DmChannel{{
+						VchannelInfo: &datapb.VchannelInfo{CollectionID: 300, ChannelName: "channel-c"},
+						Version:      42,
+						View:         &meta.LeaderView{ID: 4, CollectionID: 300, Channel: "channel-c", Version: 42, TargetVersion: 3000, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+					}},
+				)
+			}
+		}
+
+		buildSnapshot(t, fixture)
+		require.Equal(t, 1, attempts)
+	})
+
+	t.Run("same resource group", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		attempts := 0
+		fixture.builder.buildHook = func(attempt int) {
+			attempts++
+			if attempt == 0 {
+				segments := append([]*meta.Segment(nil), fixture.node1Segments...)
+				segments = append(segments, &meta.Segment{
+					SegmentInfo: &datapb.SegmentInfo{ID: 202, CollectionID: 200, PartitionID: 20, InsertChannel: "channel-b", NumOfRows: 25},
+					Version:     22,
+				})
+				fixture.dist.PublishNodeDistribution(1, segments, fixture.node1Channels)
+			}
+		}
+
+		snapshot := buildSnapshot(t, fixture)
+		require.GreaterOrEqual(t, attempts, 2)
+		require.Contains(t, snapshot.Segments, SegmentObjectKey{ReplicaID: testOtherReplica, SegmentID: 202, Scope: querypb.DataScope_Historical})
+	})
+}
+
+func TestPlacementSnapshotTargetScopeCaptureIsGenerationConsistent(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		scope int32
+	}{
+		{name: "current", scope: meta.CurrentTarget},
+		{name: "next", scope: meta.NextTarget},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newPlacementSnapshotFixture(t)
+			oldSegmentsRead := make(chan struct{})
+			releaseOldSegments := make(chan struct{})
+			var once sync.Once
+			fixture.targetState.mu.Lock()
+			fixture.targetState.segmentsHook = func(collectionID int64, scope int32) {
+				if collectionID == 100 && scope == tc.scope {
+					once.Do(func() {
+						close(oldSegmentsRead)
+						<-releaseOldSegments
+					})
+				}
+			}
+			fixture.targetState.mu.Unlock()
+
+			type result struct {
+				snapshot *PlacementSnapshot
+				err      error
+			}
+			resultCh := make(chan result, 1)
+			go func() {
+				snapshot, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
+				resultCh <- result{snapshot: snapshot, err: err}
+			}()
+
+			<-oldSegmentsRead
+			fixture.targetState.mu.Lock()
+			newVersion := int64(4000)
+			newSegments := map[int64]*datapb.SegmentInfo{
+				401: {ID: 401, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-new", NumOfRows: 401},
+			}
+			newChannels := map[string]*meta.DmChannel{
+				"channel-new": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 100, ChannelName: "channel-new", UnflushedSegmentIds: []int64{4001}}},
+			}
+			if tc.scope == meta.CurrentTarget {
+				fixture.targetState.currentVersion[100] = newVersion
+				fixture.targetState.currentSegments[100] = newSegments
+				fixture.targetState.currentChannels[100] = newChannels
+			} else {
+				fixture.targetState.nextVersion[100] = newVersion
+				fixture.targetState.nextSegments[100] = newSegments
+				fixture.targetState.nextChannels[100] = newChannels
+			}
+			fixture.targetState.mu.Unlock()
+			close(releaseOldSegments)
+
+			capturedResult := <-resultCh
+			require.NoError(t, capturedResult.err)
+			var captured TargetScopeSnapshot
+			if tc.scope == meta.CurrentTarget {
+				captured = capturedResult.snapshot.CollectionTargets[100].Current
+			} else {
+				captured = capturedResult.snapshot.CollectionTargets[100].Next
+			}
+			require.Equal(t, newVersion, captured.Version)
+			require.Equal(t, map[int64]TargetSegmentSnapshot{
+				401: {ID: 401, CollectionID: 100, PartitionID: 10, Channel: "channel-new", RowCount: 401},
+			}, captured.Segments)
+			require.Equal(t, map[string]TargetChannelSnapshot{
+				"channel-new": {CollectionID: 100, Channel: "channel-new", GrowingSegmentIDs: []int64{4001}},
+			}, captured.Channels)
+		})
+	}
+}
+
 func TestPlacementSnapshotCapturesCurrentAndNextTargetVersions(t *testing.T) {
 	fixture := newPlacementSnapshotFixture(t)
 	snapshot := buildSnapshot(t, fixture)
@@ -449,17 +590,125 @@ func TestPlacementSnapshotProjectsPendingActionsOnce(t *testing.T) {
 	require.Zero(t, snapshot.PendingWork.ChannelWorkloadByNode[1])
 }
 
-func TestPlacementSnapshotRetriesWhenPendingRevisionChanges(t *testing.T) {
-	fixture := newPlacementSnapshotFixture(t)
-	fixture.inspector.set(task.PendingBalanceSnapshot{Revision: 1})
-	fixture.builder.buildHook = func(attempt int) {
-		if attempt == 0 {
-			fixture.inspector.set(task.PendingBalanceSnapshot{Revision: 2})
+func TestPlacementSnapshotPendingInvalidationIsRGScopedAndWaveAware(t *testing.T) {
+	t.Run("unrelated resource group does not retry or invalidate", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               1,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 0},
+		})
+		attempts := 0
+		fixture.builder.buildHook = func(attempt int) {
+			attempts++
+			if attempt == 0 {
+				fixture.inspector.set(task.PendingBalanceSnapshot{
+					Revision:               2,
+					ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 0, testUnrelatedRG: 1},
+					Tasks: []task.PendingBalanceTaskSnapshot{{
+						TaskID: 91, CollectionID: 300, ReplicaID: 13, ResourceGroup: testUnrelatedRG,
+						Actions: []task.PendingBalanceActionSnapshot{{NodeID: 4, Type: task.ActionTypeGrow, SegmentID: 901, Scope: querypb.DataScope_Historical, Workload: 1}},
+					}},
+				})
+			}
 		}
-	}
+
+		snapshot := buildSnapshot(t, fixture)
+		require.Equal(t, 1, attempts)
+		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(AdmissionToken{
+			Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica,
+		}))
+	})
+
+	t.Run("same wave admissions are expected but external work is stale", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		snapshot := buildSnapshot(t, fixture)
+		epoch := task.BalanceEpochMeta{ResourceGroup: testSnapshotRG, LeaderTerm: 7, Sequence: 9}
+		token := AdmissionToken{
+			Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica, Epoch: epoch,
+		}
+		first := task.PendingBalanceTaskSnapshot{
+			TaskID: 1, CollectionID: 100, ReplicaID: testEligibleReplica, ResourceGroup: testSnapshotRG, Epoch: epoch,
+			Actions: []task.PendingBalanceActionSnapshot{{NodeID: 3, Type: task.ActionTypeGrow, SegmentID: 901, Scope: querypb.DataScope_Historical, Workload: 1}},
+		}
+		second := task.PendingBalanceTaskSnapshot{
+			TaskID: 2, CollectionID: 200, ReplicaID: testOtherReplica, ResourceGroup: testSnapshotRG, Epoch: epoch,
+			Actions: []task.PendingBalanceActionSnapshot{{NodeID: 3, Type: task.ActionTypeGrow, SegmentID: 902, Scope: querypb.DataScope_Historical, Workload: 1}},
+		}
+
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               1,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 1},
+			EpochRevisions:         map[task.BalanceEpochMeta]uint64{epoch: 1},
+			Tasks:                  []task.PendingBalanceTaskSnapshot{first},
+		})
+		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(token))
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               2,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 2},
+			EpochRevisions:         map[task.BalanceEpochMeta]uint64{epoch: 2},
+			Tasks:                  []task.PendingBalanceTaskSnapshot{first, second},
+		})
+		require.Equal(t, task.BalanceAdmissionAccepted, fixture.builder.Validate(token))
+
+		external := task.PendingBalanceTaskSnapshot{
+			TaskID: 3, CollectionID: 100, ReplicaID: testEligibleReplica, ResourceGroup: testSnapshotRG,
+			Actions: []task.PendingBalanceActionSnapshot{{NodeID: 3, Type: task.ActionTypeGrow, SegmentID: 903, Scope: querypb.DataScope_Historical, Workload: 1}},
+		}
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               3,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 3},
+			EpochRevisions:         map[task.BalanceEpochMeta]uint64{epoch: 2},
+			Tasks:                  []task.PendingBalanceTaskSnapshot{first, second, external},
+		})
+		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(token))
+	})
+}
+
+func TestPlacementSnapshotIncludesUnownedCapacityAndNilReplicaCleanup(t *testing.T) {
+	fixture := newPlacementSnapshotFixture(t)
+	fixture.dist.PublishNodeDistribution(3,
+		[]*meta.Segment{{
+			SegmentInfo: &datapb.SegmentInfo{ID: 901, CollectionID: 900, PartitionID: 90, InsertChannel: "orphan", NumOfRows: 90},
+			Version:     1,
+		}},
+		[]*meta.DmChannel{{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: 900, ChannelName: "orphan"},
+			Version:      1,
+			View:         &meta.LeaderView{ID: 3, CollectionID: 900, Channel: "orphan", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		}},
+	)
+	fixture.inspector.set(task.PendingBalanceSnapshot{
+		Revision: 8,
+		Tasks: []task.PendingBalanceTaskSnapshot{
+			{
+				TaskID: 81, CollectionID: 900, ReplicaID: -1,
+				Actions: []task.PendingBalanceActionSnapshot{{NodeID: 3, Type: task.ActionTypeReduce, SegmentID: 901, Shard: "orphan", Scope: querypb.DataScope_Historical, Workload: -90}},
+			},
+			{
+				TaskID: 82, CollectionID: 900, ReplicaID: -1,
+				Actions: []task.PendingBalanceActionSnapshot{{NodeID: 3, Type: task.ActionTypeReduce, Channel: "orphan", Shard: "orphan", Workload: -1}},
+			},
+			{
+				TaskID: 83, CollectionID: 300, ReplicaID: -1,
+				Actions: []task.PendingBalanceActionSnapshot{{NodeID: 4, Type: task.ActionTypeReduce, SegmentID: 301, Scope: querypb.DataScope_Historical, Workload: -300}},
+			},
+		},
+	})
 
 	snapshot := buildSnapshot(t, fixture)
-	require.Equal(t, uint64(2), snapshot.Token.PendingTaskRevision)
+	segmentKey := SegmentObjectKey{ReplicaID: -1, SegmentID: 901, Scope: querypb.DataScope_Historical}
+	channelKey := ChannelObjectKey{ReplicaID: -1, Channel: "orphan"}
+	require.Equal(t, []SegmentPlacement{{
+		NodeID: 3, CollectionID: 900, PartitionID: 90, Channel: "orphan", RowCount: 90, Version: 1, Present: true,
+	}}, snapshot.Segments[segmentKey])
+	require.Len(t, snapshot.Channels[channelKey], 1)
+	require.NotContains(t, snapshot.Segments, SegmentObjectKey{ReplicaID: testEligibleReplica, SegmentID: 901, Scope: querypb.DataScope_Historical})
+	require.NotContains(t, snapshot.Channels, ChannelObjectKey{ReplicaID: testEligibleReplica, Channel: "orphan"})
+	require.NotContains(t, snapshot.EligibleReplicas, int64(-1))
+	require.Equal(t, -90, snapshot.PendingWork.SegmentWorkloadByNode[3])
+	require.Equal(t, -1, snapshot.PendingWork.ChannelWorkloadByNode[3])
+	require.Zero(t, snapshot.PendingWork.SegmentWorkloadByNode[4])
+	require.Len(t, snapshot.PendingWork.Tasks, 2)
 }
 
 func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *testing.T) {
@@ -503,9 +752,19 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 
 	t.Run("pending changed", func(t *testing.T) {
 		fixture := newPlacementSnapshotFixture(t)
-		fixture.inspector.set(task.PendingBalanceSnapshot{Revision: 1})
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               1,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 0},
+		})
 		snapshot := buildSnapshot(t, fixture)
-		fixture.inspector.set(task.PendingBalanceSnapshot{Revision: 2})
+		fixture.inspector.set(task.PendingBalanceSnapshot{
+			Revision:               2,
+			ResourceGroupRevisions: map[string]uint64{testSnapshotRG: 1},
+			Tasks: []task.PendingBalanceTaskSnapshot{{
+				TaskID: 1, CollectionID: 100, ReplicaID: testEligibleReplica, ResourceGroup: testSnapshotRG,
+				Actions: []task.PendingBalanceActionSnapshot{{NodeID: 3, Type: task.ActionTypeGrow, SegmentID: 999, Scope: querypb.DataScope_Historical, Workload: 1}},
+			}},
+		})
 		require.Equal(t, task.BalanceAdmissionStaleEpoch, fixture.builder.Validate(AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
 	})
 
@@ -536,4 +795,43 @@ func TestSnapshotTokenEqualChecksTargetKeys(t *testing.T) {
 	}
 
 	require.False(t, left.Equal(right))
+}
+
+func TestSnapshotTokenEqualIgnoresGlobalDiagnosticRevisions(t *testing.T) {
+	left := SnapshotToken{
+		ResourceGroup:   "rg",
+		SegmentRevision: 1, ChannelRevision: 2, PendingTaskRevision: 3, PendingGlobalRevision: 4,
+		CurrentTargetVersion: map[int64]int64{100: 1},
+		NextTargetVersion:    map[int64]int64{100: 2},
+	}
+	right := left
+	right.SegmentRevision++
+	right.ChannelRevision++
+	right.PendingGlobalRevision++
+
+	require.True(t, left.Equal(right))
+}
+
+func TestReplicaChannelNodeHashEncodesNodeListBoundaries(t *testing.T) {
+	encodedLength := make([]byte, 8)
+	binary.LittleEndian.PutUint64(encodedLength, 1)
+	ambiguousChannel := string(append(encodedLength, 'x'))
+	left := map[int64]ReplicaSnapshot{
+		1: {
+			ID:             1,
+			CollectionID:   100,
+			ResourceGroup:  "rg",
+			ChannelRWNodes: map[string][]int64{"": nil, ambiguousChannel: nil},
+		},
+	}
+	right := map[int64]ReplicaSnapshot{
+		1: {
+			ID:             1,
+			CollectionID:   100,
+			ResourceGroup:  "rg",
+			ChannelRWNodes: map[string][]int64{"": {int64(len(ambiguousChannel))}, "x": nil},
+		},
+	}
+
+	require.NotEqual(t, hashReplicas(left), hashReplicas(right))
 }

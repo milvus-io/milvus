@@ -3,7 +3,6 @@ package meta
 import (
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,12 +56,24 @@ func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
 		},
 	}}
 
-	entered := make(chan struct{})
-	release := make(chan struct{})
+	captureLocked := make(chan struct{})
+	releaseCapture := make(chan struct{})
+	manager.captureHook = func(stage captureStage) {
+		if stage == captureStageLocked {
+			close(captureLocked)
+			<-releaseCapture
+		}
+	}
+	captured := make(chan DistributionSnapshot, 1)
+	go func() {
+		captured <- manager.Capture()
+	}()
+	<-captureLocked
+
+	publishAttempted := make(chan struct{})
 	manager.publishHook = func(stage publishStage) {
-		if stage == publishStageSegmentsWritten {
-			close(entered)
-			<-release
+		if stage == publishStageBeforeLock {
+			close(publishAttempted)
 		}
 	}
 	published := make(chan struct{})
@@ -70,27 +81,14 @@ func TestDistributionManagerCaptureIsNodeAtomic(t *testing.T) {
 		defer close(published)
 		manager.PublishNodeDistribution(1, newSegments, newChannels)
 	}()
-	<-entered
-
-	captured := make(chan DistributionSnapshot, 1)
-	go func() {
-		captured <- manager.Capture()
-	}()
-	select {
-	case <-captured:
-		require.Fail(t, "Capture returned while a node distribution was half-published")
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(release)
+	<-publishAttempted
+	close(releaseCapture)
 	snapshot := <-captured
 	<-published
 
 	segmentIDs, channelNames := distributionRecordsForNode(snapshot, 1)
-	wholeOld := assert.ObjectsAreEqual([]int64{1}, segmentIDs) &&
-		assert.ObjectsAreEqual([]string{"channel-old"}, channelNames)
-	wholeNew := assert.ObjectsAreEqual([]int64{2}, segmentIDs) &&
-		assert.ObjectsAreEqual([]string{"channel-new"}, channelNames)
-	require.True(t, wholeOld || wholeNew, "captured mixed node distribution: segments=%v channels=%v", segmentIDs, channelNames)
+	require.Equal(t, []int64{1}, segmentIDs)
+	require.Equal(t, []string{"channel-old"}, channelNames)
 }
 
 func distributionRecordsForNode(snapshot DistributionSnapshot, nodeID int64) ([]int64, []string) {

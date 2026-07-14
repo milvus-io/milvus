@@ -323,8 +323,28 @@ type PendingBalanceTaskSnapshot struct {
 }
 
 type PendingBalanceSnapshot struct {
-	Revision uint64
-	Tasks    []PendingBalanceTaskSnapshot
+	Revision               uint64
+	ResourceGroupRevisions map[string]uint64
+	EpochRevisions         map[BalanceEpochMeta]uint64
+	Tasks                  []PendingBalanceTaskSnapshot
+}
+
+func (snapshot PendingBalanceSnapshot) RevisionFor(resourceGroup string, epoch BalanceEpochMeta) BalancePendingRevision {
+	revision := snapshot.Revision
+	if snapshot.ResourceGroupRevisions != nil {
+		revision = snapshot.ResourceGroupRevisions[resourceGroup]
+	}
+	epochRevision := uint64(0)
+	if epoch.ResourceGroup == resourceGroup && epoch.ResourceGroup != "" &&
+		(epoch.LeaderTerm != 0 || epoch.Sequence != 0) {
+		epochRevision = snapshot.EpochRevisions[epoch]
+	}
+	return BalancePendingRevision{
+		ResourceGroup: resourceGroup,
+		Epoch:         epoch,
+		Revision:      revision,
+		EpochRevision: epochRevision,
+	}
 }
 
 type BalanceTaskInspector interface {
@@ -673,15 +693,19 @@ type taskScheduler struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	scheduleMu      sync.Mutex           // guards schedule() and RemoveByNode()
-	collKeyLock     *lock.KeyLock[int64] // guards Add() and AdmitBalanceTask()
-	pendingMu       sync.RWMutex         // guards pending indexes, deltas, and pendingRevision
-	pendingRevision uint64
-	tasks           *ConcurrentMap[UniqueID, struct{}]
-	segmentTasks    *ConcurrentMap[replicaSegmentIndex, Task]
-	channelTasks    *ConcurrentMap[replicaChannelIndex, Task]
-	processQueue    *nodeTaskQueue
-	waitQueue       *taskQueue
+	scheduleMu             sync.Mutex           // guards schedule() and RemoveByNode()
+	collKeyLock            *lock.KeyLock[int64] // guards Add() and AdmitBalanceTask()
+	pendingMu              sync.RWMutex         // guards pending indexes, deltas, and pendingRevision
+	pendingRevision        uint64
+	pendingRevisionByRG    map[string]uint64
+	pendingRevisionByEpoch map[BalanceEpochMeta]uint64
+	pendingTaskIDsByEpoch  map[BalanceEpochMeta]map[UniqueID]struct{}
+	pendingTaskRGs         map[UniqueID][]string
+	tasks                  *ConcurrentMap[UniqueID, struct{}]
+	segmentTasks           *ConcurrentMap[replicaSegmentIndex, Task]
+	channelTasks           *ConcurrentMap[replicaChannelIndex, Task]
+	processQueue           *nodeTaskQueue
+	waitQueue              *taskQueue
 
 	taskStats            *expirable.LRU[UniqueID, Task]
 	lastUpdateMetricTime atomic.Time
@@ -713,15 +737,19 @@ func NewScheduler(ctx context.Context,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
-		collKeyLock:      lock.NewKeyLock[int64](),
-		tasks:            NewConcurrentMap[UniqueID, struct{}](),
-		segmentTasks:     NewConcurrentMap[replicaSegmentIndex, Task](),
-		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
-		processQueue:     newNodeTaskQueue(),
-		waitQueue:        newTaskQueue(),
-		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
-		segmentTaskDelta: NewSegmentTaskDelta(),
-		channelTaskDelta: NewChannelTaskDelta(),
+		collKeyLock:            lock.NewKeyLock[int64](),
+		pendingRevisionByRG:    make(map[string]uint64),
+		pendingRevisionByEpoch: make(map[BalanceEpochMeta]uint64),
+		pendingTaskIDsByEpoch:  make(map[BalanceEpochMeta]map[UniqueID]struct{}),
+		pendingTaskRGs:         make(map[UniqueID][]string),
+		tasks:                  NewConcurrentMap[UniqueID, struct{}](),
+		segmentTasks:           NewConcurrentMap[replicaSegmentIndex, Task](),
+		channelTasks:           NewConcurrentMap[replicaChannelIndex, Task](),
+		processQueue:           newNodeTaskQueue(),
+		waitQueue:              newTaskQueue(),
+		taskStats:              expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
+		segmentTaskDelta:       NewSegmentTaskDelta(),
+		channelTaskDelta:       NewChannelTaskDelta(),
 	}
 }
 
@@ -779,6 +807,22 @@ type schedulerAdmissionError struct {
 }
 
 func (scheduler *taskScheduler) AdmitBalanceTask(task Task, validate BalanceAdmissionValidator) BalanceAdmissionResult {
+	return scheduler.admitBalanceTask(task, nil, validate)
+}
+
+func (scheduler *taskScheduler) AdmitBalanceTaskAtPendingRevision(
+	task Task,
+	expected BalancePendingRevision,
+	validate BalanceAdmissionValidator,
+) BalanceAdmissionResult {
+	return scheduler.admitBalanceTask(task, &expected, validate)
+}
+
+func (scheduler *taskScheduler) admitBalanceTask(
+	task Task,
+	expected *BalancePendingRevision,
+	validate BalanceAdmissionValidator,
+) BalanceAdmissionResult {
 	scheduler.collKeyLock.Lock(task.CollectionID())
 	defer scheduler.collKeyLock.Unlock(task.CollectionID())
 
@@ -797,10 +841,50 @@ func (scheduler *taskScheduler) AdmitBalanceTask(task Task, validate BalanceAdmi
 		return BalanceAdmissionResult{Reason: reason, Err: err}
 	}
 
-	scheduler.commitAddLocked(task)
+	resourceGroups := scheduler.resolveTaskResourceGroups(task)
+	if expected != nil && (task.BalanceEpoch() != expected.Epoch || !containsString(resourceGroups, expected.ResourceGroup)) {
+		err := merr.WrapErrServiceInternal(BalanceAdmissionRGChanged.String())
+		task.Cancel(err)
+		return BalanceAdmissionResult{Reason: BalanceAdmissionRGChanged, Err: err}
+	}
+
+	scheduler.scheduleMu.Lock()
+	replacementCandidate := scheduler.getLowerPriorityTask(task)
+	var replacementResourceGroups []string
+	if replacementCandidate != nil {
+		replacementResourceGroups = scheduler.resolveTaskResourceGroups(replacementCandidate)
+	}
+	scheduler.pendingMu.Lock()
+	if expected != nil {
+		current := scheduler.pendingRevisionLocked(expected.ResourceGroup, expected.Epoch)
+		if current.EffectiveRevision() != expected.EffectiveRevision() {
+			scheduler.pendingMu.Unlock()
+			scheduler.scheduleMu.Unlock()
+			err := merr.WrapErrServiceInternal(BalanceAdmissionStaleEpoch.String())
+			task.Cancel(err)
+			return BalanceAdmissionResult{
+				Reason:          BalanceAdmissionStaleEpoch,
+				Err:             err,
+				PendingRevision: current,
+			}
+		}
+	}
+	replaced := scheduler.replaceLowerPriorityTaskLocked(replacementCandidate, replacementResourceGroups)
+	scheduler.registerPendingLocked(task, resourceGroups, expected != nil)
+	pendingRevision := scheduler.pendingRevisionLocked(task.ResourceGroup(), task.BalanceEpoch())
+	if expected != nil {
+		pendingRevision = scheduler.pendingRevisionLocked(expected.ResourceGroup, expected.Epoch)
+	}
+	scheduler.pendingMu.Unlock()
+	scheduler.cancelReplacementLocked(replaced, task)
+	scheduler.scheduleMu.Unlock()
+
+	scheduler.finishReplacement(replaced)
+	scheduler.finishTaskAddition(task)
 	return BalanceAdmissionResult{
-		TaskID: task.ID(),
-		Reason: BalanceAdmissionAccepted,
+		TaskID:          task.ID(),
+		Reason:          BalanceAdmissionAccepted,
+		PendingRevision: pendingRevision,
 	}
 }
 
@@ -814,11 +898,25 @@ func (scheduler *taskScheduler) addLocked(task Task) error {
 }
 
 func (scheduler *taskScheduler) commitAddLocked(task Task) {
+	resourceGroups := scheduler.resolveTaskResourceGroups(task)
+	scheduler.scheduleMu.Lock()
+	replacementCandidate := scheduler.getLowerPriorityTask(task)
+	var replacementResourceGroups []string
+	if replacementCandidate != nil {
+		replacementResourceGroups = scheduler.resolveTaskResourceGroups(replacementCandidate)
+	}
 	scheduler.pendingMu.Lock()
-	defer scheduler.pendingMu.Unlock()
+	replaced := scheduler.replaceLowerPriorityTaskLocked(replacementCandidate, replacementResourceGroups)
+	scheduler.registerPendingLocked(task, resourceGroups, false)
+	scheduler.pendingMu.Unlock()
+	scheduler.cancelReplacementLocked(replaced, task)
+	scheduler.scheduleMu.Unlock()
 
-	scheduler.replaceLowerPriorityTaskLocked(task)
+	scheduler.finishReplacement(replaced)
+	scheduler.finishTaskAddition(task)
+}
 
+func (scheduler *taskScheduler) registerPendingLocked(task Task, resourceGroups []string, expectedAdmission bool) {
 	task.SetID(scheduler.idAllocator())
 	scheduler.waitQueue.Add(task)
 	scheduler.tasks.Insert(task.ID(), struct{}{})
@@ -836,18 +934,125 @@ func (scheduler *taskScheduler) commitAddLocked(task Task) {
 		index := NewReplicaLeaderIndex(task)
 		scheduler.segmentTasks.Insert(index, task)
 	}
+	scheduler.pendingTaskRGs[task.ID()] = append([]string(nil), resourceGroups...)
+	epoch := task.BalanceEpoch()
+	if expectedAdmission && validBalanceEpoch(epoch) && containsString(resourceGroups, epoch.ResourceGroup) {
+		taskIDs := scheduler.pendingTaskIDsByEpoch[epoch]
+		if taskIDs == nil {
+			taskIDs = make(map[UniqueID]struct{})
+			scheduler.pendingTaskIDsByEpoch[epoch] = taskIDs
+		}
+		taskIDs[task.ID()] = struct{}{}
+	}
+	scheduler.incrementPendingRevisionsLocked(task, resourceGroups, expectedAdmission)
+}
 
+func (scheduler *taskScheduler) finishTaskAddition(task Task) {
 	scheduler.taskStats.Add(task.ID(), task)
 	scheduler.updateTaskMetrics()
 	mlog.Info(task.Context(), "task added", mlog.String("task", task.String()))
 	task.RecordStartTs()
+}
+
+func (scheduler *taskScheduler) resolveTaskResourceGroups(task Task) []string {
+	resourceGroups := make(map[string]struct{})
+	if resourceGroup := task.ResourceGroup(); resourceGroup != "" {
+		resourceGroups[resourceGroup] = struct{}{}
+	} else {
+		replicas := scheduler.meta.ReplicaManager.GetByCollection(scheduler.ctx, task.CollectionID())
+		for _, action := range task.Actions() {
+			nodeID := action.Node()
+			if node := scheduler.nodeMgr.Get(nodeID); node != nil && node.ResourceGroupName() != "" {
+				resourceGroups[node.ResourceGroupName()] = struct{}{}
+			}
+			for _, resourceGroup := range scheduler.meta.ResourceManager.ListResourceGroups(scheduler.ctx) {
+				if scheduler.meta.ResourceManager.ContainsNode(scheduler.ctx, resourceGroup, nodeID) {
+					resourceGroups[resourceGroup] = struct{}{}
+				}
+			}
+			for _, replica := range replicas {
+				if replica.ContainRONode(nodeID) || replica.ContainROSQNode(nodeID) {
+					if resourceGroup := replica.GetResourceGroup(); resourceGroup != "" {
+						resourceGroups[resourceGroup] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(resourceGroups))
+	for resourceGroup := range resourceGroups {
+		result = append(result, resourceGroup)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeResourceGroups(groups ...[]string) []string {
+	merged := make(map[string]struct{})
+	for _, values := range groups {
+		for _, value := range values {
+			if value != "" {
+				merged[value] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(merged))
+	for value := range merged {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func validBalanceEpoch(epoch BalanceEpochMeta) bool {
+	return epoch.ResourceGroup != "" && (epoch.LeaderTerm != 0 || epoch.Sequence != 0)
+}
+
+func (scheduler *taskScheduler) incrementPendingRevisionsLocked(task Task, resourceGroups []string, expectedAdmission bool) {
 	scheduler.pendingRevision++
+	epoch := task.BalanceEpoch()
+	for _, resourceGroup := range resourceGroups {
+		scheduler.pendingRevisionByRG[resourceGroup]++
+		if expectedAdmission && validBalanceEpoch(epoch) && epoch.ResourceGroup == resourceGroup {
+			scheduler.pendingRevisionByEpoch[epoch]++
+		}
+	}
+}
+
+func (scheduler *taskScheduler) pendingRevisionLocked(resourceGroup string, epoch BalanceEpochMeta) BalancePendingRevision {
+	revision := BalancePendingRevision{
+		ResourceGroup: resourceGroup,
+		Epoch:         epoch,
+		Revision:      scheduler.pendingRevisionByRG[resourceGroup],
+	}
+	if validBalanceEpoch(epoch) && epoch.ResourceGroup == resourceGroup {
+		revision.EpochRevision = scheduler.pendingRevisionByEpoch[epoch]
+	}
+	return revision
 }
 
 func (scheduler *taskScheduler) GetPendingBalanceTasks() PendingBalanceSnapshot {
 	for {
 		scheduler.pendingMu.RLock()
 		before := scheduler.pendingRevision
+		rgRevisions := make(map[string]uint64, len(scheduler.pendingRevisionByRG))
+		for resourceGroup, revision := range scheduler.pendingRevisionByRG {
+			rgRevisions[resourceGroup] = revision
+		}
+		epochRevisions := make(map[BalanceEpochMeta]uint64, len(scheduler.pendingRevisionByEpoch))
+		for epoch, revision := range scheduler.pendingRevisionByEpoch {
+			epochRevisions[epoch] = revision
+		}
 		byID := make(map[int64]PendingBalanceTaskSnapshot)
 		copyTask := func(task Task) bool {
 			byID[task.ID()] = copyPendingBalanceTask(task)
@@ -866,7 +1071,12 @@ func (scheduler *taskScheduler) GetPendingBalanceTasks() PendingBalanceSnapshot 
 			tasks = append(tasks, pending)
 		}
 		sort.Slice(tasks, func(i, j int) bool { return tasks[i].TaskID < tasks[j].TaskID })
-		return PendingBalanceSnapshot{Revision: after, Tasks: tasks}
+		return PendingBalanceSnapshot{
+			Revision:               after,
+			ResourceGroupRevisions: rgRevisions,
+			EpochRevisions:         epochRevisions,
+			Tasks:                  tasks,
+		}
 	}
 }
 
@@ -1065,9 +1275,7 @@ func (scheduler *taskScheduler) validateAddLocked(task Task) *schedulerAdmission
 	return nil
 }
 
-// replaceLowerPriorityTaskLocked preserves Add's existing replacement behavior,
-// but delays the mutation until admission has passed its final validation.
-func (scheduler *taskScheduler) replaceLowerPriorityTaskLocked(task Task) {
+func (scheduler *taskScheduler) getLowerPriorityTask(task Task) Task {
 	var old Task
 	var ok bool
 	switch task := task.(type) {
@@ -1080,20 +1288,44 @@ func (scheduler *taskScheduler) replaceLowerPriorityTaskLocked(task Task) {
 	case *DropIndexTask:
 		old, ok = scheduler.segmentTasks.Get(NewReplicaDropIndex(task))
 	default:
-		panic(fmt.Sprintf("replaceLowerPriorityTaskLocked: forget to process task type: %+v", task))
+		panic(fmt.Sprintf("getLowerPriorityTask: forget to process task type: %+v", task))
 	}
 	if !ok || task.Priority() <= old.Priority() {
+		return nil
+	}
+	return old
+}
+
+// replaceLowerPriorityTaskLocked preserves Add's existing replacement behavior,
+// but delays the mutation until admission has passed its final validation.
+func (scheduler *taskScheduler) replaceLowerPriorityTaskLocked(old Task, resourceGroups []string) Task {
+	if old == nil || !scheduler.removePendingLocked(old, resourceGroups) {
+		return nil
+	}
+	return old
+}
+
+// cancelReplacementLocked cancels the old task while scheduleMu excludes
+// dispatch. pendingMu must already be released because cancellation may run
+// task callbacks.
+func (scheduler *taskScheduler) cancelReplacementLocked(old Task, replacement Task) {
+	if old == nil {
 		return
 	}
-
 	mlog.Info(scheduler.ctx, "replace old task, the new one with higher priority",
 		mlog.Int64("oldID", old.ID()),
 		mlog.String("oldPriority", old.Priority().String()),
-		mlog.Int64("newID", task.ID()),
-		mlog.String("newPriority", task.Priority().String()),
+		mlog.Int64("newID", replacement.ID()),
+		mlog.String("newPriority", replacement.Priority().String()),
 	)
 	old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-	scheduler.removePendingLocked(old)
+}
+
+func (scheduler *taskScheduler) finishReplacement(old Task) {
+	if old == nil {
+		return
+	}
+	scheduler.finishTaskRemoval(old)
 }
 
 func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
@@ -1498,12 +1730,65 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 }
 
 func (scheduler *taskScheduler) remove(task Task) {
+	resourceGroups := scheduler.resolveTaskResourceGroups(task)
 	scheduler.pendingMu.Lock()
-	defer scheduler.pendingMu.Unlock()
-	scheduler.removePendingLocked(task)
+	removed := scheduler.removePendingLocked(task, resourceGroups)
+	scheduler.pendingMu.Unlock()
+	if removed {
+		scheduler.finishTaskRemoval(task)
+	}
 }
 
-func (scheduler *taskScheduler) removePendingLocked(task Task) {
+func (scheduler *taskScheduler) removePendingLocked(task Task, currentResourceGroups []string) bool {
+	_, ok := scheduler.tasks.GetAndRemove(task.ID())
+	if !ok {
+		return false
+	}
+
+	resourceGroups := mergeResourceGroups(scheduler.pendingTaskRGs[task.ID()], currentResourceGroups)
+	delete(scheduler.pendingTaskRGs, task.ID())
+	scheduler.removePendingEpochTaskLocked(task)
+	scheduler.waitQueue.Remove(task)
+	scheduler.processQueue.Remove(task)
+	scheduler.decExecutingTaskDelta(task)
+
+	if scheduler.tasks.Len() == 0 {
+		scheduler.segmentTaskDelta.Clear()
+		scheduler.channelTaskDelta.Clear()
+	}
+
+	switch task := task.(type) {
+	case *SegmentTask:
+		index := NewReplicaSegmentIndex(task)
+		scheduler.segmentTasks.Remove(index)
+
+	case *ChannelTask:
+		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
+		scheduler.channelTasks.Remove(index)
+
+	case *LeaderTask:
+		index := NewReplicaLeaderIndex(task)
+		scheduler.segmentTasks.Remove(index)
+	}
+
+	scheduler.incrementPendingRevisionsLocked(task, resourceGroups, false)
+	return true
+}
+
+func (scheduler *taskScheduler) removePendingEpochTaskLocked(task Task) {
+	epoch := task.BalanceEpoch()
+	taskIDs := scheduler.pendingTaskIDsByEpoch[epoch]
+	if _, ok := taskIDs[task.ID()]; !ok {
+		return
+	}
+	delete(taskIDs, task.ID())
+	if len(taskIDs) == 0 {
+		delete(scheduler.pendingTaskIDsByEpoch, epoch)
+		delete(scheduler.pendingRevisionByEpoch, epoch)
+	}
+}
+
+func (scheduler *taskScheduler) finishTaskRemoval(task Task) {
 	log := mlog.With(
 		mlog.Int64("taskID", task.ID()),
 		mlog.Int64("collectionID", task.CollectionID()),
@@ -1514,13 +1799,9 @@ func (scheduler *taskScheduler) removePendingLocked(task Task) {
 	if errors.Is(task.Err(), merr.ErrSegmentNotFound) {
 		log.Info(task.Context(), "segment in target has been cleaned, trigger force update next target")
 		// Avoid using task.Ctx as it may be canceled before remove is called.
-		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
+		_ = scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
 	}
 
-	// If task failed due to resource exhaustion (OOM, disk full, GPU OOM, etc.),
-	// mark the node as resource exhausted for a penalty period.
-	// During this period, the balancer will skip this node when assigning new segments/channels.
-	// This prevents continuous failures on the same node and allows it time to recover.
 	if errors.Is(task.Err(), merr.ErrSegmentRequestResourceFailed) {
 		for _, action := range task.Actions() {
 			if action.Type() == ActionTypeGrow {
@@ -1533,51 +1814,24 @@ func (scheduler *taskScheduler) removePendingLocked(task Task) {
 	}
 
 	task.Cancel(nil)
-	_, ok := scheduler.tasks.GetAndRemove(task.ID())
-	scheduler.waitQueue.Remove(task)
-	scheduler.processQueue.Remove(task)
-	if ok {
-		scheduler.decExecutingTaskDelta(task)
-
-		if scheduler.tasks.Len() == 0 {
-			// in case of task delta leak, try to print detail info before clear
-			scheduler.segmentTaskDelta.printDetailInfos()
-			scheduler.segmentTaskDelta.Clear()
-			scheduler.channelTaskDelta.printDetailInfos()
-			scheduler.channelTaskDelta.Clear()
-		}
-	}
-
 	switch task := task.(type) {
 	case *SegmentTask:
-		index := NewReplicaSegmentIndex(task)
-		scheduler.segmentTasks.Remove(index)
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
 			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {
 			scheduler.recordSegmentTaskError(task)
 		}
-
 	case *ChannelTask:
-		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		scheduler.channelTasks.Remove(index)
 		log = mlog.With(mlog.String("channel", task.Channel()))
-
 	case *LeaderTask:
-		index := NewReplicaLeaderIndex(task)
-		scheduler.segmentTasks.Remove(index)
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
 	}
 
 	log.Info(task.Context(), "task removed")
-
 	if scheduler.meta.Exist(task.Context(), task.CollectionID()) {
 		metrics.QueryCoordTaskLatency.WithLabelValues(fmt.Sprint(task.CollectionID()),
 			scheduler.getTaskMetricsLabel(task), task.Shard()).Observe(float64(task.GetTaskLatency()))
-	}
-	if ok {
-		scheduler.pendingRevision++
 	}
 }
 

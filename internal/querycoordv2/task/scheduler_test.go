@@ -22,16 +22,23 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const balanceAdmissionShard = "balance-admission-shard"
 
 var _ BalanceTaskAdmitter = (*taskScheduler)(nil)
+var _ BalanceTaskGenerationAdmitter = (*taskScheduler)(nil)
 var _ BalanceTaskInspector = (*taskScheduler)(nil)
 
 func (suite *TaskSuite) newSegmentMoveTask(segmentID, sourceNode, targetNode int64) *SegmentTask {
@@ -117,6 +124,278 @@ func (suite *TaskSuite) TestAdmitBalanceTaskAccepted() {
 	snapshot := suite.scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode, targetNode}, suite.collection)
 	suite.Equal(-100, snapshot.GetByNodeInCollection(sourceNode))
 	suite.Equal(100, snapshot.GetByNodeInCollection(targetNode))
+}
+
+func (suite *TaskSuite) TestPendingGenerationAdmissionIsWaveAwareAndLinearized() {
+	epoch := BalanceEpochMeta{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		LeaderTerm:    7,
+		Sequence:      11,
+	}
+	expected := BalancePendingRevision{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		Epoch:         epoch,
+	}
+	newGrowTask := func(collectionID, segmentID, nodeID int64, replica *meta.Replica, taskEpoch BalanceEpochMeta) *SegmentTask {
+		segmentTask, err := NewSegmentTask(
+			context.Background(),
+			time.Second,
+			WrapIDSource(0),
+			collectionID,
+			replica,
+			commonpb.LoadPriority_LOW,
+			NewSegmentActionWithScope(nodeID, ActionTypeGrow, balanceAdmissionShard, segmentID, querypb.DataScope_Historical, 1),
+		)
+		suite.Require().NoError(err)
+		segmentTask.SetBalanceEpoch(taskEpoch)
+		return segmentTask
+	}
+
+	first := newGrowTask(suite.collection, 7001, 1, suite.replica, epoch)
+	firstResult := suite.scheduler.AdmitBalanceTaskAtPendingRevision(first, expected, func() BalanceAdmissionReason {
+		return BalanceAdmissionAccepted
+	})
+	suite.Equal(BalanceAdmissionAccepted, firstResult.Reason)
+
+	second := newGrowTask(suite.collection, 7002, 2, suite.replica, epoch)
+	secondResult := suite.scheduler.AdmitBalanceTaskAtPendingRevision(second, expected, func() BalanceAdmissionReason {
+		return BalanceAdmissionAccepted
+	})
+	suite.Equal(BalanceAdmissionAccepted, secondResult.Reason)
+
+	finalValidated := make(chan struct{})
+	releaseCommit := make(chan struct{})
+	third := newGrowTask(suite.collection, 7003, 3, suite.replica, epoch)
+	thirdResultCh := make(chan BalanceAdmissionResult, 1)
+	go func() {
+		validationCount := 0
+		thirdResultCh <- suite.scheduler.AdmitBalanceTaskAtPendingRevision(third, expected, func() BalanceAdmissionReason {
+			validationCount++
+			if validationCount == 2 {
+				close(finalValidated)
+				<-releaseCommit
+			}
+			return BalanceAdmissionAccepted
+		})
+	}()
+	<-finalValidated
+
+	externalReplica := meta.NewReplica(&querypb.Replica{
+		ID:            99,
+		CollectionID:  suite.collection + 1,
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		Nodes:         []int64{1, 2, 3},
+	})
+	suite.meta.Put(suite.ctx, externalReplica)
+	external := newGrowTask(suite.collection+1, 8001, 1, externalReplica, BalanceEpochMeta{})
+	suite.Require().NoError(suite.scheduler.Add(external))
+	close(releaseCommit)
+
+	thirdResult := <-thirdResultCh
+	suite.Equal(BalanceAdmissionStaleEpoch, thirdResult.Reason)
+	suite.Zero(third.ID())
+	suite.Equal(TaskStatusCanceled, third.Status())
+	suite.Equal(expected.EffectiveRevision()+1, thirdResult.PendingRevision.EffectiveRevision())
+}
+
+func (suite *TaskSuite) TestPendingGenerationDetectsSameEpochRemoval() {
+	epoch := BalanceEpochMeta{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		LeaderTerm:    13,
+		Sequence:      17,
+	}
+	expected := BalancePendingRevision{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		Epoch:         epoch,
+	}
+	newGrowTask := func(segmentID, nodeID int64) *SegmentTask {
+		segmentTask, err := NewSegmentTask(
+			context.Background(),
+			time.Second,
+			WrapIDSource(0),
+			suite.collection,
+			suite.replica,
+			commonpb.LoadPriority_LOW,
+			NewSegmentActionWithScope(nodeID, ActionTypeGrow, balanceAdmissionShard, segmentID, querypb.DataScope_Historical, 1),
+		)
+		suite.Require().NoError(err)
+		segmentTask.SetBalanceEpoch(epoch)
+		return segmentTask
+	}
+	accept := func() BalanceAdmissionReason { return BalanceAdmissionAccepted }
+
+	first := newGrowTask(7101, 1)
+	firstResult := suite.scheduler.AdmitBalanceTaskAtPendingRevision(first, expected, accept)
+	suite.Equal(BalanceAdmissionAccepted, firstResult.Reason)
+
+	second := newGrowTask(7102, 2)
+	secondResult := suite.scheduler.AdmitBalanceTaskAtPendingRevision(second, expected, accept)
+	suite.Equal(BalanceAdmissionAccepted, secondResult.Reason)
+
+	suite.scheduler.remove(first)
+	afterRemoval := suite.scheduler.GetPendingBalanceTasks().RevisionFor(expected.ResourceGroup, epoch)
+	suite.Equal(uint64(3), afterRemoval.Revision)
+	suite.Equal(uint64(2), afterRemoval.EpochRevision)
+	suite.Equal(uint64(1), afterRemoval.EffectiveRevision())
+
+	third := newGrowTask(7103, 3)
+	thirdResult := suite.scheduler.AdmitBalanceTaskAtPendingRevision(third, expected, accept)
+	suite.Equal(BalanceAdmissionStaleEpoch, thirdResult.Reason)
+	suite.Equal(expected.EffectiveRevision()+1, thirdResult.PendingRevision.EffectiveRevision())
+	suite.Zero(third.ID())
+	suite.Equal(TaskStatusCanceled, third.Status())
+}
+
+func (suite *TaskSuite) TestPendingGenerationPrunesInactiveEpochRevision() {
+	epoch := BalanceEpochMeta{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		LeaderTerm:    19,
+		Sequence:      23,
+	}
+	expected := BalancePendingRevision{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		Epoch:         epoch,
+	}
+	task, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, balanceAdmissionShard, 7201, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+	task.SetBalanceEpoch(epoch)
+	result := suite.scheduler.AdmitBalanceTaskAtPendingRevision(task, expected, func() BalanceAdmissionReason {
+		return BalanceAdmissionAccepted
+	})
+	suite.Require().Equal(BalanceAdmissionAccepted, result.Reason)
+	suite.Contains(suite.scheduler.GetPendingBalanceTasks().EpochRevisions, epoch)
+
+	suite.scheduler.remove(task)
+
+	afterRemoval := suite.scheduler.GetPendingBalanceTasks()
+	suite.NotContains(afterRemoval.EpochRevisions, epoch)
+	suite.Greater(afterRemoval.RevisionFor(expected.ResourceGroup, epoch).EffectiveRevision(), expected.EffectiveRevision())
+}
+
+func (suite *TaskSuite) TestLegacyAdmissionsDoNotAdvanceEpochRevision() {
+	epoch := BalanceEpochMeta{
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		LeaderTerm:    29,
+		Sequence:      31,
+	}
+	newGrowTask := func(segmentID, nodeID int64) *SegmentTask {
+		task, err := NewSegmentTask(
+			context.Background(),
+			time.Second,
+			WrapIDSource(0),
+			suite.collection,
+			suite.replica,
+			commonpb.LoadPriority_LOW,
+			NewSegmentActionWithScope(nodeID, ActionTypeGrow, balanceAdmissionShard, segmentID, querypb.DataScope_Historical, 1),
+		)
+		suite.Require().NoError(err)
+		task.SetBalanceEpoch(epoch)
+		return task
+	}
+
+	added := newGrowTask(7301, 1)
+	suite.Require().NoError(suite.scheduler.Add(added))
+	afterAdd := suite.scheduler.GetPendingBalanceTasks().RevisionFor(epoch.ResourceGroup, epoch)
+	suite.Equal(uint64(1), afterAdd.Revision)
+	suite.Zero(afterAdd.EpochRevision)
+
+	admitted := newGrowTask(7302, 2)
+	result := suite.scheduler.AdmitBalanceTask(admitted, func() BalanceAdmissionReason {
+		return BalanceAdmissionAccepted
+	})
+	suite.Require().Equal(BalanceAdmissionAccepted, result.Reason)
+	afterAdmission := suite.scheduler.GetPendingBalanceTasks().RevisionFor(epoch.ResourceGroup, epoch)
+	suite.Equal(uint64(2), afterAdmission.Revision)
+	suite.Zero(afterAdmission.EpochRevision)
+}
+
+func (suite *TaskSuite) TestPendingLockDoesNotCoverTargetRefresh() {
+	blockingTarget := meta.NewMockTargetManager(suite.T())
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	blockingTarget.EXPECT().UpdateCollectionNextTarget(mock.Anything, suite.collection).
+		Run(func(context.Context, int64) {
+			close(refreshStarted)
+			<-releaseRefresh
+		}).
+		Return(nil).
+		Once()
+	suite.scheduler.targetMgr = blockingTarget
+
+	failedTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, balanceAdmissionShard, 9001, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.scheduler.Add(failedTask))
+	failedTask.Fail(merr.ErrSegmentNotFound)
+	removeDone := make(chan struct{})
+	go func() {
+		suite.scheduler.remove(failedTask)
+		close(removeDone)
+	}()
+	<-refreshStarted
+
+	externalReplica := meta.NewReplica(&querypb.Replica{
+		ID:            100,
+		CollectionID:  suite.collection + 1,
+		ResourceGroup: suite.replica.GetResourceGroup(),
+		Nodes:         []int64{1, 2, 3},
+	})
+	suite.meta.Put(suite.ctx, externalReplica)
+	unrelatedTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection+1,
+		externalReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(2, ActionTypeGrow, balanceAdmissionShard, 9002, querypb.DataScope_Historical, 1),
+	)
+	suite.Require().NoError(err)
+	addDone := make(chan error, 1)
+	go func() { addDone <- suite.scheduler.Add(unrelatedTask) }()
+	inspectDone := make(chan PendingBalanceSnapshot, 1)
+	go func() { inspectDone <- suite.scheduler.GetPendingBalanceTasks() }()
+
+	addCompleted := false
+	var addErr error
+	select {
+	case addErr = <-addDone:
+		addCompleted = true
+	case <-time.After(200 * time.Millisecond):
+	}
+	inspectCompleted := false
+	select {
+	case <-inspectDone:
+		inspectCompleted = true
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(releaseRefresh)
+	<-removeDone
+	if !addCompleted {
+		addErr = <-addDone
+	}
+	if !inspectCompleted {
+		<-inspectDone
+	}
+
+	suite.NoError(addErr)
+	suite.True(addCompleted, "collection-B Add waited for collection-A target refresh")
+	suite.True(inspectCompleted, "pending inspection waited for collection-A target refresh")
 }
 
 func (suite *TaskSuite) TestAdmitBalanceTaskReturnsTypedDuplicate() {
@@ -298,6 +577,85 @@ func (suite *TaskSuite) TestAddHigherPrioritySegmentMoveSkipsTopologyRevalidatio
 	suite.Same(newTask, registered)
 }
 
+func (suite *TaskSuite) TestDelayedRemovalDoesNotDeleteReplacementIndex() {
+	segmentID := int64(1010)
+	sourceNode := int64(1)
+	suite.setSegmentMovePrerequisites(segmentID, sourceNode)
+	oldTask := suite.newSegmentMoveTask(segmentID, sourceNode, 2)
+	oldTask.SetPriority(TaskPriorityNormal)
+	suite.Require().NoError(suite.scheduler.Add(oldTask))
+
+	replacement := suite.newSegmentMoveTask(segmentID, sourceNode, 3)
+	replacement.SetPriority(TaskPriorityHigh)
+	suite.Require().NoError(suite.scheduler.Add(replacement))
+	suite.Equal(TaskStatusCanceled, oldTask.Status())
+	beforeDelayedRemoval := suite.scheduler.GetPendingBalanceTasks()
+	beforeDelta := suite.scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode, 3}, suite.collection)
+
+	suite.scheduler.remove(oldTask)
+
+	suite.Equal(TaskStatusStarted, replacement.Status())
+	suite.Equal(1, suite.scheduler.waitQueue.Len())
+	suite.Equal(1, suite.scheduler.tasks.Len())
+	suite.Equal(1, suite.scheduler.segmentTasks.Len())
+	registered, ok := suite.scheduler.segmentTasks.Get(NewReplicaSegmentIndex(replacement))
+	suite.True(ok)
+	suite.Same(replacement, registered)
+	snapshot := suite.scheduler.GetPendingBalanceTasks()
+	suite.Require().Len(snapshot.Tasks, 1)
+	suite.Equal(replacement.ID(), snapshot.Tasks[0].TaskID)
+	suite.Equal(beforeDelayedRemoval.Revision, snapshot.Revision)
+	suite.Equal(beforeDelayedRemoval.ResourceGroupRevisions, snapshot.ResourceGroupRevisions)
+	afterDelta := suite.scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode, 3}, suite.collection)
+	suite.Equal(beforeDelta.GetByNodeInCollection(sourceNode), afterDelta.GetByNodeInCollection(sourceNode))
+	suite.Equal(beforeDelta.GetByNodeInCollection(3), afterDelta.GetByNodeInCollection(3))
+}
+
+func (suite *TaskSuite) TestReplacementCancelsOldUnderScheduleLockOutsidePendingLock() {
+	segmentID := int64(1011)
+	sourceNode := int64(1)
+	suite.setSegmentMovePrerequisites(segmentID, sourceNode)
+	oldTask := suite.newSegmentMoveTask(segmentID, sourceNode, 2)
+	oldTask.SetPriority(TaskPriorityNormal)
+	suite.Require().NoError(suite.scheduler.Add(oldTask))
+	originalCancel := oldTask.baseTask.cancel
+	cancelStarted := make(chan struct{})
+	releaseCancel := make(chan struct{})
+	oldTask.baseTask.cancel = func() {
+		close(cancelStarted)
+		<-releaseCancel
+		originalCancel()
+	}
+
+	replacement := suite.newSegmentMoveTask(segmentID, sourceNode, 3)
+	replacement.SetPriority(TaskPriorityHigh)
+	addResult := make(chan error, 1)
+	go func() {
+		addResult <- suite.scheduler.Add(replacement)
+	}()
+	select {
+	case <-cancelStarted:
+	case <-time.After(time.Second):
+		suite.FailNow("replacement did not begin canceling the old task")
+	}
+
+	scheduleLockAvailable := suite.scheduler.scheduleMu.TryLock()
+	if scheduleLockAvailable {
+		suite.scheduler.scheduleMu.Unlock()
+	}
+	suite.False(scheduleLockAvailable, "replacement cancellation must exclude dispatch")
+	pendingLockAvailable := suite.scheduler.pendingMu.TryLock()
+	if pendingLockAvailable {
+		suite.scheduler.pendingMu.Unlock()
+	}
+	suite.True(pendingLockAvailable, "replacement cancellation must not hold the pending lock")
+
+	close(releaseCancel)
+	suite.NoError(<-addResult)
+	suite.Equal(TaskStatusCanceled, oldTask.Status())
+	suite.Equal(TaskStatusStarted, replacement.Status())
+}
+
 func (suite *TaskSuite) TestAddHigherPriorityChannelMoveSkipsTopologyRevalidation() {
 	channelName := "balance-admission-channel"
 	sourceNode := int64(1)
@@ -430,6 +788,157 @@ func (suite *TaskSuite) TestPendingBalanceTaskInspectorCopiesPrimitiveActionsAnd
 	suite.Greater(afterRemove.Revision, revisionBeforeRemove)
 	suite.Len(afterRemove.Tasks, 1)
 	suite.Equal(channelTask.ID(), afterRemove.Tasks[0].TaskID)
+}
+
+func (suite *TaskSuite) TestPendingRevisionForNilReplicaUsesActionNodeResourceGroup() {
+	resourceGroup := "nil-replica-rg"
+	nodeID := int64(99)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: nodeID,
+		Labels: map[string]string{sessionutil.LabelResourceGroup: resourceGroup},
+	}))
+	cleanupTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(nodeID, ActionTypeReduce, balanceAdmissionShard, 9901, querypb.DataScope_Historical, -1),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.scheduler.Add(cleanupTask))
+
+	afterAdd := suite.scheduler.GetPendingBalanceTasks()
+	suite.Equal(uint64(1), afterAdd.ResourceGroupRevisions[resourceGroup])
+	suite.Equal(uint64(1), afterAdd.RevisionFor(resourceGroup, BalanceEpochMeta{}).EffectiveRevision())
+
+	suite.scheduler.remove(cleanupTask)
+	afterRemove := suite.scheduler.GetPendingBalanceTasks()
+	suite.Equal(uint64(2), afterRemove.ResourceGroupRevisions[resourceGroup])
+}
+
+func (suite *TaskSuite) TestPendingRevisionForNilReplicaUsesPhysicalResourceGroupMembership() {
+	resourceGroup := "nil-replica-physical-rg"
+	nodeID := int64(95)
+	suite.meta.ResourceManager = meta.NewResourceManager(suite.store, suite.nodeMgr)
+	_, err := suite.meta.ResourceManager.AddResourceGroup(suite.ctx, resourceGroup, &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
+	})
+	suite.Require().NoError(err)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID}))
+	suite.meta.ResourceManager.HandleNodeUp(suite.ctx, nodeID)
+	suite.Require().True(suite.meta.ResourceManager.ContainsNode(suite.ctx, resourceGroup, nodeID))
+	suite.Empty(suite.nodeMgr.Get(nodeID).ResourceGroupName())
+
+	cleanupTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(nodeID, ActionTypeReduce, balanceAdmissionShard, 9905, querypb.DataScope_Historical, -1),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.scheduler.Add(cleanupTask))
+
+	afterAdd := suite.scheduler.GetPendingBalanceTasks()
+	suite.Equal(uint64(1), afterAdd.ResourceGroupRevisions[resourceGroup])
+}
+
+func (suite *TaskSuite) TestPendingRevisionForNilReplicaIncludesOutgoingReplicaResourceGroups() {
+	currentResourceGroup := "nil-replica-current-rg"
+	oldDataResourceGroup := "nil-replica-old-data-rg"
+	oldStreamingResourceGroup := "nil-replica-old-streaming-rg"
+	dataNode := int64(97)
+	streamingNode := int64(98)
+	for _, nodeID := range []int64{dataNode, streamingNode} {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: nodeID,
+			Labels: map[string]string{sessionutil.LabelResourceGroup: currentResourceGroup},
+		}))
+	}
+	suite.Require().NoError(suite.meta.Put(suite.ctx,
+		meta.NewReplica(&querypb.Replica{
+			ID:            97,
+			CollectionID:  suite.collection,
+			ResourceGroup: oldDataResourceGroup,
+			RoNodes:       []int64{dataNode},
+		}),
+		meta.NewReplica(&querypb.Replica{
+			ID:            98,
+			CollectionID:  suite.collection,
+			ResourceGroup: oldStreamingResourceGroup,
+			RoSqNodes:     []int64{streamingNode},
+		}),
+	))
+	newCleanupTask := func(segmentID, nodeID int64) *SegmentTask {
+		cleanupTask, err := NewSegmentTask(
+			context.Background(),
+			time.Second,
+			WrapIDSource(0),
+			suite.collection,
+			meta.NilReplica,
+			commonpb.LoadPriority_LOW,
+			NewSegmentActionWithScope(nodeID, ActionTypeReduce, balanceAdmissionShard, segmentID, querypb.DataScope_Historical, -1),
+		)
+		suite.Require().NoError(err)
+		return cleanupTask
+	}
+	dataCleanup := newCleanupTask(9902, dataNode)
+	streamingCleanup := newCleanupTask(9903, streamingNode)
+	suite.Require().NoError(suite.scheduler.Add(dataCleanup))
+	suite.Require().NoError(suite.scheduler.Add(streamingCleanup))
+
+	afterAdd := suite.scheduler.GetPendingBalanceTasks()
+	suite.Equal(uint64(2), afterAdd.ResourceGroupRevisions[currentResourceGroup])
+	suite.Equal(uint64(1), afterAdd.ResourceGroupRevisions[oldDataResourceGroup])
+	suite.Equal(uint64(1), afterAdd.ResourceGroupRevisions[oldStreamingResourceGroup])
+
+	suite.scheduler.remove(dataCleanup)
+	suite.scheduler.remove(streamingCleanup)
+	afterRemove := suite.scheduler.GetPendingBalanceTasks()
+	suite.Equal(uint64(4), afterRemove.ResourceGroupRevisions[currentResourceGroup])
+	suite.Equal(uint64(2), afterRemove.ResourceGroupRevisions[oldDataResourceGroup])
+	suite.Equal(uint64(2), afterRemove.ResourceGroupRevisions[oldStreamingResourceGroup])
+}
+
+func (suite *TaskSuite) TestNilReplicaRemovalIncludesNewOutgoingReplicaResourceGroup() {
+	currentResourceGroup := "nil-replica-removal-current-rg"
+	newOutgoingResourceGroup := "nil-replica-removal-outgoing-rg"
+	nodeID := int64(96)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: nodeID,
+		Labels: map[string]string{sessionutil.LabelResourceGroup: currentResourceGroup},
+	}))
+	cleanupTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(nodeID, ActionTypeReduce, balanceAdmissionShard, 9904, querypb.DataScope_Historical, -1),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.scheduler.Add(cleanupTask))
+	afterAdd := suite.scheduler.GetPendingBalanceTasks()
+	suite.Equal(uint64(1), afterAdd.ResourceGroupRevisions[currentResourceGroup])
+	suite.Zero(afterAdd.ResourceGroupRevisions[newOutgoingResourceGroup])
+
+	suite.Require().NoError(suite.meta.Put(suite.ctx, meta.NewReplica(&querypb.Replica{
+		ID:            96,
+		CollectionID:  suite.collection,
+		ResourceGroup: newOutgoingResourceGroup,
+		RoNodes:       []int64{nodeID},
+	})))
+	suite.scheduler.remove(cleanupTask)
+
+	afterRemove := suite.scheduler.GetPendingBalanceTasks()
+	suite.Equal(uint64(2), afterRemove.ResourceGroupRevisions[currentResourceGroup])
+	suite.Equal(uint64(1), afterRemove.ResourceGroupRevisions[newOutgoingResourceGroup])
 }
 
 func (suite *TaskSuite) TestBalanceAdmissionReasonSemantics() {
