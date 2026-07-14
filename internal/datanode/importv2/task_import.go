@@ -41,6 +41,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+var maxInflightReadBatches = paramtable.Get().DataNodeCfg.ImportMaxInflightReadBatches.GetAsInt() // default 1
+
 type ImportTask struct {
 	*datapb.ImportTaskV2
 	ctx          context.Context
@@ -214,7 +216,6 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 
 func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 	syncTasks := make([]syncmgr.Task, 0)
-	maxInflight := paramtable.Get().DataNodeCfg.ImportMaxInflightReadBatches.GetAsInt() // configurable, default 1
 	type pendingBatch struct {
 		futures []*conc.Future[struct{}]
 		tasks   []syncmgr.Task
@@ -266,7 +267,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			futures: fs,
 			tasks:   sts,
 		})
-		if len(pending) >= maxInflight {
+		if len(pending) >= maxInflightReadBatches {
 			oldest := pending[0]
 			if err := conc.AwaitAll(oldest.futures...); err != nil {
 				return err
