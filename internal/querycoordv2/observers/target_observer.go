@@ -477,7 +477,8 @@ func (ob *TargetObserver) isNextTargetSyncStarted(ctx context.Context, collectio
 	return lo.ContainsBy(delegators, func(delegator *meta.DmChannel) bool {
 		return delegator != nil &&
 			delegator.View != nil &&
-			delegator.View.TargetVersion == nextVersion
+			delegator.View.TargetVersion == nextVersion &&
+			delegator.IsServiceable()
 	})
 }
 

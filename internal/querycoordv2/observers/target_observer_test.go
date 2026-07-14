@@ -754,6 +754,92 @@ func TestShouldUpdateNextTarget_DoesNotExpireAfterDelegatorSyncStarted(t *testin
 	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
 }
 
+func TestShouldUpdateNextTarget_ExpiresWhenDelegatorSyncedButNotServiceable(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	nextVersion := int64(100)
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+
+	targetMgr := meta.NewMockTargetManager(t)
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	observer := NewTargetObserver(
+		&meta.Meta{},
+		targetMgr,
+		distMgr,
+		meta.NewMockBroker(t),
+		session.NewMockCluster(t),
+		nodeMgr,
+	)
+
+	observer.nextTargetLastUpdate.Insert(collectionID, time.Now().Add(-time.Hour))
+	distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  "channel-1",
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:            1,
+			CollectionID:  collectionID,
+			Channel:       "channel-1",
+			TargetVersion: nextVersion,
+			Status:        &querypb.LeaderViewStatus{Serviceable: false},
+		},
+	})
+	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, collectionID).Return(true).Once()
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(nextVersion).Once()
+
+	assert.True(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+}
+
+func TestShouldUpdateNextTarget_DoesNotExpireWhenServiceableDelegatorSynced(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	nextVersion := int64(100)
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+
+	targetMgr := meta.NewMockTargetManager(t)
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	observer := NewTargetObserver(
+		&meta.Meta{},
+		targetMgr,
+		distMgr,
+		meta.NewMockBroker(t),
+		session.NewMockCluster(t),
+		nodeMgr,
+	)
+
+	observer.nextTargetLastUpdate.Insert(collectionID, time.Now().Add(-time.Hour))
+	distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  "channel-1",
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:            1,
+			CollectionID:  collectionID,
+			Channel:       "channel-1",
+			TargetVersion: nextVersion,
+			Status:        &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, collectionID).Return(true).Once()
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(nextVersion).Once()
+
+	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+}
+
 func TestShouldUpdateCurrentTarget_SyncMetadataFailureDoesNotPinNextTarget(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
