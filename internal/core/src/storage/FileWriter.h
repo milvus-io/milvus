@@ -233,6 +233,9 @@ class FileWriter {
     ~FileWriter();
 
     void
+    SetFdatasyncOnFinish();
+
+    void
     Write(const void* data, size_t size);
 
     size_t
@@ -254,6 +257,12 @@ class FileWriter {
  private:
     void
     WriteInternal(const void* data, size_t nbyte);
+
+    void
+    SyncWrittenData();
+
+    void
+    SyncFileData();
 
     void
     FlushWithDirectIO();
@@ -283,6 +292,7 @@ class FileWriter {
     void* aligned_buf_{nullptr};
     size_t capacity_{0};
     size_t offset_{0};
+    bool fdatasync_on_finish_{false};
 
     // for global configuration
     static WriteMode

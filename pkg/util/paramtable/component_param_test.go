@@ -64,6 +64,20 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "queryNode.search.enableResultZeroCopy", params.QueryNodeCfg.EnableResultZeroCopy.Key)
 	})
 
+	t.Run("query node mmap writeback config", func(t *testing.T) {
+		item := params.QueryNodeCfg.MmapWriteback
+		t.Cleanup(func() {
+			params.Reset(item.Key)
+		})
+
+		assert.Equal(t, "queryNode.mmap.writeback", item.Key)
+		assert.False(t, item.Export)
+		assert.False(t, item.GetAsBool())
+
+		params.Save(item.Key, "true")
+		assert.True(t, item.GetAsBool())
+	})
+
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := &params.CommonCfg
 
