@@ -103,6 +103,8 @@ const (
 
 	BatchReduce = "batch_reduce"
 
+	FunctionChainLevelL0 = "l0"
+
 	Pending   = "pending"
 	Executing = "executing"
 	Done      = "done"
@@ -128,6 +130,7 @@ const (
 	channelNameLabelName           = "channel_name"
 	functionLabelName              = "function_name"
 	queryTypeLabelName             = "query_type"
+	chainLevelLabelName            = "chain_level"
 	collectionName                 = "collection_name"
 	databaseLabelName              = "db_name"
 	ResourceGroupLabelName         = "rg"

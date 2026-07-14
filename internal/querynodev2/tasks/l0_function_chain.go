@@ -19,6 +19,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -160,11 +162,31 @@ func executeL0RerankChains(ctx context.Context, segDFs []*chain.DataFrame, build
 	return nil
 }
 
-func (t *SearchTask) applyL0Rerank(segDFs []*chain.DataFrame, prepared *preparedQueryNodeFunctionChains, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) error {
+func (t *SearchTask) applyL0Rerank(segDFs []*chain.DataFrame, prepared *preparedQueryNodeFunctionChains, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) (retErr error) {
 	if prepared == nil {
 		return merr.WrapErrServiceInternalMsg("l0_rerank: prepared querynode function chains is nil")
 	}
-	if len(prepared.l0Chains) > 0 {
+
+	hasPublicL0 := len(prepared.l0Chains) > 0
+	hasBoostScore := prepared.plan != nil && len(prepared.plan.GetScorers()) > 0
+	if !hasPublicL0 && !hasBoostScore {
+		return t.applyBoostScoresWithPlan(segDFs, prepared.plan, searchedSegments, searchReq)
+	}
+
+	start := time.Now()
+	defer func() {
+		status := metrics.SuccessLabel
+		if retErr != nil {
+			status = metrics.FailLabel
+		}
+		metrics.QueryNodeFunctionChainLatency.WithLabelValues(
+			fmt.Sprint(t.GetNodeID()),
+			metrics.FunctionChainLevelL0,
+			status,
+		).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+	}()
+
+	if hasPublicL0 {
 		return t.applyPublicL0Rerank(segDFs, prepared)
 	}
 	return t.applyBoostScoresWithPlan(segDFs, prepared.plan, searchedSegments, searchReq)
