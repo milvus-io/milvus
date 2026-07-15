@@ -43,26 +43,24 @@ namespace milvus::storage {
 namespace {
 
 using SliceLoader = std::function<std::vector<uint8_t>(size_t seq)>;
-using SliceBudgetBytes = std::function<size_t(size_t seq)>;
+using SliceTransientBytes = std::function<size_t(size_t seq)>;
 
 struct ActiveSliceTask {
-    size_t budget_bytes{0};
+    size_t slice_transient_bytes{0};
     std::shared_ptr<StreamSliceResult> result;
     std::future<void> future;
 };
 
 class TransientBudgetGuard {
  public:
-    TransientBudgetGuard(size_t bytes,
+    TransientBudgetGuard(size_t slice_transient_bytes,
                          const folly::CancellationToken& cancellation_token,
                          const std::string& operation)
-        : bytes_(bytes) {
+        : slice_transient_bytes_(slice_transient_bytes) {
         ThrowIfCancelled(cancellation_token, operation);
         auto acquired =
             TransientMemoryBudget::GetLoadTransientBudget().AcquireUntil(
-                bytes_, [&cancellation_token]() {
-                    return cancellation_token.isCancellationRequested();
-                });
+                slice_transient_bytes_, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
             ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
@@ -70,7 +68,8 @@ class TransientBudgetGuard {
     }
 
     ~TransientBudgetGuard() {
-        TransientMemoryBudget::GetLoadTransientBudget().Release(bytes_);
+        TransientMemoryBudget::GetLoadTransientBudget().Release(
+            slice_transient_bytes_);
     }
 
     TransientBudgetGuard(const TransientBudgetGuard&) = delete;
@@ -78,7 +77,7 @@ class TransientBudgetGuard {
     operator=(const TransientBudgetGuard&) = delete;
 
  private:
-    size_t bytes_;
+    size_t slice_transient_bytes_;
 };
 
 bool
@@ -148,7 +147,7 @@ ReadOrderedEntryStream(
     ThreadPoolPriority priority,
     const folly::CancellationToken& cancellation_token,
     const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
-    const SliceBudgetBytes& slice_budget_bytes,
+    const SliceTransientBytes& slice_transient_bytes,
     const SliceLoader& load_slice) {
     ThrowIfCancelled(cancellation_token, "ReadEntryStream");
     if (num_slices == 0) {
@@ -199,44 +198,42 @@ ReadOrderedEntryStream(
                     rememberError(std::current_exception());
                 }
             }
-            budget.Release(task.budget_bytes);
+            budget.Release(task.slice_transient_bytes);
         }
     };
 
     auto submitOne = [&](bool block_for_budget) -> bool {
         size_t seq = next_submit;
-        size_t budget_bytes = 0;
+        size_t slice_transient_byte_count = 0;
         std::shared_ptr<StreamSliceResult> result;
         try {
-            budget_bytes = slice_budget_bytes(seq);
+            slice_transient_byte_count = slice_transient_bytes(seq);
             result = std::make_shared<StreamSliceResult>();
-            result->budget_bytes = budget_bytes;
+            result->slice_transient_bytes = slice_transient_byte_count;
         } catch (...) {
             rememberError(std::current_exception());
             return false;
         }
 
         if (block_for_budget) {
-            auto acquired =
-                budget.AcquireUntil(budget_bytes, [&cancellation_token]() {
-                    return cancellation_token.isCancellationRequested();
-                });
+            auto acquired = budget.AcquireUntil(slice_transient_byte_count,
+                                                cancellation_token);
             if (!acquired) {
                 rememberCancellation();
                 return false;
             }
-        } else if (!budget.TryAcquire(budget_bytes)) {
+        } else if (!budget.TryAcquire(slice_transient_byte_count)) {
             return false;
         }
 
         if (rememberCancellation()) {
-            budget.Release(budget_bytes);
+            budget.Release(slice_transient_byte_count);
             return false;
         }
 
         try {
-            active_tasks.push_back(
-                ActiveSliceTask{budget_bytes, result, std::future<void>()});
+            active_tasks.push_back(ActiveSliceTask{
+                slice_transient_byte_count, result, std::future<void>()});
             active_tasks.back().future =
                 pool.Submit([result, load_slice, seq, cancellation_token]() {
                     try {
@@ -252,7 +249,7 @@ ReadOrderedEntryStream(
                 !active_tasks.back().future.valid()) {
                 active_tasks.pop_back();
             }
-            budget.Release(budget_bytes);
+            budget.Release(slice_transient_byte_count);
             rememberError(std::current_exception());
             return false;
         }
@@ -305,7 +302,7 @@ ReadOrderedEntryStream(
             deliverSlice(task.result);
         }
 
-        budget.Release(task.budget_bytes);
+        budget.Release(task.slice_transient_bytes);
 
         if (first_error) {
             drainActiveTasks();
@@ -1223,15 +1220,19 @@ IndexEntryReader::ReadPlainEntryStream(
                slice_size);
     auto entry_size = static_cast<size_t>(pm.size);
     auto num_slices = PlainStreamSliceCount(entry_size, slice_size);
-    auto sliceBytes = [entry_size, slice_size, num_slices](size_t seq) {
+    auto sliceTransientBytes = [entry_size, slice_size, num_slices](
+                                   size_t seq) {
         return PlainStreamSliceBytes(entry_size, slice_size, num_slices, seq);
     };
     auto input = input_;
     auto cancellation_token = cancellation_token_;
-    auto load_slice = [input, pm, slice_size, sliceBytes, cancellation_token](
-                          size_t seq) {
+    auto load_slice = [input,
+                       pm,
+                       slice_size,
+                       sliceTransientBytes,
+                       cancellation_token](size_t seq) {
         size_t off = seq * slice_size;
-        size_t len = sliceBytes(seq);
+        size_t len = sliceTransientBytes(seq);
         size_t src = pm.offset + off;
         std::vector<uint8_t> data(len);
         ThrowIfCancelled(cancellation_token,
@@ -1249,7 +1250,7 @@ IndexEntryReader::ReadPlainEntryStream(
                            priority_,
                            cancellation_token_,
                            slice_consumer,
-                           sliceBytes,
+                           sliceTransientBytes,
                            load_slice);
 }
 
@@ -1268,7 +1269,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
         size_t remaining = em.original_size - output_offset;
         return std::min(remaining, slice_size_);
     };
-    auto sliceBudgetBytes = [&](size_t seq) {
+    auto sliceTransientBytes = [&](size_t seq) {
         auto plain_len = slicePlainBytes(seq);
         auto cipher_len = em.slices[seq].size;
         AssertInfo(plain_len <= (std::numeric_limits<size_t>::max() / 2) &&
@@ -1323,7 +1324,7 @@ IndexEntryReader::ReadEncryptedEntryStream(
                            priority_,
                            cancellation_token_,
                            slice_consumer,
-                           sliceBudgetBytes,
+                           sliceTransientBytes,
                            load_slice);
 }
 
