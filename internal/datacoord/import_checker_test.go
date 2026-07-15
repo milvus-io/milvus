@@ -598,6 +598,26 @@ func (s *ImportCheckerSuite) TestCheckGCNonReplicatingSkipsRollback() {
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
 
+// The replication check reaches the streaming balancer future, which blocks until the
+// balancer is registered; checkGC must pass a deadline-bounded ctx so an unregistered
+// balancer (datacoord ready before streamingcoord) cannot park the whole checker loop.
+func (s *ImportCheckerSuite) TestCheckGCReplicateCheckCtxIsBounded() {
+	s.setupGCReadyFailedJob()
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error { return nil }
+	hasDeadline := false
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) {
+		_, hasDeadline = ctx.Deadline()
+		return false, nil
+	}
+
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.True(hasDeadline)
+}
+
 // When the replication status cannot be determined (e.g. a transient balancer error during
 // shutdown), GC must NOT drop the job: a false "not replicating" would strand a replicating
 // peer with no recovery path. The job is retained and no rollback is broadcast.

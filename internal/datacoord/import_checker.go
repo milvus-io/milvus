@@ -627,7 +627,14 @@ func (c *importChecker) checkGC(job ImportJob) {
 		// release, so they skip the gate entirely.
 		if c.hooks.rollbackImport != nil && c.hooks.isReplicatingCluster != nil &&
 			job.GetState() == internalpb.ImportJobState_Failed && !job.GetAutoCommit() {
-			replicating, err := c.hooks.isReplicatingCluster(c.ctx)
+			// The check reaches the streaming balancer future, which blocks until the
+			// balancer is registered — under the server-lifetime c.ctx that would park
+			// the whole checker loop during the window before streamingcoord registers
+			// it (e.g. a restart recovering a job already past retention). Bound it like
+			// checkCollection does; a timeout is just another indeterminate status.
+			replicateCheckCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+			replicating, err := c.hooks.isReplicatingCluster(replicateCheckCtx)
+			cancel()
 			switch {
 			case err != nil:
 				// Indeterminate replication status (e.g. a transient balancer error during
