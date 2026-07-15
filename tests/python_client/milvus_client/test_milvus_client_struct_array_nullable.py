@@ -2000,6 +2000,92 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_nullable_struct_array_index_preserves_null_validity(self):
+        """
+        target: test nullable struct-array predicates before and after indexing every scalar struct subfield
+        method: query NOT array_contains, empty array_contains_all, and MATCH_ANY on controlled null, empty,
+            and non-empty rows; then release, create nested BITMAP indexes, reload, and repeat query/search
+        expected: NULL and omitted rows stay excluded under NOT and empty contains-all, raw/indexed results match,
+            and MATCH remains executable after the index-only reload path
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_bitmap_validity")
+        client = self._client()
+        fixture = gen_expression_fixture(self, client, collection_name)
+        source_by_id = fixture["source_by_id"]
+        controlled_ids = sorted(fixture["controlled_ids"])
+        scoped_prefix = f"{PK_FIELD} in {controlled_ids} && "
+
+        real_array_ids = {row_id for row_id in controlled_ids if source_by_id[row_id][STRUCT_FIELD] is not None}
+        not_contains_ids = {
+            row_id
+            for row_id in real_array_ids
+            if all(element[TAG_SUBFIELD] != "match_9100" for element in source_by_id[row_id][STRUCT_FIELD])
+        }
+        match_any_ids = {
+            row_id
+            for row_id in real_array_ids
+            if any(element[TAG_SUBFIELD] == "match_9100" for element in source_by_id[row_id][STRUCT_FIELD])
+        }
+
+        expressions = {
+            "not_contains": f'not array_contains({STRUCT_TAG_FIELD}, "match_9100")',
+            "empty_contains_all": f"array_contains_all({STRUCT_TAG_FIELD}, [])",
+            "match_any": f'MATCH_ANY({STRUCT_FIELD}, $[{TAG_SUBFIELD}] == "match_9100")',
+        }
+
+        def collect_evidence():
+            evidence = {}
+            for name, expression in expressions.items():
+                rows, _ = self.query(
+                    client,
+                    collection_name,
+                    filter=scoped_prefix + expression,
+                    output_fields=[PK_FIELD],
+                    limit=len(controlled_ids),
+                )
+                evidence[f"query_{name}"] = {row[PK_FIELD] for row in rows}
+
+            search_results, _ = self.search(
+                client,
+                collection_name,
+                data=[gen_vector(7004)],
+                anns_field=VECTOR_FIELD,
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
+                filter=scoped_prefix + expressions["empty_contains_all"],
+                output_fields=[PK_FIELD],
+                limit=len(controlled_ids),
+            )
+            evidence["search_empty_contains_all"] = {hit[PK_FIELD] for hit in search_results[0]}
+            return evidence
+
+        raw_evidence = collect_evidence()
+
+        res, _ = self.flush(client, collection_name)
+        res, _ = self.release_collection(client, collection_name)
+        nested_index_params = gen_index_params(self, client)
+        nested_index_params.add_index(field_name=STRUCT_INT_FIELD, index_type="BITMAP")
+        nested_index_params.add_index(field_name=STRUCT_TAG_FIELD, index_type="BITMAP")
+        res, _ = self.create_index(client, collection_name, nested_index_params)
+        assert self.wait_for_index_ready(client, collection_name, STRUCT_INT_FIELD, timeout=300)
+        assert self.wait_for_index_ready(client, collection_name, STRUCT_TAG_FIELD, timeout=300)
+        res, _ = self.load_collection(client, collection_name)
+
+        indexed_evidence = collect_evidence()
+        expected_evidence = {
+            "query_not_contains": not_contains_ids,
+            "query_empty_contains_all": real_array_ids,
+            "query_match_any": match_any_ids,
+            "search_empty_contains_all": real_array_ids,
+        }
+        assert {
+            "raw": raw_evidence,
+            "indexed": indexed_evidence,
+        } == {
+            "raw": expected_evidence,
+            "indexed": expected_evidence,
+        }
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_scalar_struct_array_field_nullable_parent_null_expression(self):
         """
         target: test direct null expressions on a nullable scalar Struct Array parent
@@ -4448,11 +4534,11 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_add_scalar_struct_array_field_concurrent_dml_query_search(self):
         """
-        target: test insert/delete/upsert traffic while dynamically adding a nullable scalar struct array field
-        method: load a collection with indexed sealed rows and growing rows, run AddCollectionStructField concurrently
-            with old-schema insert, delete, and upsert requests, then insert post-add struct rows
-        expected: concurrent DML requests succeed without partial schema visibility, deleted rows are absent, and old
-            schema rows expose the added struct field as null while post-add rows preserve their struct values
+        target: test read/write traffic while dynamically adding a nullable scalar struct array field
+        method: load indexed sealed and growing rows, run AddCollectionStructField concurrently with query/search,
+            insert, delete, and upsert requests, then query MATCH on the newly added field and insert post-add rows
+        expected: concurrent reads and DML complete without crash or partial map state, MATCH excludes backfilled NULL
+            rows, deleted rows are absent, and old/new rows expose the expected struct values
         """
         collection_name = cf.gen_unique_str(f"{prefix}_add_scalar_struct_concurrent_dml")
         client = self._client()
@@ -4528,7 +4614,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         ]
         delete_ids = [old_sealed_rows[1][PK_FIELD], old_growing_rows[1][PK_FIELD]]
 
-        start_barrier = threading.Barrier(4)
+        start_barrier = threading.Barrier(5)
+        reader_ready = threading.Event()
+        schema_added = threading.Event()
 
         def run_dml_with_schema_retry(action, count_key):
             last_error = None
@@ -4548,6 +4636,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
             profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
             start_barrier.wait()
+            assert reader_ready.wait(timeout=30)
             result, task_check = self.add_collection_struct_field(
                 task_client,
                 collection_name,
@@ -4556,7 +4645,83 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 max_capacity=STRUCT_MAX_CAPACITY,
             )
             assert task_check
+            schema_added.set()
             return "add", result
+
+        def query_search_task():
+            task_client = self._client()
+            start_barrier.wait()
+
+            rows, task_check = self.query(
+                task_client,
+                collection_name,
+                filter=ALL_ROWS_FILTER,
+                output_fields=[PK_FIELD],
+                limit=8,
+            )
+            assert task_check
+            assert rows
+            reader_ready.set()
+
+            for _ in range(20):
+                rows, task_check = self.query(
+                    task_client,
+                    collection_name,
+                    filter=ALL_ROWS_FILTER,
+                    output_fields=[PK_FIELD],
+                    limit=8,
+                )
+                assert task_check
+                assert rows
+                search_results, task_check = self.search(
+                    task_client,
+                    collection_name,
+                    data=[gen_vector(0)],
+                    anns_field=VECTOR_FIELD,
+                    search_params=NORMAL_VECTOR_SEARCH_PARAMS,
+                    filter=ALL_ROWS_FILTER,
+                    output_fields=[PK_FIELD],
+                    limit=1,
+                )
+                assert task_check
+                assert search_results[0]
+
+            assert schema_added.wait(timeout=30)
+            match_expression = f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 0)"
+            last_error = None
+            for _ in range(30):
+                rows, query_check = self.query(
+                    task_client,
+                    collection_name,
+                    filter=match_expression,
+                    output_fields=[PK_FIELD],
+                    limit=8,
+                    check_task=CheckTasks.check_nothing,
+                )
+                if not query_check:
+                    last_error = rows
+                    time.sleep(0.2)
+                    continue
+                assert rows == []
+
+                search_results, search_check = self.search(
+                    task_client,
+                    collection_name,
+                    data=[gen_vector(0)],
+                    anns_field=VECTOR_FIELD,
+                    search_params=NORMAL_VECTOR_SEARCH_PARAMS,
+                    filter=match_expression,
+                    output_fields=[PK_FIELD],
+                    limit=1,
+                    check_task=CheckTasks.check_nothing,
+                )
+                if not search_check:
+                    last_error = search_results
+                    time.sleep(0.2)
+                    continue
+                assert search_results == [[]]
+                return "read", 1
+            raise AssertionError(f"MATCH query/search did not recover after schema propagation: {last_error}")
 
         def insert_task():
             task_client = self._client()
@@ -4599,9 +4764,10 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             return "delete", result["delete_count"]
 
         task_results = {}
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [
                 executor.submit(add_struct_field_task),
+                executor.submit(query_search_task),
                 executor.submit(insert_task),
                 executor.submit(upsert_task),
                 executor.submit(delete_task),
@@ -4613,6 +4779,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         assert task_results["insert"] == len(concurrent_insert_rows)
         assert task_results["upsert"] == len(concurrent_upsert_rows)
         assert task_results["delete"] == len(delete_ids)
+        assert task_results["read"] == 1
 
         post_add_rows = [
             {
@@ -6493,6 +6660,128 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_add_scalar_struct_array_field_match_null_vs_empty_after_reload(self):
+        """
+        target: test MATCH three-valued semantics for schema-evolution backfill rows
+        method: add a nullable struct array field after sealed and growing rows exist, insert explicit null,
+            omitted, empty, matching, and non-matching rows, then query before and after release/load
+        expected: backfilled/null/omitted rows are UNKNOWN and excluded, while real empty arrays retain
+            vacuous MATCH_ALL, MATCH_EXACT(0), and NOT MATCH_ANY behavior across reload
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_add_struct_match_null_empty")
+        client = self._client()
+
+        schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=VECTOR_TYPE, dim=VECTOR_DIM)
+        schema.add_field(field_name=TAG_FIELD, datatype=TAG_TYPE, max_length=TAG_MAX_LENGTH)
+        res, _ = self.create_collection(client, collection_name, schema=schema)
+
+        old_sealed_row = {
+            PK_FIELD: 0,
+            VECTOR_FIELD: gen_vector(0),
+            TAG_FIELD: "old_sealed_backfill_null",
+        }
+        res, _ = self.insert(client, collection_name, [old_sealed_row])
+        assert res["insert_count"] == 1
+        res, _ = self.flush(client, collection_name)
+
+        index_params = gen_index_params(self, client)
+        index_params.add_index(
+            field_name=VECTOR_FIELD,
+            index_type=NORMAL_VECTOR_INDEX_TYPE,
+            metric_type=NORMAL_VECTOR_METRIC_TYPE,
+        )
+        res, _ = self.create_index(client, collection_name, index_params)
+        res, _ = self.load_collection(client, collection_name)
+
+        old_growing_row = {
+            PK_FIELD: 1,
+            VECTOR_FIELD: gen_vector(1),
+            TAG_FIELD: "old_growing_backfill_null",
+        }
+        res, _ = self.insert(client, collection_name, [old_growing_row])
+        assert res["insert_count"] == 1
+
+        profile_schema = gen_struct_schema(self, client)
+        profile_schema.add_field(INT_SUBFIELD, INT_SUBFIELD_TYPE)
+        profile_schema.add_field(TAG_SUBFIELD, TAG_SUBFIELD_TYPE, max_length=TAG_MAX_LENGTH)
+        res, _ = self.add_collection_struct_field(
+            client,
+            collection_name,
+            STRUCT_FIELD,
+            profile_schema,
+            max_capacity=STRUCT_MAX_CAPACITY,
+        )
+
+        post_add_rows = [
+            {
+                PK_FIELD: 2,
+                VECTOR_FIELD: gen_vector(2),
+                TAG_FIELD: "explicit_null",
+                STRUCT_FIELD: None,
+            },
+            {PK_FIELD: 3, VECTOR_FIELD: gen_vector(3), TAG_FIELD: "omitted"},
+            {
+                PK_FIELD: 4,
+                VECTOR_FIELD: gen_vector(4),
+                TAG_FIELD: "empty",
+                STRUCT_FIELD: [],
+            },
+            {
+                PK_FIELD: 5,
+                VECTOR_FIELD: gen_vector(5),
+                TAG_FIELD: "positive",
+                STRUCT_FIELD: [{INT_SUBFIELD: 10, TAG_SUBFIELD: "positive"}],
+            },
+            {
+                PK_FIELD: 6,
+                VECTOR_FIELD: gen_vector(6),
+                TAG_FIELD: "negative",
+                STRUCT_FIELD: [{INT_SUBFIELD: -1, TAG_SUBFIELD: "negative"}],
+            },
+        ]
+        res, _ = self.insert(client, collection_name, post_add_rows)
+        assert res["insert_count"] == len(post_add_rows)
+
+        controlled_ids = list(range(7))
+        scoped_prefix = f"{PK_FIELD} in {controlled_ids} && "
+        expected_ids_by_expression = {
+            f"MATCH_ALL({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 0)": {4, 5},
+            f"MATCH_EXACT({STRUCT_FIELD}, $[{INT_SUBFIELD}] > 1000, threshold=0)": {4, 5, 6},
+            f"not MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 0)": {4, 6},
+        }
+
+        def query_ids_by_expression():
+            actual = {}
+            for expression in expected_ids_by_expression:
+                rows, _ = self.query(
+                    client,
+                    collection_name,
+                    filter=scoped_prefix + expression,
+                    output_fields=[PK_FIELD],
+                    limit=len(controlled_ids),
+                )
+                actual[expression] = {row[PK_FIELD] for row in rows}
+            return actual
+
+        live_evidence = query_ids_by_expression()
+
+        res, _ = self.flush(client, collection_name)
+        assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
+        res, _ = self.release_collection(client, collection_name)
+        res, _ = self.load_collection(client, collection_name)
+
+        reloaded_evidence = query_ids_by_expression()
+        assert {
+            "live": live_evidence,
+            "reloaded": reloaded_evidence,
+        } == {
+            "live": expected_ids_by_expression,
+            "reloaded": expected_ids_by_expression,
+        }
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_scalar_struct_array_field_match_family_query_search(self):
