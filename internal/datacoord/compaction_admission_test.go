@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -88,7 +89,7 @@ func TestSingleCompactionAdmitter(t *testing.T) {
 			makeAdmissionTestSegment(1, 1000, 100, 10),
 			makeAdmissionTestSegment(2, 1000, 100, 10),
 		}
-		admitted, deferred := a.admit(eligible)
+		admitted, deferred := a.admit(context.Background(), eligible, nil)
 		assert.Len(t, admitted, 2)
 		assert.Zero(t, deferred)
 	})
@@ -105,7 +106,7 @@ func TestSingleCompactionAdmitter(t *testing.T) {
 			makeAdmissionTestSegment(2, 1000, 500, 10), // 50% deleted -> dirtiest
 			makeAdmissionTestSegment(3, 1000, 300, 10), // 30% deleted
 		}
-		admitted, deferred := a.admit(eligible)
+		admitted, deferred := a.admit(context.Background(), eligible, nil)
 		assert.Len(t, admitted, 2)
 		assert.Equal(t, 1, deferred)
 		assert.Equal(t, int64(2), admitted[0].GetID())
@@ -127,7 +128,7 @@ func TestSingleCompactionAdmitter(t *testing.T) {
 			makeAdmissionTestSegment(2, 1000, 500, 10),
 			overCap,
 		}
-		admitted, deferred := a.admit(eligible)
+		admitted, deferred := a.admit(context.Background(), eligible, nil)
 		assert.Len(t, admitted, 2) // hard-cap one + one token
 		assert.Equal(t, 1, deferred)
 		ids := []int64{admitted[0].GetID(), admitted[1].GetID()}
@@ -144,16 +145,94 @@ func TestSingleCompactionAdmitter(t *testing.T) {
 		a := &singleCompactionAdmitter{nowFn: func() time.Time { return current }}
 		seg := func(id int64) []*SegmentInfo { return []*SegmentInfo{makeAdmissionTestSegment(id, 1000, 100, 10)} }
 
-		admitted, _ := a.admit(seg(1))
+		admitted, _ := a.admit(context.Background(), seg(1), nil)
 		assert.Len(t, admitted, 1)
 		// bucket drained: an immediate retry is deferred
-		admitted, deferred := a.admit(seg(2))
+		admitted, deferred := a.admit(context.Background(), seg(2), nil)
 		assert.Len(t, admitted, 0)
 		assert.Equal(t, 1, deferred)
 		// after one full interval the bucket refills
 		current = current.Add(61 * time.Second)
-		admitted, deferred = a.admit(seg(3))
+		admitted, deferred = a.admit(context.Background(), seg(3), nil)
 		assert.Len(t, admitted, 1)
 		assert.Zero(t, deferred)
+	})
+}
+
+func TestSingleCompactionAdmitterFixes(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	now := time.Now()
+	newAdmitter := func() *singleCompactionAdmitter {
+		return &singleCompactionAdmitter{nowFn: func() time.Time { return now }}
+	}
+
+	// retention/index candidates (deltalogCount == 0, deletedRows == 0) must not
+	// be starved by a saturating stream of delete-driven accumulation candidates.
+	t.Run("retention class is not starved by an accumulation flood", func(t *testing.T) {
+		pt.Save(pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key, "4")
+		pt.Save(pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key, "60")
+		defer pt.Reset(pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+		defer pt.Reset(pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key)
+
+		a := newAdmitter()
+		accumulation := make([]*SegmentInfo, 0, 100)
+		for i := int64(1); i <= 100; i++ {
+			accumulation = append(accumulation, makeAdmissionTestSegment(i, 1000, 500, 10)) // all 50% dirty
+		}
+		retention := []*SegmentInfo{
+			makeAdmissionTestSegment(5001, 1000, 0, 0), // index rebuild / age-TTL: no deletes
+			makeAdmissionTestSegment(5002, 1000, 0, 0),
+		}
+		admitted, deferred := a.admit(context.Background(), accumulation, retention)
+		assert.Len(t, admitted, 4) // budget of 4 shared across the two classes
+		assert.Equal(t, 98, deferred)
+		admittedIDs := make(map[int64]bool)
+		for _, s := range admitted {
+			admittedIDs[s.GetID()] = true
+		}
+		assert.True(t, admittedIDs[5001], "retention candidate must get a reserved share")
+		assert.True(t, admittedIDs[5002], "retention candidate must get a reserved share")
+	})
+
+	// A positive sub-one token budget must clamp to 1 rather than deadlocking.
+	t.Run("sub-one token budget clamps to 1 instead of deadlocking", func(t *testing.T) {
+		pt.Save(pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key, "0.5")
+		pt.Save(pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key, "60")
+		defer pt.Reset(pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+		defer pt.Reset(pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key)
+
+		a := newAdmitter()
+		eligible := []*SegmentInfo{makeAdmissionTestSegment(1, 1000, 100, 10)}
+		admitted, deferred := a.admit(context.Background(), eligible, nil)
+		assert.Len(t, admitted, 1, "clamped budget of 1 must admit one segment, not deadlock")
+		assert.Zero(t, deferred)
+	})
+
+	// Lowering the refreshable deltalog threshold must not drop the hard cap and
+	// release an already-accumulated cohort in a single round.
+	t.Run("hard cap does not drop when the threshold config is lowered", func(t *testing.T) {
+		pt.Save(pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key, "1")
+		pt.Save(pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key, "60")
+		pt.Save(pt.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key, "200")
+		defer pt.Reset(pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+		defer pt.Reset(pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key)
+		defer pt.Reset(pt.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key)
+
+		a := newAdmitter()
+		// Round 1 snapshots maxDeltalogMaxNum = 200 (hard cap = 800) and drains
+		// the single token on an ordinary segment.
+		primed, _ := a.admit(context.Background(), []*SegmentInfo{makeAdmissionTestSegment(1, 1000, 100, 10)}, nil)
+		assert.Len(t, primed, 1)
+
+		// Operator lowers the threshold 200 -> 50. A naive hard cap would drop to
+		// 4*50 = 200, so a 300-deltalog cohort segment would bypass the drained
+		// bucket. With the monotonic snapshot the cap stays 800, so the segment
+		// remains token-gated and is deferred (bucket is empty this round).
+		pt.Save(pt.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key, "50")
+		cohort := makeAdmissionTestSegment(2, 1000, 100, 300) // 4*50 <= 300 < 4*200
+		admitted, deferred := a.admit(context.Background(), []*SegmentInfo{cohort}, nil)
+		assert.Empty(t, admitted, "lowering the config must not let the cohort bypass the drained bucket")
+		assert.Equal(t, 1, deferred)
 	})
 }

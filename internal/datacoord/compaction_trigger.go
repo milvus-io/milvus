@@ -457,7 +457,12 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	var nonPlannedSegments []*SegmentInfo
 
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
-	var admissionCandidates []*SegmentInfo
+	// Single-compaction candidates are split by reason: accumulation
+	// (delete / expired-entity, the avalanche-shaped case) is paced
+	// dirtiest-first, while retention/index candidates get a reserved share so a
+	// delete-heavy workload cannot starve index rebuild or TTL cleanup.
+	var accumulationCandidates []*SegmentInfo
+	var retentionCandidates []*SegmentInfo
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
@@ -465,25 +470,38 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 			// manual/force compaction expresses explicit operator intent and
 			// bypasses admission limiting.
 			prioritizedCandidates = append(prioritizedCandidates, segment)
-		} else if t.ShouldDoSingleCompaction(segment, compactTime) {
-			admissionCandidates = append(admissionCandidates, segment)
-		} else if t.isSmallSegment(segment, expectedSize) {
-			smallCandidates = append(smallCandidates, segment)
-		} else {
-			nonPlannedSegments = append(nonPlannedSegments, segment)
+			continue
+		}
+		switch t.singleCompactionReason(segment, compactTime) {
+		case singleReasonAccumulation:
+			accumulationCandidates = append(accumulationCandidates, segment)
+		case singleReasonRetention:
+			retentionCandidates = append(retentionCandidates, segment)
+		default:
+			if t.isSmallSegment(segment, expectedSize) {
+				smallCandidates = append(smallCandidates, segment)
+			} else {
+				nonPlannedSegments = append(nonPlannedSegments, segment)
+			}
 		}
 	}
 	// Rate-limit single-compaction admissions so that mass eligibility (a
 	// same-batch cohort crossing thresholds together, a threshold config
 	// change, a TTL cliff) becomes a paced stream instead of an avalanche.
-	// Deferred segments carry no state and are re-evaluated next round.
-	admitted, deferred := getSingleCompactionAdmitter().admit(admissionCandidates)
-	prioritizedCandidates = append(prioritizedCandidates, admitted...)
-	if deferred > 0 {
-		mlog.RatedInfo(context.TODO(), rate.Limit(10), "deferred single compaction candidates by admission limit",
-			mlog.FieldCollectionID(signal.collectionID),
-			mlog.Int("admitted", len(admitted)),
-			mlog.Int("deferred", deferred))
+	// Deferred segments carry no state and are re-evaluated next round. Only
+	// consult the admitter when there is something to admit (force signals and
+	// merge-only rounds produce no admission candidates), and skip it when the
+	// inspector is already full so no tokens are spent on plans that would be
+	// dropped downstream.
+	if len(accumulationCandidates)+len(retentionCandidates) > 0 && !t.inspector.isFull() {
+		admitted, deferred := getSingleCompactionAdmitter().admit(context.TODO(), accumulationCandidates, retentionCandidates)
+		prioritizedCandidates = append(prioritizedCandidates, admitted...)
+		if deferred > 0 {
+			mlog.RatedInfo(context.TODO(), rate.Limit(10), "deferred single compaction candidates by admission limit",
+				mlog.FieldCollectionID(signal.collectionID),
+				mlog.Int("admitted", len(admitted)),
+				mlog.Int("deferred", deferred))
+		}
 	}
 
 	buckets := [][]*SegmentInfo{}
@@ -767,7 +785,31 @@ func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *compact
 	return startTs.UnixMicro() >= expirationTime && expirationTime > 0
 }
 
+// singleCompactionReason classifies why a segment is eligible for single
+// compaction, so the admission limiter can pace the two shapes fairly.
+type singleCompactionReason int
+
+const (
+	// singleReasonNone: segment is not eligible for single compaction.
+	singleReasonNone singleCompactionReason = iota
+	// singleReasonAccumulation: delete / expired-entity accumulation. This is
+	// the avalanche-shaped case the admission bucket exists for; candidates are
+	// paced dirtiest-first and protected by the deltalog hard cap.
+	singleReasonAccumulation
+	// singleReasonRetention: strict age-based TTL, TTL-field expiry, or index
+	// rebuild. These are NOT delete-driven (deltalog count / deleted-rows ratio
+	// ~= 0), so under the accumulation ordering they would always sort last and
+	// never hit the hard cap — i.e. be starved whenever delete-driven demand
+	// saturates the bucket. They are still paced, but with a reserved share so
+	// they cannot be starved (see singleCompactionAdmitter.admit).
+	singleReasonRetention
+)
+
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
+	return t.singleCompactionReason(segment, compactTime) != singleReasonNone
+}
+
+func (t *compactionTrigger) singleCompactionReason(segment *SegmentInfo, compactTime *compactTime) singleCompactionReason {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	// if expire time is enabled, put segment into compaction candidate
@@ -791,13 +833,14 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 			earliestFromTs = min(earliestFromTs, tsoutil.EffectiveTimestamp(l.TimestampFrom, segment.GetCommitTimestamp()))
 		}
 	}
+	// Pure age-based TTL retention: not delete-driven, must not be starved.
 	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
-		return true
+		return singleReasonRetention
 	}
 
 	// Accumulation-type expiry thresholds share the per-segment jitter; the pure
-	// age-based TTL checks below are deliberately not jittered (delaying
-	// retention cleanup is a semantic change) and rely on admission limiting.
+	// age-based TTL checks are deliberately not jittered (delaying retention
+	// cleanup is a semantic change) and rely on admission limiting only.
 	expiryMult := singleCompactionThresholdMultiplier(segment.ID)
 	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*expiryMult ||
 		float64(totalExpiredSize) > float64(Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64())*expiryMult {
@@ -805,16 +848,16 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 			mlog.Int("expiredRows", totalExpiredRows), mlog.Int64("expiredLogSize", totalExpiredSize),
 			mlog.Bool("createdByCompaction", segment.CreatedByCompaction), mlog.Int64s("compactionFrom", segment.CompactionFrom),
 			mlog.Float64("jitterMultiplier", expiryMult))
-		return true
+		return singleReasonAccumulation
 	}
 
 	// check if deltalog count, size, and deleted rowcount ratio exceeds threshold
 	if hasTooManyDeletions(segment) {
-		return true
+		return singleReasonAccumulation
 	}
 
 	if t.ShouldRebuildSegmentIndex(segment) {
-		return true
+		return singleReasonRetention
 	}
 
 	if t.ShouldCompactExpiryWithTTLField(compactTime, segment) {
@@ -822,10 +865,10 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 			mlog.FieldCollectionID(segment.CollectionID),
 			mlog.FieldPartitionID(segment.PartitionID),
 			mlog.String("channel", segment.InsertChannel))
-		return true
+		return singleReasonRetention
 	}
 
-	return false
+	return singleReasonNone
 }
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool {

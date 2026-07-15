@@ -106,7 +106,13 @@ type singleCompactionAdmitter struct {
 	tokens          float64
 	lastRefill      time.Time
 	throttledRounds int
-	nowFn           func() time.Time // injectable for tests
+	// maxDeltalogMaxNum snapshots the largest SingleCompactionDeltalogMaxNum
+	// ever observed. The hard cap is derived from it monotonically so that
+	// lowering the (refreshable) config cannot retroactively drop the hard cap
+	// and release a whole cohort of already-accumulated segments in one round,
+	// reproducing the very avalanche the bucket exists to pace.
+	maxDeltalogMaxNum float64
+	nowFn             func() time.Time // injectable for tests
 }
 
 var (
@@ -122,20 +128,40 @@ func getSingleCompactionAdmitter() *singleCompactionAdmitter {
 }
 
 // admit selects which eligible segments may be submitted this round.
-// Ordering: segments past the deferral hard cap are always admitted; the rest
-// are admitted dirtiest-first while tokens last. A non-positive token config
-// disables limiting entirely (legacy behavior).
-func (a *singleCompactionAdmitter) admit(eligible []*SegmentInfo) (admitted []*SegmentInfo, deferred int) {
-	if len(eligible) == 0 {
+//
+// Candidates are split by reason into two classes:
+//   - accumulation: delete / expired-entity accumulation, the avalanche-shaped
+//     case. Paced dirtiest-first; segments past the deferral hard cap are always
+//     admitted.
+//   - retention: strict age-TTL, TTL-field expiry, and index rebuild. These are
+//     not delete-driven, so under the accumulation ordering they would always
+//     sort last and never reach the hard cap — i.e. be starved whenever
+//     delete-driven demand saturates the bucket. They are paced too, but the two
+//     classes are interleaved so a reserved share of every round goes to
+//     retention and it can never be indefinitely starved.
+//
+// A non-positive token config disables limiting entirely (legacy behavior).
+func (a *singleCompactionAdmitter) admit(ctx context.Context, accumulation, retention []*SegmentInfo) (admitted []*SegmentInfo, deferred int) {
+	if len(accumulation)+len(retention) == 0 {
 		return nil, 0
 	}
 	budget := Params.DataCoordCfg.SingleCompactionRateLimitTokens.GetAsFloat()
 	if budget <= 0 {
-		return eligible, 0
+		return append(accumulation, retention...), 0
 	}
 	interval := Params.DataCoordCfg.SingleCompactionRateLimitInterval.GetAsDuration(time.Second)
 	if interval <= 0 {
-		return eligible, 0
+		return append(accumulation, retention...), 0
+	}
+	// A sub-one positive token budget is a misconfiguration: the bucket caps at
+	// `budget`, so tokens could never reach 1 and every non-hard-cap candidate
+	// would be deferred forever (a soft deadlock). A slow rate is expressed via
+	// a longer interval, not a fractional token count; clamp up to 1 and warn.
+	if budget < 1 {
+		mlog.RatedWarn(ctx, rate.Limit(60), "single compaction rateLimitTokens is a positive value below 1; "+
+			"clamping to 1 to avoid a soft deadlock — use a longer rateLimitInterval to express a slower rate",
+			mlog.Float64("configuredTokens", budget))
+		budget = 1
 	}
 
 	a.mu.Lock()
@@ -152,42 +178,71 @@ func (a *singleCompactionAdmitter) admit(eligible []*SegmentInfo) (admitted []*S
 	}
 	a.lastRefill = now
 
-	hardCapCount := int(deferralHardCap * Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsFloat())
-	rest := make([]*SegmentInfo, 0, len(eligible))
-	for _, segment := range eligible {
-		if segmentDeltalogCount(segment) >= hardCapCount {
-			// bounded deferral: always admitted, does not consume tokens
+	// Derive the hard cap from a monotonically non-decreasing snapshot of the
+	// threshold, so a config decrease cannot drop the cap and release a cohort
+	// of already-accumulated segments at once.
+	if cur := Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsFloat(); cur > a.maxDeltalogMaxNum {
+		a.maxDeltalogMaxNum = cur
+	}
+	hardCapCount := int(deferralHardCap * a.maxDeltalogMaxNum)
+
+	// Bounded deferral: accumulation segments past the hard cap are always
+	// admitted and do not consume tokens. The rest are paced dirtiest-first.
+	pacedAccum := make([]*SegmentInfo, 0, len(accumulation))
+	for _, segment := range accumulation {
+		if hardCapCount > 0 && segmentDeltalogCount(segment) >= hardCapCount {
 			admitted = append(admitted, segment)
 			continue
 		}
-		rest = append(rest, segment)
+		pacedAccum = append(pacedAccum, segment)
 	}
-	sort.Slice(rest, func(i, j int) bool {
-		return segmentDeletedRowsRatio(rest[i]) > segmentDeletedRowsRatio(rest[j])
+	sort.Slice(pacedAccum, func(i, j int) bool {
+		return segmentDeletedRowsRatio(pacedAccum[i]) > segmentDeletedRowsRatio(pacedAccum[j])
 	})
-	for _, segment := range rest {
+	// Deterministic order for the retention class (stable across rounds).
+	sort.Slice(retention, func(i, j int) bool {
+		return retention[i].GetID() < retention[j].GetID()
+	})
+
+	// Interleave the two classes so retention gets a reserved share of tokens
+	// and is never starved by a saturating accumulation stream. When one class
+	// drains, the other consumes the remaining tokens.
+	ai, ri := 0, 0
+	takeRetention := false
+	for ai < len(pacedAccum) || ri < len(retention) {
 		if a.tokens < 1 {
-			deferred++
-			continue
+			deferred += (len(pacedAccum) - ai) + (len(retention) - ri)
+			break
+		}
+		if (takeRetention || ai >= len(pacedAccum)) && ri < len(retention) {
+			admitted = append(admitted, retention[ri])
+			ri++
+		} else {
+			admitted = append(admitted, pacedAccum[ai])
+			ai++
 		}
 		a.tokens--
-		admitted = append(admitted, segment)
+		takeRetention = !takeRetention
 	}
 
 	if deferred > 0 {
 		a.throttledRounds++
 		if a.throttledRounds >= consecutiveThrottledRoundsToWarn {
-			mlog.RatedWarn(context.TODO(), rate.Limit(60), "single compaction admission throttled for many consecutive rounds; "+
+			mlog.RatedWarn(ctx, rate.Limit(60), "single compaction admission throttled for many consecutive rounds; "+
 				"the rate limit may be below steady-state demand and deltalog backlog is growing",
 				mlog.Int("deferred", deferred),
 				mlog.Int("consecutiveThrottledRounds", a.throttledRounds),
 				mlog.Float64("rateLimitTokens", budget))
 		} else {
-			mlog.RatedInfo(context.TODO(), rate.Limit(10), "single compaction admission throttled",
+			mlog.RatedInfo(ctx, rate.Limit(10), "single compaction admission throttled",
 				mlog.Int("admitted", len(admitted)),
 				mlog.Int("deferred", deferred))
 		}
-	} else {
+	} else if a.tokens >= 1 {
+		// Only clear the throttle counter when this round genuinely had spare
+		// capacity. A lightly-loaded caller that happened to defer nothing must
+		// not mask sustained throttling seen by another caller sharing the
+		// bucket (which would have already drained the tokens).
 		a.throttledRounds = 0
 	}
 	return admitted, deferred

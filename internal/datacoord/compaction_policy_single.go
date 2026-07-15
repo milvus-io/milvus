@@ -299,8 +299,10 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 	}
 	// Share the single-compaction admission budget with the legacy trigger so
 	// mass eligibility drains as a paced stream instead of an avalanche;
-	// deferred segments are stateless and re-evaluated next round.
-	admitted, deferred := getSingleCompactionAdmitter().admit(admissionCandidates)
+	// deferred segments are stateless and re-evaluated next round. L2 candidates
+	// are all delete-driven (hasTooManyDeletions), so they enter the
+	// accumulation class; there are no retention/index candidates here.
+	admitted, deferred := getSingleCompactionAdmitter().admit(ctx, admissionCandidates, nil)
 	for _, segment := range admitted {
 		segmentViews := GetViewsByInfo(segment)
 		view := &MixSegmentView{
