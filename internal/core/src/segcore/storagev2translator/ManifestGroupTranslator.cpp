@@ -50,7 +50,6 @@
 #include "milvus-storage/reader.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
-#include "storage/ThreadPools.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/Util.h"
@@ -390,11 +389,8 @@ ManifestGroupTranslator::get_cells(
     auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
 
     // Submit cell-batch loading tasks
-    auto& pool = milvus::ThreadPools::GetThreadPool(
-        milvus::PriorityForLoad(load_priority_));
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
-        static_cast<size_t>(pool.GetMaxThreadNum() *
-                            milvus::segcore::kChannelCapacityMultiplier));
+        std::max<size_t>(1, cids.size()));
 
     auto load_futures = milvus::segcore::LoadCellBatchAsync(
         ctx,
