@@ -349,7 +349,7 @@ TEST(TextMatch, FuzzyIndex) {
                                          "unique_id",
                                          "milvus_tokenizer",
                                          "{}",
-                                         /*enable_background_merge=*/false);
+                                         false);
     index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddTextSealed("football, basketball, pingpang", true, 0);
     index->AddTextSealed("", false, 1);
