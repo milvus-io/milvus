@@ -182,6 +182,195 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	return nil
 }
 
+// CheckStructArrayConsistency verifies that within each StructArrayField all
+// sub-field columns are row-wise consistent: for every row, the sub-fields
+// must agree on null-ness, and, when the row is valid, on the number of
+// struct elements (array length for scalar Array sub-fields, vector count
+// for ArrayOfVector sub-fields). The proxy enforces this invariant on the
+// insert path (checkAndFlattenStructFieldData), and JSON/CSV/Parquet/NumPy
+// importers produce consistent columns by construction, but binlog import
+// deserializes each sub-field's binlogs independently — divergent sub-field
+// data would otherwise be persisted and poison the segment (query-time
+// assertion failures or silently wrong element-level filter results).
+// Cost is O(rows * subFields), negligible compared with reading the data.
+func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
+	type subColumn struct {
+		name string
+		data storage.FieldData
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		subFields := structField.GetFields()
+		columns := make([]subColumn, 0, len(subFields))
+		var firstAbsent string
+		for _, subField := range subFields {
+			fieldData, ok := data.Data[subField.GetFieldID()]
+			if !ok || fieldData == nil || fieldData.RowNum() == 0 {
+				if firstAbsent == "" {
+					firstAbsent = subField.GetName()
+				}
+				continue
+			}
+			columns = append(columns, subColumn{name: subField.GetName(), data: fieldData})
+		}
+		// A struct must be supplied whole: either all sub-fields present or all
+		// absent. A partial set is malformed input — the absent sub-fields get
+		// backfilled as all-NULL (AppendNullableDefaultFieldsData) while the
+		// present ones carry real elements, producing per-row element-count
+		// mismatches that poison the segment. (checkAndFlattenStructFieldData
+		// enforces the same on the proxy insert path.)
+		if len(columns) == 0 {
+			continue
+		}
+		if len(columns) < len(subFields) {
+			return merr.WrapErrImportFailedMsg(
+				"struct field '%s' has a partial sub-field set: sub-field '%s' is present but sub-field '%s' is missing; provide all sub-fields or none",
+				structField.GetName(), columns[0].name, firstAbsent)
+		}
+		if len(columns) < 2 {
+			continue
+		}
+
+		ref := columns[0]
+		rows := ref.data.RowNum()
+		for _, col := range columns[1:] {
+			if col.data.RowNum() != rows {
+				return merr.WrapErrImportFailedMsg(
+					"struct field '%s' has misaligned sub-fields, sub-field '%s' with '%d' rows, sub-field '%s' with '%d' rows",
+					structField.GetName(), ref.name, rows, col.name, col.data.RowNum())
+			}
+		}
+
+		for i := 0; i < rows; i++ {
+			refValid := structSubFieldRowValid(ref.data, i)
+			refCount := -1
+			if refValid {
+				var err error
+				refCount, err = structSubFieldRowElementCount(ref.data, i, structField.GetName(), ref.name)
+				if err != nil {
+					return err
+				}
+			}
+			for _, col := range columns[1:] {
+				valid := structSubFieldRowValid(col.data, i)
+				if valid != refValid {
+					return merr.WrapErrImportFailedMsg(
+						"struct field '%s' has inconsistent sub-field null-ness at row %d, sub-field '%s' valid=%t, sub-field '%s' valid=%t",
+						structField.GetName(), i, ref.name, refValid, col.name, valid)
+				}
+				if !valid {
+					continue
+				}
+				count, err := structSubFieldRowElementCount(col.data, i, structField.GetName(), col.name)
+				if err != nil {
+					return err
+				}
+				if count != refCount {
+					return merr.WrapErrImportFailedMsg(
+						"struct field '%s' has inconsistent element count at row %d, sub-field '%s' with %d elements, sub-field '%s' with %d elements",
+						structField.GetName(), i, ref.name, refCount, col.name, count)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// structSubFieldRowValid reports whether row i of a struct sub-field column is
+// valid (non-null).
+func structSubFieldRowValid(fieldData storage.FieldData, i int) bool {
+	if !fieldData.GetNullable() {
+		return true
+	}
+	var validData []bool
+	switch fd := fieldData.(type) {
+	case *storage.ArrayFieldData:
+		validData = fd.ValidData
+	case *storage.VectorArrayFieldData:
+		validData = fd.ValidData
+	default:
+		// struct sub-fields are always Array or ArrayOfVector columns;
+		// fall back to the interface-level null representation
+		return fieldData.GetRow(i) != nil
+	}
+	if i >= len(validData) {
+		return true
+	}
+	return validData[i]
+}
+
+// structSubFieldRowElementCount returns the number of struct elements in row i
+// of a struct sub-field column: the array length for scalar Array sub-fields,
+// or the number of vectors for ArrayOfVector sub-fields.
+func structSubFieldRowElementCount(fieldData storage.FieldData, i int, structName, subFieldName string) (int, error) {
+	switch fd := fieldData.(type) {
+	case *storage.ArrayFieldData:
+		return scalarFieldElementCount(fd.Data[i]), nil
+	case *storage.VectorArrayFieldData:
+		row := fd.Data[i]
+		var payloadLen, width int
+		dim := int(fd.Dim)
+		switch fd.ElementType {
+		case schemapb.DataType_FloatVector:
+			payloadLen = len(row.GetFloatVector().GetData())
+			width = dim
+		case schemapb.DataType_BinaryVector:
+			payloadLen = len(row.GetBinaryVector())
+			width = (dim + 7) / 8
+		case schemapb.DataType_Float16Vector:
+			payloadLen = len(row.GetFloat16Vector())
+			width = dim * 2
+		case schemapb.DataType_BFloat16Vector:
+			payloadLen = len(row.GetBfloat16Vector())
+			width = dim * 2
+		case schemapb.DataType_Int8Vector:
+			payloadLen = len(row.GetInt8Vector())
+			width = dim
+		default:
+			return 0, merr.WrapErrImportSysFailedMsg(
+				"unsupported vector element type '%s' for sub-field '%s' of struct field '%s'",
+				fd.ElementType.String(), subFieldName, structName)
+		}
+		if width <= 0 || payloadLen%width != 0 {
+			return 0, merr.WrapErrImportFailedMsg(
+				"corrupted vector array data at row %d of sub-field '%s' of struct field '%s', payload length %d is not a multiple of vector width %d",
+				i, subFieldName, structName, payloadLen, width)
+		}
+		return payloadLen / width, nil
+	default:
+		return 0, merr.WrapErrImportSysFailedMsg(
+			"unexpected column type '%s' for sub-field '%s' of struct field '%s'",
+			fieldData.GetDataType().String(), subFieldName, structName)
+	}
+}
+
+// scalarFieldElementCount returns the number of elements held by one Array row.
+func scalarFieldElementCount(sf *schemapb.ScalarField) int {
+	switch d := sf.GetData().(type) {
+	case *schemapb.ScalarField_BoolData:
+		return len(d.BoolData.GetData())
+	case *schemapb.ScalarField_IntData:
+		return len(d.IntData.GetData())
+	case *schemapb.ScalarField_LongData:
+		return len(d.LongData.GetData())
+	case *schemapb.ScalarField_FloatData:
+		return len(d.FloatData.GetData())
+	case *schemapb.ScalarField_DoubleData:
+		return len(d.DoubleData.GetData())
+	case *schemapb.ScalarField_StringData:
+		return len(d.StringData.GetData())
+	case *schemapb.ScalarField_BytesData:
+		return len(d.BytesData.GetData())
+	case *schemapb.ScalarField_ArrayData:
+		return len(d.ArrayData.GetData())
+	case *schemapb.ScalarField_JsonData:
+		return len(d.JsonData.GetData())
+	case *schemapb.ScalarField_TimestamptzData:
+		return len(d.TimestamptzData.GetData())
+	default:
+		return 0
+	}
+}
+
 func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
