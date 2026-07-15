@@ -112,13 +112,13 @@ that column group.
 
 ### High-Level Architecture
 
-The design introduces `ColumnBasedInterface` as the column-oriented access
-abstraction for sealed scalar fields. This is the main interface shift for
+The design extends `ChunkedColumnInterface` with column-oriented scan and
+positional access for sealed scalar fields. This is the main interface shift for
 local format: Vortex data is not naturally owned as Milvus raw chunks, so the
 new path moves callers from `ChunkedBase` chunk access to column-level
 operations.
 
-`Scan` is one operation under `ColumnBasedInterface`, used by expression
+`Scan` is one operation under `ChunkedColumnInterface`, used by expression
 evaluation. Positional take/output operations are also part of the same
 column-based abstraction and are used by retrieve and requery. The Vortex reader
 consumes a sparse local file view behind these column-level operations.
@@ -127,14 +127,14 @@ Milvus is in a transition state where two access families coexist:
 
 - `ChunkedBase` remains the raw chunk-oriented path for the existing raw local
   format and existing chunk consumers.
-- `ColumnBasedInterface` is the local-format-aware path used by Vortex and by
+- `ChunkedColumnInterface` is the local-format-aware path used by Vortex and by
   scan/take code that should not depend on physical chunk ownership.
 
 Filter scan path:
 
 ```text
 Expr
-  -> ColumnBasedInterface::Scan(...)
+  -> ChunkedColumnInterface::Scan(...)
   -> VortexColumn
   -> VortexPlanner
   -> VortexColumnGroup cache slot pin
@@ -146,7 +146,7 @@ Retrieve/requery output path:
 
 ```text
 Retrieve output / bulk_subscript
-  -> ColumnBasedInterface positional take
+  -> ChunkedColumnInterface positional take
   -> VortexColumn::Take...
   -> VortexPlanner::PlanForOffsets
   -> VortexColumnGroup cache slot pin
@@ -272,9 +272,9 @@ path.
 `FieldMeta` parses `type_params["local_format"]` and defaults to `raw`. It also
 serializes non-default local format back to the field schema.
 
-#### `ColumnBasedInterface`
+#### `ChunkedColumnInterface`
 
-`ColumnBasedInterface` is the shared access contract for column-oriented scalar
+`ChunkedColumnInterface` is the shared access contract for column-oriented scalar
 data. It lets callers express the operation they need without assuming the data
 is backed by raw Milvus chunks.
 
@@ -325,7 +325,7 @@ All fields in the same physical group share the same `VortexColumnGroup`.
 
 #### `VortexColumn`
 
-`VortexColumn` is a field-level `ColumnBasedInterface` implementation over a
+`VortexColumn` is a field-level `ChunkedColumnInterface` implementation over a
 shared `VortexColumnGroup`.
 
 Responsibilities:
@@ -348,7 +348,7 @@ Example:
 
 ```text
 UnaryExpr / BinaryRangeExpr
-  -> ColumnBasedInterface::Scan(ScanOutput::RowIds)
+  -> ChunkedColumnInterface::Scan(ScanOutput::RowIds)
   -> VortexColumn::Scan
   -> VortexRowIdScanCursor
   -> VortexPlanner::PlanForRowRange(predicate)
@@ -370,7 +370,7 @@ Example:
 
 ```text
 Expr data path
-  -> ColumnBasedInterface::Scan(ScanOutput::Data)
+  -> ChunkedColumnInterface::Scan(ScanOutput::Data)
   -> VortexDataScanCursor
   -> VortexPlanner::PlanForRowRange(no predicate)
   -> pin planned cells
@@ -397,7 +397,7 @@ ProcessDataByOffsets
   -> expression layer checks the offset bitmap
 ```
 
-Bitmap or selection pushdown into `ColumnBasedInterface::Scan` is left as
+Bitmap or selection pushdown into `ChunkedColumnInterface::Scan` is left as
 future work. The current strategy avoids many small reads while keeping
 semantics simple.
 
@@ -409,7 +409,7 @@ selected row offsets.
 ```text
 FillTargetEntry / Retrieve output
   -> bulk_subscript
-  -> ColumnBasedInterface positional take
+  -> ChunkedColumnInterface positional take
   -> VortexColumn::BulkPrimitiveValueAt / BulkRawStringAt / BulkArrayAt
   -> TakeOwn / TakeStringLikeViews
   -> VortexPlanner::PlanForOffsets
@@ -424,7 +424,7 @@ tracked as a separate performance area from filter pushdown.
 
 ### Nullable and Validity
 
-The `ColumnBasedInterface` scan API uses `ValidityView` to present nullability
+The `ChunkedColumnInterface` scan API uses `ValidityView` to present nullability
 uniformly.
 
 Rules:
@@ -486,7 +486,7 @@ level so all field proxies in the same physical group share the same state.
   splitting keeps them physically separate.
 - During the transition, QueryNode keeps both access paths: raw fields continue
   to use the `ChunkedBase` chunk-oriented path, while Vortex fields use the
-  `ColumnBasedInterface` column-oriented path.
+  `ChunkedColumnInterface` column-oriented path.
 - Vortex local format is only used for Storage V3 sealed segments.
 - Rolling upgrades must ensure QueryNodes understand Vortex local format before
   new Vortex column groups are loaded. Older readers cannot load Vortex physical
@@ -509,8 +509,8 @@ Unit and component validation:
 
 - `FieldMeta` parse/serialize of `local_format`.
 - Column group split policy keeps raw and Vortex fields separate.
-- `ColumnBasedInterface` scan and positional take behavior.
-- Raw `ChunkedBase` path and Vortex `ColumnBasedInterface` path coexist without
+- `ChunkedColumnInterface` scan and positional take behavior.
+- Raw `ChunkedBase` path and Vortex `ChunkedColumnInterface` path coexist without
   changing raw field behavior.
 - `VortexColumn` row-id scan, data scan, validity, and take paths.
 - `VortexFooterReader` footer and optional zone-map lifecycle.
@@ -527,7 +527,7 @@ Performance validation:
 
 ## Future Work
 
-- Push offset bitmaps or row selections into `ColumnBasedInterface::Scan`.
+- Push offset bitmaps or row selections into `ChunkedColumnInterface::Scan`.
 - Expand Vortex predicate construction for more scalar types and expression
   forms.
 - Optimize long string, JSON, and ARRAY retrieve/take conversion paths.
