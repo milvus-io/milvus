@@ -920,6 +920,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                        em.original_size);
             size_t remaining = em.original_size - output_offset;
             size_t plain_len = std::min(remaining, slice_size_);
+            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+                EncryptedStreamBudgetBytes(slice.size, plain_len),
+                cancellation_token,
+                "IndexEntryReader::ReadEntriesStreamToFiles");
 
             futures.push_back(pool.Submit([input,
                                            cipher_plugin,
@@ -932,11 +936,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            plain_len,
                                            i,
                                            &state,
-                                           cancellation_token]() {
-                TransientBudgetGuard budget_guard(
-                    EncryptedStreamBudgetBytes(slice.size, plain_len),
-                    cancellation_token,
-                    "IndexEntryReader::ReadEntriesStreamToFiles");
+                                           cancellation_token,
+                                           budget_guard =
+                                               std::move(budget_guard)]() {
+                (void)budget_guard;
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 
@@ -975,6 +978,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t len =
                 PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
             size_t src_offset = pm.offset + output_offset;
+            auto budget_guard = std::make_shared<TransientBudgetGuard>(
+                len,
+                cancellation_token,
+                "IndexEntryReader::ReadEntriesStreamToFiles");
 
             futures.push_back(pool.Submit([input,
                                            writer,
@@ -983,11 +990,10 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                                            len,
                                            seq,
                                            &state,
-                                           cancellation_token]() {
-                TransientBudgetGuard budget_guard(
-                    len,
-                    cancellation_token,
-                    "IndexEntryReader::ReadEntriesStreamToFiles");
+                                           cancellation_token,
+                                           budget_guard =
+                                               std::move(budget_guard)]() {
+                (void)budget_guard;
                 ThrowIfCancelled(cancellation_token,
                                  "IndexEntryReader::ReadEntriesStreamToFiles");
 
