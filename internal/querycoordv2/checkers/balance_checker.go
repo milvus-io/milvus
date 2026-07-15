@@ -18,6 +18,8 @@ package checkers
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,6 +59,38 @@ type balanceConfig struct {
 	segmentTaskTimeout time.Duration
 	// channelTaskTimeout specifies the timeout for channel balance tasks
 	channelTaskTimeout time.Duration
+}
+
+// balanceEpochConfig is frozen once at the beginning of each checker tick.
+// Task 7 intentionally keeps the production provider disabled; Task 8 loads
+// these values from paramtable and freezes policy selection for the tick.
+type balanceEpochConfig struct {
+	enabled            bool
+	shadow             bool
+	budget             balance.BalanceWaveBudget
+	deadline           time.Duration
+	noProgressDeadline time.Duration
+	segmentTaskTimeout time.Duration
+	channelTaskTimeout time.Duration
+	maxObjectRetries   int
+	quarantineBackoff  time.Duration
+	policyConfig       balance.EpochPolicyConfig
+}
+
+type balanceCheckerOption func(*BalanceChecker)
+
+func withEpochControllerForTest(controller balance.BalanceEpochController) balanceCheckerOption {
+	return func(checker *BalanceChecker) {
+		checker.epochManager = controller
+	}
+}
+
+func withEpochConfigForTest(config balanceEpochConfig) balanceCheckerOption {
+	return func(checker *BalanceChecker) {
+		checker.epochConfigProvider = func() balanceEpochConfig {
+			return config
+		}
+	}
 }
 
 // This method fetches all balance-related configuration parameters from the global
@@ -141,6 +175,15 @@ type BalanceChecker struct {
 	// autoBalanceTs records the timestamp of the last auto balance operation
 	// to ensure balance operations don't happen too frequently
 	autoBalanceTs time.Time
+
+	epochManager        balance.BalanceEpochController
+	epochConfigProvider func() balanceEpochConfig
+
+	// normalEpochCollectionCursor is the last collection selected for an epoch
+	// request set. It persists across checker ticks to avoid starving collections
+	// outside the configured per-check window.
+	normalEpochCollectionCursor    int64
+	normalEpochCollectionCursorSet bool
 }
 
 func NewBalanceChecker(meta *meta.Meta,
@@ -149,7 +192,18 @@ func NewBalanceChecker(meta *meta.Meta,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 ) *BalanceChecker {
-	return &BalanceChecker{
+	return newBalanceChecker(meta, dist, targetMgr, nodeMgr, scheduler)
+}
+
+func newBalanceChecker(
+	meta *meta.Meta,
+	dist *meta.DistributionManager,
+	targetMgr meta.TargetManagerInterface,
+	nodeMgr *session.NodeManager,
+	scheduler task.Scheduler,
+	opts ...balanceCheckerOption,
+) *BalanceChecker {
+	checker := &BalanceChecker{
 		checkerActivation:    newCheckerActivation(),
 		meta:                 meta,
 		dist:                 dist,
@@ -158,7 +212,31 @@ func NewBalanceChecker(meta *meta.Meta,
 		normalBalanceQueue:   assign.NewPriorityQueuePtr(),
 		stoppingBalanceQueue: assign.NewPriorityQueuePtr(),
 		scheduler:            scheduler,
+		epochConfigProvider: func() balanceEpochConfig {
+			return balanceEpochConfig{}
+		},
 	}
+
+	admitter, admitsGenerations := scheduler.(task.BalanceTaskGenerationAdmitter)
+	inspector, inspectsPending := scheduler.(task.BalanceTaskInspector)
+	if admitsGenerations && inspectsPending {
+		checker.epochManager = balance.NewBalanceEpochManager(
+			meta,
+			dist,
+			targetMgr,
+			nodeMgr,
+			scheduler,
+			admitter,
+			inspector,
+			checker.ID(),
+			balance.GetGlobalBalancerFactory().GetEpochPolicy,
+		)
+	}
+
+	for _, opt := range opts {
+		opt(checker)
+	}
+	return checker
 }
 
 func (b *BalanceChecker) ID() utils.CheckerType {
@@ -239,7 +317,7 @@ func (b *BalanceChecker) constructStoppingBalanceQueue(ctx context.Context) *ass
 //  4. Be serviceable (loaded status, ensures consistency with segment_checker and channel_checker)
 //
 // Returns a new priority queue with all eligible collections for normal balance.
-func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) *assign.PriorityQueue {
+func (b *BalanceChecker) eligibleNormalBalanceCollections(ctx context.Context) []int64 {
 	filterLoadedCollections := func(ctx context.Context, cid int64) bool {
 		collection := b.meta.GetCollection(ctx, cid)
 		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
@@ -267,12 +345,16 @@ func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) *assig
 		return true
 	}
 
+	return b.filterCollectionForBalance(ctx, b.readyToCheck, filterLoadedCollections, filterTargetReadyCollections, filterServiceableCollections)
+}
+
+func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) *assign.PriorityQueue {
 	sortOrder := strings.ToLower(Params.QueryCoordCfg.BalanceTriggerOrder.GetValue())
 	if sortOrder == "" {
 		sortOrder = "byrowcount" // Default to ByRowCount
 	}
 
-	ret := b.filterCollectionForBalance(ctx, b.readyToCheck, filterLoadedCollections, filterTargetReadyCollections, filterServiceableCollections)
+	ret := b.eligibleNormalBalanceCollections(ctx)
 	pq := assign.NewPriorityQueuePtr()
 	for _, cid := range ret {
 		rowCount := b.targetMgr.GetCollectionRowCount(ctx, cid, meta.CurrentTargetFirst)
@@ -281,6 +363,100 @@ func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) *assig
 	}
 	b.normalBalanceQueue = pq
 	return pq
+}
+
+func (b *BalanceChecker) selectNormalEpochCollections(collectionIDs []int64, config balanceConfig) []int64 {
+	if len(collectionIDs) == 0 || config.maxCheckCollectionCount <= 0 {
+		return nil
+	}
+
+	sortedCollectionIDs := append([]int64(nil), collectionIDs...)
+	sort.Slice(sortedCollectionIDs, func(i, j int) bool {
+		return sortedCollectionIDs[i] < sortedCollectionIDs[j]
+	})
+	limit := config.maxCheckCollectionCount
+	if !config.balanceOnMultipleCollections {
+		limit = 1
+	}
+	if limit > len(sortedCollectionIDs) {
+		limit = len(sortedCollectionIDs)
+	}
+
+	start := 0
+	if b.normalEpochCollectionCursorSet {
+		start = sort.Search(len(sortedCollectionIDs), func(i int) bool {
+			return sortedCollectionIDs[i] > b.normalEpochCollectionCursor
+		})
+		if start == len(sortedCollectionIDs) {
+			start = 0
+		}
+	}
+
+	selected := make([]int64, 0, limit)
+	for i := 0; i < limit; i++ {
+		selected = append(selected, sortedCollectionIDs[(start+i)%len(sortedCollectionIDs)])
+	}
+	return selected
+}
+
+func (b *BalanceChecker) collectNormalEpochRequests(
+	ctx context.Context,
+	config balanceConfig,
+	epochConfig balanceEpochConfig,
+) []balance.EpochRequest {
+	collectionIDs := b.eligibleNormalBalanceCollections(ctx)
+	selectedCollectionIDs := b.selectNormalEpochCollections(collectionIDs, config)
+	if len(selectedCollectionIDs) == 0 {
+		return nil
+	}
+
+	replicasByResourceGroup := make(map[string][]int64)
+	for _, collectionID := range selectedCollectionIDs {
+		// ReplicaManager owns the returned slice. Extract IDs into checker-owned
+		// storage and sort only those copies below.
+		for _, replica := range b.meta.GetByCollection(ctx, collectionID) {
+			if replica == nil {
+				continue
+			}
+			resourceGroup := replica.GetResourceGroup()
+			replicasByResourceGroup[resourceGroup] = append(replicasByResourceGroup[resourceGroup], replica.GetID())
+		}
+	}
+	b.normalEpochCollectionCursor = selectedCollectionIDs[len(selectedCollectionIDs)-1]
+	b.normalEpochCollectionCursorSet = true
+	if len(replicasByResourceGroup) == 0 {
+		return nil
+	}
+
+	resourceGroups := make([]string, 0, len(replicasByResourceGroup))
+	for resourceGroup := range replicasByResourceGroup {
+		resourceGroups = append(resourceGroups, resourceGroup)
+	}
+	sort.Strings(resourceGroups)
+
+	requests := make([]balance.EpochRequest, 0, len(resourceGroups))
+	for _, resourceGroup := range resourceGroups {
+		replicaIDs := append([]int64(nil), replicasByResourceGroup[resourceGroup]...)
+		sort.Slice(replicaIDs, func(i, j int) bool {
+			return replicaIDs[i] < replicaIDs[j]
+		})
+		requests = append(requests, balance.EpochRequest{
+			ResourceGroup:      resourceGroup,
+			EligibleReplicaIDs: replicaIDs,
+			Budget:             epochConfig.budget,
+			PolicyConfig:       epochConfig.policyConfig,
+			AllowNew:           true,
+			Shadow:             epochConfig.shadow,
+			Deadline:           epochConfig.deadline,
+			NoProgressDeadline: epochConfig.noProgressDeadline,
+			SegmentTaskTimeout: epochConfig.segmentTaskTimeout,
+			ChannelTaskTimeout: epochConfig.channelTaskTimeout,
+			MaxObjectRetries:   epochConfig.maxObjectRetries,
+			QuarantineBackoff:  epochConfig.quarantineBackoff,
+		})
+	}
+
+	return requests
 }
 
 // getReplicaForStoppingBalance returns replicas that need stopping balance operations.
@@ -422,8 +598,8 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 //   - isStoppingBalance: if true, uses HIGH load priority for stopping balance
 //
 // Returns:
-//   - generatedSegmentTaskNum: number of generated segment balance tasks
-//   - generatedChannelTaskNum: number of generated channel balance tasks
+//   - acceptedSegmentTaskNum: number of segment balance tasks accepted by the scheduler
+//   - acceptedChannelTaskNum: number of channel balance tasks accepted by the scheduler
 func (b *BalanceChecker) processBalanceQueue(
 	ctx context.Context,
 	balancer balance.Balance,
@@ -439,14 +615,15 @@ func (b *BalanceChecker) processBalanceQueue(
 		pq = constructQueueFunc(ctx)
 	}
 
-	generatedSegmentTaskNum := 0
-	generatedChannelTaskNum := 0
-	for generatedSegmentTaskNum < config.segmentBatchSize &&
-		generatedChannelTaskNum < config.channelBatchSize &&
+	acceptedSegmentTaskNum := 0
+	acceptedChannelTaskNum := 0
+	for acceptedSegmentTaskNum < config.segmentBatchSize &&
+		acceptedChannelTaskNum < config.channelBatchSize &&
 		checkCollectionCount < config.maxCheckCollectionCount &&
 		pq.Len() > 0 {
-		// Break if balanceOnMultipleCollections is disabled and we already have tasks
-		if !config.balanceOnMultipleCollections && (generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0) {
+		// Break if balanceOnMultipleCollections is disabled and the scheduler
+		// accepted work for a previous collection.
+		if !config.balanceOnMultipleCollections && (acceptedSegmentTaskNum > 0 || acceptedChannelTaskNum > 0) {
 			mlog.Debug(ctx, "Balance on multiple collections disabled, stopping after first collection")
 			break
 		}
@@ -460,24 +637,52 @@ func (b *BalanceChecker) processBalanceQueue(
 		}
 
 		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
-		generatedSegmentTaskNum += len(newSegmentTasks)
-		generatedChannelTaskNum += len(newChannelTasks)
-		b.submitTasks(newSegmentTasks, newChannelTasks)
+		acceptedSegments, acceptedChannels := b.submitTasks(newSegmentTasks, newChannelTasks)
+		acceptedSegmentTaskNum += acceptedSegments
+		acceptedChannelTaskNum += acceptedChannels
 	}
-	return generatedSegmentTaskNum, generatedChannelTaskNum
+	return acceptedSegmentTaskNum, acceptedChannelTaskNum
 }
 
 // submitTasks submits the generated balance tasks to the scheduler for execution.
 // This method handles the final step of the balance process by adding all
 // generated tasks to the task scheduler, which will execute them asynchronously.
-func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) {
-	for _, task := range segmentTasks {
-		b.scheduler.Add(task)
+func (b *BalanceChecker) submitTasks(segmentTasks, channelTasks []task.Task) (int, int) {
+	acceptedSegments := 0
+	for _, balanceTask := range segmentTasks {
+		if err := b.scheduler.Add(balanceTask); err != nil {
+			b.logLegacyBalanceAdmissionError(balanceTask, "segment", err)
+			continue
+		}
+		acceptedSegments++
 	}
 
-	for _, task := range channelTasks {
-		b.scheduler.Add(task)
+	acceptedChannels := 0
+	for _, balanceTask := range channelTasks {
+		if err := b.scheduler.Add(balanceTask); err != nil {
+			b.logLegacyBalanceAdmissionError(balanceTask, "channel", err)
+			continue
+		}
+		acceptedChannels++
 	}
+	return acceptedSegments, acceptedChannels
+}
+
+func (b *BalanceChecker) logLegacyBalanceAdmissionError(balanceTask task.Task, kind string, err error) {
+	object := balanceTask.Shard()
+	switch typed := balanceTask.(type) {
+	case *task.SegmentTask:
+		object = fmt.Sprintf("segment:%d", typed.SegmentID())
+	case *task.ChannelTask:
+		object = fmt.Sprintf("channel:%s", typed.Channel())
+	}
+	mlog.Warn(balanceTask.Context(), "failed to submit legacy balance task",
+		mlog.Int64("collectionID", balanceTask.CollectionID()),
+		mlog.Int64("replicaID", balanceTask.ReplicaID()),
+		mlog.String("taskKind", kind),
+		mlog.String("object", object),
+		mlog.String("taskIndex", balanceTask.Index()),
+		mlog.Err(err))
 }
 
 // Check is the main entry point for balance operations.
@@ -520,13 +725,15 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		}
 	}()
 
-	// Load current configuration to respect dynamic parameter changes
+	// Freeze configuration once for the checker tick. Task 8 replaces the
+	// disabled epoch provider with paramtable-backed values.
 	config := b.loadBalanceConfig()
+	epochConfig := b.epochConfigProvider()
 
-	// Phase 1: Process stopping balance first (higher priority)
-	// This handles nodes that are being gracefully stopped and need immediate attention
+	// Phase 1: Process stopping balance first (higher priority).
+	acceptedStoppingSegments, acceptedStoppingChannels := 0, 0
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
+		acceptedStoppingSegments, acceptedStoppingChannels = b.processBalanceQueue(ctx,
 			balance.GetGlobalBalancerFactory().GetStoppingBalancer(),
 			b.getReplicaForStoppingBalance,
 			b.constructStoppingBalanceQueue,
@@ -535,45 +742,114 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 			true, // isStoppingBalance: use HIGH priority for node draining
 		)
 
-		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
-			// clean up the normal balance queue when stopping balance generated tasks
-			// make sure that next time when trigger normal balance, a new normal balance round will be started
+		if acceptedStoppingSegments > 0 || acceptedStoppingChannels > 0 {
+			// Accepted stopping work invalidates pending normal legacy work.
 			b.normalBalanceQueue = nil
-
-			return nil
 		}
 	}
 
-	// Only Skip normal balance operations if the checker is not active
-	if !b.IsActive() {
+	// Existing epochs are observed independently of feature enablement, checker
+	// activation, and auto-balance settings. Capture and retain this set for the
+	// whole tick so a generation cleared by observation cannot restart here.
+	activeAtTickStart := make(map[string]struct{})
+	if b.epochManager != nil {
+		for _, resourceGroup := range sortedUniqueResourceGroups(b.epochManager.ActiveResourceGroups()) {
+			activeAtTickStart[resourceGroup] = struct{}{}
+			b.normalBalanceQueue = nil
+			b.epochManager.Advance(ctx, balance.EpochRequest{
+				ResourceGroup: resourceGroup,
+				AllowNew:      false,
+			})
+		}
+	}
+
+	if acceptedStoppingSegments > 0 || acceptedStoppingChannels > 0 {
 		return nil
 	}
 
-	// Phase 2: Process normal balance if no stopping balance was needed
-	// This handles regular load balancing operations for cluster optimization
-	if paramtable.Get().QueryCoordCfg.AutoBalance.GetAsBool() {
-		// Respect the auto balance interval to prevent too frequent operations
-		if time.Since(b.autoBalanceTs) <= config.autoBalanceInterval {
+	// Normal balancing still respects checker activation and AutoBalance.
+	if !b.IsActive() {
+		return nil
+	}
+	if !paramtable.Get().QueryCoordCfg.AutoBalance.GetAsBool() {
+		return nil
+	}
+	if time.Since(b.autoBalanceTs) <= config.autoBalanceInterval {
+		return nil
+	}
+
+	postObservationActive := []string(nil)
+	if b.epochManager != nil {
+		postObservationActive = sortedUniqueResourceGroups(b.epochManager.ActiveResourceGroups())
+		if len(postObservationActive) > 0 {
+			b.normalBalanceQueue = nil
+		}
+	}
+
+	epochModeEnabled := epochConfig.enabled || epochConfig.shadow
+	policySupported := false
+	if epochModeEnabled && b.epochManager != nil {
+		_, policySupported = balance.GetGlobalBalancerFactory().GetEpochPolicy()
+	}
+
+	// Disabled, unavailable, and unsupported epoch modes drain all active RGs
+	// before returning to legacy normal balance.
+	if !epochModeEnabled || b.epochManager == nil || !policySupported {
+		if len(postObservationActive) > 0 {
 			return nil
 		}
-
-		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
+		acceptedSegments, acceptedChannels := b.processBalanceQueue(ctx,
 			balance.GetGlobalBalancerFactory().GetBalancer(),
 			b.getReplicaForNormalBalance,
 			b.constructNormalBalanceQueue,
 			func() *assign.PriorityQueue { return b.normalBalanceQueue },
 			config,
-			false, // isStoppingBalance: use LOW priority for normal balance
+			false,
 		)
-
-		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
-			// clean up the stopping balance queue when normal balance generated tasks
-			// make sure that next time when trigger stopping balance, a new stopping balance round will be started
+		if acceptedSegments > 0 || acceptedChannels > 0 {
 			b.stoppingBalanceQueue = nil
 		}
 		b.autoBalanceTs = time.Now()
+		return nil
 	}
+
+	// One interval-eligible epoch/shadow planning attempt advances the throttle
+	// exactly once, including empty, converged, rejected, and error results.
+	requests := b.collectNormalEpochRequests(ctx, config, epochConfig)
+	for _, request := range requests {
+		if _, wasActive := activeAtTickStart[request.ResourceGroup]; wasActive {
+			continue
+		}
+		activeAtTickStart[request.ResourceGroup] = struct{}{}
+		if b.epochManager.HasActive(request.ResourceGroup) {
+			b.normalBalanceQueue = nil
+			continue
+		}
+		result := b.epochManager.Advance(ctx, request)
+		if result.Started || result.Admitted > 0 || b.epochManager.HasActive(request.ResourceGroup) {
+			b.normalBalanceQueue = nil
+		}
+		if result.Admitted > 0 {
+			b.stoppingBalanceQueue = nil
+		}
+	}
+	b.autoBalanceTs = time.Now()
 
 	// Always return nil as tasks are submitted directly to scheduler
 	return nil
+}
+
+func sortedUniqueResourceGroups(resourceGroups []string) []string {
+	if len(resourceGroups) == 0 {
+		return nil
+	}
+	sorted := append([]string(nil), resourceGroups...)
+	sort.Strings(sorted)
+	unique := sorted[:0]
+	for _, resourceGroup := range sorted {
+		if len(unique) == 0 || unique[len(unique)-1] != resourceGroup {
+			unique = append(unique, resourceGroup)
+		}
+	}
+	return unique
 }
