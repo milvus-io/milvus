@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "mmap/SparseVortexFileSystem.h"
 #include "milvus-storage/properties.h"
 
 namespace arrow::fs {
@@ -55,6 +56,15 @@ class VortexColumnGroup {
  public:
     using FileInfo = VortexColumnFileInfo;
 
+    struct Options {
+        SparseVortexFileBacking sparse_file_backing =
+            SparseVortexFileBacking::Memory;
+        bool mmap_populate = false;
+        std::string mmap_dir_path;
+        int64_t segment_id = 0;
+        int64_t column_group_index = 0;
+    };
+
     struct FileState {
         std::string path;
         std::string resolved_path;
@@ -77,6 +87,14 @@ class VortexColumnGroup {
         const std::vector<std::string>& field_names,
         CacheWarmupPolicy cache_warmup_policy,
         milvus::OpContext* op_ctx);
+
+    VortexColumnGroup(
+        const std::vector<VortexColumnFileInfo>& files,
+        std::shared_ptr<milvus_storage::api::Properties> properties,
+        const std::vector<std::string>& field_names,
+        CacheWarmupPolicy cache_warmup_policy,
+        milvus::OpContext* op_ctx,
+        Options options);
 
     ~VortexColumnGroup();
 

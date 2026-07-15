@@ -2002,6 +2002,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool eager_load,
         bool has_warmup_setting,
         const std::string& aggregated_warmup_policy,
+        bool use_mmap,
         milvus::OpContext* op_ctx,
         bool is_replace,
         RuntimeResourceState* runtime,
