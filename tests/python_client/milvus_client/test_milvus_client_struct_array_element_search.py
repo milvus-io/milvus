@@ -732,6 +732,72 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert "offset" in top_hit, "element offset not exposed on hit"
         assert top_hit["offset"] == target_elem, f"expected element offset={target_elem}, got {top_hit['offset']}"
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_filter_template_matches_inline_query_and_search(self):
+        """
+        target: verify filter templates bind Struct child values for element-level query and search
+        method: compare a string template against its inline element_filter form for query and vector search
+        expected: template and inline forms return identical PK/offset results
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_ef_template")
+        data = self._create_collection_and_insert(client, collection_name, nb=20, metric_type="COSINE")
+        target_row = 5
+        target_elem = 2
+        tag = data[target_row]["structA"][target_elem]["str_val"]
+        query_vector = data[target_row]["structA"][target_elem]["embedding"]
+        inline = f'element_filter(structA, $[str_val] == "{tag}")'
+        template = "element_filter(structA, $[str_val] == {tag})"
+        failures = []
+
+        inline_query = client.query(
+            collection_name,
+            filter=inline,
+            output_fields=["id"],
+            limit=100,
+        )
+        try:
+            template_query = client.query(
+                collection_name,
+                filter=template,
+                filter_params={"tag": tag},
+                output_fields=["id"],
+                limit=100,
+            )
+            assert [(row["id"], row["offset"]) for row in template_query] == [
+                (row["id"], row["offset"]) for row in inline_query
+            ]
+        except Exception as exc:
+            failures.append(f"query failed: {exc}")
+
+        inline_search = client.search(
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter=inline,
+            limit=10,
+            output_fields=["id"],
+        )[0]
+        try:
+            template_search = client.search(
+                collection_name,
+                data=[query_vector],
+                anns_field="structA[embedding]",
+                search_params={"metric_type": "COSINE"},
+                filter=template,
+                filter_params={"tag": tag},
+                limit=10,
+                output_fields=["id"],
+            )[0]
+            assert [(hit["id"], hit["offset"]) for hit in template_search] == [
+                (hit["id"], hit["offset"]) for hit in inline_search
+            ]
+        except Exception as exc:
+            failures.append(f"search failed: {exc}")
+
+        assert not failures, "\n".join(failures)
+
     # ---- L1 tests ----
 
     @pytest.mark.tags(CaseLabel.L1)
