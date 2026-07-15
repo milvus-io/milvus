@@ -110,6 +110,13 @@ func (r *channelReplicator) StartReplication() {
 	}()
 }
 
+// initLastReplicatedTimeTickMetric seeds the lag series synchronously, before
+// any network dependency, so that the series exists even while init() keeps
+// failing against an unreachable target — an absent series reads as zero lag
+// on the dashboard. The initialized (creation-time) checkpoint is a
+// conservative bound: real progress is at or after it, so the seed can only
+// overstate the lag. init() overwrites it with the target-confirmed
+// checkpoint once the target is reachable.
 func (r *channelReplicator) initLastReplicatedTimeTickMetric() {
 	checkpoint := r.channel.Value.GetInitializedCheckpoint()
 	if checkpoint == nil {
