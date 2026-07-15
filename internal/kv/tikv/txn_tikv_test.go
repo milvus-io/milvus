@@ -31,6 +31,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestTiKVLoad(te *testing.T) {
@@ -296,6 +297,11 @@ func TestTiKVLoad(te *testing.T) {
 	})
 
 	te.Run("kv failed to start txn", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
 		rootPath := "/tikv/test/root/start_exn"
 		kv := NewTiKV(txnClient, rootPath)
 		defer kv.Close()
@@ -321,6 +327,11 @@ func TestTiKVLoad(te *testing.T) {
 	})
 
 	te.Run("kv failed to commit txn", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
 		rootPath := "/tikv/test/root/commit_txn"
 		kv := NewTiKV(txnClient, rootPath)
 		defer kv.Close()
@@ -639,4 +650,118 @@ func TestTxnWithPredicates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteTxnRetry(t *testing.T) {
+	rootPath := "/tikv/test/root/write_txn_retry"
+	kv := NewTiKV(txnClient, rootPath)
+	err := kv.RemoveWithPrefix(context.TODO(), "")
+	require.NoError(t, err)
+
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(context.TODO(), "")
+
+	ctx := context.TODO()
+
+	t.Run("transient commit failure recovers for MultiSave", func(t *testing.T) {
+		fails := 2
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			if fails > 0 {
+				fails--
+				// Simulate a region error escaping client-go after its internal
+				// backoff budget is exhausted (e.g. a region split under load).
+				return errors.New("epoch_not_match:<>")
+			}
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"retry_key_1": "v1"})
+		assert.NoError(t, err)
+		assert.Zero(t, fails)
+
+		val, err := kv.Load(ctx, "retry_key_1")
+		assert.NoError(t, err)
+		assert.Equal(t, "v1", val)
+	})
+
+	t.Run("transient commit failure recovers for Save", func(t *testing.T) {
+		fails := 1
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			if fails > 0 {
+				fails--
+				return errors.New("epoch_not_match:<>")
+			}
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.Save(ctx, "retry_key_2", "v2")
+		assert.NoError(t, err)
+		assert.Zero(t, fails)
+
+		val, err := kv.Load(ctx, "retry_key_2")
+		assert.NoError(t, err)
+		assert.Equal(t, "v2", val)
+	})
+
+	t.Run("transient begin failure recovers", func(t *testing.T) {
+		fails := 1
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			if fails > 0 {
+				fails--
+				return nil, errors.New("pd timeout")
+			}
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"retry_key_3": "v3"})
+		assert.NoError(t, err)
+		assert.Zero(t, fails)
+	})
+
+	t.Run("persistent commit failure still surfaces", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return errors.New("epoch_not_match:<>")
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"retry_key_4": "v4"})
+		assert.Error(t, err)
+		assert.Equal(t, int(writeTxnRetryAttempts), commits)
+	})
+
+	t.Run("build failure is not retried and not wrapped", func(t *testing.T) {
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		// Reserved empty-value placeholder is rejected while building mutations.
+		err := kv.MultiSave(ctx, map[string]string{"bad_key": EmptyValueString})
+		assert.Error(t, err)
+		assert.Zero(t, commits)
+		// The retry.Unrecoverable marker must not leak to callers.
+		assert.True(t, retry.IsRecoverable(err))
+	})
 }
