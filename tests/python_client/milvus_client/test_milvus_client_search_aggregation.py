@@ -1617,9 +1617,9 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_struct_array_element_search_with_primary_key_aggregation(self):
         """
-        target: clarify StructArray element-vector search support when grouped by primary key.
-        method: search structA[embedding] and request aggregation by the primary key field.
-        expected: request succeeds because element-level StructArray search only supports primary-key grouping.
+        target: verify StructArray element results are aggregated exactly by primary key.
+        method: search six elements from three primary keys and request PK buckets with counts and two top hits.
+        expected: all three PK buckets contain exactly their two elements without cross-row mixing or loss.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1646,16 +1646,24 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             params={"M": 8, "efConstruction": 64},
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        vectors = cf.gen_vectors(self.nb * 2, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
+        vectors = [
+            [1.0, 0.0] + [0.0] * (dim - 2),
+            [0.9, 0.1] + [0.0] * (dim - 2),
+            [0.0, 1.0] + [0.0] * (dim - 2),
+            [0.1, 0.9] + [0.0] * (dim - 2),
+            [-1.0, 0.0] + [0.0] * (dim - 2),
+            [-0.9, -0.1] + [0.0] * (dim - 2),
+        ]
+        primary_keys = [10, 20, 30]
         rows = [
             {
-                "id": i,
+                "id": primary_key,
                 "structA": [
                     {"embedding": vectors[i * 2], "label": f"label_{i}_0"},
                     {"embedding": vectors[i * 2 + 1], "label": f"label_{i}_1"},
                 ],
             }
-            for i in range(self.nb)
+            for i, primary_key in enumerate(primary_keys)
         ]
         self.insert(client, collection_name, data=rows)
         self.flush(client, collection_name)
@@ -1664,25 +1672,30 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         res, _ = self.search(
             client,
             collection_name,
-            data=[vectors[0]],
+            data=[[0.7, 0.7] + [0.0] * (dim - 2)],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"ef": 32}},
-            limit=10,
-            output_fields=["id"],
+            search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+            limit=len(vectors),
+            output_fields=["id", "structA[label]"],
             search_aggregation=SearchAggregation(
                 fields=["id"],
                 size=3,
                 metrics={"doc_count": {"count": "*"}},
-                top_hits=TopHits(size=1),
+                top_hits=TopHits(size=2, sort=[{"_score": "desc"}]),
             ),
         )
 
         assert len(res.agg_buckets) == 1
-        assert 1 <= len(res.agg_buckets[0]) <= 3
+        assert len(res.agg_buckets[0]) == len(primary_keys)
+        buckets_by_id = {bucket.key[0]["value"]: bucket for bucket in res.agg_buckets[0]}
+        assert set(buckets_by_id) == set(primary_keys)
         for bucket in res.agg_buckets[0]:
             assert [entry["field_name"] for entry in bucket.key] == ["id"]
-            assert bucket.metrics["doc_count"] == bucket.count
-            assert len(bucket.hits) == 1
+            primary_key = bucket.key[0]["value"]
+            assert bucket.metrics["doc_count"] == bucket.count == 2
+            assert len(bucket.hits) == 2
+            assert all(hit.pk == primary_key for hit in bucket.hits)
+            assert bucket.hits[0].score >= bucket.hits[1].score
 
 
 @pytest.mark.xdist_group("TestSearchAggregationTextAndBM25")
