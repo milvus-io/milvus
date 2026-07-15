@@ -161,6 +161,7 @@ func (f *fakeBalanceEpochController) ActiveResourceGroups() []string {
 func testBalanceEpochConfig() balanceEpochConfig {
 	return balanceEpochConfig{
 		enabled:            true,
+		balancer:           meta.ScoreBasedBalancerName,
 		budget:             balance.BalanceWaveBudget{MaxSegmentTasks: 3, MaxChannelTasks: 2, MaxTasksPerNode: 2, MaxTasksPerCollection: 2},
 		deadline:           10 * time.Second,
 		noProgressDeadline: 5 * time.Second,
@@ -202,8 +203,8 @@ func mockEpochCheckConfig(
 		Return((balance.Balance)(nil)).
 		Build()
 	cleanupMock(t, mockBalancer)
-	mockPolicy := mockey.Mock((*balance.BalancerFactory).GetEpochPolicy).
-		To(func(*balance.BalancerFactory) (balance.EpochBalancePolicy, bool) {
+	mockPolicy := mockey.Mock((*balance.BalancerFactory).GetEpochPolicyFor).
+		To(func(*balance.BalancerFactory, string, balance.EpochPolicyConfig) (balance.EpochBalancePolicy, bool) {
 			return nil, policySupported
 		}).
 		Build()
@@ -885,7 +886,7 @@ func TestBalanceChecker_SubmitTasks_EmptyTasks(t *testing.T) {
 
 func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 	t.Run("StoppingBalanceRunsWhenInactive", func(t *testing.T) {
-		checker := createTestBalanceChecker()
+		checker := createTestBalanceChecker(withEpochConfigForTest(balanceEpochConfig{}))
 		ctx := context.Background()
 
 		// Mock IsActive to return false - checker is inactive
@@ -936,7 +937,7 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 	})
 
 	t.Run("NormalBalanceSkippedWhenInactive", func(t *testing.T) {
-		checker := createTestBalanceChecker()
+		checker := createTestBalanceChecker(withEpochConfigForTest(balanceEpochConfig{}))
 		ctx := context.Background()
 
 		// Mock IsActive to return false - checker is inactive
@@ -986,7 +987,7 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 
 func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 	t.Run("StoppingBalanceGeneratesTasksAndClearsNormalQueue", func(t *testing.T) {
-		checker := createTestBalanceChecker()
+		checker := createTestBalanceChecker(withEpochConfigForTest(balanceEpochConfig{}))
 		ctx := context.Background()
 
 		// Pre-populate normal balance queue to verify it gets cleared
@@ -1041,7 +1042,7 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 	})
 
 	t.Run("StoppingBalanceNoTasksAllowsNormalBalance", func(t *testing.T) {
-		checker := createTestBalanceChecker()
+		checker := createTestBalanceChecker(withEpochConfigForTest(balanceEpochConfig{}))
 		ctx := context.Background()
 		checker.autoBalanceTs = time.Time{} // Allow normal balance
 
@@ -1101,7 +1102,7 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 
 func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 	t.Run("NormalBalanceGeneratesTasks", func(t *testing.T) {
-		checker := createTestBalanceChecker()
+		checker := createTestBalanceChecker(withEpochConfigForTest(balanceEpochConfig{}))
 		ctx := context.Background()
 
 		// Set autoBalanceTs to allow normal balance
@@ -1162,7 +1163,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 	})
 
 	t.Run("NormalBalanceRespects IntervalThrottle", func(t *testing.T) {
-		checker := createTestBalanceChecker()
+		checker := createTestBalanceChecker(withEpochConfigForTest(balanceEpochConfig{}))
 		ctx := context.Background()
 
 		// Set autoBalanceTs to recent time to trigger throttling
@@ -1216,7 +1217,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 	})
 
 	t.Run("NormalBalanceSkippedWhenAutoBalanceDisabled", func(t *testing.T) {
-		checker := createTestBalanceChecker()
+		checker := createTestBalanceChecker(withEpochConfigForTest(balanceEpochConfig{}))
 		ctx := context.Background()
 
 		// Set autoBalanceTs to allow normal balance
@@ -2196,49 +2197,174 @@ func TestBalanceCheckerEpochGroupsReplicasByRG(t *testing.T) {
 	assert.Equal(t, []int64{30, 40}, requests[1].EligibleReplicaIDs)
 	for _, request := range requests {
 		assert.True(t, request.AllowNew)
+		assert.Equal(t, epochConfig.balancer, request.Balancer)
 		assert.Equal(t, epochConfig.budget, request.Budget)
 		assert.Equal(t, epochConfig.policyConfig, request.PolicyConfig)
 	}
 }
 
-func TestBalanceCheckerEpochPropagatesFrozenConfigOncePerTick(t *testing.T) {
-	controller := &fakeBalanceEpochController{}
-	checker := createTestBalanceChecker(withEpochControllerForTest(controller))
-	epochConfig := testBalanceEpochConfig()
-	epochConfig.shadow = true
-	epochConfig.policyConfig.StreamingServiceEnabled = true
-	providerCalls := 0
-	checker.epochConfigProvider = func() balanceEpochConfig {
-		providerCalls++
-		return epochConfig
-	}
-	mockEpochCheckConfig(t, checker, balanceConfig{
-		maxCheckCollectionCount:      1,
-		balanceOnMultipleCollections: true,
-		autoBalanceInterval:          0,
-	}, false, true, true)
-	mockEligibleEpochCollections(t, checker, []int64{1}, map[int64][]*meta.Replica{
-		1: {newEpochReplica(10, 1, "rg-a")},
+func TestBalanceCheckerLoadsEpochConfigOncePerTick(t *testing.T) {
+	t.Run("loads every field", func(t *testing.T) {
+		paramtable.Init()
+		params := paramtable.Get()
+		values := map[string]string{
+			params.QueryCoordCfg.BalanceEpochEnabled.Key:               "true",
+			params.QueryCoordCfg.BalanceEpochShadowMode.Key:            "true",
+			params.QueryCoordCfg.BalanceEpochDeadline.Key:              "1234",
+			params.QueryCoordCfg.BalanceEpochNoProgressDeadline.Key:    "5678",
+			params.QueryCoordCfg.BalanceEpochMaxSegmentTasks.Key:       "9",
+			params.QueryCoordCfg.BalanceEpochMaxChannelTasks.Key:       "8",
+			params.QueryCoordCfg.BalanceEpochMaxTasksPerNode.Key:       "7",
+			params.QueryCoordCfg.BalanceEpochMaxTasksPerCollection.Key: "6",
+			params.QueryCoordCfg.BalanceEpochMaxObjectRetries.Key:      "4",
+			params.QueryCoordCfg.BalanceEpochQuarantineBackoff.Key:     "9012",
+			params.QueryCoordCfg.SegmentTaskTimeout.Key:                "3456",
+			params.QueryCoordCfg.ChannelTaskTimeout.Key:                "7890",
+			params.QueryCoordCfg.Balancer.Key:                          meta.ScoreBasedBalancerName,
+			params.QueryCoordCfg.GlobalRowCountFactor.Key:              "0.11",
+			params.QueryCoordCfg.DelegatorMemoryOverloadFactor.Key:     "0.22",
+			params.QueryCoordCfg.CollectionChannelCountFactor.Key:      "0.33",
+			params.QueryCoordCfg.AutoBalanceChannel.Key:                "false",
+		}
+		for key, value := range values {
+			require.NoError(t, params.Save(key, value))
+		}
+		t.Cleanup(func() {
+			for key := range values {
+				params.Reset(key)
+			}
+			streamingutil.UnsetStreamingServiceEnabled()
+		})
+		streamingutil.SetStreamingServiceEnabled()
+
+		checker := &BalanceChecker{}
+		assert.Equal(t, balanceEpochConfig{
+			enabled:  true,
+			shadow:   true,
+			balancer: meta.ScoreBasedBalancerName,
+			budget: balance.BalanceWaveBudget{
+				MaxSegmentTasks:       9,
+				MaxChannelTasks:       8,
+				MaxTasksPerNode:       7,
+				MaxTasksPerCollection: 6,
+			},
+			deadline:           1234 * time.Millisecond,
+			noProgressDeadline: 5678 * time.Millisecond,
+			segmentTaskTimeout: 3456 * time.Millisecond,
+			channelTaskTimeout: 7890 * time.Millisecond,
+			maxObjectRetries:   4,
+			quarantineBackoff:  9012 * time.Millisecond,
+			policyConfig: balance.EpochPolicyConfig{
+				GlobalRowCountFactor:          0.11,
+				DelegatorMemoryOverloadFactor: 0.22,
+				CollectionChannelCountFactor:  0.33,
+				AutoBalanceChannel:            false,
+				StreamingServiceEnabled:       true,
+			},
+		}, checker.loadBalanceEpochConfig())
 	})
 
-	checker.Check(context.Background())
+	t.Run("one snapshot per check", func(t *testing.T) {
+		controller := &fakeBalanceEpochController{}
+		checker := createTestBalanceChecker(withEpochControllerForTest(controller))
+		epochConfig := testBalanceEpochConfig()
+		epochConfig.shadow = true
+		epochConfig.policyConfig.StreamingServiceEnabled = true
+		providerCalls := 0
+		checker.epochConfigProvider = func() balanceEpochConfig {
+			providerCalls++
+			return epochConfig
+		}
+		mockEpochCheckConfig(t, checker, balanceConfig{
+			maxCheckCollectionCount:      1,
+			balanceOnMultipleCollections: true,
+			autoBalanceInterval:          0,
+		}, false, true, true)
+		mockEligibleEpochCollections(t, checker, []int64{1}, map[int64][]*meta.Replica{
+			1: {newEpochReplica(10, 1, "rg-a")},
+		})
 
-	assert.Equal(t, 1, providerCalls)
-	require.Len(t, controller.requests, 1)
-	assert.Equal(t, balance.EpochRequest{
-		ResourceGroup:      "rg-a",
-		EligibleReplicaIDs: []int64{10},
-		Budget:             epochConfig.budget,
-		PolicyConfig:       epochConfig.policyConfig,
-		AllowNew:           true,
-		Shadow:             true,
-		Deadline:           epochConfig.deadline,
-		NoProgressDeadline: epochConfig.noProgressDeadline,
-		SegmentTaskTimeout: epochConfig.segmentTaskTimeout,
-		ChannelTaskTimeout: epochConfig.channelTaskTimeout,
-		MaxObjectRetries:   epochConfig.maxObjectRetries,
-		QuarantineBackoff:  epochConfig.quarantineBackoff,
-	}, controller.requests[0])
+		checker.Check(context.Background())
+
+		assert.Equal(t, 1, providerCalls)
+		require.Len(t, controller.requests, 1)
+		assert.Equal(t, balance.EpochRequest{
+			ResourceGroup:      "rg-a",
+			EligibleReplicaIDs: []int64{10},
+			Balancer:           epochConfig.balancer,
+			Budget:             epochConfig.budget,
+			PolicyConfig:       epochConfig.policyConfig,
+			AllowNew:           true,
+			Shadow:             true,
+			Deadline:           epochConfig.deadline,
+			NoProgressDeadline: epochConfig.noProgressDeadline,
+			SegmentTaskTimeout: epochConfig.segmentTaskTimeout,
+			ChannelTaskTimeout: epochConfig.channelTaskTimeout,
+			MaxObjectRetries:   epochConfig.maxObjectRetries,
+			QuarantineBackoff:  epochConfig.quarantineBackoff,
+		}, controller.requests[0])
+	})
+
+	t.Run("before every early return", func(t *testing.T) {
+		tests := []struct {
+			name                string
+			stoppingEnabled     bool
+			active              bool
+			autoBalanceEnabled  bool
+			autoBalanceInterval time.Duration
+			acceptedStopping    int
+		}{
+			{
+				name:               "accepted stopping work",
+				stoppingEnabled:    true,
+				active:             true,
+				autoBalanceEnabled: true,
+				acceptedStopping:   1,
+			},
+			{
+				name:               "inactive checker",
+				active:             false,
+				autoBalanceEnabled: true,
+			},
+			{
+				name:               "auto balance disabled",
+				active:             true,
+				autoBalanceEnabled: false,
+			},
+			{
+				name:                "interval throttled",
+				active:              true,
+				autoBalanceEnabled:  true,
+				autoBalanceInterval: time.Hour,
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				checker := createTestBalanceChecker(withEpochControllerForTest(&fakeBalanceEpochController{}))
+				providerCalls := 0
+				checker.epochConfigProvider = func() balanceEpochConfig {
+					providerCalls++
+					return testBalanceEpochConfig()
+				}
+				mockEpochCheckConfig(t, checker, balanceConfig{
+					autoBalanceInterval: test.autoBalanceInterval,
+				}, test.stoppingEnabled, test.autoBalanceEnabled, true)
+				checker.autoBalanceTs = time.Now()
+
+				mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(test.active).Build()
+				cleanupMock(t, mockIsActive)
+				mockProcess := mockey.Mock((*BalanceChecker).processBalanceQueue).
+					Return(test.acceptedStopping, 0).
+					Build()
+				cleanupMock(t, mockProcess)
+
+				checker.Check(context.Background())
+
+				assert.Equal(t, 1, providerCalls)
+			})
+		}
+	})
 }
 
 func TestBalanceCheckerEpochOptionalSchedulerCapabilities(t *testing.T) {
@@ -2246,7 +2372,7 @@ func TestBalanceCheckerEpochOptionalSchedulerCapabilities(t *testing.T) {
 	baseScheduler := task.NewMockScheduler(t)
 	managerCalls := 0
 	var capturedSource task.Source
-	var capturedPolicyProvider func() (balance.EpochBalancePolicy, bool)
+	var capturedPolicyProvider func(string, balance.EpochPolicyConfig) (balance.EpochBalancePolicy, bool)
 	mockNewManager := mockey.Mock(balance.NewBalanceEpochManager).
 		To(func(
 			_ *meta.Meta,
@@ -2257,7 +2383,7 @@ func TestBalanceCheckerEpochOptionalSchedulerCapabilities(t *testing.T) {
 			_ task.BalanceTaskGenerationAdmitter,
 			_ task.BalanceTaskInspector,
 			source task.Source,
-			policyProvider func() (balance.EpochBalancePolicy, bool),
+			policyProvider func(string, balance.EpochPolicyConfig) (balance.EpochBalancePolicy, bool),
 			_ ...balance.EpochManagerOption,
 		) *balance.BalanceEpochManager {
 			managerCalls++
@@ -2268,9 +2394,13 @@ func TestBalanceCheckerEpochOptionalSchedulerCapabilities(t *testing.T) {
 		Build()
 	cleanupMock(t, mockNewManager)
 	policyCalls := 0
-	mockPolicy := mockey.Mock((*balance.BalancerFactory).GetEpochPolicy).
-		To(func(*balance.BalancerFactory) (balance.EpochBalancePolicy, bool) {
+	var capturedBalancer string
+	var capturedConfig balance.EpochPolicyConfig
+	mockPolicy := mockey.Mock((*balance.BalancerFactory).GetEpochPolicyFor).
+		To(func(_ *balance.BalancerFactory, balancer string, config balance.EpochPolicyConfig) (balance.EpochBalancePolicy, bool) {
 			policyCalls++
+			capturedBalancer = balancer
+			capturedConfig = config
 			return nil, true
 		}).
 		Build()
@@ -2297,9 +2427,12 @@ func TestBalanceCheckerEpochOptionalSchedulerCapabilities(t *testing.T) {
 	assert.Equal(t, 1, managerCalls)
 	assert.Equal(t, utils.BalanceChecker, capturedSource)
 	require.NotNil(t, capturedPolicyProvider)
-	_, supported := capturedPolicyProvider()
+	frozenConfig := balance.EpochPolicyConfig{AutoBalanceChannel: true, StreamingServiceEnabled: true}
+	_, supported := capturedPolicyProvider(meta.ScoreBasedBalancerName, frozenConfig)
 	assert.True(t, supported)
 	assert.Equal(t, 1, policyCalls)
+	assert.Equal(t, meta.ScoreBasedBalancerName, capturedBalancer)
+	assert.Equal(t, frozenConfig, capturedConfig)
 }
 
 func TestBalanceCheckerEpochUsesDeterministicRGOrder(t *testing.T) {
@@ -2383,12 +2516,10 @@ func TestBalanceCheckerEpochInactiveStillReconciles(t *testing.T) {
 	checker.Check(context.Background())
 
 	require.Len(t, controller.requests, 2)
-	assert.Equal(t, []string{"rg-a", "rg-b"}, []string{
-		controller.requests[0].ResourceGroup,
-		controller.requests[1].ResourceGroup,
-	})
-	assert.False(t, controller.requests[0].AllowNew)
-	assert.False(t, controller.requests[1].AllowNew)
+	assert.Equal(t, []balance.EpochRequest{
+		{ResourceGroup: "rg-a", AllowNew: false},
+		{ResourceGroup: "rg-b", AllowNew: false},
+	}, controller.requests)
 }
 
 func TestBalanceCheckerEpochAutoBalanceDisabledStillReconciles(t *testing.T) {

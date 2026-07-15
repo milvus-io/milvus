@@ -135,17 +135,29 @@ func (f *BalancerFactory) GetBalancer() Balance {
 // can preserve its semantics without consulting live managers during planning.
 func (f *BalancerFactory) GetEpochPolicy() (EpochBalancePolicy, bool) {
 	params := paramtable.Get()
-	balanceKey := params.QueryCoordCfg.Balancer.GetValue()
-	streamingEnabled := streamingutil.IsStreamingServiceEnabled()
+	balancer := params.QueryCoordCfg.Balancer.GetValue()
+	config := EpochPolicyConfig{
+		AutoBalanceChannel:      params.QueryCoordCfg.AutoBalanceChannel.GetAsBool(),
+		StreamingServiceEnabled: streamingutil.IsStreamingServiceEnabled(),
+	}
+	return f.GetEpochPolicyFor(balancer, config)
+}
 
-	switch balanceKey {
+// GetEpochPolicyFor returns the snapshot-only policy selected by a frozen
+// balancer name and policy configuration. It intentionally performs no live
+// parameter-table or streaming-service reads.
+func (f *BalancerFactory) GetEpochPolicyFor(
+	balancer string,
+	config EpochPolicyConfig,
+) (EpochBalancePolicy, bool) {
+	switch balancer {
 	case meta.ScoreBasedBalancerName:
-		if streamingEnabled && params.QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		if config.StreamingServiceEnabled && config.AutoBalanceChannel {
 			return nil, false
 		}
 		return newScoreEpochPolicy(false), true
 	case meta.ChannelLevelScoreBalancerName:
-		if streamingEnabled {
+		if config.StreamingServiceEnabled {
 			return nil, false
 		}
 		return newScoreEpochPolicy(true), true
