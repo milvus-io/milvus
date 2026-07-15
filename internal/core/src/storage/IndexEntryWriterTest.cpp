@@ -1202,8 +1202,20 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     ASSERT_EQ(DefaultStreamSliceSize(), slice_size);
     milvus::SetLoadTransientBudgetBytes(0);
     ASSERT_EQ(budget.CapacityBytes(), 0);
-    ASSERT_EQ(EntryStreamMaxTransientBytes(),
+    ASSERT_NE(EntryStreamMaxTransientBytes(),
               std::numeric_limits<size_t>::max());
+    ASSERT_EQ(EntryStreamMaxTransientBytes(),
+              EntryStreamPoolBoundTransientBytes());
+
+    const size_t pool_bound_transient_bytes =
+        EntryStreamPoolBoundTransientBytes();
+    ASSERT_LT(
+        pool_bound_transient_bytes,
+        static_cast<size_t>(std::numeric_limits<int64_t>::max()) - slice_size);
+    const size_t oversized_budget = pool_bound_transient_bytes + slice_size;
+    milvus::SetLoadTransientBudgetBytes(static_cast<int64_t>(oversized_budget));
+    ASSERT_EQ(budget.CapacityBytes(), oversized_budget);
+    ASSERT_EQ(EntryStreamMaxTransientBytes(), pool_bound_transient_bytes);
 
     const size_t configured_budget = 3 * slice_size;
     milvus::SetLoadTransientBudgetBytes(
