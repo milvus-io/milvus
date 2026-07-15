@@ -810,17 +810,26 @@ func copySearchResultsWithData(src *milvuspb.SearchResults, data *schemapb.Searc
 }
 
 type aggregateOperator struct {
-	aggCtx     *search_agg.SearchAggregationContext
-	collSchema *schemapb.CollectionSchema
+	aggCtx       *search_agg.SearchAggregationContext
+	collSchema   *schemapb.CollectionSchema
+	roundDecimal int64
 }
 
 func newAggregateOperator(t *searchTask, _ map[string]any) (operator, error) {
 	if t.aggCtx == nil {
 		return nil, merr.WrapErrServiceInternal("aggregate operator requires non-nil aggCtx")
 	}
+	// Aggregation searches bypass endOperator (newSearchPipeline returns early for
+	// aggCtx), so round the aggregation hit scores here at the terminal step to keep
+	// round_decimal behavior consistent with non-aggregation searches.
+	roundDecimal := int64(-1)
+	if !t.GetIsAdvanced() && len(t.queryInfos) > 0 && t.queryInfos[0] != nil {
+		roundDecimal = t.queryInfos[0].GetRoundDecimal()
+	}
 	return &aggregateOperator{
-		aggCtx:     t.aggCtx,
-		collSchema: t.schema.CollectionSchema,
+		aggCtx:       t.aggCtx,
+		collSchema:   t.schema.CollectionSchema,
+		roundDecimal: roundDecimal,
 	}, nil
 }
 
@@ -858,6 +867,7 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	aggBuckets := make([]*schemapb.AggBucket, 0)
 	aggTopks := make([]int64, 0, len(nqAggResults))
 	for _, buckets := range nqAggResults {
+		roundAggHitScores(buckets, op.roundDecimal)
 		aggTopks = append(aggTopks, int64(len(buckets)))
 		aggBuckets = append(aggBuckets, serializeAggBuckets(buckets, fieldIDToName, op.aggCtx.Levels, 0)...)
 	}
@@ -1809,13 +1819,40 @@ func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) 
 	return []any{result}, nil
 }
 
+func roundScore(score float32, roundDecimal int64) float32 {
+	if roundDecimal < 0 {
+		return score
+	}
+	multiplier := math.Pow(10.0, float64(roundDecimal))
+	return float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
+}
+
 func roundSearchScores(result *schemapb.SearchResultData, roundDecimal int64) {
 	if result == nil || roundDecimal < 0 {
 		return
 	}
-	multiplier := math.Pow(10.0, float64(roundDecimal))
 	for i, score := range result.Scores {
-		result.Scores[i] = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
+		result.Scores[i] = roundScore(score, roundDecimal)
+	}
+}
+
+// roundAggHitScores rounds aggregation hit scores in place (recursing into
+// sub-aggregation buckets). Applied at the aggregate operator's terminal step
+// because aggregation searches bypass endOperator.
+func roundAggHitScores(buckets []*search_agg.AggBucketResult, roundDecimal int64) {
+	if roundDecimal < 0 {
+		return
+	}
+	for _, b := range buckets {
+		if b == nil {
+			continue
+		}
+		for _, h := range b.Hits {
+			if h != nil {
+				h.Score = roundScore(h.Score, roundDecimal)
+			}
+		}
+		roundAggHitScores(b.SubAggBuckets, roundDecimal)
 	}
 }
 

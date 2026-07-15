@@ -2507,6 +2507,37 @@ func (s *SearchPipelineSuite) TestEndOperatorRoundsScores() {
 	s.Equal([]float32{0, 0}, resultData.GetScores())
 }
 
+func (s *SearchPipelineSuite) TestRoundAggHitScores() {
+	// Aggregation searches bypass endOperator, so hit scores are rounded at the
+	// aggregate operator's terminal step. Covers nested sub-aggregation buckets.
+	buckets := []*search_agg.AggBucketResult{
+		{
+			Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}},
+			SubAggBuckets: []*search_agg.AggBucketResult{
+				{Hits: []*search_agg.HitResult{{Score: 0.51}, nil}},
+			},
+		},
+		nil,
+	}
+
+	roundAggHitScores(buckets, 0)
+
+	s.Equal(float32(0), buckets[0].Hits[0].Score)
+	s.Equal(float32(0), buckets[0].Hits[1].Score)
+	s.Equal(float32(1), buckets[0].SubAggBuckets[0].Hits[0].Score)
+}
+
+func (s *SearchPipelineSuite) TestRoundAggHitScoresDisabled() {
+	buckets := []*search_agg.AggBucketResult{
+		{Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}}},
+	}
+
+	roundAggHitScores(buckets, -1)
+
+	s.Equal(float32(0.49), buckets[0].Hits[0].Score)
+	s.Equal(float32(0.36), buckets[0].Hits[1].Score)
+}
+
 func (s *SearchPipelineSuite) TestEndOperatorKeepsScoresWhenRoundDecimalDisabled() {
 	task := &searchTask{
 		queryInfos: []*planpb.QueryInfo{{RoundDecimal: -1}},

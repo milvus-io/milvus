@@ -1400,8 +1400,8 @@ SearchResultToJson(const SearchResult& sr, int64_t round_decimal = -1) {
     int64_t num_queries = sr.total_nq_;
     int64_t topk = sr.unity_topK_;
     std::vector<std::vector<std::string>> results;
-    const float multiplier = round_decimal >= 0 ? std::pow(10.0, round_decimal)
-                                                : 1.0f;
+    const float multiplier =
+        round_decimal >= 0 ? std::pow(10.0, round_decimal) : 1.0f;
     for (int q = 0; q < num_queries; ++q) {
         std::vector<std::string> result;
         for (int k = 0; k < topk; ++k) {
