@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "common/Decimal.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
@@ -135,6 +136,18 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(element_offset,
                                 FIELD_DATA(data, timestamptz).data(),
                                 element_count);
+        }
+        case DataType::DECIMAL: {
+            // Wire values are decimal-literal text (e.g. "19.99"), unlike every
+            // other case here which already receives typed data — decode to the
+            // unscaled int64 representation before storing, exactly once, here.
+            auto& bytes_data = FIELD_DATA(data, bytes);
+            auto scale = field_meta.get_decimal_scale();
+            std::vector<int64_t> data_raw(bytes_data.size());
+            for (int i = 0; i < bytes_data.size(); ++i) {
+                data_raw[i] = DecodeDecimalUnscaled(bytes_data[i], scale);
+            }
+            return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         case DataType::STRING:
         case DataType::VARCHAR:

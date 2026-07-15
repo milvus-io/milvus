@@ -476,7 +476,8 @@ class ChunkedColumn : public ChunkedColumnBase {
                     op_ctx, dst, offsets, count);
                 break;
             }
-            case DataType::TIMESTAMPTZ: {
+            case DataType::TIMESTAMPTZ:
+            case DataType::DECIMAL: {
                 BulkPrimitiveValueAtImpl<int64_t, int64_t>(
                     op_ctx, dst, offsets, count);
                 break;

@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -855,6 +856,27 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
+		case schemapb.DataType_Decimal:
+			precision, scale, err := parameterutil.GetPrecisionAndScale(field)
+			if err != nil {
+				return nil, err
+			}
+			srcData := srcField.GetScalars().GetBytesData().GetData()
+			decoded := make([]int64, len(srcData))
+			for i, b := range srcData {
+				decoded[i], err = parameterutil.EncodeUnscaledInt64(string(b), precision, scale)
+				if err != nil {
+					return nil, err
+				}
+			}
+			validData := srcField.GetValidData()
+
+			fieldData = &DecimalFieldData{
+				Data:      decoded,
+				ValidData: validData,
+				Nullable:  field.GetNullable(),
+			}
+
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := srcField.GetValidData()
@@ -1081,6 +1103,19 @@ func mergeTimestamptzField(data *InsertData, fid FieldID, field *TimestamptzFiel
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
+func mergeDecimalField(data *InsertData, fid FieldID, field *DecimalFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &DecimalFieldData{
+			Data:      nil,
+			ValidData: nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*DecimalFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
 func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &StringFieldData{
@@ -1259,6 +1294,8 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeDoubleField(data, fid, field)
 	case *TimestamptzFieldData:
 		mergeTimestamptzField(data, fid, field)
+	case *DecimalFieldData:
+		mergeDecimalField(data, fid, field)
 	case *StringFieldData:
 		mergeStringField(data, fid, field)
 	case *ArrayFieldData:

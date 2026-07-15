@@ -130,6 +130,11 @@ FieldMeta::ToProto() const {
         }
     } else if (IsArrayDataType(type_)) {
         // element_type already populated above
+    } else if (type_ == DataType::DECIMAL) {
+        Assert(decimal_info_.has_value());
+        add_type_param(DECIMAL_PRECISION,
+                       std::to_string(decimal_info_->precision_));
+        add_type_param(DECIMAL_SCALE, std::to_string(decimal_info_->scale_));
     }
 
     return proto;
@@ -261,6 +266,25 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          field_id,
                          data_type,
                          DataType(schema_proto.element_type()),
+                         nullable,
+                         default_value,
+                         external_field_mapping};
+    }
+
+    if (data_type == DataType::DECIMAL) {
+        auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
+        AssertInfo(type_map.count(DECIMAL_PRECISION),
+                   "precision not found for decimal field");
+        AssertInfo(type_map.count(DECIMAL_SCALE),
+                   "scale not found for decimal field");
+        auto precision =
+            boost::lexical_cast<int64_t>(type_map.at(DECIMAL_PRECISION));
+        auto scale = boost::lexical_cast<int64_t>(type_map.at(DECIMAL_SCALE));
+        return FieldMeta{name,
+                         field_id,
+                         data_type,
+                         precision,
+                         scale,
                          nullable,
                          default_value,
                          external_field_mapping};

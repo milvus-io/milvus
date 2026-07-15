@@ -541,6 +541,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
                     break;
                 case DataType::INT64:
                 case DataType::TIMESTAMPTZ:
+                case DataType::DECIMAL:
                     field_bytes = num_rows * sizeof(int64_t);
                     break;
                 case DataType::FLOAT:
