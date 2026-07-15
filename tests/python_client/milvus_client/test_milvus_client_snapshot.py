@@ -2249,8 +2249,8 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
         """
         target: verify snapshot restores Struct Array schema, nullability, nested indexes, and both search modes
         method: snapshot nullable Struct rows with empty and variable-length values plus separate embedding-list and
-            element-vector sub-fields, restore to a new collection, and compare exact observations
-        expected: restored projection, predicates, element offsets, embedding-list PK, and index metadata equal source
+            element-vector sub-fields, restore to a new collection, and compare exact semantic observations
+        expected: restored projection, predicates, complete valid ANN candidate sets, and index metadata equal source
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_struct_source")
@@ -2274,14 +2274,19 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
             nullable=True,
         )
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", index_type="FLAT", metric_type="COSINE")
+        index_params.add_index("vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64})
         index_params.add_index(
             "events[embedding]",
             index_type="HNSW",
             metric_type="MAX_SIM_COSINE",
             params={"M": 8, "efConstruction": 64},
         )
-        index_params.add_index("events[element_embedding]", index_type="FLAT", metric_type="COSINE")
+        index_params.add_index(
+            "events[element_embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
         index_params.add_index("events[tag]", index_type="BITMAP")
         self.create_collection(
             client,
@@ -2337,7 +2342,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
                 target_collection,
                 data=[vector(0)],
                 anns_field="events[element_embedding]",
-                search_params={"metric_type": "COSINE"},
+                search_params={"metric_type": "COSINE", "params": {"ef": 64}},
                 output_fields=["id"],
                 limit=3,
             )[0][0]
@@ -2350,14 +2355,14 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
                 anns_field="events[embedding]",
                 search_params={"metric_type": "MAX_SIM_COSINE", "params": {"ef": 32}},
                 output_fields=["id"],
-                limit=1,
+                limit=2,
             )[0][0]
             return {
                 "projection": sorted((row["id"], row["events"]) for row in projected),
                 "contains_ids": sorted(row["id"] for row in contains),
                 "match_ids": sorted(row["id"] for row in matched),
                 "element_keys": sorted((hit["id"], hit["offset"]) for hit in element_hits),
-                "embedding_ids": [hit["id"] for hit in embedding_hits],
+                "embedding_ids": sorted(hit["id"] for hit in embedding_hits),
                 "indexes": sorted(client.list_indexes(target_collection)),
             }
 
@@ -2365,7 +2370,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
         assert source_observations["contains_ids"] == [2]
         assert source_observations["match_ids"] == [2]
         assert source_observations["element_keys"] == [(2, 0), (2, 1), (3, 0)]
-        assert source_observations["embedding_ids"] == [2]
+        assert source_observations["embedding_ids"] == [2, 3]
 
         self.create_snapshot(client, snapshot_name, collection_name)
         job_id = self.restore_snapshot(
@@ -2376,10 +2381,14 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
         )[0]
         wait_for_restore_complete(self, client, job_id)
         self.load_collection(client, restored_collection_name)
-        assert collect_observations(restored_collection_name) == source_observations
-
-        self.drop_snapshot(client, snapshot_name, collection_name)
-        self.drop_collection(client, restored_collection_name)
+        try:
+            restored_observations = collect_observations(restored_collection_name)
+            for key in ("projection", "contains_ids", "match_ids", "element_keys", "indexes"):
+                assert restored_observations[key] == source_observations[key]
+            assert restored_observations["embedding_ids"] == [2, 3]
+        finally:
+            self.drop_snapshot(client, snapshot_name, collection_name)
+            self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_with_bfloat16_vector(self):

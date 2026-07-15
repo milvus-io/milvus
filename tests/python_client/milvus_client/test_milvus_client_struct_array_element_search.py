@@ -3854,7 +3854,12 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         for field_name in ["normal_vector", "structA[embedding]", "structA[embedding_alt]", "structB[embedding]"]:
-            index_params.add_index(field_name=field_name, index_type="FLAT", metric_type=metric_type)
+            index_params.add_index(
+                field_name=field_name,
+                index_type="HNSW",
+                metric_type=metric_type,
+                params={"M": 8, "efConstruction": 64},
+            )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         def _struct_a(scores):
@@ -4073,9 +4078,9 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         query_vector = self._cosine_vector(1.0)
 
         def _req(field_name, params=None):
-            search_params = {"metric_type": "COSINE"}
+            search_params = {"metric_type": "COSINE", "params": {"ef": 64}}
             if params is not None:
-                search_params["params"] = params
+                search_params["params"].update(params)
             return AnnSearchRequest(
                 **{
                     "data": [query_vector],
@@ -4138,7 +4143,12 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
 
         index_params = client.prepare_index_params()
         for field_name in ("structA[embedding]", "structB[embedding]"):
-            index_params.add_index(field_name=field_name, index_type="FLAT", metric_type="COSINE")
+            index_params.add_index(
+                field_name=field_name,
+                index_type="HNSW",
+                metric_type="COSINE",
+                params={"M": 8, "efConstruction": 64},
+            )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         scores_by_id = {
@@ -4184,7 +4194,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
                         "anns_field": field_name,
                         "param": {
                             "metric_type": "COSINE",
-                            "params": {"element_scope": {"collapse": collapse}},
+                            "params": {"ef": 64, "element_scope": {"collapse": collapse}},
                         },
                         "limit": sum(len(values) for values in scores_by_id.values()),
                     }
@@ -4232,7 +4242,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
                     "anns_field": "structA[embedding]",
                     "param": {
                         "metric_type": "COSINE",
-                        "params": {"element_scope": {"collapse": collapse}},
+                        "params": {"ef": 64, "element_scope": {"collapse": collapse}},
                     },
                     "limit": 9,
                 }
@@ -4241,7 +4251,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
                 **{
                     "data": [query_vector],
                     "anns_field": "structB[embedding]",
-                    "param": {"metric_type": "COSINE"},
+                    "param": {"metric_type": "COSINE", "params": {"ef": 64}},
                     "limit": 9,
                 }
             )
@@ -4283,7 +4293,12 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         )
         index_params = client.prepare_index_params()
         for field_name in ("structA[embedding]", "structA[embedding_alt]"):
-            index_params.add_index(field_name=field_name, index_type="FLAT", metric_type="COSINE")
+            index_params.add_index(
+                field_name=field_name,
+                index_type="HNSW",
+                metric_type="COSINE",
+                params={"M": 8, "efConstruction": 64},
+            )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         score_rows = {"doc/a": [0.99, 0.10], "doc:b": [0.90, 0.80]}
@@ -4311,7 +4326,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
                 **{
                     "data": [query_vector],
                     "anns_field": field_name,
-                    "param": {"metric_type": "COSINE"},
+                    "param": {"metric_type": "COSINE", "params": {"ef": 64}},
                     "limit": 4,
                 }
             )
@@ -4344,7 +4359,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_hyb_range_same_struct")
         self._setup_multi_struct_collection(client, collection_name)
         query_vector = self._cosine_vector(1.0)
-        range_params = {"radius": 0.85}
+        range_params = {"ef": 64, "radius": 0.85}
 
         req1 = AnnSearchRequest(
             **{

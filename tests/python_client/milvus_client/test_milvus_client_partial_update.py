@@ -399,8 +399,10 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         )
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index("vector", index_type="FLAT", metric_type="COSINE")
-        index_params.add_index("events[embedding]", index_type="FLAT", metric_type="COSINE")
+        index_params.add_index("vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64})
+        index_params.add_index(
+            "events[embedding]", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64}
+        )
         index_params.add_index("events[tag]", index_type="BITMAP")
         self.create_collection(
             client,
@@ -497,7 +499,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                 collection_name,
                 data=[vector(0)],
                 anns_field="events[embedding]",
-                search_params={"metric_type": "COSINE"},
+                search_params={"metric_type": "COSINE", "params": {"ef": 64}},
                 filter="element_filter(events, $[score] >= 0)",
                 output_fields=["id"],
                 limit=3,
@@ -549,7 +551,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             nullable=True,
         )
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index("vector", index_type="FLAT", metric_type="COSINE")
+        index_params.add_index("vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 64})
         self.create_collection(
             client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
         )
