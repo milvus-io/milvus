@@ -861,6 +861,90 @@ func TestEpochManagerCarryMetricOutlivesTerminal(t *testing.T) {
 	})
 }
 
+func TestEpochManagerObservationAppliesRetryDisablePolicy(t *testing.T) {
+	registry := newEpochManagerMetricsRegistry(t)
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan), epochManagerWave(plan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+
+	fixture.manager.Advance(context.Background(), request)
+	fixture.admitter.acceptedTasks()[0].Fail(errors.New("first grow failure"))
+	fixture.manager.Advance(context.Background(), request)
+	fixture.manager.Advance(context.Background(), request)
+	fixture.admitter.acceptedTasks()[1].Fail(errors.New("second grow failure"))
+	fixture.manager.Advance(context.Background(), request)
+
+	request.AllowNew = false
+	fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	}).GetGauge().GetValue())
+
+	request.MaxObjectRetries = 0
+	request.QuarantineBackoff = 0
+	result := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochIdle, result.State)
+	requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	})
+	require.NotContains(t, fixture.manager.ResourceGroupsToObserve(), testSnapshotRG)
+}
+
+func TestEpochManagerObservationPrunesExpiredQuarantine(t *testing.T) {
+	registry := newEpochManagerMetricsRegistry(t)
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan), epochManagerWave(plan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+
+	fixture.manager.Advance(context.Background(), request)
+	fixture.admitter.acceptedTasks()[0].Fail(errors.New("first grow failure"))
+	fixture.manager.Advance(context.Background(), request)
+	fixture.manager.Advance(context.Background(), request)
+	fixture.admitter.acceptedTasks()[1].Fail(errors.New("second grow failure"))
+	fixture.manager.Advance(context.Background(), request)
+
+	request.AllowNew = false
+	fixture.manager.Advance(context.Background(), request)
+	require.Contains(t, fixture.manager.ResourceGroupsToObserve(), testSnapshotRG)
+	require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	}).GetGauge().GetValue())
+
+	fixture.clock.Advance(2 * time.Minute)
+	fixture.manager.Advance(context.Background(), request)
+	requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	})
+	runtime := fixture.manager.runtime(testSnapshotRG)
+	runtime.mu.Lock()
+	retryCount := len(runtime.retries)
+	runtime.mu.Unlock()
+	require.Zero(t, retryCount)
+	require.NotContains(t, fixture.manager.ResourceGroupsToObserve(), testSnapshotRG)
+}
+
+func TestEpochManagerRetainedRetryHistoryRemainsObservableUntilDisabled(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+
+	fixture.manager.Advance(context.Background(), request)
+	fixture.admitter.acceptedTasks()[0].Fail(errors.New("first grow failure"))
+	fixture.manager.Advance(context.Background(), request)
+
+	request.AllowNew = false
+	fixture.manager.Advance(context.Background(), request)
+	require.Contains(t, fixture.manager.ResourceGroupsToObserve(), testSnapshotRG)
+
+	request.MaxObjectRetries = 0
+	request.QuarantineBackoff = 0
+	fixture.manager.Advance(context.Background(), request)
+	require.NotContains(t, fixture.manager.ResourceGroupsToObserve(), testSnapshotRG)
+}
+
 func TestEpochManagerUsesFrozenPolicySelection(t *testing.T) {
 	t.Run("active generation", func(t *testing.T) {
 		fixture := newEpochManagerTestFixture(t)

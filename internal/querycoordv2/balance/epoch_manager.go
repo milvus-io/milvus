@@ -88,6 +88,7 @@ type BalanceEpochController interface {
 	Advance(context.Context, EpochRequest) EpochAdvanceResult
 	HasActive(resourceGroup string) bool
 	ActiveResourceGroups() []string
+	ResourceGroupsToObserve() []string
 }
 
 type EpochTaskFactory interface {
@@ -158,13 +159,14 @@ type BalanceEpochManager struct {
 }
 
 type rgRuntime struct {
-	mu         sync.Mutex
-	activeFlag atomic.Bool
-	sequence   uint64
-	active     *activeEpoch
-	carryOver  map[BalanceObjectKey]*admittedWork
-	retries    map[BalanceObjectKey]*objectRetryHistory
-	last       atomic.Value
+	mu              sync.Mutex
+	activeFlag      atomic.Bool
+	observationFlag atomic.Bool
+	sequence        uint64
+	active          *activeEpoch
+	carryOver       map[BalanceObjectKey]*admittedWork
+	retries         map[BalanceObjectKey]*objectRetryHistory
+	last            atomic.Value
 }
 
 type activeEpoch struct {
@@ -322,28 +324,26 @@ func (manager *BalanceEpochManager) Advance(ctx context.Context, request EpochRe
 	if runtime.active != nil && isTerminalEpochState(runtime.active.state) {
 		runtime.active = nil
 		runtime.activeFlag.Store(false)
-		manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 	}
 	if runtime.active != nil {
 		return manager.advanceActiveLocked(ctx, runtime)
 	}
+	manager.applyRequestRetryPolicyLocked(runtime, request)
+	manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 	if !request.AllowNew {
-		manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 		return runtime.publish(EpochAdvanceResult{
 			ResourceGroup: request.ResourceGroup,
 			State:         EpochIdle,
 			Rejected:      make(map[task.BalanceAdmissionReason]int),
 		})
 	}
-	manager.applyNewRequestRetryPolicyLocked(runtime, request)
-	manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 	if request.Shadow {
 		return manager.planShadowLocked(ctx, runtime, request)
 	}
 	return manager.startEpochLocked(ctx, runtime, request)
 }
 
-func (manager *BalanceEpochManager) applyNewRequestRetryPolicyLocked(runtime *rgRuntime, request EpochRequest) {
+func (manager *BalanceEpochManager) applyRequestRetryPolicyLocked(runtime *rgRuntime, request EpochRequest) {
 	if request.MaxObjectRetries <= 0 || request.QuarantineBackoff <= 0 {
 		runtime.retries = make(map[BalanceObjectKey]*objectRetryHistory)
 	}
@@ -372,6 +372,24 @@ func (manager *BalanceEpochManager) ActiveResourceGroups() []string {
 	}
 	sort.Strings(active)
 	return active
+}
+
+func (manager *BalanceEpochManager) ResourceGroupsToObserve() []string {
+	manager.runtimesMu.Lock()
+	runtimes := make(map[string]*rgRuntime, len(manager.runtimes))
+	for name, runtime := range manager.runtimes {
+		runtimes[name] = runtime
+	}
+	manager.runtimesMu.Unlock()
+
+	observe := make([]string, 0, len(runtimes))
+	for name, runtime := range runtimes {
+		if runtime.activeFlag.Load() || runtime.observationFlag.Load() {
+			observe = append(observe, name)
+		}
+	}
+	sort.Strings(observe)
+	return observe
 }
 
 func (manager *BalanceEpochManager) runtime(resourceGroup string) *rgRuntime {
@@ -889,10 +907,16 @@ func (manager *BalanceEpochManager) publishCarryMetricsLocked(runtime *rgRuntime
 	}
 	now := manager.now()
 	for key, history := range runtime.retries {
-		if !history.quarantineUntil.IsZero() && now.Before(history.quarantineUntil) {
-			objects[key] = struct{}{}
+		if history.quarantineUntil.IsZero() {
+			continue
 		}
+		if !now.Before(history.quarantineUntil) {
+			delete(runtime.retries, key)
+			continue
+		}
+		objects[key] = struct{}{}
 	}
+	runtime.observationFlag.Store(len(runtime.retries) != 0)
 
 	counts := map[BalanceObjectKind]int{
 		BalanceObjectSegment: 0,

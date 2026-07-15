@@ -774,17 +774,24 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
-	// Existing epochs are observed independently of feature enablement, checker
-	// activation, and auto-balance settings. Capture and retain this set for the
-	// whole tick so a generation cleared by observation cannot restart here.
+	// Existing epochs and retained retry/quarantine state are observed
+	// independently of feature enablement, checker activation, and auto-balance
+	// settings. Only active epoch ownership suppresses legacy work or a same-tick
+	// restart.
 	activeAtTickStart := make(map[string]struct{})
 	if b.epochManager != nil {
 		for _, resourceGroup := range sortedUniqueResourceGroups(b.epochManager.ActiveResourceGroups()) {
 			activeAtTickStart[resourceGroup] = struct{}{}
-			b.normalBalanceQueue = nil
+		}
+		for _, resourceGroup := range sortedUniqueResourceGroups(b.epochManager.ResourceGroupsToObserve()) {
+			if _, active := activeAtTickStart[resourceGroup]; active {
+				b.normalBalanceQueue = nil
+			}
 			b.epochManager.Advance(ctx, balance.EpochRequest{
-				ResourceGroup: resourceGroup,
-				AllowNew:      false,
+				ResourceGroup:     resourceGroup,
+				AllowNew:          false,
+				MaxObjectRetries:  epochConfig.maxObjectRetries,
+				QuarantineBackoff: epochConfig.quarantineBackoff,
 			})
 		}
 	}
