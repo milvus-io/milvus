@@ -364,6 +364,32 @@ def write_scalar_struct_rows_parquet(
     pq.write_table(table, local_file_path, row_group_size=row_group_size)
 
 
+def write_struct_vector_rows_parquet(
+    rows: list[dict[str, Any]],
+    local_file_path: str,
+    *,
+    row_group_size: int,
+):
+    profile_type = pa.list_(
+        pa.struct(
+            [
+                pa.field(INT_SUBFIELD, pa.int64()),
+                pa.field(TAG_SUBFIELD, pa.string()),
+                pa.field(VECTOR_SUBFIELD, pa.list_(pa.float32())),
+            ]
+        )
+    )
+    table = pa.table(
+        {
+            PK_FIELD: pa.array([row[PK_FIELD] for row in rows], type=pa.int64()),
+            VECTOR_FIELD: pa.array([row[VECTOR_FIELD] for row in rows], type=pa.list_(pa.float32())),
+            TAG_FIELD: pa.array([row[TAG_FIELD] for row in rows], type=pa.string()),
+            STRUCT_FIELD: pa.array([row[STRUCT_FIELD] for row in rows], type=profile_type),
+        }
+    )
+    pq.write_table(table, local_file_path, row_group_size=row_group_size)
+
+
 def gen_index_filler_rows(
     start_id: int,
     count: int,
@@ -695,6 +721,18 @@ def assert_profile_vector_subfield_equal(
         expected,
         expected_keys=(VECTOR_SUBFIELD,),
         exact_keys=True,
+    )
+
+
+def assert_ann_recall(actual_keys, expected_keys, minimum_recall=0.8):
+    """Assert ANN Top-K recall against exact ground truth without requiring a specific hit."""
+    expected_set = set(expected_keys)
+    actual_set = set(actual_keys)
+    assert expected_set
+    recall = len(actual_set.intersection(expected_set)) / len(expected_set)
+    assert recall >= minimum_recall, (
+        f"ANN recall {recall:.2f} is below {minimum_recall:.2f}; "
+        f"missing={sorted(expected_set - actual_set)}, extra={sorted(actual_set - expected_set)}"
     )
 
 
@@ -1574,7 +1612,10 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 
         index_params = gen_index_params(self, client)
         index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+            field_name=VECTOR_FIELD,
+            index_type="HNSW",
+            metric_type=NORMAL_VECTOR_METRIC_TYPE,
+            params=INDEX_PARAMS,
         )
         res, _ = self.create_index(client, collection_name, index_params)
 
@@ -12209,18 +12250,20 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             assert entity[STRUCT_FIELD] is None
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_nullable_struct_array_with_vector_json(self):
+    @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
+    @pytest.mark.parametrize("search_mode", ["embedding_list", "element"], ids=["embedding_list", "element"])
+    def test_import_nullable_struct_array_with_vector(self, file_format, search_mode):
         """
-        target: test JSON bulk import for a nullable Struct Array field with scalar and vector sub-fields
+        target: test JSON and Parquet import for a nullable Struct Array field with scalar and vector sub-fields
         method: create a collection with nullable Struct Array, import rows with null, empty, and non-empty profile
-            values, build indexes on normal vector and struct vector sub-field, then query and normal-vector search the
-            imported data
+            values, build an embedding-list or element-level index on the Struct vector child, then query and search
+            the imported data
         expected: imported row count matches source data, indexes are ready, and query/search output preserves nullable
-            struct semantics including vector sub-field values
+            Struct semantics, vector values, and element offsets in both row file formats
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_struct_vector_json")
-        entities = 3000
+        collection_name = cf.gen_unique_str(f"{prefix}_import_nullable_struct_vector_{file_format}_{search_mode}")
+        entities = 60
 
         schema = gen_schema(self, client, auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name=PK_FIELD, datatype=PK_TYPE, is_primary=True)
@@ -12244,12 +12287,20 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
         index_params.add_index(
             field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
         )
-        index_params.add_index(
-            field_name=STRUCT_VECTOR_FIELD,
-            index_type=STRUCT_VECTOR_INDEX_TYPE,
-            metric_type=STRUCT_VECTOR_METRIC_TYPE,
-            params=INDEX_PARAMS,
-        )
+        if search_mode == "embedding_list":
+            index_params.add_index(
+                field_name=STRUCT_VECTOR_FIELD,
+                index_type=STRUCT_VECTOR_INDEX_TYPE,
+                metric_type=STRUCT_VECTOR_METRIC_TYPE,
+                params=INDEX_PARAMS,
+            )
+        else:
+            index_params.add_index(
+                field_name=STRUCT_VECTOR_FIELD,
+                index_type="HNSW",
+                metric_type="COSINE",
+                params=INDEX_PARAMS,
+            )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rows = []
@@ -12261,6 +12312,10 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
                 profile = []
             else:
                 profile = gen_profile(row_id)
+                for offset, element in enumerate(profile):
+                    rng = np.random.RandomState(row_id * STRUCT_MAX_CAPACITY + offset)
+                    vector = rng.uniform(-1.0, 1.0, VECTOR_SUBFIELD_DIM).astype(np.float32)
+                    element[VECTOR_SUBFIELD] = (vector / np.linalg.norm(vector)).tolist()
             row = {
                 PK_FIELD: row_id,
                 VECTOR_FIELD: gen_vector(row_id),
@@ -12270,7 +12325,12 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             rows.append(row)
             source_by_id[row_id] = row
 
-        remote_files = self.upload_import_rows(collection_name, rows, "json", row_group_size=entities)
+        if file_format == "parquet":
+            local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"{collection_name}.parquet")
+            write_struct_vector_rows_parquet(rows, local_file_path, row_group_size=entities)
+            remote_files = self.upload_to_minio(local_file_path)
+        else:
+            remote_files = self.upload_import_rows(collection_name, rows, file_format, row_group_size=entities)
         self.call_bulkinsert(collection_name, remote_files)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
@@ -12294,20 +12354,90 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
             assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
 
         search_row = source_by_id[entities - 1]
-        search_results, _ = self.search(
+        ann_limit = 10
+        normal_search_results, _ = self.search(
             client,
             collection_name,
             data=[search_row[VECTOR_FIELD]],
             anns_field=VECTOR_FIELD,
-            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
+            search_params={"metric_type": NORMAL_VECTOR_METRIC_TYPE, "params": {"ef": 128}},
             output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
-            limit=entities,
+            limit=ann_limit,
         )
-        hits = search_results[0]
-        assert {hit[PK_FIELD] for hit in hits} == set(source_by_id)
-        assert hits[0][PK_FIELD] == search_row[PK_FIELD]
-        for hit in hits:
+        normal_hits = normal_search_results[0]
+        exact_normal_ids = [
+            row[PK_FIELD]
+            for row in sorted(
+                rows,
+                key=lambda row: np.sum((np.asarray(search_row[VECTOR_FIELD]) - np.asarray(row[VECTOR_FIELD])) ** 2),
+            )[:ann_limit]
+        ]
+        assert_ann_recall([hit[PK_FIELD] for hit in normal_hits], exact_normal_ids)
+        for hit in normal_hits:
             expected = source_by_id[hit[PK_FIELD]]
             entity = search_entity(hit)
             assert entity[TAG_FIELD] == expected[TAG_FIELD]
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
+
+        non_empty_rows = [row for row in rows if row[STRUCT_FIELD]]
+        target_row = non_empty_rows[-1]
+        if search_mode == "embedding_list":
+            query_tensor = EmbeddingList()
+            for element in target_row[STRUCT_FIELD]:
+                query_tensor.add(element[VECTOR_SUBFIELD])
+            struct_results, _ = self.search(
+                client,
+                collection_name,
+                data=[query_tensor],
+                anns_field=STRUCT_VECTOR_FIELD,
+                search_params={"metric_type": STRUCT_VECTOR_METRIC_TYPE, "params": {"ef": 128}},
+                output_fields=[PK_FIELD],
+                limit=ann_limit,
+            )
+            query_vectors = [np.asarray(element[VECTOR_SUBFIELD]) for element in target_row[STRUCT_FIELD]]
+            exact_embedding_ids = [
+                row[PK_FIELD]
+                for row in sorted(
+                    non_empty_rows,
+                    key=lambda row: sum(
+                        max(
+                            float(np.dot(query_vector, np.asarray(element[VECTOR_SUBFIELD])))
+                            for element in row[STRUCT_FIELD]
+                        )
+                        for query_vector in query_vectors
+                    ),
+                    reverse=True,
+                )[:ann_limit]
+            ]
+            actual_ids = [hit[PK_FIELD] for hit in struct_results[0]]
+            assert set(actual_ids).issubset({row[PK_FIELD] for row in non_empty_rows})
+            assert_ann_recall(actual_ids, exact_embedding_ids)
+        else:
+            query_vector = np.asarray(target_row[STRUCT_FIELD][0][VECTOR_SUBFIELD])
+            struct_results, _ = self.search(
+                client,
+                collection_name,
+                data=[query_vector.tolist()],
+                anns_field=STRUCT_VECTOR_FIELD,
+                search_params={"metric_type": "COSINE", "params": {"ef": 128}},
+                output_fields=[PK_FIELD],
+                limit=ann_limit,
+            )
+            exact_elements = sorted(
+                (
+                    (
+                        row[PK_FIELD],
+                        offset,
+                        float(np.dot(query_vector, np.asarray(element[VECTOR_SUBFIELD]))),
+                    )
+                    for row in non_empty_rows
+                    for offset, element in enumerate(row[STRUCT_FIELD])
+                ),
+                key=lambda item: item[2],
+                reverse=True,
+            )[:ann_limit]
+            expected_keys = [(row_id, offset) for row_id, offset, _ in exact_elements]
+            actual_keys = [(hit[PK_FIELD], hit["offset"]) for hit in struct_results[0]]
+            valid_keys = {(row[PK_FIELD], offset) for row in non_empty_rows for offset in range(len(row[STRUCT_FIELD]))}
+            assert set(actual_keys).issubset(valid_keys)
+            assert_ann_recall(actual_keys, expected_keys)
