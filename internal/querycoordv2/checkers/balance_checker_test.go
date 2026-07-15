@@ -80,6 +80,7 @@ func createTestBalanceCheckerWithScheduler(scheduler task.Scheduler, opts ...bal
 
 type fakeBalanceEpochController struct {
 	active             []string
+	observe            []string
 	requests           []balance.EpochRequest
 	activateOnNew      bool
 	clearOnObservation bool
@@ -184,6 +185,13 @@ func (s *shadowCoexistenceScheduler) GetPendingBalanceTasks() task.PendingBalanc
 
 func (f *fakeBalanceEpochController) ActiveResourceGroups() []string {
 	return append([]string(nil), f.active...)
+}
+
+func (f *fakeBalanceEpochController) ResourceGroupsToObserve() []string {
+	if f.observe != nil {
+		return append([]string(nil), f.observe...)
+	}
+	return f.ActiveResourceGroups()
 }
 
 func testBalanceEpochConfig() balanceEpochConfig {
@@ -2545,9 +2553,59 @@ func TestBalanceCheckerEpochInactiveStillReconciles(t *testing.T) {
 
 	require.Len(t, controller.requests, 2)
 	assert.Equal(t, []balance.EpochRequest{
-		{ResourceGroup: "rg-a", AllowNew: false},
-		{ResourceGroup: "rg-b", AllowNew: false},
+		{
+			ResourceGroup:     "rg-a",
+			AllowNew:          false,
+			MaxObjectRetries:  2,
+			QuarantineBackoff: time.Second,
+		},
+		{
+			ResourceGroup:     "rg-b",
+			AllowNew:          false,
+			MaxObjectRetries:  2,
+			QuarantineBackoff: time.Second,
+		},
 	}, controller.requests)
+}
+
+func TestBalanceCheckerObservesRetainedStateWithoutSuppressingLegacy(t *testing.T) {
+	controller := &fakeBalanceEpochController{observe: []string{"rg-retained"}}
+	disabled := testBalanceEpochConfig()
+	disabled.enabled = false
+	disabled.shadow = false
+	disabled.maxObjectRetries = 7
+	disabled.quarantineBackoff = 9 * time.Second
+	checker := createTestBalanceChecker(
+		withEpochControllerForTest(controller),
+		withEpochConfigForTest(disabled),
+	)
+	mockEpochCheckConfig(t, checker, balanceConfig{autoBalanceInterval: 0}, false, true, true)
+	legacyCalls := 0
+	mockProcess := mockey.Mock((*BalanceChecker).processBalanceQueue).
+		To(func(
+			_ context.Context,
+			_ balance.Balance,
+			_ func(context.Context, int64) []int64,
+			_ func(context.Context) *assign.PriorityQueue,
+			_ func() *assign.PriorityQueue,
+			_ balanceConfig,
+			isStopping bool,
+		) (int, int) {
+			assert.False(t, isStopping)
+			legacyCalls++
+			return 0, 0
+		}).
+		Build()
+	cleanupMock(t, mockProcess)
+
+	checker.Check(context.Background())
+
+	require.Len(t, controller.requests, 1)
+	assert.Equal(t, "rg-retained", controller.requests[0].ResourceGroup)
+	assert.False(t, controller.requests[0].AllowNew)
+	assert.Equal(t, disabled.maxObjectRetries, controller.requests[0].MaxObjectRetries)
+	assert.Equal(t, disabled.quarantineBackoff, controller.requests[0].QuarantineBackoff)
+	assert.Equal(t, 1, legacyCalls, "inactive retained state must not suppress legacy balance")
 }
 
 func TestBalanceCheckerEpochAutoBalanceDisabledStillReconciles(t *testing.T) {
