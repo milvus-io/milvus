@@ -4,7 +4,7 @@ import (
 	"context"
 
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
-	snmanager "github.com/milvus-io/milvus/internal/streamingnode/client/manager"
+	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -12,28 +12,20 @@ import (
 
 var _ ViewSyncClient = (*DefaultViewSyncClient)(nil)
 
-// WALLocatedProvider provides the latest pchannel-to-StreamingNode lookup.
-type WALLocatedProvider interface {
-	GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool)
-}
-
-// DefaultViewSyncClient combines QueryNode service discovery, StreamingNode
-// service discovery, and channel WAL-location lookup for ReliableSyncer.
+// DefaultViewSyncClient combines QueryNode service discovery and pchannel-level
+// StreamingNode handler discovery for ReliableSyncer.
 type DefaultViewSyncClient struct {
 	queryNodes     qnmanager.ManagerClient
-	streamingNodes snmanager.ManagerClient
-	channels       WALLocatedProvider
+	streamingNodes snhandler.QueryViewSyncClient
 }
 
 func NewDefaultViewSyncClient(
 	queryNodes qnmanager.ManagerClient,
-	streamingNodes snmanager.ManagerClient,
-	channels WALLocatedProvider,
+	streamingNodes snhandler.QueryViewSyncClient,
 ) *DefaultViewSyncClient {
 	return &DefaultViewSyncClient{
 		queryNodes:     queryNodes,
 		streamingNodes: streamingNodes,
-		channels:       channels,
 	}
 }
 
@@ -76,20 +68,9 @@ func (c *DefaultViewSyncClient) OpenSyncStream(ctx context.Context, node qviews.
 		return client.SyncQueryView(ctx)
 	case qviews.StreamingNode:
 		if c.streamingNodes == nil {
-			return nil, merr.WrapErrServiceInternalMsg("streamingnode manager client is nil")
+			return nil, merr.WrapErrServiceInternalMsg("streamingnode query view sync client is nil")
 		}
-		if c.channels == nil {
-			return nil, merr.WrapErrServiceInternalMsg("channel manager is nil")
-		}
-		streamingNodeID, ok := c.channels.GetLatestWALLocated(ctx, n.PChannel)
-		if !ok {
-			return nil, merr.WrapErrServiceInternalMsg("streamingnode assignment not found for pchannel %s", n.PChannel)
-		}
-		client, err := c.streamingNodes.CreateViewSyncClient(ctx, streamingNodeID)
-		if err != nil {
-			return nil, err
-		}
-		return client.SyncQueryView(ctx)
+		return c.streamingNodes.SyncQueryView(ctx, n.PChannel)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unknown work node type %T", node)
 	}

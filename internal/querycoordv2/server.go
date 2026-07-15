@@ -491,13 +491,13 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startQueryCoord() error {
-	mlog.Info(s.ctx, "start watcher...")
+	mlog.Info(s.ctx, "start querycoord in query view mode")
 	sessions, revision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return err
 	}
 
-	mlog.Info(s.ctx, "rewatch nodes", mlog.Any("sessions", sessions))
+	mlog.Info(s.ctx, "rewatch nodes for query view mode", mlog.Any("sessions", sessions))
 	err = s.rewatchNodes(sessions)
 	if err != nil {
 		return err
@@ -506,48 +506,18 @@ func (s *Server) startQueryCoord() error {
 	s.wg.Add(1)
 	go s.watchNodes(revision)
 
-	// check whether old node exist, if yes suspend auto balance until all old nodes down
-	s.updateBalanceConfigLoop(s.ctx)
-
-	if err := s.proxyWatcher.WatchProxy(s.ctx); err != nil {
-		mlog.Warn(s.ctx, "querycoord failed to watch proxy", mlog.Err(err))
-	}
-
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
-	// check replica changes after restart
-	// Note: this should be called after start progress is done
-	s.watchLoadConfigChanges()
 	return nil
 }
 
 func (s *Server) startServerLoop() {
-	// leader cache observer shall be started before `SyncAll` call
-	s.leaderCacheObserver.Start(s.ctx)
-	// Recover dist, to avoid generate too much task when dist not ready after restart
-	s.distController.SyncAll(s.ctx)
-
-	// start the components from inside to outside,
-	// to make the dependencies ready for every component
-	mlog.Info(s.ctx, "start cluster...")
-	s.cluster.Start()
-
-	mlog.Info(s.ctx, "start observers...")
-	s.collectionObserver.Start()
-	s.targetObserver.Start()
-	s.replicaObserver.Start()
-	s.resourceObserver.Start()
-
-	mlog.Info(s.ctx, "start task scheduler...")
-	s.taskScheduler.Start()
-
-	mlog.Info(s.ctx, "start checker controller...")
-	s.checkerController.Start()
-
-	mlog.Info(s.ctx, "start job scheduler...")
-	s.jobScheduler.Start()
+	mlog.Info(s.ctx, "start resource observer...")
+	if s.resourceObserver != nil {
+		s.resourceObserver.Start()
+	}
 
 	mlog.Info(s.ctx, "start query view runtime...")
 	if s.qviewsRuntime != nil {
@@ -792,6 +762,12 @@ func (s *Server) handleNodeUp(node int64) {
 		return
 	}
 
+	if s.qviewsRuntime != nil {
+		s.meta.HandleNodeUp(s.ctx, node)
+		s.metricsCacheManager.InvalidateSystemInfoMetrics()
+		return
+	}
+
 	// add executor to task scheduler
 	s.taskScheduler.AddExecutor(node)
 
@@ -806,6 +782,13 @@ func (s *Server) handleNodeUp(node int64) {
 }
 
 func (s *Server) handleNodeDown(node int64) {
+	if s.qviewsRuntime != nil {
+		s.meta.HandleNodeDown(context.Background(), node)
+		metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
+		s.metricsCacheManager.InvalidateSystemInfoMetrics()
+		return
+	}
+
 	s.taskScheduler.RemoveExecutor(node)
 	s.distController.Remove(node)
 
@@ -826,6 +809,11 @@ func (s *Server) handleNodeDown(node int64) {
 func (s *Server) handleNodeStopping(node int64) {
 	// mark node as stopping in node manager
 	s.nodeMgr.Stopping(node)
+
+	if s.qviewsRuntime != nil {
+		s.meta.HandleNodeStopping(context.Background(), node)
+		return
+	}
 
 	// mark node as stopping in resource manager
 	s.meta.HandleNodeStopping(context.Background(), node)

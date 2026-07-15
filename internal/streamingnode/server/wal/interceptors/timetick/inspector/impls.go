@@ -35,9 +35,13 @@ func (s *timeTickSyncInspectorImpl) TriggerSync(pChannelInfo types.PChannelInfo,
 	s.syncNotifier.AddAndNotify(pChannelInfo, persisted)
 }
 
-// GetOperator gets the operator by pchannel info.
+func (s *timeTickSyncInspectorImpl) GetOperator(pChannelInfo types.PChannelInfo) (TimeTickSyncOperator, bool) {
+	return s.operators.Get(pChannelInfo.Name)
+}
+
+// MustGetOperator gets the operator by pchannel info.
 func (s *timeTickSyncInspectorImpl) MustGetOperator(pChannelInfo types.PChannelInfo) TimeTickSyncOperator {
-	operator, ok := s.operators.Get(pChannelInfo.Name)
+	operator, ok := s.GetOperator(pChannelInfo)
 	if !ok {
 		panic("sync operator not found, critical bug in code")
 	}
@@ -68,6 +72,7 @@ func (s *timeTickSyncInspectorImpl) background() {
 
 	interval := paramtable.Get().ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-s.taskNotifier.Context().Done():

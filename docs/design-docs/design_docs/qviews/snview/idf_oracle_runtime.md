@@ -35,9 +35,9 @@ catchup, and the transition to `Ready`.
 
 | Component | Role | Boundary |
 |---|---|---|
-| `SNQueryRuntimeManager` | PChannel-local owner of QueryView/init references. It creates the vchannel `QueryRuntime`, waits for runtime initialization on `Acquire`, and advances the runtime by oldest active QueryView DataVersion. | It does not compute BM25 stats diffs and does not evict IDF internal segment stats. |
-| `QueryRuntime` | VChannel-level singleton runtime. Implements `VChannelLiveObserver`, owns one live-event buffer and one consumer, calls `IDFOracleRuntime.Prepare`, forwards live events, and calls `IDFOracleRuntime.Advance`. | It does not compute BM25 stats or fetch sealed resources directly. |
-| `IDFOracleRuntime` | QueryRuntime module that owns the vchannel singleton oracle, growing BM25 stats store, sealed contribution leases, current DataVersion, and advance worker. | It does not implement `VChannelLiveObserver`, expose external truncation, or own QueryView references. |
+| `VChannelRecoveryModule` | VChannel-local owner of QueryView references. It creates the vchannel `QueryRuntime`, waits for runtime initialization on `Acquire`, and advances the runtime by oldest active QueryView DataVersion. | It does not compute BM25 stats diffs and does not evict IDF internal segment stats. |
+| `QueryRuntime` | VChannel-level singleton runtime. Owns one live-event buffer and one consumer, calls `IDFOracleRuntime.Prepare`, forwards live events, and calls `IDFOracleRuntime.Advance`. | It does not compute BM25 stats or fetch sealed resources directly. |
+| `IDFOracleRuntime` | QueryRuntime module that owns the vchannel singleton oracle, growing BM25 stats store, sealed contribution leases, current DataVersion, and advance worker. | It does not own the vchannel live-event buffer, expose external truncation, or own QueryView references. |
 | `VChannelWALView` | Provides the initial schema, settings, segment snapshot, historical insert input, and no-gap live resource event stream. | Its capture and no-gap contract are defined in [StreamingNode VChannel WAL View Design](../../wal/streamingnode_vchannel_wal_view.md). |
 | `SealedBM25ResourceProvider` | Calls DataCoord to fetch the complete sealed BM25 resource set for a target DataVersion. | It does not cache local files or merge oracle stats. |
 | `SealedBM25SegmentCache` | Downloads, parses, reuses, and leases sealed BM25 stats. | It does not decide DataVersion advancement or contribution membership. |
@@ -86,7 +86,7 @@ GrowingBM25StatsStore
 DataVersion advancement:
 
 ```text
-SNQueryRuntimeManager
+VChannelRecoveryModule
         |
         | QueryRuntime.Advance(oldestDataVersion)
         v
@@ -145,7 +145,7 @@ BM25 stats can be removed.
 1. `IDFOracleRuntime` implements `QueryRuntimeModule`.
 2. There is only one `IDFOracleRuntime` per loaded vchannel.
 3. There is no `DataVersion -> IDFOracle` map.
-4. `IDFOracleRuntime` does not implement `VChannelLiveObserver`.
+4. `IDFOracleRuntime` does not own the vchannel live-event buffer.
 5. `IDFOracleRuntime` does not expose a module-level catchup handle.
 6. Initial construction is triggered by `QueryRuntime.Initialize`, not by
    QueryView `Acquire`.
@@ -193,7 +193,7 @@ type IDFOracleRuntime interface {
 }
 ```
 
-This is an IDF-module concept. The shared `viewresource` package depends only
+This is an IDF-module concept. The parent `wal/vchannel` package depends only
 on `QueryRuntimeModule` and `QueryRuntimeModuleBuilder`; it does not define or
 reference `IDFOracleRuntime`.
 
@@ -329,7 +329,7 @@ successfully, not for an IDF-specific catchup handle.
 
 ```text
 QueryView references move forward
-  -> SNQueryRuntimeManager computes oldestDataVersion
+  -> VChannelRecoveryModule computes oldestDataVersion
   -> QueryRuntime.Advance(oldestDataVersion)
   -> IDFOracleRuntime.Advance(oldestDataVersion)
   -> IDFAdvanceWorker.Request(oldestDataVersion)

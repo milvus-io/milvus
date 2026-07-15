@@ -14,17 +14,8 @@ var (
 	ErrTransformLogVChannelUnavailable = errors.New("transform log vchannel is unavailable")
 )
 
-// TransformLogAccesser is the WAL read entry for transform log events.
-type TransformLogAccesser interface {
-	Read(ctx context.Context, opt TransformLogReadOption) TransformLogScanner
-}
-
-type TransformLogReadOption struct {
-	Name               string
-	VChannel           string
-	StartAfterTimeTick uint64
-	EndTimeTick        uint64
-}
+// TransformLogAccesser is the WAL entry for transform log event streams.
+type TransformLogAccesser = TransformLogStreamManager
 
 type TransformLogScanner interface {
 	Name() string
@@ -43,6 +34,44 @@ type TransformLogCaughtUp struct {
 	StartAfterTimeTick uint64
 }
 
+type TransformLogStreamManager interface {
+	AcquireStream(ctx context.Context, pchannel string) (TransformLogStream, error)
+}
+
+type TransformLogStream interface {
+	Subscribe(ctx context.Context, opt TransformLogSubscriptionOption) (TransformLogSubscription, error)
+	Done() <-chan struct{}
+	Error() error
+	Close() error
+}
+
+type TransformLogSubscriptionOption struct {
+	SubscriptionID     int64
+	VChannel           string
+	StartAfterTimeTick uint64
+	EndTimeTick        uint64
+	Handler            TransformLogEventHandler
+}
+
+type TransformLogEventHandler interface {
+	Handle(event TransformLogStreamEvent) error
+	Close()
+}
+
+type TransformLogSubscription interface {
+	ID() int64
+	VChannel() string
+	Close() error
+}
+
+type TransformLogStreamEvent struct {
+	SubscriptionID int64
+	VChannel       string
+	Entry          *streamingpb.TransformLogEntry
+	CaughtUp       *TransformLogCaughtUp
+	Err            error
+}
+
 type transformLogErrorAccesser struct {
 	err error
 }
@@ -51,8 +80,8 @@ func NewTransformLogErrorAccesser(err error) TransformLogAccesser {
 	return transformLogErrorAccesser{err: err}
 }
 
-func (a transformLogErrorAccesser) Read(context.Context, TransformLogReadOption) TransformLogScanner {
-	return NewTransformLogErrorScanner("", a.err)
+func (a transformLogErrorAccesser) AcquireStream(context.Context, string) (TransformLogStream, error) {
+	return nil, a.err
 }
 
 type transformLogErrorScanner struct {

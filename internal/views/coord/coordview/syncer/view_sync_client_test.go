@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func TestDefaultViewSyncClientRoutesQueryNodeAndStreamingNode(t *testing.T) {
@@ -24,11 +23,8 @@ func TestDefaultViewSyncClientRoutesQueryNodeAndStreamingNode(t *testing.T) {
 	streamingClient := &fakeStreamingNodeViewSyncClient{
 		viewClient: &capturingViewSyncServiceClient{},
 	}
-	channels := &fakeChannelAssignmentLookup{
-		located: map[string]int64{"p0": 11},
-	}
 
-	client := NewDefaultViewSyncClient(queryClient, streamingClient, channels)
+	client := NewDefaultViewSyncClient(queryClient, streamingClient)
 	defer client.Close()
 
 	assert.True(t, client.IsNodeAlive(context.Background(), qviews.StreamingNode{PChannel: "p0"}))
@@ -43,9 +39,7 @@ func TestDefaultViewSyncClientRoutesQueryNodeAndStreamingNode(t *testing.T) {
 
 	_, err = client.OpenSyncStream(context.Background(), qviews.StreamingNode{PChannel: "p0"})
 	require.NoError(t, err)
-	streamingNodeID, ok := contextutil.GetPickServerID(streamingClient.viewClient.queryCtx)
-	require.True(t, ok)
-	assert.Equal(t, int64(11), streamingNodeID)
+	assert.Equal(t, "p0", streamingClient.pchannel)
 }
 
 func TestDefaultViewSyncClientForwardsNodeChangedNotifier(t *testing.T) {
@@ -53,7 +47,7 @@ func TestDefaultViewSyncClientForwardsNodeChangedNotifier(t *testing.T) {
 		nodes:      map[int64]*qnmanager.NodeInfo{},
 		viewClient: &capturingViewSyncServiceClient{},
 	}
-	client := NewDefaultViewSyncClient(queryClient, nil, nil)
+	client := NewDefaultViewSyncClient(queryClient, nil)
 	defer client.Close()
 
 	var called atomic.Bool
@@ -67,13 +61,11 @@ func TestDefaultViewSyncClientForwardsNodeChangedNotifier(t *testing.T) {
 
 func TestDefaultViewSyncClientCloseDoesNotCloseManagerClients(t *testing.T) {
 	queryClient := &fakeQueryNodeViewSyncClient{}
-	streamingClient := &fakeStreamingNodeViewSyncClient{}
-	client := NewDefaultViewSyncClient(queryClient, streamingClient, nil)
+	client := NewDefaultViewSyncClient(queryClient, nil)
 
 	client.Close()
 
 	assert.False(t, queryClient.closed)
-	assert.False(t, streamingClient.closed)
 }
 
 type fakeQueryNodeViewSyncClient struct {
@@ -107,44 +99,12 @@ func (c *fakeQueryNodeViewSyncClient) notifyNodeChanged() {
 
 type fakeStreamingNodeViewSyncClient struct {
 	viewClient *capturingViewSyncServiceClient
-	closed     bool
+	pchannel   string
 }
 
-func (c *fakeStreamingNodeViewSyncClient) WatchNodeChanged(ctx context.Context) (<-chan struct{}, error) {
-	return nil, nil
-}
-
-func (c *fakeStreamingNodeViewSyncClient) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
-	return nil, nil
-}
-
-func (c *fakeStreamingNodeViewSyncClient) CollectAllStatus(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
-	return nil, nil
-}
-
-func (c *fakeStreamingNodeViewSyncClient) Assign(ctx context.Context, pchannel types.PChannelInfoAssigned) error {
-	return nil
-}
-
-func (c *fakeStreamingNodeViewSyncClient) Remove(ctx context.Context, pchannel types.PChannelInfoAssigned) error {
-	return nil
-}
-
-func (c *fakeStreamingNodeViewSyncClient) CreateViewSyncClient(ctx context.Context, streamingNodeID int64) (viewpb.ViewSyncServiceClient, error) {
-	return &routedTestViewSyncServiceClient{serverID: streamingNodeID, client: c.viewClient}, nil
-}
-
-func (c *fakeStreamingNodeViewSyncClient) Close() {
-	c.closed = true
-}
-
-type fakeChannelAssignmentLookup struct {
-	located map[string]int64
-}
-
-func (l *fakeChannelAssignmentLookup) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
-	serverID, ok := l.located[pchannel]
-	return serverID, ok
+func (c *fakeStreamingNodeViewSyncClient) SyncQueryView(ctx context.Context, pchannel string) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
+	c.pchannel = pchannel
+	return c.viewClient.SyncQueryView(ctx)
 }
 
 type routedTestViewSyncServiceClient struct {

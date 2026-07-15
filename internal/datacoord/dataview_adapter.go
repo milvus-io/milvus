@@ -28,6 +28,7 @@ import (
 
 type (
 	DataViewManager                  = dataview.Manager
+	CreateCollectionDataViewEvent    = dataview.CreateCollectionDataViewEvent
 	FlushDataViewEvent               = dataview.FlushDataViewEvent
 	ImportDataViewEvent              = dataview.ImportDataViewEvent
 	CopySegmentCompleteDataViewEvent = dataview.CopySegmentCompleteDataViewEvent
@@ -44,6 +45,16 @@ type dataViewSegmentStore struct {
 
 func newDataViewManager(catalog metastore.DataCoordCatalog, meta *meta) DataViewManager {
 	return dataview.NewManager(catalog, &dataViewSegmentStore{meta: meta})
+}
+
+func (s *Server) CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) (*viewpb.DataVersion, error) {
+	if s.dataViewManager == nil {
+		return nil, nil
+	}
+	return s.dataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+		CollectionID: collectionID,
+		VChannels:    vchannels,
+	})
 }
 
 func (s *Server) Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error) {
@@ -93,22 +104,22 @@ func newDataViewSegment(segment *SegmentInfo) *dataview.Segment {
 		return nil
 	}
 	return &dataview.Segment{
-		ID:                            segment.GetID(),
-		CollectionID:                  segment.GetCollectionID(),
-		PartitionID:                   segment.GetPartitionID(),
-		InsertChannel:                 segment.GetInsertChannel(),
-		NumOfRows:                     segment.GetNumOfRows(),
-		MemSize:                       dataViewSegmentMemSize(segment),
-		State:                         segment.GetState(),
-		Level:                         segment.GetLevel(),
-		IsImporting:                   segment.GetIsImporting(),
-		IsInvisible:                   segment.GetIsInvisible(),
-		StartPosition:                 segment.GetStartPosition(),
-		DmlPosition:                   segment.GetDmlPosition(),
-		CommitTimestamp:               segment.GetCommitTimestamp(),
-		DeleteApplyStartAfterTimetick: segment.GetDeleteApplyStartAfterTimetick(),
-		CreatedByCompaction:           segment.GetCreatedByCompaction(),
-		CompactionFrom:                append([]int64(nil), segment.GetCompactionFrom()...),
+		ID:                          segment.GetID(),
+		CollectionID:                segment.GetCollectionID(),
+		PartitionID:                 segment.GetPartitionID(),
+		InsertChannel:               segment.GetInsertChannel(),
+		NumOfRows:                   segment.GetNumOfRows(),
+		MemSize:                     dataViewSegmentMemSize(segment),
+		State:                       segment.GetState(),
+		Level:                       segment.GetLevel(),
+		IsImporting:                 segment.GetIsImporting(),
+		IsInvisible:                 segment.GetIsInvisible(),
+		StartPosition:               segment.GetStartPosition(),
+		DmlPosition:                 segment.GetDmlPosition(),
+		CommitTimestamp:             segment.GetCommitTimestamp(),
+		TransformStartAfterTimetick: segment.GetDeleteApplyStartAfterTimetick(),
+		CreatedByCompaction:         segment.GetCreatedByCompaction(),
+		CompactionFrom:              append([]int64(nil), segment.GetCompactionFrom()...),
 	}
 }
 

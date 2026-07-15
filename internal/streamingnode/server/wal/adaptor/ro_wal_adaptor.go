@@ -32,7 +32,6 @@ type roWALAdaptorImpl struct {
 	scanners        *typeutil.ConcurrentMap[int64, wal.Scanner]
 	cleanup         func()
 	scanMetrics     *metricsutil.ScanMetrics
-	forceRecovery   bool
 }
 
 func (w *roWALAdaptorImpl) WALName() message.WALName {
@@ -77,11 +76,6 @@ func (w *roWALAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableM
 	panic("we cannot append message into a read only wal")
 }
 
-// ForceRecovery force recovery wal, currently only used for Alter WAL
-func (w *roWALAdaptorImpl) ForceRecovery(forceRecovery bool) {
-	w.forceRecovery = forceRecovery
-}
-
 // Read returns a scanner for reading records from the wal.
 func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Scanner, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -105,8 +99,7 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 		w.roWALImpls,
 		opts,
 		w.scanMetrics.NewScannerMetrics(),
-		func() { w.scanners.Remove(id) },
-		w.forceRecovery)
+		func() { w.scanners.Remove(id) })
 	w.scanners.Insert(id, s)
 	return s, nil
 }

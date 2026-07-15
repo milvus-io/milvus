@@ -25,12 +25,11 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 
 ## 3. Two-Phase Query Process
 
-TODO(query/query_client.md): add the detailed query-path flow, service boundary,
-client orchestration, and shard discovery design when the query path is picked.
-TODO(query/query_plan.md): add the node-side Phase 1 planning design when that
-module is picked.
-TODO(query/query_execution.md): add the node-side Phase 2 execution design when
-that module is picked.
+For the detailed query-path flow, service boundary, client orchestration, and
+shard discovery design, see [Query Client Design](query/query_client.md).
+For node-side Phase 1 planning and Phase 2 execution, see
+[Query Plan Node-Side Design](query/query_plan.md) and
+[Query Execution Node-Side Design](query/query_execution.md).
 
 1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
    - Includes MVCC

@@ -13,11 +13,12 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestViewScopedPhysicalSegmentManager_SubmitsSegmentLoadTasks(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
-	meta.DeleteApplyStartAfterTimetick = 99
+	meta.TransformStartAfterTimetick = 99
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
@@ -53,6 +54,176 @@ func TestViewScopedPhysicalSegmentManager_SubmitsSegmentLoadTasks(t *testing.T) 
 	require.Eventually(t, func() bool {
 		return len(loadedCh) == 2
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentLoads(t *testing.T) {
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	scheduler := &fakeSegmentLoadScheduler{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+
+	loadedCh := make(chan []TransformSegment, 2)
+	failedCh := make(chan int64, 1)
+	unrecoverableCh := make(chan struct{}, 1)
+	mgr.Acquire(AcquirePhysicalSegments{
+		Key: key, Meta: meta, View: view,
+		Collection:             &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
+		OnLoaded:               func(loaded []TransformSegment) { loadedCh <- loaded },
+		OnSegmentUnrecoverable: func(segmentID int64, err error) { failedCh <- segmentID },
+		OnUnrecoverable:        func() { unrecoverableCh <- struct{}{} },
+	})
+
+	require.Eventually(t, func() bool {
+		return len(scheduler.tasks) == 2
+	}, time.Second, 10*time.Millisecond)
+	taskBySegment := make(map[int64]SegmentLoadTask, len(scheduler.tasks))
+	for _, task := range scheduler.tasks {
+		taskBySegment[task.SegmentID] = task
+	}
+
+	taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
+	select {
+	case got := <-failedCh:
+		t.Fatalf("resource failure should pend while another segment is loading, got failed segment %d", got)
+	case <-unrecoverableCh:
+		t.Fatal("resource failure should not mark view unrecoverable while another segment is loading")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
+	require.Eventually(t, func() bool {
+		return len(scheduler.tasks) == 3
+	}, time.Second, 10*time.Millisecond)
+	retry := scheduler.tasks[2]
+	require.Equal(t, int64(1000), retry.SegmentID)
+	retry.OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+
+	require.Eventually(t, func() bool {
+		return len(loadedCh) == 2
+	}, time.Second, 10*time.Millisecond)
+	select {
+	case got := <-failedCh:
+		t.Fatalf("resource failure should be recovered by retry, got failed segment %d", got)
+	case <-unrecoverableCh:
+		t.Fatal("resource failure should be recovered by retry")
+	default:
+	}
+}
+
+func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForPendingRetryCallback(t *testing.T) {
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	scheduler := &fakeSegmentLoadScheduler{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+
+	mgr.Acquire(AcquirePhysicalSegments{
+		Key: key, Meta: meta, View: view,
+		OnLoaded:               func([]TransformSegment) {},
+		OnSegmentUnrecoverable: func(segmentID int64, err error) { t.Fatalf("unexpected failed segment %d: %v", segmentID, err) },
+		OnUnrecoverable:        func() { t.Fatal("unexpected unrecoverable") },
+	})
+	require.Eventually(t, func() bool {
+		return len(scheduler.tasks) == 2
+	}, time.Second, 10*time.Millisecond)
+	taskBySegment := make(map[int64]SegmentLoadTask, len(scheduler.tasks))
+	for _, task := range scheduler.tasks {
+		taskBySegment[task.SegmentID] = task
+	}
+	taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
+	taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
+	require.Eventually(t, func() bool {
+		return len(scheduler.tasks) == 3
+	}, time.Second, 10*time.Millisecond)
+
+	dropped := make(chan struct{}, 1)
+	mgr.Release(ReleaseSegments{Key: key, OnDropped: func() { dropped <- struct{}{} }})
+	require.Eventually(t, func() bool {
+		return assert.ObjectsAreEqual([]int64{1000}, scheduler.canceled)
+	}, time.Second, 10*time.Millisecond)
+	select {
+	case <-dropped:
+		t.Fatal("release should wait for pending retry callback")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	scheduler.tasks[2].OnUnrecoverable(context.Canceled)
+	select {
+	case <-dropped:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for dropped after pending retry callback")
+	}
+}
+
+func TestViewScopedPhysicalSegmentManager_FailsResourceFailureWithoutOtherSegmentLoads(t *testing.T) {
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	scheduler := &fakeSegmentLoadScheduler{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+
+	failedCh := make(chan int64, 1)
+	mgr.Acquire(AcquirePhysicalSegments{
+		Key: key, Meta: meta, View: view,
+		OnLoaded:               func([]TransformSegment) { t.Fatal("unexpected loaded") },
+		OnSegmentUnrecoverable: func(segmentID int64, err error) { failedCh <- segmentID },
+		OnUnrecoverable:        func() { t.Fatal("unexpected view unrecoverable") },
+	})
+	require.Eventually(t, func() bool {
+		return len(scheduler.tasks) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	scheduler.tasks[0].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
+	select {
+	case got := <-failedCh:
+		assert.Equal(t, int64(1000), got)
+	case <-time.After(time.Second):
+		t.Fatal("resource failure should fail when no other segment is loading")
+	}
+}
+
+func TestViewScopedPhysicalSegmentManager_FailsNonResourceErrorWhileOtherSegmentLoads(t *testing.T) {
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	scheduler := &fakeSegmentLoadScheduler{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+
+	failedCh := make(chan int64, 1)
+	mgr.Acquire(AcquirePhysicalSegments{
+		Key: key, Meta: meta, View: view,
+		OnLoaded:               func([]TransformSegment) { t.Fatal("unexpected loaded") },
+		OnSegmentUnrecoverable: func(segmentID int64, err error) { failedCh <- segmentID },
+		OnUnrecoverable:        func() { t.Fatal("unexpected view unrecoverable") },
+	})
+	require.Eventually(t, func() bool {
+		return len(scheduler.tasks) == 2
+	}, time.Second, 10*time.Millisecond)
+	taskBySegment := make(map[int64]SegmentLoadTask, len(scheduler.tasks))
+	for _, task := range scheduler.tasks {
+		taskBySegment[task.SegmentID] = task
+	}
+
+	taskBySegment[1000].OnUnrecoverable(assert.AnError)
+	select {
+	case got := <-failedCh:
+		assert.Equal(t, int64(1000), got)
+	case <-time.After(time.Second):
+		t.Fatal("non-resource failure should fail immediately")
+	}
 }
 
 func TestViewScopedPhysicalSegmentManager_CancelsLoadingSegmentAfterLastViewRelease(t *testing.T) {

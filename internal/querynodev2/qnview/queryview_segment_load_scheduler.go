@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -102,4 +103,20 @@ type transformStartSegment struct {
 
 func (s *transformStartSegment) TransformStartAfterTimeTick() uint64 {
 	return s.startAfter
+}
+
+func (s *transformStartSegment) QuerySegment() segments.Segment {
+	readable, ok := s.TransformSegment.(ReadableSealedSegment)
+	if !ok {
+		return nil
+	}
+	return readable.QuerySegment()
+}
+
+func (s *transformStartSegment) Collection() *segments.Collection {
+	readable, ok := s.TransformSegment.(ReadableSealedSegment)
+	if !ok {
+		return nil
+	}
+	return readable.Collection()
 }

@@ -30,6 +30,11 @@ type qvLoadedSegment interface {
 	Release(ctx context.Context) error
 }
 
+type qvReadableSegment interface {
+	QuerySegment() segments.Segment
+	Collection() *segments.Collection
+}
+
 type qvPKCandidateSegment interface {
 	PkCandidateExist() bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool

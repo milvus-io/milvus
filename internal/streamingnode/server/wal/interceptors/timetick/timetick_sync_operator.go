@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -122,26 +121,21 @@ func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(c
 	ts := impl.ackDetails.LastAllAcknowledgedTimestamp()
 	lastConfirmedMessageID := impl.ackDetails.EarliestLastConfirmedMessageID()
 	persist := (!impl.ackDetails.IsNoPersistedMessage() || forcePersisted)
+	if !persist {
+		impl.ackDetails.Clear()
+		return nil
+	}
 
-	return impl.sendTsMsgToWAL(ctx, ts, lastConfirmedMessageID, persist, appender)
+	return impl.sendTsMsgToWAL(ctx, ts, lastConfirmedMessageID, appender)
 }
 
 // sendPersistentTsMsg sends persistent time tick message to wal.
 func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	ts uint64,
 	lastConfirmedMessageID message.MessageID,
-	persist bool,
 	appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error),
 ) error {
-	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID, persist)
-	if !persist {
-		// there's no persisted message, so no need to send persistent time tick message.
-		// With the hint of not persisted message, the underlying wal will not persist it.
-		// but the interceptors will still be triggered.
-		ctx = utility.WithNotPersisted(ctx, &utility.NotPersistedHint{
-			MessageID: lastConfirmedMessageID,
-		})
-	}
+	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID, true)
 
 	// Append it to wal.
 	msgID, err := appender(ctx, msg)
@@ -154,7 +148,7 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	}
 
 	// metrics updates
-	impl.metrics.CountTimeTickSync(ts, persist)
+	impl.metrics.CountTimeTickSync(ts, true)
 	msgs := make([]message.ImmutableMessage, 0, impl.ackDetails.Len())
 	impl.ackDetails.Range(func(detail *ack.AckDetail) bool {
 		impl.metrics.CountSyncTimeTick(detail.IsSync)

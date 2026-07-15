@@ -6,10 +6,12 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
-	"go.uber.org/atomic"
 )
 
 type queryViewTransformSegment struct {
@@ -17,7 +19,9 @@ type queryViewTransformSegment struct {
 	releaser    qvSegmentManager
 	vchannel    string
 	startAfter  uint64
-	applied     atomic.Uint64
+	mu          sync.Mutex
+	applied     uint64
+	waiters     map[uint64][]chan struct{}
 	releaseOnce sync.Once
 	releaseErr  error
 }
@@ -28,6 +32,8 @@ func newQueryViewTransformSegment(segment qvLoadedSegment, releaser qvSegmentMan
 		releaser:   releaser,
 		vchannel:   vchannel,
 		startAfter: startAfter,
+		applied:    startAfter,
+		waiters:    make(map[uint64][]chan struct{}),
 	}
 }
 
@@ -43,6 +49,22 @@ func (s *queryViewTransformSegment) PartitionID() int64 {
 	return s.segment.Partition()
 }
 
+func (s *queryViewTransformSegment) QuerySegment() segments.Segment {
+	readable, ok := s.segment.(qvReadableSegment)
+	if !ok {
+		return nil
+	}
+	return readable.QuerySegment()
+}
+
+func (s *queryViewTransformSegment) Collection() *segments.Collection {
+	readable, ok := s.segment.(qvReadableSegment)
+	if !ok {
+		return nil
+	}
+	return readable.Collection()
+}
+
 func (s *queryViewTransformSegment) TransformStartAfterTimeTick() uint64 {
 	return s.startAfter
 }
@@ -53,35 +75,122 @@ func (s *queryViewTransformSegment) ApplyTransform(ctx context.Context, entry *s
 	}
 	deleteEntry := entry.GetDelete()
 	if deleteEntry == nil {
-		s.applied.Store(entry.GetTimeTick())
+		s.markTransformApplied(entry.GetTimeTick())
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.TODO()
+	}
 	for _, block := range deleteEntry.GetBlocks() {
-		if block.GetPartitionId() != s.PartitionID() {
+		blockPartitionID := block.GetPartitionId()
+		if blockPartitionID != common.AllPartitionsID && blockPartitionID != s.PartitionID() {
+			mlog.Debug(ctx, "querynode transform segment skipped delete block by partition",
+				mlog.FieldSegmentID(s.ID()),
+				mlog.FieldPartitionID(s.PartitionID()),
+				mlog.Int64("blockPartitionID", blockPartitionID),
+				mlog.Uint64("timeTick", entry.GetTimeTick()),
+			)
 			continue
 		}
 		pks, err := parseTransformDeletePrimaryKeys(block.GetPrimaryKeys())
 		if err != nil {
 			return err
 		}
+		originalPKCount := pks.Len()
 		timestamps := make([]typeutil.Timestamp, pks.Len())
 		for i := range timestamps {
 			timestamps[i] = entry.GetTimeTick()
 		}
 		pks, timestamps = filterMaybeHitPrimaryKeys(s.segment, pks, timestamps)
 		if pks == nil || pks.Len() == 0 {
+			mlog.Debug(ctx, "querynode transform segment delete block filtered out",
+				mlog.FieldSegmentID(s.ID()),
+				mlog.FieldPartitionID(s.PartitionID()),
+				mlog.Uint64("timeTick", entry.GetTimeTick()),
+				mlog.Int("originalPKCount", originalPKCount),
+				mlog.Int("filteredPKCount", 0),
+			)
 			continue
 		}
+		mlog.Debug(ctx, "querynode transform segment applies delete block",
+			mlog.FieldSegmentID(s.ID()),
+			mlog.FieldPartitionID(s.PartitionID()),
+			mlog.Uint64("timeTick", entry.GetTimeTick()),
+			mlog.Int("originalPKCount", originalPKCount),
+			mlog.Int("filteredPKCount", pks.Len()),
+		)
 		if err := s.segment.Delete(ctx, pks, timestamps); err != nil {
 			return err
 		}
 	}
-	s.applied.Store(entry.GetTimeTick())
+	s.markTransformApplied(entry.GetTimeTick())
 	return nil
 }
 
 func (s *queryViewTransformSegment) AppliedTransformTimeTick() uint64 {
-	return s.applied.Load()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.applied
+}
+
+func (s *queryViewTransformSegment) WaitTransformApplied(ctx context.Context, timetick uint64) error {
+	if timetick == 0 {
+		return nil
+	}
+	waiter := make(chan struct{})
+
+	s.mu.Lock()
+	if s.applied >= timetick {
+		s.mu.Unlock()
+		return nil
+	}
+	s.waiters[timetick] = append(s.waiters[timetick], waiter)
+	s.mu.Unlock()
+
+	select {
+	case <-waiter:
+		return nil
+	case <-ctx.Done():
+		s.removeTransformWaiter(timetick, waiter)
+		return ctx.Err()
+	}
+}
+
+func (s *queryViewTransformSegment) markTransformApplied(timetick uint64) {
+	var ready []chan struct{}
+	s.mu.Lock()
+	if timetick > s.applied {
+		s.applied = timetick
+	}
+	for target, waiters := range s.waiters {
+		if target <= s.applied {
+			ready = append(ready, waiters...)
+			delete(s.waiters, target)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, waiter := range ready {
+		close(waiter)
+	}
+}
+
+func (s *queryViewTransformSegment) removeTransformWaiter(timetick uint64, waiter chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	waiters := s.waiters[timetick]
+	for i, candidate := range waiters {
+		if candidate != waiter {
+			continue
+		}
+		waiters = append(waiters[:i], waiters[i+1:]...)
+		break
+	}
+	if len(waiters) == 0 {
+		delete(s.waiters, timetick)
+		return
+	}
+	s.waiters[timetick] = waiters
 }
 
 func parseTransformDeletePrimaryKeys(ids *schemapb.IDs) (pks storage.PrimaryKeys, err error) {

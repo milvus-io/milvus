@@ -8278,9 +8278,10 @@ type streamingConfig struct {
 	FlushGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
 
 	// Flush control
-	FlushL0MaxLifetime ParamItem `refreshable:"true"`
-	FlushL0MaxRowNum   ParamItem `refreshable:"true"`
-	FlushL0MaxSize     ParamItem `refreshable:"true"`
+	FlushL0MaxLifetime       ParamItem `refreshable:"true"`
+	FlushL0MaxRowNum         ParamItem `refreshable:"true"`
+	FlushL0MaxSize           ParamItem `refreshable:"true"`
+	FlushL1CommitConcurrency ParamItem `refreshable:"true"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
@@ -8677,6 +8678,15 @@ If the binary size of l0 segment is greater than this size, it will be flushed.`
 		Export:       true,
 	}
 	p.FlushL0MaxSize.Init(base.mgr)
+
+	p.FlushL1CommitConcurrency = ParamItem{
+		Key:          "streaming.flush.l1.commitConcurrency",
+		Version:      "2.6.10",
+		Doc:          `The max concurrency of L1 segment commit tasks per streaming node, 4 by default. Non-positive value means unlimited.`,
+		DefaultValue: "4",
+		Export:       true,
+	}
+	p.FlushL1CommitConcurrency.Init(base.mgr)
 
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",

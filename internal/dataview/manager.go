@@ -39,6 +39,7 @@ type SegmentStore interface {
 }
 
 type Manager interface {
+	OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error)
 	OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error)
 	OnImport(ctx context.Context, event ImportDataViewEvent) (*viewpb.DataVersion, error)
 	OnCopySegmentComplete(ctx context.Context, event CopySegmentCompleteDataViewEvent) (*viewpb.DataVersion, error)
@@ -57,6 +58,11 @@ type Manager interface {
 	ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error)
 	IsSegmentReferenced(ctx context.Context, collectionID int64, segmentID int64) (bool, error)
 	GarbageCollect(ctx context.Context, collectionID int64, protected []*viewpb.DataVersion, retainLatest int) error
+}
+
+type CreateCollectionDataViewEvent struct {
+	CollectionID int64
+	VChannels    []string
 }
 
 type FlushDataViewEvent struct {
@@ -120,22 +126,22 @@ type dataViewManager struct {
 }
 
 type Segment struct {
-	ID                            int64
-	CollectionID                  int64
-	PartitionID                   int64
-	InsertChannel                 string
-	NumOfRows                     int64
-	MemSize                       int64
-	State                         commonpb.SegmentState
-	Level                         datapb.SegmentLevel
-	IsImporting                   bool
-	IsInvisible                   bool
-	StartPosition                 *msgpb.MsgPosition
-	DmlPosition                   *msgpb.MsgPosition
-	CommitTimestamp               uint64
-	DeleteApplyStartAfterTimetick uint64
-	CreatedByCompaction           bool
-	CompactionFrom                []int64
+	ID                          int64
+	CollectionID                int64
+	PartitionID                 int64
+	InsertChannel               string
+	NumOfRows                   int64
+	MemSize                     int64
+	State                       commonpb.SegmentState
+	Level                       datapb.SegmentLevel
+	IsImporting                 bool
+	IsInvisible                 bool
+	StartPosition               *msgpb.MsgPosition
+	DmlPosition                 *msgpb.MsgPosition
+	CommitTimestamp             uint64
+	TransformStartAfterTimetick uint64
+	CreatedByCompaction         bool
+	CompactionFrom              []int64
 }
 
 func (s *Segment) GetID() int64 {
@@ -223,11 +229,11 @@ func (s *Segment) GetCommitTimestamp() uint64 {
 	return s.CommitTimestamp
 }
 
-func (s *Segment) GetDeleteApplyStartAfterTimetick() uint64 {
+func (s *Segment) GetTransformStartAfterTimetick() uint64 {
 	if s == nil {
 		return 0
 	}
-	return s.DeleteApplyStartAfterTimetick
+	return s.TransformStartAfterTimetick
 }
 
 func (s *Segment) GetCreatedByCompaction() bool {
@@ -265,6 +271,41 @@ func NewManager(catalog metastore.DataCoordCatalog, segments SegmentStore) Manag
 		segments: segments,
 		states:   make(map[int64]*collectionDataViewState),
 	}
+}
+
+func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error) {
+	state := m.getOrCreateState(event.CollectionID)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.dropped = false
+
+	if state.latestResident != nil {
+		if state.latestVisible == nil {
+			state.latestVisible = m.withDeleteTimetick(ctx, state.latestResident)
+		}
+		return dataVersionFromView(state.latestResident), nil
+	}
+
+	persistedViews, err := m.catalog.ListDataViews(ctx, event.CollectionID)
+	if err != nil {
+		return nil, err
+	}
+	latestPersisted := latestDataView(persistedViews)
+	if latestPersisted != nil {
+		state.latestResident = canonicalDataViewClone(latestPersisted)
+		state.latestVisible = m.latestVisiblePersistedView(ctx, persistedViews)
+		return dataVersionFromView(state.latestResident), nil
+	}
+
+	view := buildEmptyDataView(event.CollectionID, event.VChannels)
+	view.DataVersion = nextDataVersion(nil, dataViewAdvanceStreaming)
+	toPersist := cloneDataViewWithoutDeleteTimetick(view)
+	if err := m.catalog.SaveDataView(ctx, toPersist); err != nil {
+		return nil, err
+	}
+	state.latestResident = canonicalDataViewClone(toPersist)
+	state.latestVisible = m.withDeleteTimetick(ctx, state.latestResident)
+	return dataVersionFromView(state.latestResident), nil
 }
 
 func (m *dataViewManager) OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error) {
@@ -785,16 +826,16 @@ func (m *dataViewManager) withDeleteTimetick(ctx context.Context, view *viewpb.D
 			for _, segmentID := range partition.GetSegmentIds() {
 				hasSegment = true
 				segment := m.segments.GetSegment(ctx, segmentID)
-				ts := segmentDeleteApplyStartAfterTimetick(segment)
+				ts := segmentTransformStartAfterTimetick(segment)
 				if ts < minTs {
 					minTs = ts
 				}
 			}
 		}
 		if hasSegment {
-			shard.DeleteApplyStartAfterTimetick = minTs
+			shard.TransformStartAfterTimetick = minTs
 		} else {
-			shard.DeleteApplyStartAfterTimetick = 0
+			shard.TransformStartAfterTimetick = 0
 		}
 	}
 	return clone
@@ -807,8 +848,8 @@ func dataViewTimeTicks(view *viewpb.DataViewOfCollection) []*viewpb.DataViewShar
 	timeticks := make([]*viewpb.DataViewShardTimeTick, 0, len(view.GetShards()))
 	for _, shard := range view.GetShards() {
 		timeticks = append(timeticks, &viewpb.DataViewShardTimeTick{
-			Vchannel:                      shard.GetVchannel(),
-			DeleteApplyStartAfterTimetick: shard.GetDeleteApplyStartAfterTimetick(),
+			Vchannel:                    shard.GetVchannel(),
+			TransformStartAfterTimetick: shard.GetTransformStartAfterTimetick(),
 		})
 	}
 	return timeticks
@@ -866,11 +907,11 @@ func segmentEffectiveDmlTs(segment *Segment) uint64 {
 	return segment.GetDmlPosition().GetTimestamp()
 }
 
-func segmentDeleteApplyStartAfterTimetick(segment *Segment) uint64 {
+func segmentTransformStartAfterTimetick(segment *Segment) uint64 {
 	if segment == nil {
 		return 0
 	}
-	if ts := segment.GetDeleteApplyStartAfterTimetick(); ts != 0 {
+	if ts := segment.GetTransformStartAfterTimetick(); ts != 0 {
 		return ts
 	}
 	if ts := segment.GetCommitTimestamp(); ts != 0 {
@@ -1072,7 +1113,7 @@ func cloneDataViewWithoutDeleteTimetick(view *viewpb.DataViewOfCollection) *view
 		return nil
 	}
 	for _, shard := range clone.GetShards() {
-		shard.DeleteApplyStartAfterTimetick = 0
+		shard.TransformStartAfterTimetick = 0
 	}
 	return clone
 }
@@ -1095,6 +1136,26 @@ func canonicalizeDataView(view *viewpb.DataViewOfCollection) {
 			partition.SegmentIds = dedupSortedInt64s(partition.SegmentIds)
 		}
 	}
+}
+
+func buildEmptyDataView(collectionID int64, vchannels []string) *viewpb.DataViewOfCollection {
+	view := &viewpb.DataViewOfCollection{
+		CollectionId: collectionID,
+		DataVersion:  &viewpb.DataVersion{},
+	}
+	if len(vchannels) == 0 {
+		return view
+	}
+	seen := make(map[string]struct{}, len(vchannels))
+	for _, vchannel := range vchannels {
+		if _, ok := seen[vchannel]; ok {
+			continue
+		}
+		seen[vchannel] = struct{}{}
+		view.Shards = append(view.Shards, &viewpb.DataViewOfShard{Vchannel: vchannel})
+	}
+	canonicalizeDataView(view)
+	return view
 }
 
 func dedupSortedInt64s(values []int64) []int64 {

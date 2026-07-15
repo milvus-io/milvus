@@ -10,7 +10,7 @@ import (
 )
 
 func TestConsumeDirtySnapshotKeepsStableInFlightView(t *testing.T) {
-	view := newVChannelView(
+	view := NewVChannelView(
 		&streamingpb.VChannelMeta{
 			Vchannel:           "v1",
 			CheckpointTimeTick: 10,

@@ -14,11 +14,11 @@ import (
 )
 
 type dataFrontierProvider struct {
-	views []moduleapi.DataFrontierView
+	views []moduleapi.DataFrontierProvider
 }
 
-func newDataFrontierProvider(views ...moduleapi.DataFrontierView) moduleapi.DataFrontierProvider {
-	filtered := make([]moduleapi.DataFrontierView, 0, len(views))
+func newDataFrontierProvider(views ...moduleapi.DataFrontierProvider) moduleapi.DataFrontierProvider {
+	filtered := make([]moduleapi.DataFrontierProvider, 0, len(views))
 	for _, view := range views {
 		if view != nil {
 			filtered = append(filtered, view)

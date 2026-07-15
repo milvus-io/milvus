@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -29,14 +28,6 @@ func TestTimeTickSyncOperator(t *testing.T) {
 
 	walFuture := syncutil.NewFuture[wal.WAL]()
 	l := mock_wal.NewMockWAL(t)
-	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
-		hint := utility.GetNotPersisted(ctx)
-		assert.NotNil(t, hint)
-		return &types.AppendResult{
-			MessageID: hint.MessageID,
-			TimeTick:  mm.TimeTick(),
-		}, nil
-	})
 	walFuture.Set(l)
 	msgID := walimplstest.NewTestMessageID(1)
 	channel := types.PChannelInfo{Name: "test", Term: 1}
@@ -62,25 +53,21 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	defer operator.Close()
 	wb := operator.WriteAheadBuffer()
 
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
-	defer cancel()
-
 	newTs, _ := resource.Resource().TSOAllocator().Allocate(ctx)
-	r, err := wb.ReadFromExclusiveTimeTick(ctx, newTs)
+	readCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	r, err := wb.ReadFromExclusiveTimeTick(readCtx, newTs)
+	cancel()
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Nil(t, r)
-	// should not trigger any wal operation, but only update the timetick.
+	// should not trigger any wal operation or update the write-ahead buffer.
 	operator.Sync(context.Background(), false)
-	r, err = wb.ReadFromExclusiveTimeTick(context.Background(), newTs)
-	assert.NoError(t, err)
-	// should not block because timetick updates.
-	msg, err := r.Next(context.Background())
-	assert.NoError(t, err)
-	assert.NotNil(t, msg)
-	assert.Greater(t, msg.TimeTick(), ts)
+	readCtx, cancel = context.WithTimeout(ctx, 20*time.Millisecond)
+	r, err = wb.ReadFromExclusiveTimeTick(readCtx, newTs)
+	cancel()
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, r)
 
-	// should trigger wal operation.
-	l.EXPECT().Append(mock.Anything, mock.Anything).Unset()
+	// should trigger wal operation and update the write-ahead buffer.
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
 		return &types.AppendResult{
 			MessageID: walimplstest.NewTestMessageID(1),
@@ -88,4 +75,10 @@ func TestTimeTickSyncOperator(t *testing.T) {
 		}, nil
 	})
 	operator.Sync(context.Background(), true)
+	r, err = wb.ReadFromExclusiveTimeTick(context.Background(), newTs)
+	assert.NoError(t, err)
+	msg, err := r.Next(context.Background())
+	assert.NoError(t, err)
+	assert.NotNil(t, msg)
+	assert.Greater(t, msg.TimeTick(), ts)
 }

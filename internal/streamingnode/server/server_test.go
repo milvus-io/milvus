@@ -13,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func TestRegisterGRPCServiceRegistersViewSyncWithQueryViewRouter(t *testing.T) {
+func TestRegisterGRPCServiceRegistersQueryViewServices(t *testing.T) {
 	resource.InitForTest(t)
 
 	grpcServer := grpc.NewServer()
@@ -25,5 +25,9 @@ func TestRegisterGRPCServiceRegistersViewSyncWithQueryViewRouter(t *testing.T) {
 	s.registerGRPCService(grpcServer)
 
 	_, ok := grpcServer.GetServiceInfo()[viewpb.ViewSyncService_ServiceDesc.ServiceName]
+	require.True(t, ok)
+	_, ok = grpcServer.GetServiceInfo()[viewpb.QueryPlanService_ServiceDesc.ServiceName]
+	require.True(t, ok)
+	_, ok = grpcServer.GetServiceInfo()[viewpb.ViewQueryService_ServiceDesc.ServiceName]
 	require.True(t, ok)
 }

@@ -74,6 +74,7 @@ const (
 	MessageTypeRestoreSnapshot           MessageType = MessageType(messagespb.MessageType_RestoreSnapshot)
 	MessageTypeDropSnapshotsByCollection MessageType = MessageType(messagespb.MessageType_DropSnapshotsByCollection)
 	MessageTypeAlterWAL                  MessageType = MessageType(messagespb.MessageType_AlterWAL)
+	MessageTypeRecoveryBarrier           MessageType = MessageType(messagespb.MessageType_RecoveryBarrier)
 	MessageTypeBatchUpdateManifest       MessageType = MessageType(messagespb.MessageType_BatchUpdateManifest)
 	MessageTypeRefreshExternalCollection MessageType = MessageType(messagespb.MessageType_RefreshExternalCollection)
 )
@@ -194,6 +195,8 @@ type (
 	DropSnapshotsByCollectionMessageBody   = messagespb.DropSnapshotsByCollectionMessageBody
 	AlterWALMessageHeader                  = messagespb.AlterWALMessageHeader
 	AlterWALMessageBody                    = messagespb.AlterWALMessageBody
+	RecoveryBarrierMessageHeader           = messagespb.RecoveryBarrierMessageHeader
+	RecoveryBarrierMessageBody             = messagespb.RecoveryBarrierMessageBody
 	BatchUpdateManifestMessageHeader       = messagespb.BatchUpdateManifestMessageHeader
 	BatchUpdateManifestMessageBody         = messagespb.BatchUpdateManifestMessageBody
 	RefreshExternalCollectionMessageHeader = messagespb.RefreshExternalCollectionMessageHeader
@@ -2279,6 +2282,48 @@ var MustAsBroadcastAlterWALMessageV2 = MustAsSpecializedBroadcastMessage[*AlterW
 // NewAlterWALMessageBuilderV2 creates a new message builder for AlterWALMessageV2
 var NewAlterWALMessageBuilderV2 = newMutableMessageBuilder[*AlterWALMessageHeader, *AlterWALMessageBody]
 
+// Type aliases for RecoveryBarrierMessageV2
+type (
+	MutableRecoveryBarrierMessageV2         = specializedMutableMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+	ImmutableRecoveryBarrierMessageV2       = SpecializedImmutableMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+	BroadcastRecoveryBarrierMessageV2       = SpecializedBroadcastMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+	BroadcastResultRecoveryBarrierMessageV2 = BroadcastResult[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+	AckResultRecoveryBarrierMessageV2       = AckResult[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+)
+
+// MessageTypeWithVersion for RecoveryBarrierMessageV2
+var MessageTypeRecoveryBarrierV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeRecoveryBarrier,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for RecoveryBarrierMessageV2
+var SpecializedTypeRecoveryBarrierV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*RecoveryBarrierMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*RecoveryBarrierMessageHeader)(nil)),
+}
+
+// AsMutableRecoveryBarrierMessageV2 converts a BasicMessage to MutableRecoveryBarrierMessageV2
+var AsMutableRecoveryBarrierMessageV2 = asSpecializedMutableMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+
+// MustAsMutableRecoveryBarrierMessageV2 converts a BasicMessage to MutableRecoveryBarrierMessageV2, panics on error
+var MustAsMutableRecoveryBarrierMessageV2 = mustAsSpecializedMutableMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+
+// AsImmutableRecoveryBarrierMessageV2 converts an ImmutableMessage to ImmutableRecoveryBarrierMessageV2
+var AsImmutableRecoveryBarrierMessageV2 = asSpecializedImmutableMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+
+// MustAsImmutableRecoveryBarrierMessageV2 converts an ImmutableMessage to ImmutableRecoveryBarrierMessageV2, panics on error
+var MustAsImmutableRecoveryBarrierMessageV2 = MustAsSpecializedImmutableMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+
+// AsBroadcastRecoveryBarrierMessageV2 converts a BasicMessage to BroadcastRecoveryBarrierMessageV2
+var AsBroadcastRecoveryBarrierMessageV2 = asSpecializedBroadcastMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+
+// MustAsBroadcastRecoveryBarrierMessageV2 converts a BasicMessage to BroadcastRecoveryBarrierMessageV2, panics on error
+var MustAsBroadcastRecoveryBarrierMessageV2 = MustAsSpecializedBroadcastMessage[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+
+// NewRecoveryBarrierMessageBuilderV2 creates a new message builder for RecoveryBarrierMessageV2
+var NewRecoveryBarrierMessageBuilderV2 = newMutableMessageBuilder[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
+
 // Type aliases for BatchUpdateManifestMessageV2
 type (
 	MutableBatchUpdateManifestMessageV2         = specializedMutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
@@ -2408,6 +2453,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.ImportMessageHeader{}):                    MessageTypeImport,
 	reflect.TypeOf(&messagespb.InsertMessageHeader{}):                    MessageTypeInsert,
 	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):               MessageTypeManualFlush,
+	reflect.TypeOf(&messagespb.RecoveryBarrierMessageHeader{}):           MessageTypeRecoveryBarrier,
 	reflect.TypeOf(&messagespb.RefreshExternalCollectionMessageHeader{}): MessageTypeRefreshExternalCollection,
 	reflect.TypeOf(&messagespb.RestoreRBACMessageHeader{}):               MessageTypeRestoreRBAC,
 	reflect.TypeOf(&messagespb.RestoreSnapshotMessageHeader{}):           MessageTypeRestoreSnapshot,
@@ -2480,6 +2526,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeImportV1:                    SpecializedTypeImportV1,
 	MessageTypeInsertV1:                    SpecializedTypeInsertV1,
 	MessageTypeManualFlushV2:               SpecializedTypeManualFlushV2,
+	MessageTypeRecoveryBarrierV2:           SpecializedTypeRecoveryBarrierV2,
 	MessageTypeRefreshExternalCollectionV2: SpecializedTypeRefreshExternalCollectionV2,
 	MessageTypeRestoreRBACV2:               SpecializedTypeRestoreRBACV2,
 	MessageTypeRestoreSnapshotV2:           SpecializedTypeRestoreSnapshotV2,
@@ -2536,6 +2583,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeImportV1:                    MessageTypeImportV1,
 	SpecializedTypeInsertV1:                    MessageTypeInsertV1,
 	SpecializedTypeManualFlushV2:               MessageTypeManualFlushV2,
+	SpecializedTypeRecoveryBarrierV2:           MessageTypeRecoveryBarrierV2,
 	SpecializedTypeRefreshExternalCollectionV2: MessageTypeRefreshExternalCollectionV2,
 	SpecializedTypeRestoreRBACV2:               MessageTypeRestoreRBACV2,
 	SpecializedTypeRestoreSnapshotV2:           MessageTypeRestoreSnapshotV2,

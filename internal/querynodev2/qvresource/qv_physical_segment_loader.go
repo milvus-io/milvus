@@ -81,7 +81,11 @@ func (l realQVSegmentLoader) NewSegment(ctx context.Context, collection qnview.C
 	if err != nil {
 		return nil, err
 	}
-	return &qvLocalSegment{segment: segment, collection: localCollection}, nil
+	return &qvLocalSegment{
+		segment:      segment,
+		collections:  l.collections,
+		collectionID: collection.CollectionID(),
+	}, nil
 }
 
 func (l realQVSegmentLoader) LoadSegment(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
@@ -100,7 +104,11 @@ func (l realQVSegmentLoader) LoadDeltaLogs(ctx context.Context, segment qvLoaded
 	if err != nil {
 		return err
 	}
-	if typeutil.IsExternalCollection(local.collection.Schema()) {
+	collection := local.Collection()
+	if collection == nil {
+		return merr.WrapErrCollectionNotFound(local.collectionID)
+	}
+	if typeutil.IsExternalCollection(collection.Schema()) {
 		return nil
 	}
 	return l.loader.LoadDeltaLogsWithoutResource(ctx, local.segment, info)
@@ -114,7 +122,11 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 	if local.segment.PkCandidateExist() {
 		return nil
 	}
-	if typeutil.IsExternalCollection(local.collection.Schema()) {
+	collection := local.Collection()
+	if collection == nil {
+		return merr.WrapErrCollectionNotFound(local.collectionID)
+	}
+	if typeutil.IsExternalCollection(collection.Schema()) {
 		local.segment.SetPKCandidate(pkoracle.NewExternalSegmentCandidate(
 			info.GetSegmentID(),
 			info.GetPartitionID(),
@@ -137,8 +149,9 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 }
 
 type qvLocalSegment struct {
-	segment    segments.Segment
-	collection *segments.Collection
+	segment      segments.Segment
+	collections  qvCollectionManager
+	collectionID int64
 }
 
 func (s *qvLocalSegment) ID() int64 {
@@ -147,6 +160,17 @@ func (s *qvLocalSegment) ID() int64 {
 
 func (s *qvLocalSegment) Partition() int64 {
 	return s.segment.Partition()
+}
+
+func (s *qvLocalSegment) QuerySegment() segments.Segment {
+	return s.segment
+}
+
+func (s *qvLocalSegment) Collection() *segments.Collection {
+	if s.collections == nil {
+		return nil
+	}
+	return s.collections.Get(s.collectionID)
 }
 
 func (s *qvLocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {

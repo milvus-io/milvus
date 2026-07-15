@@ -146,6 +146,7 @@ func (c *LoadConfig) toCollectionLoadInfoProto() *querypb.CollectionLoadInfo {
 	info := &querypb.CollectionLoadInfo{
 		CollectionID:             c.CollectionID,
 		DbID:                     c.DbID,
+		ReplicaNumber:            int32(len(c.Replicas)),
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 	}
 	if len(c.LoadFields) > 0 {

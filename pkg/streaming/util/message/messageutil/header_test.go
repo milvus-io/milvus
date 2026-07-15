@@ -20,3 +20,10 @@ func TestIsSchemaChange(t *testing.T) {
 	header.UpdateMask.Paths = []string{message.FieldMaskCollectionSchema}
 	assert.True(t, IsSchemaChange(header))
 }
+
+func TestIsTimeTickConfirmBarrier(t *testing.T) {
+	assert.True(t, IsTimeTickConfirmBarrier(message.MessageTypeTimeTick))
+	assert.True(t, IsTimeTickConfirmBarrier(message.MessageTypeRecoveryBarrier))
+	assert.False(t, IsTimeTickConfirmBarrier(message.MessageTypeInsert))
+	assert.False(t, IsTimeTickConfirmBarrier(message.MessageTypeDelete))
+}

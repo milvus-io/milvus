@@ -5,6 +5,8 @@ package transformlogbuffer
 import (
 	"context"
 	"errors"
+	"slices"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -12,74 +14,150 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-type fakeAccesser struct {
-	mu       sync.Mutex
-	opts     []wal.TransformLogReadOption
-	scanners []*fakeScanner
+type fakeStreamManager struct {
+	mu      sync.Mutex
+	streams map[string]*fakeStream
+	calls   []string
 }
 
-func (a *fakeAccesser) Read(_ context.Context, opt wal.TransformLogReadOption) wal.TransformLogScanner {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	scanner := newFakeScanner()
-	a.opts = append(a.opts, opt)
-	a.scanners = append(a.scanners, scanner)
-	return scanner
+func newFakeStreamManager() *fakeStreamManager {
+	return &fakeStreamManager{streams: make(map[string]*fakeStream)}
 }
 
-func (a *fakeAccesser) readCount() int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return len(a.opts)
+func (m *fakeStreamManager) AcquireStream(_ context.Context, pchannel string) (wal.TransformLogStream, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, pchannel)
+	stream := m.streams[pchannel]
+	if stream == nil {
+		stream = newFakeStream()
+		m.streams[pchannel] = stream
+	}
+	return stream, nil
 }
 
-func (a *fakeAccesser) firstScanner() *fakeScanner {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.scanners[0]
+func (m *fakeStreamManager) callCount(pchannel string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, call := range m.calls {
+		if call == pchannel {
+			count++
+		}
+	}
+	return count
 }
 
-type fakeScanner struct {
-	ch        chan wal.TransformLogEvent
-	done      chan struct{}
-	err       error
-	closeOnce sync.Once
+func (m *fakeStreamManager) stream(pchannel string) *fakeStream {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.streams[pchannel]
 }
 
-func newFakeScanner() *fakeScanner {
-	return &fakeScanner{
-		ch:   make(chan wal.TransformLogEvent, 16),
+type fakeStream struct {
+	mu            sync.Mutex
+	done          chan struct{}
+	err           error
+	closeOnce     sync.Once
+	subscriptions []wal.TransformLogSubscriptionOption
+}
+
+func newFakeStream() *fakeStream {
+	return &fakeStream{
 		done: make(chan struct{}),
 	}
 }
 
-func (s *fakeScanner) Name() string {
-	return "fake"
+func (s *fakeStream) Subscribe(_ context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.subscriptions = append(s.subscriptions, opt)
+	return fakeSubscription{id: int64(len(s.subscriptions)), vchannel: opt.VChannel}, nil
 }
 
-func (s *fakeScanner) Chan() <-chan wal.TransformLogEvent {
-	return s.ch
-}
-
-func (s *fakeScanner) Error() error {
-	return s.err
-}
-
-func (s *fakeScanner) Done() <-chan struct{} {
+func (s *fakeStream) Done() <-chan struct{} {
 	return s.done
 }
 
-func (s *fakeScanner) Close() error {
+func (s *fakeStream) Error() error {
+	return s.err
+}
+
+func (s *fakeStream) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.done)
 	})
 	return s.err
+}
+
+func (s *fakeStream) failSubscription(err error) {
+	s.mu.Lock()
+	subscriptions := append([]wal.TransformLogSubscriptionOption(nil), s.subscriptions...)
+	s.mu.Unlock()
+	for _, sub := range subscriptions {
+		_ = sub.Handler.Handle(wal.TransformLogStreamEvent{VChannel: sub.VChannel, Err: err})
+	}
+}
+
+func (s *fakeStream) emit(event wal.TransformLogStreamEvent) {
+	s.mu.Lock()
+	subscriptions := append([]wal.TransformLogSubscriptionOption(nil), s.subscriptions...)
+	s.mu.Unlock()
+	for _, sub := range subscriptions {
+		if sub.VChannel == event.VChannel {
+			_ = sub.Handler.Handle(event)
+			return
+		}
+	}
+}
+
+func (s *fakeStream) subscriptionVChannels() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vchannels := make([]string, 0, len(s.subscriptions))
+	for _, sub := range s.subscriptions {
+		vchannels = append(vchannels, sub.VChannel)
+	}
+	return vchannels
+}
+
+func requireSubscriptionVChannels(t *testing.T, stream *fakeStream, expected []string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return stringSetEqual(stream.subscriptionVChannels(), expected)
+	}, time.Second, 10*time.Millisecond)
+}
+
+func stringSetEqual(left []string, right []string) bool {
+	left = append([]string(nil), left...)
+	right = append([]string(nil), right...)
+	sort.Strings(left)
+	sort.Strings(right)
+	return slices.Equal(left, right)
+}
+
+type fakeSubscription struct {
+	id       int64
+	vchannel string
+}
+
+func (s fakeSubscription) ID() int64 {
+	return s.id
+}
+
+func (s fakeSubscription) VChannel() string {
+	return s.vchannel
+}
+
+func (s fakeSubscription) Close() error {
+	return nil
 }
 
 type fakeSegment struct {
@@ -88,9 +166,11 @@ type fakeSegment struct {
 	partitionID int64
 	startAfter  uint64
 
-	mu      sync.Mutex
-	applied []uint64
-	err     error
+	mu           sync.Mutex
+	applied      []uint64
+	err          error
+	applyStarted chan struct{}
+	applyBlock   chan struct{}
 }
 
 func (s *fakeSegment) ID() int64 {
@@ -113,6 +193,15 @@ func (s *fakeSegment) ApplyTransform(_ context.Context, entry *streamingpb.Trans
 	if s.err != nil {
 		return s.err
 	}
+	if s.applyStarted != nil {
+		select {
+		case s.applyStarted <- struct{}{}:
+		default:
+		}
+	}
+	if s.applyBlock != nil {
+		<-s.applyBlock
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.applied = append(s.applied, entry.GetTimeTick())
@@ -128,6 +217,10 @@ func (s *fakeSegment) AppliedTransformTimeTick() uint64 {
 	return s.applied[len(s.applied)-1]
 }
 
+func (s *fakeSegment) WaitTransformApplied(context.Context, uint64) error {
+	return nil
+}
+
 func (s *fakeSegment) Release(context.Context) error {
 	return nil
 }
@@ -138,9 +231,36 @@ func (s *fakeSegment) appliedTicks() []uint64 {
 	return append([]uint64(nil), s.applied...)
 }
 
-func TestBufferAcquireReusesVChannelScannerAndRegistersFromLocalBuffer(t *testing.T) {
-	accesser := &fakeAccesser{}
-	buffer := New(accesser)
+func TestBufferAcquireMultiplexesVChannelsOnOnePChannelStream(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams)
+
+	guard1, err := buffer.Acquire(context.Background(), newTestQueryView("p_1v0", 50))
+	require.NoError(t, err)
+	defer guard1.Release()
+	guard2, err := buffer.Acquire(context.Background(), newTestQueryView("p_2v0", 80))
+	require.NoError(t, err)
+	defer guard2.Release()
+
+	require.Equal(t, 1, streams.callCount("p"))
+	stream := streams.stream("p")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"p_1v0", "p_2v0"})
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- guard1.WaitTransformVisible(context.Background(), 60)
+	}()
+	stream.emit(wal.TransformLogStreamEvent{
+		VChannel: "p_1v0",
+		Entry:    &streamingpb.TransformLogEntry{TimeTick: 60},
+	})
+	require.NoError(t, <-waitDone)
+}
+
+func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams)
 	view1 := newTestQueryView("v1", 50)
 	view2 := newTestQueryView("v1", 80)
 
@@ -148,19 +268,22 @@ func TestBufferAcquireReusesVChannelScannerAndRegistersFromLocalBuffer(t *testin
 	require.NoError(t, err)
 	guard2, err := buffer.Acquire(context.Background(), view2)
 	require.NoError(t, err)
-	require.Equal(t, 1, accesser.readCount())
+	require.Equal(t, 1, streams.callCount("v1"))
+	stream := streams.stream("v1")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
 
-	scanner := accesser.firstScanner()
-	scanner.ch <- wal.TransformLogEvent{Entry: &streamingpb.TransformLogEntry{TimeTick: 60}}
-	scanner.ch <- wal.TransformLogEvent{Entry: &streamingpb.TransformLogEntry{TimeTick: 90}}
-	scanner.ch <- wal.TransformLogEvent{CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}}
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 60}})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 90}})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}})
+	require.NoError(t, guard2.WaitTransformVisible(context.Background(), 90))
 
 	segment := &fakeSegment{id: 10, vchannel: "v1", startAfter: 80}
 	reg, err := buffer.RegisterSegment(context.Background(), segment)
 	require.NoError(t, err)
 	require.NoError(t, reg.WaitCatchup(context.Background()))
 	assert.Equal(t, []uint64{90}, segment.appliedTicks())
-	assert.Equal(t, 1, accesser.readCount())
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
 
 	guard1.Release()
 	oldSegment := &fakeSegment{id: 11, vchannel: "v1", startAfter: 60}
@@ -170,15 +293,15 @@ func TestBufferAcquireReusesVChannelScannerAndRegistersFromLocalBuffer(t *testin
 	guard2.Release()
 	reg.Unregister()
 	select {
-	case <-scanner.Done():
+	case <-stream.Done():
 	case <-time.After(time.Second):
-		t.Fatal("scanner was not closed after last guard release")
+		t.Fatal("stream was not closed after last guard release")
 	}
 }
 
 func TestBufferRegistrationKeepsApplyingLiveEntriesAfterCaughtUp(t *testing.T) {
-	accesser := &fakeAccesser{}
-	buffer := New(accesser)
+	streams := newFakeStreamManager()
+	buffer := New(streams)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -188,35 +311,246 @@ func TestBufferRegistrationKeepsApplyingLiveEntriesAfterCaughtUp(t *testing.T) {
 	require.NoError(t, err)
 	defer reg.Unregister()
 
-	scanner := accesser.firstScanner()
-	scanner.ch <- wal.TransformLogEvent{CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}}
+	stream := streams.stream("v1")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}})
 	require.NoError(t, reg.WaitCatchup(context.Background()))
 
-	scanner.ch <- wal.TransformLogEvent{Entry: &streamingpb.TransformLogEntry{TimeTick: 60}}
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 60}})
 	require.Eventually(t, func() bool {
 		return assert.ObjectsAreEqual([]uint64{60}, segment.appliedTicks())
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams)
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("p_1v0", 50))
+	require.NoError(t, err)
+	defer guard.Release()
+
+	stream := streams.stream("p")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"p_1v0"})
+	stream.emit(wal.TransformLogStreamEvent{
+		VChannel: "p_1v0",
+		Entry:    &streamingpb.TransformLogEntry{TimeTick: 60},
+	})
+	require.NoError(t, guard.WaitTransformVisible(context.Background(), 60))
+
+	applyStarted := make(chan struct{}, 1)
+	applyBlock := make(chan struct{})
+	segment := &fakeSegment{
+		id:           10,
+		vchannel:     "p_1v0",
+		startAfter:   50,
+		applyStarted: applyStarted,
+		applyBlock:   applyBlock,
+	}
+	defer close(applyBlock)
+
+	type registerResult struct {
+		reg qnview.TransformRegistration
+		err error
+	}
+	registerDone := make(chan registerResult, 1)
+	go func() {
+		reg, err := buffer.RegisterSegment(context.Background(), segment)
+		registerDone <- registerResult{reg: reg, err: err}
+	}()
+
+	select {
+	case result := <-registerDone:
+		require.NoError(t, result.err)
+		require.NotNil(t, result.reg)
+		defer result.reg.Unregister()
+	case <-applyStarted:
+		t.Fatal("RegisterSegment blocked while draining transform log backlog")
+	case <-time.After(time.Second):
+		t.Fatal("RegisterSegment did not return")
+	}
+}
+
+func TestBufferRegisterSegmentDrainsEntriesArrivingDuringCatchupBeforeLiveAttach(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams)
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("p_1v0", 50))
+	require.NoError(t, err)
+	defer guard.Release()
+
+	stream := streams.stream("p")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"p_1v0"})
+	stream.emit(wal.TransformLogStreamEvent{
+		VChannel: "p_1v0",
+		Entry:    &streamingpb.TransformLogEntry{TimeTick: 60},
+	})
+	require.NoError(t, guard.WaitTransformVisible(context.Background(), 60))
+
+	applyStarted := make(chan struct{}, 1)
+	applyBlock := make(chan struct{})
+	segment := &fakeSegment{
+		id:           10,
+		vchannel:     "p_1v0",
+		startAfter:   50,
+		applyStarted: applyStarted,
+		applyBlock:   applyBlock,
+	}
+	reg, err := buffer.RegisterSegment(context.Background(), segment)
+	require.NoError(t, err)
+	defer reg.Unregister()
+
+	<-applyStarted
+	stream.emit(wal.TransformLogStreamEvent{
+		VChannel: "p_1v0",
+		Entry:    &streamingpb.TransformLogEntry{TimeTick: 70},
+	})
+	stream.emit(wal.TransformLogStreamEvent{
+		VChannel: "p_1v0",
+		CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50},
+	})
+
+	close(applyBlock)
+	require.NoError(t, reg.WaitCatchup(context.Background()))
+	require.NoError(t, guard.WaitTransformVisible(context.Background(), 70))
+	assert.Equal(t, []uint64{60, 70}, segment.appliedTicks())
+
+	stream.emit(wal.TransformLogStreamEvent{
+		VChannel: "p_1v0",
+		Entry:    &streamingpb.TransformLogEntry{TimeTick: 80},
+	})
+	require.Eventually(t, func() bool {
+		return assert.ObjectsAreEqual([]uint64{60, 70, 80}, segment.appliedTicks())
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestGuardWaitTransformVisibleUsesVChannelFrontier(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams)
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	require.NoError(t, err)
+	defer guard.Release()
+
+	require.NoError(t, guard.WaitTransformVisible(context.Background(), 50))
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- guard.WaitTransformVisible(context.Background(), 70)
+	}()
+
+	select {
+	case err := <-waitDone:
+		t.Fatalf("wait finished before target frontier: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	stream := streams.stream("v1")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 60}})
+	select {
+	case err := <-waitDone:
+		t.Fatalf("wait finished at lower frontier: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 70}})
+	require.NoError(t, <-waitDone)
+}
+
+func TestGuardWaitTransformVisibleWaitsForLiveApply(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams)
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	require.NoError(t, err)
+	defer guard.Release()
+
+	segment := &fakeSegment{
+		id:           10,
+		vchannel:     "v1",
+		startAfter:   50,
+		applyStarted: make(chan struct{}, 1),
+		applyBlock:   make(chan struct{}),
+	}
+	reg, err := buffer.RegisterSegment(context.Background(), segment)
+	require.NoError(t, err)
+	defer reg.Unregister()
+
+	stream := streams.stream("v1")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}})
+	require.NoError(t, reg.WaitCatchup(context.Background()))
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- guard.WaitTransformVisible(context.Background(), 60)
+	}()
+
+	go stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 60}})
+	require.Eventually(t, func() bool {
+		select {
+		case <-segment.applyStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	select {
+	case err := <-waitDone:
+		t.Fatalf("wait finished before live apply completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(segment.applyBlock)
+	require.NoError(t, <-waitDone)
+	assert.Equal(t, []uint64{60}, segment.appliedTicks())
+}
+
+func TestGuardWaitTransformVisibleReturnsScannerError(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams)
+	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	require.NoError(t, err)
+	defer guard.Release()
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- guard.WaitTransformVisible(context.Background(), 70)
+	}()
+
+	stream := streams.stream("v1")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+	stream.failSubscription(errors.New("transform log truncated"))
+
+	require.ErrorContains(t, <-waitDone, "transform log truncated")
+}
+
 func TestBufferRegisterSegmentFailsWhenScannerFailsBeforeCaughtUp(t *testing.T) {
-	accesser := &fakeAccesser{}
-	buffer := New(accesser)
+	streams := newFakeStreamManager()
+	buffer := New(streams)
 	_, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.NoError(t, err)
 
-	scanner := accesser.firstScanner()
-	scanner.err = errors.New("truncated")
-	_ = scanner.Close()
+	stream := streams.stream("v1")
+	require.NotNil(t, stream)
+	requireSubscriptionVChannels(t, stream, []string{"v1"})
+	stream.failSubscription(errors.New("truncated"))
 
-	_, err = buffer.RegisterSegment(context.Background(), &fakeSegment{id: 10, vchannel: "v1", startAfter: 50})
+	require.Eventually(t, func() bool {
+		_, err = buffer.RegisterSegment(context.Background(), &fakeSegment{id: 10, vchannel: "v1", startAfter: 50})
+		return err != nil
+	}, time.Second, 10*time.Millisecond)
 	require.ErrorContains(t, err, "truncated")
 }
 
 func newTestQueryView(vchannel string, startAfter uint64) *qviews.QueryViewAtQueryNode {
 	return qviews.NewQueryViewAtQueryNode(
 		&viewpb.QueryViewMeta{
-			Vchannel:                      vchannel,
-			DeleteApplyStartAfterTimetick: startAfter,
+			Vchannel:                    vchannel,
+			TransformStartAfterTimetick: startAfter,
 		},
 		&viewpb.QueryViewOfQueryNode{NodeId: 1},
 	).(*qviews.QueryViewAtQueryNode)
