@@ -7880,6 +7880,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                                    data_type,
                                    false,
                                    true,
+                                   segment_load_info,
+                                   schema_snapshot,
+                                   runtime,
                                    std::nullopt,
                                    op_ctx,
                                    is_replace);

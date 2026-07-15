@@ -2111,18 +2111,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
 
-    void
-    load_field_data_common(
-        FieldId field_id,
-        const std::shared_ptr<ChunkedColumnInterface>& column,
-        size_t num_rows,
-        DataType data_type,
-        bool enable_mmap,
-        bool is_proxy_column,
-        std::optional<ParquetStatistics> statistics = {},
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false);
-
     std::shared_ptr<ChunkedColumnInterface>
     get_column(const std::shared_ptr<const RuntimeResourceState>& runtime,
                FieldId field_id) const {
