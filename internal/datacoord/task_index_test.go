@@ -51,6 +51,42 @@ type indexTaskSuite struct {
 	fieldID  int64
 }
 
+// Test_isNestedArrayIndex locks the single source of truth for the
+// is_nested_index marker shared by the build path (prepareJobRequest) and the
+// snapshot-restore copy path (syncVectorScalarIndexes): plain arrays at
+// scalar version >= 5 are nested, struct sub-fields ("parent[sub]") stay
+// marker=false (routed nested by NAME everywhere), and non-array / pre-v5 never
+// get the marker.
+func Test_isNestedArrayIndex(t *testing.T) {
+	v5 := common.MinScalarIndexVersionForNestedArrayIndex
+	arrayField := func(name string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{Name: name, DataType: schemapb.DataType_Array}
+	}
+	cases := []struct {
+		name    string
+		field   *schemapb.FieldSchema
+		version int32
+		want    bool
+	}{
+		{"plain array at v5 -> nested", arrayField("tags"), v5, true},
+		{"plain array above v5 -> nested", arrayField("tags"), v5 + 1, true},
+		{"plain array below v5 -> row-level", arrayField("tags"), v5 - 1, false},
+		// struct sub-fields are routed nested by NAME on every binary, so their
+		// marker MUST stay false even at v5 -- otherwise the snapshot-restore
+		// version guard would wrongly refuse a pre-v5 pool that can load them.
+		{"struct sub-field at v5 -> marker false", arrayField("profile[ints]"), v5, false},
+		{"struct sub-field above v5 -> marker false", arrayField("profile[ints]"), v5 + 5, false},
+		// non-array fields never carry the marker.
+		{"int64 field -> false", &schemapb.FieldSchema{Name: "id", DataType: schemapb.DataType_Int64}, v5, false},
+	}
+	for _, c := range cases {
+		if got := isNestedArrayIndex(c.field, c.version); got != c.want {
+			t.Errorf("%s: isNestedArrayIndex(%q, %d) = %v, want %v",
+				c.name, c.field.GetName(), c.version, got, c.want)
+		}
+	}
+}
+
 func Test_indexTaskSuite(t *testing.T) {
 	suite.Run(t, new(indexTaskSuite))
 }

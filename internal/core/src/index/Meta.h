@@ -53,6 +53,12 @@ constexpr const char* HYBRID_INDEX_TYPE = "HYBRID";
 constexpr const char* RTREE_INDEX_TYPE = "RTREE";
 constexpr const char* SCALAR_INDEX_ENGINE_VERSION =
     "scalar_index_engine_version";
+// Per-segment marker: the scalar index on this ARRAY field is a nested
+// (element-level) index. On build, indexbuilder injects it into the config
+// from BuildIndexInfo.is_nested_index; on load, segcore injects it into the
+// index params from the persisted index meta. Missing/false = legacy
+// row-level index.
+constexpr const char* NESTED_INDEX = "nested_index";
 constexpr const char* TANTIVY_INDEX_VERSION = "tantivy_index_version";
 constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
 constexpr uint32_t TANTIVY_INDEX_MINIMUM_VERSION = 5;

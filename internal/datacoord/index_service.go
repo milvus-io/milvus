@@ -1073,6 +1073,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							NumRows:                   segIdx.NumRows,
 							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+							IsNestedIndex:             segIdx.IsNestedIndex,
 							IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 						})
 				}

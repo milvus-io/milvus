@@ -582,6 +582,24 @@ IndexFactory::ScalarIndexLoadResource(
             // V3 streaming: chunks streamed to disk + mmap. The index data is
             // not heap-resident, but legacy metadata may be heap-resident.
             auto resident_bytes = legacy_aux_bytes;
+            // Same admission hazard the BITMAP branch floors below: a NESTED
+            // (element-level) ARRAY sort index keeps its validity bitset
+            // heap-resident sized by ELEMENT count
+            // (ScalarIndexSort/StringIndexSort::LoadEntries ->
+            // load_valid_bitset), which the row-sized estimate above
+            // under-counts by the array fan-out -- over-admitting and OOMing
+            // on high-fan-out arrays. The element count is unavailable here,
+            // but the serialized file already contains the element-sized
+            // bitset, so index_size_in_bytes is a safe conservative upper
+            // bound. Gate on the persisted nested marker so LEGACY row-level
+            // ARRAY sort indexes keep their row-sized estimate and large mmap
+            // files are not wrongly rejected on rolling upgrade.
+            auto nested_it = index_params.find(milvus::index::NESTED_INDEX);
+            const bool is_nested_array =
+                nested_it != index_params.end() && nested_it->second == "true";
+            if (field_type == DataType::ARRAY && is_nested_array) {
+                resident_bytes = std::max(resident_bytes, index_size_in_bytes);
+            }
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
             request.max_memory_cost = resident_bytes + stream_memory_overhead;
@@ -594,6 +612,9 @@ IndexFactory::ScalarIndexLoadResource(
                 request.final_memory_cost + stream_memory_overhead;
             request.max_disk_cost = 0;
         }
+        // ARRAY fields are forced to has_raw_data=false by the
+        // CanUseIndexRawDataForField override at the end of this function
+        // (an array index cannot serve array output, #51109).
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
@@ -634,6 +655,30 @@ IndexFactory::ScalarIndexLoadResource(
             // still allocates a per-bitmap heap buffer, so reserve for the
             // largest plausible bitmap in addition to stream buffers.
             auto resident_bytes = BitsetBytes(num_rows);
+            // Only a NESTED (element-level) ARRAY bitmap has an element-sized
+            // resident validity bitset: it is sized by the ELEMENT count, not
+            // the row count, so BitsetBytes(num_rows) under-counts it by the
+            // array fan-out -- leading the loader to over-admit and OOM on
+            // high-fan-out arrays. The element count is not available here, but
+            // the serialized index file already contains the element-sized
+            // validity bitset, so index_size_in_bytes is a safe (slightly
+            // conservative) upper bound; floor the resident estimate to it.
+            //
+            // A LEGACY row-level ARRAY bitmap (the marker is missing/false --
+            // e.g. every existing ARRAY index during a rolling upgrade) is
+            // row-count sized exactly like a scalar-field bitmap, so flooring it
+            // would grossly OVER-count a large mmap index and reject otherwise
+            // loadable segments. Gate the floor on the persisted nested marker,
+            // which travels here via index_params[NESTED_INDEX] (injected on
+            // load from SegmentIndex.is_nested_index). (The element x 8-byte
+            // offset cache under indexOffsetCacheEnabled is skipped for nested
+            // indexes at build/load time, so it is not resident here.)
+            auto nested_it = index_params.find(milvus::index::NESTED_INDEX);
+            const bool is_nested_array =
+                nested_it != index_params.end() && nested_it->second == "true";
+            if (field_type == DataType::ARRAY && is_nested_array) {
+                resident_bytes = std::max(resident_bytes, index_size_in_bytes);
+            }
             auto frozen_buffer_bytes =
                 BitmapMmapFrozenBufferBytes(num_rows, index_size_in_bytes);
             request.final_memory_cost = resident_bytes;
@@ -1100,6 +1145,36 @@ IndexFactory::CreateScalarIndex(
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);
         case DataType::ARRAY: {
+            // New array scalar indexes are built as nested (element-level) so
+            // that MATCH_*/element_filter can use them. Row-level array
+            // queries (array_contains, array_length) keep working: the
+            // expression framework converts a nested index's element-level
+            // result back to row-level via IArrayOffsets.
+            //
+            // Routing is by the explicit per-segment marker
+            // (nested_array_index), NOT by the scalar index engine version:
+            //  - BUILD: datacoord sets the marker for new array-field index
+            //    builds when the negotiated engine version is >= 5
+            //    (common.MinScalarIndexVersionForNestedArrayIndex, the
+            //    version nested-array support ships with; it is the minimum
+            //    across all querynodes, so the marker is only set once every
+            //    node can read a nested index). The version stays purely a
+            //    capability signal for that decision.
+            //  - LOAD: the marker was persisted with the segment's index meta
+            //    at build time (SegmentIndex.is_nested_index) and travels
+            //    here via the index params (NESTED_INDEX). Missing/false =
+            //    legacy row-level index -- including HYBRID/AUTOINDEX, whose
+            //    file layout only HybridScalarIndex can open -- so every old
+            //    index deterministically loads via the composite path it was
+            //    built with, and MATCH_* falls back to brute force on it
+            //    (element-level exec-path guard in the Unary/Range/Term
+            //    exprs).
+            if (create_index_info.nested_array_index) {
+                return CreateNestedIndex(
+                    create_index_info.index_type,
+                    create_index_info.tantivy_index_version,
+                    file_manager_context);
+            }
             return CreateCompositeScalarIndex(create_index_info,
                                               file_manager_context);
         }

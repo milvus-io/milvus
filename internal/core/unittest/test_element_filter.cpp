@@ -696,8 +696,8 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
 // (FieldDataVectorArrayImpl packs only valid rows), so
 // ExtractArrayLengthsFromFieldData reads valid rows by physical index -- the
 // OPPOSITE convention from a scalar ARRAY (stored densely, read by logical
-// index). This guards the VECTOR_ARRAY (compact) branch of the growing
-// binlog-recovery extractor.
+// index). This guards the VECTOR_ARRAY (compact) branch, the symmetric
+// counterpart of the scalar-array growing-recovery path.
 TEST(ElementFilter, GrowingNullableVectorArrayBinlogRecovery) {
     constexpr int64_t dim = 4;
     constexpr int64_t N = 5;
@@ -4637,7 +4637,7 @@ TEST(ElementVectorSearch, SealedBruteForce_IteratorV2_MultiBatch) {
 // skip the raw data, leaving MATCH_*/element_filter with no offsets to abort on
 // ("Array offsets not available"). Non-nested scalar indexes are unaffected.
 TEST(NestedArrayIndexRawData, NestedIndexesReportNoRawData) {
-    // STL_SORT (ScalarIndexSort): nested -> false, non-nested -> true.
+    // STL_SORT (ScalarIndexSort): nested -> false (the guard), non-nested -> true.
     auto stl_nested = std::make_unique<index::ScalarIndexSort<int32_t>>(
         storage::FileManagerContext(), /*is_nested_index=*/true);
     EXPECT_FALSE(stl_nested->HasRawData());

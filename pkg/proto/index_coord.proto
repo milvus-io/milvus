@@ -99,6 +99,10 @@ message SegmentIndex {
     // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
     // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
     IndexStorePathVersion index_store_path_version = 22;
+    // Persisted per-segment marker: this ARRAY-field scalar index was built
+    // as a nested (element-level) index. Missing/false = legacy row-level
+    // index. Load routing MUST use this marker, not the engine version.
+    bool is_nested_index = 23;
 }
 
 message RegisterNodeRequest {
@@ -187,6 +191,8 @@ message IndexFilePathInfo {
     uint64 mem_size = 12;
     int32 current_scalar_index_version = 13;
     IndexStorePathVersion index_store_path_version = 14;
+    // Mirrors SegmentIndex.is_nested_index (see there for semantics).
+    bool is_nested_index = 15;
 }
 
 message SegmentInfo {

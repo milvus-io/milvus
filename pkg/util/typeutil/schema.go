@@ -4121,6 +4121,35 @@ func IsStructSubField(fieldName string) bool {
 	return strings.Contains(fieldName, "[")
 }
 
+// IsNestedArrayIndex reports whether a scalar index on `field`, built at
+// scalarIndexVersion, is a NESTED (element-level) array index whose loading
+// requires nested-array-capable (scalar index version >= 5) code.
+//
+// This is the single source of truth for the is_nested_index marker. It is
+// applied at every site that decides or persists the marker so the invariant
+// "scalar index version >= 5 on a plain ARRAY field <=> nested" can never be
+// broken by a version-skewed peer:
+//   - datacoord build decision (prepareJobRequest) and the snapshot-restore
+//     copy path (syncVectorScalarIndexes) derive the persisted marker here;
+//   - the index worker re-derives it in PreExecute from the field schema and
+//     the post-clamp version, overriding the request bit — so a request from
+//     an old datacoord (which resolves version 5 from upgraded querynodes but
+//     has no nested field in its proto) still produces a nested build, and a
+//     worker clamped below v5 always builds (and echoes) row-level.
+//
+// Marker semantics: "loading this index requires nested-array-capable code",
+// NOT "the physical layout is element-level". Struct sub-field indexes
+// ("parent[sub]", ARRAY-typed) are physically element-level too, but every
+// released binary routes them nested by NAME (IsStructSubField precedes the
+// marker check in C++), so they load everywhere and their marker MUST stay
+// false -- otherwise the snapshot-restore version guard (snapshot_manager.go)
+// would wrongly refuse to place them on a pre-v5 pool that can load them fine.
+func IsNestedArrayIndex(field *schemapb.FieldSchema, scalarIndexVersion int32) bool {
+	return field.GetDataType() == schemapb.DataType_Array &&
+		!IsStructSubField(field.GetName()) &&
+		scalarIndexVersion >= common.MinScalarIndexVersionForNestedArrayIndex
+}
+
 func ExtractStructFieldName(fieldName string) (string, error) {
 	parts := strings.Split(fieldName, "[")
 	if len(parts) == 1 {

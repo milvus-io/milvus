@@ -2468,17 +2468,13 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
             AssertInfo(array_offsets != nullptr,
                        "array offsets not found for field {}",
                        expr_->column_.field_id_.get());
-            return array_offsets->ForEachRowElementRange(
-                [&element_bitset](int32_t elem_start, int32_t elem_end) {
-                    for (int32_t i = elem_start; i < elem_end; ++i) {
-                        if (element_bitset[i]) {
-                            return true;
-                        }
-                    }
-                    return false;
-                },
-                0,
-                active_count_);
+            // Word-wise ANY reduction: a row matches iff any element bit in
+            // its range is set. Skips zero words instead of testing each
+            // element bit.
+            TargetBitmap row_bitset(active_count_);
+            array_offsets->ElementBitsetToRowBitsetAny(
+                element_bitset.view(), 0, 0, row_bitset.view());
+            return row_bitset;
         };
 
         switch (expr_->op_) {

@@ -218,6 +218,12 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                               const Config& config) {
+    // Legacy per-file format predates nested support: any index loaded through
+    // this path is an old non-nested (row-level) index. Nested indexes are built
+    // by compaction with the current code, which uses the V3 packed format
+    // (LoadEntries restores the flag there). Override the load-time constructor's
+    // forced-true value so MATCH_* falls back to brute instead of mis-folding.
+    is_nested_index_ = false;
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -444,6 +450,13 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     wrapper_->terms_query(values, n, &bitset);
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
+
+    // Nested indexes return one bit per flattened array element, while
+    // null_offset_ stores row offsets.  Row validity is handled after the
+    // element bitmap is folded back to rows by the expression executor.
+    if (is_nested_index_) {
+        return bitset;
+    }
 
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
@@ -898,6 +911,7 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->PutMeta("file_names", file_names);
     writer->PutMeta("has_null", has_null);
+    writer->PutMeta("is_nested", is_nested_index_);
 
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
@@ -923,6 +937,8 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
                                      const Config& config) {
     auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
     bool has_null = reader.GetMeta<bool>("has_null");
+    // Default false: an old index without the persisted flag is non-nested.
+    is_nested_index_ = reader.GetMeta<bool>("is_nested", false);
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);

@@ -1144,6 +1144,9 @@ message VectorScalarIndexInfo {
   int32 current_scalar_index_version = 8;  // Scalar index engine version
   string index_name = 9;                   // Index name for multi-index-per-field lookup
   index.IndexStorePathVersion index_store_path_version = 10;
+  // Persisted per-segment marker: this ARRAY-field scalar index was built as
+  // a nested (element-level) index; must travel with copied index metadata.
+  bool is_nested_index = 11;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation

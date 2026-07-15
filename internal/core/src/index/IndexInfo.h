@@ -35,6 +35,10 @@ struct CreateIndexInfo {
     std::string field_name;
     int64_t dim;
     int32_t scalar_index_engine_version{1};
+    // The scalar index on this ARRAY field is (build) / was built as (load) a
+    // nested (element-level) index. Comes from the persisted per-segment
+    // marker (see NESTED_INDEX in Meta.h); false = legacy row-level index.
+    bool nested_array_index{false};
     uint32_t tantivy_index_version{7};
     JsonCastType json_cast_type{JsonCastType::UNKNOWN};
     std::string json_path;

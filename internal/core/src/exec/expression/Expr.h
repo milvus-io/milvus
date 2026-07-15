@@ -1389,7 +1389,19 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
-                // Chunk is skipped, mark all elements as false
+                // Chunk is skipped, mark all elements as false.
+                //
+                // NOTE(latent): valid_res=false means UNKNOWN, and MATCH_ALL
+                // excludes UNKNOWN elements from its element count — a row
+                // whose elements were all "skipped" would vacuously match.
+                // This branch is unreachable today because the skip index is
+                // never built for ARRAY fields (no ARRAY case in
+                // SkipIndexStatsBuilder::Build and the load gate in
+                // ChunkedSegmentSealedImpl skips ARRAY), so skip_func always
+                // returns false here. If element-level skip stats are ever
+                // added for arrays, a skipped chunk must instead produce
+                // definite false (valid_res=true) — or MATCH_ALL over a
+                // skipped chunk returns false positives.
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<ArrayView>(
                         op_ctx_, field_id_, i, data_pos, size);

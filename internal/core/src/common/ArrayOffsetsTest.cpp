@@ -613,42 +613,6 @@ TEST_F(ArrayOffsetsTest, SealedRowOffsetsToElementOffsetsEmpty) {
     EXPECT_EQ(elem_offsets.size(), 0);
 }
 
-TEST_F(ArrayOffsetsTest, SealedForEachRowElementRange) {
-    // row 0: 2 elements (elem 0, 1)
-    // row 1: 3 elements (elem 2, 3, 4)
-    // row 2: 1 element  (elem 5)
-    ArrayOffsetsSealed offsets({0, 2, 5, 6});
-
-    // Predicate: return true if row has more than 1 element
-    auto predicate = [](int32_t elem_start, int32_t elem_end) {
-        return (elem_end - elem_start) > 1;
-    };
-
-    auto result = offsets.ForEachRowElementRange(predicate, 0, 3);
-
-    EXPECT_EQ(result.size(), 3);
-    EXPECT_TRUE(result[0]);   // row 0: 2 elements > 1
-    EXPECT_TRUE(result[1]);   // row 1: 3 elements > 1
-    EXPECT_FALSE(result[2]);  // row 2: 1 element <= 1
-}
-
-TEST_F(ArrayOffsetsTest, SealedForEachRowElementRangeWithRowStart) {
-    // row 0: 2 elements, row 1: 3 elements, row 2: 1 element, row 3: 4 elements
-    ArrayOffsetsSealed offsets({0, 2, 5, 6, 10});
-
-    auto predicate = [](int32_t elem_start, int32_t elem_end) {
-        return (elem_end - elem_start) >= 3;
-    };
-
-    // Start from row 1, check 3 rows
-    auto result = offsets.ForEachRowElementRange(predicate, 1, 3);
-
-    EXPECT_EQ(result.size(), 3);
-    EXPECT_TRUE(result[0]);   // row 1: 3 elements >= 3
-    EXPECT_FALSE(result[1]);  // row 2: 1 element < 3
-    EXPECT_TRUE(result[2]);   // row 3: 4 elements >= 3
-}
-
 TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitsetWithRowStart) {
     // row 0: 2 elements, row 1: 3 elements, row 2: 1 element, row 3: 2 elements
     ArrayOffsetsSealed offsets({0, 2, 5, 6, 8});
@@ -748,23 +712,6 @@ TEST_F(ArrayOffsetsTest, GrowingRowOffsetsToElementOffsets) {
     EXPECT_EQ(elem_offsets[0], 0);
     EXPECT_EQ(elem_offsets[1], 1);
     EXPECT_EQ(elem_offsets[2], 5);
-}
-
-TEST_F(ArrayOffsetsTest, GrowingForEachRowElementRange) {
-    ArrayOffsetsGrowing offsets;
-    std::vector<int32_t> lens = {2, 3, 1};
-    offsets.Insert(0, lens.data(), 3);
-
-    auto predicate = [](int32_t elem_start, int32_t elem_end) {
-        return (elem_end - elem_start) > 1;
-    };
-
-    auto result = offsets.ForEachRowElementRange(predicate, 0, 3);
-
-    EXPECT_EQ(result.size(), 3);
-    EXPECT_TRUE(result[0]);   // 2 > 1
-    EXPECT_TRUE(result[1]);   // 3 > 1
-    EXPECT_FALSE(result[2]);  // 1 <= 1
 }
 
 TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementBitsetWithRowStart) {
@@ -1077,7 +1024,7 @@ TEST_F(ArrayOffsetsTest, SealedCopyRowElementRanges) {
 TEST_F(ArrayOffsetsTest, GrowingCopyRowElementRanges) {
     ArrayOffsetsGrowing offsets;
 
-    // No committed rows: {0, 0} out-of-range insurance.
+    // No committed rows: {0, 0} insurance (same as ElementIDRangeOfRow).
     {
         std::vector<int32_t> rows = {0};
         std::pair<int32_t, int32_t> out{-1, -1};
