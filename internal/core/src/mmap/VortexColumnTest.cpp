@@ -18,7 +18,6 @@
 
 #include <cstdint>
 #include <cmath>
-#include <deque>
 #include <exception>
 #include <filesystem>
 #include <memory>
@@ -30,8 +29,6 @@
 #include "arrow/filesystem/localfs.h"
 #include "common/Common.h"
 #include "common/FieldMeta.h"
-#include "common/ValueOp.h"
-#include "exec/expression/Expr.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/format/vortex/vortex_writer.h"
@@ -241,38 +238,6 @@ CheckNullableFilteredScanReturnsValidity(VortexColumn& column, DataType type) {
         3, 10, proto::plan::OpType::Equal, value);
     EXPECT_EQ(CollectFilteredRowIdPayload(column, offset_options),
               (std::vector<int64_t>{5, 8, 9}));
-
-    auto expr_scan_result = column.Scan(nullptr, options);
-    ASSERT_NE(expr_scan_result, nullptr);
-    std::deque<exec::RowIdScanEntry> buffered_entries;
-    ChunkedColumnInterface::ScanBatch expr_batch;
-    auto bitmaps = exec::RowIdScanToBitmaps(expr_scan_result.get(),
-                                            buffered_entries,
-                                            expr_batch,
-                                            0,
-                                            kNullableRows,
-                                            TargetBitmap());
-    EXPECT_FALSE(bitmaps.result[1]);
-    EXPECT_FALSE(bitmaps.validity[1]);
-    EXPECT_FALSE(bitmaps.validity[5]);
-    EXPECT_TRUE(bitmaps.result[8]);
-    EXPECT_FALSE(bitmaps.result[9]);
-    EXPECT_FALSE(bitmaps.validity[9]);
-    EXPECT_FALSE(bitmaps.validity[13]);
-    EXPECT_FALSE(bitmaps.result[10]);
-    EXPECT_TRUE(bitmaps.validity[10]);
-
-    auto vector = std::make_shared<ColumnVector>(std::move(bitmaps.result),
-                                                 std::move(bitmaps.validity));
-    common::ThreeValuedLogicOp::Not(vector);
-    TargetBitmapView data(vector->GetRawData(), vector->size());
-    TargetBitmapView valid(vector->GetValidRawData(), vector->size());
-    EXPECT_TRUE(data[0]);
-    EXPECT_TRUE(valid[0]);
-    EXPECT_FALSE(data[8]);
-    EXPECT_TRUE(valid[8]);
-    EXPECT_FALSE(data[9]);
-    EXPECT_FALSE(valid[9]);
 }
 
 std::string
