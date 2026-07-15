@@ -248,6 +248,25 @@ type epochManagerBlockingRejectAdmitter struct {
 	reason  task.BalanceAdmissionReason
 }
 
+type epochManagerRejectAdmitter struct {
+	reason task.BalanceAdmissionReason
+	err    error
+}
+
+func (a *epochManagerRejectAdmitter) AdmitBalanceTaskAtPendingRevision(
+	balanceTask task.Task,
+	expected task.BalancePendingRevision,
+	validate task.BalanceAdmissionValidator,
+) task.BalanceAdmissionResult {
+	if reason := validate(); reason != task.BalanceAdmissionAccepted {
+		err := errors.New(reason.String())
+		balanceTask.Cancel(err)
+		return task.BalanceAdmissionResult{Reason: reason, Err: err, PendingRevision: expected}
+	}
+	balanceTask.Cancel(a.err)
+	return task.BalanceAdmissionResult{Reason: a.reason, Err: a.err, PendingRevision: expected}
+}
+
 func (a *epochManagerBlockingRejectAdmitter) AdmitBalanceTaskAtPendingRevision(
 	balanceTask task.Task,
 	expected task.BalancePendingRevision,
@@ -679,6 +698,29 @@ func TestEpochManagerDeadlineCarriesAmbiguousWork(t *testing.T) {
 	require.True(t, superseded.Terminal)
 }
 
+func TestEpochManagerDeadlineDesiredPlacementCompletes(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan), BalanceWave{Kind: PlanKindSegment, Converged: true})
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.Deadline = time.Second
+	request.NoProgressDeadline = 0
+
+	started := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	fixture.clock.Advance(2 * time.Second)
+	publishEpochManagerSegments(fixture.placement, []int64{201}, []int64{101})
+
+	result := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochCompleted, result.State)
+	require.True(t, result.Terminal)
+	require.NoError(t, result.Err)
+
+	fixture.manager.Advance(context.Background(), request)
+	require.Empty(t, fixture.source.lastCarry(testSnapshotRG))
+	require.NotContains(t, fixture.policy.lastConstraints(testSnapshotRG).Objects, plan.ObjectKey())
+}
+
 func TestEpochManagerNodeOrRGChangeSupersedesGeneration(t *testing.T) {
 	for _, reason := range []task.BalanceAdmissionReason{
 		task.BalanceAdmissionNodeIneligible,
@@ -959,6 +1001,46 @@ func TestEpochManagerAmbiguousCarryAddsDiagnosticAfterBudgetStop(t *testing.T) {
 	require.True(t, result.Terminal)
 	require.Error(t, result.Err)
 	require.Contains(t, result.Err.Error(), "ambiguous")
+}
+
+func TestEpochManagerAmbiguousCarryPreservesAdmissionError(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	carriedPlan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	newPlan := epochSegmentPlan(*fixture.snapshot, testOtherReplica, 201, 1, 3)
+	fixture.policy.setWaves(
+		testSnapshotRG,
+		epochManagerWave(carriedPlan),
+		epochManagerWave(newPlan),
+		BalanceWave{Kind: PlanKindSegment, Converged: true},
+	)
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica, testOtherReplica)
+	request.Deadline = time.Second
+	request.NoProgressDeadline = 0
+
+	fixture.manager.Advance(context.Background(), request)
+	fixture.clock.Advance(2 * time.Second)
+	timedOut := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochTimedOut, timedOut.State)
+
+	admissionErr := errors.New("ordinary admission rejection")
+	fixture.manager.admitter = &epochManagerRejectAdmitter{
+		reason: task.BalanceAdmissionDuplicate,
+		err:    admissionErr,
+	}
+	request.Deadline = time.Minute
+	result := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochDegraded, result.State)
+	require.True(t, result.Terminal)
+	require.Equal(t, 1, result.Rejected[task.BalanceAdmissionDuplicate])
+	require.ErrorIs(t, result.Err, admissionErr)
+	require.Contains(t, result.Err.Error(), "ambiguous")
+
+	carrying := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, carrying.State)
+	require.Len(t, fixture.source.lastCarry(testSnapshotRG), 1)
+	constraint := fixture.policy.lastConstraints(testSnapshotRG).Objects[carriedPlan.ObjectKey()]
+	require.Equal(t, ReservationAmbiguousCapacity, constraint.Class)
+	require.Equal(t, []int64{1, 3}, constraint.ChargedNodes)
 }
 
 func TestEpochManagerDeadlineAfterRejectedAdmissionWinsOrdinaryFailure(t *testing.T) {
