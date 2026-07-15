@@ -41,6 +41,43 @@ func TestGetAllQueryNodesReturnsSessionNodeInfo(t *testing.T) {
 	}, nodes)
 }
 
+func TestIsQueryableQueryNodeSession(t *testing.T) {
+	tests := []struct {
+		name    string
+		labels  map[string]string
+		want    bool
+		message string
+	}{
+		{
+			name: "regular querynode",
+			want: true,
+		},
+		{
+			name:    "embedded querynode",
+			labels:  map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"},
+			want:    false,
+			message: "streamingnode embedded querynode should not be discovered by querynode manager",
+		},
+		{
+			name:    "legacy embedded querynode",
+			labels:  map[string]string{sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1"},
+			want:    false,
+			message: "legacy streamingnode embedded querynode should not be discovered by querynode manager",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session := &sessionutil.SessionRaw{
+				ServerID:     10,
+				Address:      "localhost:10",
+				ServerLabels: test.labels,
+			}
+			assert.Equal(t, test.want, isQueryableQueryNodeSession(session), test.message)
+		})
+	}
+}
+
 func TestCreateViewSyncClientRoutesByQueryNodeID(t *testing.T) {
 	baseClient := &capturingViewSyncServiceClient{}
 	m := &managerClientImpl{

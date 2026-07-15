@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/github.com/milvus-io/milvus-proto/go-api/v3/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
@@ -29,6 +30,7 @@ func TestMessageType(t *testing.T) {
 	assert.True(t, MessageTypeTimeTick.Valid())
 
 	assert.True(t, MessageTypeTimeTick.IsSystem())
+	assert.True(t, MessageTypeRecoveryBarrier.IsSystem())
 	assert.True(t, MessageTypeTxn.IsSystem())
 	assert.True(t, MessageTypeBeginTxn.IsSystem())
 	assert.True(t, MessageTypeCommitTxn.IsSystem())
@@ -45,6 +47,7 @@ func TestMessageType(t *testing.T) {
 	assert.False(t, MessageTypeDropPartition.IsSystem())
 
 	assert.True(t, MessageTypeTimeTick.IsSelfControlled())
+	assert.True(t, MessageTypeRecoveryBarrier.IsSelfControlled())
 	assert.False(t, MessageTypeTxn.IsSelfControlled())
 	assert.False(t, MessageTypeBeginTxn.IsSelfControlled())
 	assert.False(t, MessageTypeCommitTxn.IsSelfControlled())
@@ -66,6 +69,7 @@ func TestMessageType(t *testing.T) {
 	assert.False(t, MessageTypeCommitTxn.IsDMLMessageType())
 	assert.False(t, MessageTypeRollbackTxn.IsDMLMessageType())
 	assert.False(t, MessageTypeTimeTick.IsDMLMessageType())
+	assert.Equal(t, mlog.InfoLevel, MessageTypeRecoveryBarrier.LogLevel())
 }
 
 func TestMessageUnreplicableProperty(t *testing.T) {

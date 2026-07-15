@@ -12,7 +12,7 @@ growing-side segment resources prepared from `VChannelWALView`.
 It is created as part of a vchannel `QueryRuntime`:
 
 ```text
-SNQueryRuntimeManager
+VChannelRecoveryModule
   -> QueryRuntime(Preparing)
        -> GrowingRuntime
        -> other QueryRuntimeModule implementations
@@ -34,9 +34,9 @@ catchup, and the transition to `Ready`.
 
 | Component | Role | Boundary |
 |---|---|---|
-| `SNQueryRuntimeManager` | PChannel-local owner of QueryView/init references. Creates the vchannel `QueryRuntime` and submits its initialization task. | It does not build individual growing segments or apply WAL events directly. |
-| `QueryRuntime` | VChannel-level singleton runtime. Implements `VChannelLiveObserver`, owns one live-event buffer and one consumer, calls `GrowingRuntime.Prepare`, forwards live events, and calls `GrowingRuntime.Advance`. | It does not own single-segment resource handles directly. |
-| `GrowingRuntime` | QueryRuntime module that owns the vchannel segment map and segment-level dispatch. | It does not implement `VChannelLiveObserver`, decide resource references, or call WAL modules directly. |
+| `VChannelRecoveryModule` | VChannel-local owner of QueryView references. Creates the vchannel `QueryRuntime` and submits its initialization task through the PChannel manager scheduler. | It does not build individual growing segments directly. |
+| `QueryRuntime` | VChannel-level singleton runtime. Owns one live-event buffer and one consumer, calls `GrowingRuntime.Prepare`, forwards live events, and calls `GrowingRuntime.Advance`. | It does not own single-segment resource handles directly. |
+| `GrowingRuntime` | QueryRuntime module that owns the vchannel segment map and segment-level dispatch. | It does not decide resource references or call WAL modules directly. |
 | `GrowingSegment` | Owns one segment's local resource handle and applies segment-scoped persisted data, inserts, deletes, and sealed metadata. | It does not own vchannel-level message dispatch or DataVersion watermarks. |
 | `VChannelWALView` | Provides no-gap WAL input for the selected base DataVersion. | Its contract is defined in [StreamingNode VChannel WAL View Design](../../wal/streamingnode_vchannel_wal_view.md). |
 | `SegmentModule` | Owns segment metadata, visible snapshot construction, and segment metadata GC. | It is consumed only through `VChannelWALView`; runtime components do not call it directly. |
@@ -79,7 +79,7 @@ GrowingSegment
 DataVersion advancement:
 
 ```text
-SNQueryRuntimeManager
+VChannelRecoveryModule
         |
         | QueryRuntime.Advance(oldestDataVersion)
         v
@@ -127,7 +127,7 @@ storage or segcore implementation from the runtime.
 ### 3.4 Invariants
 
 1. `GrowingRuntime` implements `QueryRuntimeModule`.
-2. `GrowingRuntime` does not implement `VChannelLiveObserver`.
+2. `GrowingRuntime` does not own the vchannel live-event buffer.
 3. `GrowingRuntime` does not own pending live-event buffering.
 4. `GrowingRuntime` does not expose a catchup handle.
 5. Runtime preparation never reads `SegmentModule` or `TransformLogModule`
@@ -237,6 +237,9 @@ QueryRuntime.applyLiveEvent(event)
 `QueryRuntime` owns event ordering. `GrowingRuntime` assumes calls come from the
 single `QueryRuntime` consumer and are already serialized in WAL order.
 
+Recovery baseline events are defined by
+[RecoveryBarrier](../../../../agent_guides/streaming-system/message/message-semantic-recovery-barrier.md).
+
 ### 5.3 Segment Seal DataVersion
 
 Segment sealing has two relevant moments:
@@ -251,7 +254,7 @@ resource events captured by `RecoveryStorage` and forwarded by `QueryRuntime`.
 ### 5.4 Truncation
 
 ```text
-SNQueryRuntimeManager computes oldest active QueryView DataVersion
+VChannelRecoveryModule computes oldest active QueryView DataVersion
   -> QueryRuntime.Advance(oldestDataVersion)
   -> GrowingRuntime.Advance(oldestDataVersion)
   -> GrowingRuntime.Truncate(oldestDataVersion)
@@ -260,8 +263,7 @@ SNQueryRuntimeManager computes oldest active QueryView DataVersion
 `Truncate` closes and removes growing segment resources whose retained state is
 strictly older than the oldest active QueryView's required DataVersion.
 
-If no QueryView references remain, the manager does not call `Advance`; it
-closes the whole `QueryRuntime` when `initRef` is also absent.
+If no QueryView references remain, the module closes the whole `QueryRuntime`.
 
 ### 5.5 Close
 

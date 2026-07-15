@@ -107,8 +107,14 @@ type HandlerClient interface {
 	// A consumer will not share stream connection with other consumers.
 	CreateConsumer(ctx context.Context, opts *ConsumerOptions) (Consumer, error)
 
-	// ReadTransformLog creates a local or remote transform log scanner.
-	ReadTransformLog(ctx context.Context, opts wal.TransformLogReadOption) wal.TransformLogScanner
+	// AcquireTransformLogStream creates a pchannel-level transform log event stream.
+	AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error)
+
+	// QueryViewClient returns the QueryView domain client.
+	QueryViewClient() QueryViewClient
+
+	// QueryViewSyncClient returns the QueryView sync domain client.
+	QueryViewSyncClient() QueryViewSyncClient
 
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.
@@ -131,17 +137,19 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		)
 	})
 	watcher := assignment.NewWatcher(rb.Resolver())
-	return &handlerClientImpl{
-		lifetime:              typeutil.NewLifetime(),
-		service:               lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
-		rb:                    rb,
-		watcher:               watcher,
-		rebalanceTrigger:      w,
-		newProducer:           producer.CreateProducer,
-		newConsumer:           consumer.CreateConsumer,
-		newTransformLogStream: transformlogclient.CreateStream,
-		transformStreams:      make(map[transformlogclient.StreamKey]*transformlogclient.Stream),
+	hc := &handlerClientImpl{
+		lifetime:                   typeutil.NewLifetime(),
+		service:                    lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
+		rb:                         rb,
+		watcher:                    watcher,
+		rebalanceTrigger:           w,
+		newProducer:                producer.CreateProducer,
+		newConsumer:                consumer.CreateConsumer,
+		newTransformLogEventStream: transformlogclient.CreateEventStream,
 	}
+	hc.queryViewClient = newQueryViewClient(hc, conn)
+	hc.queryViewSyncClient = newQueryViewSyncClient(hc, conn)
+	return hc
 }
 
 // getDialOptions returns grpc dial options.

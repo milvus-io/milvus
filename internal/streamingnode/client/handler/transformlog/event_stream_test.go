@@ -2,6 +2,7 @@ package transformlog
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -13,90 +14,72 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
-func TestStreamMultiplexesSubscriptionsAndCloseAck(t *testing.T) {
+func TestEventStreamPublishesSubscriptionEventsOnSharedOutput(t *testing.T) {
 	ctx := context.Background()
 	fakeStream := newFakeSubscribeTransformClient(ctx)
 	handlerClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
 	handlerClient.EXPECT().SubscribeTransform(mock.Anything, mock.Anything).Return(fakeStream, nil).Once()
 
-	stream, err := CreateStream(ctx, &StreamOptions{Assignment: testAssignment()}, handlerClient)
+	stream, err := CreateEventStream(ctx, &EventStreamOptions{Assignment: testAssignment()}, handlerClient)
 	require.NoError(t, err)
 	defer stream.Close()
 
-	sub1 := subscribeForTest(t, ctx, stream, "v1", 10, fakeStream)
-	sub2 := subscribeForTest(t, ctx, stream, "v2", 20, fakeStream)
+	handler1 := newRecordingHandler()
+	sub1 := subscribeEventForTest(t, ctx, stream, "v1", 10, handler1, fakeStream)
+	handler2 := newRecordingHandler()
+	sub2 := subscribeEventForTest(t, ctx, stream, "v2", 20, handler2, fakeStream)
 
 	fakeStream.recv(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_MessageBatch{
 			MessageBatch: &streamingpb.TransformMessageBatch{
-				SubscriptionId: 2,
+				SubscriptionId: sub2.ID(),
 				Vchannel:       "v2",
 				Entries:        []*streamingpb.TransformLogEntry{{TimeTick: 21}},
 			},
 		},
 	})
-	require.Equal(t, uint64(21), recvEvent(t, sub2.Chan()).Entry.GetTimeTick())
-
-	fakeStream.recv(&streamingpb.TransformResponse{
-		Response: &streamingpb.TransformResponse_MessageBatch{
-			MessageBatch: &streamingpb.TransformMessageBatch{
-				SubscriptionId: 1,
-				Vchannel:       "v1",
-				Entries:        []*streamingpb.TransformLogEntry{{TimeTick: 11}},
-			},
-		},
-	})
-	require.Equal(t, uint64(11), recvEvent(t, sub1.Chan()).Entry.GetTimeTick())
-
-	closeDone := make(chan error, 1)
-	go func() {
-		closeDone <- sub1.Close()
-	}()
-	closeReq := fakeStream.sent(t)
-	require.Equal(t, int64(1), closeReq.GetCloseSubscription().GetSubscriptionId())
-	fakeStream.recv(&streamingpb.TransformResponse{
-		Response: &streamingpb.TransformResponse_CloseSubscription{
-			CloseSubscription: &streamingpb.CloseTransformSubscriptionResponse{
-				SubscriptionId: 1,
-				Vchannel:       "v1",
-			},
-		},
-	})
-	require.NoError(t, <-closeDone)
+	event := recvEvent(t, handler2.events)
+	require.Equal(t, sub2.ID(), event.SubscriptionID)
+	require.Equal(t, "v2", event.VChannel)
+	require.Equal(t, uint64(21), event.Entry.GetTimeTick())
 
 	fakeStream.recv(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_CaughtUp{
 			CaughtUp: &streamingpb.TransformSubscriptionCaughtUp{
-				SubscriptionId:     2,
-				Vchannel:           "v2",
-				StartAfterTimeTick: 20,
+				SubscriptionId:     sub1.ID(),
+				Vchannel:           "v1",
+				StartAfterTimeTick: 10,
 			},
 		},
 	})
-	require.Equal(t, uint64(20), recvEvent(t, sub2.Chan()).CaughtUp.StartAfterTimeTick)
+	event = recvEvent(t, handler1.events)
+	require.Equal(t, sub1.ID(), event.SubscriptionID)
+	require.Equal(t, "v1", event.VChannel)
+	require.Equal(t, uint64(10), event.CaughtUp.StartAfterTimeTick)
+}
 
-	closeDone = make(chan error, 1)
-	go func() {
-		closeDone <- sub2.Close()
-	}()
-	closeReq = fakeStream.sent(t)
-	require.Equal(t, int64(2), closeReq.GetCloseSubscription().GetSubscriptionId())
-	fakeStream.recv(&streamingpb.TransformResponse{
-		Response: &streamingpb.TransformResponse_CloseSubscription{
-			CloseSubscription: &streamingpb.CloseTransformSubscriptionResponse{
-				SubscriptionId: 2,
-				Vchannel:       "v2",
-			},
-		},
-	})
-	require.NoError(t, <-closeDone)
-	closeStreamReq := fakeStream.sent(t)
-	require.NotNil(t, closeStreamReq.GetCloseStream())
+func TestEventStreamReportsStreamErrorOnStreamOnly(t *testing.T) {
+	ctx := context.Background()
+	fakeStream := newFakeSubscribeTransformClient(ctx)
+	handlerClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	handlerClient.EXPECT().SubscribeTransform(mock.Anything, mock.Anything).Return(fakeStream, nil).Once()
+
+	stream, err := CreateEventStream(ctx, &EventStreamOptions{Assignment: testAssignment()}, handlerClient)
+	require.NoError(t, err)
+	defer stream.Close()
+
+	handler := newRecordingHandler()
+	sub := subscribeEventForTest(t, ctx, stream, "v1", 10, handler, fakeStream)
+	streamErr := errors.New("stream broken")
+	fakeStream.fail(streamErr)
+
+	requireNoEvent(t, handler.events)
 	require.Eventually(t, func() bool {
 		select {
 		case <-stream.Done():
@@ -105,48 +88,63 @@ func TestStreamMultiplexesSubscriptionsAndCloseAck(t *testing.T) {
 			return false
 		}
 	}, time.Second, 10*time.Millisecond)
+	require.ErrorIs(t, stream.Error(), streamErr)
+	require.ErrorIs(t, sub.Close(), streamErr)
 }
 
-func TestStreamRejectsSubscribeAfterClosing(t *testing.T) {
+func TestEventStreamPublishesSubscriptionError(t *testing.T) {
 	ctx := context.Background()
 	fakeStream := newFakeSubscribeTransformClient(ctx)
 	handlerClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
 	handlerClient.EXPECT().SubscribeTransform(mock.Anything, mock.Anything).Return(fakeStream, nil).Once()
 
-	stream, err := CreateStream(ctx, &StreamOptions{Assignment: testAssignment()}, handlerClient)
+	stream, err := CreateEventStream(ctx, &EventStreamOptions{Assignment: testAssignment()}, handlerClient)
 	require.NoError(t, err)
 	defer stream.Close()
 
-	stream.markClosing()
-	scanner, err := stream.Subscribe(ctx, transformReadOption("v1", 10))
-	require.ErrorIs(t, err, io.EOF)
-	require.Nil(t, scanner)
-	requireNoSentRequest(t, fakeStream)
+	handler := newRecordingHandler()
+	sub := subscribeEventForTest(t, ctx, stream, "v1", 10, handler, fakeStream)
+	subErr := streamingstatus.NewIgnoreOperation("subscription failed")
+	fakeStream.recv(&streamingpb.TransformResponse{
+		Response: &streamingpb.TransformResponse_SubscriptionError{
+			SubscriptionError: &streamingpb.TransformSubscriptionError{
+				SubscriptionId: sub.ID(),
+				Vchannel:       "v1",
+				Error:          subErr.AsPBError(),
+			},
+		},
+	})
+
+	event := recvEvent(t, handler.events)
+	require.Equal(t, sub.ID(), event.SubscriptionID)
+	require.Equal(t, "v1", event.VChannel)
+	require.True(t, streamingstatus.AsStreamingError(event.Err).IsIgnoredOperation())
 }
 
-func subscribeForTest(
+func subscribeEventForTest(
 	t *testing.T,
 	ctx context.Context,
-	stream *Stream,
+	stream *EventStream,
 	vchannel string,
 	startAfter uint64,
+	handler wal.TransformLogEventHandler,
 	fakeStream *fakeSubscribeTransformClient,
-) *remoteSubscription {
+) wal.TransformLogSubscription {
 	t.Helper()
 	resultCh := make(chan struct {
-		scanner *remoteSubscription
-		err     error
+		sub wal.TransformLogSubscription
+		err error
 	}, 1)
 	go func() {
-		scanner, err := stream.Subscribe(ctx, transformReadOption(vchannel, startAfter))
-		result := struct {
-			scanner *remoteSubscription
-			err     error
-		}{err: err}
-		if scanner != nil {
-			result.scanner = scanner.(*remoteSubscription)
-		}
-		resultCh <- result
+		sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
+			VChannel:           vchannel,
+			StartAfterTimeTick: startAfter,
+			Handler:            handler,
+		})
+		resultCh <- struct {
+			sub wal.TransformLogSubscription
+			err error
+		}{sub: sub, err: err}
 	}()
 	req := fakeStream.sent(t)
 	create := req.GetCreate()
@@ -164,16 +162,23 @@ func subscribeForTest(
 	})
 	result := <-resultCh
 	require.NoError(t, result.err)
-	return result.scanner
+	return result.sub
 }
 
-func transformReadOption(vchannel string, startAfter uint64) wal.TransformLogReadOption {
-	return wal.TransformLogReadOption{
-		Name:               vchannel,
-		VChannel:           vchannel,
-		StartAfterTimeTick: startAfter,
-	}
+type recordingHandler struct {
+	events chan wal.TransformLogStreamEvent
 }
+
+func newRecordingHandler() *recordingHandler {
+	return &recordingHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
+}
+
+func (h *recordingHandler) Handle(event wal.TransformLogStreamEvent) error {
+	h.events <- event
+	return nil
+}
+
+func (h *recordingHandler) Close() {}
 
 func recvEvent[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
@@ -187,12 +192,12 @@ func recvEvent[T any](t *testing.T, ch <-chan T) T {
 	}
 }
 
-func requireNoSentRequest(t *testing.T, f *fakeSubscribeTransformClient) {
+func requireNoEvent[T any](t *testing.T, ch <-chan T) {
 	t.Helper()
 	select {
-	case req := <-f.sendCh:
-		t.Fatalf("unexpected sent request: %v", req)
-	case <-time.After(50 * time.Millisecond):
+	case event := <-ch:
+		t.Fatalf("unexpected event: %+v", event)
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 
@@ -207,6 +212,7 @@ type fakeSubscribeTransformClient struct {
 	ctx     context.Context
 	sendCh  chan *streamingpb.TransformRequest
 	recvCh  chan *streamingpb.TransformResponse
+	errCh   chan error
 	closeCh chan struct{}
 	once    sync.Once
 }
@@ -216,6 +222,7 @@ func newFakeSubscribeTransformClient(ctx context.Context) *fakeSubscribeTransfor
 		ctx:     ctx,
 		sendCh:  make(chan *streamingpb.TransformRequest, 16),
 		recvCh:  make(chan *streamingpb.TransformResponse, 16),
+		errCh:   make(chan error, 1),
 		closeCh: make(chan struct{}),
 	}
 }
@@ -235,6 +242,10 @@ func (f *fakeSubscribeTransformClient) recv(resp *streamingpb.TransformResponse)
 	f.recvCh <- resp
 }
 
+func (f *fakeSubscribeTransformClient) fail(err error) {
+	f.errCh <- err
+}
+
 func (f *fakeSubscribeTransformClient) Send(req *streamingpb.TransformRequest) error {
 	select {
 	case f.sendCh <- req:
@@ -248,6 +259,8 @@ func (f *fakeSubscribeTransformClient) Recv() (*streamingpb.TransformResponse, e
 	select {
 	case resp := <-f.recvCh:
 		return resp, nil
+	case err := <-f.errCh:
+		return nil, err
 	case <-f.closeCh:
 		return nil, io.EOF
 	}

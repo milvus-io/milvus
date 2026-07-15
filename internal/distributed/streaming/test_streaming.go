@@ -214,8 +214,8 @@ func (n *noopWALAccesser) Read(ctx context.Context, opts ReadOption) Scanner {
 	return &noopScanner{}
 }
 
-func (n *noopWALAccesser) TransformLog() wal.TransformLogAccesser {
-	return wal.NewTransformLogErrorAccesser(nil)
+func (n *noopWALAccesser) TransformLogStreamManager() wal.TransformLogStreamManager {
+	return nil
 }
 
 func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {

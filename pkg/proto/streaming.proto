@@ -279,6 +279,8 @@ message StreamingNodeInfo {
 
 // StreamingNodeAssignment is the assignment info of a streaming node.
 message StreamingNodeAssignment {
+ ShardAssignmentInfo shard_assignment = 3;
+ repeated PChannelInfo secondary_channels = 4;
     StreamingNodeInfo node         = 1;
     repeated PChannelInfo channels = 2;
 }
@@ -589,6 +591,7 @@ message TransformLogEntry {
 
     oneof entry {
         TransformDeleteEntry delete = 2;
+ TransformBarrierEntry barrier = 3;
     }
 }
 
@@ -1103,3 +1106,20 @@ message VChannelTransformLogMeta {
     // L0 materializer cursor.
     uint64 materialized_time_tick = 5;
 }
+
+message ShardAssignmentInfo {
+    repeated PChannelShardAssignment pchannel_assignments = 1;
+}
+
+message PChannelShardAssignment {
+    string pchannel = 1;
+    repeated ShardAssignmentEntry entries = 2;
+}
+
+message ShardAssignmentEntry {
+    int64 collection_id = 1;  // Collection this shard belongs to.
+    int32 shard_index = 2;    // Shard index within the collection (0-based).
+    int64 replica_id = 3;     // Replica this shard belongs to.
+}
+
+message TransformBarrierEntry {}

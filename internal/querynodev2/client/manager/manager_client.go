@@ -52,7 +52,12 @@ type NodeInfo struct {
 // NewManagerClient creates a new QueryNode manager client using etcd session discovery.
 func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 	role := sessionutil.GetSessionPrefixByRole(typeutil.QueryNodeRole)
-	rb := resolver.NewSessionBuilder(etcdCli, discoverer.OptSDPrefix(role), discoverer.OptSDVersionRange(">=2.6.0-dev"))
+	rb := resolver.NewSessionBuilder(
+		etcdCli,
+		discoverer.OptSDPrefix(role),
+		discoverer.OptSDVersionRange(">=2.6.0-dev"),
+		discoverer.OptSDSessionFilter(isQueryableQueryNodeSession),
+	)
 	dialTimeout := paramtable.Get().QueryNodeGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {
@@ -70,6 +75,15 @@ func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 		rb:       rb,
 		service:  lazygrpc.WithServiceCreator(conn, viewpb.NewViewSyncServiceClient),
 	}
+}
+
+func isQueryableQueryNodeSession(session *sessionutil.SessionRaw) bool {
+	if session == nil {
+		return false
+	}
+	labels := session.GetServerLabel()
+	return labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] != "1" &&
+		labels[sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode] != "1"
 }
 
 // getDialOptions returns grpc dial options.

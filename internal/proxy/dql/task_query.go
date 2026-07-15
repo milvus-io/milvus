@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -78,6 +79,7 @@ type QueryTask struct {
 	partitionKeyMode bool
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
+	viewQueryClient  queryclient.Client
 	channelsMvcc     map[string]Timestamp
 	// Output snapshots for internal partial-update reads, independent of the
 	// channelsMvcc input overrides. Only successful shard responses are recorded.
@@ -1046,6 +1048,14 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
+	if t.viewQueryClient != nil {
+		if err := t.executeByQueryView(ctx); err != nil {
+			log.Warn(ctx, "fail to execute query by query view", mlog.Err(err))
+			return errors.Wrap(err, "failed to query")
+		}
+		log.Debug(ctx, "Query Execute done.")
+		return nil
+	}
 	// Built once, ahead of the namespace fast path below, so that the fast
 	// path derives its single-channel workload from the same value Execute
 	// would fan out -- every collection-level field, the resource-group scope
@@ -1088,8 +1098,21 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+func (t *QueryTask) executeByQueryView(ctx context.Context) error {
+	result, err := t.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
+		Req: t.RetrieveRequest,
+	})
+	if err != nil {
+		return err
+	}
+	for _, retrieveResult := range result.Results {
+		t.resultBuf.Insert(retrieveResult)
+	}
+	return nil
+}
+
 func (t *QueryTask) PostExecute(ctx context.Context) error {
-	tr := timerecord.NewTimeRecorder("QueryTask PostExecute")
+	tr := timerecord.NewTimeRecorder("queryTask PostExecute")
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()

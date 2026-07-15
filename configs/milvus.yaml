@@ -1750,6 +1750,10 @@ streaming:
       # The max size of l0 segment, 32m by default.
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
+    l1:
+      # The max concurrency of L1 segment commit tasks per streaming node, 4 by default.
+      # Non-positive value means unlimited.
+      commitConcurrency: 4
   summary:
     cacheBytesPerPChannel: 64MB # Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.
   walRecovery:
