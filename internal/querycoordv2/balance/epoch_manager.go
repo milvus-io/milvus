@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"hash/fnv"
@@ -705,11 +706,15 @@ func (manager *BalanceEpochManager) reconcileLocked(
 			state = EpochCompleted
 		}
 	}
+	if state == EpochTimedOut && len(nextCarry) == 0 && !hadFailure {
+		state = EpochCompleted
+	}
 	if len(nextCarry) != 0 && state != EpochTimedOut && state != EpochSuperseded {
 		state = EpochDegraded
-		if active.result.Err == nil {
-			active.result.Err = fmt.Errorf("%d balance object(s) remain ambiguous after reconciliation", len(nextCarry))
-		}
+		active.result.Err = errors.Join(
+			active.result.Err,
+			fmt.Errorf("%d balance object(s) remain ambiguous after reconciliation", len(nextCarry)),
+		)
 	}
 	return manager.finishLocked(runtime, active, state, active.result.Err)
 }
