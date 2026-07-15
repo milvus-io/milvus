@@ -1556,7 +1556,7 @@ VortexColumn::MakeFilePlanner(
 }
 
 std::shared_ptr<milvus_storage::vortex::VortexFormatReader>
-VortexColumn::OpenFileReader(
+VortexColumn::BuildFileReader(
     const VortexColumnGroup::FileState& group_file) const {
     auto projected_arrow_schema = MakeProjectedArrowSchema(
         group_file.footer_reader->file_schema(), field_name_);
@@ -1621,6 +1621,7 @@ VortexColumn::BuildFileState(
     FileState state;
     state.path = group_file.path;
     state.planner = MakeFilePlanner(group_file);
+    state.reader = BuildFileReader(group_file);
     state.slot = group_file.slot;
     state.rows = static_cast<int64_t>(state.planner->rows());
     state.memory_bytes = state.planner->memory_bytes();
@@ -1759,8 +1760,7 @@ VortexColumn::OpenDataScanForFile(milvus::OpContext* op_ctx,
                              static_cast<uint64_t>(start_offset),
                              static_cast<uint64_t>(start_offset + length));
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
-    auto vortex_reader = OpenFileReader(column_group_->files()[chunk_id]);
-    auto stream_result = vortex_reader->read_with_plan(plan.read_plan);
+    auto stream_result = file.reader->read_with_plan(plan.read_plan);
     AssertInfo(stream_result.ok(),
                "failed to open vortex data scan field {} chunk {}: {}",
                field_id_.get(),
@@ -1796,8 +1796,7 @@ VortexColumn::OpenRowIdScanForFile(milvus::OpContext* op_ctx,
                              static_cast<uint64_t>(start_offset + length),
                              predicate);
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
-    auto vortex_reader = OpenFileReader(column_group_->files()[chunk_id]);
-    auto stream_result = vortex_reader->read_row_ids_with_plan(plan.read_plan);
+    auto stream_result = file.reader->read_row_ids_with_plan(plan.read_plan);
     AssertInfo(stream_result.ok(),
                "failed to open vortex row id scan field {} chunk {}: {}",
                field_id_.get(),
@@ -1849,8 +1848,7 @@ VortexColumn::ScanStringLikeViewsFromFile(
                              static_cast<uint64_t>(start),
                              static_cast<uint64_t>(start + length));
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
-    auto vortex_reader = OpenFileReader(column_group_->files()[chunk_id]);
-    auto stream_result = vortex_reader->read_with_plan(plan.read_plan);
+    auto stream_result = file.reader->read_with_plan(plan.read_plan);
     AssertInfo(stream_result.ok(),
                "failed to open vortex string-like scan field {} chunk {}: {}",
                field_id_.get(),
@@ -1911,8 +1909,7 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
     const auto& file = files_[chunk_id];
     auto plan = PlanOffsets(file, offsets);
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
-    auto vortex_reader = OpenFileReader(column_group_->files()[chunk_id]);
-    auto stream_result = vortex_reader->read_with_plan(plan.read_plan);
+    auto stream_result = file.reader->read_with_plan(plan.read_plan);
     AssertInfo(stream_result.ok(),
                "failed to take vortex field {} chunk {}: {}",
                field_id_.get(),

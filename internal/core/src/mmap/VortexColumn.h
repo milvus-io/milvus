@@ -245,6 +245,7 @@ class VortexColumn final : public ChunkedColumnInterface {
     struct FileState {
         std::string path;
         std::shared_ptr<milvus_storage::vortex::VortexPlanner> planner;
+        std::shared_ptr<milvus_storage::vortex::VortexFormatReader> reader;
         std::shared_ptr<
             cachinglayer::CacheSlot<milvus_storage::vortex::VortexCellGuard>>
             slot;
@@ -290,7 +291,7 @@ class VortexColumn final : public ChunkedColumnInterface {
     MakeFilePlanner(const VortexColumnGroup::FileState& group_file) const;
 
     std::shared_ptr<milvus_storage::vortex::VortexFormatReader>
-    OpenFileReader(const VortexColumnGroup::FileState& group_file) const;
+    BuildFileReader(const VortexColumnGroup::FileState& group_file) const;
 
     void
     ValidateFileState(const FileState& state,
