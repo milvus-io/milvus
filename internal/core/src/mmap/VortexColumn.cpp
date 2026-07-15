@@ -17,8 +17,6 @@
 #include "mmap/VortexColumn.h"
 
 #include <algorithm>
-#include <iomanip>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -1443,75 +1441,14 @@ VortexColumn::QuoteSqlStringLiteral(std::string_view value) {
     return out;
 }
 
-bool
-VortexColumn::CanUseVortexPredicateLiteral(
-    DataType data_type, const proto::plan::GenericValue& value) {
-    switch (data_type) {
-        case DataType::BOOL:
-            return value.val_case() == proto::plan::GenericValue::kBoolVal;
-        case DataType::INT8:
-        case DataType::INT16:
-        case DataType::INT32:
-            return false;
-        case DataType::INT64:
-        case DataType::TIMESTAMPTZ:
-            return value.val_case() == proto::plan::GenericValue::kInt64Val;
-        case DataType::FLOAT:
-            return false;
-        case DataType::DOUBLE:
-            return value.val_case() == proto::plan::GenericValue::kFloatVal ||
-                   value.val_case() == proto::plan::GenericValue::kInt64Val;
-        case DataType::STRING:
-        case DataType::VARCHAR:
-        case DataType::TEXT:
-        case DataType::GEOMETRY:
-            return value.val_case() == proto::plan::GenericValue::kStringVal;
-        default:
-            return false;
-    }
-}
-
-std::string
-VortexColumn::FormatVortexDoubleLiteral(double value) {
-    std::ostringstream os;
-    os << std::setprecision(17) << value;
-    auto literal = os.str();
-    if (literal.find_first_of(".eE") == std::string::npos) {
-        literal += ".0";
-    }
-    return literal;
-}
-
 std::optional<std::string>
 VortexColumn::VortexLiteral(DataType data_type,
                             const proto::plan::GenericValue& value) {
-    if (!CanUseVortexPredicateLiteral(data_type, value)) {
+    if ((data_type != DataType::STRING && data_type != DataType::VARCHAR) ||
+        value.val_case() != proto::plan::GenericValue::kStringVal) {
         return std::nullopt;
     }
-    switch (data_type) {
-        case DataType::BOOL:
-            return value.bool_val() ? "true" : "false";
-        case DataType::INT8:
-        case DataType::INT16:
-        case DataType::INT32:
-        case DataType::INT64:
-        case DataType::TIMESTAMPTZ:
-            return std::to_string(value.int64_val());
-        case DataType::FLOAT:
-        case DataType::DOUBLE:
-            if (value.val_case() == proto::plan::GenericValue::kFloatVal) {
-                return FormatVortexDoubleLiteral(value.float_val());
-            }
-            return FormatVortexDoubleLiteral(
-                static_cast<double>(value.int64_val()));
-        case DataType::STRING:
-        case DataType::VARCHAR:
-        case DataType::TEXT:
-        case DataType::GEOMETRY:
-            return QuoteSqlStringLiteral(value.string_val());
-        default:
-            return std::nullopt;
-    }
+    return QuoteSqlStringLiteral(value.string_val());
 }
 
 std::optional<std::string>
@@ -1657,7 +1594,6 @@ VortexColumn::BuildFileState(
     state.reader = BuildFileReader(group_file);
     state.slot = group_file.slot;
     state.rows = static_cast<int64_t>(state.planner->rows());
-    state.memory_bytes = state.planner->memory_bytes();
     ValidateFileState(state, group_file);
     return state;
 }
@@ -2446,14 +2382,6 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
     // Predicate pushdown is deliberately limited to expressions that can be
     // represented by the Vortex reader. Unsupported predicates fail here
     // instead of silently scanning data through the RowId path.
-    if (!SupportsScanPushdown(options)) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "unsupported vortex row id scan predicate for field {} "
-                  "type {}",
-                  field_id_.get(),
-                  static_cast<int>(data_type_));
-    }
-
     auto predicate = BuildVortexPredicate(options);
     if (!predicate.has_value()) {
         ThrowInfo(ErrorCode::Unsupported,

@@ -253,7 +253,6 @@ class VortexColumn final : public ChunkedColumnInterface {
             cachinglayer::CacheSlot<milvus_storage::vortex::VortexCellGuard>>
             slot;
         int64_t rows = 0;
-        size_t memory_bytes = 0;
     };
 
     struct ArrowTakeResult;
@@ -272,13 +271,6 @@ class VortexColumn final : public ChunkedColumnInterface {
 
     static std::string
     QuoteSqlStringLiteral(std::string_view value);
-
-    static bool
-    CanUseVortexPredicateLiteral(DataType data_type,
-                                 const proto::plan::GenericValue& value);
-
-    static std::string
-    FormatVortexDoubleLiteral(double value);
 
     static std::optional<std::string>
     VortexLiteral(DataType data_type, const proto::plan::GenericValue& value);

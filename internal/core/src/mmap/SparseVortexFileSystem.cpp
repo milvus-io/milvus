@@ -16,6 +16,7 @@
 #include "mmap/SparseVortexFileSystem.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -400,13 +401,13 @@ class SparseVortexInputFile final : public arrow::io::RandomAccessFile {
 
     arrow::Status
     Close() override {
-        closed_ = true;
+        closed_.store(true, std::memory_order_release);
         return arrow::Status::OK();
     }
 
     bool
     closed() const override {
-        return closed_;
+        return closed_.load(std::memory_order_acquire);
     }
 
     arrow::Result<int64_t>
@@ -440,7 +441,7 @@ class SparseVortexInputFile final : public arrow::io::RandomAccessFile {
 
     arrow::Result<int64_t>
     ReadAt(int64_t position, int64_t nbytes, void* out) override {
-        if (closed_) {
+        if (closed()) {
             return arrow::Status::IOError("SparseVortexInputFile is closed");
         }
         return file_->ReadAt(position, nbytes, out);
@@ -448,7 +449,7 @@ class SparseVortexInputFile final : public arrow::io::RandomAccessFile {
 
     arrow::Result<std::shared_ptr<arrow::Buffer>>
     ReadAt(int64_t position, int64_t nbytes) override {
-        if (closed_) {
+        if (closed()) {
             return arrow::Status::IOError("SparseVortexInputFile is closed");
         }
         return file_->ReadAt(position, nbytes);
@@ -462,7 +463,7 @@ class SparseVortexInputFile final : public arrow::io::RandomAccessFile {
  private:
     std::shared_ptr<milvus_storage::vortex::VortexRangeFile> file_;
     int64_t position_ = 0;
-    bool closed_ = false;
+    std::atomic_bool closed_{false};
 };
 
 class SparseVortexFileSystem final

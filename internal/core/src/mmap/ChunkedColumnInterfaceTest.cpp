@@ -440,6 +440,32 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
+           BulkIsValidWithoutOffsetsTraversesNullableColumn) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
+    auto fx = TypeParam::Create(spec);
+
+    std::vector<std::pair<size_t, bool>> validity;
+    fx.column->BulkIsValid(
+        nullptr,
+        [&](bool valid, size_t offset) {
+            validity.emplace_back(offset, valid);
+        },
+        nullptr,
+        0);
+
+    EXPECT_EQ(validity,
+              (std::vector<std::pair<size_t, bool>>{
+                  {0, true},
+                  {1, false},
+                  {2, true},
+                  {3, false},
+                  {4, true},
+              }));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
            BulkVectorValueAtDefaultsToLogicalOffsetsForNullableColumn) {
     ColumnSpec spec{{5, 3, 4},
                     {{true, false, true, true, false},
