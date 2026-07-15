@@ -210,10 +210,6 @@ func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	)
 }
 
-func (s *L0Segment) RemoveUnusedFieldFiles() error {
-	panic("not implemented")
-}
-
 func (s *L0Segment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return nil
 }

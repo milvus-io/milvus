@@ -6591,6 +6591,23 @@ ChunkedSegmentSealedImpl::ApplySchemaForReopen(SchemaPtr sch) {
 }
 
 void
+ChunkedSegmentSealedImpl::CompactRuntimeLoadInfoForManifest() {
+    auto current = CapturePublishedState();
+    if (current == nullptr || current->load_info == nullptr ||
+        !current->load_info->HasManifestPath()) {
+        return;
+    }
+
+    auto compacted = std::make_shared<SegmentLoadInfo>(*current->load_info);
+    compacted->CompactRuntimeInfoForManifest();
+    auto published = std::const_pointer_cast<const SegmentLoadInfo>(compacted);
+    PublishReopenState(
+        current,
+        MakeStateDelta(
+            current->schema, published, current->runtime, current->commit_ts));
+}
+
+void
 ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
     milvus::OpContext* op_ctx,
     SegmentLoadInfo& segment_load_info,
@@ -6867,13 +6884,8 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     }
 
     SegmentLoadInfo current_mutable(*current->load_info);
-    SegmentLoadInfo new_local(current->load_info->GetProto(), sch);
-    new_local.InheritCachedColumnGroupsFrom(*current->load_info);
-    for (auto fid : current->load_info->GetCreatedTextIndexes()) {
-        if (field_exists_in_schema(sch, fid)) {
-            new_local.SetTextIndexCreated(fid);
-        }
-    }
+    SegmentLoadInfo new_local(*current->load_info);
+    new_local.ReplaceSchemaForReopen(sch);
 
     auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
@@ -6908,6 +6920,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
     committer.Publish(current, delta);
+    CompactRuntimeLoadInfoForManifest();
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }
@@ -6984,6 +6997,7 @@ ChunkedSegmentSealedImpl::Reopen(
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
     committer.Publish(current, delta);
+    CompactRuntimeLoadInfoForManifest();
 
     LOG_INFO("Reopen segment {} done", id_);
 }
@@ -8244,6 +8258,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
+    CompactRuntimeLoadInfoForManifest();
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
