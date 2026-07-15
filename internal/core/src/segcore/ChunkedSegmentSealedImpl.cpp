@@ -76,6 +76,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/TypeTraits.h"
+#include "common/Decimal.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/VectorArray.h"
@@ -4536,6 +4537,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(op_ctx,
                                          column.get(),
@@ -5619,6 +5621,25 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                     ->mutable_timestamptz_data()
                     ->mutable_data()
                     ->mutable_data());
+            break;
+        }
+        case DataType::DECIMAL: {
+            // Client-facing value is decimal text, unlike every other case
+            // here — fetch the raw unscaled int64 values into a temp buffer,
+            // then encode each back to text (mirror of the decode done once
+            // at insert time).
+            auto scale = field_meta.get_decimal_scale();
+            std::vector<int64_t> raw_values(count);
+            column->BulkPrimitiveValueAt(op_ctx,
+                                         static_cast<void*>(raw_values.data()),
+                                         seg_offsets,
+                                         count,
+                                         false);
+            auto dst =
+                ret->mutable_scalars()->mutable_bytes_data()->mutable_data();
+            for (int64_t i = 0; i < count; ++i) {
+                dst->at(i) = EncodeDecimalText(raw_values[i], scale);
+            }
             break;
         }
         case DataType::VECTOR_FLOAT: {
@@ -8715,6 +8736,20 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
             for (int64_t i = 0; i < size; i++) {
                 obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::DECIMAL: {
+            // External-table Decimal support (e.g. mapping an external Arrow
+            // Decimal128 column) is out of scope for now, same as this
+            // function's TIMESTAMPTZ case only supports the Int64 form —
+            // this only avoids a crash for an already-Int64-typed source,
+            // and does NOT convert back to decimal text like the native
+            // (non-external) result paths do.
+            auto obj = data_array->mutable_scalars()->mutable_bytes_data();
+            auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(std::to_string(typed->Value(result_mapping[i])));
             }
             break;
         }
