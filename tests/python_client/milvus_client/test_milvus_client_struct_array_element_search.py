@@ -788,7 +788,7 @@ class TestStructArrayElementHybridSearchNoFilter(StructArrayElementSearchBase):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
-                ct.err_msg: "range search is not supported for vector array (embedding-list) fields in hybrid search",
+                ct.err_msg: "range search is not supported for vector array fields",
             },
         )
 
@@ -829,6 +829,6 @@ class TestStructArrayElementHybridSearchNoFilter(StructArrayElementSearchBase):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
-                ct.err_msg: "group by search is not supported for vector array (embedding-list) fields in hybrid search",
+                ct.err_msg: "group by search is not supported for vector array fields",
             },
         )
