@@ -1491,11 +1491,24 @@ func shouldRemoveGranteeIDSubtree(ctx context.Context, granteePrefix string, idS
 }
 
 func (kc *Catalog) loadGranteeIDPrefix(ctx context.Context, tenant string, granteeKey string, idStr string) ([]string, []string, string, error) {
+	return kc.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, granteeKey, idStr, nil, nil)
+}
+
+func (kc *Catalog) loadGranteeIDPrefixWithLoadedGrantees(ctx context.Context, tenant string, granteeKey string, idStr string, granteeKeys []string, granteeValues []string) ([]string, []string, string, error) {
 	var firstPrefix string
 	newID := crypto.GranteeID(granteeKey)
 	if isLegacyGranteeID(idStr) && idStr != newID {
 		granteeIDKey := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, idStr)
-		otherGranteeKey, err := kc.findOtherGranteeWithID(ctx, tenant, granteeKey, idStr)
+		var (
+			otherGranteeKey string
+			err             error
+		)
+		if granteeKeys != nil {
+			granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+			otherGranteeKey, err = findOtherGranteeWithIDFromKeys(ctx, granteePrefix, granteeKey, idStr, granteeKeys, granteeValues)
+		} else {
+			otherGranteeKey, err = kc.findOtherGranteeWithID(ctx, tenant, granteeKey, idStr)
+		}
 		if err != nil {
 			return nil, nil, granteeIDKey, err
 		}
@@ -1981,7 +1994,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 			continue
 		}
 		logicalGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
-		idKeys, _, granteeIDKey, err := kc.loadGranteeIDPrefix(ctx, tenant, logicalGranteeKey, values[i])
+		idKeys, _, granteeIDKey, err := kc.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, logicalGranteeKey, values[i], keys, values)
 		if err != nil {
 			mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", granteeIDKey), mlog.Err(err))
 			return []*milvuspb.GrantEntity{}, err
