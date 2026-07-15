@@ -705,6 +705,14 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// Manifest is written to S3 so DataNodes can read file info by range.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
+		// Transient storage failures are also wrapped as ErrStorage by the packed
+		// layer, so check the transient sentinel before classifying permanent
+		// storage failures below. Returning a regular error keeps the job in Init
+		// for the checker to retry.
+		if errors.Is(err, packed.ErrLoonTransient) {
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
+		}
+
 		// Hard explore failures are terminal for this job: the source is
 		// unreachable, denied, malformed, absent, or its snapshot metadata
 		// is incompatible with the requested external format. Surface them
@@ -713,7 +721,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		// in-process errors (ctx cancel, etcd unavailable, etc.) keep the
 		// existing transient path so a real outage still gets retried.
 		if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
-			errors.Is(err, packed.ErrLoonTransient) ||
+			errors.Is(err, merr.ErrStorage) ||
 			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}
