@@ -7,7 +7,13 @@ fields, complementing test_milvus_client_struct_array_element_query.py:
 - string predicates on a varchar sub-field: == and like-prefix
 - compound predicates across two sub-fields inside one element
 - element_filter(sa, p) row-set equivalence with MATCH_ANY(sa, p)
+- array_contains / array_contains_any / array_contains_all desugar behavior,
+  including contains_all([]) IS-NOT-NULL semantics (vacuous true for real
+  arrays, NULL row excluded) and the documented rejection of contains_all with
+  a template placeholder list
 - `not MATCH_*` with nullable rows (NULL row stays excluded under negation)
+- scalar/struct ARRAY NULL parity: the same logical data in both array shapes
+  must answer the same MATCH query identically
 """
 
 import pytest
@@ -82,8 +88,9 @@ def match_pks(match_type, pred, threshold=None, negated=False, profiles=KNOWN_PR
 
 
 class TestMilvusClientStructArrayMatch(TestMilvusClientV2Base):
-    """Quantified MATCH_* / element_filter on a struct array field with an int
-    and a varchar sub-field, over nullable rows and empty struct arrays."""
+    """Quantified MATCH_* / element_filter / array_contains* on a struct array
+    field with an int and a varchar sub-field, over nullable rows and empty
+    struct arrays."""
 
     def _build_collection(self, client):
         collection_name = cf.gen_unique_str(prefix)
@@ -260,6 +267,66 @@ class TestMilvusClientStructArrayMatch(TestMilvusClientV2Base):
             )
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_struct_array_contains_desugar(self):
+        """
+        target: test array_contains/any/all on struct sub-fields (desugared to MATCH_ANY)
+        method: compare each contains form with its MATCH_ANY equivalent; check the
+                contains_all([]) vacuous-true fast path and the documented rejection of
+                contains_all with a template placeholder list
+        expected: contains == MATCH_ANY equality-row set; contains_all([]) has
+                  IS NOT NULL semantics (every real array incl. empty [], NULL
+                  row excluded); template list rejected
+        """
+        client = self._client()
+        collection_name = self._build_collection(client)
+
+        # array_contains(profile[p_int], 2) desugars to MATCH_ANY(profile, $[p_int] == 2)
+        expected = match_pks("ANY", lambda e: e[INT_SUBFIELD] == 2)
+        assert expected == [0, 1]
+        contains_pks = self._query_pks(client, collection_name, f"array_contains({STRUCT_FIELD}[{INT_SUBFIELD}], 2)")
+        match_any_pks = self._query_pks(client, collection_name, f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] == 2)")
+        assert contains_pks == match_any_pks == expected
+
+        # array_contains_any(profile[p_tag], ["x", "z"]) -> pk 0, pk 1, pk 5
+        expected = match_pks("ANY", lambda e: e[STR_SUBFIELD] in ["x", "z"])
+        assert expected == [0, 1, 5]
+        self._check_match(
+            client, collection_name, f'array_contains_any({STRUCT_FIELD}[{STR_SUBFIELD}], ["x", "z"])', expected
+        )
+
+        # array_contains_all(profile[p_int], [1, 2]) -> rows holding both values -> pk 0
+        expected = [
+            pk
+            for pk, profile in enumerate(KNOWN_PROFILES)
+            if profile is not None and all(v in [e[INT_SUBFIELD] for e in profile] for v in [1, 2])
+        ]
+        assert expected == [0]
+        self._check_match(
+            client, collection_name, f"array_contains_all({STRUCT_FIELD}[{INT_SUBFIELD}], [1, 2])", expected
+        )
+
+        # array_contains_all(profile[p_int], []) has IS NOT NULL semantics:
+        # vacuously true for every REAL array — including the empty-array row
+        # (pk 3) — but UNKNOWN for the NULL row (pk 4), which is excluded
+        # (pg: `arr @> '{}'` is strict, NULL @> '{}' yields NULL, not true).
+        expected = [pk for pk, profile in enumerate(KNOWN_PROFILES) if profile is not None]
+        assert expected == [0, 1, 2, 3, 5]
+        self._check_match(client, collection_name, f"array_contains_all({STRUCT_FIELD}[{INT_SUBFIELD}], [])", expected)
+
+        # Documented divergence: contains_all with a template placeholder list is
+        # rejected on struct sub-fields (the desugar expands values at parse time).
+        error = {ct.err_code: 1100, ct.err_msg: "template placeholder list"}
+        self.query(
+            client,
+            collection_name,
+            filter=f"array_contains_all({STRUCT_FIELD}[{INT_SUBFIELD}], {{vals}})",
+            filter_params={"vals": [1, 2]},
+            output_fields=[PK_FIELD],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_struct_array_match_not_with_nullable(self):
         """
         target: test `not MATCH_*` three-valued semantics with nullable struct rows
@@ -281,3 +348,133 @@ class TestMilvusClientStructArrayMatch(TestMilvusClientV2Base):
         expected = match_pks("ALL", lambda e: e[INT_SUBFIELD] >= 1, negated=True)
         assert expected == [2]
         self._check_match(client, collection_name, f"not MATCH_ALL({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 1)", expected)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_struct_array_match_template(self):
+        """
+        target: test a template placeholder inside a struct MATCH_* element predicate
+        method: query MATCH_ANY(profile, $[p_int] == {v}) with filter_params
+        expected: results identical to the literal expression
+        """
+        client = self._client()
+        collection_name = self._build_collection(client)
+
+        expected = match_pks("ANY", lambda e: e[INT_SUBFIELD] == 2)
+        assert expected == [0, 1]
+        actual = self._query_pks(
+            client,
+            collection_name,
+            f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] == {{v}})",
+            filter_params={"v": 2},
+        )
+        assert actual == expected, f"template MATCH_ANY: expected {expected}, got {actual}"
+        log.info("struct MATCH template placeholder assertion passed")
+
+
+class TestMilvusClientArrayStructNullMatch(TestMilvusClientV2Base):
+    """The same logical data stored in scalar and struct arrays must answer the
+    same MATCH query with identical row sets, including NULL and empty []."""
+
+    ARRAY_FIELD = "arr_int"
+
+    # Logical rows (pk = index): a real [1, 2] array, a real empty array, a NULL.
+    LOGICAL_ARRAYS = [[1, 2], [], None]
+
+    def _build_collection(self, client):
+        collection_name = cf.gen_unique_str(f"{prefix}_cross")
+
+        schema, _ = self.create_schema(client, auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name=PK_FIELD, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=VECTOR_FIELD, datatype=DataType.FLOAT_VECTOR, dim=VECTOR_DIM)
+        schema.add_field(
+            field_name=self.ARRAY_FIELD,
+            datatype=DataType.ARRAY,
+            element_type=DataType.INT64,
+            max_capacity=STRUCT_MAX_CAPACITY,
+            nullable=True,
+        )
+        struct_schema, _ = self.create_struct_field_schema(client)
+        struct_schema.add_field(INT_SUBFIELD, DataType.INT64)
+        schema.add_field(
+            STRUCT_FIELD,
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=STRUCT_MAX_CAPACITY,
+            nullable=True,
+        )
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        vectors = cf.gen_vectors(len(self.LOGICAL_ARRAYS), VECTOR_DIM)
+        rows = []
+        for pk, values in enumerate(self.LOGICAL_ARRAYS):
+            rows.append(
+                {
+                    PK_FIELD: pk,
+                    VECTOR_FIELD: list(vectors[pk]),
+                    self.ARRAY_FIELD: values,
+                    STRUCT_FIELD: None if values is None else [{INT_SUBFIELD: v} for v in values],
+                }
+            )
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(field_name=VECTOR_FIELD, **FLAT_INDEX)
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        return collection_name
+
+    def _query_pks(self, client, collection_name, expr):
+        res, _ = self.query(client, collection_name, filter=expr, output_fields=[PK_FIELD])
+        return sorted(row[PK_FIELD] for row in res)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_array_struct_null_and_empty_parity(self):
+        """
+        target: verify NULL / empty-[] MATCH semantics are identical across scalar
+                and struct ARRAY containers
+        method: store the same logical arrays in both containers, run the same
+                logical MATCH query against each, compare the two row sets
+        expected: both containers return the same pks; the NULL row (pk 2) never
+                  appears (even under `not`), the [] row (pk 1) follows vacuous rules
+        """
+        client = self._client()
+        collection_name = self._build_collection(client)
+
+        # (description, scalar-array expr, struct-array expr, expected pks)
+        cases = [
+            (
+                "MATCH_ANY $ > 0: only the real non-empty array",
+                f"MATCH_ANY({self.ARRAY_FIELD}, $ > 0)",
+                f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] > 0)",
+                [0],
+            ),
+            (
+                "MATCH_ALL $ >= 1: [] is vacuously true, NULL is excluded",
+                f"MATCH_ALL({self.ARRAY_FIELD}, $ >= 1)",
+                f"MATCH_ALL({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 1)",
+                [0, 1],
+            ),
+            (
+                "not MATCH_ANY $ > 5: NULL stays excluded under negation",
+                f"not MATCH_ANY({self.ARRAY_FIELD}, $ > 5)",
+                f"not MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] > 5)",
+                [0, 1],
+            ),
+            (
+                "MATCH_MOST threshold=0 $ > 0: only the empty array has zero matches",
+                f"MATCH_MOST({self.ARRAY_FIELD}, $ > 0, threshold=0)",
+                f"MATCH_MOST({STRUCT_FIELD}, $[{INT_SUBFIELD}] > 0, threshold=0)",
+                [1],
+            ),
+        ]
+
+        for description, array_expr, struct_expr, expected in cases:
+            array_pks = self._query_pks(client, collection_name, array_expr)
+            struct_pks = self._query_pks(client, collection_name, struct_expr)
+            assert array_pks == struct_pks == expected, (
+                f"{description}: scalar={array_pks} struct={struct_pks} expected={expected}"
+            )
+            log.info(f"scalar/struct array parity ok: {description} -> {expected}")

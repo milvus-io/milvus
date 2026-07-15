@@ -39,6 +39,8 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
 	case *planpb.Expr_GisfunctionFilterExpr:
 		return FillGISFunctionFilterExpressionValue(e.GisfunctionFilterExpr, templateValues)
+	case *planpb.Expr_MatchExpr:
+		return FillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
 	case *planpb.Expr_ElementFilterExpr:
 		if err := FillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
 			return err

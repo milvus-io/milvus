@@ -1242,6 +1242,12 @@ PhyTermFilterExpr::DetermineExecPath() {
     }
 
     SegmentExpr::DetermineExecPath();
+    // MATCH_*/element_filter child ($ predicate) is element-level: it can only
+    // use a nested index.
+    if (expr_->column_.element_level_ &&
+        exec_path_ == ExprExecPath::ScalarIndex && !PinnedIndexIsNested()) {
+        FallbackToRawDataExecPath();
+    }
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
     }
@@ -1253,7 +1259,7 @@ PhyTermFilterExpr::DetermineExecPath() {
 
     // ARRAY type cannot use scalar index
     if (data_type == DataType::ARRAY) {
-        exec_path_ = ExprExecPath::RawData;
+        FallbackToRawDataExecPath();
     }
 }
 

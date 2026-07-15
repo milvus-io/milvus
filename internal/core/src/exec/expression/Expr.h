@@ -2625,6 +2625,24 @@ class SegmentExpr : public Expr {
         return index_ptr != nullptr && index_ptr->IsNestedIndex();
     }
 
+    // Downgrade to the RawData path AND release the already-pinned scalar
+    // index. The element-level / nested-vs-row-level mismatch guards of
+    // element-capable exprs necessarily run AFTER
+    // SegmentExpr::DetermineExecPath() has pinned the index, so they must
+    // release the pin when they bail out: this keeps the invariant
+    // "pinned_index_ is non-empty iff exec_path_ == ScalarIndex" (see
+    // DetermineExecPath) and stops the cache cell from staying pinned for
+    // the whole query. This is the rolling-upgrade correctness fallback
+    // shared by all element-capable exprs: a legacy row-level array index
+    // cannot serve an element-level predicate (and vice versa), so we fall
+    // back to brute force over raw data.
+    void
+    FallbackToRawDataExecPath() {
+        exec_path_ = ExprExecPath::RawData;
+        pinned_index_.clear();
+        num_index_chunk_ = 0;
+    }
+
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
     bool is_pk_field_{false};
