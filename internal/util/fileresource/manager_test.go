@@ -309,6 +309,34 @@ func (suite *RefManagerSuite) TestNormal() {
 	suite.NoFileExists(filePath)
 }
 
+func (suite *RefManagerSuite) TestDownloadErrorRollsBackReferences() {
+	const rootPath = "/test/storage"
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 1, Name: "test1", Path: "/storage/test1.file"},
+		{Id: 2, Name: "test2", Path: "/storage/test2.file"},
+	}
+
+	suite.mockStorage.EXPECT().RootPath().Return(rootPath)
+	suite.mockStorage.EXPECT().Reader(context.Background(), resources[0].GetPath()).Return(newMockReader("test content"), nil)
+	suite.mockStorage.EXPECT().Reader(context.Background(), resources[1].GetPath()).Return(nil, io.ErrUnexpectedEOF)
+
+	err := suite.manager.Download(context.Background(), suite.mockStorage, resources...)
+	suite.ErrorIs(err, io.ErrUnexpectedEOF)
+
+	firstKey := fmt.Sprintf("%s/%d", rootPath, resources[0].GetId())
+	secondKey := fmt.Sprintf("%s/%d", rootPath, resources[1].GetId())
+	suite.Equal(0, suite.manager.ref[firstKey])
+	suite.Equal(0, suite.manager.ref[secondKey])
+
+	firstFilePath := path.Join(suite.tempDir, firstKey, path.Base(resources[0].GetPath()))
+	suite.FileExists(firstFilePath)
+
+	suite.manager.CleanResource()
+	suite.NotContains(suite.manager.ref, firstKey)
+	suite.NotContains(suite.manager.ref, secondKey)
+	suite.NoFileExists(firstFilePath)
+}
+
 func (suite *RefManagerSuite) TestMode() {
 	mode := suite.manager.Mode()
 	suite.Equal(RefMode, mode)
