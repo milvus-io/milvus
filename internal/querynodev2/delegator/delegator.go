@@ -73,6 +73,7 @@ type ShardDelegator interface {
 	Collection() int64
 	Version() int64
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
+	NotServingSealedSegments() (segmentIDs []int64, ok bool)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	SyncPartitionStats(ctx context.Context, partVersions map[int64]int64)
 	GetPartitionStatsVersions(ctx context.Context) map[int64]int64
@@ -230,6 +231,11 @@ func (sd *shardDelegator) Version() int64 {
 // GetSegmentInfo returns current segment distribution snapshot.
 func (sd *shardDelegator) GetSegmentInfo(readable bool) ([]SnapshotItem, []SegmentEntry) {
 	return sd.distribution.PeekSegments(readable)
+}
+
+// NotServingSealedSegments returns the loaded sealed segments the delegator is not serving.
+func (sd *shardDelegator) NotServingSealedSegments() ([]int64, bool) {
+	return sd.distribution.NotServingSealedSegments()
 }
 
 // SyncDistribution revises distribution.

@@ -294,6 +294,36 @@ func (d *distribution) Serviceable() bool {
 	return d.queryView.Serviceable()
 }
 
+// ServedFromNode: is this segment still in the readable snapshot AND served from that
+// node? The holder is the only party that knows at the moment the release actually runs.
+func (d *distribution) ServedFromNode(segmentID int64, nodeID int64) bool {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	if _, readable := d.queryView.sealedSegmentRowCount[segmentID]; !readable {
+		return false
+	}
+	entry, ok := d.sealedSegments[segmentID]
+	return ok && !entry.Offline && entry.NodeID == nodeID
+}
+
+// NotServingSealedSegments: loaded sealed segments outside the readable snapshot.
+func (d *distribution) NotServingSealedSegments() ([]int64, bool) {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	if !d.queryView.syncedByCoord || d.queryView.version == initialTargetVersion {
+		return nil, false
+	}
+	notServing := make([]int64, 0)
+	for segmentID := range d.sealedSegments {
+		if _, readable := d.queryView.sealedSegmentRowCount[segmentID]; !readable {
+			notServing = append(notServing, segmentID)
+		}
+	}
+	return notServing, true
+}
+
 // for now, delegator become serviceable only when watchDmChannel is done
 // so we regard all needed growing is loaded and we compute loadRatio based on sealed segments
 func (d *distribution) updateServiceable(triggerAction string) {

@@ -1532,6 +1532,63 @@ func (_c *MockShardDelegator_Version_Call) RunAndReturn(run func() int64) *MockS
 	return _c
 }
 
+// NotServingSealedSegments provides a mock function with no fields
+func (_m *MockShardDelegator) NotServingSealedSegments() ([]int64, bool) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for NotServingSealedSegments")
+	}
+
+	var r0 []int64
+	var r1 bool
+	if rf, ok := ret.Get(0).(func() ([]int64, bool)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() bool); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockShardDelegator_NotServingSealedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NotServingSealedSegments'
+type MockShardDelegator_NotServingSealedSegments_Call struct {
+	*mock.Call
+}
+
+// NotServingSealedSegments is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) NotServingSealedSegments() *MockShardDelegator_NotServingSealedSegments_Call {
+	return &MockShardDelegator_NotServingSealedSegments_Call{Call: _e.mock.On("NotServingSealedSegments")}
+}
+
+func (_c *MockShardDelegator_NotServingSealedSegments_Call) Run(run func()) *MockShardDelegator_NotServingSealedSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_NotServingSealedSegments_Call) Return(segmentIDs []int64, ok bool) *MockShardDelegator_NotServingSealedSegments_Call {
+	_c.Call.Return(segmentIDs, ok)
+	return _c
+}
+
+func (_c *MockShardDelegator_NotServingSealedSegments_Call) RunAndReturn(run func() ([]int64, bool)) *MockShardDelegator_NotServingSealedSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockShardDelegator creates a new instance of MockShardDelegator. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockShardDelegator(t interface {
