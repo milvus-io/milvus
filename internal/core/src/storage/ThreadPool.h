@@ -26,12 +26,12 @@
 #include <condition_variable>
 #include <functional>
 #include <future>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <ostream>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 
 #include <prometheus/counter.h>
@@ -171,15 +171,10 @@ class ThreadPool {
             observe_execute();
         };
 
-        work_queue_.enqueue(wrap_func);
-        if (metric_submitted_) {
-            metric_submitted_->Increment();
-        }
-        if (metric_queue_depth_) {
-            metric_queue_depth_->Set(work_queue_.size());
-        }
+        auto future = task_ptr->get_future();
 
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::unique_lock<std::mutex> lock(mutex_);
+        work_queue_.enqueue(std::move(wrap_func));
 
         if (idle_threads_size_ > 0) {
             condition_lock_.notify_one();
@@ -187,13 +182,37 @@ class ThreadPool {
         if (work_queue_.size() > static_cast<size_t>(idle_threads_size_) &&
             current_threads_size_ < max_threads_size_.load()) {
             // Dynamic increase thread number
-            std::thread t(&ThreadPool::Worker, this);
-            assert(threads_.find(t.get_id()) == threads_.end());
-            threads_[t.get_id()] = std::move(t);
-            current_threads_size_++;
+            try {
+                if (worker_spawn_hook_for_test_) {
+                    worker_spawn_hook_for_test_();
+                }
+                threads_.emplace_back(&ThreadPool::Worker, this);
+                current_threads_size_++;
+            } catch (const std::exception& e) {
+                LOG_WARN(
+                    "Failed to expand thread pool {}: {}", name_, e.what());
+            } catch (...) {
+                LOG_WARN("Failed to expand thread pool {}", name_);
+            }
+        }
+        lock.unlock();
+
+        try {
+            if (metric_submitted_) {
+                metric_submitted_->Increment();
+            }
+            if (metric_queue_depth_) {
+                metric_queue_depth_->Set(work_queue_.size());
+            }
+        } catch (const std::exception& e) {
+            LOG_WARN("Failed to update thread pool {} submit metrics: {}",
+                     name_,
+                     e.what());
+        } catch (...) {
+            LOG_WARN("Failed to update thread pool {} submit metrics", name_);
         }
 
-        return task_ptr->get_future();
+        return future;
     }
 
     void
@@ -253,7 +272,7 @@ class ThreadPool {
     bool shutdown_;
     static constexpr size_t WAIT_SECONDS = 2;
     SafeQueue<std::function<void()>> work_queue_;
-    std::unordered_map<std::thread::id, std::thread> threads_;
+    std::list<std::thread> threads_;
     SafeQueue<std::thread::id> need_finish_threads_;
     std::mutex mutex_;
     std::condition_variable condition_lock_;
@@ -268,6 +287,12 @@ class ThreadPool {
     prometheus::Counter* metric_completed_{nullptr};
     prometheus::Histogram* metric_queue_duration_{nullptr};
     prometheus::Histogram* metric_execute_duration_{nullptr};
+
+ private:
+    friend class ThreadPoolTest_WorkerSpawnFailureDoesNotFailQueuedTask_Test;
+
+    // Deterministic test seam for worker-spawn failure coverage.
+    std::function<void()> worker_spawn_hook_for_test_;
 };
 
 }  // namespace milvus

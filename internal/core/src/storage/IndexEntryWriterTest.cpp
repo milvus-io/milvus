@@ -1424,6 +1424,77 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesStreamToFilesRunsFilesConcurrently) {
     ::unlink(file_c.c_str());
 }
 
+TEST_F(IndexEntryWriterV3Test,
+       ReadEntriesStreamBudgetWaitDoesNotOccupyLoadPoolWorker) {
+    const std::string file_path = kV3FilePath + "_stream_budget_admission";
+    const size_t entry_size = kMinStreamSliceSize;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(entry_size);
+    budget.Acquire(entry_size);
+    bool budget_held = true;
+    auto budget_cleanup = folly::makeGuard([&]() {
+        if (budget_held) {
+            budget.Release(entry_size);
+        }
+        budget.SetCapacityBytes(old_capacity);
+    });
+
+    auto pool_priority = milvus::ThreadPoolPriority::LOW;
+    auto& pool = milvus::ThreadPools::GetThreadPool(pool_priority);
+    auto old_max_threads = pool.GetMaxThreadNum();
+    auto cpu_num = std::max(1, milvus::CPU_NUM);
+    milvus::ThreadPools::ResizeThreadPool(pool_priority,
+                                          1.0F / static_cast<float>(cpu_num));
+    auto pool_cleanup =
+        folly::makeGuard([pool_priority, old_max_threads, cpu_num]() {
+            milvus::ThreadPools::ResizeThreadPool(
+                pool_priority,
+                static_cast<float>(old_max_threads) /
+                    static_cast<float>(cpu_num));
+        });
+    ASSERT_EQ(pool.GetMaxThreadNum(), 1);
+    if (pool.GetThreadNum() > 1) {
+        GTEST_SKIP() << "LOW load thread pool already has more than one worker";
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size, 0, milvus::LOW);
+    std::string local_file = GetRootPath() + "/stream_budget_admission.bin";
+    auto load_future = std::async(std::launch::async, [&]() {
+        reader->ReadEntriesStreamToFiles({{"data", local_file}},
+                                         milvus::storage::io::Priority::LOW);
+    });
+
+    EXPECT_EQ(load_future.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    auto marker_future = pool.Submit([]() {});
+    auto marker_status = marker_future.wait_for(std::chrono::milliseconds(200));
+
+    budget.Release(entry_size);
+    budget_held = false;
+
+    ASSERT_EQ(load_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    load_future.get();
+    ASSERT_EQ(marker_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    marker_future.get();
+    EXPECT_EQ(marker_status, std::future_status::ready);
+
+    ::unlink(local_file.c_str());
+}
+
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamConsumerExceptionDoesNotLeak) {
     const std::string file_path = kV3FilePath + "_stream_consumer_throw";
     const size_t slice_size = 64 * 1024;
