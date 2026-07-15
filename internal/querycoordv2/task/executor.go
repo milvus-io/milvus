@@ -279,7 +279,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	startTs := time.Now()
 	mlog.Info(context.TODO(), "load segments...")
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
-	err = merr.CheckRPCCall(status, err)
+	err = checkBalanceRPCCall(status, err)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to load segment", mlog.Err(err))
 		return err
@@ -377,7 +377,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 
 	mlog.Info(context.TODO(), "release segment...")
 	status, err := ex.cluster.ReleaseSegments(ctx, dstNode, req)
-	err = merr.CheckRPCCall(status, err)
+	err = checkBalanceRPCCall(status, err)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to release segment", mlog.Err(err))
 		return
@@ -486,6 +486,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	)
 	status, err := ex.cluster.WatchDmChannels(ctx, action.Node(), req)
 	if err != nil {
+		err = checkBalanceRPCCall(status, err)
 		mlog.Warn(context.TODO(), "failed to subscribe channel, it may be a false failure", mlog.Err(err))
 		return err
 	}
@@ -497,6 +498,16 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	elapsed := time.Since(startTs)
 	mlog.Info(context.TODO(), "subscribe channel done", mlog.Int64("taskID", task.ID()), mlog.Duration("time taken", elapsed))
 	return nil
+}
+
+func checkBalanceRPCCall(status *commonpb.Status, err error) error {
+	if err != nil {
+		if session.IsRPCNotSentError(err) {
+			return err
+		}
+		return NewAmbiguousExecutionError(err)
+	}
+	return merr.CheckRPCCall(status, nil)
 }
 
 func (ex *Executor) shouldIncludeFlushedSegmentInfo(nodeID int64) bool {
@@ -525,6 +536,7 @@ func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 	mlog.Info(context.TODO(), "unsubscribe channel...")
 	status, err := ex.cluster.UnsubDmChannel(ctx, action.Node(), req)
 	if err != nil {
+		err = checkBalanceRPCCall(status, err)
 		mlog.Warn(context.TODO(), "failed to unsubscribe channel, it may be a false failure", mlog.Err(err))
 		return err
 	}

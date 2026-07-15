@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -179,6 +181,8 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 	switch testName {
 	case "TestSubscribeChannelTask",
 		"TestUnsubscribeChannelTask",
+		"TestExecutorRawLoadSegmentsErrorIsAmbiguous",
+		"TestExecutorRawWatchDmChannelsErrorIsAmbiguous",
 		"TestLoadSegmentTask",
 		"TestLoadSegmentTaskNotIndex",
 		"TestSegmentTaskWaitsDistAfterLoadRPC",
@@ -263,6 +267,247 @@ func (suite *TaskSuite) TestTaskDoneClosesOnTerminalState() {
 			suite.ErrorIs(task.Err(), terminalErr)
 		})
 	}
+}
+
+func (suite *TaskSuite) TestExecutorRawLoadSegmentsErrorIsAmbiguous() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.loadSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-ambiguous-load",
+	}
+	rpcErr := status.Error(codes.Unavailable, "load response lost")
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestExecutorRawLoadSegmentsErrorIsAmbiguous",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		},
+	}, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).
+		Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{{
+		ID: segmentID, CollectionID: suite.collection, PartitionID: 1, InsertChannel: channel.ChannelName,
+	}}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segmentID).Return(nil, nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName,
+			Status: &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID: segmentID, CollectionID: suite.collection, PartitionID: 1, InsertChannel: channel.ChannelName,
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).
+		Return([]*datapb.VchannelInfo{channel}, []*datapb.SegmentInfo{segmentInfo}, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeGrow, channel.ChannelName, segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.Unavailable, status.Code(err))
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRawReleaseSegmentsErrorIsAmbiguous() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.releaseSegments[0]
+	channelName := Params.CommonCfg.RootCoordDml.GetValue() + "-ambiguous-release"
+	rpcErr := status.Error(codes.DeadlineExceeded, "release response lost")
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(
+		suite.collection, 1, segmentID, targetNode, 1, channelName,
+	))
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, channelName, segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.DeadlineExceeded, status.Code(err))
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRawWatchDmChannelsErrorIsAmbiguous() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	channel := &datapb.VchannelInfo{CollectionID: suite.collection, ChannelName: "ambiguous-watch"}
+	rpcErr := status.Error(codes.Unavailable, "watch response lost")
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{Name: "TestExecutorRawWatchDmChannelsErrorIsAmbiguous"},
+	}, nil)
+	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
+		Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return(nil, nil)
+	suite.cluster.EXPECT().WatchDmChannels(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).
+		Return([]*datapb.VchannelInfo{channel}, nil, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	balanceTask, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		NewChannelAction(targetNode, ActionTypeGrow, channel.ChannelName),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.Unavailable, status.Code(err))
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRawUnsubDmChannelErrorIsAmbiguous() {
+	ctx := context.Background()
+	sourceNode := int64(1)
+	channel := &datapb.VchannelInfo{CollectionID: suite.collection, ChannelName: "ambiguous-unsub"}
+	rpcErr := status.Error(codes.DeadlineExceeded, "unsubscribe response lost")
+
+	suite.cluster.EXPECT().UnsubDmChannel(mock.Anything, sourceNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.dist.ChannelDistManager.Update(sourceNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         sourceNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID: sourceNode, CollectionID: suite.collection, Channel: channel.ChannelName,
+			Status: &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	balanceTask, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		NewChannelAction(sourceNode, ActionTypeReduce, channel.ChannelName),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(sourceNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.DeadlineExceeded, status.Code(err))
+
+	suite.scheduler.Dispatch(sourceNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRPCNotSentReleaseErrorIsDefinitive() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.releaseSegments[0]
+	sentinel := errors.New("query node client unavailable before dispatch")
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), session.NewRPCNotSentError(sentinel)).Once()
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, "definitive-pre-dispatch", segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.False(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, sentinel)
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorNonOKReleaseStatusIsDefinitive() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.releaseSegments[0]
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "release rejected",
+	}, nil).Once()
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, "definitive-status", segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.False(IsAmbiguousExecutionError(err))
+	suite.ErrorContains(err, "release rejected")
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
 }
 
 func (suite *TaskSuite) TestSubscribeChannelTask() {
@@ -1686,6 +1931,17 @@ func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 	suite.Equal(scheduler.channelTasks.Len(), channel)
 	suite.Equal(scheduler.tasks.Len(), process+wait)
 	suite.Equal(scheduler.tasks.Len(), segment+channel)
+}
+
+func (suite *TaskSuite) waitForTaskTerminal(balanceTask Task) error {
+	suite.T().Helper()
+	select {
+	case <-balanceTask.Done():
+		return balanceTask.Err()
+	case <-time.After(10 * time.Second):
+		suite.FailNow("task did not reach a terminal state")
+		return nil
+	}
 }
 
 func (suite *TaskSuite) dispatchAndWait(node int64) {
