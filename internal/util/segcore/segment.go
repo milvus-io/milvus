@@ -136,6 +136,20 @@ func (s *cSegmentImpl) HasFieldData(fieldID int64) bool {
 	return bool(ret)
 }
 
+// UpdateIndexMeta replaces the segment's collection index meta (monotonic by version).
+func (s *cSegmentImpl) UpdateIndexMeta(indexMetaBlob []byte, version uint64) error {
+	if len(indexMetaBlob) == 0 {
+		return nil
+	}
+	status := C.UpdateSegmentIndexMeta(
+		s.ptr,
+		(*C.uint8_t)(unsafe.Pointer(&indexMetaBlob[0])),
+		C.int64_t(len(indexMetaBlob)),
+		C.uint64_t(version),
+	)
+	return ConsumeCStatusIntoError(&status)
+}
+
 // Search requests a search on the segment.
 // If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {

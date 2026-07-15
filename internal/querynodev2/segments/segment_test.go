@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -652,6 +653,37 @@ func (suite *SegmentSuite) TestFlushDataPartialRange() {
 		suite.NotNil(result)
 		suite.Equal(end-start, result.NumRows)
 	}
+}
+
+func (suite *SegmentSuite) TestUpdateIndexMeta() {
+	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.collection.Schema())
+	blob, err := proto.Marshal(indexMeta)
+	suite.Require().NoError(err)
+
+	// empty blob is a no-op on both segment types.
+	suite.NoError(suite.sealed.UpdateIndexMetaBlob(nil, 100))
+	suite.NoError(suite.growing.UpdateIndexMetaBlob(nil, 100))
+
+	// A newer version pushes the marshaled meta through cgo into the segment's
+	// index meta: sealed swaps col_index_meta_, growing swaps the indexing record's
+	// index_meta_ — both return success.
+	suite.NoError(suite.sealed.UpdateIndexMetaBlob(blob, 100))
+	suite.NoError(suite.growing.UpdateIndexMetaBlob(blob, 100))
+
+	// A stale (older-or-equal) version is silently skipped by the segment's
+	// monotonic guard — still no error.
+	suite.NoError(suite.sealed.UpdateIndexMetaBlob(blob, 50))
+	suite.NoError(suite.sealed.UpdateIndexMetaBlob(blob, 100))
+}
+
+func TestL0SegmentUpdateIndexMeta(t *testing.T) {
+	// L0 segments carry no field index meta; UpdateIndexMetaBlob is always a no-op.
+	l0 := &L0Segment{}
+	assert.NoError(t, l0.UpdateIndexMetaBlob(nil, 0))
+	blob, err := proto.Marshal(
+		mock_segcore.GenTestIndexMeta(1, mock_segcore.GenTestCollectionSchema("l0", schemapb.DataType_Int64, false)))
+	assert.NoError(t, err)
+	assert.NoError(t, l0.UpdateIndexMetaBlob(blob, 100))
 }
 
 func TestSegment(t *testing.T) {

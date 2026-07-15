@@ -174,9 +174,11 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         std::map<std::string, std::string> index_info;
         if (metric_type == knowhere::metric::BM25 ||
             metric_type == knowhere::metric::MHJACCARD) {
-            index_info = segment.get_indexing_record()
-                             .get_field_index_meta(vecfield_id)
-                             .GetIndexParams();
+            // atomic_load keeps the meta alive for the params read; the growing
+            // segment's index meta may be concurrently swapped by UpdateIndexMeta.
+            auto index_meta = segment.get_indexing_record().get_index_meta();
+            index_info =
+                index_meta->GetFieldIndexMeta(vecfield_id).GetIndexParams();
         }
 
         // step 3: brute force search where small indexing is unavailable

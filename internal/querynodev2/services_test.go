@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -2589,6 +2590,83 @@ func (suite *ServiceSuite) TestGetHighlight() {
 		suite.NoError(err)
 		suite.NoError(merr.Error(resp.GetStatus()))
 		suite.NotNil(resp.Results)
+	})
+}
+
+func (suite *ServiceSuite) TestUpdateIndex() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := &querypb.UpdateIndexRequest{
+		CollectionID: suite.collectionID,
+		Actions: []*querypb.UpdateIndexRequest_Action{
+			{
+				Op: &querypb.UpdateIndexRequest_Action_AddIndexRequest{
+					AddIndexRequest: &querypb.UpdateIndexRequest_AddIndex{
+						IndexInfo: &indexpb.IndexInfo{CollectionID: suite.collectionID, FieldID: 101},
+					},
+				},
+			},
+		},
+		IndexBarrierTs: 100,
+	}
+	newMeta := &segcorepb.CollectionIndexMeta{
+		IndexMetas: []*segcorepb.FieldIndexMeta{{FieldID: 101}},
+	}
+	newMetaBlob, err := proto.Marshal(newMeta)
+	suite.Require().NoError(err)
+
+	colManager := suite.node.manager.Collection
+	segManager := suite.node.manager.Segment
+	defer func() {
+		suite.node.manager.Collection = colManager
+		suite.node.manager.Segment = segManager
+	}()
+	mockCol := segments.NewMockCollectionManager(suite.T())
+	mockSeg := segments.NewMockSegmentManager(suite.T())
+	suite.node.manager.Collection = mockCol
+	suite.node.manager.Segment = mockSeg
+
+	suite.Run("meta_changed_fans_out_to_segments", func() {
+		mockCol.EXPECT().UpdateIndex(suite.collectionID, req).Return(newMeta, uint64(100), nil).Once()
+		seg := segments.NewMockSegment(suite.T())
+		seg.EXPECT().ID().Return(int64(1)).Maybe()
+		seg.EXPECT().UpdateIndexMetaBlob(newMetaBlob, uint64(100)).Return(nil).Once()
+		mockSeg.EXPECT().GetBy(mock.Anything).Return([]segments.Segment{seg}).Once()
+
+		status, err := suite.node.UpdateIndex(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("segment_error_propagates_to_status", func() {
+		mockCol.EXPECT().UpdateIndex(suite.collectionID, req).Return(newMeta, uint64(100), nil).Once()
+		seg := segments.NewMockSegment(suite.T())
+		seg.EXPECT().ID().Return(int64(1)).Maybe()
+		seg.EXPECT().UpdateIndexMetaBlob(newMetaBlob, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
+		mockSeg.EXPECT().GetBy(mock.Anything).Return([]segments.Segment{seg}).Once()
+
+		// The fan-out error is returned so the delegator retries the worker RPC.
+		status, err := suite.node.UpdateIndex(ctx, req)
+		suite.Error(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("nil_meta_success_without_fanout", func() {
+		mockCol.EXPECT().UpdateIndex(suite.collectionID, req).Return(nil, uint64(0), nil).Once()
+		status, err := suite.node.UpdateIndex(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("collection_manager_error", func() {
+		mockCol.EXPECT().UpdateIndex(suite.collectionID, req).Return(nil, uint64(0), merr.WrapErrServiceInternal("mocked")).Once()
+		status, err := suite.node.UpdateIndex(ctx, req)
+		suite.Error(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("abnormal_node", func() {
+		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := suite.node.UpdateIndex(ctx, req)
+		suite.Error(merr.CheckRPCCall(status, err))
 	})
 }
 

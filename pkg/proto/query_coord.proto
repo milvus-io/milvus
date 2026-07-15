@@ -1051,7 +1051,15 @@ message UpdateIndexRequest {
             DropIndex drop_index_request = 2;
         }
     }
-    Action action = 3;
+    // All field indexes bound to ONE DDL, applied as a single atomic update so they
+    // share one barrier_ts without the monotonic gate dropping all but the first.
+    repeated Action actions = 3;
+    // Monotonic apply cursor (DDL BeginTs): an older-ts update is skipped once a newer one applied.
+    uint64 index_barrier_ts = 4;
+    // Publication catch-up: the full current index-info list applied to catchup_segment_ids
+    // (segments that missed the DDL fan-out while still loading). Set instead of actions.
+    repeated index.IndexInfo catchup_index_infos = 5;
+    repeated int64 catchup_segment_ids = 6;
 }
 
 message RunAnalyzerRequest{

@@ -96,6 +96,11 @@ type Segment interface {
 	Load(ctx context.Context) error
 	Release(ctx context.Context, opts ...releaseOption)
 	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
+	// UpdateIndexMetaBlob replaces the segment's collection-level index meta if version
+	// is newer than the last applied one (monotonic), syncing a backfilled field's
+	// index params so brute-force GetFieldIndexMeta stops throwing. Takes a pre-marshalled
+	// CollectionIndexMeta so a fan-out over many segments marshals the meta only once.
+	UpdateIndexMetaBlob(indexMetaBlob []byte, version uint64) error
 
 	// PK candidate related (BloomFilterSet for regular segments, ExternalSegmentCandidate for external)
 	// Segment implements pkoracle.Candidate: MayPkExist, BatchPkExist, ID, Partition, Type,

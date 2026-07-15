@@ -1322,6 +1322,21 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	return nil
 }
 
+// UpdateIndexMeta replaces the segment's collection-level index meta (monotonic by
+// version), so a backfilled field's index params reach the brute-force path without
+// a full reload. Control-plane driven only (no query self-heal).
+func (s *LocalSegment) UpdateIndexMetaBlob(indexMetaBlob []byte, version uint64) error {
+	if len(indexMetaBlob) == 0 {
+		return nil
+	}
+	if !s.ptrLock.PinIfNotReleased() {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during update index meta")
+	}
+	defer s.ptrLock.Unpin()
+
+	return s.csegment.UpdateIndexMeta(indexMetaBlob, version)
+}
+
 type ReleaseScope int
 
 const (

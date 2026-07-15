@@ -21,11 +21,21 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+// indexUpdate is all field indexes bound to ONE add-field DDL, plus the DDL BeginTs
+// used as their shared monotonic apply barrier. Grouping per DDL here (at the source,
+// where the DDL boundary is known) lets them fan out as one atomic update, so the
+// barrier's monotonic gate does not drop all but the first.
+type indexUpdate struct {
+	fieldIndexes []*indexpb.FieldIndex
+	barrierTs    uint64
+}
 
 type insertNodeMsg struct {
 	insertMsgs      []*InsertMsg
@@ -33,6 +43,7 @@ type insertNodeMsg struct {
 	timeRange       TimeRange
 	schema          *schemapb.CollectionSchema
 	schemaBarrierTs uint64
+	indexUpdates    []indexUpdate
 }
 
 type deleteNodeMsg struct {
@@ -40,6 +51,7 @@ type deleteNodeMsg struct {
 	timeRange       TimeRange
 	schema          *schemapb.CollectionSchema
 	schemaBarrierTs uint64
+	indexUpdates    []indexUpdate
 }
 
 func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
@@ -67,6 +79,16 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			body := putCollectionMsg.AlterCollectionMessage.MustBody()
 			msg.schema = body.GetUpdates().GetSchema()
 			msg.schemaBarrierTs = taskMsg.BeginTs()
+			// An add-field DDL carries the index meta bound to the new fields on the
+			// SAME message; fan it to segments' col_index_meta_ so the backfilled
+			// field's brute-force search stops throwing. Same BeginTs as the schema,
+			// so schema + index apply atomically and monotonically.
+			if boundFieldIndexes := body.GetUpdates().GetBoundFieldIndexes(); len(boundFieldIndexes) > 0 {
+				msg.indexUpdates = append(msg.indexUpdates, indexUpdate{
+					fieldIndexes: boundFieldIndexes,
+					barrierTs:    taskMsg.BeginTs(),
+				})
+			}
 		}
 	case commonpb.MsgType_ManualFlush:
 		// ManualFlush is consumed in filterNode.filtrate(); no insert/delete payload here.

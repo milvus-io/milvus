@@ -159,6 +159,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		timeRange:       nodeMsg.timeRange,
 		schema:          nodeMsg.schema,
 		schemaBarrierTs: nodeMsg.schemaBarrierTs,
+		indexUpdates:    nodeMsg.indexUpdates,
 	}
 }
 

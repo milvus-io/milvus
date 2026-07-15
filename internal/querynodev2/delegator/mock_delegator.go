@@ -8,6 +8,7 @@ import (
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	mock "github.com/stretchr/testify/mock"
@@ -1385,6 +1386,54 @@ func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) Return() *MockShardD
 
 func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run func(uint64)) *MockShardDelegator_TryCleanExcludedSegments_Call {
 	_c.Run(run)
+	return _c
+}
+
+// UpdateIndex provides a mock function with given fields: ctx, fieldIndexes, indexBarrierTs
+func (_m *MockShardDelegator) UpdateIndex(ctx context.Context, fieldIndexes []*indexpb.FieldIndex, indexBarrierTs uint64) error {
+	ret := _m.Called(ctx, fieldIndexes, indexBarrierTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*indexpb.FieldIndex, uint64) error); ok {
+		r0 = rf(ctx, fieldIndexes, indexBarrierTs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_UpdateIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndex'
+type MockShardDelegator_UpdateIndex_Call struct {
+	*mock.Call
+}
+
+// UpdateIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - fieldIndexes []*indexpb.FieldIndex
+//   - indexBarrierTs uint64
+func (_e *MockShardDelegator_Expecter) UpdateIndex(ctx interface{}, fieldIndexes interface{}, indexBarrierTs interface{}) *MockShardDelegator_UpdateIndex_Call {
+	return &MockShardDelegator_UpdateIndex_Call{Call: _e.mock.On("UpdateIndex", ctx, fieldIndexes, indexBarrierTs)}
+}
+
+func (_c *MockShardDelegator_UpdateIndex_Call) Run(run func(ctx context.Context, fieldIndexes []*indexpb.FieldIndex, indexBarrierTs uint64)) *MockShardDelegator_UpdateIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*indexpb.FieldIndex), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndex_Call) Return(_a0 error) *MockShardDelegator_UpdateIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndex_Call) RunAndReturn(run func(context.Context, []*indexpb.FieldIndex, uint64) error) *MockShardDelegator_UpdateIndex_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

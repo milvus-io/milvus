@@ -157,6 +157,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Reopen(SchemaPtr sch) override;
 
     void
+    UpdateIndexMeta(IndexMetaPtr index_meta, uint64_t version) override {
+        // Growing search reads brute-force BM25/MinHash params from the indexing
+        // record's index meta; forward the swap there. No field_indexings_ rebuild:
+        // the field set is unchanged, only the params-meta pointer is refreshed.
+        indexing_record_.UpdateIndexMeta(std::move(index_meta), version);
+    }
+
+    void
     Reopen(
         milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;

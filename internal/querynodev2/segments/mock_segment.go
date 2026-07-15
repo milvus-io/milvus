@@ -2310,6 +2310,53 @@ func (_c *MockSegment_UpdateBM25Stats_Call) RunAndReturn(run func(map[int64]*sto
 	return _c
 }
 
+// UpdateIndexMetaBlob provides a mock function with given fields: indexMetaBlob, version
+func (_m *MockSegment) UpdateIndexMetaBlob(indexMetaBlob []byte, version uint64) error {
+	ret := _m.Called(indexMetaBlob, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndexMetaBlob")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]byte, uint64) error); ok {
+		r0 = rf(indexMetaBlob, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_UpdateIndexMetaBlob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndexMetaBlob'
+type MockSegment_UpdateIndexMetaBlob_Call struct {
+	*mock.Call
+}
+
+// UpdateIndexMetaBlob is a helper method to define mock.On call
+//   - indexMetaBlob []byte
+//   - version uint64
+func (_e *MockSegment_Expecter) UpdateIndexMetaBlob(indexMetaBlob interface{}, version interface{}) *MockSegment_UpdateIndexMetaBlob_Call {
+	return &MockSegment_UpdateIndexMetaBlob_Call{Call: _e.mock.On("UpdateIndexMetaBlob", indexMetaBlob, version)}
+}
+
+func (_c *MockSegment_UpdateIndexMetaBlob_Call) Run(run func(indexMetaBlob []byte, version uint64)) *MockSegment_UpdateIndexMetaBlob_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]byte), args[1].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_UpdateIndexMetaBlob_Call) Return(_a0 error) *MockSegment_UpdateIndexMetaBlob_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_UpdateIndexMetaBlob_Call) RunAndReturn(run func([]byte, uint64) error) *MockSegment_UpdateIndexMetaBlob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdatePkCandidate provides a mock function with given fields: pks
 func (_m *MockSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
 	_m.Called(pks)

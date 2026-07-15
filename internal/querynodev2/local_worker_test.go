@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -183,6 +184,26 @@ func (suite *LocalWorkerTestSuite) TestSearchSegments_EmptyResult() {
 			suite.Nil(resp.GetResultData())
 		}
 	}
+}
+
+func (suite *LocalWorkerTestSuite) TestUpdateIndex() {
+	// LocalWorker.UpdateIndex simply forwards to the wrapped node; with the
+	// collection loaded and no segments, the real path merges + returns success.
+	infos := mock_segcore.GenTestIndexInfoList(suite.collectionID, suite.schema)
+	suite.Require().NotEmpty(infos)
+	req := &querypb.UpdateIndexRequest{
+		CollectionID: suite.collectionID,
+		Actions: []*querypb.UpdateIndexRequest_Action{
+			{
+				Op: &querypb.UpdateIndexRequest_Action_AddIndexRequest{
+					AddIndexRequest: &querypb.UpdateIndexRequest_AddIndex{IndexInfo: infos[0]},
+				},
+			},
+		},
+		IndexBarrierTs: 100,
+	}
+	status, err := suite.worker.UpdateIndex(suite.ctx, req)
+	suite.NoError(merr.CheckRPCCall(status, err))
 }
 
 func TestLocalWorker(t *testing.T) {

@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -2152,6 +2153,101 @@ func (s *DelegatorSuite) TestDelegatorStateTransitions() {
 		err = sd.IsWorking(lifetime.Stopped)
 		s.Error(err)
 		s.True(errors.Is(err, merr.ErrChannelNotAvailable))
+	})
+}
+
+func (s *DelegatorSuite) TestUpdateIndex() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+
+	fieldIndex := &indexpb.FieldIndex{
+		IndexInfo: &indexpb.IndexInfo{
+			CollectionID: s.collectionID,
+			FieldID:      101,
+			IndexID:      1,
+			IndexName:    "idx",
+		},
+	}
+	fieldIndexes := []*indexpb.FieldIndex{fieldIndex}
+
+	s.Run("normal", func() {
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
+		workers[1] = worker1
+		workers[2] = worker2
+
+		assertReq := func(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+			s.Equal(s.collectionID, req.GetCollectionID())
+			s.Equal(uint64(100), req.GetIndexBarrierTs())
+			s.Len(req.GetActions(), 1)
+			s.EqualValues(101, req.GetActions()[0].GetAddIndexRequest().GetIndexInfo().GetFieldID())
+			return merr.Success(), nil
+		}
+		// node 1 serves its sealed + growing (twice), node 2 serves its sealed (once).
+		worker1.EXPECT().UpdateIndex(mock.Anything, mock.AnythingOfType("*querypb.UpdateIndexRequest")).RunAndReturn(assertReq).Twice()
+		worker2.EXPECT().UpdateIndex(mock.Anything, mock.AnythingOfType("*querypb.UpdateIndexRequest")).RunAndReturn(assertReq).Once()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil).Times(3)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.UpdateIndex(ctx, fieldIndexes, 100)
+		s.NoError(err)
+	})
+
+	s.Run("nil_index_info_is_noop", func() {
+		// An update without IndexInfo returns early, before any fan-out; no
+		// worker/manager expectations are set, so any call would fail the test.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.UpdateIndex(ctx, []*indexpb.FieldIndex{{}}, 100)
+		s.NoError(err)
+	})
+
+	s.Run("worker_return_error", func() {
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().UpdateIndex(mock.Anything, mock.AnythingOfType("*querypb.UpdateIndexRequest")).RunAndReturn(func(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+			return merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")
+		}).Maybe()
+		worker2.EXPECT().UpdateIndex(mock.Anything, mock.AnythingOfType("*querypb.UpdateIndexRequest")).RunAndReturn(func(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		}).Maybe()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil).Times(3)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.UpdateIndex(ctx, fieldIndexes, 100)
+		s.Error(err)
+	})
+
+	s.Run("worker_manager_error", func() {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).RunAndReturn(func(ctx context.Context, i int64) (cluster.Worker, error) {
+			return nil, merr.WrapErrServiceInternal("mocked")
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.UpdateIndex(ctx, fieldIndexes, 100)
+		s.Error(err)
+	})
+
+	s.Run("cluster_not_serviceable", func() {
+		s.delegator.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.UpdateIndex(ctx, fieldIndexes, 100)
+		s.Error(err)
 	})
 }
 

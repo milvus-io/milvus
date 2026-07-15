@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -517,9 +518,28 @@ class IndexingRecord {
         return *ptr;
     }
 
-    const FieldIndexMeta&
-    get_field_index_meta(FieldId fieldId) const {
-        return index_meta_->GetFieldIndexMeta(fieldId);
+    // atomic_load so the returned shared_ptr keeps the meta alive across the
+    // caller's read; UpdateIndexMeta may concurrently swap index_meta_. Callers
+    // must hold this pointer (not a bare reference) while reading field metas.
+    IndexMetaPtr
+    get_index_meta() const {
+        return std::atomic_load(&index_meta_);
+    }
+
+    // Swap the collection index meta (BM25/MinHash brute-force param source) to a
+    // newer version. Published via std::atomic_store for the unlocked search
+    // reader (get_index_meta); the monotonic guard is serialized by its own mutex.
+    void
+    UpdateIndexMeta(IndexMetaPtr index_meta, uint64_t version) {
+        if (!index_meta) {
+            return;
+        }
+        std::lock_guard<std::mutex> guard(index_meta_update_mutex_);
+        if (version <= index_meta_version_) {
+            return;
+        }
+        std::atomic_store(&index_meta_, index_meta);
+        index_meta_version_ = version;
     }
 
     bool
@@ -539,6 +559,9 @@ class IndexingRecord {
 
  private:
     IndexMetaPtr index_meta_;
+    // monotonic apply cursor + guard for UpdateIndexMeta swaps of index_meta_.
+    uint64_t index_meta_version_{0};
+    std::mutex index_meta_update_mutex_;
     const SegcoreConfig& segcore_config_;
 
     // control info

@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -83,6 +84,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	UpdateIndex(ctx context.Context, fieldIndexes []*indexpb.FieldIndex, indexBarrierTs uint64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -172,6 +174,14 @@ type shardDelegator struct {
 	// schemaBarrierTs fences load results started before the latest schema update.
 	schemaChangeMutex sync.RWMutex
 	schemaBarrierTs   uint64
+
+	// index-meta fence, mirroring the schema fence: serialize WAL-consumed index updates
+	// against segment publication so a newly-published segment is either seen by the DDL
+	// fan-out or caught up at publication. currentIndexInfos is the accumulated current
+	// index list, applied to segments that missed the fan-out while still loading.
+	indexChangeMutex  sync.RWMutex
+	indexBarrierTs    uint64
+	currentIndexInfos map[int64]*indexpb.IndexInfo
 
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
@@ -285,7 +295,55 @@ func (sd *shardDelegator) GetSegmentInfo(readable bool) ([]SnapshotItem, []Segme
 
 // SyncDistribution revises distribution.
 func (sd *shardDelegator) SyncDistribution(ctx context.Context, entries ...SegmentEntry) {
+	sd.publishDistributions(ctx, entries...)
+}
+
+// publishDistributions makes segments readable and, under the index-meta fence, catches up
+// segments that missed a WAL-consumed index update while they were still loading. Every
+// AddDistributions call site routes through here.
+func (sd *shardDelegator) publishDistributions(ctx context.Context, entries ...SegmentEntry) {
+	sd.indexChangeMutex.RLock()
 	sd.distribution.AddDistributions(entries...)
+	barrierTs := sd.indexBarrierTs
+	var infos []*indexpb.IndexInfo
+	if len(sd.currentIndexInfos) > 0 {
+		infos = make([]*indexpb.IndexInfo, 0, len(sd.currentIndexInfos))
+		for _, info := range sd.currentIndexInfos {
+			infos = append(infos, info)
+		}
+	}
+	sd.indexChangeMutex.RUnlock()
+	if len(infos) > 0 {
+		sd.catchUpIndexMeta(ctx, infos, barrierTs, entries...)
+	}
+}
+
+// catchUpIndexMeta pushes the current full index list to the newly-published segments' workers,
+// so a segment that missed the DDL fan-out while loading gets its col_index_meta_. Best-effort
+// and idempotent: the receiver applies it per segment under the segment's monotonic version guard.
+func (sd *shardDelegator) catchUpIndexMeta(ctx context.Context, infos []*indexpb.IndexInfo, barrierTs uint64, entries ...SegmentEntry) {
+	byNode := make(map[int64][]int64)
+	for _, e := range entries {
+		byNode[e.NodeID] = append(byNode[e.NodeID], e.SegmentID)
+	}
+	for nodeID, segmentIDs := range byNode {
+		worker, err := sd.workerManager.GetWorker(ctx, nodeID)
+		if err != nil {
+			mlog.Warn(ctx, "catch-up index meta: get worker failed", mlog.FieldNodeID(nodeID), mlog.Err(err))
+			continue
+		}
+		req := &querypb.UpdateIndexRequest{
+			Base:              commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+			CollectionID:      sd.collectionID,
+			CatchupIndexInfos: infos,
+			CatchupSegmentIds: segmentIDs,
+			IndexBarrierTs:    barrierTs,
+		}
+		req.GetBase().TargetID = nodeID
+		if _, err := worker.UpdateIndex(ctx, req); err != nil {
+			mlog.Warn(ctx, "catch-up index meta failed", mlog.FieldNodeID(nodeID), mlog.Err(err))
+		}
+	}
 }
 
 // SyncDistribution revises distribution.
@@ -1233,6 +1291,86 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 	return sd.catchingUpStreamingData.Load()
 }
 
+// UpdateIndex fans a single-index add (from an add-field DDL that bound the index)
+// out to every worker holding this shard's segments, so each node merges it into its
+// collection index meta and each segment's col_index_meta_ (see QueryNode.UpdateIndex).
+// Purely control-plane; monotonicity by indexBarrierTs is enforced per-node in
+// collectionManager.UpdateIndex and per-segment in the segcore setter.
+func (sd *shardDelegator) UpdateIndex(ctx context.Context, fieldIndexes []*indexpb.FieldIndex, indexBarrierTs uint64) error {
+	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	// One DDL may bind several field indexes; pack them all into a single request so they
+	// apply as one atomic update sharing indexBarrierTs (the receiver's monotonic gate
+	// advances once, keeping every field instead of dropping all but the first).
+	actions := make([]*querypb.UpdateIndexRequest_Action, 0, len(fieldIndexes))
+	infos := make([]*indexpb.IndexInfo, 0, len(fieldIndexes))
+	for _, fieldIndex := range fieldIndexes {
+		info := fieldIndex.GetIndexInfo()
+		if info == nil {
+			continue
+		}
+		actions = append(actions, &querypb.UpdateIndexRequest_Action{
+			Op: &querypb.UpdateIndexRequest_Action_AddIndexRequest{
+				AddIndexRequest: &querypb.UpdateIndexRequest_AddIndex{
+					IndexInfo: info,
+				},
+			},
+		})
+		infos = append(infos, info)
+	}
+	if len(actions) == 0 {
+		return nil
+	}
+	mlog.Info(ctx, "delegator received update index event",
+		mlog.Int("fieldCount", len(actions)),
+		mlog.Uint64("indexBarrierTs", indexBarrierTs),
+	)
+
+	req := &querypb.UpdateIndexRequest{
+		Base:           commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+		CollectionID:   sd.collectionID,
+		Actions:        actions,
+		IndexBarrierTs: indexBarrierTs,
+	}
+
+	// Accumulate the current index list and snapshot online segments under one lock, so a
+	// concurrently-publishing segment is either in this snapshot (and gets the fan-out) or
+	// sees this update at its publication catch-up (indexChangeMutex read side). The fan-out
+	// RPCs run after the lock is released.
+	sd.indexChangeMutex.Lock()
+	for _, info := range infos {
+		sd.currentIndexInfos[info.GetFieldID()] = info
+	}
+	sd.indexBarrierTs = indexBarrierTs
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
+	sd.indexChangeMutex.Unlock()
+	defer sd.distribution.Unpin(version)
+
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, false,
+		func(req *querypb.UpdateIndexRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateIndexRequest {
+			nodeReq := typeutil.Clone(req)
+			nodeReq.GetBase().TargetID = targetID
+			return nodeReq
+		})
+	if err != nil {
+		return err
+	}
+
+	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateIndexRequest, worker cluster.Worker) (*StatusWrapper, error) {
+		// Index-meta apply has no query-time self-heal, so retry transient worker
+		// errors a few times; a persistent failure falls back to the load-path
+		// (PutOrRef) reconcile when the segment next (re)loads.
+		ctx = retry.WithMaxAttemptsContext(ctx, 3)
+		status, err := worker.UpdateIndex(ctx, req)
+		return (*StatusWrapper)(status), err
+	}, "UpdateIndex", log)
+	return err
+}
+
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
@@ -1534,6 +1672,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		collectionManager: manager.Collection,
 		segmentManager:    manager.Segment,
 		workerManager:     workerManager,
+		currentIndexInfos: make(map[int64]*indexpb.IndexInfo),
 		lifetime:          lifetime.NewLifetime(lifetime.Initializing),
 		distribution:      NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,

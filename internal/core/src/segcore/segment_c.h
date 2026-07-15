@@ -253,6 +253,12 @@ CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
 
 CStatus
+UpdateSegmentIndexMeta(CSegmentInterface c_segment,
+                       const uint8_t* index_meta_blob,
+                       const int64_t blob_size,
+                       const uint64_t version);
+
+CStatus
 DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
                            int64_t field_id,
                            const char* nested_path);

@@ -1801,10 +1801,93 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 
 func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
-	// UpdateIndex is currently a placeholder implementation
-	// The actual logic should handle AddIndex and DropIndex actions
-	// For now, return success to satisfy the interface
-	return merr.Success(), nil
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	// Publication catch-up: apply the delegator's current full index list to the named
+	// newly-published segments (which missed the DDL fan-out while still loading). Distinct
+	// from the delta-merge-and-fan path below.
+	if len(req.GetCatchupSegmentIds()) > 0 {
+		return node.catchUpSegmentIndexMeta(ctx, req), nil
+	}
+
+	log := mlog.With(
+		mlog.Int64("collectionID", req.GetCollectionID()),
+		mlog.Uint64("indexBarrierTs", req.GetIndexBarrierTs()),
+	)
+
+	// Merge the index delta into the collection index meta (monotonic). If it
+	// changed, fan the new full meta out to every loaded segment's col_index_meta_
+	// so a backfilled field's brute-force GetFieldIndexMeta stops throwing.
+	newMeta, version, err := node.manager.Collection.UpdateIndex(req.GetCollectionID(), req)
+	if err != nil {
+		log.Warn(ctx, "failed to update collection index meta", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	if newMeta == nil {
+		return merr.Success(), nil
+	}
+	// Marshal once and fan the same blob to every segment (each applies it under its own
+	// monotonic guard), instead of re-marshalling the meta per segment.
+	blob, err := proto.Marshal(newMeta)
+	if err != nil {
+		log.Warn(ctx, "failed to marshal collection index meta", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	var firstErr error
+	for _, segment := range node.manager.Segment.GetBy(segments.SegmentFilterFunc(func(s segments.Segment) bool {
+		return s.Collection() == req.GetCollectionID()
+	})) {
+		if err := segment.UpdateIndexMetaBlob(blob, version); err != nil {
+			log.Warn(ctx, "failed to update segment index meta",
+				mlog.Int64("segmentID", segment.ID()), mlog.Err(err))
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	// Return the error so the delegator retries the worker RPC; the re-fan is
+	// idempotent (per-segment monotonic guard), so only failed segments reapply.
+	return merr.Status(firstErr), nil
+}
+
+// catchUpSegmentIndexMeta applies the delegator's current full index list to the named
+// newly-published segments (which missed the DDL fan-out while loading). The per-segment
+// monotonic version guard makes it idempotent.
+func (node *QueryNode) catchUpSegmentIndexMeta(ctx context.Context, req *querypb.UpdateIndexRequest) *commonpb.Status {
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	if collection == nil {
+		return merr.Success() // released; nothing to catch up
+	}
+	// Union the caught-up DDL fields into the worker's current index meta (which already
+	// carries the base indexes each segment loaded) so applying it never drops the base.
+	addMeta := segments.ComposeIndexMeta(ctx, req.GetCatchupIndexInfos(), collection.Schema())
+	meta := collection.UnionIndexMeta(addMeta)
+	if meta == nil {
+		return merr.Success()
+	}
+	blob, err := proto.Marshal(meta)
+	if err != nil {
+		mlog.Warn(ctx, "catch-up: failed to marshal collection index meta", mlog.Err(err))
+		return merr.Status(err)
+	}
+	var firstErr error
+	for _, segID := range req.GetCatchupSegmentIds() {
+		seg := node.manager.Segment.Get(segID)
+		if seg == nil {
+			continue
+		}
+		if err := seg.UpdateIndexMetaBlob(blob, req.GetIndexBarrierTs()); err != nil {
+			mlog.Warn(ctx, "catch-up segment index meta failed", mlog.Int64("segmentID", segID), mlog.Err(err))
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return merr.Status(firstErr)
 }
 
 func (node *QueryNode) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) (*querypb.GetHighlightResponse, error) {

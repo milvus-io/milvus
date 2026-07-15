@@ -105,6 +105,23 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 		}
 	}
 
+	// Fan the add-field DDL's bound index meta to segments, after the schema apply
+	// above (both come from the same DDL). A failure is logged and swallowed here;
+	// the load-path PutOrRef reconcile is the backstop when a segment next (re)loads.
+	for _, iu := range nodeMsg.indexUpdates {
+		if len(iu.fieldIndexes) == 0 {
+			continue
+		}
+		ctx := context.TODO()
+		if err := dNode.delegator.UpdateIndex(ctx, iu.fieldIndexes, iu.barrierTs); err != nil {
+			mlog.Warn(ctx, "failed to update index in delete node",
+				mlog.Int64("collectionID", dNode.collectionID),
+				mlog.String("channel", dNode.channel),
+				mlog.Uint64("indexBarrierTs", iu.barrierTs),
+				mlog.Err(err))
+		}
+	}
+
 	// update tSafe
 	dNode.delegator.UpdateTSafe(nodeMsg.timeRange.timestampMax)
 	return nil

@@ -53,6 +53,10 @@ type CollectionManager interface {
 	// version. The manager derives the logical schema version from schema.Version
 	// when a schema payload is present.
 	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	// UpdateIndex merges a single-index add delta into the collection's index meta
+	// (monotonic by index_barrier_ts), updates the Collection object, and returns the
+	// new full CollectionIndexMeta + version to fan out to segments (nil if stale/no-op).
+	UpdateIndex(collectionID int64, req *querypb.UpdateIndexRequest) (*segcorepb.CollectionIndexMeta, uint64, error)
 }
 
 type collectionManager struct {
@@ -126,12 +130,16 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 				mlog.Any("schema", schema),
 			)
 		}
-		// Always update index meta to ensure newly indexed fields are visible
-		// for search plan creation (CollectionIndexMeta::HasField check).
+		// Union (never drop) instead of replace: an out-of-order stale load (LoadSegments
+		// timeline) must not roll back a field already synced by the WAL-consumed add-field
+		// DDL (UpdateIndex timeline). DropIndex thus does not propagate via load; a lingering
+		// entry is safe (brute-force, no throw). Follow-up: a monotonic index_version guard.
 		if meta != nil {
-			if err := collection.updateIndexMeta(meta); err != nil {
+			merged := unionIndexMeta(collection.indexMeta.Load(), meta)
+			if err := collection.updateIndexMeta(merged); err != nil {
 				return err
 			}
+			collection.indexMeta.Store(merged)
 		}
 		collection.Ref(1)
 		return nil
@@ -144,6 +152,9 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		return err
 	}
 
+	if meta != nil {
+		collection.indexMeta.Store(meta)
+	}
 	collection.Ref(1)
 	m.collections[collectionID] = collection
 	m.updateMetric()
@@ -175,6 +186,127 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	}
 	collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
 	return nil
+}
+
+func (m *collectionManager) UpdateIndex(collectionID int64, req *querypb.UpdateIndexRequest) (*segcorepb.CollectionIndexMeta, uint64, error) {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return nil, 0, merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
+	}
+
+	version := req.GetIndexBarrierTs()
+	cur := collection.indexMetaVersion.Load()
+	if version > cur {
+		// Newer: merge every field of this DDL and advance the collection-object meta.
+		if newMeta := mergeIndexActions(collection.indexMeta.Load(), req.GetActions()); newMeta != nil {
+			if err := collection.updateIndexMeta(newMeta); err != nil {
+				return nil, 0, err
+			}
+			collection.indexMeta.Store(newMeta)
+			collection.indexMetaVersion.Store(version)
+			return newMeta, version, nil
+		}
+	}
+	// Not newer (duplicate / WAL replay / no-op action such as DropIndex): return the
+	// CURRENT meta + version so the caller can idempotently (re)fan it to segments.
+	// This lets a retry reach segments that failed the first fan-out — each segment
+	// has its own monotonic guard, so already-applied ones are skipped.
+	if curMeta := collection.indexMeta.Load(); curMeta != nil {
+		return curMeta, cur, nil
+	}
+	return nil, 0, nil
+}
+
+// mergeIndexActions folds every action of one DDL into cur in a single pass, returning
+// the new full meta (nil if no action changed anything). Applying a DDL's fields together
+// keeps the monotonic apply cursor advancing once for the whole DDL.
+func mergeIndexActions(cur *segcorepb.CollectionIndexMeta, actions []*querypb.UpdateIndexRequest_Action) *segcorepb.CollectionIndexMeta {
+	meta := cur
+	changed := false
+	for _, action := range actions {
+		if merged := mergeIndexAction(meta, action); merged != nil {
+			meta = merged
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return meta
+}
+
+// mergeIndexAction applies an UpdateIndexRequest action to the current
+// CollectionIndexMeta and returns a new full meta (nil if nothing changed).
+// AddIndex upserts the field's FieldIndexMeta built from IndexInfo (mirroring
+// ComposeIndexMeta); DropIndex propagation is deferred to V2 (a lingering entry is
+// safe — brute-force still works, no throw), so it is a no-op here.
+func mergeIndexAction(cur *segcorepb.CollectionIndexMeta, action *querypb.UpdateIndexRequest_Action) *segcorepb.CollectionIndexMeta {
+	add := action.GetAddIndexRequest()
+	if add == nil {
+		return nil
+	}
+	info := add.GetIndexInfo()
+	if info == nil {
+		return nil
+	}
+	base := &segcorepb.CollectionIndexMeta{}
+	if cur != nil {
+		base = proto.Clone(cur).(*segcorepb.CollectionIndexMeta)
+	}
+	base.IndexMetas = upsertFieldIndexMeta(base.GetIndexMetas(), &segcorepb.FieldIndexMeta{
+		CollectionID:    info.GetCollectionID(),
+		FieldID:         info.GetFieldID(),
+		IndexName:       info.GetIndexName(),
+		TypeParams:      info.GetTypeParams(),
+		IndexParams:     info.GetIndexParams(),
+		IsAutoIndex:     info.GetIsAutoIndex(),
+		UserIndexParams: info.GetUserIndexParams(),
+	})
+	return base
+}
+
+// upsertFieldIndexMeta replaces the entry with the same FieldID or appends fim.
+func upsertFieldIndexMeta(metas []*segcorepb.FieldIndexMeta, fim *segcorepb.FieldIndexMeta) []*segcorepb.FieldIndexMeta {
+	for i, existing := range metas {
+		if existing.GetFieldID() == fim.GetFieldID() {
+			metas[i] = fim
+			return metas
+		}
+	}
+	return append(metas, fim)
+}
+
+// unionIndexMeta upserts every field of add into base by FieldID, never dropping a field
+// present only in base, so an out-of-order stale load cannot roll back an index already
+// synced by a newer add-field DDL. base/add may be nil. DropIndex therefore does not
+// propagate via load; a lingering entry is safe (brute-force, no throw).
+func unionIndexMeta(base, add *segcorepb.CollectionIndexMeta) *segcorepb.CollectionIndexMeta {
+	if base == nil {
+		return add
+	}
+	if add == nil {
+		return base
+	}
+	out := proto.Clone(base).(*segcorepb.CollectionIndexMeta)
+	metas := out.GetIndexMetas()
+	for _, fim := range add.GetIndexMetas() {
+		metas = upsertFieldIndexMeta(metas, fim)
+	}
+	out.IndexMetas = metas
+	if add.GetMaxIndexRowCount() > 0 {
+		out.MaxIndexRowCount = add.GetMaxIndexRowCount()
+	}
+	return out
+}
+
+// UnionIndexMeta merges add into this collection's current index meta without dropping
+// existing fields, so a publication catch-up can add DDL fields to a segment while keeping
+// the base indexes it already loaded.
+func (c *Collection) UnionIndexMeta(add *segcorepb.CollectionIndexMeta) *segcorepb.CollectionIndexMeta {
+	return unionIndexMeta(c.indexMeta.Load(), add)
 }
 
 // ShouldUpdateCollectionSchema reports whether an UpdateSchema payload would
@@ -324,6 +456,13 @@ type Collection struct {
 	schema     atomic.Pointer[collectionSchemaSnapshot]
 	isGpuIndex bool
 	loadFields typeutil.Set[int64]
+
+	// indexMeta is the Go-side copy of the collection index meta, used to merge
+	// single-index UpdateIndex deltas into a full CollectionIndexMeta before pushing
+	// to ccollection + segments. indexMetaVersion is the monotonic apply cursor
+	// (index_barrier_ts).
+	indexMeta        atomic.Pointer[segcorepb.CollectionIndexMeta]
+	indexMetaVersion atomic.Uint64
 
 	refCount *atomic.Uint32
 }
