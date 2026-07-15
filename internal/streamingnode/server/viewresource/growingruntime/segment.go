@@ -165,7 +165,7 @@ func (s *growingSegment) applyInsert(ctx context.Context, insert walview.Segment
 		},
 		InsertRequest: request,
 	}
-	record, err := storage.TransferInsertMsgToInsertRecord(s.collection.Schema(), insertMsg)
+	record, _, err := storage.TransferInsertMsgToInsertRecord(s.collection.Schema(), insertMsg)
 	if err != nil {
 		return err
 	}
