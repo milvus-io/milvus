@@ -30,13 +30,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type EpochState int
@@ -304,7 +304,7 @@ func (factory *defaultEpochTaskFactory) Build(
 			balanceTask.SetReason("channel unbalanced")
 		}
 	default:
-		return nil, fmt.Errorf("unsupported epoch plan kind %d", plan.Kind)
+		return nil, merr.WrapErrServiceInternalMsg("unsupported epoch plan kind %d", plan.Kind)
 	}
 	if err != nil {
 		return nil, err
@@ -434,7 +434,7 @@ func (manager *BalanceEpochManager) planShadowLocked(
 	policy, ok := manager.epochPolicy(request.Balancer, request.PolicyConfig)
 	if !ok {
 		result.State = EpochDegraded
-		result.Err = fmt.Errorf("epoch balance policy unavailable")
+		result.Err = merr.WrapErrServiceInternalMsg("epoch balance policy unavailable")
 		return manager.publishShadowResult(ctx, runtime, request, result, nil)
 	}
 	snapshot, err := manager.buildSnapshot(ctx, runtime, request)
@@ -542,7 +542,7 @@ func (manager *BalanceEpochManager) startEpochLocked(
 	}
 	policy, ok := manager.epochPolicy(active.request.Balancer, active.request.PolicyConfig)
 	if !ok {
-		return manager.finishLocked(runtime, active, EpochDegraded, fmt.Errorf("epoch balance policy unavailable"))
+		return manager.finishLocked(runtime, active, EpochDegraded, merr.WrapErrServiceInternalMsg("epoch balance policy unavailable"))
 	}
 	snapshot, err := manager.buildSnapshot(ctx, runtime, active.request)
 	if err != nil {
@@ -651,7 +651,7 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 		}
 		if manager.deadlineExpired(active, manager.now()) {
 			active.ledger.Release(plan)
-			balanceTask.Cancel(fmt.Errorf("balance epoch deadline exceeded before admission"))
+			balanceTask.Cancel(merr.WrapErrServiceUnavailableMsg("balance epoch deadline exceeded before admission"))
 			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index:])
 			active.terminalIntent = EpochTimedOut
 			break
@@ -662,7 +662,7 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 			manager.publishAdmissionMetric(active.epoch.ResourceGroup, task.BalanceAdmissionInternalError)
 			manager.publishPlanMetric(active.epoch.ResourceGroup, plan.Kind, "rejected")
 			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index+1:])
-			active.result.Err = fmt.Errorf("balance task generation admitter unavailable")
+			active.result.Err = merr.WrapErrServiceInternalMsg("balance task generation admitter unavailable")
 			active.terminalIntent = EpochSuperseded
 			break
 		}
@@ -781,7 +781,7 @@ func (manager *BalanceEpochManager) reconcileLocked(
 			hadLostPlacement = true
 			manager.recordFailureLocked(runtime, work.plan, active.request, manager.now())
 			if active.result.Err == nil {
-				active.result.Err = fmt.Errorf("balance object %v has no authoritative source or target placement", key)
+				active.result.Err = merr.WrapErrServiceInternalMsg("balance object %v has no authoritative source or target placement", key)
 			}
 		}
 	}
@@ -806,7 +806,7 @@ func (manager *BalanceEpochManager) reconcileLocked(
 		state = EpochDegraded
 		active.result.Err = errors.Join(
 			active.result.Err,
-			fmt.Errorf("%d balance object(s) remain ambiguous after reconciliation", len(nextCarry)),
+			merr.WrapErrServiceUnavailableMsg("%d balance object(s) remain ambiguous after reconciliation", len(nextCarry)),
 		)
 	}
 	return manager.finishLocked(runtime, active, state, active.result.Err)
@@ -1025,7 +1025,7 @@ func (manager *BalanceEpochManager) buildSnapshot(
 	request EpochRequest,
 ) (*PlacementSnapshot, error) {
 	if manager.snapshotBuilder == nil {
-		return nil, fmt.Errorf("placement snapshot source unavailable")
+		return nil, merr.WrapErrServiceInternalMsg("placement snapshot source unavailable")
 	}
 	return manager.snapshotBuilder.Build(
 		ctx,

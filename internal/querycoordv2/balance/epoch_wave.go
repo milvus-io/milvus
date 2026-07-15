@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type BalanceWaveBudget struct {
@@ -424,11 +425,11 @@ func (p *ProjectedPlacement) ChannelWorkload(nodeID int64) int {
 
 func (p *ProjectedPlacement) Apply(plan EpochPlan) error {
 	if !validEpochPlan(plan) {
-		return fmt.Errorf("invalid projected balance plan for object %v", plan.ObjectKey())
+		return merr.WrapErrServiceInternalMsg("invalid projected balance plan for object %v", plan.ObjectKey())
 	}
 	key := plan.ObjectKey()
 	if _, ok := p.applied[key]; ok {
-		return fmt.Errorf("balance object %v already has an outstanding projection", key)
+		return merr.WrapErrServiceInternalMsg("balance object %v already has an outstanding projection", key)
 	}
 
 	switch plan.Kind {
@@ -437,7 +438,7 @@ func (p *ProjectedPlacement) Apply(plan EpochPlan) error {
 	case PlanKindChannel:
 		return p.applyChannel(plan)
 	default:
-		return fmt.Errorf("invalid projected balance plan kind %d", plan.Kind)
+		return merr.WrapErrServiceInternalMsg("invalid projected balance plan kind %d", plan.Kind)
 	}
 }
 
@@ -535,21 +536,21 @@ func validateSegmentProjection(placements []SegmentPlacement, plan EpochPlan) (i
 	sourceCount := 0
 	for index, placement := range placements {
 		if placement.CollectionID != plan.CollectionID {
-			return -1, fmt.Errorf("segment %d collection mismatch: placement=%d plan=%d", plan.SegmentID, placement.CollectionID, plan.CollectionID)
+			return -1, merr.WrapErrServiceInternalMsg("segment %d collection mismatch: placement=%d plan=%d", plan.SegmentID, placement.CollectionID, plan.CollectionID)
 		}
 		if placement.NodeID == plan.To {
-			return -1, fmt.Errorf("segment %d already exists on target node %d", plan.SegmentID, plan.To)
+			return -1, merr.WrapErrServiceInternalMsg("segment %d already exists on target node %d", plan.SegmentID, plan.To)
 		}
 		if placement.NodeID == plan.From {
 			sourceCount++
 			sourceIndex = index
 			if !placement.Present {
-				return -1, fmt.Errorf("segment %d source on node %d is not present", plan.SegmentID, plan.From)
+				return -1, merr.WrapErrServiceInternalMsg("segment %d source on node %d is not present", plan.SegmentID, plan.From)
 			}
 		}
 	}
 	if sourceCount != 1 {
-		return -1, fmt.Errorf("segment %d must exist exactly once on source node %d, found %d", plan.SegmentID, plan.From, sourceCount)
+		return -1, merr.WrapErrServiceInternalMsg("segment %d must exist exactly once on source node %d, found %d", plan.SegmentID, plan.From, sourceCount)
 	}
 	return sourceIndex, nil
 }
@@ -559,21 +560,21 @@ func validateChannelProjection(placements []ChannelPlacement, plan EpochPlan) (i
 	sourceCount := 0
 	for index, placement := range placements {
 		if placement.CollectionID != plan.CollectionID {
-			return -1, fmt.Errorf("channel %q collection mismatch: placement=%d plan=%d", plan.Channel, placement.CollectionID, plan.CollectionID)
+			return -1, merr.WrapErrServiceInternalMsg("channel %q collection mismatch: placement=%d plan=%d", plan.Channel, placement.CollectionID, plan.CollectionID)
 		}
 		if placement.NodeID == plan.To {
-			return -1, fmt.Errorf("channel %q already exists on target node %d", plan.Channel, plan.To)
+			return -1, merr.WrapErrServiceInternalMsg("channel %q already exists on target node %d", plan.Channel, plan.To)
 		}
 		if placement.NodeID == plan.From {
 			sourceCount++
 			sourceIndex = index
 			if !placement.Present {
-				return -1, fmt.Errorf("channel %q source on node %d is not present", plan.Channel, plan.From)
+				return -1, merr.WrapErrServiceInternalMsg("channel %q source on node %d is not present", plan.Channel, plan.From)
 			}
 		}
 	}
 	if sourceCount != 1 {
-		return -1, fmt.Errorf("channel %q must exist exactly once on source node %d, found %d", plan.Channel, plan.From, sourceCount)
+		return -1, merr.WrapErrServiceInternalMsg("channel %q must exist exactly once on source node %d, found %d", plan.Channel, plan.From, sourceCount)
 	}
 	return sourceIndex, nil
 }
