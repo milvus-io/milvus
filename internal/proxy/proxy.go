@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/pyudf"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -126,6 +127,9 @@ type Proxy struct {
 
 	// materialized view
 	enableMaterializedView bool
+
+	// query view
+	viewQueryClient queryclient.Client
 
 	// delete rate limiter
 	enableComplexDeleteLimit bool
@@ -528,6 +532,10 @@ func (node *Proxy) SetMixCoordClient(cli types.MixCoordClient) {
 
 func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)) {
 	node.shardMgr.SetClientCreatorFunc(f)
+}
+
+func (node *Proxy) SetViewQueryClient(client queryclient.Client) {
+	node.viewQueryClient = client
 }
 
 // GetRateLimiter returns the rateLimiter in Proxy.

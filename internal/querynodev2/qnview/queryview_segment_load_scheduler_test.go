@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -126,6 +127,45 @@ func TestQueryViewSegmentLoadScheduler_UsesTaskTransformStartTick(t *testing.T) 
 		t.Fatal("timed out waiting for loaded segment")
 	}
 	assert.Equal(t, uint64(99), loaded.TransformStartAfterTimeTick())
+}
+
+func TestQueryViewSegmentLoadScheduler_PreservesReadableSegment(t *testing.T) {
+	meta := buildHandlerTestMeta(1)
+	provider := &fakeQueryViewLoadMetadataProvider{
+		loadInfos: []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}},
+	}
+	collection := &segments.Collection{}
+	loader := &fakePhysicalLoader{
+		loadFn: func(info *querypb.SegmentLoadInfo, _ CollectionRuntime) (TransformSegment, error) {
+			return &fakeReadableTransformSegment{
+				fakeTransformSegment: fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()},
+				collection:           collection,
+			}, nil
+		},
+	}
+	scheduler := NewQueryViewSegmentLoadScheduler(provider, loader)
+
+	loadedCh := make(chan TransformSegment, 1)
+	scheduler.Submit(SegmentLoadTask{
+		Context:                     context.Background(),
+		Meta:                        meta,
+		SegmentID:                   1000,
+		TransformStartAfterTimeTick: 99,
+		OnLoaded:                    func(segment TransformSegment) { loadedCh <- segment },
+		OnUnrecoverable: func(error) {
+			t.Fatal("unexpected unrecoverable")
+		},
+	})
+
+	var loaded TransformSegment
+	select {
+	case loaded = <-loadedCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for loaded segment")
+	}
+	readable, ok := loaded.(ReadableSealedSegment)
+	require.True(t, ok)
+	assert.Same(t, collection, readable.Collection())
 }
 
 func TestQueryViewSegmentLoadScheduler_UpdatesCollectionIndexMetaBeforeLoad(t *testing.T) {

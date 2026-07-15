@@ -1,6 +1,8 @@
 package qnview
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -69,4 +71,12 @@ type SegmentManager interface {
 	// Release decrements reference counts for all segments held by this view.
 	// Segments whose count reaches zero will be unloaded.
 	Release(req ReleaseSegments)
+
+	// AcquireSealedSegmentHandles acquires query lifecycle refs for selected
+	// sealed segments that already reached QueryView transform readiness.
+	AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]SealedSegmentHandle, error)
+
+	// WaitTransformVisible waits until the view-scoped TransformLogBuffer can
+	// serve the QueryPlan transforming timetick boundary.
+	WaitTransformVisible(ctx context.Context, key qviews.QueryViewKey, timetick uint64) error
 }

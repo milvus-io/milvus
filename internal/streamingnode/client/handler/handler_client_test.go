@@ -10,7 +10,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -18,12 +17,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_assignment"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_resolver"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
-	transformlogclient "github.com/milvus-io/milvus/internal/streamingnode/client/handler/transformlog"
+	handlerregistry "github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -171,36 +170,6 @@ func TestHandlerClient(t *testing.T) {
 	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
 }
 
-func TestHandlerClientGetOrCreateTransformLogStreamReusesAssignmentStream(t *testing.T) {
-	assignment := &types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
-		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
-	}
-	handlerServiceClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
-	fakeStream := newHandlerFakeSubscribeTransformClient(context.Background())
-	handlerServiceClient.EXPECT().SubscribeTransform(mock.Anything, mock.Anything).Return(fakeStream, nil).Once()
-
-	createCount := 0
-	handler := &handlerClientImpl{
-		newTransformLogStream: func(ctx context.Context, opts *transformlogclient.StreamOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (*transformlogclient.Stream, error) {
-			createCount++
-			return transformlogclient.CreateStream(ctx, opts, handlerClient)
-		},
-	}
-	stream1, err := handler.getOrCreateTransformLogStream(context.Background(), assignment, handlerServiceClient)
-	require.NoError(t, err)
-	stream2, err := handler.getOrCreateTransformLogStream(context.Background(), assignment, handlerServiceClient)
-	require.NoError(t, err)
-	require.Same(t, stream1, stream2)
-	require.Equal(t, 1, createCount)
-	_ = stream1.Close()
-	require.Eventually(t, func() bool {
-		handler.transformStreamMu.Lock()
-		defer handler.transformStreamMu.Unlock()
-		return len(handler.transformStreams) == 0
-	}, time.Second, 10*time.Millisecond)
-}
-
 func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
 	assignment := &types.PChannelInfoAssigned{
 		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
@@ -331,7 +300,7 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocal(t *testing.T) {
 func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsLocalWALShutdown(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
-	registry.RegisterLocalWALManager(shutdownWALManager{})
+	handlerregistry.RegisterLocalWALManager(shutdownWALManager{})
 
 	assignment := &types.PChannelInfoAssigned{
 		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
@@ -371,6 +340,41 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocalWaitsForAssignmentReady(t
 	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.False(t, prepared)
+}
+
+func TestHandlerClientAcquireTransformLogStreamUsesLocalWAL(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
+	t.Cleanup(func() {
+		handlerregistry.ResetRegisterLocalWALManager()
+		handlerregistry.RegisterLocalWALManager(handlerFakeWALManager{err: handlerregistry.ErrNoStreamingNodeDeployed})
+	})
+
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	localStream := &handlerFakeTransformLogStream{done: make(chan struct{})}
+	localManager := &handlerFakeTransformLogStreamManager{stream: localStream}
+	localWAL := mock_wal.NewMockWAL(t)
+	localWAL.EXPECT().Channel().Return(assignment.Channel).Maybe()
+	localWAL.EXPECT().TransformLog().Return(localManager)
+	handlerregistry.RegisterLocalWALManager(handlerFakeWALManager{wal: localWAL})
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		service:  service,
+		watcher:  w,
+	}
+
+	stream, err := handler.AcquireTransformLogStream(context.Background(), "pchannel")
+	assert.NoError(t, err)
+	assert.Same(t, localStream, stream)
+	assert.Equal(t, 1, localManager.acquireCount)
 }
 
 func TestHandlerClient_GetReplicateCheckpointReplicateViolation(t *testing.T) {
@@ -489,3 +493,49 @@ var (
 	_ streamingpb.StreamingNodeHandlerService_SubscribeTransformClient = (*handlerFakeSubscribeTransformClient)(nil)
 	_ grpc.ClientStream                                                = (*handlerFakeSubscribeTransformClient)(nil)
 )
+
+type handlerFakeWALManager struct {
+	wal wal.WAL
+	err error
+}
+
+func (m handlerFakeWALManager) GetAvailableWAL(types.PChannelInfo) (wal.WAL, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.wal, nil
+}
+
+func (m handlerFakeWALManager) Metrics() (*types.StreamingNodeMetrics, error) {
+	return &types.StreamingNodeMetrics{}, nil
+}
+
+type handlerFakeTransformLogStreamManager struct {
+	stream       wal.TransformLogStream
+	acquireCount int
+}
+
+func (m *handlerFakeTransformLogStreamManager) AcquireStream(context.Context, string) (wal.TransformLogStream, error) {
+	m.acquireCount++
+	return m.stream, nil
+}
+
+type handlerFakeTransformLogStream struct {
+	done chan struct{}
+}
+
+func (s *handlerFakeTransformLogStream) Subscribe(context.Context, wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *handlerFakeTransformLogStream) Done() <-chan struct{} {
+	return s.done
+}
+
+func (s *handlerFakeTransformLogStream) Error() error {
+	return nil
+}
+
+func (s *handlerFakeTransformLogStream) Close() error {
+	return nil
+}

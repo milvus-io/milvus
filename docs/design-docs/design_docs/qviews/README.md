@@ -25,9 +25,11 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 
 ## 3. Two-Phase Query Process
 
-The following end-to-end flow describes the target architecture. The current
-extraction implements the SN server side; it does not wire the new Proxy client,
-complete Coord scheduling, or QN query execution/remote Delete subscriptions.
+For the detailed query-path flow, service boundary, client orchestration, and
+shard discovery design, see [Query Client Design](query/query_client.md).
+For node-side Phase 1 planning and Phase 2 execution, see
+[Query Plan Node-Side Design](query/query_plan.md) and
+[Query Execution Node-Side Design](query/query_execution.md).
 
 1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
    - Includes MVCC
