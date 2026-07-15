@@ -4885,6 +4885,80 @@ func (_c *MockMixCoordClient_FlushAll_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// ForceReleaseDataViewGate provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ForceReleaseDataViewGate")
+	}
+
+	var r0 *rootcoordpb.ForceReleaseDataViewGateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest, ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest, ...grpc.CallOption) *rootcoordpb.ForceReleaseDataViewGateResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.ForceReleaseDataViewGateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_ForceReleaseDataViewGate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForceReleaseDataViewGate'
+type MockMixCoordClient_ForceReleaseDataViewGate_Call struct {
+	*mock.Call
+}
+
+// ForceReleaseDataViewGate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.ForceReleaseDataViewGateRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) ForceReleaseDataViewGate(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_ForceReleaseDataViewGate_Call {
+	return &MockMixCoordClient_ForceReleaseDataViewGate_Call{Call: _e.mock.On("ForceReleaseDataViewGate",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_ForceReleaseDataViewGate_Call) Run(run func(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest, opts ...grpc.CallOption)) *MockMixCoordClient_ForceReleaseDataViewGate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.ForceReleaseDataViewGateRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_ForceReleaseDataViewGate_Call) Return(_a0 *rootcoordpb.ForceReleaseDataViewGateResponse, _a1 error) *MockMixCoordClient_ForceReleaseDataViewGate_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_ForceReleaseDataViewGate_Call) RunAndReturn(run func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest, ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error)) *MockMixCoordClient_ForceReleaseDataViewGate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GcConfirm provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) GcConfirm(ctx context.Context, in *datapb.GcConfirmRequest, opts ...grpc.CallOption) (*datapb.GcConfirmResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -5547,6 +5621,80 @@ func (_c *MockMixCoordClient_GetCredential_Call) Return(_a0 *rootcoordpb.GetCred
 }
 
 func (_c *MockMixCoordClient_GetCredential_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetCredentialRequest, ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error)) *MockMixCoordClient_GetCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetDataViewGate provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataViewGate")
+	}
+
+	var r0 *rootcoordpb.GetDataViewGateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetDataViewGateRequest, ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetDataViewGateRequest, ...grpc.CallOption) *rootcoordpb.GetDataViewGateResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetDataViewGateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetDataViewGateRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_GetDataViewGate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataViewGate'
+type MockMixCoordClient_GetDataViewGate_Call struct {
+	*mock.Call
+}
+
+// GetDataViewGate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.GetDataViewGateRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) GetDataViewGate(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_GetDataViewGate_Call {
+	return &MockMixCoordClient_GetDataViewGate_Call{Call: _e.mock.On("GetDataViewGate",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_GetDataViewGate_Call) Run(run func(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest, opts ...grpc.CallOption)) *MockMixCoordClient_GetDataViewGate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetDataViewGateRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetDataViewGate_Call) Return(_a0 *rootcoordpb.GetDataViewGateResponse, _a1 error) *MockMixCoordClient_GetDataViewGate_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetDataViewGate_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetDataViewGateRequest, ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error)) *MockMixCoordClient_GetDataViewGate_Call {
 	_c.Call.Return(run)
 	return _c
 }

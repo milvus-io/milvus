@@ -684,6 +684,10 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *pro
 	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
 }
 
+func (s *Server) SyncDataViewGate(ctx context.Context, request *proxypb.SyncDataViewGateRequest) (*commonpb.Status, error) {
+	return s.proxy.SyncDataViewGate(ctx, request)
+}
+
 // CreateCollection notifies Proxy to create a collection
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateCollection(ctx, request)

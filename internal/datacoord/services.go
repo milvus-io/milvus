@@ -349,6 +349,49 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 	return resp, nil
 }
 
+// AliveSegmentMinSchemaVersion returns the minimum schema_version across the collection's healthy
+// non-L0 segments (L1/L2 data segments in any live state — growing, sealed, flushed, importing,
+// invisible). DataViewGate add-side uses it to decide when an add_function_field backfill is complete
+// on every such segment (min >= add_version). L0 (delete-only) segments are excluded: they carry no
+// field data and are never schema-bumped, so counting them would peg the min forever. growing /
+// importing / invisible are intermediate states whose data (or compaction / import product) still has
+// to reach add_version, so they must be counted or the gate would release before backfill lands. When
+// there is no such segment, math.MaxInt32 is returned so the caller reads "complete".
+//
+// This is a STORAGE-side view (schema_version DataCoord has recorded), NOT a QueryNode serving-ready
+// signal: min >= target means the backfill landed in storage, not that every QueryNode has reloaded the
+// new binlog/index. The DataViewGate add side uses it to BOUND (not eliminate) the exposure window; see
+// releaseCompletedAddGates for that intentional half-fix scope.
+func (s *Server) AliveSegmentMinSchemaVersion(ctx context.Context, collectionID int64) (int32, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return 0, err
+	}
+
+	segments := s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		return isSegmentHealthy(seg) && seg.GetLevel() != datapb.SegmentLevel_L0
+	}))
+	minVersion := int32(math.MaxInt32)
+	for _, seg := range segments {
+		if v := seg.GetSchemaVersion(); v < minVersion {
+			minVersion = v
+		}
+	}
+
+	// Also account for pending import jobs: a job created before a schema change is bound to that older
+	// schema snapshot (all its tasks share job.Schema) and will publish segments at its schema version —
+	// but before it allocates any segment there is nothing here to scan, so an add gate could release
+	// prematurely and then the import materializes a segment missing the added field. Fold each unfinished
+	// job's schema version into the min so the gate stays until the job completes.
+	for _, job := range s.importMeta.GetJobBy(ctx,
+		WithCollectionID(collectionID),
+		WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+		if v := job.GetSchema().GetVersion(); v < minVersion {
+			minVersion = v
+		}
+	}
+	return minVersion, nil
+}
+
 // GetInsertBinlogPaths returns binlog paths info for requested segments
 func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {

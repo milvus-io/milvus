@@ -25,6 +25,7 @@ const (
 	Proxy_GetComponentStates_FullMethodName            = "/milvus.proto.proxy.Proxy/GetComponentStates"
 	Proxy_GetStatisticsChannel_FullMethodName          = "/milvus.proto.proxy.Proxy/GetStatisticsChannel"
 	Proxy_InvalidateCollectionMetaCache_FullMethodName = "/milvus.proto.proxy.Proxy/InvalidateCollectionMetaCache"
+	Proxy_SyncDataViewGate_FullMethodName              = "/milvus.proto.proxy.Proxy/SyncDataViewGate"
 	Proxy_GetDdChannel_FullMethodName                  = "/milvus.proto.proxy.Proxy/GetDdChannel"
 	Proxy_InvalidateCredentialCache_FullMethodName     = "/milvus.proto.proxy.Proxy/InvalidateCredentialCache"
 	Proxy_UpdateCredentialCache_FullMethodName         = "/milvus.proto.proxy.Proxy/UpdateCredentialCache"
@@ -48,6 +49,12 @@ type ProxyClient interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	InvalidateCollectionMetaCache(ctx context.Context, in *InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// DataViewGate: apply a FULL per-collection gate snapshot (gated field set + complex-delete pause)
+	// stamped with a RootCoord-monotonic generation. The proxy applies it only when generation exceeds
+	// the last applied one, so a reordered/stale snapshot is dropped instead of overwriting newer state.
+	// drain_complex_delete=true (a drop install) also drains in-flight complex-deletes before ACK; this
+	// RPC's blocking fan-out is the drain barrier.
+	SyncDataViewGate(ctx context.Context, in *SyncDataViewGateRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetDdChannel(ctx context.Context, in *internalpb.GetDdChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	InvalidateCredentialCache(ctx context.Context, in *InvalidateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateCredentialCache(ctx context.Context, in *UpdateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -94,6 +101,15 @@ func (c *proxyClient) GetStatisticsChannel(ctx context.Context, in *internalpb.G
 func (c *proxyClient) InvalidateCollectionMetaCache(ctx context.Context, in *InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, Proxy_InvalidateCollectionMetaCache_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *proxyClient) SyncDataViewGate(ctx context.Context, in *SyncDataViewGateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, Proxy_SyncDataViewGate_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -233,6 +249,12 @@ type ProxyServer interface {
 	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
 	InvalidateCollectionMetaCache(context.Context, *InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	// DataViewGate: apply a FULL per-collection gate snapshot (gated field set + complex-delete pause)
+	// stamped with a RootCoord-monotonic generation. The proxy applies it only when generation exceeds
+	// the last applied one, so a reordered/stale snapshot is dropped instead of overwriting newer state.
+	// drain_complex_delete=true (a drop install) also drains in-flight complex-deletes before ACK; this
+	// RPC's blocking fan-out is the drain barrier.
+	SyncDataViewGate(context.Context, *SyncDataViewGateRequest) (*commonpb.Status, error)
 	GetDdChannel(context.Context, *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error)
 	InvalidateCredentialCache(context.Context, *InvalidateCredCacheRequest) (*commonpb.Status, error)
 	UpdateCredentialCache(context.Context, *UpdateCredCacheRequest) (*commonpb.Status, error)
@@ -262,6 +284,9 @@ func (UnimplementedProxyServer) GetStatisticsChannel(context.Context, *internalp
 }
 func (UnimplementedProxyServer) InvalidateCollectionMetaCache(context.Context, *InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InvalidateCollectionMetaCache not implemented")
+}
+func (UnimplementedProxyServer) SyncDataViewGate(context.Context, *SyncDataViewGateRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncDataViewGate not implemented")
 }
 func (UnimplementedProxyServer) GetDdChannel(context.Context, *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetDdChannel not implemented")
@@ -367,6 +392,24 @@ func _Proxy_InvalidateCollectionMetaCache_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProxyServer).InvalidateCollectionMetaCache(ctx, req.(*InvalidateCollMetaCacheRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Proxy_SyncDataViewGate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SyncDataViewGateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServer).SyncDataViewGate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Proxy_SyncDataViewGate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServer).SyncDataViewGate(ctx, req.(*SyncDataViewGateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -641,6 +684,10 @@ var Proxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InvalidateCollectionMetaCache",
 			Handler:    _Proxy_InvalidateCollectionMetaCache_Handler,
+		},
+		{
+			MethodName: "SyncDataViewGate",
+			Handler:    _Proxy_SyncDataViewGate_Handler,
 		},
 		{
 			MethodName: "GetDdChannel",

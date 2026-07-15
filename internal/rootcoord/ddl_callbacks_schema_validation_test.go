@@ -150,6 +150,10 @@ func TestDDLCallbacksSchemaEvolutionRejectsGraphBreakingAlterCollectionSchemaDro
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 
+	// The function-add above leaves an add gate open until backfill reaches this version; drive that
+	// release so the drop reaches schema validation instead of the gate's in-flight admission.
+	core.dataViewGate.releaseCompletedAddGates(ctx)
+
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,

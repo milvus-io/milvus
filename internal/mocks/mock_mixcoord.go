@@ -388,6 +388,63 @@ func (_c *MixCoord_AddFileResource_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// AliveSegmentMinSchemaVersion provides a mock function with given fields: ctx, collectionID
+func (_m *MixCoord) AliveSegmentMinSchemaVersion(ctx context.Context, collectionID int64) (int32, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AliveSegmentMinSchemaVersion")
+	}
+
+	var r0 int32
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (int32, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) int32); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AliveSegmentMinSchemaVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AliveSegmentMinSchemaVersion'
+type MixCoord_AliveSegmentMinSchemaVersion_Call struct {
+	*mock.Call
+}
+
+// AliveSegmentMinSchemaVersion is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *MixCoord_Expecter) AliveSegmentMinSchemaVersion(ctx interface{}, collectionID interface{}) *MixCoord_AliveSegmentMinSchemaVersion_Call {
+	return &MixCoord_AliveSegmentMinSchemaVersion_Call{Call: _e.mock.On("AliveSegmentMinSchemaVersion", ctx, collectionID)}
+}
+
+func (_c *MixCoord_AliveSegmentMinSchemaVersion_Call) Run(run func(ctx context.Context, collectionID int64)) *MixCoord_AliveSegmentMinSchemaVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AliveSegmentMinSchemaVersion_Call) Return(_a0 int32, _a1 error) *MixCoord_AliveSegmentMinSchemaVersion_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AliveSegmentMinSchemaVersion_Call) RunAndReturn(run func(context.Context, int64) (int32, error)) *MixCoord_AliveSegmentMinSchemaVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocID provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) AllocID(_a0 context.Context, _a1 *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -3917,6 +3974,65 @@ func (_c *MixCoord_FlushAll_Call) RunAndReturn(run func(context.Context, *datapb
 	return _c
 }
 
+// ForceReleaseDataViewGate provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ForceReleaseDataViewGate(_a0 context.Context, _a1 *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ForceReleaseDataViewGate")
+	}
+
+	var r0 *rootcoordpb.ForceReleaseDataViewGateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest) *rootcoordpb.ForceReleaseDataViewGateResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.ForceReleaseDataViewGateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ForceReleaseDataViewGate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForceReleaseDataViewGate'
+type MixCoord_ForceReleaseDataViewGate_Call struct {
+	*mock.Call
+}
+
+// ForceReleaseDataViewGate is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.ForceReleaseDataViewGateRequest
+func (_e *MixCoord_Expecter) ForceReleaseDataViewGate(_a0 interface{}, _a1 interface{}) *MixCoord_ForceReleaseDataViewGate_Call {
+	return &MixCoord_ForceReleaseDataViewGate_Call{Call: _e.mock.On("ForceReleaseDataViewGate", _a0, _a1)}
+}
+
+func (_c *MixCoord_ForceReleaseDataViewGate_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.ForceReleaseDataViewGateRequest)) *MixCoord_ForceReleaseDataViewGate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.ForceReleaseDataViewGateRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ForceReleaseDataViewGate_Call) Return(_a0 *rootcoordpb.ForceReleaseDataViewGateResponse, _a1 error) *MixCoord_ForceReleaseDataViewGate_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ForceReleaseDataViewGate_Call) RunAndReturn(run func(context.Context, *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error)) *MixCoord_ForceReleaseDataViewGate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GcConfirm provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GcConfirm(_a0 context.Context, _a1 *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4503,6 +4619,65 @@ func (_c *MixCoord_GetDataCoordTopology_Call) Return(_a0 *metricsinfo.DataCoordT
 }
 
 func (_c *MixCoord_GetDataCoordTopology_Call) RunAndReturn(run func(context.Context, *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error)) *MixCoord_GetDataCoordTopology_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetDataViewGate provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetDataViewGate(_a0 context.Context, _a1 *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataViewGate")
+	}
+
+	var r0 *rootcoordpb.GetDataViewGateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetDataViewGateRequest) *rootcoordpb.GetDataViewGateResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetDataViewGateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetDataViewGateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetDataViewGate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataViewGate'
+type MixCoord_GetDataViewGate_Call struct {
+	*mock.Call
+}
+
+// GetDataViewGate is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.GetDataViewGateRequest
+func (_e *MixCoord_Expecter) GetDataViewGate(_a0 interface{}, _a1 interface{}) *MixCoord_GetDataViewGate_Call {
+	return &MixCoord_GetDataViewGate_Call{Call: _e.mock.On("GetDataViewGate", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetDataViewGate_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetDataViewGateRequest)) *MixCoord_GetDataViewGate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetDataViewGateRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetDataViewGate_Call) Return(_a0 *rootcoordpb.GetDataViewGateResponse, _a1 error) *MixCoord_GetDataViewGate_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetDataViewGate_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error)) *MixCoord_GetDataViewGate_Call {
 	_c.Call.Return(run)
 	return _c
 }

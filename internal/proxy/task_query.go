@@ -613,6 +613,22 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan.DynamicFields = t.userDynamicFields
 	}
 
+	// DataViewGate: reject a query that would expose OR CONSUME a field currently gated (being dropped, or
+	// an add_function_field still backfilling). Besides output fields, the read still touches group-by,
+	// aggregate input, and order-by fields (output fields are emptied in the hasAgg branch), so all are
+	// added explicitly — mirrors the search path.
+	exposedFieldIDs := append([]UniqueID{}, t.OutputFieldsId...)
+	exposedFieldIDs = append(exposedFieldIDs, t.GroupByFieldIds...)
+	for _, aggregate := range t.Aggregates {
+		exposedFieldIDs = append(exposedFieldIDs, aggregate.GetFieldId())
+	}
+	for _, orderByField := range t.OrderByFields {
+		exposedFieldIDs = append(exposedFieldIDs, orderByField.GetFieldId())
+	}
+	if err := checkReadFieldGate(t.GetCollectionID(), exposedFieldIDs...); err != nil {
+		return err
+	}
+
 	mlog.Debug(ctx, "translate output fields to field ids",
 		mlog.Int64s("OutputFieldsID", t.OutputFieldsId),
 		mlog.String("requestType", t.getQueryLabel()))

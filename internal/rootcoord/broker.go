@@ -51,6 +51,8 @@ type Broker interface {
 	WatchChannels(ctx context.Context, info *watchInfo) error
 	UnwatchChannels(ctx context.Context, info *watchInfo) error
 	GetSegmentStates(context.Context, *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
+	// DataViewGate add-side: min schema_version over the collection's alive segments (backfill-done check).
+	AliveSegmentMinSchemaVersion(ctx context.Context, collectionID int64) (int32, error)
 	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
@@ -192,6 +194,10 @@ func (b *ServerBroker) UnwatchChannels(ctx context.Context, info *watchInfo) err
 
 func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	return b.s.mixCoord.GetSegmentStates(ctx, req)
+}
+
+func (b *ServerBroker) AliveSegmentMinSchemaVersion(ctx context.Context, collectionID int64) (int32, error) {
+	return b.s.mixCoord.AliveSegmentMinSchemaVersion(ctx, collectionID)
 }
 
 func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {

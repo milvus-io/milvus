@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -1158,6 +1159,46 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		enqueueTs := tsoutil.ComposeTSByTime(time.Now())
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
+	})
+
+	t.Run("rejects search grouping by a gated field", func(t *testing.T) {
+		collName := "search_gated_groupby" + funcutil.GenRandomStr()
+		_, name2id := createCollWithFields(t, collName, qc)
+		collID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collName)
+		require.NoError(t, err)
+
+		// DataViewGate blocks the group-by field (as a drop / add-backfill gate would). A search that
+		// groups by it must be rejected even though the field is not an output field — group-by is a
+		// read that references the gated field.
+		old := globalDataViewGate
+		defer func() { globalDataViewGate = old }()
+		globalDataViewGate = newDataViewGate()
+		_, err = globalDataViewGate.ApplyGateSnapshot(context.Background(), collID, []UniqueID{name2id[testInt64Field]}, false, 1, false)
+		require.NoError(t, err)
+		// PreExecute re-pulls the gate via GetCollectionID; have the pull deliver the same gated field at a
+		// newer generation so it re-affirms the block (an empty-gate pull would otherwise clear it).
+		qc.getDataViewGateFunc = func(_ context.Context, req *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error) {
+			resp := &rootcoordpb.GetDataViewGateResponse{Status: merr.Success()}
+			if req.GetCollectionID() == collID {
+				resp.GatedFieldIds = []int64{name2id[testInt64Field]}
+				resp.Generation = 2
+			}
+			return resp, nil
+		}
+		defer func() { qc.getDataViewGateFunc = nil }()
+
+		st := getSearchTaskWithRerank(t, collName, testFloatField)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.DslType = commonpb.DslType_BoolExprV1
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   GroupByFieldKey,
+			Value: testInt64Field,
+		})
+		st.SetTs(tsoutil.ComposeTSByTime(time.Now()))
+
+		err = st.PreExecute(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not readable")
 	})
 }
 

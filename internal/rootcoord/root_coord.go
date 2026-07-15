@@ -137,6 +137,8 @@ type Core struct {
 	tikvCli          *txnkv.Client
 	address          string
 	meta             IMetaTable
+	catalog          metastore.RootCoordCatalog // direct handle for DataViewGate coordination-state persistence
+	dataViewGate     *dataViewGateManager       // central owner of all DataViewGate operations
 	scheduler        IScheduler
 	broker           Broker
 	ddlTsLockManager DdlTsLockManager
@@ -404,6 +406,8 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
 
+		c.catalog = catalog
+		c.dataViewGate = newDataViewGateManager(c)
 		if c.meta, err = NewMetaTable(c.ctx, catalog, c.tsoAllocator); err != nil {
 			return err
 		}
@@ -499,7 +503,11 @@ func (c *Core) initInternal() error {
 		c.chanTimeTick.initSessions,
 		c.proxyClientManager.SetProxyClients,
 	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient, func(session *sessionutil.Session) {
+		// DataViewGate: a proxy that pulled before a gate installed and joined after its push learns of the
+		// gate via neither path; re-sync active gates to it now that it is in the fan-out (B1 catch-up).
+		c.dataViewGate.pushActiveGatesToProxy(session.ServerID)
+	})
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	mlog.Info(context.TODO(), "init proxy manager done")
 
@@ -564,6 +572,22 @@ func (c *Core) Init() error {
 		if len(pending) > 0 {
 			c.meta.RecoverFileResourceRefCnt(pending)
 			mlog.Info(context.TODO(), "recovered file resource refCnt from pending broadcast tasks", mlog.Int("count", len(pending)))
+		}
+		// DataViewGate: load persisted drop gates BEFORE registering DDL callbacks, so the AlterCollection
+		// ack callback (the sole releaser of a drop gate) always finds the loaded op — same
+		// recover-before-register discipline as the file-resource recovery above (#48612).
+		if c.dataViewGate != nil {
+			// retry absorbs transient etcd jitter; a persisted failure (e.g. a corrupt gate record) must NOT
+			// silently fail open (the drop gate would be lost + its record leaked, and the re-driven ack's
+			// releaseGate would no-op), so surface it and fail-fast. A real etcd outage crash-loops until
+			// etcd recovers (RootCoord can't work without etcd anyway).
+			if err := retry.Do(c.ctx, func() error {
+				return c.dataViewGate.recoverDropGatesForPull(c.ctx)
+			}, retry.Attempts(5)); err != nil {
+				mlog.Warn(context.TODO(), "data view gate: failed to load drop gates after retries; failing RootCoord init", mlog.Err(err))
+				initError = err
+				return
+			}
 		}
 		RegisterDDLCallbacks(c)
 	})
@@ -718,6 +742,20 @@ func (c *Core) startInternal() error {
 		panic(err)
 	}
 
+	// DataViewGate: reconcile persisted gate records after restart (resume paused proxies for drop
+	// gates, re-install add gates + restart their releasers). Best-effort — the add releaser and the
+	// DescribeCollection pull give eventual convergence, so a recovery error must not block startup.
+	// Symmetric with the drop-gate recovery in Init: retry absorbs transient etcd jitter; a persisted
+	// failure must not silently fail open (a newly-added function field would be readable pre-backfill),
+	// so warn and fail-fast (panic, matching this function's restore handling above).
+	if err := retry.Do(c.ctx, func() error {
+		return c.dataViewGate.recoverAddGates(c.ctx)
+	}, retry.Attempts(5)); err != nil {
+		mlog.Warn(context.TODO(), "data view gate: add-gate recovery failed after retries; failing RootCoord start", mlog.Err(err))
+		panic(err)
+	}
+	c.dataViewGate.Start()
+
 	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		c.quotaCenter.Start()
 	}
@@ -794,6 +832,9 @@ func (c *Core) GracefulStop() {
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
+	if c.dataViewGate != nil {
+		c.dataViewGate.Stop()
+	}
 	if c.tombstoneSweeper != nil {
 		c.tombstoneSweeper.Close()
 	}
@@ -1280,6 +1321,52 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 // by rootcoord, eventually, the dropping collections will be released.
 func (c *Core) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return c.describeCollectionImpl(ctx, in, true)
+}
+
+// GetDataViewGate returns the DataViewGate state (read-blocked field ids + complex-delete pause) for a
+// collection. Internal-only pull for the proxy meta-cache to converge a new/recovered proxy to the
+// current gate before it publishes the collection info and starts serving reads.
+func (c *Core) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.GetDataViewGateResponse{Status: merr.Status(err)}, nil
+	}
+	if c.dataViewGate == nil {
+		// No gate manager: report in-fan-out so a proxy never blocks its startup membership wait.
+		return &rootcoordpb.GetDataViewGateResponse{Status: merr.Success(), RequesterInFanout: true}, nil
+	}
+	collectionID := in.GetCollectionID()
+	gatedFields, complexDeletePaused, generation := c.dataViewGate.gateSnapshot(collectionID)
+	// Tell the requesting proxy whether RootCoord already has it in the fan-out: only then are all FUTURE
+	// drop pushes/drains guaranteed to reach it, so it may admit complex-deletes (see the proxy gate).
+	// Escape hatch: when the gate is disabled it protects nothing, so report in-fan-out unconditionally —
+	// a proxy whose membership never confirms can be un-frozen by turning DataViewGateEnabled off.
+	_, inFanout := c.proxyClientManager.GetProxyClients().Get(in.GetBase().GetSourceID())
+	if !c.dataViewGate.enabled() {
+		inFanout = true
+	}
+	return &rootcoordpb.GetDataViewGateResponse{
+		Status:              merr.Success(),
+		GatedFieldIds:       gatedFields,
+		ComplexDeletePaused: complexDeletePaused,
+		Generation:          generation,
+		RequesterInFanout:   inFanout,
+	}, nil
+}
+
+// ForceReleaseDataViewGate force-releases every DataViewGate op on a collection — an operator escape
+// hatch to clear a stuck gate that would otherwise freeze the collection's DDLs.
+func (c *Core) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.ForceReleaseDataViewGateResponse{Status: merr.Status(err)}, nil
+	}
+	if c.dataViewGate == nil {
+		return &rootcoordpb.ForceReleaseDataViewGateResponse{Status: merr.Success()}, nil
+	}
+	released := c.dataViewGate.forceReleaseCollection(ctx, in.GetCollectionID())
+	return &rootcoordpb.ForceReleaseDataViewGateResponse{
+		Status:        merr.Success(),
+		ReleasedCount: int32(released),
+	}, nil
 }
 
 // ShowCollections list all collection names

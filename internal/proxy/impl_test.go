@@ -1371,6 +1371,7 @@ func TestProxyDescribeCollection(t *testing.T) {
 	node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 	ctx := context.Background()
 	mixCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(mixCoord)
 	mixCoord.On("DescribeCollection", mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
 		return req.DbName == "test_1" && req.CollectionName == "test_collection"
 	})).Return(&milvuspb.DescribeCollectionResponse{

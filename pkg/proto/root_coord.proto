@@ -88,6 +88,16 @@ service RootCoord {
     rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
     rpc DescribeCollectionInternal(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
 
+    // GetDataViewGate returns the DataViewGate state (read-blocked field ids + complex-delete pause)
+    // for a collection. Internal-only: the proxy meta-cache pulls it to converge a new/recovered proxy
+    // to RootCoord's current gate before serving the collection.
+    rpc GetDataViewGate(GetDataViewGateRequest) returns (GetDataViewGateResponse) {}
+
+    // ForceReleaseDataViewGate force-releases every DataViewGate op on a collection: an operator escape
+    // hatch to clear a stuck gate (e.g. an add_function backfill that never completes) that would
+    // otherwise freeze the collection's DDLs via admission. Voids the released ops' guarantees.
+    rpc ForceReleaseDataViewGate(ForceReleaseDataViewGateRequest) returns (ForceReleaseDataViewGateResponse) {}
+
     rpc CreateAlias(milvus.CreateAliasRequest) returns (common.Status) {}
     rpc DropAlias(milvus.DropAliasRequest) returns (common.Status) {}
     rpc AlterAlias(milvus.AlterAliasRequest) returns (common.Status) {}
@@ -331,4 +341,30 @@ message ShowCollectionIDsResponse {
 message CreatePartitionResponse {
   common.Status status = 1;
   int64 partitionID = 2;
+}
+
+message GetDataViewGateRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+}
+
+message GetDataViewGateResponse {
+  common.Status status = 1;
+  repeated int64 gated_field_ids = 2;
+  bool complex_delete_paused = 3;
+  uint64 generation = 4;               // RootCoord-monotonic (TSO) version of this snapshot
+  // Whether RootCoord already has the requesting proxy in its fan-out (proxyClientManager). Only when
+  // true is the pull's snapshot + all FUTURE drop pushes/drains guaranteed to cover this proxy, so it
+  // may admit complex-deletes; until then the proxy fail-closes complex-deletes (drain-barrier safety).
+  bool requester_in_fanout = 5;
+}
+
+message ForceReleaseDataViewGateRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+}
+
+message ForceReleaseDataViewGateResponse {
+  common.Status status = 1;
+  int32 released_count = 2;
 }

@@ -154,6 +154,16 @@ func (node *Proxy) Register() error {
 	node.session.Register()
 	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	mlog.Info(node.ctx, "Proxy Register Finished")
+	// Wait until RootCoord has this proxy in its DataViewGate fan-out (session now registered), THEN go
+	// Healthy — serving must NOT begin while the proxy is outside the drop drain-barrier fan-out, else a
+	// complex-delete could cross a drop the proxy never received (see WaitForDataViewGateMembership). The
+	// transition to Healthy is done here (not in Start) precisely so it follows Register.
+	if err := node.WaitForDataViewGateMembership(node.ctx); err != nil {
+		mlog.Warn(node.ctx, "failed to confirm DataViewGate membership before serving", mlog.Err(err))
+		return err
+	}
+	mlog.Debug(node.ctx, "update state code", mlog.String("role", typeutil.ProxyRole), mlog.String("State", commonpb.StateCode_Healthy.String()))
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	// TODO Reset the logger
 	// Params.initLogCfg()
 	return nil
@@ -287,13 +297,24 @@ func (node *Proxy) Start() error {
 		hookutil.NodeIDKey: paramtable.GetNodeID(),
 	})
 
-	mlog.Debug(node.ctx, "update state code", mlog.String("role", typeutil.ProxyRole), mlog.String("State", commonpb.StateCode_Healthy.String()))
-	node.UpdateStateCode(commonpb.StateCode_Healthy)
-
 	// register devops api
 	RegisterMgrRoute(node)
 
+	// NOTE: the transition to Healthy is intentionally NOT done here. It happens in the gRPC server's
+	// start() only AFTER Register() + WaitForDataViewGateMembership(), so the proxy never serves while not
+	// yet in RootCoord's DataViewGate fan-out (see WaitForDataViewGateMembership).
 	return nil
+}
+
+// WaitForDataViewGateMembership blocks until RootCoord confirms this proxy is in its fan-out (or the gate
+// is disabled). Called after Register() and before the proxy goes Healthy, so serving never starts while
+// the proxy is outside the drop drain-barrier fan-out. No-op when the meta cache is not initialized.
+func (node *Proxy) WaitForDataViewGateMembership(ctx context.Context) error {
+	mc, ok := globalMetaCache.(*MetaCache)
+	if !ok {
+		return nil
+	}
+	return mc.waitDataViewGateMembership(ctx)
 }
 
 // Stop stops a proxy node.

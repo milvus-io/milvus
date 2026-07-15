@@ -272,6 +272,12 @@ type deleteRunner struct {
 	collectionID UniqueID
 	partitionIDs []UniqueID
 	plan         *planpb.PlanNode
+	// gateGen is the DataViewGate generation captured in Init (when the plan is built); Run re-checks it
+	// at TryRegisterComplexDelete so a drop between Init and Run rejects the now-stale complex-delete plan.
+	// The generation advances on ANY gate change (add / drop / release), so an unrelated add_function_field
+	// on the same collection can spuriously reject a still-valid complex-delete — fail-safe (never
+	// mis-deletes) and retriable, so it is accepted rather than carrying a separate drop-only generation.
+	gateGen uint64
 
 	// for query
 	msgID int64
@@ -316,6 +322,12 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
+	// Capture the DataViewGate generation the plan below is built against: a drop that installs/releases
+	// between Init and Run bumps it, so a complex-delete whose plan predates the drop (and could be
+	// missed by the drain barrier) is rejected at TryRegisterComplexDelete in Run and retried. Membership
+	// in RootCoord's fan-out is guaranteed structurally — the proxy only goes Healthy (serves) after
+	// membership is confirmed at startup — so no per-delete membership check is needed here.
+	dr.gateGen = globalDataViewGate.CurrentGen(dr.collectionID)
 	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}
@@ -418,7 +430,14 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 		}
 	} else {
 		// if get complex delete expr
-		// need query from querynode before delete
+		// need query from querynode before delete.
+		// DataViewGate: register this in-flight complex-delete so a concurrent field drop can drain
+		// it; reject if complex-deletes on this collection are currently paused (a drop is draining).
+		// dr.Run is synchronous to the Delete RPC, so the deferred deregister covers the whole op.
+		if !globalDataViewGate.TryRegisterComplexDelete(dr.collectionID, dr.gateGen) {
+			return merr.WrapErrCollectionSchemaChangeInProgress(dr.collectionID, "a field drop is draining complex-deletes on the collection; retry the delete")
+		}
+		defer globalDataViewGate.DeregisterComplexDelete(dr.collectionID)
 		err := dr.complexDelete(ctx, dr.plan)
 		if err != nil {
 			mlog.Warn(ctx, "complex delete failed,but delete some data", mlog.Int64("count", dr.result.DeleteCnt), mlog.String("expr", dr.req.GetExpr()))

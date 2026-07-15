@@ -133,6 +133,17 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 	})
 }
 
+func (c *Client) SyncDataViewGate(ctx context.Context, req *proxypb.SyncDataViewGateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
+		return client.SyncDataViewGate(ctx, req)
+	})
+}
+
 func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.InvalidateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

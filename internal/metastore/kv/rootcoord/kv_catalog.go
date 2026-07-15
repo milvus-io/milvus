@@ -1138,6 +1138,39 @@ func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 	}), nil
 }
 
+func (kc *Catalog) SaveDataViewGate(ctx context.Context, gate *model.DataViewGate) error {
+	k := fmt.Sprintf("%s/%d/%d", DataViewGatePrefix, gate.CollectionID, gate.OpVersion)
+	v, err := json.Marshal(gate)
+	if err != nil {
+		mlog.Error(ctx, "marshal data view gate fail", mlog.String("key", k), mlog.Err(err))
+		return err
+	}
+	return kc.Txn.Save(ctx, k, string(v))
+}
+
+func (kc *Catalog) DropDataViewGate(ctx context.Context, collectionID int64, opVersion int32) error {
+	k := fmt.Sprintf("%s/%d/%d", DataViewGatePrefix, collectionID, opVersion)
+	return kc.Txn.Remove(ctx, k)
+}
+
+func (kc *Catalog) ListDataViewGates(ctx context.Context) ([]*model.DataViewGate, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, DataViewGatePrefix+"/")
+	if err != nil {
+		mlog.Error(ctx, "list data view gates fail", mlog.String("prefix", DataViewGatePrefix), mlog.Err(err))
+		return nil, err
+	}
+	gates := make([]*model.DataViewGate, 0, len(values))
+	for i := range values {
+		gate := &model.DataViewGate{}
+		if err := json.Unmarshal([]byte(values[i]), gate); err != nil {
+			mlog.Error(ctx, "unmarshal data view gate fail", mlog.Err(err))
+			return nil, err
+		}
+		gates = append(gates, gate)
+	}
+	return gates, nil
+}
+
 func (kc *Catalog) listCredentials(ctx context.Context) ([]*model.Credential, error) {
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, CredentialPrefix+"/")
 	if err != nil {

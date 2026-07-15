@@ -682,6 +682,18 @@ func WrapErrCollectionSchemaVersionNotReady(collection any, consistentSegments, 
 	)
 }
 
+func WrapErrCollectionSchemaChangeInProgress(collection any, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionSchemaChangeInProgress, value("collection", collection))
+	// Guard the first-arg-is-format-string assumption: a non-string first arg is ignored rather than
+	// panicking (callers that pass no message, e.g. WrapErrCollectionSchemaChangeInProgress(collID), stay ok).
+	if len(msgAndArgs) > 0 {
+		if msg, ok := msgAndArgs[0].(string); ok {
+			err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
+		}
+	}
+	return err
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),

@@ -259,6 +259,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.OutputFieldsId = outputFieldIDs
 
+	// DataViewGate: reject a search that would expose a field currently gated (being dropped, or an
+	// add_function_field still backfilling) on the collection. Output fields are the primary exposure
+	// path; the anns/group-by fields are covered once populated below.
+	if err = checkReadFieldGate(t.GetCollectionID(), outputFieldIDs...); err != nil {
+		return err
+	}
+
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
 	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
@@ -707,6 +714,24 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			mlog.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
+	// DataViewGate: reject a hybrid search whose vector/anns, group-by, rerank-input, or order-by field(s)
+	// are gated (being dropped, or an add_function_field output still backfilling) on the collection.
+	// group-by ids come from rankParams (singular + plural); aggregation is not supported for hybrid.
+	exposedFieldIDs := append([]int64{}, queryFieldIDs...)
+	exposedFieldIDs = append(exposedFieldIDs, t.rankParams.GetGroupByFieldIds()...)
+	if gb := t.rankParams.GetGroupByFieldId(); gb >= 0 {
+		exposedFieldIDs = append(exposedFieldIDs, gb)
+	}
+	if t.rerankMeta != nil {
+		exposedFieldIDs = append(exposedFieldIDs, t.rerankMeta.GetInputFieldIDs()...)
+	}
+	for _, orderByField := range t.orderByFields {
+		exposedFieldIDs = append(exposedFieldIDs, orderByField.FieldID)
+	}
+	if err := checkReadFieldGate(t.GetCollectionID(), exposedFieldIDs...); err != nil {
+		return err
+	}
+
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
 	if err := t.validateHybridArrayOfVectorGroupBy(); err != nil {
 		return err
@@ -940,12 +965,39 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 	t.FieldId = queryInfo.GetQueryFieldId()
 
+	// DataViewGate: reject a single-vector search whose output, anns/vector, group-by, rerank-input, or
+	// order-by field is gated (being dropped, or an add_function_field output still backfilling). The
+	// output set is checked here (not only at the early check above) because initSearchAggregation runs
+	// before initSearchRequest and folds the aggregation source fields (e.g. max(field), top_hits sort key)
+	// into t.OutputFieldsId after that early check, so they would otherwise bypass the gate.
+	exposedFieldIDs := []int64{t.FieldId}
+	exposedFieldIDs = append(exposedFieldIDs, t.OutputFieldsId...)
+	exposedFieldIDs = append(exposedFieldIDs, queryInfo.GetGroupByFieldIds()...)
+	if gb := queryInfo.GetGroupByFieldId(); gb >= 0 {
+		exposedFieldIDs = append(exposedFieldIDs, gb)
+	}
+	exposedFieldIDs = append(exposedFieldIDs, t.GroupByFieldIds...)
+	if t.rerankMeta != nil {
+		exposedFieldIDs = append(exposedFieldIDs, t.rerankMeta.GetInputFieldIDs()...)
+	}
+	for _, orderByField := range t.orderByFields {
+		exposedFieldIDs = append(exposedFieldIDs, orderByField.FieldID)
+	}
+	if err := checkReadFieldGate(t.GetCollectionID(), exposedFieldIDs...); err != nil {
+		return err
+	}
+
 	if err := t.addHighlightTask(t.request.GetHighlighter(), queryInfo.GetMetricType(), queryInfo.GetQueryFieldId(), t.request.GetPlaceholderGroup(), t.GetAnalyzerName()); err != nil {
 		return err
 	}
 
 	// add highlight field ids to output fields id
 	if t.highlighter != nil {
+		// DataViewGate: the highlighter is built after the anns/group-by gate check above and consumes its
+		// required (analyzer/text) fields, so gate-check them here before adding them to the output.
+		if err := checkReadFieldGate(t.GetCollectionID(), t.highlighter.RequiredFieldIDs()...); err != nil {
+			return err
+		}
 		t.OutputFieldsId = append(t.OutputFieldsId, t.highlighter.RequiredFieldIDs()...)
 	}
 

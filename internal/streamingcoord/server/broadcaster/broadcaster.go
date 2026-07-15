@@ -44,6 +44,12 @@ type Broadcaster interface {
 	// callback yet. Used during recovery to rebuild file resource refCnt.
 	GetPendingSchemaFileResources() map[int64][]int64
 
+	// HasPendingAlterCollectionBroadcast reports whether a non-tombstone AlterCollection broadcast that
+	// produces schemaVersion on collectionID is still pending (its ack callback has not completed). Used
+	// on recovery to tell a legitimately in-flight schema change from an orphan whose broadcast never
+	// durablized.
+	HasPendingAlterCollectionBroadcast(collectionID int64, schemaVersion int32) bool
+
 	// Close closes the broadcaster.
 	Close()
 }

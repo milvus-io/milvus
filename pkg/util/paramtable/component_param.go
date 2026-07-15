@@ -1954,6 +1954,9 @@ type rootCoordConfig struct {
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
 	DefaultDBProperties         ParamItem `refreshable:"false"`
+	DataViewGateCheckInterval   ParamItem `refreshable:"true"`
+	DataViewGateDrainTimeout    ParamItem `refreshable:"true"`
+	DataViewGateEnabled         ParamItem `refreshable:"true"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -2045,6 +2048,33 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.DefaultDBProperties.Init(base.mgr)
+
+	p.DataViewGateCheckInterval = ParamItem{
+		Key:          "rootCoord.dataViewGateCheckInterval",
+		Version:      "2.6.0",
+		DefaultValue: "10",
+		Doc:          "Interval in seconds at which RootCoord checks add-field DataViewGate backfill completion to release the gate.",
+		Export:       false,
+	}
+	p.DataViewGateCheckInterval.Init(base.mgr)
+
+	p.DataViewGateDrainTimeout = ParamItem{
+		Key:          "rootCoord.dataViewGateDrainTimeout",
+		Version:      "2.6.0",
+		DefaultValue: "30",
+		Doc:          "Timeout in seconds RootCoord waits for a proxy to drain in-flight complex-deletes when installing a drop DataViewGate; on timeout the drop fails and is retriable (avoids an unbounded wait on a stuck complex-delete).",
+		Export:       false,
+	}
+	p.DataViewGateDrainTimeout.Init(base.mgr)
+
+	p.DataViewGateEnabled = ParamItem{
+		Key:          "rootCoord.dataViewGateEnabled",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Master kill-switch for the whole DataViewGate (read-gate + complex-delete drain + schema-change admission). RootCoord is the ONLY reader of this flag: set false and RootCoord stops installing/admitting AND releases every active gate on its next check-loop tick (proxies enforce installed state only and clear on that release, so they never read the flag — this avoids a config-divergence window during a false->true rollout). The drop-column consistency guarantee is off while disabled. Refreshable (hot); ForceReleaseDataViewGate remains a per-collection escape hatch.",
+		Export:       false,
+	}
+	p.DataViewGateEnabled.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2128,6 +2158,10 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+
+	MetaCacheGCTimeInterval ParamItem `refreshable:"true"`
+
+	SchemaChangeAdmissionRetryTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2714,6 +2748,24 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.QueryNodePoolingSize.Init(base.mgr)
+
+	p.MetaCacheGCTimeInterval = ParamItem{
+		Key:          "proxy.metaCacheGCTimeInterval",
+		Version:      "2.6.13",
+		Doc:          "the time interval for meta cache GC, in seconds",
+		DefaultValue: "300",
+		Export:       true,
+	}
+	p.MetaCacheGCTimeInterval.Init(base.mgr)
+
+	p.SchemaChangeAdmissionRetryTimeout = ParamItem{
+		Key:          "proxy.schemaChangeAdmissionRetryTimeout",
+		Version:      "2.6.0",
+		DefaultValue: "30",
+		Doc:          "Timeout in seconds the proxy keeps retrying a schema-change DDL that RootCoord rejects because another schema change is still in flight on the collection. Absorbs the admission wait so clients see latency, not an error; on timeout the retriable error is returned so a client may still retry.",
+		Export:       false,
+	}
+	p.SchemaChangeAdmissionRetryTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

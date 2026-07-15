@@ -521,6 +521,7 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 
 	buildRoot := func(autoID bool) *mocks.MockMixCoordClient {
 		root := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(root)
 		// InitMetaCache requires ListPolicy
 		root.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
 		// Meta cache update path fetches partitions info
@@ -8657,6 +8658,38 @@ func TestValidateDropField(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot drop sub-field of struct array field")
 		assert.Contains(t, err.Error(), "paragraphs.para_text")
+	})
+}
+
+func TestAlterCollectionSchemaTask_AdmissionRetry(t *testing.T) {
+	paramtable.Init()
+	key := Params.ProxyCfg.SchemaChangeAdmissionRetryTimeout.Key
+	paramtable.Get().Save(key, "2") // small timeout so the timeout case stays fast
+	defer paramtable.Get().Save(key, "30")
+
+	rejected := &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrCollectionSchemaChangeInProgress(1))}
+	ok := &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
+
+	t.Run("retries admission rejection then succeeds", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(rejected, nil).Twice()
+		mixCoord.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(ok, nil).Once()
+		task := &alterCollectionSchemaTask{
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{},
+			mixCoord:                     mixCoord,
+		}
+		require.NoError(t, task.Execute(context.Background()))
+	})
+
+	t.Run("times out and surfaces the retriable error", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(rejected, nil)
+		task := &alterCollectionSchemaTask{
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{},
+			mixCoord:                     mixCoord,
+		}
+		err := task.Execute(context.Background())
+		assert.ErrorIs(t, err, merr.ErrCollectionSchemaChangeInProgress)
 	})
 }
 

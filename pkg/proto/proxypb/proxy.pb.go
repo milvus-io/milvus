@@ -106,6 +106,97 @@ func (x *InvalidateCollMetaCacheRequest) GetPartitionName() string {
 	return ""
 }
 
+// SyncDataViewGateRequest carries a FULL per-collection gate snapshot (not an incremental delta),
+// ordered by a RootCoord-monotonic generation so the proxy can drop a reordered/stale snapshot.
+type SyncDataViewGateRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base                *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	CollectionID        int64             `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	GatedFieldIds       []int64           `protobuf:"varint,3,rep,packed,name=gated_field_ids,json=gatedFieldIds,proto3" json:"gated_field_ids,omitempty"`            // the collection's complete currently-gated field set
+	ComplexDeletePaused bool              `protobuf:"varint,4,opt,name=complex_delete_paused,json=complexDeletePaused,proto3" json:"complex_delete_paused,omitempty"` // resulting complex-delete pause state for the collection
+	Generation          uint64            `protobuf:"varint,5,opt,name=generation,proto3" json:"generation,omitempty"`                                                // RootCoord-monotonic (TSO) version; proxy applies iff newer
+	// drain_complex_delete=true (a drop install) makes the proxy pause + drain in-flight complex-deletes
+	// on this collection before ACK. false for add gates / release / catch-up (state sync only).
+	DrainComplexDelete bool `protobuf:"varint,6,opt,name=drain_complex_delete,json=drainComplexDelete,proto3" json:"drain_complex_delete,omitempty"`
+}
+
+func (x *SyncDataViewGateRequest) Reset() {
+	*x = SyncDataViewGateRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proxy_proto_msgTypes[1]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SyncDataViewGateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncDataViewGateRequest) ProtoMessage() {}
+
+func (x *SyncDataViewGateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proxy_proto_msgTypes[1]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncDataViewGateRequest.ProtoReflect.Descriptor instead.
+func (*SyncDataViewGateRequest) Descriptor() ([]byte, []int) {
+	return file_proxy_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SyncDataViewGateRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *SyncDataViewGateRequest) GetCollectionID() int64 {
+	if x != nil {
+		return x.CollectionID
+	}
+	return 0
+}
+
+func (x *SyncDataViewGateRequest) GetGatedFieldIds() []int64 {
+	if x != nil {
+		return x.GatedFieldIds
+	}
+	return nil
+}
+
+func (x *SyncDataViewGateRequest) GetComplexDeletePaused() bool {
+	if x != nil {
+		return x.ComplexDeletePaused
+	}
+	return false
+}
+
+func (x *SyncDataViewGateRequest) GetGeneration() uint64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *SyncDataViewGateRequest) GetDrainComplexDelete() bool {
+	if x != nil {
+		return x.DrainComplexDelete
+	}
+	return false
+}
+
 type InvalidateShardLeaderCacheRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -118,7 +209,7 @@ type InvalidateShardLeaderCacheRequest struct {
 func (x *InvalidateShardLeaderCacheRequest) Reset() {
 	*x = InvalidateShardLeaderCacheRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[1]
+		mi := &file_proxy_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -131,7 +222,7 @@ func (x *InvalidateShardLeaderCacheRequest) String() string {
 func (*InvalidateShardLeaderCacheRequest) ProtoMessage() {}
 
 func (x *InvalidateShardLeaderCacheRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[1]
+	mi := &file_proxy_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -144,7 +235,7 @@ func (x *InvalidateShardLeaderCacheRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use InvalidateShardLeaderCacheRequest.ProtoReflect.Descriptor instead.
 func (*InvalidateShardLeaderCacheRequest) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{1}
+	return file_proxy_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *InvalidateShardLeaderCacheRequest) GetBase() *commonpb.MsgBase {
@@ -173,7 +264,7 @@ type InvalidateCredCacheRequest struct {
 func (x *InvalidateCredCacheRequest) Reset() {
 	*x = InvalidateCredCacheRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[2]
+		mi := &file_proxy_proto_msgTypes[3]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -186,7 +277,7 @@ func (x *InvalidateCredCacheRequest) String() string {
 func (*InvalidateCredCacheRequest) ProtoMessage() {}
 
 func (x *InvalidateCredCacheRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[2]
+	mi := &file_proxy_proto_msgTypes[3]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -199,7 +290,7 @@ func (x *InvalidateCredCacheRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvalidateCredCacheRequest.ProtoReflect.Descriptor instead.
 func (*InvalidateCredCacheRequest) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{2}
+	return file_proxy_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *InvalidateCredCacheRequest) GetBase() *commonpb.MsgBase {
@@ -230,7 +321,7 @@ type UpdateCredCacheRequest struct {
 func (x *UpdateCredCacheRequest) Reset() {
 	*x = UpdateCredCacheRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[3]
+		mi := &file_proxy_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -243,7 +334,7 @@ func (x *UpdateCredCacheRequest) String() string {
 func (*UpdateCredCacheRequest) ProtoMessage() {}
 
 func (x *UpdateCredCacheRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[3]
+	mi := &file_proxy_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -256,7 +347,7 @@ func (x *UpdateCredCacheRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCredCacheRequest.ProtoReflect.Descriptor instead.
 func (*UpdateCredCacheRequest) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{3}
+	return file_proxy_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpdateCredCacheRequest) GetBase() *commonpb.MsgBase {
@@ -293,7 +384,7 @@ type RefreshPolicyInfoCacheRequest struct {
 func (x *RefreshPolicyInfoCacheRequest) Reset() {
 	*x = RefreshPolicyInfoCacheRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[4]
+		mi := &file_proxy_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -306,7 +397,7 @@ func (x *RefreshPolicyInfoCacheRequest) String() string {
 func (*RefreshPolicyInfoCacheRequest) ProtoMessage() {}
 
 func (x *RefreshPolicyInfoCacheRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[4]
+	mi := &file_proxy_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -319,7 +410,7 @@ func (x *RefreshPolicyInfoCacheRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshPolicyInfoCacheRequest.ProtoReflect.Descriptor instead.
 func (*RefreshPolicyInfoCacheRequest) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{4}
+	return file_proxy_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RefreshPolicyInfoCacheRequest) GetBase() *commonpb.MsgBase {
@@ -358,7 +449,7 @@ type CollectionRate struct {
 func (x *CollectionRate) Reset() {
 	*x = CollectionRate{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[5]
+		mi := &file_proxy_proto_msgTypes[6]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -371,7 +462,7 @@ func (x *CollectionRate) String() string {
 func (*CollectionRate) ProtoMessage() {}
 
 func (x *CollectionRate) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[5]
+	mi := &file_proxy_proto_msgTypes[6]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -384,7 +475,7 @@ func (x *CollectionRate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionRate.ProtoReflect.Descriptor instead.
 func (*CollectionRate) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{5}
+	return file_proxy_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CollectionRate) GetCollection() int64 {
@@ -431,7 +522,7 @@ type LimiterNode struct {
 func (x *LimiterNode) Reset() {
 	*x = LimiterNode{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[6]
+		mi := &file_proxy_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -444,7 +535,7 @@ func (x *LimiterNode) String() string {
 func (*LimiterNode) ProtoMessage() {}
 
 func (x *LimiterNode) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[6]
+	mi := &file_proxy_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -457,7 +548,7 @@ func (x *LimiterNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LimiterNode.ProtoReflect.Descriptor instead.
 func (*LimiterNode) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{6}
+	return file_proxy_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *LimiterNode) GetLimiter() *Limiter {
@@ -489,7 +580,7 @@ type Limiter struct {
 func (x *Limiter) Reset() {
 	*x = Limiter{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[7]
+		mi := &file_proxy_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -502,7 +593,7 @@ func (x *Limiter) String() string {
 func (*Limiter) ProtoMessage() {}
 
 func (x *Limiter) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[7]
+	mi := &file_proxy_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -515,7 +606,7 @@ func (x *Limiter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Limiter.ProtoReflect.Descriptor instead.
 func (*Limiter) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{7}
+	return file_proxy_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Limiter) GetRates() []*internalpb.Rate {
@@ -560,7 +651,7 @@ type SetRatesRequest struct {
 func (x *SetRatesRequest) Reset() {
 	*x = SetRatesRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[8]
+		mi := &file_proxy_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -573,7 +664,7 @@ func (x *SetRatesRequest) String() string {
 func (*SetRatesRequest) ProtoMessage() {}
 
 func (x *SetRatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[8]
+	mi := &file_proxy_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +677,7 @@ func (x *SetRatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetRatesRequest.ProtoReflect.Descriptor instead.
 func (*SetRatesRequest) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{8}
+	return file_proxy_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SetRatesRequest) GetBase() *commonpb.MsgBase {
@@ -621,7 +712,7 @@ type ListClientInfosRequest struct {
 func (x *ListClientInfosRequest) Reset() {
 	*x = ListClientInfosRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[9]
+		mi := &file_proxy_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -634,7 +725,7 @@ func (x *ListClientInfosRequest) String() string {
 func (*ListClientInfosRequest) ProtoMessage() {}
 
 func (x *ListClientInfosRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[9]
+	mi := &file_proxy_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -647,7 +738,7 @@ func (x *ListClientInfosRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClientInfosRequest.ProtoReflect.Descriptor instead.
 func (*ListClientInfosRequest) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{9}
+	return file_proxy_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListClientInfosRequest) GetBase() *commonpb.MsgBase {
@@ -669,7 +760,7 @@ type ListClientInfosResponse struct {
 func (x *ListClientInfosResponse) Reset() {
 	*x = ListClientInfosResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_proxy_proto_msgTypes[10]
+		mi := &file_proxy_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -682,7 +773,7 @@ func (x *ListClientInfosResponse) String() string {
 func (*ListClientInfosResponse) ProtoMessage() {}
 
 func (x *ListClientInfosResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_proto_msgTypes[10]
+	mi := &file_proxy_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -695,7 +786,7 @@ func (x *ListClientInfosResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClientInfosResponse.ProtoReflect.Descriptor instead.
 func (*ListClientInfosResponse) Descriptor() ([]byte, []int) {
-	return file_proxy_proto_rawDescGZIP(), []int{10}
+	return file_proxy_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListClientInfosResponse) GetStatus() *commonpb.Status {
@@ -734,6 +825,24 @@ var file_proxy_proto_rawDesc = []byte{
 	0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x12, 0x25, 0x0a, 0x0e, 0x70, 0x61, 0x72, 0x74,
 	0x69, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09,
 	0x52, 0x0d, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x22,
+	0x9d, 0x02, 0x0a, 0x17, 0x53, 0x79, 0x6e, 0x63, 0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77,
+	0x47, 0x61, 0x74, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62,
+	0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x22, 0x0a,
+	0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49,
+	0x44, 0x12, 0x26, 0x0a, 0x0f, 0x67, 0x61, 0x74, 0x65, 0x64, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64,
+	0x5f, 0x69, 0x64, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0d, 0x67, 0x61, 0x74, 0x65,
+	0x64, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x49, 0x64, 0x73, 0x12, 0x32, 0x0a, 0x15, 0x63, 0x6f, 0x6d,
+	0x70, 0x6c, 0x65, 0x78, 0x5f, 0x64, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x5f, 0x70, 0x61, 0x75, 0x73,
+	0x65, 0x64, 0x18, 0x04, 0x20, 0x01, 0x28, 0x08, 0x52, 0x13, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65,
+	0x78, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x50, 0x61, 0x75, 0x73, 0x65, 0x64, 0x12, 0x1e, 0x0a,
+	0x0a, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x05, 0x20, 0x01, 0x28,
+	0x04, 0x52, 0x0a, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x30, 0x0a,
+	0x14, 0x64, 0x72, 0x61, 0x69, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x78, 0x5f, 0x64,
+	0x65, 0x6c, 0x65, 0x74, 0x65, 0x18, 0x06, 0x20, 0x01, 0x28, 0x08, 0x52, 0x12, 0x64, 0x72, 0x61,
+	0x69, 0x6e, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x78, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x22,
 	0x7b, 0x0a, 0x21, 0x49, 0x6e, 0x76, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x53, 0x68, 0x61,
 	0x72, 0x64, 0x4c, 0x65, 0x61, 0x64, 0x65, 0x72, 0x43, 0x61, 0x63, 0x68, 0x65, 0x52, 0x65, 0x71,
 	0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01,
@@ -832,7 +941,7 @@ var file_proxy_proto_rawDesc = []byte{
 	0x0b, 0x32, 0x1f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
 	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x6e,
 	0x66, 0x6f, 0x52, 0x0b, 0x63, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x73, 0x32,
-	0xb5, 0x0e, 0x0a, 0x05, 0x50, 0x72, 0x6f, 0x78, 0x79, 0x12, 0x6c, 0x0a, 0x12, 0x47, 0x65, 0x74,
+	0x95, 0x0f, 0x0a, 0x05, 0x50, 0x72, 0x6f, 0x78, 0x79, 0x12, 0x6c, 0x0a, 0x12, 0x47, 0x65, 0x74,
 	0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x73, 0x12,
 	0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d,
 	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65,
@@ -852,6 +961,12 @@ var file_proxy_proto_rawDesc = []byte{
 	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x78, 0x79,
 	0x2e, 0x49, 0x6e, 0x76, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x4d,
 	0x65, 0x74, 0x61, 0x43, 0x61, 0x63, 0x68, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63,
+	0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x5e,
+	0x0a, 0x10, 0x53, 0x79, 0x6e, 0x63, 0x44, 0x61, 0x74, 0x61, 0x56, 0x69, 0x65, 0x77, 0x47, 0x61,
+	0x74, 0x65, 0x12, 0x2b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x78, 0x79, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x44, 0x61, 0x74, 0x61,
+	0x56, 0x69, 0x65, 0x77, 0x47, 0x61, 0x74, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
 	0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63,
 	0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x61,
 	0x0a, 0x0c, 0x47, 0x65, 0x74, 0x44, 0x64, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x2a,
@@ -966,106 +1081,110 @@ func file_proxy_proto_rawDescGZIP() []byte {
 	return file_proxy_proto_rawDescData
 }
 
-var file_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_proxy_proto_goTypes = []interface{}{
 	(*InvalidateCollMetaCacheRequest)(nil),         // 0: milvus.proto.proxy.InvalidateCollMetaCacheRequest
-	(*InvalidateShardLeaderCacheRequest)(nil),      // 1: milvus.proto.proxy.InvalidateShardLeaderCacheRequest
-	(*InvalidateCredCacheRequest)(nil),             // 2: milvus.proto.proxy.InvalidateCredCacheRequest
-	(*UpdateCredCacheRequest)(nil),                 // 3: milvus.proto.proxy.UpdateCredCacheRequest
-	(*RefreshPolicyInfoCacheRequest)(nil),          // 4: milvus.proto.proxy.RefreshPolicyInfoCacheRequest
-	(*CollectionRate)(nil),                         // 5: milvus.proto.proxy.CollectionRate
-	(*LimiterNode)(nil),                            // 6: milvus.proto.proxy.LimiterNode
-	(*Limiter)(nil),                                // 7: milvus.proto.proxy.Limiter
-	(*SetRatesRequest)(nil),                        // 8: milvus.proto.proxy.SetRatesRequest
-	(*ListClientInfosRequest)(nil),                 // 9: milvus.proto.proxy.ListClientInfosRequest
-	(*ListClientInfosResponse)(nil),                // 10: milvus.proto.proxy.ListClientInfosResponse
-	nil,                                            // 11: milvus.proto.proxy.LimiterNode.ChildrenEntry
-	(*commonpb.MsgBase)(nil),                       // 12: milvus.proto.common.MsgBase
-	(*internalpb.Rate)(nil),                        // 13: milvus.proto.internal.Rate
-	(milvuspb.QuotaState)(0),                       // 14: milvus.proto.milvus.QuotaState
-	(commonpb.ErrorCode)(0),                        // 15: milvus.proto.common.ErrorCode
-	(*commonpb.Status)(nil),                        // 16: milvus.proto.common.Status
-	(*commonpb.ClientInfo)(nil),                    // 17: milvus.proto.common.ClientInfo
-	(*milvuspb.GetComponentStatesRequest)(nil),     // 18: milvus.proto.milvus.GetComponentStatesRequest
-	(*internalpb.GetStatisticsChannelRequest)(nil), // 19: milvus.proto.internal.GetStatisticsChannelRequest
-	(*internalpb.GetDdChannelRequest)(nil),         // 20: milvus.proto.internal.GetDdChannelRequest
-	(*milvuspb.GetMetricsRequest)(nil),             // 21: milvus.proto.milvus.GetMetricsRequest
-	(*internalpb.ImportRequest)(nil),               // 22: milvus.proto.internal.ImportRequest
-	(*internalpb.GetImportProgressRequest)(nil),    // 23: milvus.proto.internal.GetImportProgressRequest
-	(*internalpb.ListImportsRequest)(nil),          // 24: milvus.proto.internal.ListImportsRequest
-	(*internalpb.GetSegmentsInfoRequest)(nil),      // 25: milvus.proto.internal.GetSegmentsInfoRequest
-	(*internalpb.GetQuotaMetricsRequest)(nil),      // 26: milvus.proto.internal.GetQuotaMetricsRequest
-	(*internalpb.ClearReadTaskQueueRequest)(nil),   // 27: milvus.proto.internal.ClearReadTaskQueueRequest
-	(*milvuspb.ComponentStates)(nil),               // 28: milvus.proto.milvus.ComponentStates
-	(*milvuspb.StringResponse)(nil),                // 29: milvus.proto.milvus.StringResponse
-	(*milvuspb.GetMetricsResponse)(nil),            // 30: milvus.proto.milvus.GetMetricsResponse
-	(*internalpb.ImportResponse)(nil),              // 31: milvus.proto.internal.ImportResponse
-	(*internalpb.GetImportProgressResponse)(nil),   // 32: milvus.proto.internal.GetImportProgressResponse
-	(*internalpb.ListImportsResponse)(nil),         // 33: milvus.proto.internal.ListImportsResponse
-	(*internalpb.GetSegmentsInfoResponse)(nil),     // 34: milvus.proto.internal.GetSegmentsInfoResponse
-	(*internalpb.GetQuotaMetricsResponse)(nil),     // 35: milvus.proto.internal.GetQuotaMetricsResponse
-	(*internalpb.ClearReadTaskQueueResponse)(nil),  // 36: milvus.proto.internal.ClearReadTaskQueueResponse
+	(*SyncDataViewGateRequest)(nil),                // 1: milvus.proto.proxy.SyncDataViewGateRequest
+	(*InvalidateShardLeaderCacheRequest)(nil),      // 2: milvus.proto.proxy.InvalidateShardLeaderCacheRequest
+	(*InvalidateCredCacheRequest)(nil),             // 3: milvus.proto.proxy.InvalidateCredCacheRequest
+	(*UpdateCredCacheRequest)(nil),                 // 4: milvus.proto.proxy.UpdateCredCacheRequest
+	(*RefreshPolicyInfoCacheRequest)(nil),          // 5: milvus.proto.proxy.RefreshPolicyInfoCacheRequest
+	(*CollectionRate)(nil),                         // 6: milvus.proto.proxy.CollectionRate
+	(*LimiterNode)(nil),                            // 7: milvus.proto.proxy.LimiterNode
+	(*Limiter)(nil),                                // 8: milvus.proto.proxy.Limiter
+	(*SetRatesRequest)(nil),                        // 9: milvus.proto.proxy.SetRatesRequest
+	(*ListClientInfosRequest)(nil),                 // 10: milvus.proto.proxy.ListClientInfosRequest
+	(*ListClientInfosResponse)(nil),                // 11: milvus.proto.proxy.ListClientInfosResponse
+	nil,                                            // 12: milvus.proto.proxy.LimiterNode.ChildrenEntry
+	(*commonpb.MsgBase)(nil),                       // 13: milvus.proto.common.MsgBase
+	(*internalpb.Rate)(nil),                        // 14: milvus.proto.internal.Rate
+	(milvuspb.QuotaState)(0),                       // 15: milvus.proto.milvus.QuotaState
+	(commonpb.ErrorCode)(0),                        // 16: milvus.proto.common.ErrorCode
+	(*commonpb.Status)(nil),                        // 17: milvus.proto.common.Status
+	(*commonpb.ClientInfo)(nil),                    // 18: milvus.proto.common.ClientInfo
+	(*milvuspb.GetComponentStatesRequest)(nil),     // 19: milvus.proto.milvus.GetComponentStatesRequest
+	(*internalpb.GetStatisticsChannelRequest)(nil), // 20: milvus.proto.internal.GetStatisticsChannelRequest
+	(*internalpb.GetDdChannelRequest)(nil),         // 21: milvus.proto.internal.GetDdChannelRequest
+	(*milvuspb.GetMetricsRequest)(nil),             // 22: milvus.proto.milvus.GetMetricsRequest
+	(*internalpb.ImportRequest)(nil),               // 23: milvus.proto.internal.ImportRequest
+	(*internalpb.GetImportProgressRequest)(nil),    // 24: milvus.proto.internal.GetImportProgressRequest
+	(*internalpb.ListImportsRequest)(nil),          // 25: milvus.proto.internal.ListImportsRequest
+	(*internalpb.GetSegmentsInfoRequest)(nil),      // 26: milvus.proto.internal.GetSegmentsInfoRequest
+	(*internalpb.GetQuotaMetricsRequest)(nil),      // 27: milvus.proto.internal.GetQuotaMetricsRequest
+	(*internalpb.ClearReadTaskQueueRequest)(nil),   // 28: milvus.proto.internal.ClearReadTaskQueueRequest
+	(*milvuspb.ComponentStates)(nil),               // 29: milvus.proto.milvus.ComponentStates
+	(*milvuspb.StringResponse)(nil),                // 30: milvus.proto.milvus.StringResponse
+	(*milvuspb.GetMetricsResponse)(nil),            // 31: milvus.proto.milvus.GetMetricsResponse
+	(*internalpb.ImportResponse)(nil),              // 32: milvus.proto.internal.ImportResponse
+	(*internalpb.GetImportProgressResponse)(nil),   // 33: milvus.proto.internal.GetImportProgressResponse
+	(*internalpb.ListImportsResponse)(nil),         // 34: milvus.proto.internal.ListImportsResponse
+	(*internalpb.GetSegmentsInfoResponse)(nil),     // 35: milvus.proto.internal.GetSegmentsInfoResponse
+	(*internalpb.GetQuotaMetricsResponse)(nil),     // 36: milvus.proto.internal.GetQuotaMetricsResponse
+	(*internalpb.ClearReadTaskQueueResponse)(nil),  // 37: milvus.proto.internal.ClearReadTaskQueueResponse
 }
 var file_proxy_proto_depIdxs = []int32{
-	12, // 0: milvus.proto.proxy.InvalidateCollMetaCacheRequest.base:type_name -> milvus.proto.common.MsgBase
-	12, // 1: milvus.proto.proxy.InvalidateShardLeaderCacheRequest.base:type_name -> milvus.proto.common.MsgBase
-	12, // 2: milvus.proto.proxy.InvalidateCredCacheRequest.base:type_name -> milvus.proto.common.MsgBase
-	12, // 3: milvus.proto.proxy.UpdateCredCacheRequest.base:type_name -> milvus.proto.common.MsgBase
-	12, // 4: milvus.proto.proxy.RefreshPolicyInfoCacheRequest.base:type_name -> milvus.proto.common.MsgBase
-	13, // 5: milvus.proto.proxy.CollectionRate.rates:type_name -> milvus.proto.internal.Rate
-	14, // 6: milvus.proto.proxy.CollectionRate.states:type_name -> milvus.proto.milvus.QuotaState
-	15, // 7: milvus.proto.proxy.CollectionRate.codes:type_name -> milvus.proto.common.ErrorCode
-	7,  // 8: milvus.proto.proxy.LimiterNode.limiter:type_name -> milvus.proto.proxy.Limiter
-	11, // 9: milvus.proto.proxy.LimiterNode.children:type_name -> milvus.proto.proxy.LimiterNode.ChildrenEntry
-	13, // 10: milvus.proto.proxy.Limiter.rates:type_name -> milvus.proto.internal.Rate
-	14, // 11: milvus.proto.proxy.Limiter.states:type_name -> milvus.proto.milvus.QuotaState
-	15, // 12: milvus.proto.proxy.Limiter.codes:type_name -> milvus.proto.common.ErrorCode
-	12, // 13: milvus.proto.proxy.SetRatesRequest.base:type_name -> milvus.proto.common.MsgBase
-	5,  // 14: milvus.proto.proxy.SetRatesRequest.rates:type_name -> milvus.proto.proxy.CollectionRate
-	6,  // 15: milvus.proto.proxy.SetRatesRequest.rootLimiter:type_name -> milvus.proto.proxy.LimiterNode
-	12, // 16: milvus.proto.proxy.ListClientInfosRequest.base:type_name -> milvus.proto.common.MsgBase
-	16, // 17: milvus.proto.proxy.ListClientInfosResponse.status:type_name -> milvus.proto.common.Status
-	17, // 18: milvus.proto.proxy.ListClientInfosResponse.client_infos:type_name -> milvus.proto.common.ClientInfo
-	6,  // 19: milvus.proto.proxy.LimiterNode.ChildrenEntry.value:type_name -> milvus.proto.proxy.LimiterNode
-	18, // 20: milvus.proto.proxy.Proxy.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
-	19, // 21: milvus.proto.proxy.Proxy.GetStatisticsChannel:input_type -> milvus.proto.internal.GetStatisticsChannelRequest
-	0,  // 22: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:input_type -> milvus.proto.proxy.InvalidateCollMetaCacheRequest
-	20, // 23: milvus.proto.proxy.Proxy.GetDdChannel:input_type -> milvus.proto.internal.GetDdChannelRequest
-	2,  // 24: milvus.proto.proxy.Proxy.InvalidateCredentialCache:input_type -> milvus.proto.proxy.InvalidateCredCacheRequest
-	3,  // 25: milvus.proto.proxy.Proxy.UpdateCredentialCache:input_type -> milvus.proto.proxy.UpdateCredCacheRequest
-	4,  // 26: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:input_type -> milvus.proto.proxy.RefreshPolicyInfoCacheRequest
-	21, // 27: milvus.proto.proxy.Proxy.GetProxyMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
-	8,  // 28: milvus.proto.proxy.Proxy.SetRates:input_type -> milvus.proto.proxy.SetRatesRequest
-	9,  // 29: milvus.proto.proxy.Proxy.ListClientInfos:input_type -> milvus.proto.proxy.ListClientInfosRequest
-	22, // 30: milvus.proto.proxy.Proxy.ImportV2:input_type -> milvus.proto.internal.ImportRequest
-	23, // 31: milvus.proto.proxy.Proxy.GetImportProgress:input_type -> milvus.proto.internal.GetImportProgressRequest
-	24, // 32: milvus.proto.proxy.Proxy.ListImports:input_type -> milvus.proto.internal.ListImportsRequest
-	1,  // 33: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:input_type -> milvus.proto.proxy.InvalidateShardLeaderCacheRequest
-	25, // 34: milvus.proto.proxy.Proxy.GetSegmentsInfo:input_type -> milvus.proto.internal.GetSegmentsInfoRequest
-	26, // 35: milvus.proto.proxy.Proxy.GetQuotaMetrics:input_type -> milvus.proto.internal.GetQuotaMetricsRequest
-	27, // 36: milvus.proto.proxy.Proxy.ClearReadTaskQueue:input_type -> milvus.proto.internal.ClearReadTaskQueueRequest
-	28, // 37: milvus.proto.proxy.Proxy.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	29, // 38: milvus.proto.proxy.Proxy.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
-	16, // 39: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:output_type -> milvus.proto.common.Status
-	29, // 40: milvus.proto.proxy.Proxy.GetDdChannel:output_type -> milvus.proto.milvus.StringResponse
-	16, // 41: milvus.proto.proxy.Proxy.InvalidateCredentialCache:output_type -> milvus.proto.common.Status
-	16, // 42: milvus.proto.proxy.Proxy.UpdateCredentialCache:output_type -> milvus.proto.common.Status
-	16, // 43: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:output_type -> milvus.proto.common.Status
-	30, // 44: milvus.proto.proxy.Proxy.GetProxyMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	16, // 45: milvus.proto.proxy.Proxy.SetRates:output_type -> milvus.proto.common.Status
-	10, // 46: milvus.proto.proxy.Proxy.ListClientInfos:output_type -> milvus.proto.proxy.ListClientInfosResponse
-	31, // 47: milvus.proto.proxy.Proxy.ImportV2:output_type -> milvus.proto.internal.ImportResponse
-	32, // 48: milvus.proto.proxy.Proxy.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
-	33, // 49: milvus.proto.proxy.Proxy.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
-	16, // 50: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:output_type -> milvus.proto.common.Status
-	34, // 51: milvus.proto.proxy.Proxy.GetSegmentsInfo:output_type -> milvus.proto.internal.GetSegmentsInfoResponse
-	35, // 52: milvus.proto.proxy.Proxy.GetQuotaMetrics:output_type -> milvus.proto.internal.GetQuotaMetricsResponse
-	36, // 53: milvus.proto.proxy.Proxy.ClearReadTaskQueue:output_type -> milvus.proto.internal.ClearReadTaskQueueResponse
-	37, // [37:54] is the sub-list for method output_type
-	20, // [20:37] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	13, // 0: milvus.proto.proxy.InvalidateCollMetaCacheRequest.base:type_name -> milvus.proto.common.MsgBase
+	13, // 1: milvus.proto.proxy.SyncDataViewGateRequest.base:type_name -> milvus.proto.common.MsgBase
+	13, // 2: milvus.proto.proxy.InvalidateShardLeaderCacheRequest.base:type_name -> milvus.proto.common.MsgBase
+	13, // 3: milvus.proto.proxy.InvalidateCredCacheRequest.base:type_name -> milvus.proto.common.MsgBase
+	13, // 4: milvus.proto.proxy.UpdateCredCacheRequest.base:type_name -> milvus.proto.common.MsgBase
+	13, // 5: milvus.proto.proxy.RefreshPolicyInfoCacheRequest.base:type_name -> milvus.proto.common.MsgBase
+	14, // 6: milvus.proto.proxy.CollectionRate.rates:type_name -> milvus.proto.internal.Rate
+	15, // 7: milvus.proto.proxy.CollectionRate.states:type_name -> milvus.proto.milvus.QuotaState
+	16, // 8: milvus.proto.proxy.CollectionRate.codes:type_name -> milvus.proto.common.ErrorCode
+	8,  // 9: milvus.proto.proxy.LimiterNode.limiter:type_name -> milvus.proto.proxy.Limiter
+	12, // 10: milvus.proto.proxy.LimiterNode.children:type_name -> milvus.proto.proxy.LimiterNode.ChildrenEntry
+	14, // 11: milvus.proto.proxy.Limiter.rates:type_name -> milvus.proto.internal.Rate
+	15, // 12: milvus.proto.proxy.Limiter.states:type_name -> milvus.proto.milvus.QuotaState
+	16, // 13: milvus.proto.proxy.Limiter.codes:type_name -> milvus.proto.common.ErrorCode
+	13, // 14: milvus.proto.proxy.SetRatesRequest.base:type_name -> milvus.proto.common.MsgBase
+	6,  // 15: milvus.proto.proxy.SetRatesRequest.rates:type_name -> milvus.proto.proxy.CollectionRate
+	7,  // 16: milvus.proto.proxy.SetRatesRequest.rootLimiter:type_name -> milvus.proto.proxy.LimiterNode
+	13, // 17: milvus.proto.proxy.ListClientInfosRequest.base:type_name -> milvus.proto.common.MsgBase
+	17, // 18: milvus.proto.proxy.ListClientInfosResponse.status:type_name -> milvus.proto.common.Status
+	18, // 19: milvus.proto.proxy.ListClientInfosResponse.client_infos:type_name -> milvus.proto.common.ClientInfo
+	7,  // 20: milvus.proto.proxy.LimiterNode.ChildrenEntry.value:type_name -> milvus.proto.proxy.LimiterNode
+	19, // 21: milvus.proto.proxy.Proxy.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
+	20, // 22: milvus.proto.proxy.Proxy.GetStatisticsChannel:input_type -> milvus.proto.internal.GetStatisticsChannelRequest
+	0,  // 23: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:input_type -> milvus.proto.proxy.InvalidateCollMetaCacheRequest
+	1,  // 24: milvus.proto.proxy.Proxy.SyncDataViewGate:input_type -> milvus.proto.proxy.SyncDataViewGateRequest
+	21, // 25: milvus.proto.proxy.Proxy.GetDdChannel:input_type -> milvus.proto.internal.GetDdChannelRequest
+	3,  // 26: milvus.proto.proxy.Proxy.InvalidateCredentialCache:input_type -> milvus.proto.proxy.InvalidateCredCacheRequest
+	4,  // 27: milvus.proto.proxy.Proxy.UpdateCredentialCache:input_type -> milvus.proto.proxy.UpdateCredCacheRequest
+	5,  // 28: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:input_type -> milvus.proto.proxy.RefreshPolicyInfoCacheRequest
+	22, // 29: milvus.proto.proxy.Proxy.GetProxyMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
+	9,  // 30: milvus.proto.proxy.Proxy.SetRates:input_type -> milvus.proto.proxy.SetRatesRequest
+	10, // 31: milvus.proto.proxy.Proxy.ListClientInfos:input_type -> milvus.proto.proxy.ListClientInfosRequest
+	23, // 32: milvus.proto.proxy.Proxy.ImportV2:input_type -> milvus.proto.internal.ImportRequest
+	24, // 33: milvus.proto.proxy.Proxy.GetImportProgress:input_type -> milvus.proto.internal.GetImportProgressRequest
+	25, // 34: milvus.proto.proxy.Proxy.ListImports:input_type -> milvus.proto.internal.ListImportsRequest
+	2,  // 35: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:input_type -> milvus.proto.proxy.InvalidateShardLeaderCacheRequest
+	26, // 36: milvus.proto.proxy.Proxy.GetSegmentsInfo:input_type -> milvus.proto.internal.GetSegmentsInfoRequest
+	27, // 37: milvus.proto.proxy.Proxy.GetQuotaMetrics:input_type -> milvus.proto.internal.GetQuotaMetricsRequest
+	28, // 38: milvus.proto.proxy.Proxy.ClearReadTaskQueue:input_type -> milvus.proto.internal.ClearReadTaskQueueRequest
+	29, // 39: milvus.proto.proxy.Proxy.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	30, // 40: milvus.proto.proxy.Proxy.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
+	17, // 41: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:output_type -> milvus.proto.common.Status
+	17, // 42: milvus.proto.proxy.Proxy.SyncDataViewGate:output_type -> milvus.proto.common.Status
+	30, // 43: milvus.proto.proxy.Proxy.GetDdChannel:output_type -> milvus.proto.milvus.StringResponse
+	17, // 44: milvus.proto.proxy.Proxy.InvalidateCredentialCache:output_type -> milvus.proto.common.Status
+	17, // 45: milvus.proto.proxy.Proxy.UpdateCredentialCache:output_type -> milvus.proto.common.Status
+	17, // 46: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:output_type -> milvus.proto.common.Status
+	31, // 47: milvus.proto.proxy.Proxy.GetProxyMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	17, // 48: milvus.proto.proxy.Proxy.SetRates:output_type -> milvus.proto.common.Status
+	11, // 49: milvus.proto.proxy.Proxy.ListClientInfos:output_type -> milvus.proto.proxy.ListClientInfosResponse
+	32, // 50: milvus.proto.proxy.Proxy.ImportV2:output_type -> milvus.proto.internal.ImportResponse
+	33, // 51: milvus.proto.proxy.Proxy.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
+	34, // 52: milvus.proto.proxy.Proxy.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
+	17, // 53: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:output_type -> milvus.proto.common.Status
+	35, // 54: milvus.proto.proxy.Proxy.GetSegmentsInfo:output_type -> milvus.proto.internal.GetSegmentsInfoResponse
+	36, // 55: milvus.proto.proxy.Proxy.GetQuotaMetrics:output_type -> milvus.proto.internal.GetQuotaMetricsResponse
+	37, // 56: milvus.proto.proxy.Proxy.ClearReadTaskQueue:output_type -> milvus.proto.internal.ClearReadTaskQueueResponse
+	39, // [39:57] is the sub-list for method output_type
+	21, // [21:39] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_proxy_proto_init() }
@@ -1087,7 +1206,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*InvalidateShardLeaderCacheRequest); i {
+			switch v := v.(*SyncDataViewGateRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1099,7 +1218,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*InvalidateCredCacheRequest); i {
+			switch v := v.(*InvalidateShardLeaderCacheRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1111,7 +1230,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpdateCredCacheRequest); i {
+			switch v := v.(*InvalidateCredCacheRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1123,7 +1242,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RefreshPolicyInfoCacheRequest); i {
+			switch v := v.(*UpdateCredCacheRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1135,7 +1254,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionRate); i {
+			switch v := v.(*RefreshPolicyInfoCacheRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1147,7 +1266,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LimiterNode); i {
+			switch v := v.(*CollectionRate); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1159,7 +1278,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Limiter); i {
+			switch v := v.(*LimiterNode); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1171,7 +1290,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SetRatesRequest); i {
+			switch v := v.(*Limiter); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1183,7 +1302,7 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListClientInfosRequest); i {
+			switch v := v.(*SetRatesRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1195,6 +1314,18 @@ func file_proxy_proto_init() {
 			}
 		}
 		file_proxy_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListClientInfosRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proxy_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ListClientInfosResponse); i {
 			case 0:
 				return &v.state
@@ -1213,7 +1344,7 @@ func file_proxy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_proxy_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

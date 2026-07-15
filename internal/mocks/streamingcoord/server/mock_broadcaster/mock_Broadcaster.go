@@ -149,6 +149,53 @@ func (_c *MockBroadcaster_GetPendingSchemaFileResources_Call) RunAndReturn(run f
 	return _c
 }
 
+// HasPendingAlterCollectionBroadcast provides a mock function with given fields: collectionID, schemaVersion
+func (_m *MockBroadcaster) HasPendingAlterCollectionBroadcast(collectionID int64, schemaVersion int32) bool {
+	ret := _m.Called(collectionID, schemaVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasPendingAlterCollectionBroadcast")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64, int32) bool); ok {
+		r0 = rf(collectionID, schemaVersion)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockBroadcaster_HasPendingAlterCollectionBroadcast_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasPendingAlterCollectionBroadcast'
+type MockBroadcaster_HasPendingAlterCollectionBroadcast_Call struct {
+	*mock.Call
+}
+
+// HasPendingAlterCollectionBroadcast is a helper method to define mock.On call
+//   - collectionID int64
+//   - schemaVersion int32
+func (_e *MockBroadcaster_Expecter) HasPendingAlterCollectionBroadcast(collectionID interface{}, schemaVersion interface{}) *MockBroadcaster_HasPendingAlterCollectionBroadcast_Call {
+	return &MockBroadcaster_HasPendingAlterCollectionBroadcast_Call{Call: _e.mock.On("HasPendingAlterCollectionBroadcast", collectionID, schemaVersion)}
+}
+
+func (_c *MockBroadcaster_HasPendingAlterCollectionBroadcast_Call) Run(run func(collectionID int64, schemaVersion int32)) *MockBroadcaster_HasPendingAlterCollectionBroadcast_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int32))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_HasPendingAlterCollectionBroadcast_Call) Return(_a0 bool) *MockBroadcaster_HasPendingAlterCollectionBroadcast_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcaster_HasPendingAlterCollectionBroadcast_Call) RunAndReturn(run func(int64, int32) bool) *MockBroadcaster_HasPendingAlterCollectionBroadcast_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LegacyAck provides a mock function with given fields: ctx, broadcastID, vchannel
 func (_m *MockBroadcaster) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	ret := _m.Called(ctx, broadcastID, vchannel)

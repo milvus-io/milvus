@@ -1010,11 +1010,11 @@ func TestProxy(t *testing.T) {
 
 	err = proxy.Start()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Healthy, proxy.GetStateCode())
 
-	// register proxy
+	// register proxy — also waits for DataViewGate membership, then transitions to Healthy.
 	err = proxy.Register()
 	assert.NoError(t, err)
+	assert.Equal(t, commonpb.StateCode_Healthy, proxy.GetStateCode())
 	mlog.Info(context.TODO(), "Register proxy done")
 	defer func() {
 		a := []any{mix, qn, dn, sn, proxy}

@@ -163,6 +163,10 @@ type mockMixCoord struct {
 	cnt   atomic.Int64
 }
 
+func (m *mockMixCoord) AliveSegmentMinSchemaVersion(context.Context, int64) (int32, error) {
+	return 0, nil
+}
+
 func (m *mockMixCoord) GetGcStatus(context.Context) (*datapb.GetGcStatusResponse, error) {
 	return &datapb.GetGcStatusResponse{}, nil
 }
@@ -341,6 +345,14 @@ func (m *mockMixCoord) DescribeCollection(ctx context.Context, req *milvuspb.Des
 
 func (m *mockMixCoord) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return m.DescribeCollection(ctx, req)
+}
+
+func (m *mockMixCoord) GetDataViewGate(ctx context.Context, req *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error) {
+	return &rootcoordpb.GetDataViewGateResponse{Status: merr.Success()}, nil
+}
+
+func (m *mockMixCoord) ForceReleaseDataViewGate(ctx context.Context, req *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	return &rootcoordpb.ForceReleaseDataViewGateResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {

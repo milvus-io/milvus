@@ -393,6 +393,16 @@ func (s *Server) DescribeCollectionInternal(ctx context.Context, in *milvuspb.De
 	return s.mixCoord.DescribeCollectionInternal(ctx, in)
 }
 
+// GetDataViewGate returns the DataViewGate state for a collection.
+func (s *Server) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error) {
+	return s.mixCoord.GetDataViewGate(ctx, in)
+}
+
+// ForceReleaseDataViewGate force-releases all DataViewGate ops on a collection (operator escape hatch).
+func (s *Server) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	return s.mixCoord.ForceReleaseDataViewGate(ctx, in)
+}
+
 // ShowCollections gets all collections
 func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.mixCoord.ShowCollections(ctx, in)

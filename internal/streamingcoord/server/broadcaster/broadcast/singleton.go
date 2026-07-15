@@ -70,6 +70,16 @@ func GetPendingSchemaFileResources() map[int64][]int64 {
 	return singleton.Get().GetPendingSchemaFileResources()
 }
 
+// HasPendingAlterCollectionBroadcast reports whether an AlterCollection broadcast producing schemaVersion
+// on collectionID is still pending. Before the broadcaster is recovered it conservatively returns true so
+// a caller (e.g. DataViewGate drop-gate recovery) never discards state on incomplete information.
+func HasPendingAlterCollectionBroadcast(collectionID int64, schemaVersion int32) bool {
+	if !singleton.Ready() {
+		return true
+	}
+	return singleton.Get().HasPendingAlterCollectionBroadcast(collectionID, schemaVersion)
+}
+
 // Release releases the broadcaster.
 func Release() {
 	if !singleton.Ready() {

@@ -1088,6 +1088,54 @@ func (_c *RootCoordCatalog_DropCredential_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// DropDataViewGate provides a mock function with given fields: ctx, collectionID, opVersion
+func (_m *RootCoordCatalog) DropDataViewGate(ctx context.Context, collectionID int64, opVersion int32) error {
+	ret := _m.Called(ctx, collectionID, opVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropDataViewGate")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) error); ok {
+		r0 = rf(ctx, collectionID, opVersion)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_DropDataViewGate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropDataViewGate'
+type RootCoordCatalog_DropDataViewGate_Call struct {
+	*mock.Call
+}
+
+// DropDataViewGate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - opVersion int32
+func (_e *RootCoordCatalog_Expecter) DropDataViewGate(ctx interface{}, collectionID interface{}, opVersion interface{}) *RootCoordCatalog_DropDataViewGate_Call {
+	return &RootCoordCatalog_DropDataViewGate_Call{Call: _e.mock.On("DropDataViewGate", ctx, collectionID, opVersion)}
+}
+
+func (_c *RootCoordCatalog_DropDataViewGate_Call) Run(run func(ctx context.Context, collectionID int64, opVersion int32)) *RootCoordCatalog_DropDataViewGate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_DropDataViewGate_Call) Return(_a0 error) *RootCoordCatalog_DropDataViewGate_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_DropDataViewGate_Call) RunAndReturn(run func(context.Context, int64, int32) error) *RootCoordCatalog_DropDataViewGate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropDatabase provides a mock function with given fields: ctx, dbID, ts
 func (_m *RootCoordCatalog) DropDatabase(ctx context.Context, dbID int64, ts uint64) error {
 	ret := _m.Called(ctx, dbID, ts)
@@ -1696,6 +1744,64 @@ func (_c *RootCoordCatalog_ListCredentials_Call) Return(_a0 []string, _a1 error)
 }
 
 func (_c *RootCoordCatalog_ListCredentials_Call) RunAndReturn(run func(context.Context) ([]string, error)) *RootCoordCatalog_ListCredentials_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListDataViewGates provides a mock function with given fields: ctx
+func (_m *RootCoordCatalog) ListDataViewGates(ctx context.Context) ([]*model.DataViewGate, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListDataViewGates")
+	}
+
+	var r0 []*model.DataViewGate
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.DataViewGate, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*model.DataViewGate); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.DataViewGate)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoordCatalog_ListDataViewGates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListDataViewGates'
+type RootCoordCatalog_ListDataViewGates_Call struct {
+	*mock.Call
+}
+
+// ListDataViewGates is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *RootCoordCatalog_Expecter) ListDataViewGates(ctx interface{}) *RootCoordCatalog_ListDataViewGates_Call {
+	return &RootCoordCatalog_ListDataViewGates_Call{Call: _e.mock.On("ListDataViewGates", ctx)}
+}
+
+func (_c *RootCoordCatalog_ListDataViewGates_Call) Run(run func(ctx context.Context)) *RootCoordCatalog_ListDataViewGates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListDataViewGates_Call) Return(_a0 []*model.DataViewGate, _a1 error) *RootCoordCatalog_ListDataViewGates_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListDataViewGates_Call) RunAndReturn(run func(context.Context) ([]*model.DataViewGate, error)) *RootCoordCatalog_ListDataViewGates_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2325,6 +2431,53 @@ func (_c *RootCoordCatalog_RestoreRBAC_Call) Return(_a0 error) *RootCoordCatalog
 }
 
 func (_c *RootCoordCatalog_RestoreRBAC_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RBACMeta) error) *RootCoordCatalog_RestoreRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveDataViewGate provides a mock function with given fields: ctx, gate
+func (_m *RootCoordCatalog) SaveDataViewGate(ctx context.Context, gate *model.DataViewGate) error {
+	ret := _m.Called(ctx, gate)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveDataViewGate")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.DataViewGate) error); ok {
+		r0 = rf(ctx, gate)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_SaveDataViewGate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveDataViewGate'
+type RootCoordCatalog_SaveDataViewGate_Call struct {
+	*mock.Call
+}
+
+// SaveDataViewGate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - gate *model.DataViewGate
+func (_e *RootCoordCatalog_Expecter) SaveDataViewGate(ctx interface{}, gate interface{}) *RootCoordCatalog_SaveDataViewGate_Call {
+	return &RootCoordCatalog_SaveDataViewGate_Call{Call: _e.mock.On("SaveDataViewGate", ctx, gate)}
+}
+
+func (_c *RootCoordCatalog_SaveDataViewGate_Call) Run(run func(ctx context.Context, gate *model.DataViewGate)) *RootCoordCatalog_SaveDataViewGate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.DataViewGate))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_SaveDataViewGate_Call) Return(_a0 error) *RootCoordCatalog_SaveDataViewGate_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_SaveDataViewGate_Call) RunAndReturn(run func(context.Context, *model.DataViewGate) error) *RootCoordCatalog_SaveDataViewGate_Call {
 	_c.Call.Return(run)
 	return _c
 }

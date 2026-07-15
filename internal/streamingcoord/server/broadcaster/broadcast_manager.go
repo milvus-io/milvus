@@ -401,6 +401,31 @@ func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int6
 	return result
 }
 
+// HasPendingAlterCollectionBroadcast reports whether a non-tombstone AlterCollection broadcast that
+// produces schemaVersion on collectionID is still pending.
+func (bm *broadcastTaskManager) HasPendingAlterCollectionBroadcast(collectionID int64, schemaVersion int32) bool {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	for _, task := range bm.tasks {
+		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+			continue
+		}
+		if task.msg.MessageTypeWithVersion() != message.MessageTypeAlterCollectionV2 {
+			continue
+		}
+		alterMsg, err := message.AsMutableAlterCollectionMessageV2(task.msg)
+		if err != nil {
+			continue
+		}
+		if alterMsg.Header().CollectionId == collectionID &&
+			alterMsg.MustBody().GetUpdates().GetSchema().GetVersion() == schemaVersion {
+			return true
+		}
+	}
+	return false
+}
+
 func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, ids []int64) {
 	if len(ids) == 0 {
 		return

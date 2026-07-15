@@ -311,6 +311,10 @@ type MixCoord interface {
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 
 	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
+
+	// AliveSegmentMinSchemaVersion returns the min schema_version over the collection's healthy non-L0
+	// segments (DataViewGate add-side backfill-completion check). In-process only, not a grpc RPC.
+	AliveSegmentMinSchemaVersion(ctx context.Context, collectionID int64) (int32, error)
 }
 
 // MixCoordComponent is used by grpc server of MixCoord

@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/rootcoord/mock_tombstone"
@@ -383,6 +385,10 @@ func (m mockProxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	return m.UpdateCredentialCacheFunc(ctx, request)
 }
 
+func (m mockProxy) SyncDataViewGate(ctx context.Context, request *proxypb.SyncDataViewGateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 func (m mockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.InvalidateCollectionMetaCacheFunc(ctx, request)
 }
@@ -419,6 +425,20 @@ func newTestCore(opts ...Opt) *Core {
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	if c.ctx == nil {
+		c.ctx = context.Background()
+	}
+	if c.catalog == nil {
+		// core.catalog is the direct DataViewGate persistence handle (set from etcd in Core.Init);
+		// tests exercising the gate DDL path need a working (in-memory) one so install/release don't
+		// nil-panic. Gate keys don't overlap collection meta, so a separate memory store is fine.
+		c.catalog = kvmetastore.NewCatalog(memkv.NewMemoryKV())
+	}
+	if c.dataViewGate == nil {
+		// production initializes this in Core.Init; tests exercising describe / DDL-callback paths
+		// need a non-nil (empty) manager so gate lookups don't nil-panic.
+		c.dataViewGate = newDataViewGateManager(c)
 	}
 	c.registerMetricsRequest()
 	return c
@@ -919,6 +939,8 @@ type mockBroker struct {
 	ShowResourceGroupsFunc func(ctx context.Context) ([]string, error)
 
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
+
+	AliveSegmentMinSchemaVersionFunc func(ctx context.Context, collectionID int64) (int32, error)
 }
 
 func newValidMockBroker() *mockBroker {
@@ -941,11 +963,20 @@ func newValidMockBroker() *mockBroker {
 	broker.ShowResourceGroupsFunc = func(ctx context.Context) ([]string, error) {
 		return []string{}, nil
 	}
+	// Report backfill as complete so a DataViewGate add gate is releasable the moment it is checked
+	// (a UT has no real backfill); tests needing a specific min version override this.
+	broker.AliveSegmentMinSchemaVersionFunc = func(ctx context.Context, collectionID int64) (int32, error) {
+		return 1 << 30, nil
+	}
 	return broker
 }
 
 func newMockBroker() *mockBroker {
 	return &mockBroker{}
+}
+
+func (b mockBroker) AliveSegmentMinSchemaVersion(ctx context.Context, collectionID int64) (int32, error) {
+	return b.AliveSegmentMinSchemaVersionFunc(ctx, collectionID)
 }
 
 func (b mockBroker) WatchChannels(ctx context.Context, info *watchInfo) error {

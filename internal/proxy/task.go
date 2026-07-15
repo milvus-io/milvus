@@ -1265,9 +1265,29 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 }
 
 func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
-	var err error
-	t.AlterCollectionSchemaResponse, err = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
-	return merr.CheckRPCCall(t.GetAlterStatus(), err)
+	// DataViewGate admission: RootCoord returns a retriable ErrCollectionSchemaChangeInProgress while
+	// another schema change is still settling on the collection (only one schema-change DDL in flight per
+	// collection). Absorb it with a bounded wait-retry here so every client sees latency, not an error,
+	// with no SDK change. Any other outcome (success or a real error) stops the retry immediately; on
+	// timeout the retriable error surfaces so a client may still retry.
+	// retryCtx bounds only the retry LOOP (re-attempts + backoff), not each RPC: a rejected attempt
+	// returns fast (admission is checked before the drop drain), while an admitted DDL runs on the parent
+	// ctx so a legitimately-slow one (e.g. a drop whose drain nears dataViewGateDrainTimeout) is not cut
+	// short by the admission-retry budget.
+	retryCtx, cancel := context.WithTimeout(ctx, Params.ProxyCfg.SchemaChangeAdmissionRetryTimeout.GetAsDuration(time.Second))
+	defer cancel()
+	return retry.Do(retryCtx, func() error {
+		var rpcErr error
+		t.AlterCollectionSchemaResponse, rpcErr = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
+		callErr := merr.CheckRPCCall(t.GetAlterStatus(), rpcErr)
+		if callErr == nil {
+			return nil
+		}
+		if errors.Is(callErr, merr.ErrCollectionSchemaChangeInProgress) {
+			return callErr // retriable: keep waiting for the in-flight schema change to settle
+		}
+		return retry.Unrecoverable(callErr)
+	}, retry.AttemptAlways(), retry.Sleep(200*time.Millisecond), retry.MaxSleepTime(2*time.Second))
 }
 
 func (t *alterCollectionSchemaTask) PostExecute(ctx context.Context) error {

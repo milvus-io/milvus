@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
@@ -68,6 +68,16 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		return err
 	}
 
+	// DataViewGate admission: at most one schema-change DDL in flight per collection. Rejects when a
+	// drop/add_function gate is still in its post-apply window (backfill/GC) — the resource key acquired
+	// above only covers broadcast->apply. Placed before any side-effecting prep in the sub-handlers so a
+	// rejected + (proxy-)retried DDL leaves no residue. Retriable; the proxy admission-retries.
+	if c.dataViewGate != nil {
+		if err := c.dataViewGate.admitSchemaChange(coll.CollectionID); err != nil {
+			return err
+		}
+	}
+
 	switch action.GetOp().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
 		return c.broadcastAlterCollectionSchemaAdd(ctx, broadcaster, coll, req)
@@ -79,7 +89,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 }
 
 // broadcastAlterCollectionSchemaAdd handles AddRequest: adding function fields.
-func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
+func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaster streamingbroadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
 	addRequest := req.GetAction().GetAddRequest()
 	plan, err := schemautil.ParseAlterSchemaAddRequest(addRequest)
 	if err != nil {
@@ -180,10 +190,41 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
+
+	// DataViewGate: install the add gate BEFORE the broadcast so the new function-output field is
+	// never visible in the window between the schema change applying and the gate landing. Only an
+	// add_function_field (e.g. BM25 sparse output) needs gating — its value is backfilled
+	// asynchronously; a plain added field has nothing to backfill and is not gated. opVersion is the
+	// explicit new schema version the DDL produces (becomes coll.SchemaVersion on apply, and is the
+	// add's backfill-completion target).
+	var addOpVersion int32
+	addGated := false
+	if plan.Kind == schemautil.AlterSchemaAddFunctionField {
+		addOpVersion = schema.GetVersion()
+		if err := c.dataViewGate.installAddGate(ctx, coll.CollectionID, addOpVersion, []int64{plan.Field.GetFieldID()}); err != nil {
+			// Symmetric with the drop path: installAddGate can fail AFTER persisting the op (a push
+			// failure), leaving it in-memory + etcd. Roll back so a failed add never freezes the
+			// collection's admission. releaseGate is idempotent (a no-op if the op was self-cleaned).
+			c.dataViewGate.releaseGate(ctx, coll.CollectionID, addOpVersion)
+			return err
+		}
+		addGated = true
+	}
+
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		// Only roll back the gate if no broadcast task was durablized; a task-created error is re-driven to
+		// apply the add (retry-till-success), so keeping the gate lets the check loop release it once
+		// backfill completes — same guard the file-resource rollback below uses.
+		if addGated && streamingbroadcaster.IsBroadcastTaskNotCreated(err) {
+			c.dataViewGate.releaseGate(ctx, coll.CollectionID, addOpVersion)
+		}
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}
+
+	// No goroutine here: the central check loop releases the add gate once the backfill has reached
+	// opVersion on every alive segment (streaming node materializes new data; bump-schema compaction
+	// backfills old sealed segments).
 	return nil
 }
 
@@ -361,7 +402,7 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 }
 
 // broadcastAlterCollectionSchemaDrop handles DropRequest: dropping fields or functions.
-func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
+func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcaster streamingbroadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
 	dropReq := req.GetAction().GetDropRequest()
 	if dropReq == nil {
 		return merr.WrapErrParameterInvalidMsg("drop_request is nil")
@@ -423,7 +464,28 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
+
+	// DataViewGate: gate the dropped fields + drain in-flight complex-deletes on the collection BEFORE
+	// the schema-change broadcast (drain-then-DDL orders those deletes ahead of the drop). The drain is
+	// PRE-COMMIT and fail-fast: if it errors here (e.g. drain timed out) we roll back and return BEFORE
+	// broadcaster.Broadcast, so no broadcast task is durablized — the drop fails cleanly and is
+	// retriable. The gate is NOT released here; it is released by the AlterCollection ack callback once
+	// the drop actually applies (recovery-safe: the ack callback re-fires until done). opVersion is the
+	// schema version this drop DDL produces.
+	dropOpVersion := schema.GetVersion()
+	if err := c.dataViewGate.installDropGate(ctx, coll.CollectionID, dropOpVersion, droppedFieldIds); err != nil {
+		c.dataViewGate.releaseGate(ctx, coll.CollectionID, dropOpVersion)
+		return err
+	}
+
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		// Only roll back the gate if no broadcast task was durablized. A task-created error is re-driven to
+		// apply the drop (retry-till-success), so keeping the gate lets the ack callback release it when the
+		// drop applies; unpersisting it here would reopen the drain/read window and defeat recovery — same
+		// guard the file-resource rollback below uses.
+		if streamingbroadcaster.IsBroadcastTaskNotCreated(err) {
+			c.dataViewGate.releaseGate(ctx, coll.CollectionID, dropOpVersion)
+		}
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}

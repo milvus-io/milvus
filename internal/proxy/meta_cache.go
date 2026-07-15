@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -1178,6 +1179,15 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
+	// DataViewGate pull: converge this proxy's read blocklist + complex-delete pause to RootCoord's
+	// current gate BEFORE the caller publishes coll into the serving cache. Keyed by the resolved
+	// collectionID (a by-name lookup passes 0, so DescribeCollection must run first to learn it), which
+	// is why this is a publish-order, not an RPC-order, guarantee. Fail-closed: a pull error aborts the
+	// refresh, so a new/recovered proxy never publishes collection info without its gate and thus never
+	// serves a gated field. The error stays retriable (System), so the read path retries the refresh.
+	if err := m.pullDataViewGate(ctx, coll.GetCollectionID()); err != nil {
+		return nil, err
+	}
 	userFields := make([]*schemapb.FieldSchema, 0)
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {
@@ -1186,6 +1196,63 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	}
 	coll.Schema.Fields = userFields
 	return coll, nil
+}
+
+// pullDataViewGate fetches the DataViewGate snapshot for collectionID from RootCoord and applies it to
+// the process-wide proxy gate, ordered by the snapshot's generation. See describeCollection for the
+// fail-closed contract; the returned error is propagated as-is so its (retriable) classification
+// survives to the read path.
+//
+// The apply is generation-ordered: ApplyGateSnapshot commits the snapshot only when its generation is
+// newer than what the proxy already has. A pull that raced a newer push simply no-ops — the proxy
+// already holds newer state, so that is success, not an error. This is what lets the pull and the push
+// share one apply path with no re-pull loop and no wire-versionless lost-update window.
+func (m *MetaCache) pullDataViewGate(ctx context.Context, collectionID int64) error {
+	resp, err := m.mixCoord.GetDataViewGate(ctx, &rootcoordpb.GetDataViewGateRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		CollectionID: collectionID,
+	})
+	if err != nil {
+		return err
+	}
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return err
+	}
+	globalDataViewGate.ApplyGateSnapshot(ctx, collectionID, resp.GetGatedFieldIds(),
+		resp.GetComplexDeletePaused(), resp.GetGeneration(), false)
+	return nil
+}
+
+// dataViewGateMembershipRetryInterval bounds how often the startup membership wait re-polls RootCoord.
+const dataViewGateMembershipRetryInterval = 200 * time.Millisecond
+
+// waitDataViewGateMembership blocks until RootCoord confirms this proxy is in its fan-out
+// (requester_in_fanout), retrying GetDataViewGate. Called at startup AFTER the session is registered and
+// BEFORE the proxy goes Healthy, so the proxy never serves (never caches a collection or admits a
+// complex-delete) while not yet in the drop drain-barrier fan-out. That structural ordering is what lets
+// the delete path trust the push/pull-maintained gate WITHOUT a per-delete membership pull: everything is
+// cold before confirmation, every post-Healthy describe pulls a fresh gate, and every drop thereafter
+// pushes to this (now in-fan-out) proxy. RootCoord returns in_fanout=true when the gate is disabled, so a
+// disabled gate (operator escape hatch) unblocks startup at once.
+func (m *MetaCache) waitDataViewGateMembership(ctx context.Context) error {
+	for {
+		resp, err := m.mixCoord.GetDataViewGate(ctx, &rootcoordpb.GetDataViewGateRequest{
+			// Carry this proxy's ServerID so RootCoord can report whether it is already in the fan-out.
+			Base:         commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+			CollectionID: 0,
+		})
+		if err == nil && merr.Error(resp.GetStatus()) == nil && resp.GetRequesterInFanout() {
+			mlog.Info(ctx, "data view gate: RootCoord confirmed this proxy in its fan-out; proxy may serve")
+			return nil
+		}
+		mlog.Warn(ctx, "data view gate: waiting for RootCoord to see this proxy in its fan-out before serving",
+			mlog.Err(err))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(dataViewGateMembershipRetryInterval):
+		}
+	}
 }
 
 func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectionName string, collectionID UniqueID) (*milvuspb.ShowPartitionsResponse, error) {

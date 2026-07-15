@@ -12,6 +12,12 @@ service Proxy {
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
   rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
+  // DataViewGate: apply a FULL per-collection gate snapshot (gated field set + complex-delete pause)
+  // stamped with a RootCoord-monotonic generation. The proxy applies it only when generation exceeds
+  // the last applied one, so a reordered/stale snapshot is dropped instead of overwriting newer state.
+  // drain_complex_delete=true (a drop install) also drains in-flight complex-deletes before ACK; this
+  // RPC's blocking fan-out is the drain barrier.
+  rpc SyncDataViewGate(SyncDataViewGateRequest) returns (common.Status) {}
   rpc GetDdChannel(internal.GetDdChannelRequest) returns (milvus.StringResponse) {}
 
   rpc InvalidateCredentialCache(InvalidateCredCacheRequest) returns (common.Status) {}
@@ -44,6 +50,19 @@ message InvalidateCollMetaCacheRequest {
   string collection_name = 3;
   int64 collectionID = 4;
   string partition_name = 5;
+}
+
+// SyncDataViewGateRequest carries a FULL per-collection gate snapshot (not an incremental delta),
+// ordered by a RootCoord-monotonic generation so the proxy can drop a reordered/stale snapshot.
+message SyncDataViewGateRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  repeated int64 gated_field_ids = 3;  // the collection's complete currently-gated field set
+  bool complex_delete_paused = 4;      // resulting complex-delete pause state for the collection
+  uint64 generation = 5;               // RootCoord-monotonic (TSO) version; proxy applies iff newer
+  // drain_complex_delete=true (a drop install) makes the proxy pause + drain in-flight complex-deletes
+  // on this collection before ACK. false for add gates / release / catch-up (state sync only).
+  bool drain_complex_delete = 6;
 }
 
 message InvalidateShardLeaderCacheRequest {

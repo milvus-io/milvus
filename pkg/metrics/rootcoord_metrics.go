@@ -246,6 +246,42 @@ var (
 			Name:      "disk_quota",
 			Help:      "disk quota",
 		}, []string{"node_id", "scope"})
+
+	// DataViewGate observability: the gate is a runtime schema-change feature with a ForceRelease
+	// escape hatch, so an operator needs active/stuck gates, install/release flow, drain latency, and
+	// admission contention to answer "why is my DDL frozen?".
+	RootCoordDataViewGateActive = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "data_view_gate_active",
+			Help:      "number of currently active DataViewGate ops by kind (a persistently non-zero add = backfill not converging)",
+		}, []string{"kind"})
+
+	RootCoordDataViewGateOpTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "data_view_gate_op_total",
+			Help:      "count of DataViewGate op lifecycle events by kind and event (install/release); install >> release signals a leak",
+		}, []string{"kind", "event"})
+
+	RootCoordDataViewGateDrainDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "data_view_gate_drain_duration_ms",
+			Help:      "latency in ms of a drop gate's complex-delete drain fan-out, by result (ok/timeout/error)",
+			Buckets:   buckets,
+		}, []string{"result"})
+
+	RootCoordDataViewGateAdmissionReject = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "data_view_gate_admission_reject_total",
+			Help:      "count of schema-change DDLs rejected by DataViewGate admission because another gate op is still in flight",
+		})
 )
 
 // RegisterRootCoord registers RootCoord metrics
@@ -287,6 +323,12 @@ func RegisterMixCoord(registry *prometheus.Registry) {
 
 	registry.MustRegister(QueryNodeMemoryHighWaterLevel)
 	registry.MustRegister(DiskQuota)
+
+	// for DataViewGate
+	registry.MustRegister(RootCoordDataViewGateActive)
+	registry.MustRegister(RootCoordDataViewGateOpTotal)
+	registry.MustRegister(RootCoordDataViewGateDrainDuration)
+	registry.MustRegister(RootCoordDataViewGateAdmissionReject)
 
 	RegisterStreamingServiceClient(registry)
 	RegisterQueryCoord(registry)

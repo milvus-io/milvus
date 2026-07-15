@@ -279,6 +279,14 @@ func (c *MockMixCoordClientInterface) DescribeCollectionInternal(ctx context.Con
 	panic("implement me")
 }
 
+func (c *MockMixCoordClientInterface) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error) {
+	return &rootcoordpb.GetDataViewGateResponse{Status: merr.Success()}, nil
+}
+
+func (c *MockMixCoordClientInterface) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	return &rootcoordpb.ForceReleaseDataViewGateResponse{Status: merr.Success()}, nil
+}
+
 // ShowCollections list all collection names
 func (c *MockMixCoordClientInterface) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{
@@ -1090,11 +1098,20 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	wg.Wait()
 }
 
+// expectDataViewGateNoop stubs GetDataViewGate to an empty success gate. describeCollection always
+// pulls the gate, so any test whose mock reaches describeCollection needs this default; Maybe allows
+// the (common) zero-call case for tests that never describe.
+func expectDataViewGateNoop(rootCoord *mocks.MockMixCoordClient) {
+	rootCoord.EXPECT().GetDataViewGate(mock.Anything, mock.Anything).
+		Return(&rootcoordpb.GetDataViewGateResponse{Status: merr.Success()}, nil).Maybe()
+}
+
 func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
 	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
@@ -1157,6 +1174,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
 		err := InitMetaCache(ctx, rootCoord)
@@ -1166,6 +1184,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 	t.Run("failed to list policy", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
 			&internalpb.ListPolicyResponse{Status: merr.Status(errors.New("mock list policy error"))},
 			nil).Once()
@@ -1176,6 +1195,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 	t.Run("rpc error", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
 			nil, errors.New("mock list policy rpc errorr")).Once()
 		err := InitMetaCache(ctx, rootCoord)
@@ -1831,6 +1851,7 @@ func TestGetDatabaseInfo(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		cache, err := NewMetaCache(rootCoord)
 		assert.NoError(t, err)
 
@@ -1855,6 +1876,7 @@ func TestGetDatabaseInfo(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		cache, err := NewMetaCache(rootCoord)
 		assert.NoError(t, err)
 
@@ -1995,6 +2017,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
 			Status: merr.Status(nil),
 			ID:     11198,
@@ -2016,6 +2039,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
 			Status: merr.Status(nil),
 		}, errors.New("mock error"))
@@ -2035,6 +2059,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
+		expectDataViewGateNoop(rootCoord)
 		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
 			Status: merr.Status(errors.New("mock failed")),
 		}, nil)
@@ -2400,7 +2425,12 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 func TestMetaCache_FillInvalidateOrdering(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status: merr.Success(),
 	}, nil).Maybe()
 
@@ -2468,6 +2498,7 @@ func TestMetaCache_GetShardLeaderList(t *testing.T) {
 func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2508,6 +2539,7 @@ func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
 func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2546,6 +2578,7 @@ func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
 func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2574,6 +2607,7 @@ func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
 func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2616,6 +2650,7 @@ func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 func TestMetaCache_RemovePartition(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2753,6 +2788,7 @@ func TestMetaCache_RemovePartitionViaAliasInvalidatesRealNameOnEmptyDBName(t *te
 func TestMetaCache_RemovePartitionInvalidatesCollectionInfo(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2805,6 +2841,7 @@ func TestMetaCache_RemovePartitionInvalidatesCollectionInfo(t *testing.T) {
 func TestMetaCache_RemovePartitionStalesCollectionInfoUnconditionally(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2847,6 +2884,7 @@ func TestMetaCache_RemovePartitionStalesCollectionInfoUnconditionally(t *testing
 func TestMetaCache_PartitionCache_Concurrent(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -2900,6 +2938,7 @@ func TestMetaCache_PartitionCache_Concurrent(t *testing.T) {
 func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -5243,6 +5282,7 @@ func TestMetaCache_RemovePartitionEvictsOwnerlessPartitionList(t *testing.T) {
 
 func TestMetaCache_Close(t *testing.T) {
 	rootCoord := mocks.NewMockMixCoordClient(t)
+	expectDataViewGateNoop(rootCoord)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),

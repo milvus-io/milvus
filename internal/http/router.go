@@ -58,6 +58,10 @@ const (
 
 	RouteCommitBackfill = "/management/datacoord/backfill/commit"
 
+	// RouteForceReleaseDataViewGate is the operator escape hatch to force-clear a stuck DataViewGate on
+	// a collection (see rootCoord.dataViewGateEnabled for the master kill-switch).
+	RouteForceReleaseDataViewGate = "/management/rootcoord/dataviewgate/force_release"
+
 	RouteSuspendQueryCoordBalance = "/management/querycoord/balance/suspend"
 	RouteResumeQueryCoordBalance  = "/management/querycoord/balance/resume"
 	RouteQueryCoordBalanceStatus  = "/management/querycoord/balance/status"

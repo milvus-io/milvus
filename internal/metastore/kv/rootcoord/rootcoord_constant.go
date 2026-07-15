@@ -23,7 +23,9 @@ const (
 	AliasMetaPrefix            = ComponentPrefix + "/aliases"
 	FieldMetaPrefix            = ComponentPrefix + "/fields"
 	StructArrayFieldMetaPrefix = ComponentPrefix + "/struct-array-fields"
-	FunctionMetaPrefix         = ComponentPrefix + "/functions"
+	// DataViewGatePrefix persists RootCoord's per-collection DataViewGate coordination records.
+	DataViewGatePrefix = ComponentPrefix + "/data-view-gate"
+	FunctionMetaPrefix = ComponentPrefix + "/functions"
 
 	// CollectionAliasMetaPrefix210 prefix for collection alias meta
 	CollectionAliasMetaPrefix210 = ComponentPrefix + "/collection-alias"

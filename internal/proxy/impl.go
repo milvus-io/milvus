@@ -234,6 +234,32 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	return merr.Success(), nil
 }
 
+// SyncDataViewGate applies a full per-collection DataViewGate snapshot pushed by RootCoord, ordered by
+// its generation (a stale/reordered snapshot is dropped by the generation check). It does NOT touch the
+// schema cache. A drop install (DrainComplexDelete) blocks here until in-flight complex-deletes on the
+// collection drain — RootCoord's blocking fan-out is exactly that drain barrier; ctx (bounded by
+// RootCoord's drain timeout) caps the wait, and on timeout/cancel the apply undoes itself and returns an
+// error so the drop fails and rolls back rather than hanging this RPC.
+func (node *Proxy) SyncDataViewGate(ctx context.Context, request *proxypb.SyncDataViewGateRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	collectionID := request.GetCollectionID()
+	applied, err := globalDataViewGate.ApplyGateSnapshot(ctx, collectionID, request.GetGatedFieldIds(),
+		request.GetComplexDeletePaused(), request.GetGeneration(), request.GetDrainComplexDelete())
+	if err != nil {
+		mlog.Warn(ctx, "data view gate snapshot apply failed (complex-delete drain canceled/timed out)",
+			mlog.Int64("collectionID", collectionID), mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	mlog.Info(ctx, "applied data view gate snapshot",
+		mlog.Int64("collectionID", collectionID),
+		mlog.Uint64("generation", request.GetGeneration()),
+		mlog.Bool("applied", applied),
+		mlog.Int64s("gatedFieldIDs", request.GetGatedFieldIds()))
+	return merr.Success(), nil
+}
+
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {

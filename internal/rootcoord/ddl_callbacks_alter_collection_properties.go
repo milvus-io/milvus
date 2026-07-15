@@ -372,6 +372,12 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 		return err
 	}
 
+	// DataViewGate: disabling the dynamic field removes $meta (a field reads / complex-deletes reference),
+	// so it must serialize behind any other in-flight schema change on the collection, like drop-column.
+	if err := c.dataViewGate.admitSchemaChange(coll.CollectionID); err != nil {
+		return err
+	}
+
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, coll.VirtualChannelNames...)
@@ -400,7 +406,24 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
+
+	// DataViewGate: disabling the dynamic field IS a field drop ($meta's data is physically removed via the
+	// same DroppedFieldIds cascade), so gate the dropped field + drain in-flight complex-deletes on the
+	// collection BEFORE the broadcast (pre-commit, fail-fast), exactly like broadcastAlterCollectionSchemaDrop.
+	// Released by the shared ack callback (releaseGate on DroppedFieldIds) once the drop applies; recovery
+	// keeps it while this AlterCollectionV2 broadcast is still pending (matched by collectionID + schema
+	// version in HasPendingAlterCollectionBroadcast). opVersion = the schema version this produces.
+	dropOpVersion := schema.GetVersion()
+	if err := c.dataViewGate.installDropGate(ctx, coll.CollectionID, dropOpVersion, []int64{dynamicFieldID}); err != nil {
+		c.dataViewGate.releaseGate(ctx, coll.CollectionID, dropOpVersion)
+		return err
+	}
 	if _, err := bc.Broadcast(ctx, msg); err != nil {
+		// Roll back the gate only if no broadcast task durablized (a created task is re-driven to apply, and
+		// the ack callback releases it then); same guard as the drop path.
+		if broadcaster.IsBroadcastTaskNotCreated(err) {
+			c.dataViewGate.releaseGate(ctx, coll.CollectionID, dropOpVersion)
+		}
 		return err
 	}
 	return nil
@@ -510,7 +533,19 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		}
 	}
 
-	return c.ExpireCaches(ctx, header)
+	// DataViewGate: expire proxy meta caches BEFORE releasing the drop's gate. AlterCollection fast-ACKs
+	// after WAL append (not after proxies/QueryNodes consume the drop), so releasing first leaves a
+	// window where the field is ungated while proxies still hold the pre-drop schema — a bounded read
+	// could then return the being-dropped field. On expiry failure keep the gate installed and return
+	// the error; this ack callback re-fires (until MarkAckCallbackDone) and retries — recovery-safe.
+	// opVersion = the schema version this alter produced (matches installDropGate's).
+	if err := c.ExpireCaches(ctx, header); err != nil {
+		return err
+	}
+	if len(header.GetDroppedFieldIds()) > 0 {
+		c.dataViewGate.releaseGate(ctx, header.GetCollectionId(), body.GetUpdates().GetSchema().GetVersion())
+	}
+	return nil
 }
 
 // applyBoundFieldIndexesInline creates the index meta bound to a newly added

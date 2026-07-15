@@ -141,6 +141,11 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	createCollectionForTest(t, ctx, core, dbName, collectionName)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
+	// A successful add_function_field installs an add gate the UT (no backfill loop) never releases,
+	// which would admission-block the next schema change on this collection. Simulate backfill
+	// completion after each such success so the sequential cases below are not gate-blocked.
+	advanceAddBackfill := func() { core.dataViewGate.releaseCompletedAddGates(ctx) }
+
 	// case 1: action == nil
 	resp, err := core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
@@ -536,6 +541,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	}
 	resp, err = core.AlterCollectionSchema(ctx, minHashReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	advanceAddBackfill()
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 
 	// The bound index meta must have been applied through the CreateIndex ack
@@ -632,6 +638,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, firstAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	advanceAddBackfill()
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 7)
 
 	// second happy path with DoPhysicalBackfill=true: the flag is ignored by alter schema.
@@ -639,6 +646,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	secondAlterReq.GetAction().GetAddRequest().DoPhysicalBackfill = true
 	resp, err = core.AlterCollectionSchema(ctx, secondAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	advanceAddBackfill()
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 8)
 	updated, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)

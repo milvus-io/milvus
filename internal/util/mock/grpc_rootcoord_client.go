@@ -150,6 +150,14 @@ func (m *GrpcRootCoordClient) DescribeCollectionInternal(ctx context.Context, in
 	return &milvuspb.DescribeCollectionResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error) {
+	return &rootcoordpb.GetDataViewGateResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	return &rootcoordpb.ForceReleaseDataViewGateResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

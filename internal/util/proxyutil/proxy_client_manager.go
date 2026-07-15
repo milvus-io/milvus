@@ -88,6 +88,7 @@ type ProxyClientManagerInterface interface {
 	GetProxyCount() int
 
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...ExpireCacheOpt) error
+	SyncDataViewGate(ctx context.Context, request *proxypb.SyncDataViewGateRequest) error
 	InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) error
 	InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) error
 	UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) error
@@ -218,6 +219,46 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
 				return merr.Wrapf(merr.Error(sta), "InvalidateCollectionMetaCache failed, proxyID = %d", k)
+			}
+			return nil
+		})
+		return true
+	})
+	return group.Wait()
+}
+
+// SyncDataViewGate pushes a DataViewGate delta to every proxy. The fan-out is blocking (errgroup
+// Wait) and all-or-error — a drop's Set (drain_complex_delete=true) does not return until every
+// proxy has drained its in-flight complex-deletes on the collection.
+func (p *ProxyClientManager) SyncDataViewGate(ctx context.Context, request *proxypb.SyncDataViewGateRequest) error {
+	if p.proxyClient.Len() == 0 {
+		mlog.Warn(ctx, "proxy client is empty, SyncDataViewGate will not send to any client")
+		return nil
+	}
+
+	group := &errgroup.Group{}
+	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
+		k, v := key, value
+		group.Go(func() error {
+			sta, err := v.SyncDataViewGate(ctx, request)
+			if err != nil {
+				if errors.Is(err, merr.ErrNodeNotFound) {
+					mlog.Warn(ctx, "SyncDataViewGate failed due to proxy service not found", mlog.Err(err))
+					return nil
+				}
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					// Old proxy (rolling upgrade) that can't participate in the gate/drain. Unlike
+					// NodeNotFound (absent → no in-flight work), it is alive and may hold an in-flight
+					// complex-delete on the dropped field, so treating it as drained is unsafe. Fail-closed
+					// with a RETRIABLE error so the drop/add DDL retries until the upgrade completes; release
+					// pushes are warn-only at the caller and stay best-effort.
+					return merr.WrapErrCollectionSchemaChangeInProgress(request.GetCollectionID(),
+						"proxy %d does not support DataViewGate yet (rolling upgrade in progress)", k)
+				}
+				return merr.Wrapf(err, "SyncDataViewGate failed, proxyID = %d", k)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return merr.Wrapf(merr.Error(sta), "SyncDataViewGate failed, proxyID = %d", k)
 			}
 			return nil
 		})

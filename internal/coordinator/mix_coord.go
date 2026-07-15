@@ -542,6 +542,14 @@ func (s *mixCoordImpl) DescribeCollectionInternal(ctx context.Context, in *milvu
 	return s.rootcoordServer.DescribeCollectionInternal(ctx, in)
 }
 
+func (s *mixCoordImpl) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error) {
+	return s.rootcoordServer.GetDataViewGate(ctx, in)
+}
+
+func (s *mixCoordImpl) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	return s.rootcoordServer.ForceReleaseDataViewGate(ctx, in)
+}
+
 func (s *mixCoordImpl) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	return s.rootcoordServer.BackupEzk(ctx, in)
 }
@@ -1060,6 +1068,10 @@ func (s *mixCoordImpl) AssignSegmentID(ctx context.Context, req *datapb.AssignSe
 
 func (s *mixCoordImpl) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	return s.datacoordServer.GetSegmentStates(ctx, req)
+}
+
+func (s *mixCoordImpl) AliveSegmentMinSchemaVersion(ctx context.Context, collectionID int64) (int32, error) {
+	return s.datacoordServer.AliveSegmentMinSchemaVersion(ctx, collectionID)
 }
 
 func (s *mixCoordImpl) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {

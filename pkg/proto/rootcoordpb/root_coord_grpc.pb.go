@@ -35,6 +35,8 @@ const (
 	RootCoord_HasCollection_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/HasCollection"
 	RootCoord_DescribeCollection_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/DescribeCollection"
 	RootCoord_DescribeCollectionInternal_FullMethodName    = "/milvus.proto.rootcoord.RootCoord/DescribeCollectionInternal"
+	RootCoord_GetDataViewGate_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetDataViewGate"
+	RootCoord_ForceReleaseDataViewGate_FullMethodName      = "/milvus.proto.rootcoord.RootCoord/ForceReleaseDataViewGate"
 	RootCoord_CreateAlias_FullMethodName                   = "/milvus.proto.rootcoord.RootCoord/CreateAlias"
 	RootCoord_DropAlias_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/DropAlias"
 	RootCoord_AlterAlias_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/AlterAlias"
@@ -164,6 +166,14 @@ type RootCoordClient interface {
 	// @return CollectionSchema
 	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 	DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
+	// GetDataViewGate returns the DataViewGate state (read-blocked field ids + complex-delete pause)
+	// for a collection. Internal-only: the proxy meta-cache pulls it to converge a new/recovered proxy
+	// to RootCoord's current gate before serving the collection.
+	GetDataViewGate(ctx context.Context, in *GetDataViewGateRequest, opts ...grpc.CallOption) (*GetDataViewGateResponse, error)
+	// ForceReleaseDataViewGate force-releases every DataViewGate op on a collection: an operator escape
+	// hatch to clear a stuck gate (e.g. an add_function backfill that never completes) that would
+	// otherwise freeze the collection's DDLs via admission. Voids the released ops' guarantees.
+	ForceReleaseDataViewGate(ctx context.Context, in *ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*ForceReleaseDataViewGateResponse, error)
 	CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -367,6 +377,24 @@ func (c *rootCoordClient) DescribeCollection(ctx context.Context, in *milvuspb.D
 func (c *rootCoordClient) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	out := new(milvuspb.DescribeCollectionResponse)
 	err := c.cc.Invoke(ctx, RootCoord_DescribeCollectionInternal_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) GetDataViewGate(ctx context.Context, in *GetDataViewGateRequest, opts ...grpc.CallOption) (*GetDataViewGateResponse, error) {
+	out := new(GetDataViewGateResponse)
+	err := c.cc.Invoke(ctx, RootCoord_GetDataViewGate_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ForceReleaseDataViewGate(ctx context.Context, in *ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*ForceReleaseDataViewGateResponse, error) {
+	out := new(ForceReleaseDataViewGateResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ForceReleaseDataViewGate_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1004,6 +1032,14 @@ type RootCoordServer interface {
 	// @return CollectionSchema
 	DescribeCollection(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 	DescribeCollectionInternal(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	// GetDataViewGate returns the DataViewGate state (read-blocked field ids + complex-delete pause)
+	// for a collection. Internal-only: the proxy meta-cache pulls it to converge a new/recovered proxy
+	// to RootCoord's current gate before serving the collection.
+	GetDataViewGate(context.Context, *GetDataViewGateRequest) (*GetDataViewGateResponse, error)
+	// ForceReleaseDataViewGate force-releases every DataViewGate op on a collection: an operator escape
+	// hatch to clear a stuck gate (e.g. an add_function backfill that never completes) that would
+	// otherwise freeze the collection's DDLs via admission. Voids the released ops' guarantees.
+	ForceReleaseDataViewGate(context.Context, *ForceReleaseDataViewGateRequest) (*ForceReleaseDataViewGateResponse, error)
 	CreateAlias(context.Context, *milvuspb.CreateAliasRequest) (*commonpb.Status, error)
 	DropAlias(context.Context, *milvuspb.DropAliasRequest) (*commonpb.Status, error)
 	AlterAlias(context.Context, *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
@@ -1136,6 +1172,12 @@ func (UnimplementedRootCoordServer) DescribeCollection(context.Context, *milvusp
 }
 func (UnimplementedRootCoordServer) DescribeCollectionInternal(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeCollectionInternal not implemented")
+}
+func (UnimplementedRootCoordServer) GetDataViewGate(context.Context, *GetDataViewGateRequest) (*GetDataViewGateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDataViewGate not implemented")
+}
+func (UnimplementedRootCoordServer) ForceReleaseDataViewGate(context.Context, *ForceReleaseDataViewGateRequest) (*ForceReleaseDataViewGateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ForceReleaseDataViewGate not implemented")
 }
 func (UnimplementedRootCoordServer) CreateAlias(context.Context, *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAlias not implemented")
@@ -1550,6 +1592,42 @@ func _RootCoord_DescribeCollectionInternal_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).DescribeCollectionInternal(ctx, req.(*milvuspb.DescribeCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_GetDataViewGate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDataViewGateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetDataViewGate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetDataViewGate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetDataViewGate(ctx, req.(*GetDataViewGateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ForceReleaseDataViewGate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForceReleaseDataViewGateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ForceReleaseDataViewGate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ForceReleaseDataViewGate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ForceReleaseDataViewGate(ctx, req.(*ForceReleaseDataViewGateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2742,6 +2820,14 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DescribeCollectionInternal",
 			Handler:    _RootCoord_DescribeCollectionInternal_Handler,
+		},
+		{
+			MethodName: "GetDataViewGate",
+			Handler:    _RootCoord_GetDataViewGate_Handler,
+		},
+		{
+			MethodName: "ForceReleaseDataViewGate",
+			Handler:    _RootCoord_ForceReleaseDataViewGate_Handler,
 		},
 		{
 			MethodName: "CreateAlias",

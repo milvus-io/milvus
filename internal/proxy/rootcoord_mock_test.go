@@ -78,6 +78,10 @@ type MixCoordMock struct {
 	nodeID  typeutil.UniqueID
 	address string
 
+	// getDataViewGateFunc, when set, overrides the default empty-gate response so a test can have the
+	// DescribeCollection pull deliver a gated field.
+	getDataViewGateFunc func(context.Context, *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error)
+
 	state atomic.Value // internal.StateCode
 
 	statisticsChannel string
@@ -650,6 +654,17 @@ func (coord *MixCoordMock) DescribeCollection(ctx context.Context, req *milvuspb
 
 func (coord *MixCoordMock) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	return coord.DescribeCollection(ctx, req)
+}
+
+func (coord *MixCoordMock) GetDataViewGate(ctx context.Context, req *rootcoordpb.GetDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error) {
+	if coord.getDataViewGateFunc != nil {
+		return coord.getDataViewGateFunc(ctx, req)
+	}
+	return &rootcoordpb.GetDataViewGateResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) ForceReleaseDataViewGate(ctx context.Context, req *rootcoordpb.ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	return &rootcoordpb.ForceReleaseDataViewGateResponse{Status: merr.Success()}, nil
 }
 
 func (coord *MixCoordMock) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {

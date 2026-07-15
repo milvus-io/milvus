@@ -845,6 +845,14 @@ func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.Sho
 	return resp, nil
 }
 
+func (m *RootCoordFactory) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error) {
+	return &rootcoordpb.GetDataViewGateResponse{Status: merr.Success()}, nil
+}
+
+func (m *RootCoordFactory) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	return &rootcoordpb.ForceReleaseDataViewGateResponse{Status: merr.Success()}, nil
+}
+
 func (m *RootCoordFactory) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 	f := MetaFactory{}
 	meta := f.GetCollectionMeta(m.collectionID, m.collectionName, m.pkType)

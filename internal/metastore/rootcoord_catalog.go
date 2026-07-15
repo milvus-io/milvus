@@ -43,6 +43,13 @@ type RootCoordCatalog interface {
 	// ListCredentials gets all usernames.
 	ListCredentials(ctx context.Context) ([]string, error)
 
+	// SaveDataViewGate persists (upsert) one per-operation DataViewGate record.
+	SaveDataViewGate(ctx context.Context, gate *model.DataViewGate) error
+	// DropDataViewGate removes the persisted record of one gate operation (collection + opVersion).
+	DropDataViewGate(ctx context.Context, collectionID int64, opVersion int32) error
+	// ListDataViewGates returns all persisted DataViewGate records (for RootCoord restart recovery).
+	ListDataViewGates(ctx context.Context) ([]*model.DataViewGate, error)
+
 	// CreateRole creates role by the entity for the tenant. Please make sure the tenent and entity.Name aren't empty. Empty entity.Name may end up with deleting all roles
 	// Returns common.IgnorableError if the role already existes
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -52,6 +53,10 @@ func RegisterMgrRoute(proxy *Proxy) {
 		management.Register(&management.Handler{
 			Path:        management.RouteCommitBackfill,
 			HandlerFunc: proxy.CommitBackfillResult,
+		})
+		management.Register(&management.Handler{
+			Path:        management.RouteForceReleaseDataViewGate,
+			HandlerFunc: proxy.ForceReleaseDataViewGate,
 		})
 		management.Register(&management.Handler{
 			Path:        management.RouteListQueryNode,
@@ -216,6 +221,48 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 		"committed_segments": resp.GetCommittedSegments(),
 		"failed_segments":    resp.GetFailedSegments(),
 		"segment_statuses":   resp.GetSegmentStatuses(),
+	})
+}
+
+// ForceReleaseDataViewGate is the operator escape hatch to force-clear a stuck DataViewGate on a
+// collection (whose DDLs would otherwise be frozen by admission). DANGEROUS: it voids the released ops'
+// guarantees; use only when a gate is confirmed stuck. See rootCoord.dataViewGateEnabled for the
+// master kill-switch.
+func (node *Proxy) ForceReleaseDataViewGate(w http.ResponseWriter, req *http.Request) {
+	writeJSON := func(status int, payload map[string]interface{}) {
+		w.WriteHeader(status)
+		bs, _ := json.Marshal(payload)
+		w.Write(bs)
+	}
+
+	collectionID, err := strconv.ParseInt(req.URL.Query().Get("collection_id"), 10, 64)
+	if err != nil || collectionID <= 0 {
+		writeJSON(http.StatusBadRequest, map[string]interface{}{
+			"msg": "a positive collection_id query parameter is required",
+		})
+		return
+	}
+
+	resp, err := node.mixCoord.ForceReleaseDataViewGate(req.Context(), &rootcoordpb.ForceReleaseDataViewGateRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		CollectionID: collectionID,
+	})
+	if err != nil {
+		writeJSON(http.StatusInternalServerError, map[string]interface{}{
+			"msg": fmt.Sprintf("failed to force-release data view gate, %s", err.Error()),
+		})
+		return
+	}
+	if !merr.Ok(resp.GetStatus()) {
+		writeJSON(http.StatusInternalServerError, map[string]interface{}{
+			"msg": fmt.Sprintf("failed to force-release data view gate, %s", resp.GetStatus().GetReason()),
+		})
+		return
+	}
+	writeJSON(http.StatusOK, map[string]interface{}{
+		"msg":            "OK",
+		"collection_id":  collectionID,
+		"released_count": resp.GetReleasedCount(),
 	})
 }
 

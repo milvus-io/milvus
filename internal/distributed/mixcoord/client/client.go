@@ -300,6 +300,50 @@ func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.De
 	return resp, err
 }
 
+func (c *Client) getDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest) (*rootcoordpb.GetDataViewGateResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.GetDataViewGateResponse, error) {
+		return client.GetDataViewGate(ctx, in)
+	})
+}
+
+func (c *Client) GetDataViewGate(ctx context.Context, in *rootcoordpb.GetDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.GetDataViewGateResponse, error) {
+	resp, err := c.getDataViewGate(ctx, in)
+	if errors.Is(err, merr.ErrServiceUnimplemented) {
+		// mixCoord upgrades before proxy, so a new proxy always faces a new coord; an Unimplemented here
+		// violates that invariant — surface it and fail-closed (return the error) instead of fabricating an
+		// empty gate. (The prior grpcStatus.FromError check was dead: checkGrpcErr wraps the gRPC status into
+		// a merr error that no longer carries GRPCStatus().)
+		mlog.Warn(ctx, "GetDataViewGate unimplemented on coord, unexpected under coord-before-proxy upgrade order", mlog.Err(err))
+	}
+	return resp, err
+}
+
+func (c *Client) forceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+		return client.ForceReleaseDataViewGate(ctx, in)
+	})
+}
+
+func (c *Client) ForceReleaseDataViewGate(ctx context.Context, in *rootcoordpb.ForceReleaseDataViewGateRequest, opts ...grpc.CallOption) (*rootcoordpb.ForceReleaseDataViewGateResponse, error) {
+	resp, err := c.forceReleaseDataViewGate(ctx, in)
+	if errors.Is(err, merr.ErrServiceUnimplemented) {
+		// Same as GetDataViewGate: Unimplemented from coord is unexpected under the coord-before-proxy
+		// upgrade order; surface it and fail-closed rather than fabricating a success.
+		mlog.Warn(ctx, "ForceReleaseDataViewGate unimplemented on coord, unexpected under coord-before-proxy upgrade order", mlog.Err(err))
+	}
+	return resp, err
+}
+
 // ShowCollections list all collection names
 func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	in = typeutil.Clone(in)
