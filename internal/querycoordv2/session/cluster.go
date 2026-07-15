@@ -131,7 +131,7 @@ func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *quer
 		status, err = cli.LoadSegments(ctx, req)
 	})
 	if err1 != nil {
-		return nil, err1
+		return nil, NewRPCNotSentError(err1)
 	}
 	return status, err
 }
@@ -145,7 +145,7 @@ func (c *QueryCluster) WatchDmChannels(ctx context.Context, nodeID int64, req *q
 		status, err = cli.WatchDmChannels(ctx, req)
 	})
 	if err1 != nil {
-		return nil, err1
+		return nil, NewRPCNotSentError(err1)
 	}
 	return status, err
 }
@@ -159,7 +159,7 @@ func (c *QueryCluster) UnsubDmChannel(ctx context.Context, nodeID int64, req *qu
 		status, err = cli.UnsubDmChannel(ctx, req)
 	})
 	if err1 != nil {
-		return nil, err1
+		return nil, NewRPCNotSentError(err1)
 	}
 	return status, err
 }
@@ -173,7 +173,7 @@ func (c *QueryCluster) ReleaseSegments(ctx context.Context, nodeID int64, req *q
 		status, err = cli.ReleaseSegments(ctx, req)
 	})
 	if err1 != nil {
-		return nil, err1
+		return nil, NewRPCNotSentError(err1)
 	}
 	return status, err
 }

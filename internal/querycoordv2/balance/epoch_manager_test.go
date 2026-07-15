@@ -28,6 +28,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	clientmodel "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
@@ -1024,6 +1026,25 @@ func epochManagerWave(plans ...EpochPlan) BalanceWave {
 	return wave
 }
 
+func epochManagerChannelPlan(
+	snapshot PlacementSnapshot,
+	replicaID int64,
+	channel string,
+	from int64,
+	to int64,
+) EpochPlan {
+	key := ChannelObjectKey{ReplicaID: replicaID, Channel: channel}
+	placement := snapshot.Channels[key][0]
+	return EpochPlan{
+		Kind: PlanKindChannel, CollectionID: placement.CollectionID, ReplicaID: replicaID,
+		Shard: channel, Channel: channel, From: from, To: to,
+		Token: AdmissionToken{
+			Snapshot: cloneSnapshotToken(snapshot.Token), CollectionID: placement.CollectionID,
+			ReplicaID: replicaID, ExpectedSourceNode: from, Channel: &key,
+		},
+	}
+}
+
 func publishEpochManagerSegments(
 	fixture *placementSnapshotFixture,
 	node1SegmentIDs []int64,
@@ -1057,6 +1078,58 @@ func publishEpochManagerSegments(
 	}
 	fixture.dist.PublishNodeDistribution(1, segments(1, node1SegmentIDs), fixture.node1Channels)
 	fixture.dist.PublishNodeDistribution(3, segments(3, node3SegmentIDs), nil)
+}
+
+func publishEpochManagerChannel(
+	t *testing.T,
+	fixture *placementSnapshotFixture,
+	sourcePresent bool,
+	targetPresent bool,
+	targetReady bool,
+) {
+	t.Helper()
+	captured := fixture.dist.Capture()
+	channels := make([]meta.ChannelSnapshotRecord, 0, len(captured.Channels)+1)
+	var template *meta.ChannelSnapshotRecord
+	for _, record := range captured.Channels {
+		if record.CollectionID == 100 && record.Channel == "channel-a" && (record.NodeID == 1 || record.NodeID == 3) {
+			if template == nil || record.NodeID == 1 {
+				copy := record
+				template = &copy
+			}
+			continue
+		}
+		channels = append(channels, record)
+	}
+	require.NotNil(t, template)
+	if sourcePresent {
+		source := *template
+		source.NodeID = 1
+		source.Present = true
+		source.Serviceable = true
+		source.LeaderID = 1
+		source.LeaderTargetVersion = fixture.targetState.currentVersion[100]
+		channels = append(channels, source)
+	}
+	if targetPresent {
+		target := *template
+		target.NodeID = 3
+		target.Version++
+		target.Present = true
+		target.Serviceable = targetReady
+		target.LeaderID = 0
+		target.LeaderTargetVersion = 0
+		if targetReady {
+			target.LeaderID = 3
+			target.LeaderVersion++
+			target.LeaderTargetVersion = fixture.targetState.currentVersion[100]
+		}
+		channels = append(channels, target)
+	}
+	captured.Channels = channels
+	segmentsByNode, channelsByNode := primitiveBalanceEpochDistribution(captured)
+	fixture.dist.PublishNodeDistribution(1, segmentsByNode[1], channelsByNode[1])
+	fixture.dist.PublishNodeDistribution(3, segmentsByNode[3], channelsByNode[3])
 }
 
 func publishEpochManagerAcceptedSegmentMove(
@@ -1235,12 +1308,7 @@ func TestEpochManagerFailedGrowKeepsSource(t *testing.T) {
 
 	fixture.manager.Advance(context.Background(), request)
 	accepted := fixture.admitter.acceptedTasks()[0]
-	accepted.SetStatus(task.TaskStatusFailed)
-	select {
-	case <-accepted.Done():
-		t.Fatal("status-first fixture unexpectedly closed Done")
-	default:
-	}
+	accepted.Fail(errors.New("grow failed"))
 	publishEpochManagerSegments(fixture.placement, []int64{101, 201}, nil)
 
 	result := fixture.manager.Advance(context.Background(), request)
@@ -1270,6 +1338,98 @@ func TestEpochManagerFailedReduceLeavesRedundantCopy(t *testing.T) {
 	fixture.manager.Advance(context.Background(), request)
 	require.Empty(t, fixture.source.lastCarry(testSnapshotRG))
 	require.NotContains(t, fixture.policy.lastConstraints(testSnapshotRG).Objects, plan.ObjectKey())
+}
+
+func TestEpochManagerAmbiguousRPCFailureRetainsReservationsUntilAuthoritativePlacementSettles(t *testing.T) {
+	testCases := []struct {
+		name         string
+		kind         PlanKind
+		failedTarget bool
+	}{
+		{name: "segment grow", kind: PlanKindSegment, failedTarget: false},
+		{name: "segment reduce", kind: PlanKindSegment, failedTarget: true},
+		{name: "channel grow", kind: PlanKindChannel, failedTarget: false},
+		{name: "channel reduce", kind: PlanKindChannel, failedTarget: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newEpochManagerTestFixture(t)
+			var plan EpochPlan
+			if testCase.kind == PlanKindSegment {
+				plan = epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+			} else {
+				plan = epochManagerChannelPlan(*fixture.snapshot, testEligibleReplica, "channel-a", 1, 3)
+			}
+			firstWave := epochManagerWave(plan)
+			firstWave.Kind = testCase.kind
+			blockedWave := epochManagerWave(plan)
+			blockedWave.Kind = testCase.kind
+			fixture.policy.setWaves(
+				testSnapshotRG,
+				firstWave,
+				blockedWave,
+				BalanceWave{Kind: testCase.kind, Converged: true},
+			)
+			request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+
+			started := fixture.manager.Advance(context.Background(), request)
+			require.Equal(t, EpochExecuting, started.State)
+			require.Equal(t, 1, started.Admitted)
+			require.Len(t, fixture.admitter.acceptedTasks(), 1)
+
+			if testCase.kind == PlanKindSegment {
+				if testCase.failedTarget {
+					publishEpochManagerSegments(fixture.placement, []int64{101, 201}, []int64{101})
+				} else {
+					publishEpochManagerSegments(fixture.placement, []int64{101, 201}, nil)
+				}
+			} else {
+				publishEpochManagerChannel(t, fixture.placement, true, testCase.failedTarget, testCase.failedTarget)
+			}
+			rpcErr := status.Error(codes.Unavailable, testCase.name+" response lost")
+			fixture.admitter.acceptedTasks()[0].Fail(task.NewAmbiguousExecutionError(rpcErr))
+
+			failed := fixture.manager.Advance(context.Background(), request)
+			require.Equal(t, EpochDegraded, failed.State)
+			require.True(t, failed.Terminal)
+			runtime := fixture.manager.runtime(testSnapshotRG)
+			runtime.mu.Lock()
+			require.Contains(t, runtime.carryOver, plan.ObjectKey())
+			runtime.mu.Unlock()
+
+			blocked := fixture.manager.Advance(context.Background(), request)
+			require.Equal(t, EpochDegraded, blocked.State)
+			require.True(t, blocked.Terminal)
+			require.Equal(t, 1, blocked.Rejected[task.BalanceAdmissionBudgetExhausted])
+			require.Len(t, fixture.admitter.acceptedTasks(), 1, "the ambiguous object must not be admitted twice")
+			require.Len(t, fixture.source.lastCarry(testSnapshotRG), 1)
+			constraint := fixture.policy.lastConstraints(testSnapshotRG).Objects[plan.ObjectKey()]
+			require.Equal(t, ReservationAmbiguousCapacity, constraint.Class)
+			require.Equal(t, []int64{1, 3}, constraint.ChargedNodes)
+
+			accepted := fixture.admitter.acceptedTasks()[0]
+			require.Equal(t, int64(3), accepted.Actions()[0].Node())
+			require.Equal(t, task.ActionTypeGrow, accepted.Actions()[0].Type())
+			require.Equal(t, int64(1), accepted.Actions()[1].Node())
+			require.Equal(t, task.ActionTypeReduce, accepted.Actions()[1].Type())
+
+			if testCase.kind == PlanKindSegment {
+				publishEpochManagerSegments(fixture.placement, []int64{201}, []int64{101})
+			} else {
+				publishEpochManagerChannel(t, fixture.placement, false, true, true)
+			}
+			settling := fixture.manager.Advance(context.Background(), request)
+			require.Equal(t, EpochExecuting, settling.State)
+			completed := fixture.manager.Advance(context.Background(), request)
+			require.Equal(t, EpochCompleted, completed.State)
+			require.True(t, completed.Terminal)
+			require.Len(t, fixture.admitter.acceptedTasks(), 1, "late placement must resolve without duplicate or reverse admission")
+			runtime.mu.Lock()
+			require.Empty(t, runtime.carryOver)
+			runtime.mu.Unlock()
+		})
+	}
 }
 
 func TestEpochManagerDeadlineCarriesAmbiguousWork(t *testing.T) {
@@ -2833,12 +2993,23 @@ func TestEpochManagerFailedUnreadyChannelTargetUsesPhysicalPresence(t *testing.T
 		targetPresent: true,
 		targetReady:   false,
 		status:        task.TaskStatusFailed,
+		done:          true,
 	}
 	targetOnly := withSource
 	targetOnly.sourcePresent = false
 
 	require.Equal(t, terminalWorkReduceFailed, classifyTerminalWork(withSource))
 	require.Equal(t, terminalWorkAmbiguous, classifyTerminalWork(targetOnly))
+}
+
+func TestEpochManagerFailedStatusBeforeDoneIsAmbiguous(t *testing.T) {
+	observation := workObservation{
+		sourcePresent: true,
+		status:        task.TaskStatusFailed,
+		done:          false,
+	}
+
+	require.Equal(t, terminalWorkAmbiguous, classifyTerminalWork(observation))
 }
 
 func TestSnapshotTokenWithPendingRevisionDeepCopies(t *testing.T) {

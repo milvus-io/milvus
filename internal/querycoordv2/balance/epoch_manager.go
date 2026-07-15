@@ -1326,6 +1326,7 @@ type workObservation struct {
 	targetPresent bool
 	targetReady   bool
 	status        task.Status
+	err           error
 	done          bool
 	detailDigest  uint64
 }
@@ -1346,6 +1347,7 @@ func observeWork(work *admittedWork, distribution meta.DistributionSnapshot) wor
 		select {
 		case <-work.task.Done():
 			observation.done = true
+			observation.err = work.task.Err()
 		default:
 		}
 	}
@@ -1476,6 +1478,12 @@ func classifyTerminalWork(observation workObservation) terminalWorkClass {
 	case task.TaskStatusStarted, task.TaskStatusCanceled:
 		return terminalWorkAmbiguous
 	case task.TaskStatusFailed:
+		if !observation.done {
+			return terminalWorkAmbiguous
+		}
+		if task.IsAmbiguousExecutionError(observation.err) {
+			return terminalWorkAmbiguous
+		}
 		if observation.sourcePresent && !observation.targetPresent {
 			return terminalWorkGrowFailed
 		}
