@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
@@ -676,6 +677,19 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     if (real_batch_size == 0) {
         return nullptr;
     }
+
+    // ArrayLength only reads each row's element count, which the segment's
+    // IArrayOffsets already stores as prefix sums: serve the predicate from
+    // them (O(rows) integer scan) instead of materializing every array.
+    // Offsets are absent e.g. on index-only loads; fall back to raw data.
+    if (expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength) {
+        if (auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            array_offsets != nullptr) {
+            return ExecArrayLengthFromOffsets<ValueType>(
+                *array_offsets, input, real_batch_size);
+        }
+    }
+
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
@@ -1153,6 +1167,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
         arg_inited_ = true;
     }
 
+    // Same offsets-based fast path as ExecRangeVisitorImplForArray: struct
+    // VECTOR_ARRAY sub-fields share the struct's IArrayOffsets. Standalone
+    // VECTOR_ARRAY fields have no offsets and use the view-reading fallback.
+    if (auto array_offsets = segment_->GetArrayOffsets(field_id_);
+        array_offsets != nullptr) {
+        return ExecArrayLengthFromOffsets<ValueType>(
+            *array_offsets, input, real_batch_size);
+    }
+
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
@@ -1223,6 +1246,104 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
                "expect batch size {}",
                processed_size,
                real_batch_size);
+    return res_vec;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromOffsets(
+    const IArrayOffsets& array_offsets,
+    OffsetVector* input,
+    int64_t real_batch_size) {
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+    auto op_type = expr_->op_type_;
+    auto value = value_arg_.GetValue<ValueType>();
+
+    auto compare_length = [op_type, value](int length) {
+        switch (op_type) {
+            case proto::plan::OpType::Equal:
+                return length == value;
+            case proto::plan::OpType::NotEqual:
+                return length != value;
+            case proto::plan::OpType::GreaterThan:
+                return length > value;
+            case proto::plan::OpType::GreaterEqual:
+                return length >= value;
+            case proto::plan::OpType::LessThan:
+                return length < value;
+            case proto::plan::OpType::LessEqual:
+                return length <= value;
+            default:
+                ThrowInfo(OpTypeInvalid,
+                          "unsupported operator type for array "
+                          "length eval expr: {}",
+                          op_type);
+        }
+        return false;
+    };
+
+    // NULL-row handling must be bit-identical to the raw-data path, which
+    // clears res/valid_res from the COLUMN's valid data. For a contiguous
+    // batch we take validity from the offsets themselves: their row-valid
+    // info is captured from that same column validity at build time (sealed
+    // BuildFromColumn/BuildFromSegment read the column's valid flags,
+    // BuildAllNulls marks backfilled rows invalid; growing Insert records
+    // the -1 NULL sentinel emitted by the insert extractors, InsertNulls
+    // marks backfilled rows). res bits for NULL rows stay false, exactly as
+    // BinaryArithRangeArrayLengthCompate leaves them.
+    if (has_offset_input_) {
+        // Offset-input (iterative filter) mode: arbitrary row ids, one
+        // batched CopyRowElementRanges for the lengths. AndRowValidBitmap
+        // only addresses contiguous row ranges, so validity comes from
+        // ApplyFieldValidDataByOffsets -- the very column validity the
+        // raw-data path consumes, read without materializing array data.
+        std::vector<std::pair<int32_t, int32_t>> ranges(real_batch_size);
+        array_offsets.CopyRowElementRanges(
+            input->data(), real_batch_size, ranges.data());
+
+        std::vector<int64_t> offsets64(input->begin(), input->end());
+        segment_->ApplyFieldValidDataByOffsets(
+            op_ctx_, field_id_, offsets64.data(), real_batch_size, valid_res);
+
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            if (valid_res[i]) {
+                res[i] = compare_length(ranges[i].second - ranges[i].first);
+            }
+        }
+        return res_vec;
+    }
+
+    // Contiguous batch: replicate GetNextBatchSize's data-cursor position
+    // (ARRAY/VECTOR_ARRAY arith always runs on the RawData path, so the
+    // index cursor is never in play).
+    int64_t row_start = 0;
+    if (segment_->is_chunked()) {
+        row_start =
+            segment_->num_rows_until_chunk(field_id_, current_data_chunk_) +
+            current_data_chunk_pos_;
+    } else {
+        row_start =
+            current_data_chunk_ * size_per_chunk_ + current_data_chunk_pos_;
+    }
+
+    FixedVector<int32_t> starts(real_batch_size + 1);
+    array_offsets.CopyRowElementStarts(
+        row_start, real_batch_size, starts.data());
+    array_offsets.AndRowValidBitmap(valid_res, row_start, real_batch_size);
+
+    for (int64_t i = 0; i < real_batch_size; ++i) {
+        if (valid_res[i]) {
+            res[i] = compare_length(starts[i + 1] - starts[i]);
+        }
+    }
+
+    // Advance the raw-data cursor exactly as ProcessDataChunks would have.
+    MoveCursorForData();
     return res_vec;
 }
 
@@ -2659,6 +2780,15 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
             break;
         }
         default: {
+            // ArrayLength predicates served from IArrayOffsets (see
+            // ExecArrayLengthFromOffsets) never touch the raw chunks;
+            // don't pull them into cache.
+            if (expr_->arith_op_type_ ==
+                    proto::plan::ArithOpType::ArrayLength &&
+                segment_->GetArrayOffsets(expr_->column_.field_id_) !=
+                    nullptr) {
+                break;
+            }
             SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
             break;
         }
