@@ -208,7 +208,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
 	deleteData := storage.NewDeleteData(
 		[]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	pack := new(syncmgr.SyncPack).
 		WithCollectionID(CollectionID).
@@ -517,7 +517,7 @@ func genTextLOBCompactionSchema() *schemapb.CollectionSchema {
 
 func genTextLOBInsertData(rows int, seed int64, schema *schemapb.CollectionSchema) []*storage.InsertData {
 	buf, _ := storage.NewInsertData(schema)
-	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0))
+	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
 	for i := 0; i < rows; i++ {
 		pk := seed*100 + int64(i)
 		_ = buf.Append(map[int64]interface{}{

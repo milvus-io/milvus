@@ -155,7 +155,7 @@ func TestMixCompactionMaterializesMissingFieldWithDeleteFilter(t *testing.T) {
 	s.Require().NoError(err)
 	removeFieldBinlogForTest(kvs, fBinlogs, StringField)
 
-	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10 * time.Second))
 	blob, err := getInt64DeltaBlobs(segmentID, []int64{segmentID}, []uint64{deleteTs})
 	s.Require().NoError(err)
 	deltaPath := "deltalog/missing-field-delete"
@@ -304,7 +304,7 @@ func (s *MixCompactionTaskStorageV1Suite) prepareCompactDupPKSegments() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	s.Require().NoError(err)
 
@@ -463,7 +463,7 @@ func (s *MixCompactionTaskStorageV1Suite) prepareCompactSortedSegment() {
 	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
-	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10 * time.Second))
 	for _, segID := range segments {
 		s.initMultiRowsSegBuffer(segID, 100, 3)
 		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
@@ -522,7 +522,7 @@ func (s *MixCompactionTaskStorageV1Suite) prepareCompactSortedSegmentLackBinlog(
 	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
-	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10 * time.Second))
 	addedFieldSet := typeutil.NewSet[int64]()
 	for _, f := range s.meta.GetSchema().GetFields() {
 		if !f.Nullable {
@@ -644,7 +644,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestSplitMergeEntityExpired() {
 
 func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpirationLackBinlog() {
 	s.initSegBuffer(1, 4)
-	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10 * time.Second))
 	tests := []struct {
 		description string
 		deletions   map[int64]uint64
@@ -731,7 +731,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpirationLackBinlog() {
 
 func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpiration() {
 	s.initSegBuffer(1, 4)
-	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10 * time.Second))
 	tests := []struct {
 		description string
 		deletions   map[int64]uint64
@@ -993,7 +993,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestCompactFail() {
 
 func getRow(magic int64, ts int64) map[int64]interface{} {
 	if ts == 0 {
-		ts = int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0))
+		ts = int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
 	}
 	return map[int64]interface{}{
 		common.RowIDField:      magic,
@@ -1037,7 +1037,7 @@ func (s *MixCompactionTaskStorageV1Suite) initMultiRowsSegBuffer(magic, numRows,
 	for i := int64(0); i < numRows; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(magic + i*step),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     getRow(magic+i*step, 0),
 		}
 		err = segWriter.Write(&v)
@@ -1055,7 +1055,7 @@ func (s *MixCompactionTaskStorageV1Suite) initSegBufferWithBM25(magic int64) {
 
 	v := storage.Value{
 		PK:        storage.NewInt64PrimaryKey(magic),
-		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 		Value:     genRowWithBM25(magic),
 	}
 	err = segWriter.Write(&v)
@@ -1072,8 +1072,8 @@ func (s *MixCompactionTaskStorageV1Suite) initSegBuffer(size int, seed int64) {
 	for i := 0; i < size; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(seed),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
-			Value:     getRow(seed, int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0))),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
+			Value:     getRow(seed, int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))),
 		}
 		err = segWriter.Write(&v)
 		s.Require().NoError(err)

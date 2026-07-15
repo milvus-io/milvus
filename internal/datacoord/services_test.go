@@ -1983,7 +1983,7 @@ func TestServer_FlushAll(t *testing.T) {
 			for _, vchannel := range msg.BroadcastHeader().VChannels {
 				results[vchannel] = &message.AppendResult{
 					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 					LastConfirmedMessageID: rmq.NewRmqID(1),
 				}
 			}
@@ -3910,7 +3910,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 					AppendResults: map[string]*types2.AppendResult{
 						"by-dev-rootcoord-dml_0": {
 							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 							LastConfirmedMessageID: rmq.NewRmqID(1),
 						},
 					},
@@ -4051,7 +4051,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			AppendResults: map[string]*types2.AppendResult{
 				"by-dev-rootcoord-dml_0": {
 					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 					LastConfirmedMessageID: rmq.NewRmqID(1),
 				},
 			},
@@ -4120,7 +4120,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 					AppendResults: map[string]*types2.AppendResult{
 						"by-dev-rootcoord-dml_0": {
 							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 							LastConfirmedMessageID: rmq.NewRmqID(1),
 						},
 					},
@@ -4380,7 +4380,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 					AppendResults: map[string]*types2.AppendResult{
 						"by-dev-rootcoord-dml_0": {
 							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 							LastConfirmedMessageID: rmq.NewRmqID(1),
 						},
 					},
@@ -4547,7 +4547,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			AppendResults: map[string]*types2.AppendResult{
 				"by-dev-rootcoord-dml_0": {
 					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 					LastConfirmedMessageID: rmq.NewRmqID(1),
 				},
 			},

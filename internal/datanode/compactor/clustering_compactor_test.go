@@ -190,7 +190,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	s.Require().NoError(err)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"1"}).
@@ -203,7 +203,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRow(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -299,7 +299,7 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRow(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -403,7 +403,7 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25OutputTask(rowN
 	for i := 0; i < rowNum; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRowWithBM25(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -533,7 +533,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOr
 }
 
 func genRow(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),
@@ -648,7 +648,7 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),

@@ -435,8 +435,8 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
 		now := time.Now()
-		mvccTimeTick := tsoutil.ComposeTSByTime(now, 0)
-		recoveryTimeTick := tsoutil.ComposeTSByTime(now.Add(-time.Second*10), 0)
+		mvccTimeTick := tsoutil.ComposeTSByTime(now)
+		recoveryTimeTick := tsoutil.ComposeTSByTime(now.Add(-time.Second * 10))
 		if !lag.Load() {
 			recoveryTimeTick = mvccTimeTick
 		}
