@@ -48,7 +48,8 @@ class GroupChunkTranslator
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
         const std::string& warmup_policy,
-        MmapChunkWritebackConfig writeback_config = {});
+        MmapChunkWritebackMode writeback_mode =
+            MmapChunkWritebackMode::Disabled);
 
     ~GroupChunkTranslator() override;
 
@@ -116,7 +117,7 @@ class GroupChunkTranslator
     bool use_mmap_;
     bool mmap_populate_;
     bool has_array_field_{false};
-    MmapChunkWritebackConfig writeback_config_;
+    MmapChunkWritebackMode writeback_mode_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
 };
