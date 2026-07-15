@@ -230,15 +230,21 @@ ArrayOffsetsSealed::RowBitsetToElementBitset(
     int64_t element_count = element_end - element_start;
 
     TargetBitmap element_bitset(element_count);
-    TargetBitmap valid_element_bitset(element_count);
+    TargetBitmap valid_element_bitset(element_count, true);
 
     for (int64_t i = 0; i < row_count; ++i) {
         int64_t row_id = row_start + i;
         int64_t start = row_to_element_start_[row_id] - element_start;
         int64_t end = row_to_element_start_[row_id + 1] - element_start;
         if (start < end) {
-            element_bitset.set(start, end - start, row_bitset[i]);
-            valid_element_bitset.set(start, end - start, valid_row_bitset[i]);
+            // Bitmaps are pre-initialized (false / true); only flip ranges
+            // that differ to avoid per-row no-op range fills.
+            if (row_bitset[i]) {
+                element_bitset.set(start, end - start, true);
+            }
+            if (!valid_row_bitset[i]) {
+                valid_element_bitset.set(start, end - start, false);
+            }
         }
     }
 
@@ -303,30 +309,6 @@ ArrayOffsetsSealed::RowOffsetsToElementOffsets(
     }
 
     return element_offsets;
-}
-
-TargetBitmap
-ArrayOffsetsSealed::ForEachRowElementRange(
-    const ElementRangePredicate& predicate,
-    int64_t row_start,
-    int64_t row_count) const {
-    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
-               "row range out of bounds: row_start={}, row_count={}, "
-               "total_rows={}",
-               row_start,
-               row_count,
-               GetRowCount());
-
-    TargetBitmap result(row_count);
-
-    for (int64_t i = 0; i < row_count; ++i) {
-        int64_t row_id = row_start + i;
-        int32_t elem_start = row_to_element_start_[row_id];
-        int32_t elem_end = row_to_element_start_[row_id + 1];
-        result[i] = predicate(elem_start, elem_end);
-    }
-
-    return result;
 }
 
 void
@@ -693,7 +675,7 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
     int64_t element_count = element_end - element_start;
 
     TargetBitmap element_bitset(element_count);
-    TargetBitmap valid_element_bitset(element_count);
+    TargetBitmap valid_element_bitset(element_count, true);
 
     // Use row-based iteration (more efficient than element-based)
     for (int64_t i = 0; i < row_count; ++i) {
@@ -701,8 +683,14 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
         int64_t start = starts[row_id] - element_start;
         int64_t end = starts[row_id + 1] - element_start;
         if (start < end) {
-            element_bitset.set(start, end - start, row_bitset[i]);
-            valid_element_bitset.set(start, end - start, valid_row_bitset[i]);
+            // Bitmaps are pre-initialized (false / true); only flip ranges
+            // that differ to avoid per-row no-op range fills.
+            if (row_bitset[i]) {
+                element_bitset.set(start, end - start, true);
+            }
+            if (!valid_row_bitset[i]) {
+                valid_element_bitset.set(start, end - start, false);
+            }
         }
     }
 
@@ -774,34 +762,6 @@ ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
     }
 
     return element_offsets;
-}
-
-TargetBitmap
-ArrayOffsetsGrowing::ForEachRowElementRange(
-    const ElementRangePredicate& predicate,
-    int64_t row_start,
-    int64_t row_count) const {
-    const int64_t committed =
-        committed_row_count_.load(std::memory_order_acquire);
-
-    AssertInfo(row_start >= 0 && row_start + row_count <= committed,
-               "row range out of bounds: row_start={}, row_count={}, "
-               "committed_rows={}",
-               row_start,
-               row_count,
-               committed);
-
-    ChunkedReader starts(starts_chunks_);
-    TargetBitmap result(row_count);
-
-    for (int64_t i = 0; i < row_count; ++i) {
-        int64_t row_id = row_start + i;
-        int32_t elem_start = starts[row_id];
-        int32_t elem_end = starts[row_id + 1];
-        result[i] = predicate(elem_start, elem_end);
-    }
-
-    return result;
 }
 
 void

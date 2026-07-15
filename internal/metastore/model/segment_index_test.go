@@ -81,6 +81,29 @@ func TestSegmentIndex_MarshalUnmarshal_LegacyDefaultZero(t *testing.T) {
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, restored.IndexStorePathVersion)
 }
 
+func TestSegmentIndex_MarshalUnmarshal_IsNestedIndex(t *testing.T) {
+	original := &SegmentIndex{
+		SegmentID:     1,
+		CollectionID:  100,
+		BuildID:       1000,
+		IsNestedIndex: true,
+	}
+	pb := MarshalSegmentIndexModel(original)
+	assert.True(t, pb.IsNestedIndex)
+	restored := UnmarshalSegmentIndexModel(pb)
+	assert.True(t, restored.IsNestedIndex)
+
+	// Legacy metadata without the marker unmarshals to false (row-level).
+	legacy := UnmarshalSegmentIndexModel(&indexpb.SegmentIndex{
+		CollectionID: 100,
+		BuildID:      1000,
+	})
+	assert.False(t, legacy.IsNestedIndex)
+
+	cloned := CloneSegmentIndex(original)
+	assert.True(t, cloned.IsNestedIndex)
+}
+
 func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
 	original := &SegmentIndex{
 		CollectionID:          100,

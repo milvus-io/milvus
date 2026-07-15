@@ -892,6 +892,7 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 				NumRows:                   segIdx.NumRows,
 				CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 				CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+				IsNestedIndex:             segIdx.IsNestedIndex,
 				IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 			})
 		}

@@ -117,6 +117,11 @@ message CreateJobRequest {
   // Path format version for index files on object storage.
   // See milvus.proto.index.IndexStorePathVersion for value semantics.
   index.IndexStorePathVersion index_store_path_version = 36;
+  // Build this ARRAY-field scalar index as a nested (element-level) index.
+  // Decided by datacoord when the request is created (field is ARRAY &&
+  // negotiated scalar index engine version supports nested); echoed back in
+  // IndexTaskInfo and persisted with the segment index meta.
+  bool is_nested_index = 37;
 }
 
 message QueryJobsRequest {
@@ -242,6 +247,9 @@ message IndexTaskInfo {
   // The actual index file path layout used by the worker for this build.
   // See milvus.proto.index.IndexStorePathVersion for value semantics.
   index.IndexStorePathVersion index_store_path_version = 10;
+  // Echo of CreateJobRequest.is_nested_index: the built ARRAY-field scalar
+  // index is nested (element-level). Persisted into SegmentIndex meta.
+  bool is_nested_index = 11;
 }
 
 message IndexJobResults {

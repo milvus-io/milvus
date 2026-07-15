@@ -3105,9 +3105,7 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
         array_offsets = std::make_shared<ArrayOffsetsGrowing>();
         if (row_count > 0) {
             // Backfilled rows of a schema-evolved struct array are NULL, not
-            // empty arrays (mirrors ArrayOffsetsSealed::BuildAllNulls on the
-            // sealed side): the field did not exist when those rows were
-            // written, and an added field must be nullable.
+            // empty arrays (see the scalar branch above).
             array_offsets->InsertNulls(0, row_count);
         }
         struct_representative_fields_.insert(field_meta.get_id());

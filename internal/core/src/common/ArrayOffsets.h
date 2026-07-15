@@ -119,19 +119,6 @@ class IArrayOffsets {
                       int64_t row_start,
                       int64_t row_count) const = 0;
 
-    // Iterate over rows and apply predicate with element range
-    // predicate: function(element_start, element_end) -> bool
-    //   element_start: first element ID of the row (inclusive)
-    //   element_end: last element ID of the row (exclusive)
-    // Returns: bitmap where bit[i] = predicate result for row (row_start + i)
-    using ElementRangePredicate =
-        std::function<bool(int32_t elem_start, int32_t elem_end)>;
-
-    virtual TargetBitmap
-    ForEachRowElementRange(const ElementRangePredicate& predicate,
-                           int64_t row_start,
-                           int64_t row_count) const = 0;
-
     // Word-wise ANY-semantics reduction of an element-level bitmap to row
     // level. Bit j of elem_bitset corresponds to global element id
     // (elem_offset + j). For each i in [0, row_result.size()), sets
@@ -256,10 +243,6 @@ class ArrayOffsetsSealed : public IArrayOffsets {
         }
     }
 
-    TargetBitmap
-    ForEachRowElementRange(const ElementRangePredicate& predicate,
-                           int64_t row_start,
-                           int64_t row_count) const override;
 
     void
     ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
@@ -420,10 +403,6 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
                       int64_t row_start,
                       int64_t row_count) const override;
 
-    TargetBitmap
-    ForEachRowElementRange(const ElementRangePredicate& predicate,
-                           int64_t row_start,
-                           int64_t row_count) const override;
 
     void
     ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
