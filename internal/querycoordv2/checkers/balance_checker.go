@@ -62,11 +62,12 @@ type balanceConfig struct {
 }
 
 // balanceEpochConfig is frozen once at the beginning of each checker tick.
-// Task 7 intentionally keeps the production provider disabled; Task 8 loads
-// these values from paramtable and freezes policy selection for the tick.
+// It carries both policy inputs and the exact balancer selection used by every
+// resource-group request derived from that tick.
 type balanceEpochConfig struct {
 	enabled            bool
 	shadow             bool
+	balancer           string
 	budget             balance.BalanceWaveBudget
 	deadline           time.Duration
 	noProgressDeadline time.Duration
@@ -104,6 +105,33 @@ func (b *BalanceChecker) loadBalanceConfig() balanceConfig {
 		autoBalanceInterval:          paramtable.Get().QueryCoordCfg.AutoBalanceInterval.GetAsDuration(time.Millisecond),
 		segmentTaskTimeout:           paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 		channelTaskTimeout:           paramtable.Get().QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond),
+	}
+}
+
+func (b *BalanceChecker) loadBalanceEpochConfig() balanceEpochConfig {
+	return balanceEpochConfig{
+		enabled:  Params.QueryCoordCfg.BalanceEpochEnabled.GetAsBool(),
+		shadow:   Params.QueryCoordCfg.BalanceEpochShadowMode.GetAsBool(),
+		balancer: Params.QueryCoordCfg.Balancer.GetValue(),
+		budget: balance.BalanceWaveBudget{
+			MaxSegmentTasks:       Params.QueryCoordCfg.BalanceEpochMaxSegmentTasks.GetAsInt(),
+			MaxChannelTasks:       Params.QueryCoordCfg.BalanceEpochMaxChannelTasks.GetAsInt(),
+			MaxTasksPerNode:       Params.QueryCoordCfg.BalanceEpochMaxTasksPerNode.GetAsInt(),
+			MaxTasksPerCollection: Params.QueryCoordCfg.BalanceEpochMaxTasksPerCollection.GetAsInt(),
+		},
+		deadline:           Params.QueryCoordCfg.BalanceEpochDeadline.GetAsDuration(time.Millisecond),
+		noProgressDeadline: Params.QueryCoordCfg.BalanceEpochNoProgressDeadline.GetAsDuration(time.Millisecond),
+		segmentTaskTimeout: Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
+		channelTaskTimeout: Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond),
+		maxObjectRetries:   Params.QueryCoordCfg.BalanceEpochMaxObjectRetries.GetAsInt(),
+		quarantineBackoff:  Params.QueryCoordCfg.BalanceEpochQuarantineBackoff.GetAsDuration(time.Millisecond),
+		policyConfig: balance.EpochPolicyConfig{
+			GlobalRowCountFactor:          Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat(),
+			DelegatorMemoryOverloadFactor: Params.QueryCoordCfg.DelegatorMemoryOverloadFactor.GetAsFloat(),
+			CollectionChannelCountFactor:  Params.QueryCoordCfg.CollectionChannelCountFactor.GetAsFloat(),
+			AutoBalanceChannel:            Params.QueryCoordCfg.AutoBalanceChannel.GetAsBool(),
+			StreamingServiceEnabled:       streamingutil.IsStreamingServiceEnabled(),
+		},
 	}
 }
 
@@ -212,10 +240,8 @@ func newBalanceChecker(
 		normalBalanceQueue:   assign.NewPriorityQueuePtr(),
 		stoppingBalanceQueue: assign.NewPriorityQueuePtr(),
 		scheduler:            scheduler,
-		epochConfigProvider: func() balanceEpochConfig {
-			return balanceEpochConfig{}
-		},
 	}
+	checker.epochConfigProvider = checker.loadBalanceEpochConfig
 
 	admitter, admitsGenerations := scheduler.(task.BalanceTaskGenerationAdmitter)
 	inspector, inspectsPending := scheduler.(task.BalanceTaskInspector)
@@ -229,7 +255,7 @@ func newBalanceChecker(
 			admitter,
 			inspector,
 			checker.ID(),
-			balance.GetGlobalBalancerFactory().GetEpochPolicy,
+			balance.GetGlobalBalancerFactory().GetEpochPolicyFor,
 		)
 	}
 
@@ -443,6 +469,7 @@ func (b *BalanceChecker) collectNormalEpochRequests(
 		requests = append(requests, balance.EpochRequest{
 			ResourceGroup:      resourceGroup,
 			EligibleReplicaIDs: replicaIDs,
+			Balancer:           epochConfig.balancer,
 			Budget:             epochConfig.budget,
 			PolicyConfig:       epochConfig.policyConfig,
 			AllowNew:           true,
@@ -725,8 +752,7 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		}
 	}()
 
-	// Freeze configuration once for the checker tick. Task 8 replaces the
-	// disabled epoch provider with paramtable-backed values.
+	// Freeze both legacy and epoch configuration once for the checker tick.
 	config := b.loadBalanceConfig()
 	epochConfig := b.epochConfigProvider()
 
@@ -789,7 +815,10 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	epochModeEnabled := epochConfig.enabled || epochConfig.shadow
 	policySupported := false
 	if epochModeEnabled && b.epochManager != nil {
-		_, policySupported = balance.GetGlobalBalancerFactory().GetEpochPolicy()
+		_, policySupported = balance.GetGlobalBalancerFactory().GetEpochPolicyFor(
+			epochConfig.balancer,
+			epochConfig.policyConfig,
+		)
 	}
 
 	// Disabled, unavailable, and unsupported epoch modes drain all active RGs

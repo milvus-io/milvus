@@ -368,7 +368,7 @@ func newEpochManagerTestFixture(t *testing.T) *epochManagerTestFixture {
 		admitter,
 		admitter,
 		task.WrapIDSource(6),
-		func() (EpochBalancePolicy, bool) { return policy, true },
+		func(string, EpochPolicyConfig) (EpochBalancePolicy, bool) { return policy, true },
 		WithEpochClock(clock.Now),
 		WithLeaderTerm(77),
 		WithPlacementSnapshotSource(source),
@@ -389,6 +389,7 @@ func epochManagerRequest(resourceGroup string, replicaIDs ...int64) EpochRequest
 	return EpochRequest{
 		ResourceGroup:      resourceGroup,
 		EligibleReplicaIDs: append([]int64(nil), replicaIDs...),
+		Balancer:           meta.ScoreBasedBalancerName,
 		Budget: BalanceWaveBudget{
 			MaxSegmentTasks: 10, MaxChannelTasks: 10,
 			MaxTasksPerNode: 10, MaxTasksPerCollection: 10,
@@ -401,6 +402,66 @@ func epochManagerRequest(resourceGroup string, replicaIDs ...int64) EpochRequest
 		MaxObjectRetries:   2,
 		QuarantineBackoff:  time.Minute,
 	}
+}
+
+func TestEpochManagerUsesFrozenPolicySelection(t *testing.T) {
+	t.Run("active generation", func(t *testing.T) {
+		fixture := newEpochManagerTestFixture(t)
+		plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+		fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+
+		type selection struct {
+			balancer string
+			config   EpochPolicyConfig
+		}
+		selections := make([]selection, 0, 1)
+		fixture.manager.policyProvider = func(balancer string, config EpochPolicyConfig) (EpochBalancePolicy, bool) {
+			selections = append(selections, selection{balancer: balancer, config: config})
+			return fixture.policy, true
+		}
+
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.Balancer = meta.ScoreBasedBalancerName
+		request.PolicyConfig = EpochPolicyConfig{
+			GlobalRowCountFactor:          0.11,
+			DelegatorMemoryOverloadFactor: 0.22,
+			CollectionChannelCountFactor:  0.33,
+			AutoBalanceChannel:            true,
+			StreamingServiceEnabled:       false,
+		}
+		result := fixture.manager.Advance(context.Background(), request)
+		require.True(t, result.Started)
+		require.Equal(t, 1, result.Admitted)
+
+		changed := request
+		changed.Balancer = meta.ChannelLevelScoreBalancerName
+		changed.PolicyConfig.AutoBalanceChannel = false
+		changed.PolicyConfig.StreamingServiceEnabled = true
+		fixture.manager.Advance(context.Background(), changed)
+
+		require.Equal(t, []selection{{balancer: request.Balancer, config: request.PolicyConfig}}, selections)
+		require.Equal(t, request, fixture.manager.runtime(testSnapshotRG).active.request)
+	})
+
+	t.Run("shadow generation", func(t *testing.T) {
+		fixture := newEpochManagerTestFixture(t)
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.Shadow = true
+		request.Balancer = meta.ChannelLevelScoreBalancerName
+		request.PolicyConfig = EpochPolicyConfig{CollectionChannelCountFactor: 7}
+
+		providerCalls := 0
+		fixture.manager.policyProvider = func(balancer string, config EpochPolicyConfig) (EpochBalancePolicy, bool) {
+			providerCalls++
+			require.Equal(t, request.Balancer, balancer)
+			require.Equal(t, request.PolicyConfig, config)
+			return fixture.policy, true
+		}
+
+		result := fixture.manager.Advance(context.Background(), request)
+		require.True(t, result.Terminal)
+		require.Equal(t, 1, providerCalls)
+	})
 }
 
 func epochManagerWave(plans ...EpochPlan) BalanceWave {
@@ -884,7 +945,7 @@ func TestEpochManagerRestartRebuildsOnlyFromDistribution(t *testing.T) {
 		restartedAdmitter,
 		restartedAdmitter,
 		task.WrapIDSource(6),
-		func() (EpochBalancePolicy, bool) { return restartedPolicy, true },
+		func(string, EpochPolicyConfig) (EpochBalancePolicy, bool) { return restartedPolicy, true },
 		WithEpochClock(fixture.clock.Now),
 		WithLeaderTerm(88),
 		WithPlacementSnapshotSource(restartedSource),
@@ -1110,7 +1171,7 @@ func TestEpochManagerStaticTargetConvergesWithProductionPolicy(t *testing.T) {
 		admitter,
 		admitter,
 		task.WrapIDSource(6),
-		func() (EpochBalancePolicy, bool) { return policy, true },
+		func(string, EpochPolicyConfig) (EpochBalancePolicy, bool) { return policy, true },
 		WithEpochClock(clock.Now),
 		WithLeaderTerm(99),
 	)

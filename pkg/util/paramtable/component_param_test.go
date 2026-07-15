@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -25,6 +26,145 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 )
+
+func TestComponentParam_BalanceEpochDefaultsAndRefresh(t *testing.T) {
+	Init()
+	params := Get()
+	items := []struct {
+		name         string
+		item         *ParamItem
+		key          string
+		defaultValue string
+	}{
+		{"BalanceEpochEnabled", &params.QueryCoordCfg.BalanceEpochEnabled, "queryCoord.balanceEpoch.enabled", "false"},
+		{"BalanceEpochShadowMode", &params.QueryCoordCfg.BalanceEpochShadowMode, "queryCoord.balanceEpoch.shadowMode", "false"},
+		{"BalanceEpochDeadline", &params.QueryCoordCfg.BalanceEpochDeadline, "queryCoord.balanceEpoch.deadline", "120000"},
+		{"BalanceEpochNoProgressDeadline", &params.QueryCoordCfg.BalanceEpochNoProgressDeadline, "queryCoord.balanceEpoch.noProgressDeadline", "30000"},
+		{"BalanceEpochMaxSegmentTasks", &params.QueryCoordCfg.BalanceEpochMaxSegmentTasks, "queryCoord.balanceEpoch.maxSegmentTasks", "5"},
+		{"BalanceEpochMaxChannelTasks", &params.QueryCoordCfg.BalanceEpochMaxChannelTasks, "queryCoord.balanceEpoch.maxChannelTasks", "1"},
+		{"BalanceEpochMaxTasksPerNode", &params.QueryCoordCfg.BalanceEpochMaxTasksPerNode, "queryCoord.balanceEpoch.maxTasksPerNode", "5"},
+		{"BalanceEpochMaxTasksPerCollection", &params.QueryCoordCfg.BalanceEpochMaxTasksPerCollection, "queryCoord.balanceEpoch.maxTasksPerCollection", "5"},
+		{"BalanceEpochMaxObjectRetries", &params.QueryCoordCfg.BalanceEpochMaxObjectRetries, "queryCoord.balanceEpoch.maxObjectRetries", "3"},
+		{"BalanceEpochQuarantineBackoff", &params.QueryCoordCfg.BalanceEpochQuarantineBackoff, "queryCoord.balanceEpoch.quarantineBackoff", "60000"},
+	}
+	for _, item := range items {
+		assert.NoError(t, params.Reset(item.item.Key))
+	}
+	t.Cleanup(func() {
+		for _, item := range items {
+			params.Reset(item.item.Key)
+		}
+	})
+
+	configType := reflect.TypeOf(&params.QueryCoordCfg).Elem()
+	for _, item := range items {
+		field, ok := configType.FieldByName(item.name)
+		assert.True(t, ok, item.name)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"), item.name)
+		assert.Equal(t, item.key, item.item.Key, item.name)
+		assert.Equal(t, item.defaultValue, item.item.GetValue(), item.name)
+	}
+	assert.False(t, params.QueryCoordCfg.BalanceEpochEnabled.GetAsBool())
+	assert.False(t, params.QueryCoordCfg.BalanceEpochShadowMode.GetAsBool())
+	assert.Equal(t, 120000*time.Millisecond, params.QueryCoordCfg.BalanceEpochDeadline.GetAsDuration(time.Millisecond))
+	assert.Equal(t, 30000*time.Millisecond, params.QueryCoordCfg.BalanceEpochNoProgressDeadline.GetAsDuration(time.Millisecond))
+	assert.Equal(t, 60000*time.Millisecond, params.QueryCoordCfg.BalanceEpochQuarantineBackoff.GetAsDuration(time.Millisecond))
+
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochEnabled.Key, "true"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochShadowMode.Key, "true"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochDeadline.Key, "1234"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochNoProgressDeadline.Key, "5678"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochMaxSegmentTasks.Key, "9"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochMaxChannelTasks.Key, "8"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochMaxTasksPerNode.Key, "7"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochMaxTasksPerCollection.Key, "6"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochMaxObjectRetries.Key, "4"))
+	assert.NoError(t, params.Save(params.QueryCoordCfg.BalanceEpochQuarantineBackoff.Key, "9012"))
+
+	assert.True(t, params.QueryCoordCfg.BalanceEpochEnabled.GetAsBool())
+	assert.True(t, params.QueryCoordCfg.BalanceEpochShadowMode.GetAsBool())
+	assert.Equal(t, 1234*time.Millisecond, params.QueryCoordCfg.BalanceEpochDeadline.GetAsDuration(time.Millisecond))
+	assert.Equal(t, 5678*time.Millisecond, params.QueryCoordCfg.BalanceEpochNoProgressDeadline.GetAsDuration(time.Millisecond))
+	assert.Equal(t, 9, params.QueryCoordCfg.BalanceEpochMaxSegmentTasks.GetAsInt())
+	assert.Equal(t, 8, params.QueryCoordCfg.BalanceEpochMaxChannelTasks.GetAsInt())
+	assert.Equal(t, 7, params.QueryCoordCfg.BalanceEpochMaxTasksPerNode.GetAsInt())
+	assert.Equal(t, 6, params.QueryCoordCfg.BalanceEpochMaxTasksPerCollection.GetAsInt())
+	assert.Equal(t, 4, params.QueryCoordCfg.BalanceEpochMaxObjectRetries.GetAsInt())
+	assert.Equal(t, 9012*time.Millisecond, params.QueryCoordCfg.BalanceEpochQuarantineBackoff.GetAsDuration(time.Millisecond))
+
+	for _, item := range items {
+		assert.NoError(t, params.Reset(item.item.Key))
+		assert.Equal(t, item.defaultValue, item.item.GetValue(), item.name)
+	}
+}
+
+func TestComponentParam_BalanceEpochBatchFallbacks(t *testing.T) {
+	Init()
+	params := Get()
+	tests := []struct {
+		name       string
+		epoch      *ParamItem
+		current    *ParamItem
+		deprecated *ParamItem
+		fallbacks  []string
+		defaultVal int
+	}{
+		{
+			name:       "segment",
+			epoch:      &params.QueryCoordCfg.BalanceEpochMaxSegmentTasks,
+			current:    &params.QueryCoordCfg.BalanceSegmentBatchSize,
+			deprecated: &params.QueryCoordCfg.CollectionBalanceSegmentBatchSize,
+			fallbacks: []string{
+				"queryCoord.balanceSegmentBatchSize",
+				"queryCoord.collectionBalanceSegmentBatchSize",
+			},
+			defaultVal: 5,
+		},
+		{
+			name:       "channel",
+			epoch:      &params.QueryCoordCfg.BalanceEpochMaxChannelTasks,
+			current:    &params.QueryCoordCfg.BalanceChannelBatchSize,
+			deprecated: &params.QueryCoordCfg.CollectionBalanceChannelBatchSize,
+			fallbacks: []string{
+				"queryCoord.balanceChannelBatchSize",
+				"queryCoord.collectionBalanceChannelBatchSize",
+			},
+			defaultVal: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, item := range []*ParamItem{test.epoch, test.current, test.deprecated} {
+				assert.NoError(t, params.Reset(item.Key))
+			}
+			t.Cleanup(func() {
+				for _, item := range []*ParamItem{test.epoch, test.current, test.deprecated} {
+					params.Reset(item.Key)
+				}
+			})
+
+			assert.Equal(t, test.fallbacks, test.epoch.FallbackKeys)
+			assert.Equal(t, test.defaultVal, test.epoch.GetAsInt())
+
+			assert.NoError(t, params.Save(test.deprecated.Key, "7"))
+			assert.Equal(t, 7, test.epoch.GetAsInt(), "deprecated key fallback")
+
+			assert.NoError(t, params.Save(test.current.Key, "8"))
+			assert.Equal(t, 8, test.epoch.GetAsInt(), "current key fallback")
+
+			assert.NoError(t, params.Save(test.epoch.Key, "9"))
+			assert.Equal(t, 9, test.epoch.GetAsInt(), "epoch-specific override")
+
+			assert.NoError(t, params.Reset(test.epoch.Key))
+			assert.Equal(t, 8, test.epoch.GetAsInt(), "reset restores current key fallback")
+			assert.NoError(t, params.Reset(test.current.Key))
+			assert.Equal(t, 7, test.epoch.GetAsInt(), "reset restores deprecated key fallback")
+			assert.NoError(t, params.Reset(test.deprecated.Key))
+			assert.Equal(t, test.defaultVal, test.epoch.GetAsInt())
+		})
+	}
+}
 
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()

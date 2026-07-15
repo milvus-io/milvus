@@ -54,6 +54,7 @@ const (
 type EpochRequest struct {
 	ResourceGroup      string
 	EligibleReplicaIDs []int64
+	Balancer           string
 	Budget             BalanceWaveBudget
 	PolicyConfig       EpochPolicyConfig
 	AllowNew           bool
@@ -143,7 +144,7 @@ type BalanceEpochManager struct {
 	admitter       task.BalanceTaskGenerationAdmitter
 	inspector      task.BalanceTaskInspector
 	source         task.Source
-	policyProvider func() (EpochBalancePolicy, bool)
+	policyProvider func(string, EpochPolicyConfig) (EpochBalancePolicy, bool)
 
 	now             func() time.Time
 	leaderTerm      uint64
@@ -204,7 +205,7 @@ func NewBalanceEpochManager(
 	admitter task.BalanceTaskGenerationAdmitter,
 	inspector task.BalanceTaskInspector,
 	source task.Source,
-	policyProvider func() (EpochBalancePolicy, bool),
+	policyProvider func(string, EpochPolicyConfig) (EpochBalancePolicy, bool),
 	opts ...EpochManagerOption,
 ) *BalanceEpochManager {
 	if admitter == nil {
@@ -386,7 +387,7 @@ func (manager *BalanceEpochManager) planShadowLocked(
 		result.Terminal = true
 		return runtime.publish(result)
 	}
-	policy, ok := manager.epochPolicy()
+	policy, ok := manager.epochPolicy(request.Balancer, request.PolicyConfig)
 	if !ok {
 		result.State = EpochDegraded
 		result.Terminal = true
@@ -470,11 +471,11 @@ func (manager *BalanceEpochManager) startEpochLocked(
 	if manager.deadlineExpired(active, manager.now()) {
 		return manager.finishLocked(runtime, active, EpochTimedOut, nil)
 	}
-	policy, ok := manager.epochPolicy()
+	policy, ok := manager.epochPolicy(active.request.Balancer, active.request.PolicyConfig)
 	if !ok {
 		return manager.finishLocked(runtime, active, EpochDegraded, fmt.Errorf("epoch balance policy unavailable"))
 	}
-	snapshot, err := manager.buildSnapshot(ctx, runtime, request)
+	snapshot, err := manager.buildSnapshot(ctx, runtime, active.request)
 	if err != nil {
 		return manager.finishLocked(runtime, active, EpochDegraded, err)
 	}
@@ -482,10 +483,10 @@ func (manager *BalanceEpochManager) startEpochLocked(
 	if manager.deadlineExpired(active, manager.now()) {
 		return manager.finishLocked(runtime, active, EpochTimedOut, nil)
 	}
-	constraints := manager.planningConstraintsLocked(runtime, snapshot.Token, request, manager.now())
-	wave := policy.Plan(snapshot, request.Budget, constraints, request.PolicyConfig)
+	constraints := manager.planningConstraintsLocked(runtime, snapshot.Token, active.request, manager.now())
+	wave := policy.Plan(snapshot, active.request.Budget, constraints, active.request.PolicyConfig)
 	active.wave = cloneBalanceWave(wave)
-	active.ledger = NewWaveLedger(request.Budget, constraints)
+	active.ledger = NewWaveLedger(active.request.Budget, constraints)
 	active.result.Planned = len(wave.Plans)
 	active.result.ObjectiveBefore = wave.Before.Value
 	active.result.ObjectiveAfter = wave.Before.Value
@@ -915,11 +916,14 @@ func (manager *BalanceEpochManager) deadlineExpired(active *activeEpoch, now tim
 	return active.request.Deadline > 0 && !now.Before(active.startedAt.Add(active.request.Deadline))
 }
 
-func (manager *BalanceEpochManager) epochPolicy() (EpochBalancePolicy, bool) {
+func (manager *BalanceEpochManager) epochPolicy(
+	balancer string,
+	config EpochPolicyConfig,
+) (EpochBalancePolicy, bool) {
 	if manager.policyProvider == nil {
 		return nil, false
 	}
-	policy, ok := manager.policyProvider()
+	policy, ok := manager.policyProvider(balancer, config)
 	return policy, ok && policy != nil
 }
 
