@@ -78,3 +78,25 @@ func TestIterativeRecordReader_MissingChunkDoesNotPanic(t *testing.T) {
 		assert.NoError(t, ir.Close())
 	})
 }
+
+// TestPackedRecordReader_CloseNilReceiverDoesNotPanic pins the defense-in-depth
+// half of the #50927 fix: Close() on a typed-nil reader (the shape produced when
+// newPackedRecordReader fails and its nil result is boxed into a RecordReader
+// interface) must be a safe no-op, not a nil-pointer dereference.
+func TestPackedRecordReader_CloseNilReceiverDoesNotPanic(t *testing.T) {
+	var pr *packedRecordReader
+	assert.NotPanics(t, func() {
+		assert.NoError(t, pr.Close())
+	})
+
+	var fpr *ffiPackedRecordReader
+	assert.NotPanics(t, func() {
+		assert.NoError(t, fpr.Close())
+	})
+
+	// Boxed into the interface, exactly as the deferred Close in sortSegment sees it.
+	var rr RecordReader = pr
+	assert.NotPanics(t, func() {
+		assert.NoError(t, rr.Close())
+	})
+}
