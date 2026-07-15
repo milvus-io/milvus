@@ -750,6 +750,18 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForVectorArray(OffsetVector* input = nullptr);
 
+    // Fast path for `array_length(field) <op> N`: serve every row's length
+    // straight from the segment's IArrayOffsets prefix sums
+    // (length = starts[row + 1] - starts[row]) without materializing any
+    // array data. Shared by the ARRAY and VECTOR_ARRAY visitors; callers
+    // must fall back to the data-reading path when the segment has no
+    // offsets for the field (e.g. index-only load).
+    template <typename ValueType>
+    VectorPtr
+    ExecArrayLengthFromOffsets(const IArrayOffsets& array_offsets,
+                               OffsetVector* input,
+                               int64_t real_batch_size);
+
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
     SingleElement right_operand_arg_;
