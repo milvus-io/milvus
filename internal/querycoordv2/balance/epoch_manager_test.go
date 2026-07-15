@@ -24,12 +24,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	clientmodel "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	pkgmetrics "github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -402,6 +405,460 @@ func epochManagerRequest(resourceGroup string, replicaIDs ...int64) EpochRequest
 		MaxObjectRetries:   2,
 		QuarantineBackoff:  time.Minute,
 	}
+}
+
+func newEpochManagerMetricsRegistry(t *testing.T) *prometheus.Registry {
+	t.Helper()
+	resetEpochManagerMetrics()
+	t.Cleanup(resetEpochManagerMetrics)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(
+		pkgmetrics.QueryCoordBalanceEpochActive,
+		pkgmetrics.QueryCoordBalanceEpochTotal,
+		pkgmetrics.QueryCoordBalanceEpochPlansTotal,
+		pkgmetrics.QueryCoordBalanceEpochAdmissionTotal,
+		pkgmetrics.QueryCoordBalanceEpochSnapshotRetriesTotal,
+		pkgmetrics.QueryCoordBalanceEpochObjective,
+		pkgmetrics.QueryCoordBalanceEpochCarryOver,
+		pkgmetrics.QueryCoordBalanceEpochDurationSeconds,
+	)
+	return registry
+}
+
+func resetEpochManagerMetrics() {
+	pkgmetrics.QueryCoordBalanceEpochActive.Reset()
+	pkgmetrics.QueryCoordBalanceEpochTotal.Reset()
+	pkgmetrics.QueryCoordBalanceEpochPlansTotal.Reset()
+	pkgmetrics.QueryCoordBalanceEpochAdmissionTotal.Reset()
+	pkgmetrics.QueryCoordBalanceEpochSnapshotRetriesTotal.Reset()
+	pkgmetrics.QueryCoordBalanceEpochObjective.Reset()
+	pkgmetrics.QueryCoordBalanceEpochCarryOver.Reset()
+	pkgmetrics.QueryCoordBalanceEpochDurationSeconds.Reset()
+}
+
+func requireEpochMetric(
+	t *testing.T,
+	registry *prometheus.Registry,
+	name string,
+	labels map[string]string,
+) *clientmodel.Metric {
+	t.Helper()
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.Metric {
+			actual := make(map[string]string, len(metric.Label))
+			for _, pair := range metric.Label {
+				actual[pair.GetName()] = pair.GetValue()
+			}
+			if mapsEqual(actual, labels) {
+				return metric
+			}
+		}
+	}
+	t.Fatalf("metric %s with labels %v not found", name, labels)
+	return nil
+}
+
+func requireEpochMetricAbsent(
+	t *testing.T,
+	registry *prometheus.Registry,
+	name string,
+	labels map[string]string,
+) {
+	t.Helper()
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.Metric {
+			actual := make(map[string]string, len(metric.Label))
+			for _, pair := range metric.Label {
+				actual[pair.GetName()] = pair.GetValue()
+			}
+			require.False(t, mapsEqual(actual, labels), "unexpected metric %s with labels %v", name, labels)
+		}
+	}
+}
+
+func mapsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func requireEpochMetricFamilyAbsent(t *testing.T, registry *prometheus.Registry, name string) {
+	t.Helper()
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, name, family.GetName())
+	}
+}
+
+func TestEpochManagerMetricsLifecycleExactlyOnce(t *testing.T) {
+	t.Run("active generation publishes transitions and terminal once", func(t *testing.T) {
+		registry := newEpochManagerMetricsRegistry(t)
+		fixture := newEpochManagerTestFixture(t)
+		plans := []EpochPlan{
+			epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3),
+			epochSegmentPlan(*fixture.snapshot, testOtherReplica, 201, 1, 3),
+		}
+		fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plans...))
+		fixture.admitter.reasons = []task.BalanceAdmissionReason{
+			task.BalanceAdmissionAccepted,
+			task.BalanceAdmissionDuplicate,
+		}
+
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica, testOtherReplica)
+		started := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochExecuting, started.State)
+		require.Equal(t, 1, started.Admitted)
+		require.Equal(t, 1, started.Rejected[task.BalanceAdmissionDuplicate])
+
+		active := requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_active", map[string]string{
+			"resource_group": testSnapshotRG, "state": "executing",
+		})
+		require.Equal(t, float64(1), active.GetGauge().GetValue())
+		requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_active", map[string]string{
+			"resource_group": testSnapshotRG, "state": "planning",
+		})
+		requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_active", map[string]string{
+			"resource_group": testSnapshotRG, "state": "admitting",
+		})
+		require.Equal(t, float64(2), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_plans_total", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment", "result": "planned",
+		}).GetCounter().GetValue())
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_plans_total", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment", "result": "reserved",
+		}).GetCounter().GetValue())
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_plans_total", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment", "result": "rejected",
+		}).GetCounter().GetValue())
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_admission_total", map[string]string{
+			"resource_group": testSnapshotRG, "reason": task.BalanceAdmissionAccepted.String(),
+		}).GetCounter().GetValue())
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_admission_total", map[string]string{
+			"resource_group": testSnapshotRG, "reason": task.BalanceAdmissionDuplicate.String(),
+		}).GetCounter().GetValue())
+		require.Equal(t, float64(100), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_objective", map[string]string{
+			"resource_group": testSnapshotRG, "phase": "observed",
+		}).GetGauge().GetValue())
+		require.Equal(t, float64(80), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_objective", map[string]string{
+			"resource_group": testSnapshotRG, "phase": "projected",
+		}).GetGauge().GetValue())
+		require.Equal(t, float64(90), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_objective", map[string]string{
+			"resource_group": testSnapshotRG, "phase": "committed",
+		}).GetGauge().GetValue())
+
+		fixture.clock.Advance(2 * time.Second)
+		publishEpochManagerSegments(fixture.placement, []int64{201}, []int64{101})
+		terminal := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochDegraded, terminal.State)
+		require.True(t, terminal.Terminal)
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_active")
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_total", map[string]string{
+			"resource_group": testSnapshotRG, "result": "degraded",
+		}).GetCounter().GetValue())
+		duration := requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_duration_seconds", map[string]string{
+			"resource_group": testSnapshotRG, "result": "degraded",
+		}).GetHistogram()
+		require.Equal(t, uint64(1), duration.GetSampleCount())
+		require.Equal(t, float64(2), duration.GetSampleSum())
+
+		runtime := fixture.manager.runtime(testSnapshotRG)
+		runtime.mu.Lock()
+		cached := fixture.manager.Advance(context.Background(), request)
+		runtime.mu.Unlock()
+		require.Equal(t, terminal, cached)
+		runtime.mu.Lock()
+		cached = fixture.manager.Advance(context.Background(), request)
+		runtime.mu.Unlock()
+		require.Equal(t, terminal, cached)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_total", map[string]string{
+			"resource_group": testSnapshotRG, "result": "degraded",
+		}).GetCounter().GetValue())
+		duration = requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_duration_seconds", map[string]string{
+			"resource_group": testSnapshotRG, "result": "degraded",
+		}).GetHistogram()
+		require.Equal(t, uint64(1), duration.GetSampleCount())
+	})
+
+	t.Run("shadow publishes plans and objective without generation metrics", func(t *testing.T) {
+		registry := newEpochManagerMetricsRegistry(t)
+		fixture := newEpochManagerTestFixture(t)
+		plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+		fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.Shadow = true
+		request.AllowNew = false
+		observed := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochIdle, observed.State)
+		require.Zero(t, fixture.source.buildCount(testSnapshotRG))
+
+		request.AllowNew = true
+		result := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochCompleted, result.State)
+		require.True(t, result.Terminal)
+		require.Zero(t, result.Epoch)
+		require.False(t, fixture.manager.HasActive(testSnapshotRG))
+		require.Empty(t, fixture.admitter.acceptedTasks())
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_plans_total", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment", "result": "shadow",
+		}).GetCounter().GetValue())
+		require.Equal(t, float64(100), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_objective", map[string]string{
+			"resource_group": testSnapshotRG, "phase": "observed",
+		}).GetGauge().GetValue())
+		require.Equal(t, float64(90), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_objective", map[string]string{
+			"resource_group": testSnapshotRG, "phase": "projected",
+		}).GetGauge().GetValue())
+		require.Equal(t, float64(90), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_objective", map[string]string{
+			"resource_group": testSnapshotRG, "phase": "shadow",
+		}).GetGauge().GetValue())
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_active")
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_total")
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_duration_seconds")
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_admission_total")
+	})
+
+	t.Run("shadow timeout after planning retains the computed wave", func(t *testing.T) {
+		registry := newEpochManagerMetricsRegistry(t)
+		fixture := newEpochManagerTestFixture(t)
+		plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+		fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+		entered, release := fixture.policy.blockFirst(testSnapshotRG)
+		defer release()
+
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.Shadow = true
+		request.Deadline = time.Second
+		resultCh := make(chan EpochAdvanceResult, 1)
+		go func() {
+			resultCh <- fixture.manager.Advance(context.Background(), request)
+		}()
+		receiveBalanceTestSignal(t, entered, "blocked shadow planner")
+		fixture.clock.Advance(2 * time.Second)
+		release()
+
+		result := receiveBalanceTestSignal(t, resultCh, "timed-out shadow result")
+		require.Equal(t, EpochTimedOut, result.State)
+		require.True(t, result.Terminal)
+		require.Equal(t, 1, result.Planned)
+		require.Equal(t, float64(100), result.ObjectiveBefore)
+		require.Equal(t, float64(90), result.ObjectiveAfter)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_plans_total", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment", "result": "shadow",
+		}).GetCounter().GetValue())
+		require.Equal(t, float64(90), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_objective", map[string]string{
+			"resource_group": testSnapshotRG, "phase": "shadow",
+		}).GetGauge().GetValue())
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_active")
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_total")
+		requireEpochMetricFamilyAbsent(t, registry, "milvus_querycoord_balance_epoch_admission_total")
+	})
+
+	t.Run("snapshot failure uses its stable terminal result exactly once", func(t *testing.T) {
+		registry := newEpochManagerMetricsRegistry(t)
+		fixture := newEpochManagerTestFixture(t)
+		request := epochManagerRequest("missing-rg")
+
+		terminal := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochDegraded, terminal.State)
+		require.True(t, terminal.Terminal)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_total", map[string]string{
+			"resource_group": "missing-rg", "result": "snapshot_error",
+		}).GetCounter().GetValue())
+		duration := requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_duration_seconds", map[string]string{
+			"resource_group": "missing-rg", "result": "snapshot_error",
+		}).GetHistogram()
+		require.Equal(t, uint64(1), duration.GetSampleCount())
+
+		runtime := fixture.manager.runtime("missing-rg")
+		runtime.mu.Lock()
+		cached := fixture.manager.Advance(context.Background(), request)
+		runtime.mu.Unlock()
+		require.Equal(t, terminal, cached)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_total", map[string]string{
+			"resource_group": "missing-rg", "result": "snapshot_error",
+		}).GetCounter().GetValue())
+		duration = requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_duration_seconds", map[string]string{
+			"resource_group": "missing-rg", "result": "snapshot_error",
+		}).GetHistogram()
+		require.Equal(t, uint64(1), duration.GetSampleCount())
+	})
+
+	t.Run("default snapshot builder publishes retry metrics", func(t *testing.T) {
+		registry := newEpochManagerMetricsRegistry(t)
+		fixture := newEpochManagerTestFixture(t)
+		fixture.policy.setWaves(testSnapshotRG, BalanceWave{Kind: PlanKindSegment, Converged: true})
+		manager := NewBalanceEpochManager(
+			fixture.placement.meta,
+			fixture.placement.dist,
+			fixture.placement.target,
+			fixture.placement.nodes,
+			nil,
+			fixture.admitter,
+			fixture.admitter,
+			task.WrapIDSource(6),
+			func(string, EpochPolicyConfig) (EpochBalancePolicy, bool) { return fixture.policy, true },
+			WithEpochClock(fixture.clock.Now),
+			WithLeaderTerm(77),
+		)
+
+		mutated := false
+		fixture.placement.targetState.mu.Lock()
+		fixture.placement.targetState.segmentsHook = func(collectionID int64, scope int32) {
+			if collectionID != 100 || scope != meta.CurrentTarget || mutated {
+				return
+			}
+			mutated = true
+			fixture.placement.targetState.mu.Lock()
+			fixture.placement.targetState.currentVersion[collectionID]++
+			fixture.placement.targetState.mu.Unlock()
+		}
+		fixture.placement.targetState.mu.Unlock()
+
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.Shadow = true
+		result := manager.Advance(context.Background(), request)
+		require.Equal(t, EpochCompleted, result.State)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_snapshot_retries_total", map[string]string{
+			"resource_group": testSnapshotRG,
+		}).GetCounter().GetValue())
+	})
+}
+
+func TestEpochManagerCarryMetricOutlivesTerminal(t *testing.T) {
+	registry := newEpochManagerMetricsRegistry(t)
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(
+		testSnapshotRG,
+		epochManagerWave(plan),
+		BalanceWave{Kind: PlanKindSegment, Converged: true},
+	)
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.Deadline = time.Second
+	request.NoProgressDeadline = 0
+
+	started := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	}).GetGauge().GetValue())
+	requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "channel",
+	})
+
+	fixture.clock.Advance(2 * time.Second)
+	terminal := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochTimedOut, terminal.State)
+	require.True(t, terminal.Terminal)
+	require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	}).GetGauge().GetValue())
+
+	request.AllowNew = false
+	idle := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochIdle, idle.State)
+	require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	}).GetGauge().GetValue())
+
+	publishEpochManagerSegments(fixture.placement, []int64{201}, []int64{101})
+	request.AllowNew = true
+	restarted := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, restarted.State)
+	resolved := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochCompleted, resolved.State)
+	requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+		"resource_group": testSnapshotRG, "kind": "segment",
+	})
+
+	t.Run("quarantine remains after terminal and expires", func(t *testing.T) {
+		registry := newEpochManagerMetricsRegistry(t)
+		fixture := newEpochManagerTestFixture(t)
+		plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+		fixture.policy.setWaves(
+			testSnapshotRG,
+			epochManagerWave(plan),
+			epochManagerWave(plan),
+		)
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.MaxObjectRetries = 2
+		request.QuarantineBackoff = time.Minute
+
+		fixture.manager.Advance(context.Background(), request)
+		fixture.admitter.acceptedTasks()[0].Fail(errors.New("first grow failure"))
+		first := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochDegraded, first.State)
+
+		fixture.manager.Advance(context.Background(), request)
+		fixture.admitter.acceptedTasks()[1].Fail(errors.New("second grow failure"))
+		second := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochDegraded, second.State)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment",
+		}).GetGauge().GetValue())
+
+		request.AllowNew = false
+		fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment",
+		}).GetGauge().GetValue())
+
+		fixture.clock.Advance(2 * time.Minute)
+		fixture.manager.Advance(context.Background(), request)
+		requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment",
+		})
+	})
+
+	t.Run("disabling retries clears the quarantine metric", func(t *testing.T) {
+		registry := newEpochManagerMetricsRegistry(t)
+		fixture := newEpochManagerTestFixture(t)
+		plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+		fixture.policy.setWaves(
+			testSnapshotRG,
+			epochManagerWave(plan),
+			epochManagerWave(plan),
+			BalanceWave{Kind: PlanKindSegment, Converged: true},
+		)
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.MaxObjectRetries = 2
+		request.QuarantineBackoff = time.Minute
+
+		fixture.manager.Advance(context.Background(), request)
+		fixture.admitter.acceptedTasks()[0].Fail(errors.New("first grow failure"))
+		fixture.manager.Advance(context.Background(), request)
+		fixture.manager.Advance(context.Background(), request)
+		fixture.admitter.acceptedTasks()[1].Fail(errors.New("second grow failure"))
+		fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, float64(1), requireEpochMetric(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment",
+		}).GetGauge().GetValue())
+
+		request.MaxObjectRetries = 0
+		request.QuarantineBackoff = 0
+		result := fixture.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochCompleted, result.State)
+		require.NotContains(t, fixture.policy.lastConstraints(testSnapshotRG).Objects, plan.ObjectKey())
+		requireEpochMetricAbsent(t, registry, "milvus_querycoord_balance_epoch_carry_over", map[string]string{
+			"resource_group": testSnapshotRG, "kind": "segment",
+		})
+	})
 }
 
 func TestEpochManagerUsesFrozenPolicySelection(t *testing.T) {

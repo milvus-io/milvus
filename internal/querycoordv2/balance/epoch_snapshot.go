@@ -45,7 +45,16 @@ type PlacementSnapshotBuilder struct {
 	nodes     *session.NodeManager
 	inspector task.BalanceTaskInspector
 
-	buildHook func(attempt int)
+	buildHook     func(attempt int)
+	retryObserver func(resourceGroup string)
+}
+
+type PlacementSnapshotBuilderOption func(*PlacementSnapshotBuilder)
+
+func WithSnapshotRetryObserver(observer func(resourceGroup string)) PlacementSnapshotBuilderOption {
+	return func(builder *PlacementSnapshotBuilder) {
+		builder.retryObserver = observer
+	}
 }
 
 func NewPlacementSnapshotBuilder(
@@ -54,14 +63,19 @@ func NewPlacementSnapshotBuilder(
 	target meta.TargetManagerInterface,
 	nodes *session.NodeManager,
 	inspector task.BalanceTaskInspector,
+	opts ...PlacementSnapshotBuilderOption,
 ) *PlacementSnapshotBuilder {
-	return &PlacementSnapshotBuilder{
+	builder := &PlacementSnapshotBuilder{
 		meta:      metadata,
 		dist:      distribution,
 		target:    target,
 		nodes:     nodes,
 		inspector: inspector,
 	}
+	for _, opt := range opts {
+		opt(builder)
+	}
+	return builder
 }
 
 func (b *PlacementSnapshotBuilder) Build(
@@ -71,6 +85,9 @@ func (b *PlacementSnapshotBuilder) Build(
 	carryOver []task.PendingBalanceTaskSnapshot,
 ) (*PlacementSnapshot, error) {
 	for attempt := 0; attempt < maxPlacementSnapshotAttempts; attempt++ {
+		if attempt > 0 && b.retryObserver != nil {
+			b.retryObserver(resourceGroup)
+		}
 		distribution := b.dist.Capture()
 		pending := b.capturePending()
 		snapshot, stable, err := b.buildFromCapture(ctx, resourceGroup, eligibleReplicaIDs, distribution, pending, carryOver)

@@ -34,6 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
@@ -178,6 +180,13 @@ type activeEpoch struct {
 	terminalIntent EpochState
 	progressDigest uint64
 	result         EpochAdvanceResult
+	metricState    epochMetricPublication
+}
+
+type epochMetricPublication struct {
+	activeState       string
+	terminalResult    string
+	terminalPublished bool
 }
 
 type admittedWork struct {
@@ -229,7 +238,16 @@ func NewBalanceEpochManager(
 	}
 	manager.taskFactory = &defaultEpochTaskFactory{source: source}
 	if metadata != nil && dist != nil && nodeMgr != nil {
-		manager.snapshotBuilder = NewPlacementSnapshotBuilder(metadata, dist, targetMgr, nodeMgr, inspector)
+		manager.snapshotBuilder = NewPlacementSnapshotBuilder(
+			metadata,
+			dist,
+			targetMgr,
+			nodeMgr,
+			inspector,
+			WithSnapshotRetryObserver(func(resourceGroup string) {
+				metrics.QueryCoordBalanceEpochSnapshotRetriesTotal.WithLabelValues(resourceGroup).Inc()
+			}),
+		)
 	}
 	for _, opt := range opts {
 		opt(manager)
@@ -304,21 +322,31 @@ func (manager *BalanceEpochManager) Advance(ctx context.Context, request EpochRe
 	if runtime.active != nil && isTerminalEpochState(runtime.active.state) {
 		runtime.active = nil
 		runtime.activeFlag.Store(false)
+		manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 	}
 	if runtime.active != nil {
 		return manager.advanceActiveLocked(ctx, runtime)
 	}
 	if !request.AllowNew {
+		manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 		return runtime.publish(EpochAdvanceResult{
 			ResourceGroup: request.ResourceGroup,
 			State:         EpochIdle,
 			Rejected:      make(map[task.BalanceAdmissionReason]int),
 		})
 	}
+	manager.applyNewRequestRetryPolicyLocked(runtime, request)
+	manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 	if request.Shadow {
 		return manager.planShadowLocked(ctx, runtime, request)
 	}
 	return manager.startEpochLocked(ctx, runtime, request)
+}
+
+func (manager *BalanceEpochManager) applyNewRequestRetryPolicyLocked(runtime *rgRuntime, request EpochRequest) {
+	if request.MaxObjectRetries <= 0 || request.QuarantineBackoff <= 0 {
+		runtime.retries = make(map[BalanceObjectKey]*objectRetryHistory)
+	}
 }
 
 func (manager *BalanceEpochManager) HasActive(resourceGroup string) bool {
@@ -378,59 +406,82 @@ func (manager *BalanceEpochManager) planShadowLocked(
 	}
 	if err := ctx.Err(); err != nil {
 		result.State = EpochDegraded
-		result.Terminal = true
 		result.Err = err
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, nil)
 	}
 	if shadowDeadlineExpired(request, startedAt, manager.now()) {
 		result.State = EpochTimedOut
-		result.Terminal = true
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, nil)
 	}
 	policy, ok := manager.epochPolicy(request.Balancer, request.PolicyConfig)
 	if !ok {
 		result.State = EpochDegraded
-		result.Terminal = true
 		result.Err = fmt.Errorf("epoch balance policy unavailable")
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, nil)
 	}
 	snapshot, err := manager.buildSnapshot(ctx, runtime, request)
 	if err != nil {
 		result.State = EpochDegraded
-		result.Terminal = true
 		result.Err = err
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, nil)
 	}
 	if err := ctx.Err(); err != nil {
 		result.State = EpochDegraded
-		result.Terminal = true
 		result.Err = err
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, nil)
 	}
 	if shadowDeadlineExpired(request, startedAt, manager.now()) {
 		result.State = EpochTimedOut
-		result.Terminal = true
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, nil)
 	}
 	constraints := manager.planningConstraintsLocked(runtime, snapshot.Token, request, manager.now())
+	manager.publishCarryMetricsLocked(runtime, request.ResourceGroup)
 	wave := policy.Plan(snapshot, request.Budget, constraints, request.PolicyConfig)
 	if err := ctx.Err(); err != nil {
 		result.State = EpochDegraded
-		result.Terminal = true
 		result.Err = err
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, &wave)
 	}
 	if shadowDeadlineExpired(request, startedAt, manager.now()) {
 		result.State = EpochTimedOut
-		result.Terminal = true
-		return runtime.publish(result)
+		return manager.publishShadowResult(ctx, runtime, request, result, &wave)
 	}
 	result.State = EpochCompleted
-	result.Planned = len(wave.Plans)
+	return manager.publishShadowResult(ctx, runtime, request, result, &wave)
+}
+
+func (manager *BalanceEpochManager) publishShadowResult(
+	ctx context.Context,
+	runtime *rgRuntime,
+	request EpochRequest,
+	result EpochAdvanceResult,
+	wave *BalanceWave,
+) EpochAdvanceResult {
 	result.Terminal = true
-	result.Converged = wave.Converged
-	result.ObjectiveBefore = wave.Before.Value
-	result.ObjectiveAfter = wave.After.Value
+	segmentPlans, channelPlans := 0, 0
+	if wave != nil {
+		result.Planned = len(wave.Plans)
+		result.Converged = wave.Converged
+		result.ObjectiveBefore = wave.Before.Value
+		result.ObjectiveAfter = wave.After.Value
+		manager.publishShadowMetrics(request.ResourceGroup, *wave)
+		segmentPlans, channelPlans = countPlansByKind(wave.Plans)
+	}
+	mlog.Info(ctx, "resource-group balance epoch shadow result",
+		mlog.String("resourceGroup", request.ResourceGroup),
+		mlog.Bool("shadow", true),
+		mlog.String("result", shadowEpochResultLabel(result)),
+		mlog.Bool("converged", result.Converged),
+		mlog.Int("planned", result.Planned),
+		mlog.Int("segmentPlans", segmentPlans),
+		mlog.Int("channelPlans", channelPlans),
+		mlog.Int("maxSegmentTasks", request.Budget.MaxSegmentTasks),
+		mlog.Int("maxChannelTasks", request.Budget.MaxChannelTasks),
+		mlog.Int("maxTasksPerNode", request.Budget.MaxTasksPerNode),
+		mlog.Int("maxTasksPerCollection", request.Budget.MaxTasksPerCollection),
+		mlog.Float64("objectiveObserved", result.ObjectiveBefore),
+		mlog.Float64("objectiveProjected", result.ObjectiveAfter),
+		mlog.Err(result.Err))
 	return runtime.publish(result)
 }
 
@@ -463,7 +514,7 @@ func (manager *BalanceEpochManager) startEpochLocked(
 	}
 	runtime.active = active
 	runtime.activeFlag.Store(true)
-	runtime.publish(active.result)
+	manager.publishActiveLocked(runtime, active)
 
 	if err := ctx.Err(); err != nil {
 		return manager.finishLocked(runtime, active, EpochDegraded, err)
@@ -477,6 +528,7 @@ func (manager *BalanceEpochManager) startEpochLocked(
 	}
 	snapshot, err := manager.buildSnapshot(ctx, runtime, active.request)
 	if err != nil {
+		active.metricState.terminalResult = "snapshot_error"
 		return manager.finishLocked(runtime, active, EpochDegraded, err)
 	}
 	active.token = cloneSnapshotToken(snapshot.Token)
@@ -491,7 +543,9 @@ func (manager *BalanceEpochManager) startEpochLocked(
 	active.result.ObjectiveBefore = wave.Before.Value
 	active.result.ObjectiveAfter = wave.Before.Value
 	active.result.Converged = wave.Converged
+	manager.publishPlannedWaveMetrics(active.epoch.ResourceGroup, wave)
 	if manager.deadlineExpired(active, manager.now()) {
+		manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, wave.Plans)
 		return manager.finishLocked(runtime, active, EpochTimedOut, nil)
 	}
 	if len(wave.Plans) == 0 {
@@ -501,14 +555,14 @@ func (manager *BalanceEpochManager) startEpochLocked(
 			active.result.Terminal = false
 			active.result.Converged = false
 			active.progressDigest = manager.progressDigest(runtime, active, manager.dist.Capture())
-			return runtime.publish(active.result)
+			return manager.publishActiveLocked(runtime, active)
 		}
 		return manager.finishLocked(runtime, active, EpochCompleted, nil)
 	}
 
 	active.state = EpochAdmitting
 	active.result.State = EpochAdmitting
-	runtime.publish(active.result)
+	manager.publishActiveLocked(runtime, active)
 	manager.admitWaveLocked(ctx, runtime, active)
 	if len(active.admitted) == 0 {
 		state := active.terminalIntent
@@ -525,7 +579,7 @@ func (manager *BalanceEpochManager) startEpochLocked(
 	active.result.State = EpochExecuting
 	active.result.Terminal = false
 	active.progressDigest = manager.progressDigest(runtime, active, manager.dist.Capture())
-	return runtime.publish(active.result)
+	return manager.publishActiveLocked(runtime, active)
 }
 
 func (manager *BalanceEpochManager) admitWaveLocked(
@@ -536,6 +590,7 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 	pendingRevision := active.token.PendingRevision(active.epoch)
 	for index := range active.wave.Plans {
 		if manager.deadlineExpired(active, manager.now()) {
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index:])
 			active.terminalIntent = EpochTimedOut
 			break
 		}
@@ -545,6 +600,9 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 		active.token = plan.Token.Snapshot
 		if !active.ledger.TryReserve(plan) {
 			active.result.Rejected[task.BalanceAdmissionBudgetExhausted]++
+			manager.publishAdmissionMetric(active.epoch.ResourceGroup, task.BalanceAdmissionBudgetExhausted)
+			manager.publishPlanMetric(active.epoch.ResourceGroup, plan.Kind, "rejected")
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index+1:])
 			active.terminalIntent = EpochDegraded
 			break
 		}
@@ -552,6 +610,9 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 		if replica == nil || replica.GetResourceGroup() != active.epoch.ResourceGroup || replica.GetCollectionID() != plan.CollectionID {
 			active.ledger.Release(plan)
 			active.result.Rejected[task.BalanceAdmissionReplicaChanged]++
+			manager.publishAdmissionMetric(active.epoch.ResourceGroup, task.BalanceAdmissionReplicaChanged)
+			manager.publishPlanMetric(active.epoch.ResourceGroup, plan.Kind, "rejected")
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index+1:])
 			active.terminalIntent = EpochSuperseded
 			break
 		}
@@ -563,6 +624,9 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 		if err != nil {
 			active.ledger.Release(plan)
 			active.result.Rejected[task.BalanceAdmissionInternalError]++
+			manager.publishAdmissionMetric(active.epoch.ResourceGroup, task.BalanceAdmissionInternalError)
+			manager.publishPlanMetric(active.epoch.ResourceGroup, plan.Kind, "rejected")
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index+1:])
 			active.result.Err = err
 			active.terminalIntent = EpochSuperseded
 			break
@@ -570,12 +634,16 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 		if manager.deadlineExpired(active, manager.now()) {
 			active.ledger.Release(plan)
 			balanceTask.Cancel(fmt.Errorf("balance epoch deadline exceeded before admission"))
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index:])
 			active.terminalIntent = EpochTimedOut
 			break
 		}
 		if manager.admitter == nil {
 			active.ledger.Release(plan)
 			active.result.Rejected[task.BalanceAdmissionInternalError]++
+			manager.publishAdmissionMetric(active.epoch.ResourceGroup, task.BalanceAdmissionInternalError)
+			manager.publishPlanMetric(active.epoch.ResourceGroup, plan.Kind, "rejected")
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index+1:])
 			active.result.Err = fmt.Errorf("balance task generation admitter unavailable")
 			active.terminalIntent = EpochSuperseded
 			break
@@ -588,9 +656,12 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 			return manager.snapshotBuilder.Validate(plan.Token)
 		})
 		admissionDeadlineExpired := manager.deadlineExpired(active, manager.now())
+		manager.publishAdmissionMetric(active.epoch.ResourceGroup, admission.Reason)
 		if admission.Reason != task.BalanceAdmissionAccepted {
 			active.ledger.Release(plan)
 			active.result.Rejected[admission.Reason]++
+			manager.publishPlanMetric(active.epoch.ResourceGroup, plan.Kind, "rejected")
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index+1:])
 			active.result.Err = admission.Err
 			if supersedesGeneration(admission.Reason) {
 				active.terminalIntent = EpochSuperseded
@@ -606,11 +677,14 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 		active.token = active.token.WithPendingRevision(pendingRevision)
 		active.admitted[admission.TaskID] = &admittedWork{plan: cloneEpochPolicyPlan(plan), task: balanceTask}
 		active.result.Admitted++
+		manager.publishPlanMetric(active.epoch.ResourceGroup, plan.Kind, "reserved")
 		active.lastProgressAt = manager.now()
 		if active.result.Admitted <= len(active.wave.PrefixAfter) {
 			active.result.ObjectiveAfter = active.wave.PrefixAfter[active.result.Admitted-1].Value
+			metrics.QueryCoordBalanceEpochObjective.WithLabelValues(active.epoch.ResourceGroup, "committed").Set(active.result.ObjectiveAfter)
 		}
 		if admissionDeadlineExpired {
+			manager.publishUnattemptedPlanMetrics(active.epoch.ResourceGroup, active.wave.Plans[index+1:])
 			active.terminalIntent = EpochTimedOut
 			break
 		}
@@ -623,7 +697,7 @@ func (manager *BalanceEpochManager) advanceActiveLocked(
 ) EpochAdvanceResult {
 	active := runtime.active
 	if active.state != EpochExecuting {
-		return runtime.publish(active.result)
+		return manager.publishActiveLocked(runtime, active)
 	}
 	distribution := manager.dist.Capture()
 	digest := manager.progressDigest(runtime, active, distribution)
@@ -645,7 +719,7 @@ func (manager *BalanceEpochManager) advanceActiveLocked(
 		active.terminalIntent = EpochTimedOut
 	}
 	if active.terminalIntent == EpochIdle && !manager.allWorkQuiescent(runtime, active, distribution) {
-		return runtime.publish(active.result)
+		return manager.publishActiveLocked(runtime, active)
 	}
 	return manager.reconcileLocked(runtime, active, distribution)
 }
@@ -657,7 +731,7 @@ func (manager *BalanceEpochManager) reconcileLocked(
 ) EpochAdvanceResult {
 	active.state = EpochReconciling
 	active.result.State = EpochReconciling
-	runtime.publish(active.result)
+	manager.publishActiveLocked(runtime, active)
 
 	all := make(map[BalanceObjectKey]*admittedWork, len(runtime.carryOver)+len(active.admitted))
 	for key, work := range runtime.carryOver {
@@ -732,7 +806,193 @@ func (manager *BalanceEpochManager) finishLocked(
 	if err != nil {
 		active.result.Err = err
 	}
-	return runtime.publish(active.result)
+	return manager.publishActiveLocked(runtime, active)
+}
+
+func (manager *BalanceEpochManager) publishActiveLocked(
+	runtime *rgRuntime,
+	active *activeEpoch,
+) EpochAdvanceResult {
+	result := runtime.publish(active.result)
+	resourceGroup := active.epoch.ResourceGroup
+	nextState := activeEpochStateLabel(active.state)
+	if active.metricState.activeState != "" && active.metricState.activeState != nextState {
+		metrics.QueryCoordBalanceEpochActive.DeleteLabelValues(resourceGroup, active.metricState.activeState)
+	}
+	if nextState == "" {
+		active.metricState.activeState = ""
+	} else {
+		metrics.QueryCoordBalanceEpochActive.WithLabelValues(resourceGroup, nextState).Set(1)
+		active.metricState.activeState = nextState
+	}
+
+	manager.publishCarryMetricsLocked(runtime, resourceGroup)
+	if isTerminalEpochState(active.state) && !active.metricState.terminalPublished {
+		terminalResult := active.metricState.terminalResult
+		if terminalResult == "" {
+			terminalResult = terminalEpochResultLabel(active)
+		}
+		metrics.QueryCoordBalanceEpochTotal.WithLabelValues(resourceGroup, terminalResult).Inc()
+		duration := manager.now().Sub(active.startedAt).Seconds()
+		if duration < 0 {
+			duration = 0
+		}
+		metrics.QueryCoordBalanceEpochDurationSeconds.WithLabelValues(resourceGroup, terminalResult).Observe(duration)
+		active.metricState.terminalPublished = true
+	}
+	return result
+}
+
+func (manager *BalanceEpochManager) publishPlannedWaveMetrics(resourceGroup string, wave BalanceWave) {
+	for _, plan := range wave.Plans {
+		manager.publishPlanMetric(resourceGroup, plan.Kind, "planned")
+	}
+	metrics.QueryCoordBalanceEpochObjective.WithLabelValues(resourceGroup, "observed").Set(wave.Before.Value)
+	metrics.QueryCoordBalanceEpochObjective.WithLabelValues(resourceGroup, "projected").Set(wave.After.Value)
+	metrics.QueryCoordBalanceEpochObjective.WithLabelValues(resourceGroup, "committed").Set(wave.Before.Value)
+}
+
+func (manager *BalanceEpochManager) publishShadowMetrics(resourceGroup string, wave BalanceWave) {
+	for _, plan := range wave.Plans {
+		manager.publishPlanMetric(resourceGroup, plan.Kind, "shadow")
+	}
+	metrics.QueryCoordBalanceEpochObjective.WithLabelValues(resourceGroup, "observed").Set(wave.Before.Value)
+	metrics.QueryCoordBalanceEpochObjective.WithLabelValues(resourceGroup, "projected").Set(wave.After.Value)
+	metrics.QueryCoordBalanceEpochObjective.WithLabelValues(resourceGroup, "shadow").Set(wave.After.Value)
+}
+
+func (manager *BalanceEpochManager) publishPlanMetric(resourceGroup string, kind PlanKind, result string) {
+	if label, ok := planKindLabel(kind); ok {
+		metrics.QueryCoordBalanceEpochPlansTotal.WithLabelValues(resourceGroup, label, result).Inc()
+	}
+}
+
+func (manager *BalanceEpochManager) publishUnattemptedPlanMetrics(resourceGroup string, plans []EpochPlan) {
+	for _, plan := range plans {
+		manager.publishPlanMetric(resourceGroup, plan.Kind, "unattempted")
+	}
+}
+
+func (manager *BalanceEpochManager) publishAdmissionMetric(resourceGroup string, reason task.BalanceAdmissionReason) {
+	metrics.QueryCoordBalanceEpochAdmissionTotal.WithLabelValues(resourceGroup, reason.String()).Inc()
+}
+
+func (manager *BalanceEpochManager) publishCarryMetricsLocked(runtime *rgRuntime, resourceGroup string) {
+	objects := make(map[BalanceObjectKey]struct{}, len(runtime.carryOver)+len(runtime.retries))
+	if runtime.active != nil && !isTerminalEpochState(runtime.active.state) {
+		for _, work := range runtime.active.admitted {
+			objects[work.plan.ObjectKey()] = struct{}{}
+		}
+	}
+	for key := range runtime.carryOver {
+		objects[key] = struct{}{}
+	}
+	now := manager.now()
+	for key, history := range runtime.retries {
+		if !history.quarantineUntil.IsZero() && now.Before(history.quarantineUntil) {
+			objects[key] = struct{}{}
+		}
+	}
+
+	counts := map[BalanceObjectKind]int{
+		BalanceObjectSegment: 0,
+		BalanceObjectChannel: 0,
+	}
+	for key := range objects {
+		counts[key.Kind]++
+	}
+	for _, kind := range []BalanceObjectKind{BalanceObjectSegment, BalanceObjectChannel} {
+		label, ok := objectKindLabel(kind)
+		if !ok {
+			continue
+		}
+		if counts[kind] == 0 {
+			metrics.QueryCoordBalanceEpochCarryOver.DeleteLabelValues(resourceGroup, label)
+			continue
+		}
+		metrics.QueryCoordBalanceEpochCarryOver.WithLabelValues(resourceGroup, label).Set(float64(counts[kind]))
+	}
+}
+
+func activeEpochStateLabel(state EpochState) string {
+	switch state {
+	case EpochPlanning:
+		return "planning"
+	case EpochAdmitting:
+		return "admitting"
+	case EpochExecuting:
+		return "executing"
+	case EpochReconciling:
+		return "reconciling"
+	default:
+		return ""
+	}
+}
+
+func terminalEpochResultLabel(active *activeEpoch) string {
+	switch active.state {
+	case EpochCompleted:
+		if active.result.Converged {
+			return "converged"
+		}
+		return "completed"
+	case EpochDegraded:
+		return "degraded"
+	case EpochSuperseded:
+		return "superseded"
+	case EpochTimedOut:
+		return "timed_out"
+	default:
+		return "degraded"
+	}
+}
+
+func shadowEpochResultLabel(result EpochAdvanceResult) string {
+	switch result.State {
+	case EpochCompleted:
+		if result.Converged {
+			return "converged"
+		}
+		return "completed"
+	case EpochTimedOut:
+		return "timed_out"
+	default:
+		return "degraded"
+	}
+}
+
+func planKindLabel(kind PlanKind) (string, bool) {
+	switch kind {
+	case PlanKindSegment:
+		return "segment", true
+	case PlanKindChannel:
+		return "channel", true
+	default:
+		return "", false
+	}
+}
+
+func objectKindLabel(kind BalanceObjectKind) (string, bool) {
+	switch kind {
+	case BalanceObjectSegment:
+		return "segment", true
+	case BalanceObjectChannel:
+		return "channel", true
+	default:
+		return "", false
+	}
+}
+
+func countPlansByKind(plans []EpochPlan) (segments int, channels int) {
+	for _, plan := range plans {
+		switch plan.Kind {
+		case PlanKindSegment:
+			segments++
+		case PlanKindChannel:
+			channels++
+		}
+	}
+	return segments, channels
 }
 
 func (manager *BalanceEpochManager) buildSnapshot(

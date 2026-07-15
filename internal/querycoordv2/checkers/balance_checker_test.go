@@ -54,6 +54,11 @@ func cleanupMock(t *testing.T, mocker *mockey.Mocker) {
 
 // Helper function to create a test BalanceChecker
 func createTestBalanceChecker(opts ...balanceCheckerOption) *BalanceChecker {
+	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
+	return createTestBalanceCheckerWithScheduler(scheduler, opts...)
+}
+
+func createTestBalanceCheckerWithScheduler(scheduler task.Scheduler, opts ...balanceCheckerOption) *BalanceChecker {
 	metaInstance := &meta.Meta{
 		CollectionManager: meta.NewCollectionManager(nil),
 		ReplicaManager:    meta.NewReplicaManager(nil, nil),
@@ -61,7 +66,6 @@ func createTestBalanceChecker(opts ...balanceCheckerOption) *BalanceChecker {
 	targetMgr := meta.NewTargetManager(nil, nil)
 	nodeMgr := &session.NodeManager{}
 	dist := meta.NewDistributionManager(nodeMgr)
-	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
 
 	// Initialize global assign policy factory for testing
 	assign.ResetGlobalAssignPolicyFactoryForTest()
@@ -151,6 +155,30 @@ func (s *epochCapableScheduler) AdmitBalanceTaskAtPendingRevision(
 }
 
 func (s *epochCapableScheduler) GetPendingBalanceTasks() task.PendingBalanceSnapshot {
+	return task.PendingBalanceSnapshot{}
+}
+
+type shadowCoexistenceScheduler struct {
+	task.Scheduler
+	addCalls                 int
+	generationAdmissionCalls int
+}
+
+func (s *shadowCoexistenceScheduler) Add(balanceTask task.Task) error {
+	s.addCalls++
+	return nil
+}
+
+func (s *shadowCoexistenceScheduler) AdmitBalanceTaskAtPendingRevision(
+	_ task.Task,
+	_ task.BalancePendingRevision,
+	_ task.BalanceAdmissionValidator,
+) task.BalanceAdmissionResult {
+	s.generationAdmissionCalls++
+	return task.BalanceAdmissionResult{Reason: task.BalanceAdmissionAccepted}
+}
+
+func (s *shadowCoexistenceScheduler) GetPendingBalanceTasks() task.PendingBalanceSnapshot {
 	return task.PendingBalanceSnapshot{}
 }
 
@@ -2295,7 +2323,7 @@ func TestBalanceCheckerLoadsEpochConfigOncePerTick(t *testing.T) {
 			Budget:             epochConfig.budget,
 			PolicyConfig:       epochConfig.policyConfig,
 			AllowNew:           true,
-			Shadow:             true,
+			Shadow:             false,
 			Deadline:           epochConfig.deadline,
 			NoProgressDeadline: epochConfig.noProgressDeadline,
 			SegmentTaskTimeout: epochConfig.segmentTaskTimeout,
@@ -2673,6 +2701,146 @@ func TestBalanceCheckerEpochUnsupportedPolicyWaitsForActiveDrain(t *testing.T) {
 
 	require.Len(t, controller.requests, 1)
 	assert.False(t, controller.requests[0].AllowNew)
+	assert.Equal(t, 0, legacyCalls)
+}
+
+func TestBalanceCheckerShadowPlansWithoutGenerationAdmissionAndRunsLegacy(t *testing.T) {
+	baseScheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
+	scheduler := &shadowCoexistenceScheduler{Scheduler: baseScheduler}
+	controller := &fakeBalanceEpochController{
+		newResult: balance.EpochAdvanceResult{State: balance.EpochCompleted, Terminal: true, Converged: true},
+	}
+	epochConfig := testBalanceEpochConfig()
+	epochConfig.enabled = false
+	epochConfig.shadow = true
+	checker := createTestBalanceCheckerWithScheduler(
+		scheduler,
+		withEpochControllerForTest(controller),
+		withEpochConfigForTest(epochConfig),
+	)
+	checker.normalBalanceQueue = createMockPriorityQueue()
+	checker.normalBalanceQueue.Push(newCollectionBalanceItem(1, 1, "bycollectionid"))
+	checker.stoppingBalanceQueue = createMockPriorityQueue()
+	checker.stoppingBalanceQueue.Push(newCollectionBalanceItem(2, 1, "bycollectionid"))
+	mockEpochCheckConfig(t, checker, balanceConfig{
+		segmentBatchSize:             1,
+		channelBatchSize:             1,
+		maxCheckCollectionCount:      1,
+		balanceOnMultipleCollections: true,
+		autoBalanceInterval:          0,
+	}, false, true, true)
+	mockEligibleEpochCollections(t, checker, []int64{1}, map[int64][]*meta.Replica{
+		1: {newEpochReplica(10, 1, "rg-a")},
+	})
+	legacyTask := newLegacySegmentBalanceTask(t, checker, 100)
+	mockGenerate := mockey.Mock((*BalanceChecker).generateBalanceTasksFromReplicas).
+		Return([]task.Task{legacyTask}, []task.Task(nil)).
+		Build()
+	cleanupMock(t, mockGenerate)
+
+	checker.Check(context.Background())
+
+	require.Len(t, controller.requests, 1)
+	assert.Equal(t, "rg-a", controller.requests[0].ResourceGroup)
+	assert.True(t, controller.requests[0].AllowNew)
+	assert.True(t, controller.requests[0].Shadow)
+	assert.Equal(t, 0, scheduler.generationAdmissionCalls)
+	assert.Equal(t, 1, scheduler.addCalls)
+	assert.Nil(t, checker.stoppingBalanceQueue, "accepted legacy work performs the normal queue cleanup")
+	assert.False(t, checker.autoBalanceTs.IsZero())
+}
+
+func TestBalanceCheckerShadowUnsupportedOrUnavailableUsesLegacyOnly(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		withController  bool
+		policySupported bool
+	}{
+		{name: "unsupported policy", withController: true, policySupported: false},
+		{name: "manager unavailable", withController: false, policySupported: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			controller := &fakeBalanceEpochController{}
+			epochConfig := testBalanceEpochConfig()
+			epochConfig.enabled = false
+			epochConfig.shadow = true
+			options := []balanceCheckerOption{withEpochConfigForTest(epochConfig)}
+			if test.withController {
+				options = append(options, withEpochControllerForTest(controller))
+			}
+			checker := createTestBalanceChecker(options...)
+			if !test.withController {
+				checker.epochManager = nil
+			}
+			mockEpochCheckConfig(t, checker, balanceConfig{autoBalanceInterval: 0}, false, true, test.policySupported)
+			legacyCalls := 0
+			mockProcess := mockey.Mock((*BalanceChecker).processBalanceQueue).
+				To(func(
+					_ context.Context,
+					_ balance.Balance,
+					_ func(context.Context, int64) []int64,
+					_ func(context.Context) *assign.PriorityQueue,
+					_ func() *assign.PriorityQueue,
+					_ balanceConfig,
+					isStopping bool,
+				) (int, int) {
+					assert.False(t, isStopping)
+					legacyCalls++
+					return 0, 0
+				}).
+				Build()
+			cleanupMock(t, mockProcess)
+
+			checker.Check(context.Background())
+
+			assert.Equal(t, 1, legacyCalls)
+			assert.Empty(t, controller.requests)
+			assert.False(t, checker.autoBalanceTs.IsZero())
+		})
+	}
+}
+
+func TestBalanceCheckerActiveModePrecedesShadow(t *testing.T) {
+	controller := &fakeBalanceEpochController{
+		newResult: balance.EpochAdvanceResult{Started: true, State: balance.EpochExecuting},
+	}
+	epochConfig := testBalanceEpochConfig()
+	epochConfig.enabled = true
+	epochConfig.shadow = true
+	checker := createTestBalanceChecker(
+		withEpochControllerForTest(controller),
+		withEpochConfigForTest(epochConfig),
+	)
+	mockEpochCheckConfig(t, checker, balanceConfig{
+		maxCheckCollectionCount:      1,
+		balanceOnMultipleCollections: true,
+		autoBalanceInterval:          0,
+	}, false, true, true)
+	mockEligibleEpochCollections(t, checker, []int64{1}, map[int64][]*meta.Replica{
+		1: {newEpochReplica(10, 1, "rg-a")},
+	})
+	legacyCalls := 0
+	mockProcess := mockey.Mock((*BalanceChecker).processBalanceQueue).
+		To(func(
+			_ context.Context,
+			_ balance.Balance,
+			_ func(context.Context, int64) []int64,
+			_ func(context.Context) *assign.PriorityQueue,
+			_ func() *assign.PriorityQueue,
+			_ balanceConfig,
+			_ bool,
+		) (int, int) {
+			legacyCalls++
+			return 0, 0
+		}).
+		Build()
+	cleanupMock(t, mockProcess)
+
+	checker.Check(context.Background())
+
+	require.Len(t, controller.requests, 1)
+	assert.True(t, controller.requests[0].AllowNew)
+	assert.False(t, controller.requests[0].Shadow)
 	assert.Equal(t, 0, legacyCalls)
 }
 

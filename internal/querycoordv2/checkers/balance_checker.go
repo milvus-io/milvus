@@ -812,21 +812,17 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
-	epochModeEnabled := epochConfig.enabled || epochConfig.shadow
+	activeMode := epochConfig.enabled
+	shadowMode := !activeMode && epochConfig.shadow
 	policySupported := false
-	if epochModeEnabled && b.epochManager != nil {
+	if (activeMode || shadowMode) && b.epochManager != nil {
 		_, policySupported = balance.GetGlobalBalancerFactory().GetEpochPolicyFor(
 			epochConfig.balancer,
 			epochConfig.policyConfig,
 		)
 	}
 
-	// Disabled, unavailable, and unsupported epoch modes drain all active RGs
-	// before returning to legacy normal balance.
-	if !epochModeEnabled || b.epochManager == nil || !policySupported {
-		if len(postObservationActive) > 0 {
-			return nil
-		}
+	runLegacyNormalBalance := func() {
 		acceptedSegments, acceptedChannels := b.processBalanceQueue(ctx,
 			balance.GetGlobalBalancerFactory().GetBalancer(),
 			b.getReplicaForNormalBalance,
@@ -838,30 +834,61 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		if acceptedSegments > 0 || acceptedChannels > 0 {
 			b.stoppingBalanceQueue = nil
 		}
+	}
+
+	// Disabled, unavailable, and unsupported epoch modes drain all active RGs
+	// before returning to legacy normal balance.
+	if (!activeMode && !shadowMode) || b.epochManager == nil || !policySupported {
+		if len(postObservationActive) > 0 {
+			return nil
+		}
+		runLegacyNormalBalance()
 		b.autoBalanceTs = time.Now()
 		return nil
 	}
 
-	// One interval-eligible epoch/shadow planning attempt advances the throttle
-	// exactly once, including empty, converged, rejected, and error results.
-	requests := b.collectNormalEpochRequests(ctx, config, epochConfig)
-	for _, request := range requests {
-		if _, wasActive := activeAtTickStart[request.ResourceGroup]; wasActive {
-			continue
+	if activeMode {
+		// Active mode wins when both rollout flags are enabled.
+		activeConfig := epochConfig
+		activeConfig.shadow = false
+		requests := b.collectNormalEpochRequests(ctx, config, activeConfig)
+		for _, request := range requests {
+			if _, wasActive := activeAtTickStart[request.ResourceGroup]; wasActive {
+				continue
+			}
+			activeAtTickStart[request.ResourceGroup] = struct{}{}
+			if b.epochManager.HasActive(request.ResourceGroup) {
+				b.normalBalanceQueue = nil
+				continue
+			}
+			result := b.epochManager.Advance(ctx, request)
+			if result.Started || result.Admitted > 0 || b.epochManager.HasActive(request.ResourceGroup) {
+				b.normalBalanceQueue = nil
+			}
+			if result.Admitted > 0 {
+				b.stoppingBalanceQueue = nil
+			}
 		}
-		activeAtTickStart[request.ResourceGroup] = struct{}{}
-		if b.epochManager.HasActive(request.ResourceGroup) {
-			b.normalBalanceQueue = nil
-			continue
-		}
-		result := b.epochManager.Advance(ctx, request)
-		if result.Started || result.Admitted > 0 || b.epochManager.HasActive(request.ResourceGroup) {
-			b.normalBalanceQueue = nil
-		}
-		if result.Admitted > 0 {
-			b.stoppingBalanceQueue = nil
-		}
+		b.autoBalanceTs = time.Now()
+		return nil
 	}
+
+	// Shadow is stateless and never suppresses the legacy normal-balance path.
+	// Retained active state still drains before either path can produce work.
+	if len(postObservationActive) > 0 {
+		return nil
+	}
+	shadowConfig := epochConfig
+	shadowConfig.enabled = false
+	shadowConfig.shadow = true
+	requests := b.collectNormalEpochRequests(ctx, config, shadowConfig)
+	for _, request := range requests {
+		if b.epochManager.HasActive(request.ResourceGroup) {
+			continue
+		}
+		b.epochManager.Advance(ctx, request)
+	}
+	runLegacyNormalBalance()
 	b.autoBalanceTs = time.Now()
 
 	// Always return nil as tasks are submitted directly to scheduler
