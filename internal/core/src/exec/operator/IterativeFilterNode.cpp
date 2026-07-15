@@ -178,6 +178,16 @@ PhyIterativeFilterNode::GetOutput() {
         std::vector<std::pair<int32_t, int32_t>> element_to_doc_mapping;
         std::unordered_map<int64_t, bool> doc_eval_cache;
         std::unordered_set<int64_t> unique_doc_ids;
+        // Cached element range of the last resolved row: element ids from
+        // one row arrive in clusters even though iterator output is
+        // distance-ordered, so ids inside the cached range resolve without
+        // the virtual binary-search lookup and anything else falls back to
+        // the per-element lookup (correctness never depends on ordering).
+        // A resolved row's range is immutable, so the cache stays valid
+        // across batches and nqs.
+        int32_t cached_doc_id = 0;
+        int32_t cached_first_elem = 0;
+        int32_t cached_last_elem = 0;  // empty: first lookup always misses
 
         for (auto& iterator : search_result.vector_iterators_.value()) {
             EvalCtx eval_ctx(operator_context_->get_exec_context());
@@ -223,8 +233,23 @@ PhyIterativeFilterNode::GetOutput() {
                     element_to_doc_mapping.reserve(offsets.size());
 
                     for (auto element_id : offsets) {
-                        auto [doc_id, elem_idx] =
-                            array_offsets->ElementIDToRowID(element_id);
+                        int32_t doc_id;
+                        int32_t elem_idx;
+                        if (element_id >= cached_first_elem &&
+                            element_id < cached_last_elem) {
+                            doc_id = cached_doc_id;
+                            elem_idx = element_id - cached_first_elem;
+                        } else {
+                            const auto row =
+                                array_offsets->ElementIDToRowID(element_id);
+                            doc_id = row.first;
+                            elem_idx = row.second;
+                            cached_doc_id = doc_id;
+                            cached_first_elem = element_id - elem_idx;
+                            cached_last_elem =
+                                array_offsets->ElementIDRangeOfRow(doc_id)
+                                    .second;
+                        }
                         element_to_doc_mapping.push_back({doc_id, elem_idx});
                         unique_doc_ids.insert(doc_id);
                     }
