@@ -7,7 +7,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get upgrade -y --no-install-recommends gnupg2 gnupg gnupg-l10n gnupg-utils gpg gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm gpgv dirmngr && \
+    apt-get upgrade -y --no-install-recommends gnupg2 gnupg gnupg-l10n gnupg-utils gpg gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm gpgv dirmngr openssl libssl3 && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
@@ -37,4 +37,3 @@ RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/
 ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /milvus
-
