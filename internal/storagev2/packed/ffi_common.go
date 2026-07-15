@@ -24,16 +24,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
-// milvus-storage does not expose structured error codes, so callers cannot
-// distinguish a recoverable concurrent-transaction conflict from a hard IO
-// error. We treat all loon failures as retryable for now and rely on a
-// bounded retry budget plus outer error handling to keep the worst case
-// finite.
-//
-// TODO(storage v3): once milvus-storage exposes explicit error codes, narrow
-// this sentinel to only the concurrent-transaction case (FailResolver) and
-// let other errors propagate immediately as retry.Unrecoverable.
+// ErrLoonTransient marks failures that milvus-storage explicitly classifies as
+// retryable through loon_ffi_is_retryable_errcode. Permanent Loon FFI failures
+// use the typed merr storage error instead.
 var ErrLoonTransient = errors.New("loon FFI transient error")
 
 // Property keys exported by milvus-storage/ffi_c.h.
@@ -315,13 +308,16 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 	defer C.loon_ffi_free_result(&ffiResult)
 	if C.loon_ffi_is_success(&ffiResult) == 0 {
+		errCode := int(ffiResult.err_code)
 		errMsg := C.loon_ffi_get_errmsg(&ffiResult)
 		errStr := "Unknown error"
 		if errMsg != nil {
 			errStr = C.GoString(errMsg)
 		}
-
-		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		if C.loon_ffi_is_retryable_errcode(ffiResult.err_code) != 0 {
+			return merr.Wrapf(ErrLoonTransient, "FFI operation failed (code %d): %s", errCode, errStr)
+		}
+		return merr.WrapErrStorageMsg("FFI operation failed (code %d): %s", errCode, errStr)
 	}
 	return nil
 }

@@ -61,6 +61,7 @@
 #include "log/Log.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -2880,12 +2881,16 @@ SegmentGrowingImpl::LoadColumnGroup(
     LOG_INFO("Loading segment {} column group {}", id_, index);
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "error: {}",
-               get_segment_id(),
-               index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        auto error =
+            milvus_storage::ToSegcoreError(chunk_reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "get chunk reader failed, segment {}, column group index "
+                  "{}, error: {}",
+                  get_segment_id(),
+                  index,
+                  error.what());
+    }
 
     auto chunk_reader = std::move(chunk_reader_result.ValueOrDie());
 
@@ -2896,12 +2901,15 @@ SegmentGrowingImpl::LoadColumnGroup(
                "load column group row limit should be non-negative, got {}",
                row_limit);
     auto chunk_rows_result = chunk_reader->get_chunk_rows();
-    AssertInfo(chunk_rows_result.ok(),
-               "get chunk rows failed, segment {}, column group index {}, "
-               "error: {}",
-               get_segment_id(),
-               index,
-               chunk_rows_result.status().ToString());
+    if (!chunk_rows_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(chunk_rows_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "get chunk rows failed, segment {}, column group index {}, "
+                  "error: {}",
+                  get_segment_id(),
+                  index,
+                  error.what());
+    }
 
     auto chunk_rows = std::move(chunk_rows_result).ValueOrDie();
     std::vector<int64_t> row_groups_to_load;
@@ -2937,7 +2945,13 @@ SegmentGrowingImpl::LoadColumnGroup(
                 std::iota(chunk_ids.begin(), chunk_ids.end(), part.offset);
 
                 auto result = chunk_reader->get_chunks(chunk_ids, 1);
-                AssertInfo(result.ok(), "get chunks failed");
+                if (!result.ok()) {
+                    auto error =
+                        milvus_storage::ToSegcoreError(result.status());
+                    ThrowInfo(error.get_error_code(),
+                              "get chunks failed: {}",
+                              error.what());
+                }
                 return result.ValueOrDie();
             }));
     }

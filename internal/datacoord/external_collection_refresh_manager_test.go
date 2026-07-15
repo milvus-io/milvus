@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -660,13 +661,9 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.Empty(t, job.GetTaskIds(), "no tasks should be persisted after async failure")
 	})
 
-	t.Run("ffi_explore_error_marks_job_failed_non_retriable", func(t *testing.T) {
-		// Regression for #49233: any FFI failure during explore (NoSuchBucket,
-		// AccessDenied, DNS NXDOMAIN, malformed URI, ...) is wrapped by the
-		// loon FFI layer as ErrLoonTransient. Without classification this
-		// looped forever as RefreshPending. Treat all FFI explore failures
-		// as terminal so the job transitions to RefreshFailed and the user
-		// gets a clear signal.
+	t.Run("permanent_ffi_explore_error_marks_job_failed_non_retriable", func(t *testing.T) {
+		// Regression for #49233: permanent FFI failures such as NoSuchBucket
+		// must transition the job to RefreshFailed instead of retrying forever.
 		refreshMeta := createTestRefreshMeta(t)
 		alloc := &stubAllocator{nextID: 1000}
 		scheduler := newStubScheduler()
@@ -685,7 +682,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
 		defer mockIsExternal.UnPatch()
 
-		ffiErr := errors.Wrap(packed.ErrLoonTransient, "FFI operation failed: AWS Error NO_SUCH_BUCKET during ListObjectsV2")
+		ffiErr := merr.WrapErrStorageMsg("FFI operation failed: AWS Error NO_SUCH_BUCKET during ListObjectsV2")
 		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
 			Return(nil, "", ffiErr).Build()
 		defer mockExplore.UnPatch()
@@ -704,6 +701,52 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.Contains(t, job.GetFailReason(), "explore external files failed")
 		assert.Contains(t, job.GetFailReason(), "NO_SUCH_BUCKET",
 			"underlying error must be surfaced to operators")
+	})
+
+	t.Run("transient_ffi_explore_error_keeps_job_init_for_retry", func(t *testing.T) {
+		refreshMeta := createTestRefreshMeta(t)
+		alloc := &stubAllocator{nextID: 1000}
+		scheduler := newStubScheduler()
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID: 100,
+			Schema: &schemapb.CollectionSchema{
+				Name:           "test_collection",
+				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"parquet"}`,
+			},
+		})
+		mt := &meta{collections: collections}
+
+		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
+		defer mockIsExternal.UnPatch()
+
+		// ExploreFilesReturnManifestPath wraps HandleLoonFFIResult errors with
+		// ErrStorage, so a real transient failure matches both sentinels.
+		ffiErr := merr.WrapErrStorage(
+			errors.Wrap(packed.ErrLoonTransient, "FFI operation failed: storage timeout"),
+			"loon_exttable_explore failed",
+		)
+		assert.ErrorIs(t, ffiErr, packed.ErrLoonTransient)
+		assert.ErrorIs(t, ffiErr, merr.ErrStorage)
+		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+			Return(nil, "", ffiErr).Build()
+		defer mockExplore.UnPatch()
+
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+
+		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		assert.NoError(t, err)
+
+		manager.Stop()
+
+		job := refreshMeta.GetJob(1)
+		assert.NotNil(t, job)
+		assert.Equal(t, indexpb.JobState_JobStateInit, job.GetState(),
+			"transient FFI explore failure must remain retryable")
+		assert.Empty(t, job.GetFailReason())
+		assert.Empty(t, job.GetTaskIds())
 	})
 
 	t.Run("milvus_table_schema_error_marks_job_failed_non_retriable", func(t *testing.T) {

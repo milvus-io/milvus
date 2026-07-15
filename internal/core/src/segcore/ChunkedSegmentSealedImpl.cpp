@@ -100,6 +100,7 @@
 #include "knowhere/version.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -8204,12 +8205,16 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         "reader must exist before loading manifest column group, segment {}",
         get_segment_id());
     auto chunk_reader_result = reader->get_chunk_reader(index, needed_columns);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "status msg: {}",
-               get_segment_id(),
-               index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        auto error =
+            milvus_storage::ToSegcoreError(chunk_reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "get chunk reader failed, segment {}, column group index "
+                  "{}, status msg: {}",
+                  get_segment_id(),
+                  index,
+                  error.what());
+    }
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
@@ -8348,12 +8353,16 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         "reader must exist before loading manifest column group, segment {}",
         get_segment_id());
     auto chunk_reader_result = reader->get_chunk_reader(index, needed_columns);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "status msg: {}",
-               get_segment_id(),
-               index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        auto error =
+            milvus_storage::ToSegcoreError(chunk_reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "get chunk reader failed, segment {}, column group index "
+                  "{}, status msg: {}",
+                  get_segment_id(),
+                  index,
+                  error.what());
+    }
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
