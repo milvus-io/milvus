@@ -248,12 +248,35 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
 
-    auto schema = segment_->get_schema();
-    auto field_meta =
-        schema.GetFirstArrayFieldInStruct(expr_->get_struct_name());
+    // Plain scalar arrays and struct arrays are resolved by name via
+    // ResolveArrayElementField, keeping the existing element aggregation
+    // (ArrayOffsets) path unchanged.
+    const auto& schema = segment_->get_schema();
+    auto field_meta = schema.ResolveArrayElementField(expr_->get_field_name());
+    EvalWithOffsets(context,
+                    result,
+                    segment_->GetArrayOffsets(field_meta.get_id()),
+                    field_meta.get_id());
+}
 
-    auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());
-    AssertInfo(array_offsets != nullptr, "Array offsets not available");
+void
+PhyMatchFilterExpr::EvalWithOffsets(
+    EvalCtx& context,
+    VectorPtr& result,
+    std::shared_ptr<const IArrayOffsets> array_offsets,
+    FieldId field_id) {
+    auto input = context.get_offset_input();
+    // Reachable via a deployment config choice (index-only load: the array
+    // field's index is loaded but its raw data is not), so surface it as a
+    // typed, actionable error instead of an internal assert.
+    if (array_offsets == nullptr) {
+        ThrowInfo(ExprInvalid,
+                  "MATCH_*/element_filter on field '{}' requires the array "
+                  "field's raw data to be loaded: no row->element offsets "
+                  "are available (an index alone carries no row<->element "
+                  "mapping). Load the field's raw data instead of index-only.",
+                  expr_->get_field_name());
+    }
 
     int64_t batch_rows;
     int64_t elem_start;
@@ -308,7 +331,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (MatchEmptyElements(match_type, threshold)) {
             bitset_view.set();
         }
-        MaskNullRows(col_vec.get(), field_meta.get_id(), input, batch_rows);
+        MaskNullRows(col_vec.get(), field_id, input, batch_rows);
         if (!has_offset_input_) {
             current_pos_ += batch_rows;
         }
@@ -320,6 +343,21 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                "Match result should be ColumnVector");
     AssertInfo(match_result_col_vec->IsBitmap(),
                "Match result should be bitmap");
+    // Backstop for the parser-side predicate-shape validation: the child MUST
+    // be element-level (one bit per element). A row-level child (row-space
+    // column ref or a constant-folded predicate) returns batch_rows bits; the
+    // per-row aggregation below would then read up to elem_count bits from it,
+    // i.e. past its end. A malformed/legacy plan shape is an invalid
+    // expression, not an internal bug -- fail loudly with a typed error
+    // instead of returning garbage.
+    if (match_result_col_vec->size() != elem_count) {
+        ThrowInfo(ExprInvalid,
+                  "MATCH predicate produced a non-element-level bitmap: got "
+                  "{} bits, expected {} (one per array element); the "
+                  "predicate must only reference $ / $[subField]",
+                  match_result_col_vec->size(),
+                  elem_count);
+    }
     TargetBitmapView match_result_bitset_view(
         match_result_col_vec->GetRawData(), match_result_col_vec->size());
     TargetBitmapView match_result_valid_view(
@@ -407,7 +445,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         dispatch.template operator()<false>();
     }
 
-    MaskNullRows(col_vec.get(), field_meta.get_id(), input, batch_rows);
+    MaskNullRows(col_vec.get(), field_id, input, batch_rows);
     if (!has_offset_input_) {
         current_pos_ += batch_rows;
     }

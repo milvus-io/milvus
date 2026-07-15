@@ -131,9 +131,7 @@ PhyNullExpr::DetermineExecPath() {
 
     SegmentExpr::DetermineExecPath();
     if (PinnedIndexIsNested()) {
-        exec_path_ = ExprExecPath::RawData;
-        pinned_index_.clear();
-        num_index_chunk_ = 0;
+        FallbackToRawDataExecPath();
     }
 }
 
