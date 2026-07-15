@@ -121,6 +121,20 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	return nopCloseWAL{l}, nil
 }
 
+// GetAvailableRawWALByPChannel returns the available raw wal instance for the pchannel.
+func (m *managerImpl) GetAvailableRawWALByPChannel(pchannel string) (wal.WAL, error) {
+	if !m.lifetime.AddIf(isGetable) {
+		return nil, errWALManagerClosed
+	}
+	defer m.lifetime.Done()
+
+	l := m.getWALLifetime(pchannel).GetWAL()
+	if l == nil || !l.IsAvailable() {
+		return nil, status.NewChannelNotExist(pchannel)
+	}
+	return l, nil
+}
+
 func (m *managerImpl) Metrics() (*types.StreamingNodeMetrics, error) {
 	if !m.lifetime.AddIf(isGetable) {
 		return nil, errWALManagerClosed
@@ -196,6 +210,10 @@ func isOpenable(state managerState) bool {
 // So wrap the wal instance to prevent it from being closed by other components.
 type nopCloseWAL struct {
 	wal.WAL
+}
+
+func (w nopCloseWAL) UnwrapWAL() wal.WAL {
+	return w.WAL
 }
 
 func (w nopCloseWAL) Close() {

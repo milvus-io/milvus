@@ -34,6 +34,12 @@ type StreamingNodeCataLog interface {
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 
+	// ListSegmentDataVersionSummaries lists segment data version summaries for the wal.
+	ListSegmentDataVersionSummaries(ctx context.Context, pChannelName string) (map[string]*streamingpb.SegmentDataVersionSummary, error)
+
+	// SaveSegmentDataVersionSummaries saves segment data version summaries for the wal.
+	SaveSegmentDataVersionSummaries(ctx context.Context, pChannelName string, summaries map[string]*streamingpb.SegmentDataVersionSummary) error
+
 	// ListQueryViews lists persisted StreamingNode query views for the WAL.
 	ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error)
 

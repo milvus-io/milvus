@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -2273,6 +2274,24 @@ func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegme
 	suite.Require().True(deltaResp.GetIsDelta())
 	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
 	suite.Equal(channel, deltaResp.GetLeaderViews()[0].GetChannel())
+}
+
+func TestLeaderViewCatchingUpStreamingData(t *testing.T) {
+	t.Run("legacy querynode preserves catchup state", func(t *testing.T) {
+		assert.True(t, leaderViewCatchingUpStreamingData(nil, true))
+		assert.False(t, leaderViewCatchingUpStreamingData(nil, false))
+	})
+
+	t.Run("embedded querynode does not report legacy catchup", func(t *testing.T) {
+		labels := map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"}
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, true))
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, false))
+	})
+
+	t.Run("legacy embedded querynode label is honored", func(t *testing.T) {
+		labels := map[string]string{sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1"}
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, true))
+	})
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Normal() {

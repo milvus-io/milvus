@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -34,9 +35,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -328,30 +331,72 @@ func TestRegisterQueryViewSyncServer(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestRegisterQueryViewServers(t *testing.T) {
+	server := grpc.NewServer()
+	registerQueryViewServers(server, noopQNSegmentManager{}, 100)
+
+	services := server.GetServiceInfo()
+	_, ok := services["milvus.proto.view.ViewSyncService"]
+	assert.True(t, ok)
+	_, ok = services["milvus.proto.view.ViewQueryService"]
+	assert.True(t, ok)
+}
+
 type noopQNSegmentManager struct{}
 
 func (noopQNSegmentManager) Acquire(qnview.AcquireSegments) {}
 
 func (noopQNSegmentManager) Release(qnview.ReleaseSegments) {}
 
-func TestQueryViewTransformLogAccesserNilWhenWALNotReady(t *testing.T) {
+func (noopQNSegmentManager) AcquireSealedSegmentHandles(context.Context, qviews.QueryViewKey, *viewpb.QueryViewOfQueryNode) ([]qnview.SealedSegmentHandle, error) {
+	return nil, nil
+}
+
+func (noopQNSegmentManager) WaitTransformVisible(context.Context, qviews.QueryViewKey, uint64) error {
+	return nil
+}
+
+func TestQueryViewTransformLogStreamManagerNilWhenWALNotReady(t *testing.T) {
 	streaming.SetWALForTest(nil)
 	defer streaming.SetupNoopWALForTest()
 
-	assert.Nil(t, queryViewTransformLogAccesser())
+	assert.Nil(t, queryViewTransformLogStreamManager())
 }
 
 type fakeQueryViewMetadataMixCoordClient struct {
 	types.MixCoordClient
 
-	getQVLoadInfoReq  *querypb.GetQueryViewSegmentLoadInfoRequest
-	getQVLoadInfoResp *querypb.GetQueryViewSegmentLoadInfoResponse
-	getQVLoadInfoErr  error
+	describeReqs  []*milvuspb.DescribeCollectionRequest
+	describeResps []*milvuspb.DescribeCollectionResponse
+	describeErrs  []error
+
+	getQVLoadInfoReqs  []*querypb.GetQueryViewSegmentLoadInfoRequest
+	getQVLoadInfoResps []*querypb.GetQueryViewSegmentLoadInfoResponse
+	getQVLoadInfoErrs  []error
+}
+
+func (c *fakeQueryViewMetadataMixCoordClient) DescribeCollection(_ context.Context, req *milvuspb.DescribeCollectionRequest, _ ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+	c.describeReqs = append(c.describeReqs, req)
+	idx := len(c.describeReqs) - 1
+	if idx < len(c.describeErrs) && c.describeErrs[idx] != nil {
+		return nil, c.describeErrs[idx]
+	}
+	if idx < len(c.describeResps) {
+		return c.describeResps[idx], nil
+	}
+	return c.describeResps[len(c.describeResps)-1], nil
 }
 
 func (c *fakeQueryViewMetadataMixCoordClient) GetQueryViewSegmentLoadInfo(_ context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	c.getQVLoadInfoReq = req
-	return c.getQVLoadInfoResp, c.getQVLoadInfoErr
+	c.getQVLoadInfoReqs = append(c.getQVLoadInfoReqs, req)
+	idx := len(c.getQVLoadInfoReqs) - 1
+	if idx < len(c.getQVLoadInfoErrs) && c.getQVLoadInfoErrs[idx] != nil {
+		return nil, c.getQVLoadInfoErrs[idx]
+	}
+	if idx < len(c.getQVLoadInfoResps) {
+		return c.getQVLoadInfoResps[idx], nil
+	}
+	return c.getQVLoadInfoResps[len(c.getQVLoadInfoResps)-1], nil
 }
 
 func newTestQueryViewLoadMetadataProvider(client types.MixCoordClient) *lazyQueryViewLoadMetadataProvider {
@@ -363,11 +408,11 @@ func newTestQueryViewLoadMetadataProvider(client types.MixCoordClient) *lazyQuer
 func TestLazyQueryViewLoadMetadataProvider_GetQueryViewSegmentLoadInfo(t *testing.T) {
 	indexes := []*indexpb.IndexInfo{{CollectionID: 100, FieldID: 101, IndexName: "vec_idx"}}
 	client := &fakeQueryViewMetadataMixCoordClient{
-		getQVLoadInfoResp: &querypb.GetQueryViewSegmentLoadInfoResponse{
+		getQVLoadInfoResps: []*querypb.GetQueryViewSegmentLoadInfoResponse{{
 			Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			Infos:         []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}},
 			IndexInfoList: indexes,
-		},
+		}},
 	}
 	provider := newTestQueryViewLoadMetadataProvider(client)
 
@@ -376,9 +421,80 @@ func TestLazyQueryViewLoadMetadataProvider_GetQueryViewSegmentLoadInfo(t *testin
 	require.NoError(t, err)
 	assert.Equal(t, []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}}, infos)
 	assert.Equal(t, indexes, indexInfos)
-	require.NotNil(t, client.getQVLoadInfoReq)
-	assert.Equal(t, int64(100), client.getQVLoadInfoReq.GetCollectionID())
-	assert.Equal(t, []int64{1000}, client.getQVLoadInfoReq.GetSegmentIDs())
+	require.Len(t, client.getQVLoadInfoReqs, 1)
+	assert.Equal(t, int64(100), client.getQVLoadInfoReqs[0].GetCollectionID())
+	assert.Equal(t, []int64{1000}, client.getQVLoadInfoReqs[0].GetSegmentIDs())
+}
+
+func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionRetriesRecoverableError(t *testing.T) {
+	client := &fakeQueryViewMetadataMixCoordClient{
+		describeErrs: []error{merr.WrapErrNodeNotMatch(1, 2)},
+		describeResps: []*milvuspb.DescribeCollectionResponse{{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Schema: &schemapb.CollectionSchema{
+				Name: "qv",
+			},
+		}},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	resp, err := provider.DescribeCollection(context.Background(), 100)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "qv", resp.GetSchema().GetName())
+	require.Len(t, client.describeReqs, 2)
+	assert.Equal(t, int64(100), client.describeReqs[0].GetCollectionID())
+	assert.Equal(t, int64(100), client.describeReqs[1].GetCollectionID())
+}
+
+func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionDoesNotRetryPermanentError(t *testing.T) {
+	client := &fakeQueryViewMetadataMixCoordClient{
+		describeErrs: []error{merr.WrapErrCollectionNotFound(100)},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	_, err := provider.DescribeCollection(context.Background(), 100)
+
+	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	assert.NotContains(t, err.Error(), "unrecoverable error")
+	require.Len(t, client.describeReqs, 1)
+	assert.Equal(t, int64(100), client.describeReqs[0].GetCollectionID())
+}
+
+func TestLazyQueryViewLoadMetadataProvider_GetQueryViewSegmentLoadInfoRetriesRecoverableError(t *testing.T) {
+	client := &fakeQueryViewMetadataMixCoordClient{
+		getQVLoadInfoErrs: []error{merr.WrapErrNodeNotMatch(1, 2)},
+		getQVLoadInfoResps: []*querypb.GetQueryViewSegmentLoadInfoResponse{{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Infos:  []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}},
+		}},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	infos, _, err := provider.GetQueryViewSegmentLoadInfo(context.Background(), 100, 1000)
+
+	require.NoError(t, err)
+	assert.Equal(t, []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}}, infos)
+	require.Len(t, client.getQVLoadInfoReqs, 2)
+	assert.Equal(t, []int64{1000}, client.getQVLoadInfoReqs[0].GetSegmentIDs())
+	assert.Equal(t, []int64{1000}, client.getQVLoadInfoReqs[1].GetSegmentIDs())
+}
+
+func TestLazyQueryViewLoadMetadataProvider_GetQueryViewSegmentLoadInfoDoesNotRetryMissingSegment(t *testing.T) {
+	client := &fakeQueryViewMetadataMixCoordClient{
+		getQVLoadInfoResps: []*querypb.GetQueryViewSegmentLoadInfoResponse{{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	_, _, err := provider.GetQueryViewSegmentLoadInfo(context.Background(), 100, 1000)
+
+	require.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	assert.NotContains(t, err.Error(), "unrecoverable error")
+	require.Len(t, client.getQVLoadInfoReqs, 1)
+	assert.Equal(t, []int64{1000}, client.getQVLoadInfoReqs[0].GetSegmentIDs())
 }
 
 func Test_Run(t *testing.T) {

@@ -248,7 +248,6 @@ message AssignmentDiscoverResponse {
     oneof response {
         FullStreamingNodeAssignmentWithVersion full_assignment =
             1;  // all assignment info.
-        // TODO: may be support partial assignment info in future.
         CloseAssignmentDiscoverResponse close = 2;
     }
 }
@@ -280,7 +279,37 @@ message StreamingNodeInfo {
 // StreamingNodeAssignment is the assignment info of a streaming node.
 message StreamingNodeAssignment {
     StreamingNodeInfo node         = 1;
-    repeated PChannelInfo channels = 2;
+    repeated PChannelInfo channels = 2;  // Primary pchannels (WAL owner, read-write). Unchanged for backward compatibility.
+    // Shard-to-replica mapping for loaded collections on this SN.
+    ShardAssignmentInfo shard_assignment = 3;
+    // Secondary (read-only) pchannel replicas on this SN.
+    // These pchannels subscribe to the WAL but do not own it.
+    // Primary pchannels remain in the channels field above.
+    repeated PChannelInfo secondary_channels = 4;
+}
+
+//
+// ======================== Shard Assignment ========================
+//
+
+// ShardAssignmentInfo carries pchannel-scoped shard-to-replica mappings for a single StreamingNode.
+// Published as part of channel assignment full updates.
+message ShardAssignmentInfo {
+    repeated PChannelShardAssignment pchannel_assignments = 1;
+}
+
+// PChannelShardAssignment carries shard replicas on one pchannel of a StreamingNode.
+// The pchannel must appear in the same StreamingNodeAssignment's channels or secondary_channels.
+message PChannelShardAssignment {
+    string pchannel = 1;
+    repeated ShardAssignmentEntry entries = 2;
+}
+
+// ShardAssignmentEntry identifies a single shard replica on this SN.
+message ShardAssignmentEntry {
+    int64 collection_id = 1;  // Collection this shard belongs to.
+    int32 shard_index = 2;    // Shard index within the collection (0-based).
+    int64 replica_id = 3;     // Replica this shard belongs to.
 }
 
 // DeliverPolicy is the policy to deliver message.
@@ -688,13 +717,16 @@ message TransformDeleteEntry {
     repeated TransformDeleteBlock blocks = 1;
 }
 
+message TransformBarrierEntry {}
+
 // TransformLogEntry is the durable and subscription replay unit.
 message TransformLogEntry {
-    // WAL Delete TimeTick, also the MVCC TimeTick.
+    // Source WAL message TimeTick, also the MVCC TimeTick.
     uint64 time_tick = 1;
 
     oneof entry {
         TransformDeleteEntry delete = 2;
+        TransformBarrierEntry barrier = 3;
     }
 }
 

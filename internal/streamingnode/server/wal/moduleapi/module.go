@@ -103,10 +103,6 @@ type DirtySnapshot interface {
 	MarkPersisted()
 }
 
-type CheckpointPersistedObserver interface {
-	NotifyCheckpointPersisted(metaTimeTick uint64, dataTimeTick uint64)
-}
-
 type ScopeType int
 
 const (
@@ -129,10 +125,6 @@ type Scope struct {
 	VChannel     string
 	CollectionID int64
 	PartitionID  int64
-}
-
-type DataFrontierView interface {
-	DataFrontier(scope Scope) walcheckpoint.Barrier
 }
 
 type DataFrontierProvider interface {

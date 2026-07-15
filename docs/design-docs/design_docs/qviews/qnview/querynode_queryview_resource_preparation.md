@@ -250,6 +250,10 @@ segment, the late result is released and ignored.
 `QueryViewSegmentReadinessManager` turns physically loaded segments into
 QueryView-ready segments.
 
+Recovery baseline events written into TransformLog/TransformingBuffer are
+defined by
+[RecoveryBarrier](../../../../agent_guides/streaming-system/message/message-semantic-recovery-barrier.md).
+
 For each physically loaded segment:
 
 1. mark the segment as physically loaded if it is still referenced;

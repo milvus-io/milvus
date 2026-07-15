@@ -71,6 +71,11 @@ type StreamingNodeManager struct {
 	previousNodesByRG   map[int64]*types.StreamingNodeInfoWithResourceGroup // used to store the previous nodes by resource group.
 }
 
+type shardAssignmentBalancer interface {
+	SetShardAssignmentProvider(balancer.ShardAssignmentProvider)
+	TriggerShardAssignmentUpdate()
+}
+
 // GetBalancer returns the balancer of the streaming node manager.
 func (s *StreamingNodeManager) GetBalancer() balancer.Balancer {
 	b, err := balance.GetWithContext(context.Background())
@@ -125,6 +130,32 @@ func (s *StreamingNodeManager) RegisterStreamingEnabledListener(ctx context.Cont
 		return err
 	}
 	balancer.RegisterStreamingEnabledNotifier(notifier.inner)
+	return nil
+}
+
+func (s *StreamingNodeManager) RegisterShardAssignmentProvider(ctx context.Context, provider balancer.ShardAssignmentProvider) error {
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	shardBalancer, ok := b.(shardAssignmentBalancer)
+	if !ok {
+		return errors.New("streaming balancer does not support shard assignment provider")
+	}
+	shardBalancer.SetShardAssignmentProvider(provider)
+	return nil
+}
+
+func (s *StreamingNodeManager) TriggerShardAssignmentUpdate(ctx context.Context) error {
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	shardBalancer, ok := b.(shardAssignmentBalancer)
+	if !ok {
+		return errors.New("streaming balancer does not support shard assignment provider")
+	}
+	shardBalancer.TriggerShardAssignmentUpdate()
 	return nil
 }
 

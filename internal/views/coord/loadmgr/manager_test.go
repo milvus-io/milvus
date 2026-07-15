@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -110,4 +111,36 @@ func TestCollectionLoadManager_ReleaseCollectionKeepsRegistryForReconcile(t *tes
 
 	assert.NotContains(t, store.Snapshot().ConfigsMap(), int64(100))
 	assert.Equal(t, []int64{100, 100}, notified)
+}
+
+func TestCollectionLoadManager_DiscoverableShardAssignments(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	store := newEmptyLoadConfigStore(t, catalog)
+	var assignmentUpdates int
+	manager := NewCollectionLoadManager(store, nil, nil)
+	manager.SetShardAssignmentNotifier(func() { assignmentUpdates++ })
+
+	shardID := qviews.ShardID{
+		ReplicaID: 1000,
+		VChannel:  "by-dev-rootcoord-dml_0_100v2",
+	}
+	manager.ObserveShardUp(shardID)
+	manager.ObserveShardUp(shardID)
+
+	assignments := manager.ShardAssignmentsByPChannel()
+	require.Len(t, assignments, 1)
+	assert.Equal(t, []types.ShardAssignmentEntry{
+		{CollectionID: 100, ShardIndex: 2, ReplicaID: 1000},
+	}, assignments["by-dev-rootcoord-dml_0"])
+	assert.Equal(t, 1, assignmentUpdates)
+
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	require.NoError(t, store.Put(context.Background(), &LoadConfig{CollectionID: 100}))
+	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(100)).Return(nil).Once()
+	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(100)).Return(nil).Once()
+	require.NoError(t, manager.ReleaseCollection(context.Background(), &messagespb.DropLoadConfigMessageHeader{
+		CollectionId: 100,
+	}))
+	assert.Empty(t, manager.ShardAssignmentsByPChannel())
+	assert.Equal(t, 2, assignmentUpdates)
 }

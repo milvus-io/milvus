@@ -20,6 +20,9 @@ type Manager interface {
 	// Return nil if the wal instance is not found.
 	GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error)
 
+	// GetAvailableRawWALByPChannel returns the available raw wal instance for the pchannel.
+	GetAvailableRawWALByPChannel(pchannel string) (wal.WAL, error)
+
 	// Metrics return all the metrics of current wal manager.
 	Metrics() (*types.StreamingNodeMetrics, error)
 

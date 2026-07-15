@@ -2,6 +2,11 @@
 
 A system-generated WAL message acting as a **visibility barrier**: when a consumer sees TimeTick with timestamp T, all messages with TimeTick < T are committed and safe to consume. No future message will have TimeTick < T.
 
+TimeTick is only an ordering and confirmation barrier. It must not be used to
+create per-VChannel query MVCC entries. WAL recovery uses a separate
+[RecoveryBarrier](message-semantic-recovery-barrier.md) message when it needs to
+establish a query-resource baseline for every recovered live VChannel.
+
 ## IsPersist
 
 TimeTick messages have an **IsPersist** flag. Persisted when real data messages exist in the batch; non-persisted for idle sync ticks (skips WAL backend write but still flows through interceptors and WriteAheadBuffer).

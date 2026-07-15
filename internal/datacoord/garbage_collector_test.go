@@ -78,6 +78,7 @@ func (c *fakeDataViewReferenceChecker) ReferencedDataVersions(collectionID int64
 
 type fakeGCDataViewManager struct {
 	calls             []fakeGCDataViewCall
+	createEvents      []CreateCollectionDataViewEvent
 	flushEvents       []FlushDataViewEvent
 	l0CompactEvents   []L0CompactDataViewEvent
 	snapshotRequested []int64
@@ -90,6 +91,11 @@ type fakeGCDataViewCall struct {
 	collectionID int64
 	protected    []*viewpb.DataVersion
 	retainLatest int
+}
+
+func (m *fakeGCDataViewManager) OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error) {
+	m.createEvents = append(m.createEvents, event)
+	return nil, nil
 }
 
 func (m *fakeGCDataViewManager) OnFlush(ctx context.Context, event FlushDataViewEvent) (*viewpb.DataVersion, error) {

@@ -2,27 +2,31 @@ package segment
 
 import (
 	"context"
-	"sort"
+	"math"
 	"sync"
 
-	"go.uber.org/atomic"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-func newSegmentViewFromMeta(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema, configs ...runtimeConfig) *SegmentView {
-	return newSegmentView(
+func NewSegmentViewFromMeta(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema, configs ...runtimeConfig) *SegmentView {
+	return NewSegmentView(
 		meta,
 		meta.GetCheckpointTimeTick(),
+		meta.GetDataCheckpointTimeTick(),
 		false,
 		writeOnlyInsertBuffer{},
 		schema,
@@ -30,13 +34,10 @@ func newSegmentViewFromMeta(meta *streamingpb.SegmentAssignmentMeta, schema *sch
 	)
 }
 
-func NewSegmentViewFromMetaWithConfig(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema, config ViewConfig) *SegmentView {
-	return newSegmentViewFromMeta(meta, schema, runtimeConfigFromViewConfig(config))
-}
-
-func newSegmentView(
+func NewSegmentView(
 	meta *streamingpb.SegmentAssignmentMeta,
-	persistedCheckpointTimeTick uint64,
+	persistedMetaTimeTick uint64,
+	persistedDataTimeTick uint64,
 	dirty bool,
 	pending writeOnlyInsertBuffer,
 	schema *schemapb.CollectionSchema,
@@ -47,54 +48,33 @@ func newSegmentView(
 		flushPolicy = newDefaultWriteOnlyFlushPolicy()
 	}
 	return &SegmentView{
-		meta:                        proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta),
-		durableMeta:                 proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta),
-		persistedCheckpointTimeTick: persistedCheckpointTimeTick,
-		dirty:                       dirty,
-		lifecycle:                   config.lifecycle,
-		packWriter:                  config.packWriter,
-		runtime:                     config.runtime,
-		pending:                     pending,
-		flushPolicy:                 flushPolicy,
-		schema:                      schema,
-		finalCommitDone:             *atomic.NewBool(finalCommitDoneFromMeta(meta)),
-		createSegmentTimeTick:       meta.GetStat().GetCreateSegmentTimeTick(),
-		segmentID:                   meta.GetSegmentId(),
-		vchannel:                    meta.GetVchannel(),
-		owner:                       config.owner,
+		meta:                  meta,
+		persistedMetaTimeTick: persistedMetaTimeTick,
+		persistedDataTimeTick: persistedDataTimeTick,
+		dirty:                 dirty,
+		lifecycle:             config.lifecycle,
+		packWriter:            config.packWriter,
+		runtime:               config.runtime,
+		pending:               pending,
+		flushPolicy:           flushPolicy,
+		onDataUpdated:         config.onDataUpdated,
+		onSegmentSealed:       config.onSegmentSealed,
+		schema:                schema,
+		metaAndData:           config.metaAndData,
+		commitL1Limiter:       config.commitL1Limiter,
 	}
 }
 
-func finalCommitDoneFromMeta(meta *streamingpb.SegmentAssignmentMeta) bool {
-	return meta.GetL1CommitDone()
-}
-
-func shouldRetryRecoveredFinalCommit(meta *streamingpb.SegmentAssignmentMeta) bool {
-	if finalCommitDoneFromMeta(meta) {
-		return false
-	}
-	switch meta.GetState() {
-	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-		streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED:
-		return meta.GetCheckpointTimeTick() > 0
-	default:
-		return false
-	}
-}
-
-func newSegmentViewFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2, schema *schemapb.CollectionSchema, configs ...runtimeConfig) *SegmentView {
-	return newSegmentView(
+func NewSegmentViewFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2, schema *schemapb.CollectionSchema, configs ...runtimeConfig) *SegmentView {
+	return NewSegmentView(
 		newSegmentAssignmentMetaFromCreateSegmentMessage(msg),
 		0,
-		false,
+		0,
+		true,
 		writeOnlyInsertBuffer{},
 		schema,
 		firstRuntimeConfig(configs),
 	)
-}
-
-func NewSegmentViewFromCreateSegmentMessageWithConfig(msg message.ImmutableCreateSegmentMessageV2, schema *schemapb.CollectionSchema, config ViewConfig) *SegmentView {
-	return newSegmentViewFromCreateSegmentMessage(msg, schema, runtimeConfigFromViewConfig(config))
 }
 
 func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *streamingpb.SegmentAssignmentMeta {
@@ -107,8 +87,7 @@ func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreat
 		Vchannel:           msg.VChannel(),
 		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
 		StorageVersion:     header.StorageVersion,
-		SchemaVersion:      header.SchemaVersion,
-		CheckpointTimeTick: 0,
+		CheckpointTimeTick: msg.TimeTick(),
 		PersistedStorage:   &streamingpb.L1SegmentPersistedStorage{},
 		Stat: &streamingpb.SegmentAssignmentStat{
 			MaxRows:               header.MaxRows,
@@ -128,24 +107,16 @@ func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreat
 type SegmentView struct {
 	mu sync.Mutex
 
-	// meta is the in-memory segment recovery state. It is updated synchronously
-	// by WAL observe and is used to recover the live write path. Its checkpoint
-	// is the observation watermark: the largest message timetick already
-	// delivered by the WAL. It starts at the durable checkpoint (the recovery
-	// anchor restored from the catalog) and only advances as messages are
-	// observed, so after a crash observation resumes at the last persisted data
-	// point and any re-delivered message at or below it is skipped.
+	// meta is the in-memory segment recovery state. It is updated synchronously by
+	// WAL observe and later persisted as SegmentAssignmentMeta.
 	meta *streamingpb.SegmentAssignmentMeta
-	// durableMeta contains only effects whose object/lifecycle work has
-	// completed. It is the sole source of catalog snapshots and its checkpoint
-	// (the largest timetick whose data is durably flushed) is therefore the
-	// recovery anchor: data at or below it is guaranteed to be in object
-	// storage, and it never advances past the observation watermark.
-	durableMeta *streamingpb.SegmentAssignmentMeta
-	// persistedCheckpointTimeTick is the latest durable snapshot checkpoint
-	// already stored in the recovery catalog.
-	persistedCheckpointTimeTick uint64
-	// dirty means durableMeta contains changes not yet persisted into the catalog.
+	// persistedMetaTimeTick is the latest meta/stat timetick already persisted to
+	// the recovery catalog. It backs the segment meta barrier.
+	persistedMetaTimeTick uint64
+	// persistedDataTimeTick is the latest data durability timetick already
+	// persisted into the recovery catalog. It backs the segment data barrier.
+	persistedDataTimeTick uint64
+	// dirty means current meta contains changes not yet persisted into the catalog.
 	dirty bool
 	// pendingDirtySnapshot is the stable in-flight catalog view returned by
 	// ConsumeDirtyAndGetSnapshot and cleared by MarkSnapshotPersisted.
@@ -153,46 +124,73 @@ type SegmentView struct {
 
 	// lifecycle commits data-side segment state to the coordinator after object
 	// storage output is ready.
-	lifecycle  Lifecycle
-	packWriter PackWriter        // writes pending insert data to object storage.
-	runtime    moduleapi.Runtime // schedules segment-owned data tasks.
-	// pendingTasks is the segment's task queue. The head is the task currently
-	// submitted to the scheduler; later entries wait until the head finishes
-	// (see maybeSubmitNextLocked/finishTask), so tasks run strictly one at a
-	// time in creation order without predecessor bookkeeping.
-	pendingTasks []segmentTask
-	// pendingFinalCommit keeps repeated flush messages from enqueueing another
-	// final commit while the current one is pending or retrying.
-	pendingFinalCommit segmentTask
-	// unrecoverableError records the segment's terminal unrecoverable task
-	// error. Once set, every later task fails fast with the same error instead
-	// of executing (see execute). Stored as a pointer to keep the atomic free
-	// of the different-concrete-type panic that atomic.Value would raise on a
-	// second Store.
-	unrecoverableError atomic.Pointer[error]
-	// finalCommitDone is process-local task state. Recovery restores it from the
-	// persisted L1 commit marker; object durability alone does not prove that the
-	// coordinator accepted the final commit. It is published atomically so the
-	// vchannel module can scan views without taking the per-view lock on the WAL
-	// observation hot path.
-	finalCommitDone atomic.Bool
-	// createSegmentTimeTick mirrors meta.Stat.CreateSegmentTimeTick and is
-	// immutable after construction; the module reads it lock-free when
-	// recomputing the L1 materialization bound.
-	createSegmentTimeTick uint64
-	// segmentID and vchannel mirror meta and are immutable after construction;
-	// log paths read them lock-free (meta is otherwise mutated under the lock).
-	segmentID int64
-	vchannel  string
-	pending   writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
-	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks,
-	// ordered by toTimeTick. Chunks stay here until the segment checkpoint
-	// advances over them.
+	lifecycle    Lifecycle
+	packWriter   PackWriter             // writes pending insert data to object storage.
+	runtime      moduleapi.Runtime      // schedules segment-owned data tasks.
+	pendingTasks []scheduler.TaskHandle // unfinished segment tasks used as preconditions.
+	pending      writeOnlyInsertBuffer  // in-memory insert buffer not yet written as L1.
+	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks.
+	// Chunks stay here until segment data checkpoint advances over them.
 	pendingFlushChunks []writeOnlyInsertBuffer
-	pendingDataHandles []pendingDataHandle
-	flushPolicy        flushPolicy                // decides when pending insert data should be flushed.
+	flushPolicy        flushPolicy // decides when pending insert data should be flushed.
+	onDataUpdated      func()      // notifies checkpoint manager when data barrier may advance.
+	onSegmentSealed    func(walview.SegmentSealedEvent)
 	schema             *schemapb.CollectionSchema // schema used to encode pending insert data.
-	owner              ViewOwner
+	metaAndData        bool                       // false during meta-only replay; true when data tasks may run.
+	commitL1Limiter    *commitL1Limiter
+}
+
+// ViewOption configures a segment-level recovery view.
+type ViewOption func(*runtimeConfig)
+
+func WithViewLifecycle(lifecycle Lifecycle) ViewOption {
+	return func(config *runtimeConfig) {
+		config.lifecycle = lifecycle
+	}
+}
+
+func WithViewPackWriter(writer PackWriter) ViewOption {
+	return func(config *runtimeConfig) {
+		config.packWriter = writer
+	}
+}
+
+func WithViewRuntime(runtime moduleapi.Runtime) ViewOption {
+	return func(config *runtimeConfig) {
+		config.runtime = runtime
+	}
+}
+
+func WithViewSegmentSealedNotifier(notifier func(walview.SegmentSealedEvent)) ViewOption {
+	return func(config *runtimeConfig) {
+		config.onSegmentSealed = notifier
+	}
+}
+
+func WithViewDataUpdatedNotifier(notifier func()) ViewOption {
+	return func(config *runtimeConfig) {
+		config.onDataUpdated = notifier
+	}
+}
+
+// NewSegmentViewFromMetaWithOptions creates a segment-level recovery view from
+// persisted meta.
+func NewSegmentViewFromMetaWithOptions(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema, opts ...ViewOption) *SegmentView {
+	config := runtimeConfig{}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return NewSegmentViewFromMeta(meta, schema, config)
+}
+
+// NewSegmentViewFromCreateSegmentMessageWithOptions creates a segment-level
+// recovery view from a CreateSegment WAL message.
+func NewSegmentViewFromCreateSegmentMessageWithOptions(msg message.ImmutableCreateSegmentMessageV2, schema *schemapb.CollectionSchema, opts ...ViewOption) *SegmentView {
+	config := runtimeConfig{}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return NewSegmentViewFromCreateSegmentMessage(msg, schema, config)
 }
 
 func (s *SegmentView) ID() int64 {
@@ -201,98 +199,119 @@ func (s *SegmentView) ID() int64 {
 	return s.meta.GetSegmentId()
 }
 
-func (s *SegmentView) ObserveCreateSegmentMessageV2(
-	_ context.Context,
-	owned message.RetainedImmutableCreateSegmentMessageV2,
-) bool {
-	msg := owned.Message()
+func (s *SegmentView) HasDirty() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dirty
+}
+
+func (s *SegmentView) ObserveCreateSegmentMessageV2(_ context.Context, msg message.ImmutableCreateSegmentMessageV2) moduleapi.ObserveResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.unrecoverableErr() != nil {
-		// Terminal segment: the create observation can never be persisted. Do
-		// not drop it silently — poison it so a consumer can handle it
-		// separately — and do not retain it. Return false: no state change.
-		owned.IntoPoisoned()
-		return false
+	result := moduleapi.ObserveResult{}
+	if s.shouldSkipReplayLocked(msg.TimeTick()) {
+		return result
+	}
+	if !s.metaAndData {
+		return result
 	}
 	timetick := msg.TimeTick()
-	if !s.shouldObserveCreateSegmentLocked(timetick) {
-		return false
+	if timetick <= s.meta.GetDataCheckpointTimeTick() {
+		return result
 	}
-	s.meta.CheckpointTimeTick = timetick
-	s.retainDataHandleLocked(timetick, owned.CloneHandle())
-	s.newEnsureGrowingSegmentTaskLocked(timetick)
-	s.maybeSubmitNextLocked()
-	return true
+	task := s.newEnsureGrowingSegmentTaskLocked(timetick)
+	result.Data = s.dataBarrier()
+	s.runtime.Scheduler.Submit(task)
+	return result
 }
 
-// shouldObserveLocked is the durable-checkpoint watermark: it reports whether
-// data up to timetick is already persisted to object storage. Unlike the
-// observation watermark on meta, it only advances when a flush commit lands,
-// so it is the correct test for flush/commit decisions (a flush point usually
-// equals the largest observed insert timetick, which the observation watermark
-// would misjudge as already handled).
-func (s *SegmentView) shouldObserveLocked(timetick uint64) bool {
-	return timetick > s.durableMeta.GetCheckpointTimeTick()
-}
-
-// shouldObserveCreateSegmentLocked filters a create segment message for an
-// already-tracked view: the message must be a new observation (the WAL
-// delivers in timetick order, so anything at or below the observation
-// watermark is a duplicate delivery) and the segment must still be live (a
-// tombstoned segment no longer accepts any create observation). An
-// unrecoverable segment does not reject here: the entry points poison the
-// incoming message instead (see ObserveCreateSegmentMessageV2), so this
-// predicate stays a pure lifecycle/watermark test.
-func (s *SegmentView) shouldObserveCreateSegmentLocked(timetick uint64) bool {
-	return timetick > s.meta.GetCheckpointTimeTick() &&
-		s.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
-}
-
-// shouldObserveInsertLocked filters an insert batch for the pending buffer:
-// the message must be a new observation (the WAL delivers in timetick order, so
-// anything at or below the observation watermark is a duplicate delivery) and
-// the segment must still be GROWING — a FLUSHED segment's data is already
-// covered by its L1 commit and no flush task will ever run for it again, so
-// accepting anything would strand it in the buffer forever or release it
-// without persisting it. An unrecoverable segment does not reject here: the
-// entry points poison the incoming message instead (see ObserveInsert), so
-// this predicate stays a pure lifecycle/watermark test.
-func (s *SegmentView) shouldObserveInsertLocked(timetick uint64) bool {
-	return timetick > s.meta.GetCheckpointTimeTick() &&
-		s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
-}
-
-func (s *SegmentView) ObserveInsert(
+func (s *SegmentView) ObserveInsertMessageV1(
 	_ context.Context,
-	owned message.RetainedImmutableMessage,
-	batch InsertBatch,
-) bool {
+	msg message.ImmutableInsertMessageV1,
+	assignment *messagespb.PartitionSegmentAssignment,
+) moduleapi.ObserveResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.unrecoverableErr() != nil {
-		// Terminal segment: its data can never be persisted. Do not drop the
-		// message silently — poison it so a consumer can enumerate and handle
-		// it separately — and do not buffer it. Return false: no state change,
-		// so the caller needs no extra work beyond observing the poison.
-		owned.IntoPoisoned()
-		return false
+	result := moduleapi.ObserveResult{}
+	if !s.canReplayInsertLocked(msg.TimeTick()) {
+		return result
 	}
-	if len(batch.assignments) == 0 || !s.shouldObserveInsertLocked(batch.timeTick) {
-		return false
+	if msg.TimeTick() > s.meta.CheckpointTimeTick {
+		s.observeInsertMetaLocked(msg.TimeTick(), assignment)
+		result.Meta = s.metaBarrier()
 	}
-	s.meta.CheckpointTimeTick = batch.timeTick
-	for _, assignment := range batch.assignments {
-		s.observeInsertMetaLocked(batch.timeTick, assignment)
+	if !s.metaAndData {
+		return result
 	}
-	s.pending.appendMessage(owned.Clone(), batch.rows, batch.binarySize)
-	if s.flushPolicy != nil && s.flushPolicy.ShouldFlush(s.pending, batch.timeTick) {
-		s.newFlushL1BufferTaskLocked()
-		s.maybeSubmitNextLocked()
+	if msg.TimeTick() <= s.meta.GetDataCheckpointTimeTick() {
+		return result
 	}
-	return true
+	if msg.TimeTick() <= s.pending.DataTimeTick() {
+		return result
+	}
+	s.pending.append(msg, assignment)
+	if s.flushPolicy != nil && s.flushPolicy.ShouldFlush(s.pending, msg.TimeTick()) {
+		task := s.newFlushL1BufferTaskLocked()
+		s.runtime.Scheduler.Submit(task)
+	}
+	result.Data = s.dataBarrier()
+	return result
+}
+
+func (s *SegmentView) ObserveTxnMessage(_ context.Context, msg message.ImmutableTxnMessage) moduleapi.ObserveResult {
+	var task scheduler.Task
+	matched := false
+	appliedData := false
+	timetick := msg.TimeTick()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := moduleapi.ObserveResult{}
+	if s.shouldSkipReplayLocked(timetick) {
+		return result
+	}
+	if !s.canReplayInsertLocked(timetick) {
+		return result
+	}
+
+	metaTimeTick := s.meta.CheckpointTimeTick
+	pendingDataTimeTick := s.pending.DataTimeTick()
+	appliedMeta := false
+	var rows uint64
+	var binarySize uint64
+	err := forEachSegmentInsertMessage(msg, s.meta.GetSegmentId(), func(insert segmentInsertMessage) error {
+		matched = true
+		if timetick > metaTimeTick {
+			s.observeInsertMetaLocked(timetick, insert.Assignment)
+			appliedMeta = true
+		}
+		if s.metaAndData &&
+			timetick > s.meta.GetDataCheckpointTimeTick() &&
+			timetick > pendingDataTimeTick {
+			rows += insert.Assignment.GetRows()
+			binarySize += insert.Assignment.GetBinarySize()
+			appliedData = true
+		}
+		return nil
+	})
+	if err != nil || !matched {
+		return result
+	}
+	if appliedMeta {
+		result.Meta = s.metaBarrier()
+	}
+	if appliedData {
+		s.pending.appendMessage(msg, rows, binarySize)
+		result.Data = s.dataBarrier()
+		if s.flushPolicy != nil && s.flushPolicy.ShouldFlush(s.pending, timetick) {
+			task = s.newFlushL1BufferTaskLocked()
+		}
+	}
+	if task != nil {
+		s.runtime.Scheduler.Submit(task)
+	}
+	return result
 }
 
 func (s *SegmentView) observeInsertMetaLocked(timetick uint64, assignment *messagespb.PartitionSegmentAssignment) {
@@ -300,46 +319,29 @@ func (s *SegmentView) observeInsertMetaLocked(timetick uint64, assignment *messa
 	s.meta.Stat.ModifiedBinarySize += assignment.GetBinarySize()
 	s.meta.Stat.ModifiedRows += assignment.GetRows()
 	s.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
+	s.meta.CheckpointTimeTick = timetick
+	s.dirty = true
 }
 
-func (s *SegmentView) Flush(
-	_ context.Context,
-	owned message.RetainedImmutableMessage,
-) bool {
-	msg := owned.Message()
+func (s *SegmentView) Flush(_ context.Context, timetick uint64) moduleapi.ObserveResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.unrecoverableErr() != nil {
-		// Terminal segment: nothing can be persisted, so do not observe the
-		// flush or retain anything — the commit task it would enqueue fails
-		// fast and the retained handle would never be released. Poison the
-		// incoming flush message instead of dropping it silently, so a
-		// consumer can handle it separately.
-		owned.IntoPoisoned()
-		return false
-	}
-	timetick := msg.TimeTick()
 	closed, flushTimeTick, metaChanged := s.observeFlushMeta(timetick)
-	if !closed || !s.shouldObserveLocked(flushTimeTick) {
-		return metaChanged
+	result := moduleapi.ObserveResult{}
+	if metaChanged {
+		result.Meta = s.metaBarrier()
 	}
-	// The flush message is observed like any other message: advance the
-	// observation watermark. This never skips a future insert (the WAL
-	// delivers in timetick order, so every insert at or below the flush point
-	// has already been observed), and the durable checkpoint itself is only
-	// advanced later when the L1 commit actually lands (see
-	// markCheckpointDurableLocked).
-	s.meta.CheckpointTimeTick = flushTimeTick
-	if s.finalCommitDone.Load() {
-		return metaChanged
+	if !s.metaAndData {
+		return result
 	}
-	s.retainDataHandleLocked(flushTimeTick, owned.Clone())
+	if !closed || flushTimeTick <= s.meta.GetDataCheckpointTimeTick() {
+		return result
+	}
 	task := s.newCommitL1SegmentTaskLocked(flushTimeTick)
-	if task != nil {
-		s.maybeSubmitNextLocked()
-	}
-	return metaChanged || task != nil
+	result.Data = s.dataBarrier()
+	s.runtime.Scheduler.Submit(task)
+	return result
 }
 
 func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint64) error {
@@ -347,16 +349,6 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		return nil
 	}
 	s.mu.Lock()
-	if err := s.unrecoverableErr(); err != nil {
-		// Terminal segment: its data can never be committed to DataCoord, so
-		// writing another chunk to object storage would orphan binlogs with no
-		// L1 commit to register them, and markCheckpointDurableLocked would
-		// release retained handles and let the WAL truncate past data that must
-		// stay recoverable. Reject instead (see also Flush and
-		// RequestPersistThrough).
-		s.mu.Unlock()
-		return err
-	}
 	pack := s.flushPackForTimeTickLocked(targetTimeTick)
 	s.mu.Unlock()
 	if pack == nil {
@@ -367,42 +359,15 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		return err
 	}
 	if result == nil || result.PersistedStorage == nil {
-		return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("growing segment pack writer returned empty persisted storage"))
+		return errors.New("growing segment pack writer returned empty persisted storage")
 	}
 
 	s.mu.Lock()
-	chunk := s.pendingFlushChunkLocked(targetTimeTick)
-	if chunk == nil {
-		s.mu.Unlock()
-		return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("growing segment flush chunk disappeared at timetick %d", targetTimeTick))
-	}
-	appendPersistedStorage(s.meta, result.PersistedStorage)
-	appendPersistedStorage(s.durableMeta, result.PersistedStorage)
-	applyInsertStat(s.durableMeta, *chunk)
-	handles := s.markPendingDataDurableLocked(targetTimeTick)
+	s.appendPersistedStorage(result.PersistedStorage)
+	s.MarkPendingDataDurable(targetTimeTick)
 	s.mu.Unlock()
 	s.NotifyDataUpdated()
-	releaseMessages(handles)
 	return nil
-}
-
-// RequestPersistThrough schedules persistence for buffered inserts whose
-// TimeTick is not greater than targetTimeTick. The whole current buffer may be
-// persisted, so the scheduled task can cover a later TimeTick as well.
-func (s *SegmentView) RequestPersistThrough(targetTimeTick uint64) bool {
-	s.mu.Lock()
-	if s.unrecoverableErr() != nil {
-		s.mu.Unlock()
-		return false
-	}
-	if len(s.pending.entries) == 0 || s.pending.fromTimeTick > targetTimeTick {
-		s.mu.Unlock()
-		return false
-	}
-	s.newFlushL1BufferTaskLocked()
-	s.maybeSubmitNextLocked()
-	s.mu.Unlock()
-	return true
 }
 
 func (info *SegmentView) AssignmentMeta() *streamingpb.SegmentAssignmentMeta {
@@ -411,38 +376,10 @@ func (info *SegmentView) AssignmentMeta() *streamingpb.SegmentAssignmentMeta {
 	return proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
 }
 
-func (info *SegmentView) WritePathRecoveryState() (moduleapi.SegmentWritePathRecoveryState, bool) {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	// Pure lifecycle-state predicate: only the segment assignment state machine
-	// decides whether this segment is a growing target. The unrecoverable
-	// health marker never touches the state machine — it only fast-fails the
-	// persistence tasks (see task execution and the observation gates).
-	if info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-		return moduleapi.SegmentWritePathRecoveryState{}, false
-	}
-	state := moduleapi.SegmentWritePathRecoveryState{
-		VChannel:     info.meta.GetVchannel(),
-		CollectionID: info.meta.GetCollectionId(),
-		PartitionID:  info.meta.GetPartitionId(),
-		SegmentID:    info.meta.GetSegmentId(),
-	}
-	if info.meta.GetStat() != nil {
-		state.Stat = proto.Clone(info.meta.GetStat()).(*streamingpb.SegmentAssignmentStat)
-	}
-	return state, true
-}
-
 func (info *SegmentView) IDAndVChannel() (int64, string) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	return info.meta.GetSegmentId(), info.meta.GetVchannel()
-}
-
-func (info *SegmentView) CollectionID() int64 {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	return info.meta.GetCollectionId()
 }
 
 func (info *SegmentView) VChannel() string {
@@ -457,57 +394,213 @@ func (info *SegmentView) PartitionID() int64 {
 	return info.meta.GetPartitionId()
 }
 
+func (info *SegmentView) MatchesScope(scope moduleapi.Scope) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	switch scope.Type {
+	case moduleapi.ScopeAll:
+		return true
+	case moduleapi.ScopeVChannel:
+		return info.meta.GetVchannel() == scope.VChannel
+	case moduleapi.ScopePartition:
+		if scope.VChannel != "" && info.meta.GetVchannel() != scope.VChannel {
+			return false
+		}
+		return info.meta.GetCollectionId() == scope.CollectionID && info.meta.GetPartitionId() == scope.PartitionID
+	default:
+		return false
+	}
+}
+
+func (info *SegmentView) VisibleSnapshot(vchannel string, dataVersion qviews.DataVersion) (walview.VisibleSegment, bool) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetVchannel() != vchannel || !info.visibleAtDataVersionLocked(dataVersion) {
+		return walview.VisibleSegment{}, false
+	}
+	meta := proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
+	insertMessages := info.pending.Messages()
+	for _, chunk := range info.pendingFlushChunks {
+		insertMessages = append(insertMessages, chunk.Messages()...)
+	}
+	visible := walview.VisibleSegment{
+		SegmentID:           meta.GetSegmentId(),
+		PartitionID:         meta.GetPartitionId(),
+		Schema:              cloneSchema(info.schema),
+		Assignment:          meta,
+		SealedAtDataVersion: meta.GetSealedAtDataVersion(),
+		Data: walview.SegmentSnapshotData{
+			PersistedStorage: clonePersistedStorage(meta.GetPersistedStorage()),
+			InsertMessages:   insertMessages,
+		},
+	}
+	return visible, true
+}
+
+func (info *SegmentView) visibleAtDataVersionLocked(dataVersion qviews.DataVersion) bool {
+	switch info.meta.GetState() {
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
+		return true
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+		if info.meta.GetSealedAtDataVersion() == nil {
+			return true
+		}
+		return qviews.FromProtoDataVersion(info.meta.GetSealedAtDataVersion()).GT(dataVersion)
+	default:
+		return false
+	}
+}
+
+func (info *SegmentView) SealedDataVersion(vchannel string) (qviews.DataVersion, bool) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetVchannel() != vchannel ||
+		info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED ||
+		info.meta.GetSealedAtDataVersion() == nil {
+		return qviews.DataVersion{}, false
+	}
+	return qviews.FromProtoDataVersion(info.meta.GetSealedAtDataVersion()), true
+}
+
+func (info *SegmentView) TombstonedSealedDataVersion() (string, qviews.DataVersion, bool) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED ||
+		info.meta.GetSealedAtDataVersion() == nil {
+		return "", qviews.DataVersion{}, false
+	}
+	return info.meta.GetVchannel(), qviews.FromProtoDataVersion(info.meta.GetSealedAtDataVersion()), true
+}
+
+func cloneSchema(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	if schema == nil {
+		return nil
+	}
+	return proto.Clone(schema).(*schemapb.CollectionSchema)
+}
+
+func clonePersistedStorage(storage *streamingpb.L1SegmentPersistedStorage) *streamingpb.L1SegmentPersistedStorage {
+	if storage == nil {
+		return nil
+	}
+	return proto.Clone(storage).(*streamingpb.L1SegmentPersistedStorage)
+}
+
+func (info *SegmentView) metaTimeTick() uint64 {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.persistedMetaTimeTick
+}
+
+func (info *SegmentView) metaBarrier() walcheckpoint.Barrier {
+	return walcheckpoint.BarrierFunc(info.metaTimeTick)
+}
+
+func (info *SegmentView) MetaBarrier() walcheckpoint.Barrier {
+	return info.metaBarrier()
+}
+
+func (info *SegmentView) dataTimeTick() uint64 {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.persistedDataTimeTick
+}
+
+func (info *SegmentView) dataBarrier() walcheckpoint.Barrier {
+	return walcheckpoint.BarrierFunc(info.dataTimeTick)
+}
+
+func (info *SegmentView) DataBarrier() walcheckpoint.Barrier {
+	return info.dataBarrier()
+}
+
+func (info *SegmentView) DurableFrontierTimeTick() uint64 {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
+		if info.dirty {
+			return frontierBefore(info.meta.GetTombstoneTimeTick())
+		}
+		return math.MaxUint64
+	}
+	if !info.hasPendingDataWorkLocked() {
+		return math.MaxUint64
+	}
+	return min(info.persistedMetaTimeTick, info.persistedDataTimeTick)
+}
+
+func frontierBefore(timetick uint64) uint64 {
+	if timetick == 0 {
+		return 0
+	}
+	return timetick - 1
+}
+
+func (info *SegmentView) hasPendingDataWorkLocked() bool {
+	if info.meta.GetDataCheckpointTimeTick() > info.persistedDataTimeTick {
+		return true
+	}
+	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED &&
+		info.meta.GetDataCheckpointTimeTick() < info.meta.GetCheckpointTimeTick() {
+		return true
+	}
+	if len(info.pending.entries) > 0 || len(info.pendingFlushChunks) > 0 {
+		return true
+	}
+	for _, task := range info.pendingTasks {
+		if task != nil && !task.Done() {
+			return true
+		}
+	}
+	return false
+}
+
 func (info *SegmentView) CreateTimeTick() uint64 {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	return info.meta.GetStat().GetCreateSegmentTimeTick()
 }
 
-// L1MaterializationBlockerTimeTick reports the inclusive TransformLog
-// materialization frontier imposed by an L1 segment whose final commit has not
-// completed yet. Lock-free by design: finalCommitDone is published atomically
-// and createSegmentTimeTick is immutable, so the vchannel module may scan every
-// view on the WAL observation hot path without acquiring the per-view lock.
-// The level is not re-checked here because the vchannel recovery module only
-// tracks L1 segments.
-func (info *SegmentView) L1MaterializationBlockerTimeTick() (uint64, bool) {
-	if info.finalCommitDone.Load() {
-		return 0, false
+func (info *SegmentView) markMetaPersistedLocked(timetick uint64) {
+	if timetick > info.persistedMetaTimeTick {
+		info.persistedMetaTimeTick = timetick
 	}
-	return info.createSegmentTimeTick, true
 }
 
-func (info *SegmentView) markCheckpointPersistedLocked(timetick uint64) {
-	if timetick > info.persistedCheckpointTimeTick {
-		info.persistedCheckpointTimeTick = timetick
+func (info *SegmentView) markDataPersistedLocked(timetick uint64) {
+	if timetick > info.persistedDataTimeTick {
+		info.persistedDataTimeTick = timetick
 	}
 }
 
 func (info *SegmentView) MarkSnapshotPersisted(snapshot *streamingpb.SegmentAssignmentMeta) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
-	info.markCheckpointPersistedLocked(snapshot.GetCheckpointTimeTick())
+	info.markMetaPersistedLocked(snapshot.GetCheckpointTimeTick())
+	info.markDataPersistedLocked(snapshot.GetDataCheckpointTimeTick())
 	if info.pendingDirtySnapshot != nil && proto.Equal(info.pendingDirtySnapshot, snapshot) {
 		info.pendingDirtySnapshot = nil
 	}
-	info.dirty = !proto.Equal(info.durableMeta, snapshot)
+	info.dirty = !proto.Equal(info.meta, snapshot)
 }
 
-// NotifyDataUpdated reports data changes to the owning module. Must not be
-// called with the view's lock held: the module takes its own lock and may
-// re-enter the view.
 func (info *SegmentView) NotifyDataUpdated() {
-	info.owner.SegmentDataUpdated(info.ID(), info)
+	if info.onDataUpdated != nil {
+		info.onDataUpdated()
+	}
 }
 
-func (info *SegmentView) markCheckpointDurableLocked(timetick uint64) {
-	if timetick <= info.durableMeta.GetCheckpointTimeTick() {
+func (info *SegmentView) NotifySegmentSealed(event walview.SegmentSealedEvent) {
+	if info.onSegmentSealed != nil {
+		info.onSegmentSealed(event)
+	}
+}
+
+func (info *SegmentView) markDataCheckpointLocked(timetick uint64) {
+	if timetick <= info.meta.GetDataCheckpointTimeTick() {
 		return
 	}
-	// Only the durable checkpoint advances here. The observation watermark on
-	// meta already covers timetick (the flushed data was observed first), so
-	// it needs no write.
-	info.durableMeta.CheckpointTimeTick = timetick
+	info.meta.DataCheckpointTimeTick = timetick
 	info.dirty = true
 	info.prunePendingFlushChunksLocked()
 }
@@ -518,115 +611,99 @@ func (info *SegmentView) TryFinalizeTombstone() bool {
 	return info.maybeMarkTombstonedLocked()
 }
 
-// EnsureFinalCommit reports whether a flushed segment has completed its durable
-// DataCoord commit. Otherwise it schedules or reuses the segment final task.
-//
-// finalCommitDone is the authoritative commit fact and is checked first: a
-// segment whose L1 commit has landed is durably committed regardless of any
-// later task failure, so a terminal error must not invert the answer for an
-// already-committed segment. A terminal segment that has not committed can
-// never complete its commit, so it returns false — the same value as "not
-// committed yet" — rather than true ("durably committed, safe to forget").
-// Returning true for a segment that never committed would tell the caller it
-// may drop the segment, abandoning uncommitted data that exists only in the
-// WAL (its in-memory handles were already poisoned and released by
-// markUnrecoverable). No task is scheduled for a terminal segment because
-// canScheduleFinalCommitLocked is permanently false once unrecoverable, so
-// returning false does not spin anything.
-func (info *SegmentView) EnsureFinalCommit() bool {
+func (info *SegmentView) HasReadyTombstoneFinalize() bool {
 	info.mu.Lock()
-	if info.finalCommitDone.Load() {
-		info.mu.Unlock()
-		return true
-	}
-	if info.unrecoverableErr() != nil {
-		info.mu.Unlock()
-		return false
-	}
-	if info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
-		info.mu.Unlock()
-		return true
-	}
-	task := info.newCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick())
-	if task != nil {
-		info.maybeSubmitNextLocked()
-	}
-	info.mu.Unlock()
-	return false
+	defer info.mu.Unlock()
+	return info.tombstoneFinalizeReadyLocked()
 }
 
-// ResumePendingRecovery retries legacy recovered final-commit work that was
-// durable before restart but had not reached the coordinator.
-func (info *SegmentView) ResumePendingRecovery() {
+func (info *SegmentView) SwitchIntoMetaAndData() {
 	info.mu.Lock()
-	if info.unrecoverableErr() != nil {
-		// Terminal segment: its commit can never reach the coordinator, so
-		// there is nothing to resume — an enqueued recovered commit task would
-		// only fail fast (see FlushInsertChunk for the same gate).
-		info.mu.Unlock()
+	defer info.mu.Unlock()
+	info.metaAndData = true
+}
+
+func (info *SegmentView) SetSchema(schema *schemapb.CollectionSchema) {
+	if schema == nil {
 		return
 	}
-	if shouldRetryRecoveredFinalCommit(info.meta) {
-		if task := info.newRecoveredCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick()); task != nil {
-			info.maybeSubmitNextLocked()
-		}
-	}
-	info.mu.Unlock()
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	info.schema = schema
 }
 
 func (info *SegmentView) IsGrowing() bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
-	// Pure lifecycle-state predicate: whether the segment is in the GROWING
-	// state of its assignment state machine. The unrecoverable health marker
-	// does not participate — it only fast-fails persistence tasks, it never
-	// changes what state the segment reports.
 	return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
 }
 
-// PersistedCheckpointTimeTick returns the checkpoint already stored in the
-// recovery catalog (the largest timetick whose insert data was durably
-// flushed and whose segment meta was persisted). It is the conservative bound
-// a crash-recovery would observe; vchannel-level flush checkpoints reported
-// to DataCoord must not advance past it.
-func (info *SegmentView) PersistedCheckpointTimeTick() uint64 {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	return info.persistedCheckpointTimeTick
+func (info *SegmentView) canReplayInsertLocked(timetick uint64) bool {
+	switch info.meta.GetState() {
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
+		return true
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+		return timetick <= info.meta.GetCheckpointTimeTick()
+	default:
+		return false
+	}
+}
+
+func (info *SegmentView) shouldSkipReplayLocked(timetick uint64) bool {
+	return shouldSkipTombstonedSegmentMeta(info.meta, timetick)
 }
 
 func (info *SegmentView) TombstonePersisted() bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
-	checkpointTimeTick := info.meta.GetCheckpointTimeTick()
+	tombstoneTimeTick := info.meta.GetTombstoneTimeTick()
 	return info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED &&
-		checkpointTimeTick > 0 &&
+		tombstoneTimeTick > 0 &&
 		!info.dirty &&
-		info.persistedCheckpointTimeTick >= checkpointTimeTick
+		info.persistedMetaTimeTick >= tombstoneTimeTick &&
+		info.persistedDataTimeTick >= tombstoneTimeTick
 }
 
-func (info *SegmentView) TombstonedCleanupReady(physicalTimeTick uint64) bool {
+func (info *SegmentView) CoveredByTombstone(vchannel string, partitionID int64, timetick uint64) bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
-	return info.tombstonedCleanupReadyLocked(physicalTimeTick)
+	if info.meta.GetVchannel() != vchannel {
+		return false
+	}
+	if partitionID != common.AllPartitionsID && info.meta.GetPartitionId() != partitionID {
+		return false
+	}
+	createTimeTick := info.meta.GetStat().GetCreateSegmentTimeTick()
+	return createTimeTick < timetick
 }
 
-func (info *SegmentView) tombstonedCleanupReadyLocked(physicalTimeTick uint64) bool {
-	checkpointTimeTick := info.meta.GetCheckpointTimeTick()
+func (info *SegmentView) TombstonedCleanupReady(metaPhysicalTimeTick uint64, dataPhysicalTimeTick uint64) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.tombstonedCleanupReadyLocked(metaPhysicalTimeTick, dataPhysicalTimeTick)
+}
+
+func (info *SegmentView) tombstonedCleanupReadyLocked(metaPhysicalTimeTick uint64, dataPhysicalTimeTick uint64) bool {
+	tombstoneTimeTick := info.meta.GetTombstoneTimeTick()
 	return info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED &&
-		checkpointTimeTick > 0 &&
+		tombstoneTimeTick > 0 &&
 		!info.dirty &&
-		info.persistedCheckpointTimeTick >= checkpointTimeTick &&
-		physicalTimeTick > checkpointTimeTick
+		info.persistedMetaTimeTick >= tombstoneTimeTick &&
+		info.persistedDataTimeTick >= tombstoneTimeTick &&
+		metaPhysicalTimeTick > tombstoneTimeTick &&
+		dataPhysicalTimeTick > tombstoneTimeTick
 }
 
 func (info *SegmentView) observeFlushMeta(timetick uint64) (bool, uint64, bool) {
 	if info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
 		return false, info.meta.GetCheckpointTimeTick(), false
 	}
-	if timetick <= info.durableMeta.GetCheckpointTimeTick() {
-		return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			info.durableMeta.GetCheckpointTimeTick(), false
+	if timetick < info.meta.CheckpointTimeTick {
+		// the txn message will share the same time tick.
+		// (although the flush operation is not a txn message)
+		// so we only filter the time tick is less than the checkpoint time tick.
+		// Consistent state is guaranteed by the recovery storage's mutex.
+		return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, info.meta.GetCheckpointTimeTick(), false
 	}
 	if info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
 		// idempotent
@@ -635,113 +712,61 @@ func (info *SegmentView) observeFlushMeta(timetick uint64) (bool, uint64, bool) 
 	info.ensureStat()
 	info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
 	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
+	info.meta.CheckpointTimeTick = timetick
+	info.dirty = true
 	return true, timetick, true
 }
 
-func (s *SegmentView) markPendingDataDurableLocked(timetick uint64) []message.RetainedImmutableMessage {
-	if timetick <= s.durableMeta.GetCheckpointTimeTick() {
-		return nil
+func (s *SegmentView) MarkPendingDataDurable(timetick uint64) {
+	if timetick <= s.meta.GetDataCheckpointTimeTick() {
+		return
 	}
-	completed := s.takeDataHandlesThroughLocked(timetick)
-	for _, chunk := range s.pendingFlushChunks {
-		if chunk.toTimeTick > timetick {
-			break
+	s.markDataCheckpointLocked(timetick)
+}
+
+func (s *SegmentView) markSealedAtDataVersionLocked(version *viewpb.DataVersion) (walview.SegmentSealedEvent, bool) {
+	if version == nil {
+		return walview.SegmentSealedEvent{}, false
+	}
+	current := s.meta.GetSealedAtDataVersion()
+	if current != nil {
+		if proto.Equal(current, version) {
+			return walview.SegmentSealedEvent{}, false
 		}
-		completed = append(completed, chunk.retainedHandles()...)
+		panic("conflicting sealed data version for segment assignment")
 	}
-	s.markCheckpointDurableLocked(timetick)
-	return completed
-}
-
-func (s *SegmentView) retainDataHandleLocked(
-	timetick uint64,
-	retained message.RetainedImmutableMessage,
-) {
-	s.pendingDataHandles = append(s.pendingDataHandles, pendingDataHandle{
-		timetick: timetick,
-		message:  retained,
-	})
-}
-
-func (s *SegmentView) takeDataHandlesThroughLocked(timetick uint64) []message.RetainedImmutableMessage {
-	completed := make([]message.RetainedImmutableMessage, 0)
-	pending := s.pendingDataHandles[:0]
-	for _, item := range s.pendingDataHandles {
-		if item.timetick <= timetick {
-			completed = append(completed, item.message)
-			continue
-		}
-		pending = append(pending, item)
-	}
-	clear(s.pendingDataHandles[len(pending):])
-	s.pendingDataHandles = pending
-	return completed
-}
-
-// releaseMessages releases retained messages once their data has been flushed
-// and marked durable. Releasing is a memory-reclaim signal — it does NOT by
-// itself drive WAL truncation. WAL truncation is synchronized with dirty
-// persistence: the segment's dirty snapshot (containing the released data's
-// binlog paths) is persisted to the recovery catalog first, advancing
-// persistedCheckpointTimeTick, and only then does truncation advance. Because
-// markCheckpointDurableLocked (which sets dirty=true) always precedes
-// releaseMessages, the released data is already in durableMeta and cannot be
-// truncated away before it reaches the catalog. The terminal path does not use
-// this helper: markUnrecoverable poisons every retained message instead (see
-// collectAllPendingLocked), since a terminal segment's data was never durable.
-func releaseMessages(messages []message.RetainedImmutableMessage) {
-	for _, msg := range messages {
-		msg.Release()
-	}
-}
-
-// collectAllPendingLocked collects every retained handle in the three pending
-// structures and clears them. It is the terminal sweep of markUnrecoverable:
-// a segment that can never persist again poisons every message it was holding,
-// so a consumer can enumerate and handle them separately, rather than dropping
-// them (which would make the failure invisible). The handles are returned
-// rather than released inline because releasing must happen outside the lock:
-// PoisonedRelease() runs the message finalizer (a flush-completed
-// memory-reclaim signal in the real scanner wiring, which must not execute
-// under s.mu). Must be called with s.mu held.
-func (s *SegmentView) collectAllPendingLocked() []message.RetainedImmutableMessage {
-	var handles []message.RetainedImmutableMessage
-	handles = append(handles, s.pending.entries...)
-	for _, item := range s.pendingDataHandles {
-		handles = append(handles, item.message)
-	}
-	for _, chunk := range s.pendingFlushChunks {
-		handles = append(handles, chunk.entries...)
-	}
-	// Clear the structures so the handles are released and no dangling
-	// reference remains; a terminal segment accepts no new data and runs no
-	// tasks, so nothing reads them afterwards.
-	s.pending.reset()
-	s.pendingDataHandles = nil
-	s.pendingFlushChunks = nil
-	return handles
-}
-
-type pendingDataHandle struct {
-	timetick uint64
-	message  message.RetainedImmutableMessage
+	s.meta.SealedAtDataVersion = proto.Clone(version).(*viewpb.DataVersion)
+	s.dirty = true
+	return walview.SegmentSealedEvent{
+		SegmentID:           s.meta.GetSegmentId(),
+		VChannel:            s.meta.GetVchannel(),
+		SealedAtDataVersion: qviews.FromProtoDataVersion(version),
+	}, true
 }
 
 func (s *SegmentView) maybeMarkTombstonedLocked() bool {
 	if !s.tombstoneFinalizeReadyLocked() {
 		return false
 	}
+	tombstoneTimeTick := s.meta.GetCheckpointTimeTick()
 	s.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
-	s.durableMeta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
+	s.meta.TombstoneTimeTick = tombstoneTimeTick
 	s.dirty = true
 	return true
 }
 
 func (s *SegmentView) tombstoneFinalizeReadyLocked() bool {
+	tombstoneTimeTick := s.meta.GetCheckpointTimeTick()
 	return s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED &&
-		s.meta.GetCheckpointTimeTick() > 0 &&
-		s.finalCommitDone.Load() &&
-		s.durableMeta.GetCheckpointTimeTick() >= s.meta.GetCheckpointTimeTick()
+		tombstoneTimeTick > 0 &&
+		s.meta.GetDataCheckpointTimeTick() >= tombstoneTimeTick
+}
+
+func shouldSkipTombstonedSegmentMeta(meta *streamingpb.SegmentAssignmentMeta, timetick uint64) bool {
+	return meta != nil &&
+		meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED &&
+		meta.GetTombstoneTimeTick() > 0 &&
+		timetick <= meta.GetTombstoneTimeTick()
 }
 
 func (s *SegmentView) enqueuePendingFlushChunkLocked() uint64 {
@@ -754,102 +779,40 @@ func (s *SegmentView) enqueuePendingFlushChunkLocked() uint64 {
 }
 
 func (s *SegmentView) flushPackForTimeTickLocked(timetick uint64) *flushPack {
-	index := s.pendingFlushChunkIndexLocked(timetick)
-	if index < 0 {
-		return nil
+	for _, chunk := range s.pendingFlushChunks {
+		if chunk.toTimeTick == timetick {
+			return chunk.flushPack(s.meta, s.schema)
+		}
 	}
-	chunk := &s.pendingFlushChunks[index]
-	meta := proto.Clone(s.durableMeta).(*streamingpb.SegmentAssignmentMeta)
-	applyInsertStat(meta, *chunk)
-	meta.CheckpointTimeTick = chunk.toTimeTick
-	return chunk.flushPack(meta, s.schema)
-}
-
-func (s *SegmentView) pendingFlushChunkLocked(timetick uint64) *writeOnlyInsertBuffer {
-	index := s.pendingFlushChunkIndexLocked(timetick)
-	if index < 0 {
-		return nil
-	}
-	return &s.pendingFlushChunks[index]
-}
-
-func (s *SegmentView) pendingFlushChunkIndexLocked(timetick uint64) int {
-	index := firstPendingFlushChunkAtOrAfter(s.pendingFlushChunks, timetick)
-	if index == len(s.pendingFlushChunks) || s.pendingFlushChunks[index].toTimeTick != timetick {
-		return -1
-	}
-	return index
-}
-
-func applyInsertStat(meta *streamingpb.SegmentAssignmentMeta, chunk writeOnlyInsertBuffer) {
-	if len(chunk.entries) == 0 {
-		return
-	}
-	if meta.Stat == nil {
-		meta.Stat = &streamingpb.SegmentAssignmentStat{}
-	}
-	meta.Stat.ModifiedRows += chunk.rows
-	meta.Stat.ModifiedBinarySize += chunk.binarySize
-	meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(chunk.toTimeTick).Unix()
+	return nil
 }
 
 func (s *SegmentView) prunePendingFlushChunksLocked() {
-	checkpoint := s.durableMeta.GetCheckpointTimeTick()
-	firstRemaining := firstPendingFlushChunkAfter(s.pendingFlushChunks, checkpoint)
-	if firstRemaining == 0 {
-		return
+	dataCheckpoint := s.meta.GetDataCheckpointTimeTick()
+	remaining := s.pendingFlushChunks[:0]
+	for _, chunk := range s.pendingFlushChunks {
+		if chunk.toTimeTick <= dataCheckpoint {
+			continue
+		}
+		remaining = append(remaining, chunk)
 	}
-	remaining := copy(s.pendingFlushChunks, s.pendingFlushChunks[firstRemaining:])
-	clear(s.pendingFlushChunks[remaining:cap(s.pendingFlushChunks)])
-	s.pendingFlushChunks = s.pendingFlushChunks[:remaining]
+	s.pendingFlushChunks = remaining
 }
 
-func firstPendingFlushChunkAtOrAfter(chunks []writeOnlyInsertBuffer, timetick uint64) int {
-	return sort.Search(len(chunks), func(index int) bool {
-		return chunks[index].toTimeTick >= timetick
-	})
-}
-
-func firstPendingFlushChunkAfter(chunks []writeOnlyInsertBuffer, timetick uint64) int {
-	return sort.Search(len(chunks), func(index int) bool {
-		return chunks[index].toTimeTick > timetick
-	})
-}
-
-func appendPersistedStorage(meta *streamingpb.SegmentAssignmentMeta, storage *streamingpb.L1SegmentPersistedStorage) {
-	if meta.PersistedStorage == nil {
-		meta.PersistedStorage = &streamingpb.L1SegmentPersistedStorage{}
+func (s *SegmentView) appendPersistedStorage(storage *streamingpb.L1SegmentPersistedStorage) {
+	if s.meta.PersistedStorage == nil {
+		s.meta.PersistedStorage = &streamingpb.L1SegmentPersistedStorage{}
 	}
 	if storage.GetManifestPath() != "" {
-		meta.PersistedStorage.ManifestPath = storage.GetManifestPath()
+		s.meta.PersistedStorage.ManifestPath = storage.GetManifestPath()
 	}
-	meta.PersistedStorage.Binlogs = append(
-		meta.PersistedStorage.Binlogs,
+	s.meta.PersistedStorage.Binlogs = append(
+		s.meta.PersistedStorage.Binlogs,
 		cloneL1SegmentBinLogs(storage.GetBinlogs())...,
 	)
 	if storage.GetMergedStatsBinlog() != nil {
-		meta.PersistedStorage.MergedStatsBinlog = cloneFieldBinlog(storage.GetMergedStatsBinlog())
+		s.meta.PersistedStorage.MergedStatsBinlog = cloneFieldBinlog(storage.GetMergedStatsBinlog())
 	}
-	if storage.GetStatistics() != nil {
-		meta.PersistedStorage.Statistics = proto.Clone(storage.GetStatistics()).(*datapb.Statistics)
-	}
-	if len(storage.GetDeltaBinlog()) > 0 {
-		meta.PersistedStorage.DeltaBinlog = append(
-			meta.PersistedStorage.DeltaBinlog,
-			cloneFieldBinlogs(storage.GetDeltaBinlog())...,
-		)
-	}
-}
-
-func cloneFieldBinlogs(values []*datapb.FieldBinlog) []*datapb.FieldBinlog {
-	if len(values) == 0 {
-		return nil
-	}
-	cloned := make([]*datapb.FieldBinlog, 0, len(values))
-	for _, value := range values {
-		cloned = append(cloned, cloneFieldBinlog(value))
-	}
-	return cloned
 }
 
 func (info *SegmentView) ensureStat() {
@@ -867,6 +830,6 @@ func (info *SegmentView) ConsumeDirtyAndGetSnapshot() *streamingpb.SegmentAssign
 	if !info.dirty {
 		return nil
 	}
-	info.pendingDirtySnapshot = proto.Clone(info.durableMeta).(*streamingpb.SegmentAssignmentMeta)
+	info.pendingDirtySnapshot = proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
 	return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.SegmentAssignmentMeta)
 }

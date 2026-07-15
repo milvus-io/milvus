@@ -69,6 +69,25 @@ func TestPut_NewCollection(t *testing.T) {
 	assert.Len(t, got.Replicas, 2)
 }
 
+func TestPut_PersistsReplicaNumberFromReplicaAssignments(t *testing.T) {
+	store, catalog := newTestStore(t)
+	cfg := sampleConfig()
+
+	var saved querypb.CollectionLoadInfo
+	catalog.EXPECT().
+		SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, collection *querypb.CollectionLoadInfo, _ ...*querypb.PartitionLoadInfo) {
+			saved = *collection
+		}).
+		Return(nil).
+		Once()
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Once()
+
+	require.NoError(t, store.Put(context.Background(), cfg))
+	assert.Equal(t, int32(len(cfg.Replicas)), saved.GetReplicaNumber())
+}
+
 func TestPut_UpdateExistingWritesFullConfig(t *testing.T) {
 	store, catalog := newTestStore(t)
 

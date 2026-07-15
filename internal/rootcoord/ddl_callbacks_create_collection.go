@@ -39,6 +39,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type collectionDataViewCreator interface {
+	CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) error
+}
+
 func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
 	schema := &schemapb.CollectionSchema{}
 	if err := proto.Unmarshal(req.GetSchema(), schema); err != nil {
@@ -115,6 +119,11 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 			if err := c.createCollectionShard(ctx, header, body, vchannel, result); err != nil {
 				return merr.Wrap(err, "failed to create collection shard")
 			}
+		}
+	}
+	if creator, ok := c.mixCoord.(collectionDataViewCreator); ok {
+		if err := creator.CreateCollectionDataView(ctx, header.CollectionId, body.VirtualChannelNames); err != nil {
+			return merr.Wrap(err, "failed to create collection data view")
 		}
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)

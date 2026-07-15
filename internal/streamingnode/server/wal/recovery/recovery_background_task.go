@@ -234,22 +234,8 @@ func (rs *recoveryStorageImpl) persistCheckpointSnapshot(ctx context.Context, sn
 	if snapshot.CheckpointDirty {
 		rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
 		rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
-		rs.notifyCheckpointPersisted(snapshot.Checkpoint)
 	}
 	return nil
-}
-
-func (rs *recoveryStorageImpl) notifyCheckpointPersisted(checkpoint *WALCheckpoint) {
-	if checkpoint.DataCheckpoint == nil {
-		return
-	}
-	for _, module := range rs.modules {
-		observer, ok := module.(moduleapi.CheckpointPersistedObserver)
-		if !ok {
-			continue
-		}
-		observer.NotifyCheckpointPersisted(checkpoint.TimeTick, checkpoint.DataCheckpoint.TimeTick)
-	}
 }
 
 func (rs *recoveryStorageImpl) refreshSnapshotCheckpoint(snapshot *dirtyPersistSnapshot) {

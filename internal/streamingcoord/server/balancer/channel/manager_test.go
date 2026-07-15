@@ -699,6 +699,60 @@ func TestChannelManagerWatch(t *testing.T) {
 	<-done
 }
 
+func TestBuildShardAssignmentsMapsPChannelEntriesToOwner(t *testing.T) {
+	provider := staticShardAssignmentProvider{
+		assignments: map[string][]types.ShardAssignmentEntry{
+			"p1": {
+				{CollectionID: 100, ShardIndex: 0, ReplicaID: 10},
+			},
+			"p2": {
+				{CollectionID: 101, ShardIndex: 1, ReplicaID: 11},
+			},
+		},
+	}
+
+	assignments := buildShardAssignments([]types.PChannelInfoAssigned{
+		{
+			Channel: types.PChannelInfo{Name: "p1"},
+			Node:    types.StreamingNodeInfo{ServerID: 1},
+		},
+		{
+			Channel: types.PChannelInfo{Name: "p2"},
+			Node:    types.StreamingNodeInfo{ServerID: 1},
+		},
+		{
+			Channel: types.PChannelInfo{Name: "p3"},
+			Node:    types.StreamingNodeInfo{ServerID: 2},
+		},
+	}, provider)
+
+	require.Len(t, assignments, 1)
+	assert.Equal(t, types.ShardAssignmentInfo{
+		PChannelAssignments: []types.PChannelShardAssignment{
+			{
+				PChannel: "p1",
+				Entries: []types.ShardAssignmentEntry{
+					{CollectionID: 100, ShardIndex: 0, ReplicaID: 10},
+				},
+			},
+			{
+				PChannel: "p2",
+				Entries: []types.ShardAssignmentEntry{
+					{CollectionID: 101, ShardIndex: 1, ReplicaID: 11},
+				},
+			},
+		},
+	}, assignments[1])
+}
+
+type staticShardAssignmentProvider struct {
+	assignments map[string][]types.ShardAssignmentEntry
+}
+
+func (p staticShardAssignmentProvider) ShardAssignmentsByPChannel() map[string][]types.ShardAssignmentEntry {
+	return p.assignments
+}
+
 func TestChannelManager_AddPChannels(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})

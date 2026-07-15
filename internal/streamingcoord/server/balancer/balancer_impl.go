@@ -125,6 +125,14 @@ func (b *balancerImpl) RegisterStreamingEnabledNotifier(notifier *syncutil.Async
 	b.channelMetaManager.RegisterStreamingEnabledNotifier(notifier)
 }
 
+func (b *balancerImpl) SetShardAssignmentProvider(provider ShardAssignmentProvider) {
+	b.channelMetaManager.SetShardAssignmentProvider(provider)
+}
+
+func (b *balancerImpl) TriggerShardAssignmentUpdate() {
+	b.channelMetaManager.TriggerWatchUpdate()
+}
+
 func (b *balancerImpl) GetLatestChannelAssignment() (*WatchChannelAssignmentsCallbackParam, error) {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("balancer is closing")

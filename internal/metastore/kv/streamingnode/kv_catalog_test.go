@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -296,6 +297,44 @@ func TestCatalogListSegmentAssignmentRejectsMismatchedOwner(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, segments)
 	assert.ErrorContains(t, err, "mismatched segment assignment")
+}
+
+func TestCatalogListRecoveryMetaWithRootPath(t *testing.T) {
+	kv := newRootedMemoryKV("by-dev/meta")
+	catalog := NewCataLog(kv)
+	ctx := context.Background()
+
+	segment := &streamingpb.SegmentAssignmentMeta{SegmentId: 10}
+	segmentValue, err := proto.Marshal(segment)
+	require.NoError(t, err)
+	require.NoError(t, kv.Save(ctx, buildSegmentAssignmentKey("p1", 10), string(segmentValue)))
+
+	summary := &streamingpb.SegmentDataVersionSummary{
+		DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
+	}
+	summaryValue, err := proto.Marshal(summary)
+	require.NoError(t, err)
+	require.NoError(t, kv.Save(ctx, buildSegmentDataVersionSummaryKey("p1", "v1"), string(summaryValue)))
+
+	view := makeQueryViewForCatalogTest("p1_100v0", viewpb.QueryViewState_QueryViewStateUp)
+	viewValue, err := marshalQueryViewForPersistence(view)
+	require.NoError(t, err)
+	require.NoError(t, kv.Save(ctx, buildQueryViewKey("p1", view.GetMeta()), string(viewValue)))
+
+	segments, err := catalog.ListSegmentAssignment(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	assert.Equal(t, int64(10), segments[0].GetSegmentId())
+
+	summaries, err := catalog.ListSegmentDataVersionSummaries(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.True(t, proto.Equal(summary, summaries["v1"]))
+
+	views, err := catalog.ListQueryViews(ctx, "p1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Equal(t, "p1_100v0", views[0].GetMeta().GetVchannel())
 }
 
 func TestCatalogRetainsClosedRecoveryMeta(t *testing.T) {
@@ -860,4 +899,36 @@ func TestBuildPrefixAndKey(t *testing.T) {
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))
 	assert.Equal(t, "streamingnode-meta/wal/p1/qv/", buildQueryViewPrefix("p1"))
+}
+
+type rootedMemoryKV struct {
+	*memkv.MemoryKV
+	rootPath string
+}
+
+func newRootedMemoryKV(rootPath string) *rootedMemoryKV {
+	return &rootedMemoryKV{
+		MemoryKV: memkv.NewMemoryKV(),
+		rootPath: rootPath,
+	}
+}
+
+func (kv *rootedMemoryKV) GetPath(key string) string {
+	return kv.rootPath + "/" + key
+}
+
+func (kv *rootedMemoryKV) LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error) {
+	return kv.MemoryKV.LoadWithPrefix(ctx, kv.GetPath(key))
+}
+
+func (kv *rootedMemoryKV) Save(ctx context.Context, key, value string) error {
+	return kv.MemoryKV.Save(ctx, kv.GetPath(key), value)
+}
+
+func (kv *rootedMemoryKV) CompareVersionAndSwap(context.Context, string, int64, string) (bool, error) {
+	panic("unused")
+}
+
+func (kv *rootedMemoryKV) WalkWithPrefix(context.Context, string, int, func([]byte, []byte) error) error {
+	panic("unused")
 }

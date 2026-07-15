@@ -1,8 +1,6 @@
 package walview
 
 import (
-	"context"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -11,20 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-// LoadConfigListener receives WAL-captured load-config events from RecoveryStorage.
-type LoadConfigListener interface {
-	OnAlterLoadConfig(VChannelWALView) VChannelLiveObserver
-	OnDropLoadConfig(DropLoadConfigEvent)
-}
-
-// DropLoadConfigEvent identifies a dropped load-config anchor.
-type DropLoadConfigEvent struct {
-	PChannel     string
-	VChannel     string
-	CollectionID int64
-}
-
-// VChannelWALView is the RecoveryStorage-owned WAL input view for one loaded vchannel.
+// VChannelWALView is the vchannel-owned WAL input view for one query view.
 type VChannelWALView struct {
 	PChannel     string
 	VChannel     string
@@ -34,6 +19,7 @@ type VChannelWALView struct {
 	BaseTransformTimeTick uint64
 
 	LoadConfig *streamingpb.VChannelLoadConfig
+	Settings   *viewpb.QueryViewSettings
 	Schema     *schemapb.CollectionSchema
 
 	SegmentSnapshot VisibleSegmentSnapshot
@@ -81,10 +67,4 @@ type SegmentSealedEvent struct {
 	SegmentID           int64
 	VChannel            string
 	SealedAtDataVersion qviews.DataVersion
-}
-
-// VChannelLiveObserver observes live resource events after a VChannelWALView capture.
-type VChannelLiveObserver interface {
-	ObserveEvent(ctx context.Context, event VChannelResourceEvent) bool
-	Close()
 }

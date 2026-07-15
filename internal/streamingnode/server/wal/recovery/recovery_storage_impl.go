@@ -4,20 +4,18 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/segment"
-	waltransformlog "github.com/milvus-io/milvus/internal/streamingnode/server/wal/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/transformlog"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -58,7 +56,6 @@ func RecoverRecoveryStorage(
 		rs.Logger().Warn(context.TODO(), "recovery storage failed", mlog.Err(err))
 		return nil, nil, err
 	}
-	rs.emitRecoveredLoadConfigViews(snapshot)
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
@@ -74,24 +71,9 @@ func RecoverRecoveryStorage(
 
 type RecoveryStorageOption func(*recoveryStorageImpl)
 
-type ResourceRecoveryBaseSelector func(vchannel string) (qviews.DataVersion, bool)
-type RecoveredLoadConfigProvider func(vchannel string) *streamingpb.VChannelLoadConfig
-
-func WithLoadConfigListener(listener walview.LoadConfigListener) RecoveryStorageOption {
+func WithQueryRuntimeModuleBuilders(builders ...queryresource.QueryRuntimeModuleBuilder) RecoveryStorageOption {
 	return func(r *recoveryStorageImpl) {
-		r.loadConfigListener = listener
-	}
-}
-
-func WithResourceRecoveryBaseSelector(selector ResourceRecoveryBaseSelector) RecoveryStorageOption {
-	return func(r *recoveryStorageImpl) {
-		r.resourceBaseSelector = selector
-	}
-}
-
-func WithRecoveredLoadConfigProvider(provider RecoveredLoadConfigProvider) RecoveryStorageOption {
-	return func(r *recoveryStorageImpl) {
-		r.recoveredLoadConfigProvider = provider
+		r.queryRuntimeModuleBuilders = append([]queryresource.QueryRuntimeModuleBuilder(nil), builders...)
 	}
 }
 
@@ -120,7 +102,6 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 		persistNotifier:        make(chan struct{}, 1),
 		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
-		liveObservers:          newLiveObserverRegistry(),
 	}
 	rs.taskScheduler = scheduler.New(context.Background())
 	if cp != nil {
@@ -144,9 +125,7 @@ type recoveryStorageImpl struct {
 	checkpoint             *WALCheckpoint
 	checkpointManager      *walcheckpoint.Manager
 	metaObservedCheckpoint utility.WALConsumeCheckpoint
-	vchannelModule         *vchannel.Module
-	segmentModule          *segment.Module
-	transformLogModule     *waltransformlog.Module
+	vchannelManager        *vchannel.PChannelRecoveryManager
 	modules                []moduleapi.Module
 	taskScheduler          *scheduler.Scheduler
 	dirtyCounter           int // records the message count since last persist snapshot.
@@ -161,11 +140,8 @@ type recoveryStorageImpl struct {
 	alterWALInfo *AlterWALInfo
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
 	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
-	pendingSalvageCheckpoint    *utility.ReplicateCheckpoint
-	liveObservers               *liveObserverRegistry
-	loadConfigListener          walview.LoadConfigListener
-	resourceBaseSelector        ResourceRecoveryBaseSelector
-	recoveredLoadConfigProvider RecoveredLoadConfigProvider
+	pendingSalvageCheckpoint   *utility.ReplicateCheckpoint
+	queryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 }
 
 func (r *recoveryStorageImpl) installCheckpointManager(checkpoint *WALCheckpoint) {
@@ -192,56 +168,43 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		Scheduler: r.taskScheduler,
 		Notifier:  r,
 	}
-	r.vchannelModule = vchannel.NewModule(
-		r.channel.Name,
-		vchannels,
-		vchannel.WithModuleRuntime(r.Logger(), moduleRuntime),
-	)
-	r.segmentModule = segment.NewModule(
-		r.channel.Name,
-		segments,
-		r.vchannelModule,
-		segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
-		segment.WithDataVersionSummaries(segmentDataVersionSummaries),
-		segment.WithPackWriter(segment.NewBulkPackWriter(
-			resource.Resource().ChunkManager(),
-			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
-			nil,
-		)),
-		segment.WithModuleRuntime(r.Logger(), moduleRuntime),
-		segment.WithSegmentSealedNotifier(func(event walview.SegmentSealedEvent) {
-			r.observeSegmentSealedEvent(event)
-		}),
-	)
-	transformLogStore := waltransformlog.NewObjectChunkStore(
+	transformLogStore := transformlog.NewObjectChunkStore(
 		resource.Resource().ChunkManager(),
 		r.channel.Name,
 	)
-	transformLogMaterializer := waltransformlog.NewSyncMaterializer(
+	transformLogMaterializer := transformlog.NewSyncMaterializer(
 		resource.Resource().ChunkManager(),
 		idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID()),
 	)
-	r.transformLogModule = waltransformlog.NewModule(
-		r.channel.Name,
-		transformLogMetas,
-		transformLogStore,
-		waltransformlog.WithModuleRuntime(moduleRuntime),
-		waltransformlog.WithModuleMaterializer(transformLogMaterializer),
-		waltransformlog.WithModuleMaterializeLimits(
-			uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
-			uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
+	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+		PChannel:                  r.channel.Name,
+		VChannelMetas:             vchannels,
+		Segments:                  segments,
+		SegmentDataVersionSummary: segmentDataVersionSummaries,
+		TransformLogMetas:         transformLogMetas,
+		Runtime:                   moduleRuntime,
+		Logger:                    r.Logger(),
+		SegmentLifecycle:          segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
+		SegmentPackWriter: segment.NewBulkPackWriter(
+			resource.Resource().ChunkManager(),
+			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
+			nil,
 		),
-	)
-	if err := r.transformLogModule.Recover(ctx); err != nil {
+		TransformLogStore:          transformLogStore,
+		TransformLogMaterializer:   transformLogMaterializer,
+		TransformLogMaxRows:        uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
+		TransformLogMaterialRows:   uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
+		TransformLogMaterialBytes:  uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
+		QueryRuntimeModuleBuilders: r.queryRuntimeModuleBuilders,
+	})
+	if err != nil {
 		return err
 	}
-	frontierProvider := newDataFrontierProvider(r.segmentModule, r.transformLogModule)
+	r.vchannelManager = manager
 	r.modules = []moduleapi.Module{
-		r.vchannelModule,
-		r.segmentModule,
-		r.transformLogModule,
-		newBroadcastAckModule(r.channel.Name, frontierProvider, moduleRuntime),
+		r.vchannelManager,
+		newBroadcastAckModule(r.channel.Name, r.vchannelManager, moduleRuntime),
 	}
 	return nil
 }
@@ -282,16 +245,14 @@ func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
 }
 
 func (r *recoveryStorageImpl) TransformLog() wal.TransformLogAccesser {
-	if r.transformLogModule != nil {
-		return r.transformLogModule
+	if r.vchannelManager != nil {
+		return r.vchannelManager
 	}
 	return wal.NewTransformLogErrorAccesser(wal.ErrTransformLogVChannelUnavailable)
 }
 
-func (r *recoveryStorageImpl) DetachLoadConfigListener() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.loadConfigListener = nil
+func (r *recoveryStorageImpl) VChannelManager() *vchannel.PChannelRecoveryManager {
+	return r.vchannelManager
 }
 
 // Close closes the recovery storage and wait the background task stop.
@@ -358,10 +319,6 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 	r.updateCheckpoint(msg, result.Meta)
 	r.updateDataCheckpoint(msg, result.Data)
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
-	if r.liveObservers != nil {
-		r.liveObservers.Dispatch(ctx, msg)
-	}
-	r.notifyLoadConfigListener(msg)
 
 	r.dirtyCounter++
 	if r.dirtyCounter > r.cfg.maxDirtyMessages {
@@ -380,147 +337,6 @@ func (r *recoveryStorageImpl) observeMetaOnlyMessage(ctx context.Context, msg me
 	}
 }
 
-func (r *recoveryStorageImpl) notifyLoadConfigListener(msg message.ImmutableMessage) {
-	if r.loadConfigListener == nil {
-		return
-	}
-	switch msg.MessageType() {
-	case message.MessageTypeAlterLoadConfig:
-		view, ok := r.newVChannelWALView(msg.VChannel())
-		if ok {
-			r.liveObservers.Register(msg.VChannel(), r.loadConfigListener.OnAlterLoadConfig(view))
-		}
-	case message.MessageTypeDropLoadConfig:
-		drop := message.MustAsImmutableDropLoadConfigMessageV2(msg)
-		r.loadConfigListener.OnDropLoadConfig(walview.DropLoadConfigEvent{
-			PChannel:     r.channel.Name,
-			VChannel:     msg.VChannel(),
-			CollectionID: drop.Header().GetCollectionId(),
-		})
-	}
-}
-
-func (r *recoveryStorageImpl) emitRecoveredLoadConfigViews(snapshot *RecoverySnapshot) {
-	if r.loadConfigListener == nil || snapshot == nil {
-		return
-	}
-	for vchannel, meta := range snapshot.VChannels {
-		if meta.GetLoadConfig() == nil && r.recoveredLoadConfig(vchannel) == nil {
-			r.loadConfigListener.OnDropLoadConfig(walview.DropLoadConfigEvent{
-				PChannel:     r.channel.Name,
-				VChannel:     vchannel,
-				CollectionID: meta.GetCollectionInfo().GetCollectionId(),
-			})
-			continue
-		}
-		view, ok := r.newVChannelWALView(vchannel)
-		if !ok {
-			continue
-		}
-		r.liveObservers.Register(vchannel, r.loadConfigListener.OnAlterLoadConfig(view))
-	}
-}
-
-func (r *recoveryStorageImpl) newVChannelWALView(vchannel string) (walview.VChannelWALView, bool) {
-	if r.vchannelModule == nil || r.segmentModule == nil || r.transformLogModule == nil || r.liveObservers == nil {
-		return walview.VChannelWALView{}, false
-	}
-	meta := r.vchannelModule.VChannelMeta(vchannel)
-	if meta == nil {
-		return walview.VChannelWALView{}, false
-	}
-	loadConfig := meta.GetLoadConfig()
-	if loadConfig == nil {
-		loadConfig = r.recoveredLoadConfig(vchannel)
-	}
-	if loadConfig == nil {
-		return walview.VChannelWALView{}, false
-	}
-	baseTransformTimeTick := r.transformLogModule.LatestTransformTimeTick(vchannel)
-	baseGrowingTimeTick := max(r.segmentModule.LatestInsertTimeTick(vchannel), baseTransformTimeTick)
-	segmentSnapshot := r.segmentModule.VisibleSnapshot(vchannel, baseGrowingTimeTick)
-	if r.resourceBaseSelector != nil {
-		if base, ok := r.resourceBaseSelector(vchannel); ok {
-			segmentSnapshot = r.segmentModule.VisibleSnapshotAtDataVersion(vchannel, baseGrowingTimeTick, base)
-		}
-	}
-	deleteReplay := newDeleteReplayScanner(
-		r.backgroundTaskNotifier.Context(),
-		r.transformLogModule,
-		vchannel,
-		deleteReplayStartAfter(segmentSnapshot),
-		baseTransformTimeTick,
-	)
-	return walview.VChannelWALView{
-		PChannel:              r.channel.Name,
-		VChannel:              vchannel,
-		CollectionID:          meta.GetCollectionInfo().GetCollectionId(),
-		BaseGrowingTimeTick:   baseGrowingTimeTick,
-		BaseTransformTimeTick: baseTransformTimeTick,
-		LoadConfig:            loadConfig,
-		Schema:                latestSchema(meta),
-		SegmentSnapshot:       segmentSnapshot,
-		DeleteReplay:          deleteReplay,
-	}, true
-}
-
-func (r *recoveryStorageImpl) recoveredLoadConfig(vchannel string) *streamingpb.VChannelLoadConfig {
-	if r.recoveredLoadConfigProvider == nil {
-		return nil
-	}
-	return r.recoveredLoadConfigProvider(vchannel)
-}
-
-func newDeleteReplayScanner(
-	ctx context.Context,
-	accesser wal.TransformLogAccesser,
-	vchannel string,
-	startAfterTimeTick uint64,
-	endTimeTick uint64,
-) wal.TransformLogScanner {
-	const name = "vchannel-wal-view-delete-replay"
-	if accesser == nil {
-		return wal.NewTransformLogErrorScanner(name, wal.ErrTransformLogVChannelUnavailable)
-	}
-	if endTimeTick == 0 {
-		return wal.NewEmptyTransformLogScanner(name)
-	}
-	return accesser.Read(ctx, wal.TransformLogReadOption{
-		Name:               name,
-		VChannel:           vchannel,
-		StartAfterTimeTick: startAfterTimeTick,
-		EndTimeTick:        endTimeTick,
-	})
-}
-
-func deleteReplayStartAfter(snapshot walview.VisibleSegmentSnapshot) uint64 {
-	if len(snapshot.Segments) == 0 {
-		return 0
-	}
-	minCreateTimeTick := uint64(0)
-	for _, segment := range snapshot.Segments {
-		createTimeTick := segment.Assignment.GetStat().GetCreateSegmentTimeTick()
-		if createTimeTick == 0 {
-			continue
-		}
-		if minCreateTimeTick == 0 || createTimeTick < minCreateTimeTick {
-			minCreateTimeTick = createTimeTick
-		}
-	}
-	if minCreateTimeTick == 0 {
-		return 0
-	}
-	return minCreateTimeTick - 1
-}
-
-func latestSchema(meta *streamingpb.VChannelMeta) *schemapb.CollectionSchema {
-	schemas := meta.GetCollectionInfo().GetSchemas()
-	if len(schemas) == 0 {
-		return nil
-	}
-	return schemas[len(schemas)-1].GetSchema()
-}
-
 func (r *recoveryStorageImpl) observeMetaScannerMessage(ctx context.Context, msg message.ImmutableMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -531,19 +347,6 @@ func (r *recoveryStorageImpl) observeDataScannerMessage(ctx context.Context, msg
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.observeMessage(ctx, msg)
-}
-
-func (r *recoveryStorageImpl) observeSegmentSealedEvent(event walview.SegmentSealedEvent) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.liveObservers == nil {
-		return
-	}
-	r.liveObservers.DispatchEvent(
-		r.backgroundTaskNotifier.Context(),
-		event.VChannel,
-		walview.VChannelResourceEvent{SegmentSealed: &event},
-	)
 }
 
 func (r *recoveryStorageImpl) observeModulesMessage(ctx context.Context, msg message.ImmutableMessage) moduleapi.ObserveResult {
@@ -573,8 +376,9 @@ func (r *recoveryStorageImpl) startDataLiveScanner(recoveryStreamBuilder Recover
 		return
 	}
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
-		StartCheckpoint: checkpoint.MessageID,
-		EndTimeTick:     0,
+		StartCheckpoint:     checkpoint.MessageID,
+		EndTimeTick:         0,
+		UseWriteAheadBuffer: true,
 	})
 	go r.runDataLiveScanner(rs)
 }

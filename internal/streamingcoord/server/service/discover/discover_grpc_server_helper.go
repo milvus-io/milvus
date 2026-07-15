@@ -23,21 +23,24 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 	assignmentsMap := make(map[int64]*streamingpb.StreamingNodeAssignment)
 	for _, relation := range param.Relations {
 		if assignmentsMap[relation.Node.ServerID] == nil {
-			assignmentsMap[relation.Node.ServerID] = &streamingpb.StreamingNodeAssignment{
-				Node:     types.NewProtoFromStreamingNodeInfo(relation.Node),
-				Channels: make([]*streamingpb.PChannelInfo, 0),
-			}
+			assignmentsMap[relation.Node.ServerID] = newStreamingNodeAssignment(relation.Node, param.ShardAssignments)
 		}
-		assignmentsMap[relation.Node.ServerID].Channels = append(
-			assignmentsMap[relation.Node.ServerID].Channels, types.NewProtoFromPChannelInfo(relation.Channel))
+		pchannel := types.NewProtoFromPChannelInfo(relation.Channel)
+		switch relation.Channel.AccessMode {
+		case types.AccessModeRW:
+			assignmentsMap[relation.Node.ServerID].Channels = append(
+				assignmentsMap[relation.Node.ServerID].Channels, pchannel)
+		case types.AccessModeRO:
+			assignmentsMap[relation.Node.ServerID].SecondaryChannels = append(
+				assignmentsMap[relation.Node.ServerID].SecondaryChannels, pchannel)
+		default:
+			panic("undefined pchannel access mode")
+		}
 	}
 	for _, node := range nodes {
 		if assignmentsMap[node.ServerID] == nil {
 			// if current streaming node is not assigned to any channel, add it to the assignments with empty assignments.
-			assignmentsMap[node.ServerID] = &streamingpb.StreamingNodeAssignment{
-				Node:     types.NewProtoFromStreamingNodeInfo(node.StreamingNodeInfo),
-				Channels: make([]*streamingpb.PChannelInfo, 0),
-			}
+			assignmentsMap[node.ServerID] = newStreamingNodeAssignment(node.StreamingNodeInfo, param.ShardAssignments)
 		}
 	}
 	assignments := make([]*streamingpb.StreamingNodeAssignment, 0, len(assignmentsMap))
@@ -66,6 +69,21 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 			},
 		},
 	})
+}
+
+func newStreamingNodeAssignment(
+	node types.StreamingNodeInfo,
+	shardAssignments map[int64]types.ShardAssignmentInfo,
+) *streamingpb.StreamingNodeAssignment {
+	assignment := &streamingpb.StreamingNodeAssignment{
+		Node:              types.NewProtoFromStreamingNodeInfo(node),
+		Channels:          make([]*streamingpb.PChannelInfo, 0),
+		SecondaryChannels: make([]*streamingpb.PChannelInfo, 0),
+	}
+	if shardAssignment, ok := shardAssignments[node.ServerID]; ok {
+		assignment.ShardAssignment = types.NewProtoFromShardAssignmentInfo(shardAssignment)
+	}
+	return assignment
 }
 
 // SendCloseResponse sends the close response to client.

@@ -25,7 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
-	snclientmanager "github.com/milvus-io/milvus/internal/streamingnode/client/manager"
+	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
+	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/nodeview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -51,7 +53,8 @@ type qviewsRuntime struct {
 	balancer          qviewsBalancer
 
 	queryNodeManager     qnmanager.ManagerClient
-	streamingNodeManager snclientmanager.ManagerClient
+	streamingCoordClient streamingcoordclient.Client
+	streamingNodeHandler snhandler.HandlerClient
 }
 
 type qviewsRuntimeDependencies struct {
@@ -63,9 +66,10 @@ type qviewsRuntimeDependencies struct {
 	resourceGroupManager nodeview.ResourceGroupManager
 	dataViewProvider     balancer.DataViewProvider
 
-	queryNodeManager     qnmanager.ManagerClient
-	streamingNodeManager snclientmanager.ManagerClient
-	walLocatedProvider   syncer.WALLocatedProvider
+	queryNodeManager            qnmanager.ManagerClient
+	streamingCoordClient        streamingcoordclient.Client
+	streamingNodeHandler        snhandler.HandlerClient
+	streamingNodeViewSyncClient snhandler.QueryViewSyncClient
 
 	balancerFactory func(*balancer.SnapshotBuilder) qviewsBalancer
 }
@@ -90,21 +94,20 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	if deps.queryNodeClient == nil {
 		return nil, merr.WrapErrServiceInternalMsg("querynode client is nil")
 	}
+	if deps.streamingNodeViewSyncClient == nil && deps.streamingNodeHandler != nil {
+		deps.streamingNodeViewSyncClient = deps.streamingNodeHandler.QueryViewSyncClient()
+	}
 
 	if deps.viewSyncClient == nil {
 		if deps.queryNodeManager == nil {
 			return nil, merr.WrapErrServiceInternalMsg("querynode manager client is nil")
 		}
-		if deps.streamingNodeManager == nil {
-			return nil, merr.WrapErrServiceInternalMsg("streamingnode manager client is nil")
-		}
-		if deps.walLocatedProvider == nil {
-			return nil, merr.WrapErrServiceInternalMsg("wal located provider is nil")
+		if deps.streamingNodeViewSyncClient == nil {
+			return nil, merr.WrapErrServiceInternalMsg("streamingnode query view sync client is nil")
 		}
 		deps.viewSyncClient = syncer.NewDefaultViewSyncClient(
 			deps.queryNodeManager,
-			deps.streamingNodeManager,
-			deps.walLocatedProvider,
+			deps.streamingNodeViewSyncClient,
 		)
 	}
 
@@ -140,6 +143,12 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 			balancerController.Trigger(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})
 		},
 	)
+	shardViewRegistry.RegisterStatsObserver(func(shardID qviews.ShardID, stats *coordview.ShardStats) {
+		if stats != nil && stats.UpVersion != nil {
+			loadManager.ObserveShardUp(shardID)
+		}
+	})
+	seedDiscoverableShards(loadManager, shardViewRegistry.Snapshot())
 
 	return &qviewsRuntime{
 		loadConfigStore:      loadConfigStore,
@@ -148,11 +157,24 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		syncer:               reliableSyncer,
 		balancer:             balancerController,
 		queryNodeManager:     deps.queryNodeManager,
-		streamingNodeManager: deps.streamingNodeManager,
+		streamingCoordClient: deps.streamingCoordClient,
+		streamingNodeHandler: deps.streamingNodeHandler,
 	}, nil
 }
 
 func (r *qviewsRuntime) start(ctx context.Context) {
+	if err := snmanager.StaticStreamingNodeManager.RegisterShardAssignmentProvider(ctx, r.loadManager); err != nil {
+		mlog.Warn(ctx, "failed to register query view shard assignment provider", mlog.Err(err))
+	} else {
+		r.loadManager.SetShardAssignmentNotifier(func() {
+			if err := snmanager.StaticStreamingNodeManager.TriggerShardAssignmentUpdate(context.Background()); err != nil {
+				mlog.Warn(context.Background(), "failed to trigger query view shard assignment update", mlog.Err(err))
+			}
+		})
+		if err := snmanager.StaticStreamingNodeManager.TriggerShardAssignmentUpdate(ctx); err != nil {
+			mlog.Warn(ctx, "failed to trigger initial query view shard assignment update", mlog.Err(err))
+		}
+	}
 	r.balancer.Start(ctx)
 }
 
@@ -162,8 +184,19 @@ func (r *qviewsRuntime) stop() {
 	if r.queryNodeManager != nil {
 		r.queryNodeManager.Close()
 	}
-	if r.streamingNodeManager != nil {
-		r.streamingNodeManager.Close()
+	if r.streamingNodeHandler != nil {
+		r.streamingNodeHandler.Close()
+	}
+	if r.streamingCoordClient != nil {
+		r.streamingCoordClient.Close()
+	}
+}
+
+func seedDiscoverableShards(loadManager *loadmgr.CollectionLoadManager, snapshot *coordview.ShardViewSnapshot) {
+	for shardID, stats := range snapshot.StatsMap() {
+		if stats != nil && stats.UpVersion != nil {
+			loadManager.MarkShardDiscoverable(shardID)
+		}
 	}
 }
 
@@ -175,16 +208,18 @@ func newDefaultQViewsRuntimeDependencies(
 	mixCoord types.MixCoord,
 ) qviewsRuntimeDependencies {
 	queryNodeManager := qnmanager.NewManagerClient(etcdCli)
-	streamingNodeManager := snclientmanager.NewManagerClient(etcdCli)
+	streamingCoordClient := streamingcoordclient.NewClient(etcdCli)
+	streamingNodeHandler := snhandler.NewHandlerClient(streamingCoordClient.Assignment())
 	return qviewsRuntimeDependencies{
-		queryCoordCatalog:    queryCoordCatalog,
-		queryViewCatalog:     queryview.NewQueryViewCatalog(metaKV, "coord"),
-		queryNodeClient:      queryNodeManager,
-		resourceGroupManager: resourceGroupManager,
-		dataViewProvider:     &mixCoordDataViewProvider{mixCoord: mixCoord},
-		queryNodeManager:     queryNodeManager,
-		streamingNodeManager: streamingNodeManager,
-		walLocatedProvider:   staticWALLocatedProvider{},
+		queryCoordCatalog:           queryCoordCatalog,
+		queryViewCatalog:            queryview.NewQueryViewCatalog(metaKV, "coord"),
+		queryNodeClient:             queryNodeManager,
+		resourceGroupManager:        resourceGroupManager,
+		dataViewProvider:            &mixCoordDataViewProvider{mixCoord: mixCoord},
+		queryNodeManager:            queryNodeManager,
+		streamingCoordClient:        streamingCoordClient,
+		streamingNodeHandler:        streamingNodeHandler,
+		streamingNodeViewSyncClient: streamingNodeHandler.QueryViewSyncClient(),
 	}
 }
 
@@ -212,11 +247,4 @@ type emptyDataViewProvider struct{}
 
 func (emptyDataViewProvider) DataViewSnapshot(context.Context) *balancer.DataViewSnapshot {
 	return balancer.NewDataViewSnapshot(0, nil, nil)
-}
-
-type staticWALLocatedProvider struct{}
-
-func (staticWALLocatedProvider) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
-	nodeID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, pchannel)
-	return nodeID, err == nil
 }

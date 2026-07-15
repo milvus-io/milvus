@@ -201,8 +201,8 @@ type WALAccesser interface {
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner
 
-	// TransformLog returns transform log accesser.
-	TransformLog() wal.TransformLogAccesser
+	// TransformLogStreamManager returns a pchannel-level transform log stream manager.
+	TransformLogStreamManager() wal.TransformLogStreamManager
 
 	// AppendMessages appends messages to the wal.
 	// It it a helper utility function to append messages to the wal.

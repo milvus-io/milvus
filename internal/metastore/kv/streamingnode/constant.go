@@ -3,8 +3,9 @@ package streamingnode
 const (
 	MetaPrefix = "streamingnode-meta"
 
-	DirectoryWAL           = "wal"
-	DirectorySegmentAssign = "segment-assign"
+	DirectoryWAL                       = "wal"
+	DirectorySegmentAssign             = "segment-assign"
+	DirectorySegmentDataVersionSummary = "segment-data-version-summary"
 
 	DirectoryQueryView = "qv"
 

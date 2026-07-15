@@ -8,22 +8,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func (w *walAccesserImpl) TransformLog() wal.TransformLogAccesser {
-	return transformLogAccesser{w: w}
+func (w *walAccesserImpl) TransformLogStreamManager() wal.TransformLogStreamManager {
+	return transformLogStreamManager{w: w}
 }
 
-type transformLogAccesser struct {
+type transformLogStreamManager struct {
 	w *walAccesserImpl
 }
 
-func (a transformLogAccesser) Read(ctx context.Context, opts wal.TransformLogReadOption) wal.TransformLogScanner {
-	if !a.w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return wal.NewTransformLogErrorScanner(opts.Name, ErrWALAccesserClosed)
+func (m transformLogStreamManager) AcquireStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+	if !m.w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
 	}
-	defer a.w.lifetime.Done()
+	defer m.w.lifetime.Done()
 
-	if opts.VChannel == "" {
-		return wal.NewTransformLogErrorScanner(opts.Name, wal.ErrTransformLogInvalidReadOption)
-	}
-	return resumabletransformlog.NewResumableScanner(ctx, a.w.handlerClient.ReadTransformLog, opts)
+	return resumabletransformlog.NewResumableStream(ctx, pchannel, m.w.handlerClient.AcquireTransformLogStream), nil
 }

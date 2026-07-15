@@ -136,9 +136,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	case typeutil.DataNodeRole:
 		role.EnableDataNode = true
 	case typeutil.StreamingNodeRole:
-		sessionutil.EnableEmbededQueryNodeLabel()
 		role.EnableStreamingNode = true
-		role.EnableQueryNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
 		role.EnableMixCoord = true
 		role.EnableProxy = true
@@ -158,10 +156,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableDataNode = enableDataNode
 		role.EnableProxy = enableProxy
 		role.EnableStreamingNode = enableStreamingNode
-		if enableStreamingNode && !enableQueryNode {
-			role.EnableQueryNode = true
-			sessionutil.EnableEmbededQueryNodeLabel()
-		}
 
 	case typeutil.CDCRole:
 		role.EnableCDC = true
