@@ -1208,6 +1208,20 @@ func addDeltalogsToSegment(modPack *updateSegmentPack, segmentID int64, segment 
 		return false
 	}
 
+	// Drop deltalogs already present on the segment before merging or
+	// accumulating. The same L0 compaction output can reach here twice — a retry
+	// after the meta_saved task-state write failed and saveSegmentMeta re-ran, or
+	// a restart between the etcd write and the task-state transition. The
+	// committedV3Manifests cache only makes the manifest re-commit idempotent; the
+	// delta Stats accumulation below is now durable for V3 (its per-field deltalog
+	// KVs are skipped), so a blind re-add would permanently over-count deletes and
+	// inflate hasTooManyDeletions / GetResidualSegmentSize. Dedup by (fieldID,
+	// logID) keeps both the Deltalogs array and the delta Stats idempotent.
+	deltalogs = filterDuplicateFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+	if len(deltalogs) == 0 {
+		return false
+	}
+
 	segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
 	// Accumulate the incoming deltalogs onto the existing delta Stats instead
 	// of recomputing from segment.GetDeltalogs(). For V3 segments AlterSegments
@@ -3444,6 +3458,16 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 
 	cloned.StorageVersion = resultSegment.GetStorageVersion()
 	cloned.ManifestPath = resultManifest
+	// Statistics is computed at the compactor and shipped on the
+	// CompactionSegment. Materialization grows Binlogs and ships a freshly
+	// computed Stats, which must be adopted. The schema-bump-only path rewrites
+	// no data and deliberately ships Stats=nil to preserve oldSegment.Stats —
+	// overwriting with nil would zero the durable summary (V3 skips per-field
+	// KVs, so it cannot be rebuilt from arrays after a restart). Only adopt a
+	// non-nil result Stats.
+	if s := resultSegment.GetStats(); s != nil {
+		cloned.Stats = s
+	}
 	if !proto.Equal(oldSegment.SegmentInfo, cloned.SegmentInfo) {
 		cloned.DataVersion = oldSegment.GetDataVersion() + 1
 	}

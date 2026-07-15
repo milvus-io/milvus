@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2026,6 +2027,121 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	require.Len(t, snapshotData.Segments, 1)
 	assert.Equal(t, int64(1002), snapshotData.Segments[0].GetSegmentId())
 	assert.Equal(t, "ch-2", snapshotData.Segments[0].GetChannelName())
+}
+
+// TestGenSnapshot_IncludesV3ManifestOnlySegment guards the snapshot filter: a
+// V3 segment that reloaded from etcd with empty Binlogs/Deltalogs (per-field
+// KVs are not persisted for V3) but a non-empty ManifestPath still carries
+// data and must not be dropped from the snapshot. An empty segment with no
+// manifest is the negative control.
+func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
+	schema := newTestSchema()
+	// V3 segment: empty binlog arrays but a live manifest path — must be kept.
+	manifestSeg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             2001,
+		CollectionID:   200,
+		PartitionID:    0,
+		InsertChannel:  "ch-1",
+		State:          commonpb.SegmentState_Flushed,
+		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", 3),
+	})
+	// Empty segment with no manifest — must be dropped.
+	emptySeg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            2002,
+		CollectionID:  200,
+		PartitionID:   0,
+		InsertChannel: "ch-1",
+		State:         commonpb.SegmentState_Flushed,
+		StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+	})
+
+	mockMeta := &meta{indexMeta: &indexMeta{}}
+	handler := &ServerHandler{
+		s: &Server{
+			broker: broker.NewCoordinatorBroker(newMockMixCoord()),
+			meta:   mockMeta,
+		},
+	}
+
+	mockDescribe := mockey.Mock((*mockMixCoord).DescribeCollectionInternal).To(
+		func(m *mockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				Schema:              schema,
+				ShardsNum:           1,
+				NumPartitions:       1,
+				ConsistencyLevel:    commonpb.ConsistencyLevel_Strong,
+				CollectionID:        200,
+				VirtualChannelNames: []string{"ch-1"},
+			}, nil
+		}).Build()
+	defer mockDescribe.UnPatch()
+
+	mockShowPartitions := mockey.Mock((*mockMixCoord).ShowPartitionsInternal).To(
+		func(m *mockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+			return &milvuspb.ShowPartitionsResponse{
+				Status:         merr.Success(),
+				PartitionIDs:   []int64{0},
+				PartitionNames: []string{"_default"},
+			}, nil
+		}).Build()
+	defer mockShowPartitions.UnPatch()
+
+	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
+		func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
+			return []*msgpb.MsgPosition{
+				{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
+			}, uint64(1000), nil
+		}).Build()
+	defer mockSeekPositions.UnPatch()
+
+	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
+		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
+			return []*model.Index{}
+		}).Build()
+	defer mockIndexes.UnPatch()
+
+	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
+		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+			candidates := []*SegmentInfo{manifestSeg, emptySeg}
+			var result []*SegmentInfo
+			for _, seg := range candidates {
+				pass := true
+				for _, filter := range filters {
+					if !filter.Match(seg) {
+						pass = false
+						break
+					}
+				}
+				if pass {
+					result = append(result, seg)
+				}
+			}
+			return result
+		}).Build()
+	defer mockSelectSegments.UnPatch()
+
+	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
+		return nil, false
+	}).Build()
+	defer mockCompactionTo.UnPatch()
+
+	mockSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(
+		func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+			return map[int64]*model.SegmentIndex{}
+		}).Build()
+	defer mockSegmentIndexes.UnPatch()
+
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	require.NoError(t, err)
+	require.NotNil(t, snapshotData)
+	require.Len(t, snapshotData.Segments, 1)
+	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
+	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
 }
 
 func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {

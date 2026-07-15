@@ -98,15 +98,22 @@ func NewStatisticsCollectorFromStats(stats *datapb.Statistics, numRows int64) *S
 			c.nullCounts[f] = n
 		}
 	}
-	// Rebuild quantile buckets from the persisted marks: each of the N marks
-	// stands for a 1/N slice of the rows at that TimestampTo. The walk in
-	// quantiles() over these buckets reproduces the persisted marks exactly
-	// (idempotent restore) and new Digest entries append on top.
+	// Rebuild quantile buckets from the persisted marks: bucket i carries the
+	// rows between the (i-1)th and ith cumulative thresholds, computed the same
+	// way quantiles() derives them (int64(mark_i * numRows)). Sizing by the
+	// threshold difference — rather than a flat numRows/N that loses the
+	// remainder — makes the walk in quantiles() land on each persisted mark
+	// exactly (idempotent restore) even when numRows is not divisible by N;
+	// new Digest entries append on top.
 	if q := stats.GetTimestampQuantiles(); len(q) > 0 && numRows > 0 {
-		per := numRows / int64(len(q))
-		if per > 0 {
-			for _, ts := range q {
-				c.quantileEntries = append(c.quantileEntries, quantileEntry{tsTo: uint64(ts), rows: per})
+		n := len(q)
+		var prev int64
+		for i, ts := range q {
+			thr := int64(float64(i+1) / float64(n) * float64(numRows))
+			rows := thr - prev
+			prev = thr
+			if rows > 0 {
+				c.quantileEntries = append(c.quantileEntries, quantileEntry{tsTo: uint64(ts), rows: rows})
 			}
 		}
 	}

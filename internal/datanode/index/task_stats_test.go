@@ -399,3 +399,51 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "field binlog not found for field 201")
 }
+
+// A recovered StorageV3 segment reloads with empty InsertLogs but an
+// authoritative ManifestPath. The empty-InsertLogs guard must not skip the
+// text-index build: the V3 build path reads the manifest, so gating only on an
+// empty ManifestPath lets the manifest-aware build proceed.
+func TestStatsExecute_EmptyInsertLogsProceedsWhenManifestSet(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	mgr := NewTaskManager(ctx)
+	mgr.LoadOrStoreStatsTask("c1", 1, &StatsTaskInfo{SegID: 10})
+
+	req := &workerpb.CreateStatsRequest{
+		ClusterID:       "c1",
+		TaskID:          1,
+		CollectionID:    100,
+		PartitionID:     101,
+		TargetSegmentID: 102,
+		SegmentID:       103,
+		InsertChannel:   "ch",
+		TaskVersion:     1,
+		StorageConfig:   &indexpb.StorageConfig{RootPath: "/root"},
+		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+		StorageVersion:  storage.StorageV3,
+		ManifestPath:    "files/manifest/103/1", // manifest is authoritative for V3
+		InsertLogs:      nil,                    // empty after a DataCoord restart
+		NumRows:         10,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+
+	var called bool
+	m := mockey.Mock((*statsTask).createTextIndex).To(
+		func(_ *statsTask, _ context.Context, _ *indexpb.StorageConfig, _, _, _, _, _ int64, _ []*datapb.FieldBinlog) error {
+			called = true
+			return nil
+		}).Build()
+	defer m.UnPatch()
+
+	err := st.Execute(ctx)
+	require.NoError(t, err)
+	require.True(t, called, "text index build must proceed for a manifest-backed V3 segment with empty InsertLogs")
+}

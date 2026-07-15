@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"path"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -14,7 +15,9 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -288,6 +291,142 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncAppendsColumnGroupBinlogs() {
 	s.EqualValues(101, seg.Binlogs()[1].GetFieldID())
 	s.EqualValues(0, seg.Binlogs()[2].GetFieldID())
 	s.EqualValues(101, seg.Binlogs()[3].GetFieldID())
+}
+
+// TestGrowingSourceSyncShipsStats verifies the V3 growing-source flush ships a
+// Statistics whose StatsBinlogSize is sourced from the committed manifest
+// (bloom-filter + BM25 footprint), not left at 0 from empty V3 statslog arrays.
+func (s *MetaWriterSuite) TestGrowingSourceSyncShipsStats() {
+	ctx := context.Background()
+
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: s.T().TempDir()}
+	basePath := "files/growing_stats/seg1"
+	bloomPath := path.Join(cfg.RootPath, basePath, "_stats/bloom_filter.100/1")
+	bm25Path := path.Join(cfg.RootPath, basePath, "_stats/bm25.102/1")
+	s.Require().NoError(packed.WriteFile(cfg, bloomPath, []byte("bloom")))
+	s.Require().NoError(packed.WriteFile(cfg, bm25Path, []byte("bm25")))
+	manifestPath, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		Stats: []packed.StatEntry{
+			{Key: "bloom_filter.100", Files: []string{bloomPath}, Metadata: map[string]string{"memory_size": "10"}},
+			{Key: "bm25.102", Files: []string{bm25Path}, Metadata: map[string]string{"memory_size": "20"}},
+		},
+	})
+	s.Require().NoError(err)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1,
+		CollectionID:   3,
+		PartitionID:    2,
+		StorageVersion: storage.StorageV3,
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
+	metacache.UpdateNumOfRows(10)(seg)
+
+	s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return()
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(1).
+		WithChannelName("ch").
+		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
+		WithBatchRows(10).
+		WithTargetOffset(10).
+		WithMetaCache(s.metacache).
+		WithStorageConfig(cfg)
+	task.manifestPath = manifestPath
+	task.insertBinlogs = map[int64]*datapb.FieldBinlog{
+		0: {FieldID: 0, ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{
+			{LogID: 1, EntriesNum: 10, MemorySize: 1000, TimestampFrom: 101, TimestampTo: 200},
+		}},
+	}
+
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
+			s.Require().NotNil(req.GetStats())
+			s.EqualValues(30, req.GetStats().GetStatsBinlogSize()) // bloom(10)+bm25(20)
+			s.EqualValues(1000, req.GetStats().GetInsertBinlogSize())
+			s.EqualValues(1, req.GetStats().GetInsertBinlogCount())
+			return nil
+		})
+
+	err = s.writer.UpdateGrowingSourceSync(ctx, task)
+	s.NoError(err)
+}
+
+// TestGrowingSourceSyncShipsCumulativeStatsAfterRestart verifies that a
+// post-recovery V3 growing segment (empty in-memory binlog arrays, cumulative
+// state restored onto the collector) ships a Statistics that reflects the
+// restored baseline plus this batch — not this batch alone. Rebuilding from the
+// empty arrays would undercount InsertBinlogSize/count and drop delta aggregates
+// until a later compaction.
+func (s *MetaWriterSuite) TestGrowingSourceSyncShipsCumulativeStatsAfterRestart() {
+	ctx := context.Background()
+
+	// Cumulative state as persisted before restart; the binlog arrays are empty
+	// because V3 skips their per-field KVs.
+	restored := metacache.NewSegmentStatsFromStats(&datapb.Statistics{
+		InsertBinlogSize:  100000,
+		InsertBinlogCount: 50,
+		DeltaBinlogSize:   500,
+		DeltaBinlogCount:  2,
+		DeleteNumRows:     7,
+	}, 1000)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1,
+		CollectionID:   3,
+		PartitionID:    2,
+		StorageVersion: storage.StorageV3,
+	}, pkoracle.NewBloomFilterSet(), nil, restored)
+	metacache.UpdateNumOfRows(1000)(seg)
+
+	s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return()
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(1).
+		WithChannelName("ch").
+		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
+		WithBatchRows(10).
+		WithTargetOffset(10).
+		WithMetaCache(s.metacache)
+	task.manifestPath = "manifest"
+	// This batch's insert binlog (arrays on the segment are empty post-restart).
+	task.insertBinlogs = map[int64]*datapb.FieldBinlog{
+		0: {FieldID: 0, ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{
+			{LogID: 2000, EntriesNum: 10, MemorySize: 1000, TimestampFrom: 101, TimestampTo: 200, FieldNullCounts: map[int64]int64{100: 0}},
+		}},
+	}
+
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
+			s.Require().NotNil(req.GetStats())
+			// restored baseline + this batch, not this batch alone.
+			s.EqualValues(101000, req.GetStats().GetInsertBinlogSize())
+			s.EqualValues(51, req.GetStats().GetInsertBinlogCount())
+			// delta aggregates preserved from the restored collector.
+			s.EqualValues(7, req.GetStats().GetDeleteNumRows())
+			s.EqualValues(2, req.GetStats().GetDeltaBinlogCount())
+			s.EqualValues(500, req.GetStats().GetDeltaBinlogSize())
+			return nil
+		})
+
+	err := s.writer.UpdateGrowingSourceSync(ctx, task)
+	s.NoError(err)
+	// The digested cumulative collector is installed back so the next batch keeps
+	// accumulating instead of resetting to the restored baseline.
+	s.Require().NotNil(seg.Statistics())
+	s.EqualValues(101000, seg.Statistics().Publish().GetInsertBinlogSize())
 }
 
 func (s *MetaWriterSuite) TestGrowingSourceSyncMetaErrorsReturnError() {

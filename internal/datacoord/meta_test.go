@@ -1964,6 +1964,95 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Equal(resultManifest, infos[0].GetManifestPath())
 	})
 
+	suite.Run("schema-bump-only nil result stats preserves old stats", func() {
+		// runSchemaVersionBumpOnly ships Stats=nil by design (the receiver must
+		// preserve oldSegment.Stats). For V3 the per-field KVs are skipped, so
+		// clobbering with nil yields an all-zero durable summary after restart.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		oldStats := &datapb.Statistics{
+			InsertBinlogSize:  1234,
+			InsertBinlogCount: 7,
+			DeleteNumRows:     3,
+			TimestampFrom:     10,
+			TimestampTo:       50,
+		}
+		old.Stats = oldStats
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					// Stats intentionally nil (bump-only)
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		suite.Require().NotNil(infos[0].GetStats())
+		suite.EqualValues(1234, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(7, infos[0].GetStats().GetInsertBinlogCount())
+		suite.EqualValues(3, infos[0].GetStats().GetDeleteNumRows())
+	})
+
+	suite.Run("materialization non-nil result stats overwrites old stats", func() {
+		// runMissingFunctionMaterialization grows Binlogs and ships a freshly
+		// computed Stats; the receiver must adopt it, not keep the pre-bump value.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.Stats = &datapb.Statistics{InsertBinlogSize: 1234, InsertBinlogCount: 7}
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats:          &datapb.Statistics{InsertBinlogSize: 9999, InsertBinlogCount: 9},
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		suite.Require().NotNil(infos[0].GetStats())
+		suite.EqualValues(9999, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(9, infos[0].GetStats().GetInsertBinlogCount())
+	})
+
 	suite.Run("in-place result with stale base manifest is rejected", func() {
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
 		old := segs.GetSegment(1)
@@ -2576,6 +2665,49 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Require().Len(infos, 1)
 		suite.Equal(manifestPath, infos[0].GetManifestPath())
 		suite.EqualValues(3, infos[0].GetSchemaVersion())
+	})
+
+	suite.Run("v3 in-place applies shipped stats", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		newerManifest := packed.MarshalManifestPath("/data/segments/1", 11)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		segment := segs.GetSegment(1)
+		segment.SchemaVersion = 1
+		segment.StorageVersion = storage.StorageV3
+		segment.ManifestPath = currentManifest
+		// Pre-bump Stats under-counts once materialization grows Binlogs.
+		segment.Stats = &datapb.Statistics{InsertBinlogSize: 100, InsertBinlogCount: 1}
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		// Materialization adds a function-output column: Binlogs and the
+		// shipped Stats both grow; the receiver must copy the shipped Stats.
+		shippedStats := &datapb.Statistics{InsertBinlogSize: 250, InsertBinlogCount: 2}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					InsertLogs:     segment.GetBinlogs(),
+					Manifest:       newerManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats:          shippedStats,
+				},
+			},
+		}
+
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.EqualValues(250, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(250, m.segments.GetSegment(1).getSegmentSize())
 	})
 
 	suite.Run("v3 same manifest and same task schema accepted", func() {
@@ -3457,6 +3589,68 @@ func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
 	require.EqualValues(t, 11, stats.GetDeltaBinlogCount())
 	require.EqualValues(t, 100, stats.GetDeltaTimestampFrom())
 	require.EqualValues(t, 1000, stats.GetDeltaTimestampTo())
+}
+
+// Regression for the L0 retry double-add: l0CompactionTask re-runs
+// saveSegmentMeta when the subsequent meta_saved task-state write fails, so the
+// SAME committed manifest and deltalogs re-enter apply. The committedV3Manifests
+// cache makes the manifest re-commit idempotent, but the delta Stats
+// accumulation must be idempotent too — otherwise for V3 (durable Stats) the
+// retry permanently over-counts deletes.
+func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/202"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           202,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+		Stats: &datapb.Statistics{
+			DeltaBinlogSize:  4096,
+			DeleteNumRows:    1000,
+			DeltaBinlogCount: 10,
+		},
+	})))
+
+	deltalogs := []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{{
+			LogID:      9001,
+			LogPath:    basePath + "/_delta/9001",
+			EntriesNum: 50,
+			MemorySize: 256,
+		}},
+	}}
+
+	var commitCalls int
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			commitCalls++
+			return newManifest, nil
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	// First run: commits manifest, accumulates deltas.
+	cache := make(map[int64]string)
+	require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		202, deltalogs, &indexpb.StorageConfig{}, cache)))
+
+	// Retry with the SAME cache and deltalogs (meta_saved write failed after the
+	// first run persisted segment stats).
+	require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		202, deltalogs, &indexpb.StorageConfig{}, cache)))
+
+	stats := meta.GetSegment(context.TODO(), 202).GetStats()
+	require.EqualValues(t, 1050, stats.GetDeleteNumRows(), "deltas must accumulate exactly once across retry")
+	require.EqualValues(t, 4096+256, stats.GetDeltaBinlogSize())
+	require.EqualValues(t, 11, stats.GetDeltaBinlogCount())
+	require.Equal(t, 1, commitCalls, "manifest must be committed only once (cache idempotency)")
+	require.Len(t, meta.GetSegment(context.TODO(), 202).GetDeltalogs(), 1, "deltalog array must not duplicate")
 }
 
 func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *testing.T) {

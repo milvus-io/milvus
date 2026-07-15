@@ -480,6 +480,21 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 	return summary, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: pack.deltaData.RowCount}}, nil
 }
 
+// hasExistingManifest reports whether initialManifestPath points at a committed
+// manifest that can carry prior-batch stats (a version past earliest). A
+// brand-new segment (empty path or earliest version) has no prior stats to
+// preserve, so the prior-stats read is skipped for it.
+func (bw *BulkPackWriterV3) hasExistingManifest() bool {
+	if bw.initialManifestPath == "" {
+		return false
+	}
+	_, version, err := packed.UnmarshalManifestPath(bw.initialManifestPath)
+	if err != nil {
+		return false
+	}
+	return version != packed.ManifestEarliest
+}
+
 // writeStats writes bloom filter stat blobs under basePath/_stats and
 // returns the resulting StatEntry list. The caller folds the entries into
 // a ManifestUpdates that commits atomically with inserts / delta / bm25.
@@ -512,8 +527,16 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 	// merge previously written files into the new entry.
 	statKey := fmt.Sprintf("bloom_filter.%d", pkFieldID)
 	var priorBloomPaths []string
-	existingStats, err := packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
-	if err == nil {
+	if bw.hasExistingManifest() {
+		// A transient manifest read failure must NOT be swallowed: under loon
+		// replace semantics the committed StatEntry would then drop the prior
+		// per-batch paths, so the flush compound would hold only this sync's PKs
+		// — losing prior-batch PKs for delete-routing / PK-pruning. Propagate so
+		// the sync retries instead of persisting a truncated bloom set.
+		existingStats, err := packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to read prior bloom stats from manifest")
+		}
 		if existing, ok := existingStats[statKey]; ok && len(existing.Paths) > 0 {
 			// These are the prior syncs' per-batch bloom paths (already absolute,
 			// chunkManager-readable). Reused by the flush merge below so we don't
@@ -618,8 +641,13 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 	// captures them per field (already absolute, chunkManager-readable) for the
 	// flush merge below, so we don't re-read the manifest via a StatsResolver.
 	priorBM25Paths := make(map[int64][]string)
-	existingStats, err := packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
-	if err == nil {
+	if bw.hasExistingManifest() {
+		// Same as the bloom path: propagate a transient read failure rather than
+		// silently dropping prior BM25 blobs and committing a truncated set.
+		existingStats, err := packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to read prior bm25 stats from manifest")
+		}
 		for key, existing := range existingStats {
 			prefix, fieldID, ok := packed.ParseStatKey(key)
 			if !ok || prefix != "bm25" || len(existing.Paths) == 0 {

@@ -387,6 +387,21 @@ func TestStatisticsCollector_RestoreFromStats_RoundTrips(t *testing.T) {
 	assert.Equal(t, []int64{20, 30, 40, 45, 50}, got.GetTimestampQuantiles())
 }
 
+func TestStatisticsCollector_RestoreFromStats_RoundTrips_NonDivisibleNumRows(t *testing.T) {
+	// numRows not divisible by len(quantiles): the reconstructed buckets must
+	// still reproduce the persisted marks exactly (idempotent restore).
+	persisted := &datapb.Statistics{
+		InsertBinlogSize:   1000,
+		InsertBinlogCount:  4,
+		TimestampFrom:      10,
+		TimestampTo:        50,
+		TimestampQuantiles: []int64{20, 30, 40, 45, 50},
+	}
+	got := NewStatisticsCollectorFromStats(persisted, 103).Publish()
+	require.NotNil(t, got)
+	assert.Equal(t, []int64{20, 30, 40, 45, 50}, got.GetTimestampQuantiles())
+}
+
 func TestStatisticsCollector_RestoreThenDigest_Accumulates(t *testing.T) {
 	c := NewStatisticsCollectorFromStats(&datapb.Statistics{
 		InsertBinlogSize:  1000,

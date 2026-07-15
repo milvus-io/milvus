@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -595,6 +596,62 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 	count3 := len(stats3[bfKey].Paths)
 	s.Greater(count3, count2, "batch 3 should accumulate more bloom filter files than batch 2")
 	s.NotEmpty(stats3[bfKey].Metadata["memory_size"], "memory_size metadata should be set")
+}
+
+// TestWrite_PropagatesPriorStatsReadError guards against silently committing a
+// truncated compound bloom blob. When the prior-batch stats read fails on a
+// flush over an existing manifest, Write must return the error so the sync
+// retries — dropping the prior per-batch paths under loon replace semantics
+// would commit a compound holding only this sync's PKs, losing prior-batch PKs
+// for delete-routing / PK-pruning.
+func (s *PackWriterV3Suite) TestWrite_PropagatesPriorStatsReadError() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(10007) // unique ID to avoid manifest collision with other tests
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	batchRows := 5
+
+	bfs := pkoracle.NewBloomFilterSet()
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: manifestPath}, bfs, nil, metacache.NewEmptySegmentStats())
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	// Batch 1 creates a real manifest (version past earliest) carrying prior
+	// per-batch bloom paths.
+	pack1 := new(SyncPack).
+		WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertDataWithPKOffset(batchRows, 0, s.schema)).
+		WithBatchRows(int64(batchRows))
+	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+	_, _, _, _, manifest1, _, _, err := bw1.Write(context.Background(), pack1)
+	s.Require().NoError(err)
+	currentSplit := storagecommon.FillColumnGroupFormats(s.currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
+
+	// Fault-inject a transient prior-stats read failure on the flush.
+	patched := mockey.Mock(packed.GetManifestStats).
+		Return(nil, errors.New("transient manifest read failure")).Build()
+	defer patched.UnPatch()
+
+	pack2 := new(SyncPack).
+		WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertDataWithPKOffset(batchRows, batchRows, s.schema)).
+		WithFlush()
+	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, currentSplit, manifest1)
+	_, _, _, _, _, _, _, err = bw2.Write(context.Background(), pack2)
+	s.Require().Error(err, "flush must fail when prior-batch stats read fails, not commit a truncated compound blob")
 }
 
 // TestPerBatchStatPathsExcludesCompound guards the flush-merge fix: when a

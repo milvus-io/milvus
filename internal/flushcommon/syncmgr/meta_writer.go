@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"math"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -10,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -204,6 +206,32 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		mlog.String("vChannelName", task.channelName),
 	)
 
+	// Insert/delta aggregates live on the cumulative collector, not the in-memory
+	// binlog arrays — after a V3 recovery those arrays are empty (their per-field
+	// KVs are skipped), so rebuilding from them would ship a Statistics
+	// reflecting only post-recovery batches and undercount everything else.
+	// Mirror the SyncTask finalizeStats path: Digest this batch onto a clone of
+	// the restored cumulative collector, then install the clone back on success
+	// so the next batch keeps accumulating. Digest does not read insert-binlog
+	// timestamps, so pass the batch's range explicitly.
+	statsClone := segment.Statistics().Clone()
+	tsFrom, tsTo := insertBinlogTimestampRange(task.insertBinlogs)
+	statsClone.Digest(task.insertBinlogs, nil, 0, task.batchRows, tsFrom, tsTo)
+	stats := statsClone.Publish()
+	// V3 stats (bloom-filter / BM25 footprint) live in the manifest, not in
+	// statslog KV arrays; source StatsBinlogSize from the just-committed manifest.
+	if stats != nil && task.storageConfig != nil && task.manifestPath != "" {
+		if statsBlobSize, err := packed.StatsBinlogSizeFromManifest(task.manifestPath, task.storageConfig); err != nil {
+			// Degrade gracefully: keep the collector's StatsBinlogSize rather than
+			// block the flush commit on a transient manifest read error; a later
+			// compaction corrects the footprint.
+			mlog.Warn(ctx, "failed to read manifest stats footprint for growing source flush; StatsBinlogSize may under-count until next compaction",
+				mlog.Int64("segmentID", task.segmentID), mlog.String("manifestPath", task.manifestPath), mlog.Err(err))
+		} else {
+			stats.StatsBinlogSize = statsBlobSize
+		}
+	}
+
 	req := &datapb.SaveBinlogPathsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(0),
@@ -226,6 +254,7 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		StorageVersion:      segment.GetStorageVersion(),
 		WithFullBinlogs:     true,
 		ManifestPath:        task.manifestPath,
+		Stats:               stats,
 	}
 
 	err := retry.Handle(ctx, func() (bool, error) {
@@ -257,8 +286,35 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		metacache.UpdateStatslogs(statsFieldBinlogs),
 		metacache.UpdateDeltalogs(deltaFieldBinlogs),
 		metacache.UpdateBm25logs(bm25FieldBinlogs),
+		// Install the digested cumulative collector so the next batch accumulates
+		// on top of it instead of resetting to the restored baseline. Only on the
+		// success path, so a failed+retried sync re-digests from the unchanged
+		// base (idempotent), matching the SyncTask SetStatistics behavior.
+		metacache.SetStatistics(statsClone),
 	), metacache.WithSegmentIDs(task.segmentID))
 	return nil
+}
+
+// insertBinlogTimestampRange returns the min TimestampFrom and max TimestampTo
+// across a batch's insert binlogs. Digest advances the collector's timestamp
+// marks from the explicit range rather than reading insert-binlog timestamps.
+func insertBinlogTimestampRange(inserts map[int64]*datapb.FieldBinlog) (uint64, uint64) {
+	var tsFrom uint64 = math.MaxUint64
+	var tsTo uint64
+	for _, fb := range inserts {
+		for _, l := range fb.GetBinlogs() {
+			if from := l.GetTimestampFrom(); from > 0 && from < tsFrom {
+				tsFrom = from
+			}
+			if to := l.GetTimestampTo(); to > tsTo {
+				tsTo = to
+			}
+		}
+	}
+	if tsFrom == math.MaxUint64 {
+		tsFrom = 0
+	}
+	return tsFrom, tsTo
 }
 
 func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) error {
