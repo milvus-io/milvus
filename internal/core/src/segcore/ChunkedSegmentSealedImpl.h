@@ -1368,7 +1368,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     resolve_field_data_group_warmup_policy(
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         const SegmentLoadInfo& segment_load_info,
-        const SchemaPtr& schema_snapshot) const;
+        const SchemaPtr& schema_snapshot,
+        const std::string& explicit_warmup_policy = "") const;
 
     SchemaPtr
     CaptureSchemaSnapshot() const;
