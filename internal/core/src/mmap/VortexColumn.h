@@ -226,22 +226,12 @@ class VortexColumn final : public ChunkedColumnInterface {
     ScanResult
     Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const override;
 
+ private:
     struct TakeResult {
         std::vector<std::shared_ptr<Chunk>> chunks;
         std::vector<int64_t> offsets;
     };
 
-    TakeResult
-    TakeOwn(milvus::OpContext* op_ctx,
-            const int64_t* offsets,
-            int64_t count) const;
-
-    std::shared_ptr<TakeResult>
-    Take(milvus::OpContext* op_ctx,
-         const int64_t* offsets,
-         int64_t count) const;
-
- private:
     std::optional<DataType>
     GetDefaultScanDataType() const override;
 
@@ -353,6 +343,11 @@ class VortexColumn final : public ChunkedColumnInterface {
     TakeFromFile(milvus::OpContext* op_ctx,
                  int64_t chunk_id,
                  const std::vector<int64_t>& offsets) const;
+
+    TakeResult
+    TakeOwn(milvus::OpContext* op_ctx,
+            const int64_t* offsets,
+            int64_t count) const;
 
     ArrowTakeResult
     TakeArrowFromFile(milvus::OpContext* op_ctx,

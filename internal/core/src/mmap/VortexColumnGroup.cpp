@@ -42,6 +42,8 @@ ThrowVortexStatus(const arrow::Status& status,
                   ErrorCode fallback_code,
                   std::string_view action) {
     auto code = fallback_code;
+    // The Vortex bridge also uses IOError for decode failures, so the caller
+    // owns the fallback classification instead of mapping IOError globally.
     if (status.IsOutOfMemory()) {
         code = ErrorCode::MemAllocateFailed;
     } else if (status.IsCancelled()) {

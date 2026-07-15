@@ -48,6 +48,8 @@ ThrowVortexStatus(const arrow::Status& status,
                   ErrorCode fallback_code,
                   std::string_view action) {
     auto code = fallback_code;
+    // The Vortex bridge also uses IOError for decode failures, so the caller
+    // owns the fallback classification instead of mapping IOError globally.
     if (status.IsOutOfMemory()) {
         code = ErrorCode::MemAllocateFailed;
     } else if (status.IsCancelled()) {
@@ -2261,6 +2263,13 @@ VortexColumn::BulkRawBsonAt(
     const uint32_t* row_offsets,
     const uint32_t* value_offsets,
     int64_t count) const {
+    if (data_type_ != DataType::STRING) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "VortexColumn::BulkRawBsonAt only supports BSON fields");
+    }
+    if (count == 0) {
+        return;
+    }
     AssertInfo(row_offsets != nullptr && value_offsets != nullptr,
                "row_offsets and value_offsets must be provided");
     std::vector<int64_t> offsets(count);
@@ -2394,13 +2403,6 @@ VortexColumn::TakeOwn(milvus::OpContext* op_ctx,
     }
 
     return result;
-}
-
-std::shared_ptr<VortexColumn::TakeResult>
-VortexColumn::Take(milvus::OpContext* op_ctx,
-                   const int64_t* offsets,
-                   int64_t count) const {
-    return std::make_shared<TakeResult>(TakeOwn(op_ctx, offsets, count));
 }
 
 ChunkedColumnInterface::ScanResult

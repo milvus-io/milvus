@@ -1013,6 +1013,14 @@ TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
         CheckNoDataScan(column);
         CheckApplyValidDataInChunk(column);
         CheckDataScan(column, type);
+        if (type == DataType::STRING) {
+            EXPECT_NO_THROW(column.BulkRawBsonAt(
+                nullptr,
+                [](BsonView, uint32_t, uint32_t) {},
+                nullptr,
+                nullptr,
+                0));
+        }
         if (IsVortexStringPushdownType(type)) {
             CheckNullableFilteredScanReturnsValidity(column, type);
         } else if (type == DataType::TEXT) {
