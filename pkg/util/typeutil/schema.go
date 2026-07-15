@@ -114,13 +114,20 @@ func ValidateTextRequiresStorageV3(schema *schemapb.CollectionSchema, storageV3E
 	return nil
 }
 
-// UseGrowingSourceFlush returns whether insert payload for the schema should
-// be flushed from QueryNode growing source when available.
-func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
+// AllowGrowingSourceFlush returns whether insert payload for the schema may try
+// flushing from QueryNode growing source when available.
+func AllowGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
 	if !storageV3Enabled {
 		return false
 	}
 	return HasTextField(schema) || enableGrowingSourceFlush
+}
+
+// UseGrowingSourceFlush is kept for compatibility. Prefer
+// AllowGrowingSourceFlush for new code to avoid implying the source choice is
+// mandatory.
+func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
+	return AllowGrowingSourceFlush(schema, storageV3Enabled, enableGrowingSourceFlush)
 }
 
 // EstimateSizePerRecord returns the estimate size of a record in a collection

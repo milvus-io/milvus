@@ -431,6 +431,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
           segcore_config_(segcore_config),
           schema_(std::move(schema)),
           index_meta_(indexMeta),
+          retain_insert_record_chunks_for_flush_(
+              ShouldRetainInsertRecordChunksForFlush(*schema_,
+                                                     segcore_config_)),
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
           indexing_record_(
@@ -838,10 +841,30 @@ class SegmentGrowingImpl : public SegmentGrowing {
     InitializeArrayOffsets();
 
  private:
+    static bool
+    ShouldRetainInsertRecordChunksForFlush(
+        const Schema& schema, const SegcoreConfig& segcore_config) {
+        if (!segcore_config.get_storage_v3_enabled()) {
+            return false;
+        }
+        if (segcore_config.get_enable_growing_source_flush()) {
+            return true;
+        }
+        return std::any_of(schema.get_fields().begin(),
+                           schema.get_fields().end(),
+                           [](const auto& field) {
+                               return field.second.get_data_type() ==
+                                      DataType::TEXT;
+                           });
+    }
+
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
     IndexMetaPtr index_meta_;
+    // Segment-level sticky decision. Once a growing segment is created, raw
+    // chunks must not start/stop being retained because global config changes.
+    bool retain_insert_record_chunks_for_flush_;
 
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;

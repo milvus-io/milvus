@@ -392,9 +392,7 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
-    if (segcore_config_.get_storage_v3_enabled() &&
-        (SchemaHasTextField(*schema_) ||
-         segcore_config_.get_enable_growing_source_flush())) {
+    if (retain_insert_record_chunks_for_flush_) {
         // StorageV3 TEXT and growing-source flush persist growing segments
         // through milvus-storage. Interim indexes may also contain raw vector
         // data, but FlushGrowingSegmentData reads directly from insert_record_

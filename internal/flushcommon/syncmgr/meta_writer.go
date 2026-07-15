@@ -167,6 +167,10 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 	if !ok {
 		return merr.WrapErrSegmentNotFound(task.segmentID)
 	}
+	if segment.GetStorageVersion() != storage.StorageV3 {
+		return merr.WrapErrDataIntegrityMsg("growing source sync requires StorageV3 segment, segmentID=%d storageVersion=%d",
+			task.segmentID, segment.GetStorageVersion())
+	}
 
 	insertFieldBinlogs := segment.Binlogs()
 	if len(task.insertBinlogs) > 0 {
@@ -215,7 +219,7 @@ func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *Gr
 		Dropped:             task.IsDrop(),
 		Channel:             task.channelName,
 		SegLevel:            task.level,
-		StorageVersion:      storage.StorageV3,
+		StorageVersion:      segment.GetStorageVersion(),
 		WithFullBinlogs:     true,
 		ManifestPath:        task.manifestPath,
 	}

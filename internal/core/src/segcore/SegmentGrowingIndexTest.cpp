@@ -369,6 +369,75 @@ TEST_P(GrowingIndexTest, Correctness) {
     }
 }
 
+TEST(GrowingIndex, RetainInsertRecordChunksForFlushIsSegmentSticky) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 100;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "1"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+    IndexMetaPtr meta =
+        std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 16;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    interim_config.sub_dim = dim;
+    interim_config.refine_ratio = 1.0F;
+    interim_config.refine_quant_type = "NONE";
+    interim_config.refine_with_quant_flag = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+    config.set_storage_v3_enabled(true);
+    config.set_enable_growing_source_flush(true);
+
+    auto retained_segment = CreateGrowingSegment(schema, meta, 1, config);
+    auto* retained_impl =
+        dynamic_cast<SegmentGrowingImpl*>(retained_segment.get());
+    ASSERT_NE(retained_impl, nullptr);
+
+    config.set_enable_growing_source_flush(false);
+
+    auto insert = [&](SegmentGrowing* segment) {
+        auto dataset = DataGen(schema, row_count);
+        auto offset = segment->PreInsert(row_count);
+        segment->Insert(offset,
+                        row_count,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+    };
+
+    insert(retained_segment.get());
+    EXPECT_GT(
+        retained_impl->get_insert_record().get_data_base(vec)->num_chunk(), 0);
+
+    auto non_retained_segment = CreateGrowingSegment(schema, meta, 2, config);
+    auto* non_retained_impl =
+        dynamic_cast<SegmentGrowingImpl*>(non_retained_segment.get());
+    ASSERT_NE(non_retained_impl, nullptr);
+    insert(non_retained_segment.get());
+    EXPECT_EQ(
+        non_retained_impl->get_insert_record().get_data_base(vec)->num_chunk(),
+        0);
+}
+
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     constexpr int N = 1024;
     constexpr int dim = 4;
