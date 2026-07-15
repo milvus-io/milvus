@@ -257,7 +257,7 @@ func validateAddedEvolutionField(field *schemapb.FieldSchema, dynamicEnabled boo
 	if field.GetFieldID() < common.StartOfUserFieldID {
 		return merr.WrapErrParameterInvalidMsg("cannot add system field %q online", name)
 	}
-	if isReservedEvolutionFieldName(name) && !(dynamicEnabled && field.GetIsDynamic() && name == common.MetaFieldName) {
+	if isReservedEvolutionFieldName(name) && (!dynamicEnabled || !field.GetIsDynamic() || name != common.MetaFieldName) {
 		return merr.WrapErrParameterInvalidMsg("cannot add system field %q online", name)
 	}
 	if field.GetIsFunctionOutput() || field.GetIsDynamic() {
@@ -297,7 +297,7 @@ func validateDroppedEvolutionField(field *schemapb.FieldSchema, newSchema *schem
 		return merr.WrapErrParameterInvalidMsg("cannot drop clustering key field %q", name)
 	case field.GetFieldID() < common.StartOfUserFieldID:
 		return merr.WrapErrParameterInvalidMsg("cannot drop system field %q", name)
-	case isReservedEvolutionFieldName(name) && !(field.GetIsDynamic() && !newSchema.GetEnableDynamicField()):
+	case isReservedEvolutionFieldName(name) && (!field.GetIsDynamic() || newSchema.GetEnableDynamicField()):
 		return merr.WrapErrParameterInvalidMsg("cannot drop system field %q", name)
 	}
 	if function := evolutionFunctionReferencing(newSchema, field.GetFieldID()); function != "" {
