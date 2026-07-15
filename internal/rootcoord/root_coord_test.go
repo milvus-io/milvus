@@ -1892,6 +1892,15 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
+	t.Run("empty name", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterMissing)
+	})
+
 	t.Run("storage check error", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
 		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, errors.New("storage error"))
@@ -1996,6 +2005,13 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		resp, err := c.RemoveFileResource(context.Background(), &milvuspb.RemoveFileResourceRequest{})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterMissing)
 	})
 
 	t.Run("meta remove file resource error", func(t *testing.T) {
