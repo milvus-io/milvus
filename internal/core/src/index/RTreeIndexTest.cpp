@@ -1045,6 +1045,7 @@ TEST_F(RTreeIndexTest, GIS_SplitFusion_Equivalence_Indexed) {
     };
     const auto kInter = proto::plan::GISFunctionFilterExpr_GISOp_Intersects;
     const auto kWithin = proto::plan::GISFunctionFilterExpr_GISOp_Within;
+    const auto kDWithin = proto::plan::GISFunctionFilterExpr_GISOp_DWithin;
 
     std::vector<milvus::expr::TypedExprPtr> filters = {
         // scalar AND single GIS (indexed)
@@ -1065,6 +1066,21 @@ TEST_F(RTreeIndexTest, GIS_SplitFusion_Equivalence_Indexed) {
                 "POLYGON((-100 -100,100 -100,100 100,-100 100,-100 -100))"),
             Or(gis(kInter, "POLYGON((-2 -2,2 -2,2 2,-2 2,-2 -2))"),
                gis(kInter, "POLYGON((10 10,20 10,20 20,10 20,10 10))"))),
+        // DWithin mixed with a groupable GIS leaf on the SAME field, on the
+        // INDEXED side -- the config where a wrongly-grouped DWithin actually
+        // corrupts the coarse phase (RunRTreeQuery would query the R-Tree
+        // with the raw point instead of the distance-expanded bbox from
+        // create_bounding_box_for_dwithin, and the group's Pred drops the
+        // distance so refine degrades to 0.0). DWithin must stay on the
+        // baseline path per the as_groupable_gis whitelist. Query point (3,3)
+        // with a 1,000,000 m geodesic radius reaches the origin cluster
+        // (point / small polygon / linestring, each a few hundred km away)
+        // but not the (10,10)-(20,20) polygon (~1,100 km): a distance-0
+        // degradation would select zero rows here, so ON-vs-OFF diverges
+        // loudly if DWithin ever enters a fusion group.
+        And(std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+                col_geo, kDWithin, "POINT(3 3)", /*distance=*/1000000.0),
+            gis(kInter, "POLYGON((-2 -2,2 -2,2 2,-2 2,-2 -2))")),
     };
 
     auto run = [&](const milvus::expr::TypedExprPtr& f,

@@ -112,6 +112,17 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
         current_pos_ += NextBatchSize();
     }
 
+    // The coarse node never reads the raw geometry column: it either queries
+    // the R-Tree (base DetermineExecPath pins the index early on the prefetch
+    // pool when one is pinnable; RunRTreeQuery re-checks the pin) or emits an
+    // all-set bitmap. The base decision is kept on purpose -- but when it
+    // lands on RawData (no usable index), prefetching the raw column would
+    // only warm data this node never touches, so make it a no-op. The Refine
+    // node, which does read that column, prefetches it itself.
+    void
+    PrefetchRawData() override {
+    }
+
  private:
     int64_t
     NextBatchSize() const {
