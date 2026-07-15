@@ -909,6 +909,24 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     EXPECT_EQ(int_column.chunk_row_nums(0), 16);
     EXPECT_EQ(int_column.chunk_row_nums(1), 16);
 
+    const int64_t first_file_offset[] = {0};
+    const int64_t second_file_offset[] = {16};
+    const int64_t cross_file_offsets[] = {0, 16};
+    EXPECT_TRUE(int_column.CellsLoaded(nullptr, 0));
+    EXPECT_FALSE(int_column.CellsLoaded(first_file_offset, 1));
+    EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
+
+    int32_t first_value = 0;
+    int_column.BulkPrimitiveValueAt(
+        nullptr, &first_value, first_file_offset, 1, false);
+    EXPECT_EQ(first_value, 0);
+    EXPECT_TRUE(int_column.CellsLoaded(first_file_offset, 1));
+    EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
+    EXPECT_FALSE(int_column.CellsLoaded(cross_file_offsets, 2));
+
+    int_column.ManualEvictCache();
+    EXPECT_FALSE(int_column.CellsLoaded(first_file_offset, 1));
+
     std::vector<int64_t> offsets{0, 15, 16, 17, 31, 16};
     std::vector<int32_t> values(offsets.size());
     int_column.BulkPrimitiveValueAt(

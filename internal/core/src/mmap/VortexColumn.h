@@ -109,6 +109,9 @@ class VortexColumn final : public ChunkedColumnInterface {
     PrefetchChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) const override;
 
+    bool
+    CellsLoaded(const int64_t* offsets, int64_t count) const override;
+
     PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const override;
 

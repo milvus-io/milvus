@@ -24,7 +24,6 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -43,6 +42,8 @@
 #include <arrow/io/interfaces.h>
 #include <fmt/format.h>
 
+#include "common/EasyAssert.h"
+#include "log/Log.h"
 #include "milvus-storage/format/vortex/vortex_types.h"
 
 namespace milvus {
@@ -53,10 +54,21 @@ namespace {
 #define MFD_CLOEXEC 0x0001U
 #endif
 
-[[noreturn]] inline void
-ThrowSystemError(std::string_view action) {
-    throw std::runtime_error(
-        fmt::format("{} failed: {}", action, std::strerror(errno)));
+[[noreturn]] void
+ThrowSystemError(ErrorCode code, std::string_view action) {
+    const auto error = errno;
+    ThrowInfo(code, "{} failed: {}", action, std::strerror(error));
+}
+
+uint64_t
+AlignUp(uint64_t value, uint64_t alignment) {
+    const auto remainder = value % alignment;
+    return remainder == 0 ? value : value + alignment - remainder;
+}
+
+uint64_t
+AlignDown(uint64_t value, uint64_t alignment) {
+    return value - value % alignment;
 }
 
 inline int
@@ -78,19 +90,34 @@ class SparseVortexMmapFile final
     : public milvus_storage::vortex::VortexRangeFile,
       public std::enable_shared_from_this<SparseVortexMmapFile> {
  public:
-    explicit SparseVortexMmapFile(std::string name) {
-        fd_ = CreateAnonymousSparseFile(name);
+    explicit SparseVortexMmapFile(std::string name) : name_(std::move(name)) {
+        fd_ = CreateAnonymousSparseFile(name_);
         if (fd_ < 0) {
-            ThrowSystemError("create vortex sparse file");
+            ThrowSystemError(ErrorCode::FileCreateFailed,
+                             "create vortex sparse file");
         }
     }
 
     ~SparseVortexMmapFile() override {
         if (mapping_ != nullptr) {
-            ::munmap(mapping_, static_cast<size_t>(mapped_size_));
+            if (::munmap(mapping_, static_cast<size_t>(mapped_size_)) != 0) {
+                const auto error = errno;
+                LOG_WARN(
+                    "failed to unmap vortex sparse file {} during "
+                    "cleanup: {}",
+                    name_,
+                    std::strerror(error));
+            }
         }
         if (fd_ >= 0) {
-            ::close(fd_);
+            if (::close(fd_) != 0) {
+                const auto error = errno;
+                LOG_WARN(
+                    "failed to close vortex sparse file {} during "
+                    "cleanup: {}",
+                    name_,
+                    std::strerror(error));
+            }
         }
     }
 
@@ -101,11 +128,13 @@ class SparseVortexMmapFile final
             return;
         }
         if (size > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
-            throw std::runtime_error(fmt::format(
-                "vortex sparse file size {} exceeds off_t limit", size));
+            ThrowInfo(ErrorCode::MmapError,
+                      "vortex sparse file size {} exceeds off_t limit",
+                      size);
         }
         if (::ftruncate(fd_, static_cast<off_t>(size)) != 0) {
-            ThrowSystemError("resize vortex sparse file");
+            ThrowSystemError(ErrorCode::FileWriteFailed,
+                             "resize vortex sparse file");
         }
         size_ = size;
         RemapLocked();
@@ -166,6 +195,7 @@ class SparseVortexMmapFile final
         }
 
 #if defined(FALLOC_FL_PUNCH_HOLE) && defined(SYS_fallocate)
+        int fallocate_error = ENOTSUP;
         if (offset <=
                 static_cast<uint64_t>(std::numeric_limits<off_t>::max()) &&
             length <=
@@ -177,10 +207,79 @@ class SparseVortexMmapFile final
                           static_cast<off_t>(length)) == 0) {
                 return;
             }
+            fallocate_error = errno;
         }
+#else
+        constexpr int fallocate_error = ENOTSUP;
 #endif
 
+        const auto page_size = ::sysconf(_SC_PAGESIZE);
+        if (page_size > 0) {
+            const auto alignment = static_cast<uint64_t>(page_size);
+            const auto end = offset + length;
+            const auto aligned_begin = AlignUp(offset, alignment);
+            const auto aligned_end = AlignDown(end, alignment);
+            if (aligned_begin < aligned_end) {
+                const auto prefix_end = std::min(aligned_begin, end);
+                if (offset < prefix_end) {
+                    std::memset(mapping_ + offset, 0, prefix_end - offset);
+                }
+                if (aligned_end < end) {
+                    std::memset(mapping_ + aligned_end, 0, end - aligned_end);
+                }
+#ifdef MADV_REMOVE
+                if (::madvise(mapping_ + aligned_begin,
+                              static_cast<size_t>(aligned_end - aligned_begin),
+                              MADV_REMOVE) == 0) {
+                    LOG_WARN(
+                        "punching vortex cell [{}, {}) in {} with "
+                        "fallocate failed: {}; released aligned pages "
+                        "with MADV_REMOVE",
+                        offset,
+                        end,
+                        name_,
+                        std::strerror(fallocate_error));
+                    return;
+                }
+                const auto madvise_error = errno;
+#else
+                constexpr int madvise_error = ENOTSUP;
+#endif
+                std::memset(
+                    mapping_ + aligned_begin, 0, aligned_end - aligned_begin);
+#ifdef MADV_DONTNEED
+                if (::madvise(mapping_ + aligned_begin,
+                              static_cast<size_t>(aligned_end - aligned_begin),
+                              MADV_DONTNEED) != 0) {
+                    LOG_WARN(
+                        "failed to discard zeroed vortex cell pages in "
+                        "{}: {}",
+                        name_,
+                        std::strerror(errno));
+                }
+#endif
+                LOG_WARN(
+                    "failed to release vortex cell [{}, {}) in {} with "
+                    "fallocate ({}) and MADV_REMOVE ({}); zeroed the "
+                    "range to preserve sparse-file read semantics",
+                    offset,
+                    end,
+                    name_,
+                    std::strerror(fallocate_error),
+                    std::strerror(madvise_error));
+                return;
+            }
+        }
+
         std::memset(mapping_ + offset, 0, length);
+        LOG_WARN(
+            "failed to release vortex cell [{}, {}) in {} with "
+            "fallocate: {}; zeroed the range because it contains no "
+            "aligned full page",
+            offset,
+            offset + length,
+            name_,
+            std::strerror(fallocate_error));
     }
 
     arrow::Result<int64_t>
@@ -257,7 +356,8 @@ class SparseVortexMmapFile final
     RemapLocked() {
         if (mapping_ != nullptr) {
             if (::munmap(mapping_, static_cast<size_t>(mapped_size_)) != 0) {
-                ThrowSystemError("unmap vortex sparse file");
+                ThrowSystemError(ErrorCode::MmapError,
+                                 "unmap vortex sparse file");
             }
             mapping_ = nullptr;
             mapped_size_ = 0;
@@ -266,8 +366,9 @@ class SparseVortexMmapFile final
             return;
         }
         if (size_ > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-            throw std::runtime_error(fmt::format(
-                "vortex sparse file size {} exceeds mmap limit", size_));
+            ThrowInfo(ErrorCode::MmapError,
+                      "vortex sparse file size {} exceeds mmap limit",
+                      size_);
         }
         auto* mapped = ::mmap(nullptr,
                               static_cast<size_t>(size_),
@@ -276,13 +377,14 @@ class SparseVortexMmapFile final
                               fd_,
                               0);
         if (mapped == MAP_FAILED) {
-            ThrowSystemError("mmap vortex sparse file");
+            ThrowSystemError(ErrorCode::MmapError, "mmap vortex sparse file");
         }
         mapping_ = static_cast<uint8_t*>(mapped);
         mapped_size_ = size_;
     }
 
     mutable std::shared_mutex mutex_;
+    std::string name_;
     int fd_ = -1;
     uint8_t* mapping_ = nullptr;
     uint64_t mapped_size_ = 0;

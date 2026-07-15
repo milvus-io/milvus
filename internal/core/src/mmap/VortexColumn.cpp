@@ -1065,6 +1065,39 @@ VortexColumn::PrefetchChunks(milvus::OpContext* op_ctx,
     }
 }
 
+bool
+VortexColumn::CellsLoaded(const int64_t* offsets, int64_t count) const {
+    if (count == 0) {
+        return true;
+    }
+    AssertInfo(offsets != nullptr,
+               "vortex cache check requires explicit row offsets");
+
+    std::unordered_map<int64_t, std::vector<int64_t>> offsets_by_chunk;
+    for (int64_t i = 0; i < count; ++i) {
+        auto [chunk_id, chunk_offset] = GetChunkIDByOffset(offsets[i]);
+        offsets_by_chunk[static_cast<int64_t>(chunk_id)].emplace_back(
+            static_cast<int64_t>(chunk_offset));
+    }
+
+    for (auto& [chunk_id, chunk_offsets] : offsets_by_chunk) {
+        std::sort(chunk_offsets.begin(), chunk_offsets.end());
+        chunk_offsets.erase(
+            std::unique(chunk_offsets.begin(), chunk_offsets.end()),
+            chunk_offsets.end());
+
+        const auto& file = files_[chunk_id];
+        auto plan = PlanOffsets(file, chunk_offsets);
+        for (auto cell_id : plan.cell_ids) {
+            if (!file.slot->IsCached(
+                    static_cast<cachinglayer::cid_t>(cell_id))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 PinWrapper<SpanBase>
 VortexColumn::Span(milvus::OpContext* op_ctx, int64_t chunk_id) const {
     if (!IsChunkedColumnDataType(data_type_)) {

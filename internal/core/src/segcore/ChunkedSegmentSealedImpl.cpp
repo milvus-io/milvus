@@ -7802,12 +7802,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                        "{}",
                        field_id.get());
         }
-        AssertInfo(load_info->GetStorageVersion() == STORAGE_V3,
+        AssertInfo(segment_load_info.GetStorageVersion() == STORAGE_V3,
                    "vortex local_format is only supported for storage v3, "
                    "segment {}, column group {}, storage version {}",
                    get_segment_id(),
                    index,
-                   load_info->GetStorageVersion());
+                   segment_load_info.GetStorageVersion());
         AssertInfo(!column_group->files.empty(),
                    "vortex column group {} has no files, segment {}",
                    index,
@@ -7884,8 +7884,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                                    op_ctx,
                                    is_replace);
             if (field_id == TimestampFieldID) {
-                init_storage_v2_timestamp_index(column,
-                                                load_info->GetNumOfRows());
+                init_storage_v2_timestamp_index(
+                    column, segment_load_info.GetNumOfRows());
             }
         }
         LOG_INFO(
