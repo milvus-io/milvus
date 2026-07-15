@@ -257,7 +257,7 @@ func (j *reader) Size() (int64, error) {
 	if size := j.fileSize.Load(); size != 0 {
 		return size, nil
 	}
-	size, err := j.cm.Size(j.ctx, j.filePath)
+	size, err := common.GetFilesSizeWithRetry(j.ctx, j.cm, []string{j.filePath})
 	if err != nil {
 		return 0, err
 	}
