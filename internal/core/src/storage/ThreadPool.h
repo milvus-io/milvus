@@ -21,8 +21,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
-#include <condition_variable>
 #include <chrono>
+#include <cmath>
+#include <condition_variable>
 #include <functional>
 #include <future>
 #include <memory>
@@ -73,6 +74,22 @@ InitCpuNum(const int core);
 void
 SetThreadPoolMaxThreadsSize(const int size);
 
+inline int
+ClampThreadPoolMaxThreads(int size) {
+    size = std::max(1, size);
+    auto max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
+    if (max_limit > 0 && size > max_limit) {
+        size = max_limit;
+    }
+    return size;
+}
+
+inline int
+ComputeThreadPoolMaxThreads(float thread_core_coefficient) {
+    return ClampThreadPoolMaxThreads(
+        static_cast<int>(std::round(CPU_NUM * thread_core_coefficient)));
+}
+
 class ThreadPool {
  public:
     explicit ThreadPool(const float thread_core_coefficient, std::string name)
@@ -80,14 +97,8 @@ class ThreadPool {
         idle_threads_size_ = 0;
         current_threads_size_ = 0;
         min_threads_size_ = 1;
-        max_threads_size_.store(std::max(
-            1,
-            static_cast<int>(std::round(CPU_NUM * thread_core_coefficient))));
-
-        int max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
-        if (max_limit > 0 && max_threads_size_.load() > max_limit) {
-            max_threads_size_.store(max_limit);
-        }
+        max_threads_size_.store(
+            ComputeThreadPoolMaxThreads(thread_core_coefficient));
         LOG_INFO("Init thread pool:{}", name_)
             << " with min worker num:" << min_threads_size_
             << " and max worker num:" << max_threads_size_.load();
@@ -195,11 +206,7 @@ class ThreadPool {
     Resize(int new_size) {
         //no need to hold mutex here as we don't require
         //max_threads_size to take effect instantly, just guaranteed atomic
-        new_size = std::max(1, new_size);
-        int max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
-        if (max_limit > 0 && new_size > max_limit) {
-            new_size = max_limit;
-        }
+        new_size = ClampThreadPoolMaxThreads(new_size);
         max_threads_size_.store(new_size);
         if (metric_capacity_) {
             metric_capacity_->Set(new_size);
