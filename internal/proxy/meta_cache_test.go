@@ -1305,6 +1305,54 @@ func TestMetaCache_ByIDEmptyDBNameNotCached(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
 }
 
+// TestMetaCache_ByIDDefaultedRequestDBNameNotCached covers the case where the
+// request db is not empty but was defaulted by database_interceptor: an external
+// id-only lookup has its empty DbName filled with "default" before it reaches
+// the cache, so the request db that arrives here is "default", not "". That db
+// is still NOT authoritative for an id lookup, so an id-only describe that comes
+// back without a real db name must not be cached under default.<name> — doing so
+// would let a later default.<name> by-name lookup mis-hit a collection that
+// actually lives in another database.
+func TestMetaCache_ByIDDefaultedRequestDBNameNotCached(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+	describeCount := int32(0)
+	mix.SetDescribeCollectionFunc(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		atomic.AddInt32(&describeCount, 1)
+		// older rootcoord resolves the name but does not report the real db; the
+		// collection actually lives in another database (unknown to the proxy)
+		return &milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 101,
+			DbName:       "",
+			Schema:       &schemapb.CollectionSchema{Name: "foo"},
+			RequestTime:  100,
+		}, nil
+	})
+	cache, err := NewMetaCache(mix)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// id-only lookup, but the request db arrives as the interceptor-defaulted
+	// "default" (not "") — the name still resolves from the response
+	name, err := cache.GetCollectionName(ctx, "default", 101)
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", name)
+
+	// the defaulted request db must not be trusted to key the name bucket:
+	// nothing is cached under default.foo and the by-id index stays empty, so a
+	// later default.foo by-name lookup cannot silently mis-hit this entry
+	cache.mu.RLock()
+	assert.Nil(t, cache.collInfo["default"]["foo"])
+	assert.Nil(t, cache.collInfoByID[101])
+	cache.mu.RUnlock()
+
+	// re-describes on each call (no cache) — correctness over a guessed-db hit
+	_, err = cache.GetCollectionName(ctx, "default", 101)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
+}
+
 func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
@@ -2478,6 +2526,13 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
+		// A real rootcoord always reports the collection's db; the by-id refresh
+		// in ensureCollectionForPartitionInvalidation relies on it to cache the
+		// collection and resolve the alias -> real-name mapping used to stale the
+		// partition entries. (An empty DbName here is only the older-rootcoord
+		// upgrade window, where update() deliberately skips caching for id
+		// lookups, so alias resolution during invalidation degrades.)
+		DbName: "db",
 		Schema: &schemapb.CollectionSchema{
 			Name:   "collection",
 			Fields: []*schemapb.FieldSchema{},
@@ -2714,6 +2769,89 @@ func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.
 			assert.Equal(t, result.db+"_par", result.infos.partitionInfos[0].name)
 		}
 	}
+}
+
+// TestMetaCache_GetPartitionInfosNormalizesEmptyDB is a regression test for the
+// collection/partition cache asymmetry: the collection cache normalizes an empty
+// db to "default", so the partition cache must too. Otherwise an empty-db request
+// would key partitions under ""/<coll> while a drop/recreate invalidation keyed
+// on the canonical "default" bucket never sweeps them, leaving stale entries. The
+// Once() expectations assert both lookups share one normalized cache bucket.
+func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "collection",
+			Fields: []*schemapb.FieldSchema{},
+		},
+		RequestTime: 1000,
+	}, nil).Once()
+
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []int64{100},
+		PartitionNames:       []string{"par1"},
+		CreatedTimestamps:    []uint64{1000},
+		CreatedUtcTimestamps: []uint64{1000},
+	}, nil).Once()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// populate the collection-level partition cache via an empty-db request
+	infos1, err := cache.GetPartitionInfos(ctx, "", "collection")
+	assert.NoError(t, err)
+	assert.Len(t, infos1.partitionInfos, 1)
+
+	// the explicit-default request must hit the same canonical bucket with no
+	// extra RPC; without normalization it would miss and exceed the Once() mocks
+	infos2, err := cache.GetPartitionInfos(ctx, "default", "collection")
+	assert.NoError(t, err)
+	assert.Equal(t, infos1, infos2)
+}
+
+// TestMetaCache_GetPartitionInfoNormalizesEmptyDB is the partition-name-level
+// counterpart: GetPartitionInfo must key its cache under the canonical database
+// too, so an empty-db and an explicit-default lookup share one entry.
+func TestMetaCache_GetPartitionInfoNormalizesEmptyDB(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	// GetPartitionInfo resolves partitions via ShowPartitions only; it must fire
+	// exactly once across both lookups when the cache key is normalized.
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []int64{100, 101},
+		PartitionNames:       []string{"par1", "par2"},
+		CreatedTimestamps:    []uint64{1000, 1001},
+		CreatedUtcTimestamps: []uint64{1000, 1001},
+	}, nil).Once()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	p1, err := cache.GetPartitionInfo(ctx, "", "collection", "par1")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), p1.partitionID)
+
+	// explicit default resolves from the same normalized bucket — no extra RPC
+	p2, err := cache.GetPartitionInfo(ctx, "default", "collection", "par1")
+	assert.NoError(t, err)
+	assert.Equal(t, p1, p2)
 }
 
 func TestMetaCache_Close(t *testing.T) {

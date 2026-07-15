@@ -498,22 +498,24 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	// it was looked up (by name, or by id without a db name).
 	bucketDB := collection.GetDbName()
 	if bucketDB == "" {
-		if database == "" {
-			// The describe response carries no real db (older rootcoord) and
-			// the request had no db either — this is an external id-only lookup
-			// with no db context. Guessing a bucket (e.g. default) could shadow
-			// a real same-name collection of another database on a later
-			// by-name lookup, so return the info without caching rather than
-			// risk a cross-database mis-hit. The by-id index stays clean too.
-			// Name lookups always carry a db (normalized in UpdateByName) and
-			// internal by-id refreshes pass their real db, so both still cache.
-			mlog.Warn(ctx, "describe by id returned empty db name with no request db; skipping cache to avoid guessing the database",
+		if database == "" || collectionID != 0 {
+			// The describe response carries no real db (older rootcoord). For an
+			// id-based lookup the request database is NOT authoritative: an
+			// external id-only lookup has its empty DbName defaulted to "default"
+			// by database_interceptor before it reaches here (so database is
+			// already "default", not ""), yet the collection may actually live in
+			// another database. Guessing a bucket (e.g. default) would let a later
+			// default.<name> lookup silently hit a collection of another database,
+			// so return the info without caching rather than risk a cross-database
+			// mis-hit. The by-id index stays clean too. Only by-name lookups
+			// (collectionID == 0) carry an authoritative, normalized db and cache
+			// below.
+			mlog.Warn(ctx, "describe for an id lookup returned empty db name; skipping name-bucket cache to avoid guessing the database",
 				mlog.String("collectionName", collectionName),
 				mlog.Int64("collectionID", collection.GetCollectionID()))
 			return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
 		}
-		// The request database is authoritative (by-name lookup, or an internal
-		// by-id refresh that passed a real db).
+		// By-name lookup: the request database is authoritative.
 		bucketDB = normalizeDBName(database)
 	}
 
@@ -893,6 +895,12 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 	if partitionName == "" {
 		partitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 	}
+	// Key the partition cache under the collection's canonical database, matching
+	// the collection cache (UpdateByName) and the invalidation sweep
+	// (partitionInvalidationDatabases). Without this an empty-db request keys
+	// partitions under ""/<coll>/* while a drop/recreate invalidates the
+	// canonical default/<coll>/*, leaving the stale ""/<coll>/* entries active.
+	database = normalizeDBName(database)
 
 	key := buildPartitionSfKey(database, collectionName, partitionName)
 	entry, ok, release := m.partitionCache.Lookup(key)
@@ -960,6 +968,9 @@ func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collection
 
 func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionName string) (*partitionInfos, error) {
 	method := "GetPartitionInfo"
+	// See GetPartitionInfo: normalize so partition entries share the collection's
+	// canonical database bucket and are reachable by the invalidation sweep.
+	database = normalizeDBName(database)
 	key := buildSfKeyByName(database, collectionName)
 	entry, ok, release := m.collLevelPartitionCache.Lookup(key)
 	defer release(entry)
