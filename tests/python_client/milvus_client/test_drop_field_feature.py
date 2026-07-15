@@ -1110,7 +1110,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             max_capacity=4,
         )
         index_params = client.prepare_index_params()
-        index_params.add_index("vec", index_type="FLAT", metric_type="L2")
+        index_params.add_index("vec", index_type="HNSW", metric_type="L2", params={"M": 8, "efConstruction": 64})
         index_params.add_index("events[embedding]", index_type="HNSW", metric_type="MAX_SIM_L2")
         index_params.add_index("events[name]", index_type="INVERTED")
         client.create_collection(

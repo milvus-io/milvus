@@ -1072,8 +1072,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         index_params = gen_index_params(self, client)
         index_params.add_index(
             field_name=VECTOR_FIELD,
-            index_type="FLAT",
+            index_type="HNSW",
             metric_type=NORMAL_VECTOR_METRIC_TYPE,
+            params=HNSW_INDEX_PARAMS,
         )
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
@@ -1083,8 +1084,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         )
         index_params.add_index(
             field_name=struct_element_vector_field,
-            index_type="FLAT",
+            index_type="HNSW",
             metric_type="COSINE",
+            params=HNSW_INDEX_PARAMS,
         )
         index_params.add_index(field_name=STRUCT_INT_FIELD, index_type="STL_SORT")
         index_params.add_index(field_name=STRUCT_TAG_FIELD, index_type="BITMAP")
@@ -1099,7 +1101,9 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         def profile(row_id, length, tag_prefix="keep"):
             result = []
             for offset in range(length):
-                vector = gen_unit_vector(row_id + offset)
+                rng = np.random.RandomState(row_id * STRUCT_MAX_CAPACITY + offset)
+                vector = rng.uniform(-1.0, 1.0, VECTOR_SUBFIELD_DIM).astype(np.float32)
+                vector = (vector / np.linalg.norm(vector)).tolist()
                 result.append(
                     {
                         INT_SUBFIELD: row_id * 10 + offset,
@@ -1136,6 +1140,45 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
+        non_empty_rows = [row for row in source_by_id.values() if row[STRUCT_FIELD]]
+        valid_element_keys = {
+            (row[PK_FIELD], offset) for row in non_empty_rows for offset in range(len(row[STRUCT_FIELD]))
+        }
+        element_query = np.asarray(non_empty_rows[0][STRUCT_FIELD][0][element_vector_subfield])
+        element_limit = min(10, len(valid_element_keys))
+        exact_element_keys = [
+            (row_id, offset)
+            for row_id, offset, _ in sorted(
+                (
+                    (
+                        row[PK_FIELD],
+                        offset,
+                        float(np.dot(element_query, np.asarray(element[element_vector_subfield]))),
+                    )
+                    for row in non_empty_rows
+                    for offset, element in enumerate(row[STRUCT_FIELD])
+                ),
+                key=lambda item: item[2],
+                reverse=True,
+            )[:element_limit]
+        ]
+        embedding_query_vectors = [np.asarray(element[VECTOR_SUBFIELD]) for element in non_empty_rows[0][STRUCT_FIELD]]
+        embedding_limit = min(5, len(non_empty_rows))
+        exact_embedding_ids = [
+            row[PK_FIELD]
+            for row in sorted(
+                non_empty_rows,
+                key=lambda row: sum(
+                    max(
+                        float(np.dot(query_vector, np.asarray(element[VECTOR_SUBFIELD])))
+                        for element in row[STRUCT_FIELD]
+                    )
+                    for query_vector in embedding_query_vectors
+                ),
+                reverse=True,
+            )[:embedding_limit]
+        ]
+
         def collect_observations():
             rows, _ = self.query(
                 client,
@@ -1167,15 +1210,16 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             element_results, _ = self.search(
                 client,
                 collection_name,
-                data=[gen_unit_vector(0)],
+                data=[element_query.tolist()],
                 anns_field=struct_element_vector_field,
-                search_params={"metric_type": "COSINE"},
+                search_params={"metric_type": "COSINE", "params": {"ef": 128}},
                 filter=f"element_filter({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 0)",
                 output_fields=[PK_FIELD],
-                limit=sum(len(row[STRUCT_FIELD] or []) for row in source_by_id.values()),
+                limit=element_limit,
             )
             query_tensor = EmbeddingList()
-            query_tensor.add(gen_unit_vector(0))
+            for query_vector in embedding_query_vectors:
+                query_tensor.add(query_vector.tolist())
             embedding_results, _ = self.search(
                 client,
                 collection_name,
@@ -1183,29 +1227,27 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 anns_field=STRUCT_VECTOR_FIELD,
                 search_params={"metric_type": STRUCT_VECTOR_HNSW_METRIC_TYPE, "params": {"ef": 128}},
                 output_fields=[PK_FIELD],
-                limit=sum(1 for row in source_by_id.values() if row[STRUCT_FIELD]),
+                limit=embedding_limit,
             )
-            embedding_ids = sorted(hit[PK_FIELD] for hit in embedding_results[0])
-            assert set(embedding_ids).issubset({row_id for row_id, row in source_by_id.items() if row[STRUCT_FIELD]}), (
+            element_keys = [(hit[PK_FIELD], hit["offset"]) for hit in element_results[0]]
+            assert set(element_keys).issubset(valid_element_keys)
+            assert_ann_recall(element_keys, exact_element_keys)
+            embedding_ids = [hit[PK_FIELD] for hit in embedding_results[0]]
+            assert set(embedding_ids).issubset({row[PK_FIELD] for row in non_empty_rows}), (
                 f"embedding-list search returned a null or empty Struct row: {embedding_ids}"
             )
+            assert_ann_recall(embedding_ids, exact_embedding_ids)
             return {
                 "projection": sorted(
                     (row_id, rows_by_id[row_id][TAG_FIELD], rows_by_id[row_id][STRUCT_FIELD]) for row_id in rows_by_id
                 ),
                 "match_ids": sorted(row[PK_FIELD] for row in match_rows),
                 "contains_ids": sorted(row[PK_FIELD] for row in contains_rows),
-                "element_keys": sorted((hit[PK_FIELD], hit["offset"]) for hit in element_results[0]),
-                "embedding_ids": embedding_ids,
             }
 
         baseline = collect_observations()
         assert baseline["match_ids"] == sorted(row_id for row_id, row in source_by_id.items() if row[STRUCT_FIELD])
         assert baseline["contains_ids"] == [4]
-        assert baseline["element_keys"] == sorted(
-            (row_id, offset) for row_id, row in source_by_id.items() for offset in range(len(row[STRUCT_FIELD] or []))
-        )
-
         compact_id, _ = self.compact(client, collection_name)
         assert compact_id > 0
         assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
@@ -1263,7 +1305,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_filter_template")
         schema = gen_struct_array_schema(self, client, include_vector_subfield=False)
         index_params = gen_index_params(self, client)
-        index_params.add_index(VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(VECTOR_FIELD, index_type="HNSW", metric_type="L2", params=INDEX_PARAMS)
         index_params.add_index(STRUCT_INT_FIELD, index_type="STL_SORT")
         index_params.add_index(STRUCT_TAG_FIELD, index_type="BITMAP")
         self.create_collection(
@@ -1402,7 +1444,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             enable_dynamic_field=True,
         )
         index_params = gen_index_params(self, client)
-        index_params.add_index(VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(VECTOR_FIELD, index_type="HNSW", metric_type="L2", params=INDEX_PARAMS)
         index_params.add_index(STRUCT_TAG_FIELD, index_type="BITMAP")
         self.create_collection(
             client,
@@ -12285,7 +12327,10 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
         index_params = gen_index_params(self, client)
         index_params.add_index(
-            field_name=VECTOR_FIELD, index_type=NORMAL_VECTOR_INDEX_TYPE, metric_type=NORMAL_VECTOR_METRIC_TYPE
+            field_name=VECTOR_FIELD,
+            index_type="HNSW",
+            metric_type=NORMAL_VECTOR_METRIC_TYPE,
+            params=INDEX_PARAMS,
         )
         if search_mode == "embedding_list":
             index_params.add_index(
