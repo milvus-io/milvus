@@ -9,7 +9,7 @@
 - **Related Pull Requests:** [milvus-io/milvus#49861](https://github.com/milvus-io/milvus/pull/49861), [milvus-io/milvus#50774](https://github.com/milvus-io/milvus/pull/50774)
 - **Implementation Baseline:** `milvus-io/milvus@4dbaba0042d3952fa75bbb5d2fb9606c6b67f44d`
 - **Implementation Branch:** `xiaofan-luan/milvus:feature/resource-group-balance-epoch` at `8c7b55f32cdf031ead70e99afdace281434761bb`
-- **Implementation Pull Request:** The draft Milvus PR will be opened after the design-doc PR so the implementation can link the proposed MEP; this line will be updated with that URL in a follow-up design-doc commit.
+- **Implementation Pull Request:** [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431)
 - **Released:** Not released
 
 ## Summary
@@ -1624,11 +1624,11 @@ Persisting projected placement and action state introduces recovery complexity a
 
 ## Delivery Sequence
 
-This feature uses a design-first two-commit cross-link flow:
+This feature used a design-first two-commit cross-link flow:
 
-1. Commit and push this implementation-aligned MEP, then open the design-doc PR. The Milvus implementation PR is still pending at that point, as recorded in the document header.
-2. Push the feature branch only to `xiaofan-luan/milvus` and open a draft PR to `milvus-io/milvus:master`. Its body links the design-doc PR, states that active rollout defaults to disabled, and includes the verified focused/full test evidence and the repository-wide static-check blocker.
-3. Add a follow-up commit to the design-doc branch replacing the pending implementation-PR prose with the new Milvus PR URL.
+1. Open the design-doc PR as [milvus-io/milvus#51430](https://github.com/milvus-io/milvus/pull/51430), with the implementation PR still pending.
+2. Open the draft implementation PR as [milvus-io/milvus#51431](https://github.com/milvus-io/milvus/pull/51431). Its body links the design-doc PR, states that active rollout defaults to disabled, and includes the verified focused/full test evidence and repository-wide static-check blocker.
+3. Add this follow-up commit to the design-doc branch, replacing the pending implementation-PR prose with the implementation PR URL.
 4. Verify that both PRs cross-link before review handoff.
 
 ## References
@@ -1636,6 +1636,8 @@ This feature uses a design-first two-commit cross-link flow:
 - [Issue #51244: ScoreBasedBalancer never converges](https://github.com/milvus-io/milvus/issues/51244)
 - [PR #49861: make balance workload delta dist aware](https://github.com/milvus-io/milvus/pull/49861)
 - [PR #50774: 2.6 backport](https://github.com/milvus-io/milvus/pull/50774)
+- [PR #51430: Resource-Group Balance Epoch MEP](https://github.com/milvus-io/milvus/pull/51430)
+- [PR #51431: Resource-Group Balance Epoch implementation](https://github.com/milvus-io/milvus/pull/51431)
 - `internal/querycoordv2/checkers/balance_checker.go`
 - `internal/querycoordv2/balance/channel_level_score_balancer.go`
 - `internal/querycoordv2/task/scheduler.go`
