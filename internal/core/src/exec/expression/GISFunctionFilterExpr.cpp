@@ -585,7 +585,22 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     }
 
                     const auto& wkb_data = geometry_array->data(i);
-                    Geometry left(local_ctx, wkb_data.data(), wkb_data.size());
+                    Geometry left;
+                    if (!left.TryParseFromWkb(
+                            local_ctx, wkb_data.data(), wkb_data.size())) {
+                        // Unparseable WKB -- e.g. a placeholder row that
+                        // add_geometry / bulk_load keep (instead of dropping)
+                        // to hold the index row count. It can never satisfy
+                        // exact refinement, so skip it, mirroring the cache
+                        // branch's GetByOffsetUnsafe() == nullptr skip above.
+                        // MUST NOT throw: with the geometry cache off (the
+                        // default), such rows reach refinement as R-Tree
+                        // candidates whenever the query bbox covers the
+                        // placeholder MBR at the origin, and the throwing
+                        // Geometry(ctx, wkb) ctor would fail the entire query.
+                        // See PR #50951 review.
+                        continue;
+                    }
                     // Use prepared geometry for faster evaluation
                     bool result = evaluate_geometry_prepared(left);
 
@@ -626,10 +641,10 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 // (RTreeIndex::Count()), while `size` is driven by the
                 // segment's active rows. The Insert path indexes a row
                 // (AppendingIndex) before the ack-responder makes it
-                // searchable, and the growing add_geometry path never drops a
-                // row (unparseable WKB gets a placeholder MBR; sealed
-                // bulk-load differs but sizes Count() from the real row
-                // count, see bulk_load_from_field_data), so active_count <=
+                // searchable, and neither write path drops a row -- both
+                // add_geometry and bulk_load_from_field_data index a
+                // placeholder MBR for empty/unparseable WKB rather than
+                // dropping it -- so active_count <=
                 // index Count() must always hold. Guard it explicitly: a violated
                 // invariant must surface as a clear error, never as an
                 // out-of-bounds read or fabricated results (a row reported

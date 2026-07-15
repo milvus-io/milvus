@@ -62,13 +62,21 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
 
     AssertInfo(is_build_mode_, "Cannot add geometry in load mode");
 
-    // Index a deterministic placeholder MBR for this row without dropping it.
-    // The R-tree is only a coarse filter (the exact predicate refines it out),
+    // Index a deterministic placeholder MBR for a row whose WKB payload is
+    // genuinely unparseable (empty or corrupt DATA), without dropping it. The
+    // R-tree is only a coarse filter and exact refinement tolerates the
+    // placeholder (Geometry::TryParseFromWkb -> skip) in every configuration,
     // so a placeholder never yields a wrong result -- but dropping the row
     // would permanently desynchronize the index row count from the segment row
     // count, which then trips the coarse-bitmap bounds guard in
     // EvalForIndexSegment on EVERY subsequent geometry query against this
-    // segment. This mirrors the empty-geometry handling below.
+    // segment. This mirrors the empty-geometry handling below and bulk_load.
+    //
+    // This is ONLY for bad data. A transient resource failure (GEOS context /
+    // reader allocation) on a perfectly valid geometry must NOT take this path:
+    // a (0,0) placeholder would permanently mis-locate a good row, silently
+    // dropping it from every query that does not cover the origin. Those cases
+    // throw instead, so the insert fails and can be retried. See PR #50951.
     //
     // Tradeoff: Point(0, 0) is a legal coordinate (Null Island), so any query
     // whose bounding box covers the origin pulls every placeholder row in this
@@ -85,23 +93,20 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
     // Parse WKB data using GEOS for consistency
     GEOSContextHandle_t ctx = GEOS_init_r();
     if (ctx == nullptr) {
-        LOG_ERROR(
-            "Failed to initialize GEOS context for row {}; indexing a "
-            "placeholder MBR to keep the index row count consistent",
-            row_offset);
-        index_placeholder_mbr();
-        return;
+        // Transient resource failure on a valid geometry -- fail the insert so
+        // it can be retried, rather than permanently mis-indexing a good row.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to initialize GEOS context for row {}",
+                  row_offset);
     }
 
     GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
     if (reader == nullptr) {
         GEOS_finish_r(ctx);
-        LOG_ERROR(
-            "Failed to create GEOS WKB reader for row {}; indexing a "
-            "placeholder MBR to keep the index row count consistent",
-            row_offset);
-        index_placeholder_mbr();
-        return;
+        // Transient resource failure -- see above; throw rather than placeholder.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to create GEOS WKB reader for row {}",
+                  row_offset);
     }
 
     GEOSGeometry* geom = GEOSWKBReader_read_r(ctx, reader, wkb_data, len);
@@ -151,40 +156,38 @@ RTreeIndexWrapper::bulk_load_from_field_data(
 
     AssertInfo(is_build_mode_, "Cannot bulk load in load mode");
 
-    // Initialize GEOS context for bulk operations
+    // Initialize GEOS context for bulk operations. A transient allocation
+    // failure here would otherwise silently drop EVERY row from the index --
+    // throw so the build fails and can be retried instead.
     GEOSContextHandle_t ctx = GEOS_init_r();
     if (ctx == nullptr) {
-        LOG_ERROR("Failed to initialize GEOS context for bulk load");
-        return;
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to initialize GEOS context for bulk load");
     }
 
     GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
     if (reader == nullptr) {
         GEOS_finish_r(ctx);
-        LOG_ERROR("Failed to create GEOS WKB reader for bulk load");
-        return;
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to create GEOS WKB reader for bulk load");
     }
 
-    // NOTE: unlike the growing path (add_geometry), this SEALED bulk-load
-    // intentionally DROPS empty-payload and unparseable rows (`continue`
-    // below) instead of indexing a placeholder MBR. The asymmetry is safe and
-    // deliberate:
-    //  - The growing placeholder exists only to keep the index row count in
-    //    lockstep with the segment's active rows, which the coarse-bitmap
-    //    bounds assertion in EvalForIndexSegment depends on. Sealed has no
-    //    such invariant: Count() returns total_num_rows_, which
-    //    BuildWithFieldData sets to the real field-data row count regardless
-    //    of how many rows enter the rtree.
-    //  - Query results are identical either way: a corrupt/empty row can
-    //    never satisfy exact refinement, so "placeholder candidate that
-    //    always refines out" and "never a candidate" produce the same bitset.
-    //  - Keeping such rows out of the candidate set matters on sealed because
-    //    sealed refinement re-parses the raw WKB (Geometry's ctor asserts on
-    //    parse failure); a placeholder candidate would turn a corrupt row
-    //    from "never matches" into a query-time error.
+    // NOTE: non-null rows with an empty or unparseable WKB payload are indexed
+    // with a deterministic placeholder MBR (like the growing add_geometry
+    // path), NOT dropped. Growing and sealed now agree -- neither write path
+    // drops a row -- so the index row count stays in lockstep with the segment
+    // rows on both, and exact refinement tolerates the placeholder
+    // (Geometry::TryParseFromWkb -> skip) in every configuration, cache on or
+    // off. A corrupt/empty row can never satisfy exact refinement, so the
+    // placeholder is always refined out and correctness is unaffected; the only
+    // cost is that an origin-covering query pays refinement for it (see the
+    // add_geometry tradeoff note). Genuinely null rows are still skipped below.
     std::vector<Value> local_values;
     local_values.reserve(1024);
     int64_t absolute_offset = 0;
+    const auto index_placeholder = [&](int64_t offset) {
+        local_values.emplace_back(Box(Point(0, 0), Point(0, 0)), offset);
+    };
     for (const auto& fd : field_datas) {
         const auto n = fd->get_num_rows();
         const bool is_nullable_effective = nullable || fd->IsNullable();
@@ -195,6 +198,7 @@ RTreeIndexWrapper::bulk_load_from_field_data(
             const auto* wkb_str =
                 static_cast<const std::string*>(fd->RawValue(i));
             if (wkb_str == nullptr || wkb_str->empty()) {
+                index_placeholder(absolute_offset);
                 continue;
             }
 
@@ -204,6 +208,7 @@ RTreeIndexWrapper::bulk_load_from_field_data(
                 reinterpret_cast<const unsigned char*>(wkb_str->data()),
                 wkb_str->size());
             if (geom == nullptr) {
+                index_placeholder(absolute_offset);
                 continue;
             }
 
