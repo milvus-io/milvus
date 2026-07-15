@@ -55,8 +55,9 @@ class ChunkTarget {
     tell() = 0;
 };
 
-struct MmapChunkWritebackConfig {
-    bool enabled{false};
+enum class MmapChunkWritebackMode {
+    Disabled,
+    FdatasyncOnFinish,
 };
 
 class MmapChunkTarget : public ChunkTarget {
@@ -65,11 +66,12 @@ class MmapChunkTarget : public ChunkTarget {
                              bool populate,
                              size_t cap,
                              storage::io::Priority io_prio,
-                             MmapChunkWritebackConfig writeback_config = {})
+                             MmapChunkWritebackMode writeback_mode =
+                                 MmapChunkWritebackMode::Disabled)
         : file_path_(std::move(file_path)), cap_(cap), populate_(populate) {
         file_writer_ =
             std::make_unique<storage::FileWriter>(file_path_, io_prio);
-        if (writeback_config.enabled) {
+        if (writeback_mode == MmapChunkWritebackMode::FdatasyncOnFinish) {
             file_writer_->SetFdatasyncOnFinish();
         }
     }

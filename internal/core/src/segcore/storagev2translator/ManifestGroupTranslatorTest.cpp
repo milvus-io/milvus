@@ -242,7 +242,7 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             /*cache_key_suffix=*/"",
             /*fallback_bytes_per_row=*/0,
             /*shard=*/"",
-            MmapChunkWritebackConfig{},
+            MmapChunkWritebackMode::Disabled,
             enable_async_load);
     }
 

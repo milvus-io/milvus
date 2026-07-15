@@ -85,7 +85,8 @@ class ManifestGroupTranslator
         const std::string& cache_key_suffix = "",
         int64_t fallback_bytes_per_row = 0,
         std::string shard = "",
-        MmapChunkWritebackConfig writeback_config = {},
+        MmapChunkWritebackMode writeback_mode =
+            MmapChunkWritebackMode::Disabled,
         bool enable_async_load = false);
     ~ManifestGroupTranslator() = default;
 
@@ -218,7 +219,7 @@ class ManifestGroupTranslator
     bool mmap_populate_;
     bool has_array_field_{false};
     std::string mmap_dir_path_;
-    MmapChunkWritebackConfig writeback_config_;
+    MmapChunkWritebackMode writeback_mode_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
     bool enable_async_load_{false};
