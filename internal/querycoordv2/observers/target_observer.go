@@ -471,11 +471,6 @@ func (ob *TargetObserver) syncAndPromoteChannels(ctx context.Context, collection
 		return false
 	}
 
-	if paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() &&
-		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) != nil {
-		return false
-	}
-
 	allPromoted := true
 	for channel := range channelNames {
 		if !ob.syncAndPromoteChannel(ctx, collectionID, channel, replicas) {
@@ -492,6 +487,12 @@ func (ob *TargetObserver) syncAndPromoteChannel(ctx context.Context, collectionI
 
 	newVersion := ob.targetMgr.GetChannelTargetVersion(ctx, collectionID, channel, meta.NextTarget)
 	if newVersion <= 0 {
+		return false
+	}
+
+	// Readiness is checked per channel: a stuck segment on another channel must not block this one.
+	if paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() &&
+		utils.CheckChannelSegmentDataReady(ctx, collectionID, channel, ob.distMgr, ob.targetMgr, meta.NextTarget) != nil {
 		return false
 	}
 

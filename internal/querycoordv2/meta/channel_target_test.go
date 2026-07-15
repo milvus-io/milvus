@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -214,6 +215,10 @@ func (suite *ChannelTargetSuite) TestLiveVersionGC() {
 	_, known := suite.mgr.IsSegmentInLiveVersion(chTargetCollection, channelA, v1, 1)
 	suite.True(known)
 
+	// disable the grace window: this test controls readability explicitly
+	defer func(g time.Duration) { liveVersionGCGrace = g }(liveVersionGCGrace)
+	liveVersionGCGrace = 0
+
 	// a delegator still reads v1: keep it
 	suite.mgr.GCLiveVersions(chTargetCollection, channelA, typeutil.NewUniqueSet(v1))
 	_, known = suite.mgr.IsSegmentInLiveVersion(chTargetCollection, channelA, v1, 1)
@@ -224,6 +229,94 @@ func (suite *ChannelTargetSuite) TestLiveVersionGC() {
 	suite.mgr.GCLiveVersions(chTargetCollection, channelA, typeutil.NewUniqueSet(v2))
 	_, known = suite.mgr.IsSegmentInLiveVersion(chTargetCollection, channelA, v1, 1)
 	suite.False(known, "an unread version must be dropped")
+}
+
+// A version that just stopped being referenced is kept until the grace window elapses, so a GC round
+// that races the delegator's heartbeat does not drop a version about to be reported again.
+func (suite *ChannelTargetSuite) TestLiveVersionGCGraceWindow() {
+	ctx := suite.ctx
+
+	suite.recoveryInfo(map[string][]int64{channelA: {1}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, chTargetCollection))
+	v1 := suite.mgr.GetChannelTargetVersion(ctx, chTargetCollection, channelA, CurrentTarget)
+
+	suite.recoveryInfo(map[string][]int64{channelA: {2}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+	suite.True(suite.mgr.UpdateChannelCurrentTarget(ctx, chTargetCollection, channelA))
+
+	// v1 is younger than the (default 30s) grace window and unreadable this round: it must survive
+	suite.mgr.GCLiveVersions(chTargetCollection, channelA, typeutil.NewUniqueSet(int64(-1)))
+	_, known := suite.mgr.IsSegmentInLiveVersion(chTargetCollection, channelA, v1, 1)
+	suite.True(known, "a freshly retired version must survive the grace window even when unread")
+}
+
+// A partition loaded onto an already-loaded collection lands in next first; promoting a channel must
+// carry it into current, or IsCurrentTargetExist(newPartition) stays false forever and the load
+// hangs. This falsifies a WithChannelFrom that keeps only the old current's partitions.
+func (suite *ChannelTargetSuite) TestPromoteCarriesNewPartitionIntoCurrent() {
+	ctx := suite.ctx
+
+	suite.recoveryInfo(map[string][]int64{channelA: {1}, channelB: {2}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, chTargetCollection))
+
+	// a second partition is loaded; the next target rebuilt from meta now covers it
+	const newPartition = int64(200)
+	suite.meta.PutPartition(ctx, &Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: chTargetCollection, PartitionID: newPartition},
+	})
+	suite.recoveryInfo(map[string][]int64{channelA: {3}, channelB: {4}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+	suite.False(suite.mgr.IsCurrentTargetExist(ctx, chTargetCollection, newPartition),
+		"new partition is only in next before the promote")
+
+	suite.True(suite.mgr.UpdateChannelCurrentTarget(ctx, chTargetCollection, channelA))
+	suite.True(suite.mgr.IsCurrentTargetExist(ctx, chTargetCollection, newPartition),
+		"the promoted current must carry the partition that was only in next")
+}
+
+// Next is dropped once every channel has been promoted, so the next tick rebuilds it immediately
+// instead of waiting out NextTargetSurviveTime.
+func (suite *ChannelTargetSuite) TestNextDroppedAfterAllChannelsPromoted() {
+	ctx := suite.ctx
+
+	suite.recoveryInfo(map[string][]int64{channelA: {1}, channelB: {2}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, chTargetCollection))
+
+	suite.recoveryInfo(map[string][]int64{channelA: {3}, channelB: {4}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+
+	suite.True(suite.mgr.UpdateChannelCurrentTarget(ctx, chTargetCollection, channelA))
+	suite.True(suite.mgr.IsNextTargetExist(ctx, chTargetCollection), "next stays while B is unpromoted")
+
+	suite.True(suite.mgr.UpdateChannelCurrentTarget(ctx, chTargetCollection, channelB))
+	suite.False(suite.mgr.IsNextTargetExist(ctx, chTargetCollection), "next is dropped once all channels are promoted")
+}
+
+// liveVersions must be released when the collection is, since its GC is driven by a dist heartbeat
+// that stops arriving after release.
+func (suite *ChannelTargetSuite) TestLiveVersionsClearedOnRemoveCollection() {
+	ctx := suite.ctx
+
+	suite.recoveryInfo(map[string][]int64{channelA: {1}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, chTargetCollection))
+	suite.recoveryInfo(map[string][]int64{channelA: {2}})
+	suite.Require().NoError(suite.mgr.UpdateCollectionNextTarget(ctx, chTargetCollection))
+	suite.True(suite.mgr.UpdateChannelCurrentTarget(ctx, chTargetCollection, channelA))
+
+	suite.mgr.liveVersionsMut.RLock()
+	suite.NotEmpty(suite.mgr.liveVersions[chTargetCollection], "a version was retained")
+	suite.mgr.liveVersionsMut.RUnlock()
+
+	suite.mgr.RemoveCollection(ctx, chTargetCollection)
+
+	suite.mgr.liveVersionsMut.RLock()
+	_, ok := suite.mgr.liveVersions[chTargetCollection]
+	suite.mgr.liveVersionsMut.RUnlock()
+	suite.False(ok, "retained versions must be cleared on release")
 }
 
 // Targets persisted before this change carry no per-channel version: every channel takes the

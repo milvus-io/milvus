@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -85,8 +86,17 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 }
 
 func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager *meta.DistributionManager, targetMgr meta.TargetManagerInterface, scope int32) error {
+	return checkSegmentDataReady(ctx, collectionID, targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope), distManager)
+}
+
+// CheckChannelSegmentDataReady is the per-channel form: it only inspects the sealed segments of one
+// channel, so a stuck segment on another channel does not block this channel's promotion.
+func CheckChannelSegmentDataReady(ctx context.Context, collectionID int64, channel string, distManager *meta.DistributionManager, targetMgr meta.TargetManagerInterface, scope int32) error {
+	return checkSegmentDataReady(ctx, collectionID, targetMgr.GetSealedSegmentsByChannel(ctx, collectionID, channel, scope), distManager)
+}
+
+func checkSegmentDataReady(ctx context.Context, collectionID int64, segmentDist map[int64]*datapb.SegmentInfo, distManager *meta.DistributionManager) error {
 	// Check whether segments are fully loaded
-	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
 	distSegments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
 	distBySegmentID := make(map[int64][]*meta.Segment, len(distSegments))
 	for _, segment := range distSegments {

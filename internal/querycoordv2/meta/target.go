@@ -267,9 +267,12 @@ func (p *CollectionTarget) WithChannelFrom(src *CollectionTarget, channel string
 		delete(dmChannels, channel)
 	}
 
-	partitions := make([]int64, 0, p.partitions.Len())
-	partitions = append(partitions, p.partitions.Collect()...)
-	promoted := NewCollectionTarget(segments, dmChannels, partitions)
+	// the promoted channel may carry partitions the old current never had (LoadPartitions on an
+	// already-loaded collection lands them in next first), so union both sides -- dropping src's
+	// would leave IsCurrentTargetExist(newPartition) permanently false and stall the load.
+	partitionSet := typeutil.NewSet(p.partitions.Collect()...)
+	partitionSet.Insert(src.partitions.Collect()...)
+	promoted := NewCollectionTarget(segments, dmChannels, partitionSet.Collect())
 
 	// keep the untouched channels on the versions they already had; the promoted one takes src's
 	for name, version := range p.channelVersions {

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -48,6 +49,11 @@ const (
 	CurrentTargetFirst
 	NextTargetFirst
 )
+
+// liveVersionGCGrace is how long a retained version is kept after it stops being referenced by any
+// delegator's reported view, to bridge the window between a delegator being synced to a version and
+// its heartbeat reporting it back into dist. Overridable in tests.
+var liveVersionGCGrace = 30 * time.Second
 
 type TargetManagerInterface interface {
 	UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool
@@ -133,17 +139,49 @@ func (mgr *TargetManager) UpdateChannelCurrentTarget(ctx context.Context, collec
 	}
 
 	current := mgr.current.getCollectionTarget(collectionID)
-	var promoted *CollectionTarget
-	if current == nil || current.IsEmpty() {
-		promoted = next
+	base := current
+	if base == nil || base.IsEmpty() {
+		// First promote: publish only this channel, not the whole next -- a not-yet-ready channel's
+		// segments must not appear in current. (IsCurrentTargetExist(-1) still turns true here, so
+		// the partial-search sync for the other channels is skipped; making that per-channel is a
+		// follow-up.)
+		base = NewCollectionTarget(map[int64]*datapb.SegmentInfo{}, map[string]*DmChannel{}, nil)
 	} else {
 		mgr.rememberLiveVersion(collectionID, channel, current)
-		promoted = current.WithChannelFrom(next, channel)
 	}
+	promoted := base.WithChannelFrom(next, channel)
 	mgr.current.replaceCollectionTarget(collectionID, promoted)
+
+	// per-channel checkpoint-lag metric: the collection-level UpdateCollectionCurrentTarget no longer
+	// runs in production, so this is the only place it is emitted now.
+	if dmChannel, ok := promoted.dmChannels[channel]; ok {
+		ts, _ := tsoutil.ParseTS(dmChannel.GetSeekPosition().GetTimestamp())
+		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.WithLabelValues(
+			paramtable.GetStringNodeID(),
+			channel,
+		).Set(float64(ts.Unix()))
+	}
+
+	// Drop next once every one of its channels has been promoted into current, so the next tick
+	// rebuilds it via !IsNextTargetExist instead of waiting out NextTargetSurviveTime. Without this
+	// next lives forever and compaction/flush/delete absorption is delayed up to the survive time.
+	if mgr.allChannelsPromoted(promoted, next) {
+		mgr.next.removeCollectionTarget(collectionID)
+	}
 
 	log.Debug(ctx, "promoted channel to the next target version",
 		mlog.Int64("version", promoted.GetChannelTargetVersion(channel)))
+	return true
+}
+
+// allChannelsPromoted reports whether current has caught up to next on every one of next's channels,
+// i.e. next has been fully absorbed and can be dropped.
+func (mgr *TargetManager) allChannelsPromoted(current, next *CollectionTarget) bool {
+	for channel := range next.GetAllDmChannels() {
+		if current.GetChannelTargetVersion(channel) != next.GetChannelTargetVersion(channel) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -216,8 +254,14 @@ func (mgr *TargetManager) GCLiveVersions(collectionID int64, channel string, rea
 	if !ok {
 		return
 	}
+	// A version is a UnixNano timestamp of when it was built. A delegator that was just synced to a
+	// version has not necessarily reported it in dist yet, so it would be absent from readableVersions
+	// for one round; keep versions younger than the grace window regardless, to avoid dropping one
+	// that is about to be reported (dropping it does not lose safety -- servesSegment then keeps the
+	// segment -- but it stalls reclamation until the next sync).
+	graceThreshold := time.Now().Add(-liveVersionGCGrace).UnixNano()
 	for version := range versions {
-		if !readableVersions.Contain(version) {
+		if !readableVersions.Contain(version) && version < graceThreshold {
 			delete(versions, version)
 		}
 	}
@@ -375,6 +419,12 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 
 	mgr.current.removeCollectionTarget(collectionID)
 	mgr.next.removeCollectionTarget(collectionID)
+
+	// GC is driven by the channel's dist heartbeat, which stops arriving once the collection is
+	// released, so the retained versions would otherwise be pinned for the coordinator's lifetime.
+	mgr.liveVersionsMut.Lock()
+	delete(mgr.liveVersions, collectionID)
+	mgr.liveVersionsMut.Unlock()
 }
 
 // RemovePartition removes all segment in the given partition,
