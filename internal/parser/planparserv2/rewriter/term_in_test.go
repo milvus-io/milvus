@@ -545,6 +545,34 @@ func TestRewrite_NullableArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
 	}
 }
 
+func TestRewrite_NonNullableArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	// ArrayInt is non-nullable, but ArrayInt[0] carries a NestedPath: the index
+	// may be out of range, so the inner predicate is UNKNOWN, not a valid false.
+	// Every AND-contradiction / empty-intersection fold (IN+equal, IN+IN, IN+!=,
+	// IN+range, range+range) must be guarded, or an outer NOT wrongly becomes
+	// AlwaysTrue and returns the row (issue #50976).
+	for _, exprStr := range []string{
+		`ArrayInt[0] in [1] and ArrayInt[0] == 2`,
+		`ArrayInt[0] in [1] and ArrayInt[0] in [2]`,
+		`ArrayInt[0] in [1] and ArrayInt[0] != 1`,
+		`ArrayInt[0] in [1] and ArrayInt[0] > 2`,
+		`ArrayInt[0] > 100 and ArrayInt[0] < 50`,
+		`not (ArrayInt[0] in [1] and ArrayInt[0] == 2)`,
+		`not (ArrayInt[0] in [1] and ArrayInt[0] in [2])`,
+		`not (ArrayInt[0] in [1] and ArrayInt[0] != 1)`,
+		`not (ArrayInt[0] in [1] and ArrayInt[0] > 2)`,
+		`not (ArrayInt[0] > 100 and ArrayInt[0] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "non-nullable indexed array missing-path must not fold to valid false: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "non-nullable indexed array under NOT must not fold to valid true: %s", exprStr)
+	}
+}
+
 func TestRewrite_Or_In_Or_NotEqual_Nullable_NotDoesNotBecomeIsNull(t *testing.T) {
 	helper := buildSchemaHelperForRewriteNullableT(t)
 

@@ -69,6 +69,27 @@ func TestRewrite_JSON_NestedPath_Nullable_ContradictionsKeepPredicate(t *testing
 	}
 }
 
+func TestRewrite_JSON_NestedPath_NonNullable_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	// JSONField is non-nullable, but JSONField["age"] carries a NestedPath: the
+	// key may be absent, so the inner predicate is UNKNOWN, not a valid false.
+	// The AND-contradiction / empty-intersection folds must not collapse it, or
+	// an outer NOT wrongly becomes AlwaysTrue and returns the row (issue #50976).
+	for _, exprStr := range []string{
+		`JSONField["age"] in [1] and JSONField["age"] == 2`,
+		`JSONField["age"] > 100 and JSONField["age"] < 50`,
+		`not (JSONField["age"] in [1] and JSONField["age"] == 2)`,
+		`not (JSONField["age"] > 100 and JSONField["age"] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "non-nullable JSON missing-path must not fold to valid false: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "non-nullable JSON missing-path under NOT must not fold to valid true: %s", exprStr)
+	}
+}
+
 func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteAllowed(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 
