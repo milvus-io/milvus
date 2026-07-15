@@ -35,7 +35,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -95,6 +99,64 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 	replicator.StartReplication()
 	time.Sleep(200 * time.Millisecond)
 	replicator.StopReplication()
+}
+
+// TestChannelReplicatorConsumeLoopDeletesLagSeriesOnRemoval verifies the
+// in-band removal path: when the consume loop replicates an
+// AlterReplicateConfig message that removes this replication, the lag series
+// is deleted.
+func TestChannelReplicatorConsumeLoopDeletesLagSeriesOnRemoval(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, "current-cluster")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.ClusterPrefix.Key)
+
+	source, target := "TestRemoval-source", "TestRemoval-target"
+	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: source,
+		TargetChannelName: target,
+		TargetCluster:     &commonpb.MilvusCluster{ClusterId: "removed-target-cluster"},
+	}
+
+	// An AlterReplicateConfig whose topology no longer contains the
+	// current->target edge, i.e. this replication is removed.
+	msg := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{
+			ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+				Clusters: []*commonpb.MilvusCluster{
+					{
+						ClusterId:       "current-cluster",
+						ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530"},
+						Pchannels:       []string{source},
+					},
+				},
+			},
+		}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
+		WithAllVChannel().
+		MustBuildMutable().
+		WithLastConfirmedUseMessageID().
+		WithTimeTick(1).
+		IntoImmutableMessage(pulsar2.NewPulsarID(pulsar.EarliestMessageID()))
+
+	rs := replicatestream.NewMockReplicateStreamClient(t)
+	rs.EXPECT().Replicate(mock.Anything).Return(nil)
+	rs.EXPECT().BlockUntilFinish().Return()
+
+	replicator := &channelReplicator{
+		channel: &meta.ReplicateChannel{
+			Key:         "removal-key",
+			ModRevision: 1,
+			Value:       replicateInfo,
+		},
+		streamClient:  rs,
+		msgChan:       make(adaptor.ChanMessageHandler),
+		asyncNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+	}
+	replicatestream.InitLastReplicatedTimeTick(replicateInfo, tsoutil.ComposeTSByTime(time.Now()))
+
+	go func() { replicator.msgChan <- msg }()
+	replicator.startConsumeLoop()
+
+	assert.False(t, metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(source, target))
 }
 
 func TestChannelReplicatorInitMetricFromInitializedCheckpoint(t *testing.T) {

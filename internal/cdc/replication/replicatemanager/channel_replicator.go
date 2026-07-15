@@ -185,6 +185,10 @@ func (r *channelReplicator) startConsumeLoop() {
 				if util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value) {
 					logger.Info(context.TODO(), "replication removed, stop consume loop")
 					r.streamClient.BlockUntilFinish()
+					// The replication is genuinely removed, delete its lag
+					// series. Deleting after BlockUntilFinish ensures no
+					// in-flight confirm re-creates the series afterwards.
+					replicatestream.DeleteLastReplicatedTimeTick(r.channel.Value)
 					return
 				}
 			}
