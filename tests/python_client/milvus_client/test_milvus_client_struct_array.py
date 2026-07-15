@@ -65,14 +65,16 @@ EMB_LIST_INDEX_TYPES = list(EMB_LIST_INDEX_CONFIGS.keys())
 
 # Supported vector types per emb list index type (for MaxSim metrics)
 EMB_LIST_VECTOR_TYPES = {
-    "HNSW": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-             DataType.INT8_VECTOR, DataType.BINARY_VECTOR],
-    "HNSW_SQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                DataType.INT8_VECTOR],
-    "HNSW_PQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                DataType.INT8_VECTOR],
-    "HNSW_PRQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                 DataType.INT8_VECTOR],
+    "HNSW": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+        DataType.INT8_VECTOR,
+        DataType.BINARY_VECTOR,
+    ],
+    "HNSW_SQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR],
+    "HNSW_PQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR],
+    "HNSW_PRQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR],
     "IVF_FLAT": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
     "IVF_FLAT_CC": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
     "DISKANN": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
@@ -1557,9 +1559,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema
         struct_schema = client.create_struct_field_schema()
@@ -2360,9 +2360,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         method: insert (flushed + growing) → index → load → search → upsert → delete → search → verify
         expected: all CRUD operations and search work correctly for each index type
         """
-        collection_name = cf.gen_unique_str(
-            f"{prefix}_search_{index_type.lower()}"
-        )
+        collection_name = cf.gen_unique_str(f"{prefix}_search_{index_type.lower()}")
         client = self._client()
 
         config = EMB_LIST_INDEX_CONFIGS[index_type]
@@ -2370,9 +2368,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Create collection with full schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
@@ -2523,7 +2519,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
+            client,
+            collection_name,
+            filter="id < 10",
             output_fields=["id", "category", "clips"],
         )
         assert check
@@ -2541,9 +2539,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         res, check = self.flush(client, collection_name)
         assert check
 
-        results, check = self.query(
-            client, collection_name, filter="id >= 0", output_fields=["id"]
-        )
+        results, check = self.query(client, collection_name, filter="id >= 0", output_fields=["id"])
         assert check
         remaining_ids = {r["id"] for r in results}
         for del_id in delete_ids:
@@ -2571,8 +2567,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
         "vector_type",
-        [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR,
-         DataType.BINARY_VECTOR],
+        [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR],
     )
     def test_search_emb_list_with_different_vector_types(self, vector_type):
         """
@@ -2593,9 +2588,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Create schema with specified vector type
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("clip_embedding1", vector_type, dim=EMB_LIST_DIM)
@@ -2707,9 +2700,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 [np.frombuffer(v, dtype=np.uint8) if isinstance(v, bytes) else v for v in search_vecs]
             )
         else:
-            embedding_list = EmbeddingList(
-                [np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs]
-            )
+            embedding_list = EmbeddingList([np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs])
 
         results, check = self.search(
             client,
@@ -2752,7 +2743,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
+            client,
+            collection_name,
+            filter="id < 10",
             output_fields=["id", "category", "clips"],
         )
         assert check
@@ -2765,18 +2758,14 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         delete_flushed_ids = [10, 11, 12, 13, 14]
         delete_growing_ids = list(range(nb_flushed, nb_flushed + 3))
         all_delete_ids = delete_flushed_ids + delete_growing_ids
-        res, check = self.delete(
-            client, collection_name, filter=f"id in {all_delete_ids}"
-        )
+        res, check = self.delete(client, collection_name, filter=f"id in {all_delete_ids}")
         assert check
 
         # Verify deletion
         res, check = self.flush(client, collection_name)
         assert check
 
-        results, check = self.query(
-            client, collection_name, filter="id >= 0", output_fields=["id"]
-        )
+        results, check = self.query(client, collection_name, filter="id >= 0", output_fields=["id"])
         assert check
         remaining_ids = {r["id"] for r in results}
         for del_id in all_delete_ids:
@@ -5435,9 +5424,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                 struct_array.append(
                     {
                         "struct_int": item["struct_int"],
-                        "struct_vec": self.struct_vector_value_for_bulk_writer(
-                            vector_type, item["struct_int"], dim
-                        ),
+                        "struct_vec": self.struct_vector_value_for_bulk_writer(vector_type, item["struct_int"], dim),
                     }
                 )
             rows.append(

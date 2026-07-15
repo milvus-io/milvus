@@ -175,10 +175,7 @@ class StructArrayElementSearchBase(TestMilvusClientV2Base):
             ]
 
         def _struct_b(scores):
-            return [
-                {"embedding": self._cosine_vector(score), "tag": f"b_{idx}"}
-                for idx, score in enumerate(scores)
-            ]
+            return [{"embedding": self._cosine_vector(score), "tag": f"b_{idx}"} for idx, score in enumerate(scores)]
 
         score_rows = [
             (1, [0.99, 0.10, 0.10]),
@@ -231,8 +228,7 @@ class StructArrayElementSearchBase(TestMilvusClientV2Base):
                 "doc_int": i,
                 "normal_vector": _seed_vector(i + 999999),
                 "structA": [
-                    {"embedding": _seed_vector(i * 100 + k), "int_val": i * 10 + k}
-                    for k in range(rng.randint(3, 6))
+                    {"embedding": _seed_vector(i * 100 + k), "int_val": i * 10 + k} for k in range(rng.randint(3, 6))
                 ],
             }
 

@@ -1595,15 +1595,21 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema,
-                               consistency_level="Strong", index_params=index_params)
+        self.create_collection(
+            client, collection_name, default_dim, schema=schema, consistency_level="Strong", index_params=index_params
+        )
 
         # step 2: insert full rows, then partial upsert dynamic field `end_timestamp`
         nb = 100
         vectors = cf.gen_vectors(nb, default_dim)
-        rows = [{default_primary_key_field_name: i,
-                 default_vector_field_name: vectors[i],
-                 default_string_field_name: f"row_{i}"} for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: f"row_{i}",
+            }
+            for i in range(nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -1612,14 +1618,16 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # verify dynamic field was written
-        res = self.query(client, collection_name, filter="id < 5",
-                         output_fields=[default_primary_key_field_name, "end_timestamp"])[0]
+        res = self.query(
+            client, collection_name, filter="id < 5", output_fields=[default_primary_key_field_name, "end_timestamp"]
+        )[0]
         for r in res:
             assert "end_timestamp" in r, f"end_timestamp should exist as dynamic field, got {r}"
 
         # step 3: add `end_timestamp` as a static column (schema evolution)
-        self.add_collection_field(client, collection_name, field_name="end_timestamp",
-                                  data_type=DataType.INT64, nullable=True)
+        self.add_collection_field(
+            client, collection_name, field_name="end_timestamp", data_type=DataType.INT64, nullable=True
+        )
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
 
@@ -1630,12 +1638,14 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # step 5: verify the static field has the new value
-        res = self.query(client, collection_name, filter="id < 5",
-                         output_fields=[default_primary_key_field_name, "end_timestamp"])[0]
+        res = self.query(
+            client, collection_name, filter="id < 5", output_fields=[default_primary_key_field_name, "end_timestamp"]
+        )[0]
         for r in res:
             pk = r[default_primary_key_field_name]
-            assert r["end_timestamp"] == new_ts + pk, \
+            assert r["end_timestamp"] == new_ts + pk, (
                 f"end_timestamp mismatch for pk={pk}: expected {new_ts + pk}, got {r['end_timestamp']}"
+            )
 
         self.drop_collection(client, collection_name)
 
