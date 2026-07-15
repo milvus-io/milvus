@@ -1409,15 +1409,35 @@ func (suite *SegmentCheckerTestSuite) TestServingSetReleasesWhatDelegatorDropped
 }
 
 // The delegator is still serving the segment => protect it, even though the version guard alone
-// would have released it (view == current). This is the failure the reported fact prevents.
+// would have released it (view == current). This is the failure the reported fact prevents. The
+// segment is in the reported loaded universe (view.Segments) and not on the not-serving list, so it
+// is known to be served.
 func (suite *SegmentCheckerTestSuite) TestServingSetProtectsSegmentStillServed() {
-	_, currentTargetVersion, run := suite.setupServingSetCase()
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
 
-	view := newTestLeaderView(currentTargetVersion)
+	view := utils.CreateTestLeaderView(1, 1, "test-insert-channel",
+		map[int64]int64{seg.GetID(): seg.Node}, map[int64]*meta.Segment{})
+	view.TargetVersion = currentTargetVersion
 	view.ReportsServingSet = true
 	view.NotServingSegments = typeutil.NewUniqueSet() // empty => still serving the candidate
 
 	suite.Len(run(view), 0, "segment must be protected while the delegator still serves it")
+}
+
+// A release candidate that is not loaded on this leader at all (absent from the reported loaded
+// universe view.Segments) must be released, not kept: absence from the negative NotServingSegments
+// list does not prove the segment is served. Keeping it here would block reclamation indefinitely.
+func (suite *SegmentCheckerTestSuite) TestServingSetReleasesCandidateNotLoadedHere() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	// loaded universe does NOT contain the candidate; not-serving list is empty
+	view := newTestLeaderView(currentTargetVersion)
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet()
+	_, present := view.Segments[seg.GetID()]
+	suite.False(present, "precondition: candidate is not in the reported loaded universe")
+
+	suite.Len(run(view), 1, "a candidate that is not loaded on this leader must be released, not kept")
 }
 
 // Older QueryNode: no serving set reported => coord falls back to the target versions and may

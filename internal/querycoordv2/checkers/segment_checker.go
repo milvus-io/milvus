@@ -494,7 +494,16 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 			// its readable snapshot is not derivable from the target versions alone. When it
 			// reports that fact, trust it and release only what it says it no longer serves.
 			if view.ReportsServingSet {
-				inUse := !view.NotServingSegments.Contain(s.GetID())
+				// NotServingSegments is a negative list: loaded sealed segments minus the readable
+				// set. Absence from it is ambiguous -- a candidate that is not loaded on this leader
+				// at all (e.g. during a leader/distribution transition) is also absent, and must not
+				// be mistaken for "in use", or its reclamation is blocked indefinitely. A segment is
+				// in use only when it is KNOWN LOADED here (present in the reported loaded universe,
+				// view.Segments) AND not on the not-serving list. The readable set is a subset of the
+				// loaded universe, so a segment actually being served is always known loaded -- the
+				// straddle protection is unaffected.
+				_, knownLoaded := view.Segments[s.GetID()]
+				inUse := knownLoaded && !view.NotServingSegments.Contain(s.GetID())
 				if inUse && provablyNotInReadableSet(view, currentTargetVersion, nextTargetVersion) {
 					// The version guard would have released a segment the delegator is still
 					// serving -- exactly the failure this reported fact exists to prevent.
