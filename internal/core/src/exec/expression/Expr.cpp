@@ -784,6 +784,12 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             }
         }
 
+        // NOTE: do NOT extend this recursion through PhyLogicalUnaryExpr (NOT).
+        // The GIS split nodes' all-ones `valid` is only sound because a split
+        // group can never sit under a negation -- see the PRECONDITION in
+        // GISConjunctExpr.cpp. Reordering (and thus splitting) a conjunction
+        // under a NOT would negate that all-ones `valid` into selecting
+        // null-geometry rows.
         if (input->name() == "PhyConjunctFilterExpr") {
             bool sub_expr_heavy = false;
             auto sub_expr =
