@@ -2498,17 +2498,11 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
-        std::string warmup_policy = info.warmup_policy;
-        if (warmup_policy.empty()) {
-            std::string aggregated_warmup_policy;
-            for (auto field_id : milvus_field_ids) {
-                AccumulateWarmupPolicyForGroup(
-                    resolve_field_data_warmup_policy(
-                        field_id, segment_load_info, schema_snapshot),
-                    aggregated_warmup_policy);
-            }
-            warmup_policy = aggregated_warmup_policy;
-        }
+        auto warmup_policy =
+            resolve_field_data_group_warmup_policy(field_metas,
+                                                   segment_load_info,
+                                                   schema_snapshot,
+                                                   info.warmup_policy);
 
         std::vector<FieldId> fields_for_stats;
         if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
@@ -2657,6 +2651,11 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+        auto warmup_policy =
+            resolve_field_data_group_warmup_policy(field_metas,
+                                                   segment_load_info,
+                                                   schema_snapshot,
+                                                   info.warmup_policy);
 
         std::vector<FieldId> fields_for_stats;
         if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
@@ -2689,7 +2688,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
                 load_info.load_priority,
-                info.warmup_policy);
+                warmup_policy);
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -6498,12 +6497,15 @@ std::string
 ChunkedSegmentSealedImpl::resolve_field_data_group_warmup_policy(
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     const SegmentLoadInfo& segment_load_info,
-    const SchemaPtr& schema_snapshot) const {
+    const SchemaPtr& schema_snapshot,
+    const std::string& explicit_warmup_policy) const {
     std::string aggregated_warmup_policy;
     for (const auto& field_meta_pair : field_metas) {
         AccumulateWarmupPolicyForGroup(
-            resolve_field_data_warmup_policy(
-                field_meta_pair.first, segment_load_info, schema_snapshot),
+            resolve_field_data_warmup_policy(field_meta_pair.first,
+                                             segment_load_info,
+                                             schema_snapshot,
+                                             explicit_warmup_policy),
             aggregated_warmup_policy);
     }
     return aggregated_warmup_policy;
