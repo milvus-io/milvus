@@ -26,7 +26,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const maxPlacementSnapshotAttempts = 3
@@ -114,7 +114,7 @@ func (b *PlacementSnapshotBuilder) Build(
 			return snapshot, nil
 		}
 	}
-	return nil, errors.New("placement snapshot changed during all capture attempts")
+	return nil, merr.WrapErrServiceUnavailableMsg("placement snapshot changed during all capture attempts")
 }
 
 func (b *PlacementSnapshotBuilder) Validate(token AdmissionToken) task.BalanceAdmissionReason {
@@ -188,7 +188,7 @@ func (b *PlacementSnapshotBuilder) buildFromCapture(
 ) (*PlacementSnapshot, bool, error) {
 	rg := b.meta.ResourceManager.GetResourceGroup(ctx, resourceGroup)
 	if rg == nil {
-		return nil, false, fmt.Errorf("resource group %q not found", resourceGroup)
+		return nil, false, merr.WrapErrServiceUnavailableMsg("resource group %q not found", resourceGroup)
 	}
 
 	replicas := append([]*meta.Replica(nil), b.meta.ReplicaManager.GetByResourceGroup(ctx, resourceGroup)...)
@@ -622,11 +622,13 @@ func (d *digestWriter) writeInt64(value int64) {
 	binary.LittleEndian.PutUint64(encoded[:], uint64(value))
 	_, _ = d.h.Write(encoded[:])
 }
+
 func (d *digestWriter) writeUint64(value uint64) {
 	var encoded [8]byte
 	binary.LittleEndian.PutUint64(encoded[:], value)
 	_, _ = d.h.Write(encoded[:])
 }
+
 func (d *digestWriter) writeBool(value bool) {
 	if value {
 		d.writeUint64(1)

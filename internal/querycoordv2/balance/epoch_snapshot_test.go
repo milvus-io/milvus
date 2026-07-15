@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -468,7 +469,8 @@ func TestPlacementSnapshotStopsAfterThreeUnstableAttempts(t *testing.T) {
 
 	snapshot, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
 	require.Nil(t, snapshot)
-	require.EqualError(t, err, "placement snapshot changed during all capture attempts")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.ErrorContains(t, err, "placement snapshot changed during all capture attempts")
 	require.Equal(t, []int{0, 1, 2}, attempts)
 }
 
@@ -533,7 +535,8 @@ func TestPlacementSnapshotRetryObserver(t *testing.T) {
 
 		snapshot, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
 		require.Nil(t, snapshot)
-		require.EqualError(t, err, "placement snapshot changed during all capture attempts")
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorContains(t, err, "placement snapshot changed during all capture attempts")
 		require.Equal(t, []string{testSnapshotRG, testSnapshotRG}, retries)
 	})
 }
@@ -892,6 +895,10 @@ func TestPlacementSnapshotValidateTypedReasonsAndIgnoresDistributionRevision(t *
 		snapshot := buildSnapshot(t, fixture)
 		require.NoError(t, fixture.meta.ResourceManager.DropResourceGroup(fixture.ctx, testSnapshotRG))
 		require.Equal(t, task.BalanceAdmissionRGChanged, fixture.builder.Validate(AdmissionToken{Snapshot: snapshot.Token, CollectionID: 100, ReplicaID: testEligibleReplica}))
+
+		missing, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
+		require.Nil(t, missing)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	})
 
 	t.Run("distribution revision", func(t *testing.T) {

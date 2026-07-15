@@ -32,13 +32,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	pkgmetrics "github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type epochManagerClock struct {
@@ -1007,6 +1007,54 @@ func TestEpochManagerUsesFrozenPolicySelection(t *testing.T) {
 		require.True(t, result.Terminal)
 		require.Equal(t, 1, providerCalls)
 	})
+
+	t.Run("unavailable active policy is an internal error", func(t *testing.T) {
+		fixture := newEpochManagerTestFixture(t)
+		fixture.manager.policyProvider = func(string, EpochPolicyConfig) (EpochBalancePolicy, bool) {
+			return nil, false
+		}
+
+		result := fixture.manager.Advance(context.Background(), epochManagerRequest(testSnapshotRG, testEligibleReplica))
+		require.ErrorIs(t, result.Err, merr.ErrServiceInternal)
+	})
+
+	t.Run("unavailable shadow policy is an internal error", func(t *testing.T) {
+		fixture := newEpochManagerTestFixture(t)
+		fixture.manager.policyProvider = func(string, EpochPolicyConfig) (EpochBalancePolicy, bool) {
+			return nil, false
+		}
+		request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+		request.Shadow = true
+
+		result := fixture.manager.Advance(context.Background(), request)
+		require.ErrorIs(t, result.Err, merr.ErrServiceInternal)
+	})
+}
+
+func TestEpochManagerClassifiesMissingRuntimeCapabilities(t *testing.T) {
+	t.Run("generation admitter", func(t *testing.T) {
+		fixture := newEpochManagerTestFixture(t)
+		plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+		fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+		fixture.manager.admitter = nil
+
+		result := fixture.manager.Advance(context.Background(), epochManagerRequest(testSnapshotRG, testEligibleReplica))
+		require.ErrorIs(t, result.Err, merr.ErrServiceInternal)
+	})
+
+	t.Run("snapshot source", func(t *testing.T) {
+		fixture := newEpochManagerTestFixture(t)
+		fixture.manager.snapshotBuilder = nil
+
+		result := fixture.manager.Advance(context.Background(), epochManagerRequest(testSnapshotRG, testEligibleReplica))
+		require.ErrorIs(t, result.Err, merr.ErrServiceInternal)
+	})
+}
+
+func TestDefaultEpochTaskFactoryRejectsInvalidKindAsInternal(t *testing.T) {
+	factory := &defaultEpochTaskFactory{source: task.WrapIDSource(6)}
+	_, err := factory.Build(context.Background(), EpochPlan{Kind: PlanKind(99)}, nil, task.BalanceEpochMeta{}, time.Minute)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 func epochManagerWave(plans ...EpochPlan) BalanceWave {
@@ -1741,6 +1789,7 @@ func TestEpochManagerAmbiguousQuiescentIsDegraded(t *testing.T) {
 	require.Equal(t, EpochDegraded, result.State)
 	require.True(t, result.Terminal)
 	require.Error(t, result.Err)
+	require.ErrorIs(t, result.Err, merr.ErrServiceUnavailable)
 	require.Contains(t, result.Err.Error(), "ambiguous")
 }
 
@@ -2985,6 +3034,7 @@ func TestEpochManagerLostPlacementOverridesTimeout(t *testing.T) {
 	result := fixture.manager.Advance(context.Background(), request)
 	require.Equal(t, EpochDegraded, result.State)
 	require.True(t, result.Terminal)
+	require.ErrorIs(t, result.Err, merr.ErrServiceInternal)
 }
 
 func TestEpochManagerFailedUnreadyChannelTargetUsesPhysicalPresence(t *testing.T) {

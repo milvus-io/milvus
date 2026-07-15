@@ -20,9 +20,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/stretchr/testify/require"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestWaveLedgerHardBudgetLimits(t *testing.T) {
@@ -298,7 +300,8 @@ func TestWaveLedgerAndProjectionRejectMismatchedAdmissionIdentityAtomically(t *t
 
 			projection := NewProjectedPlacement(projectedPlacementFixture())
 			before := projection.Snapshot()
-			require.Error(t, projection.Apply(test.plan))
+			err := projection.Apply(test.plan)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Equal(t, before, projection.Snapshot())
 		})
 	}
@@ -692,7 +695,8 @@ func TestProjectedPlacementApplyValidationIsAtomic(t *testing.T) {
 			projection := NewProjectedPlacement(snapshot)
 			before := projection.Snapshot()
 
-			require.Error(t, projection.Apply(test.plan))
+			err := projection.Apply(test.plan)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Equal(t, before, projection.Snapshot())
 		})
 	}
@@ -767,7 +771,8 @@ func TestProjectedPlacementRejectsDuplicateApplicationWithoutMutation(t *testing
 
 	require.NoError(t, projection.Apply(plan))
 	afterFirst := projection.Snapshot()
-	require.Error(t, projection.Apply(plan))
+	err := projection.Apply(plan)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.Equal(t, afterFirst, projection.Snapshot())
 	projection.Undo(plan)
 }
@@ -778,7 +783,8 @@ func TestProjectedPlacementRejectsDuplicateChannelApplicationWithoutMutation(t *
 
 	require.NoError(t, projection.Apply(plan))
 	afterFirst := projection.Snapshot()
-	require.Error(t, projection.Apply(plan))
+	err := projection.Apply(plan)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.Equal(t, afterFirst, projection.Snapshot())
 	projection.Undo(plan)
 	require.Panics(t, func() { projection.Undo(plan) })
