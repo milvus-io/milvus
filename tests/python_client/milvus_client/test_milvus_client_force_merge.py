@@ -196,17 +196,7 @@ class TestMilvusClientForceMergeValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. compact without target_size; this is ordinary manual compaction
         compact_id = self.compact(client, collection_name)[0]
-        # 4. wait for compaction to complete
-        cost = 180
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id)[0]
-            log.info(f"Compaction state: {res}")
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(f"Compaction cost more than {cost}s")
+        assert self.wait_for_compaction_ready(client, compact_id, timeout=180)
         log.info("Manual compaction without target_size completed successfully")
 
     @pytest.mark.tags(CaseLabel.L3)

@@ -13,6 +13,7 @@ L3 tests require Milvus configuration changes:
         enableAutoCompaction: false
 """
 
+import asyncio
 import time
 
 import numpy as np
@@ -23,6 +24,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa: F403
 from pymilvus import DataType
+from pymilvus.milvus_client.async_optimize_task import AsyncOptimizeTask
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
@@ -643,10 +645,11 @@ class TestAsyncMilvusClientOptimizeValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L3)
     async def test_async_optimize_loaded_collection(self):
         """
-        target: test AsyncMilvusClient.optimize against a loaded multi-segment collection
-        method: insert and flush five batches, optimize, inspect progress and persistent segments
-        expected: Async optimize refreshes load, reduces segments, and preserves the row count
+        target: test AsyncMilvusClient.optimize wait=False against a loaded collection
+        method: observe the task lifecycle and loaded segment IDs without release/load
+        expected: The task succeeds, old loaded IDs disappear, and all rows remain queryable
         """
+        sync_client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
         collection_name = cf.gen_unique_str(prefix)
@@ -672,14 +675,29 @@ class TestAsyncMilvusClientOptimizeValid(TestMilvusClientV2Base):
                 await async_client.flush(collection_name)
 
             await async_client.load_collection(collection_name)
-            segments_before, _ = await async_client.list_persistent_segments(collection_name)
-            assert len(segments_before) > 1, f"Expected multiple async optimize inputs: {segments_before}"
+            segments_before = sync_client.list_loaded_segments(collection_name)
+            segment_ids_before = {segment.segment_id for segment in segments_before}
+            assert len(segment_ids_before) > 1, f"Expected multiple loaded optimize inputs: {segments_before}"
 
-            result, _ = await async_client.optimize(
+            task, check_result = await async_client.optimize(
                 collection_name,
                 target_size="64MB",
+                wait=False,
                 timeout=600,
             )
+            assert check_result
+            assert isinstance(task, AsyncOptimizeTask)
+
+            observed_progress = set()
+            deadline = time.time() + 600
+            while not task.done():
+                stage = task.progress()
+                observed_progress.add(getattr(stage, "value", stage))
+                if time.time() >= deadline:
+                    pytest.fail(f"Async optimize task did not complete; progress={observed_progress}")
+                await asyncio.sleep(0.5)
+
+            result = await task.result(timeout=10)
 
             assert result.status == "success"
             assert result.collection_name == collection_name
@@ -688,11 +706,26 @@ class TestAsyncMilvusClientOptimizeValid(TestMilvusClientV2Base):
             assert "compacting" in progress
             assert "waiting for index rebuild" in progress
             assert "refreshing load" in progress
-
-            segments_after, _ = await async_client.list_persistent_segments(collection_name)
-            assert len(segments_after) < len(segments_before), (
-                f"Async optimize did not reduce persistent segments: before={segments_before}, after={segments_after}"
+            assert observed_progress - {"initializing"}, (
+                f"Async task exposed no live progress beyond initialization: {observed_progress}"
             )
+
+            refresh_deadline = time.time() + 300
+            segments_after = []
+            while time.time() < refresh_deadline:
+                segments_after = sync_client.list_loaded_segments(collection_name)
+                segment_ids_after = {segment.segment_id for segment in segments_after}
+                if len(segment_ids_after) < len(segment_ids_before) and segment_ids_after.isdisjoint(
+                    segment_ids_before
+                ):
+                    break
+                await asyncio.sleep(2)
+            else:
+                pytest.fail(
+                    f"Loaded segments did not converge after async optimize without release/load: "
+                    f"before={segments_before}, after={segments_after}"
+                )
+
             count_result, _ = await async_client.query(
                 collection_name,
                 filter="",
