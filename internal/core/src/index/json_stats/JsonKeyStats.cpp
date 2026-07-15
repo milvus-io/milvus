@@ -1207,6 +1207,11 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     // Lazy JSON stats columns are loaded through per-column projected readers,
     // same as lazy storage-v2 column-group entries. This avoids co-loading
     // sibling JSON paths when a query touches only one shredding column.
+    // TODO: This only projects the actual read path. ManifestGroupTranslator
+    // still estimates cache cell size from ChunkReader::get_chunk_size(), which
+    // currently reports full row-group size instead of projected-column size.
+    // Keep the conservative estimate until milvus-storage makes
+    // ChunkReader::get_chunk_size() projection-aware.
     auto all_columns = std::make_shared<std::vector<std::string>>(column_names);
     auto reader = milvus_storage::api::Reader::create(
         column_groups, nullptr, all_columns, properties);
