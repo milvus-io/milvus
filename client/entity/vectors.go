@@ -17,7 +17,7 @@
 package entity
 
 import (
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/client/v2/internal/typeutil"
 )
 
 // Vector interface vector used int search

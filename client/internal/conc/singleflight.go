@@ -6,7 +6,7 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,32 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package row
+package conc
 
-import (
-	"reflect"
+import "golang.org/x/sync/singleflight"
 
-	"github.com/milvus-io/milvus/client/v2/internal/typeutil"
-)
-
-var cachedCandidates *typeutil.ConcurrentMap[reflect.Type, *ReceiverCandidate]
-
-func init() {
-	cachedCandidates = typeutil.NewConcurrentMap[reflect.Type, *ReceiverCandidate]()
+type Singleflight[T any] struct {
+	group singleflight.Group
 }
 
-func GetReceiverCandidate(v reflect.Type) *ReceiverCandidate {
-	rc, ok := cachedCandidates.Get(v)
-	if ok {
-		return rc
+func (sf *Singleflight[T]) Do(key string, fn func() (T, error)) (T, error, bool) {
+	value, err, shared := sf.group.Do(key, func() (any, error) {
+		return fn()
+	})
+	if value == nil {
+		var zero T
+		return zero, err, shared
 	}
-
-	// reflect.Type.String() cannot work as unique identifier for singleflight
-	// accept multiple parse for now
-	rc = &ReceiverCandidate{
-		name2Index: parseCandidate(v),
-	}
-	cachedCandidates.Insert(v, rc)
-
-	return rc
+	return value.(T), err, shared
 }
