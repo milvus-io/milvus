@@ -1058,6 +1058,25 @@ func SetStorageVersion(segmentID int64, version int64) UpdateOperator {
 	}
 }
 
+func ValidateSaveBinlogStorageVersion(segmentID int64, incoming int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			modPack.err = merr.WrapErrSegmentNotFound(segmentID)
+			return false
+		}
+
+		current := segment.GetStorageVersion()
+		if incoming != current {
+			modPack.err = merr.WrapErrDataIntegrityMsg(
+				"segment %d storage version mismatch, current=%d incoming=%d",
+				segmentID, current, incoming)
+			return false
+		}
+		return true
+	}
+}
+
 func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)

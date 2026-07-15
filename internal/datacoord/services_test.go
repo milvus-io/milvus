@@ -275,6 +275,65 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 	}
 }
 
+func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	info := &datapb.SegmentInfo{
+		ID:             10,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Growing,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV2,
+	}
+	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+	s.Require().NoError(err)
+
+	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:      10,
+		Channel:        "ch1",
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
+
+	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID: 10,
+		Channel:   "ch1",
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
+	segment := s.testServer.meta.GetSegment(context.TODO(), 10)
+	s.EqualValues(storage.StorageV2, segment.GetStorageVersion())
+
+	info = &datapb.SegmentInfo{
+		ID:             11,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Growing,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV1,
+	}
+	err = s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+	s.Require().NoError(err)
+
+	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:      11,
+		Channel:        "ch1",
+		StorageVersion: storage.StorageV2,
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
+	segment = s.testServer.meta.GetSegment(context.TODO(), 11)
+	s.EqualValues(storage.StorageV1, segment.GetStorageVersion())
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 

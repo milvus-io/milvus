@@ -1572,7 +1572,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	// Register growing-source segments as optional local flush sources. Metadata
 	// commit is still owned by WAL flusher / WriteBuffer.
-	if sd.useGrowingSourceFlush() {
+	if sd.allowGrowingSourceFlush() {
 		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, func(ctx context.Context, fenceTs uint64) error {
 			_, err := sd.waitTSafe(ctx, fenceTs)
 			return err
@@ -1589,12 +1589,12 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	return sd, nil
 }
 
-// useGrowingSourceFlush returns true when the collection should expose growing segments as a flush source.
-func (sd *shardDelegator) useGrowingSourceFlush() bool {
+// allowGrowingSourceFlush returns true when the collection may expose growing segments as a flush source.
+func (sd *shardDelegator) allowGrowingSourceFlush() bool {
 	if sd == nil || sd.collection == nil {
 		return false
 	}
-	return typeutil.UseGrowingSourceFlush(sd.collection.Schema(),
+	return typeutil.AllowGrowingSourceFlush(sd.collection.Schema(),
 		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
 }

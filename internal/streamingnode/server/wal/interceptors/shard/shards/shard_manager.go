@@ -233,13 +233,17 @@ func (c *CollectionInfo) SchemaVersion() int32 {
 	return s.GetVersion()
 }
 
-func (c *CollectionInfo) UseGrowingSourceFlush() bool {
+func (c *CollectionInfo) AllowGrowingSourceFlush() bool {
 	if c == nil || c.Schema == nil {
 		return false
 	}
-	return typeutil.UseGrowingSourceFlush(c.Schema.GetSchema(),
+	return typeutil.AllowGrowingSourceFlush(c.Schema.GetSchema(),
 		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
+}
+
+func (c *CollectionInfo) RequiresStorageV3() bool {
+	return c.HasTextField()
 }
 
 func (c *CollectionInfo) HasTextField() bool {
@@ -266,7 +270,7 @@ func (c *CollectionInfo) RuntimeFlushSize(modified stats.ModifiedMetrics) uint64
 }
 
 func (c *CollectionInfo) shouldEstimateInterimIndexExtra() bool {
-	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil || !c.UseGrowingSourceFlush() {
+	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil || !c.AllowGrowingSourceFlush() {
 		return false
 	}
 	params := paramtable.Get()

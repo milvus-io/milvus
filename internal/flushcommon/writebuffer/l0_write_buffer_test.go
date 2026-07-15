@@ -410,11 +410,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 
 	s.Run("usable_source_records_progress_and_pins_checkpoint", func() {
 		textSchema := s.textSchema()
-		metacache := s.newTextMetaCache(textSchema)
+		mc := s.newTextMetaCache(textSchema)
 		var resolvedSegmentID int64
 		var resolvedTargetOffset int64
 		resolveCalls := 0
-		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
@@ -433,11 +433,24 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
 
-		// 3 first-insert path calls plus 1 triggerSync policy check for the
-		// recorded growing source progress.
-		metacache.EXPECT().GetSegmentByID(int64(1001)).Return(nil, false).Times(4)
-		metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		segmentInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1001,
+			PartitionID:    10,
+			CollectionID:   s.collID,
+			InsertChannel:  s.channelName,
+			StartPosition:  &msgpb.MsgPosition{Timestamp: 100},
+			State:          commonpb.SegmentState_Growing,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  100,
+		}, pkoracle.NewBloomFilterSet(), nil)
+
+		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
+		// segment; recordGrowingSourceProgress and triggerSync see the segment
+		// created by AddSegment.
+		mc.EXPECT().GetSegmentByID(int64(1001)).Return(nil, false).Times(3)
+		mc.EXPECT().GetSegmentByID(int64(1001)).Return(segmentInfo, true).Times(2)
+		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
@@ -556,8 +569,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 
 	s.Run("pending_source_records_progress_instead_of_falling_back_to_writebuffer", func() {
 		textSchema := s.textSchema()
-		metacache := s.newTextMetaCache(textSchema)
-		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+		mc := s.newTextMetaCache(textSchema)
+		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
@@ -570,10 +583,24 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
 
-		// 3 first-insert path calls plus 1 triggerSync policy check.
-		metacache.EXPECT().GetSegmentByID(int64(1002)).Return(nil, false).Times(4)
-		metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		segmentInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1002,
+			PartitionID:    10,
+			CollectionID:   s.collID,
+			InsertChannel:  s.channelName,
+			StartPosition:  &msgpb.MsgPosition{Timestamp: 100},
+			State:          commonpb.SegmentState_Growing,
+			StorageVersion: storage.StorageV3,
+			SchemaVersion:  100,
+		}, pkoracle.NewBloomFilterSet(), nil)
+
+		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
+		// segment; recordGrowingSourceProgress and triggerSync see the segment
+		// created by AddSegment.
+		mc.EXPECT().GetSegmentByID(int64(1002)).Return(nil, false).Times(3)
+		mc.EXPECT().GetSegmentByID(int64(1002)).Return(segmentInfo, true).Times(2)
+		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
@@ -1666,11 +1693,25 @@ func (s *L0WriteBufferSuite) TestCheckReleaseManualFlushNeed() {
 	s.False(checker.CheckReleaseManualFlushNeed(nil))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1300}))
 
-	wb.CreateNewGrowingSegment(0, 1301, &msgpb.MsgPosition{Timestamp: 100}, 100)
+	err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:    0,
+		SegmentID:      1301,
+		StartPos:       &msgpb.MsgPosition{Timestamp: 100},
+		SchemaVersion:  100,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
 	mc.UpdateSegments(metacache.SetFlushSourceMode(metacache.FlushSourceWriteBuffer), metacache.WithSegmentIDs(1301))
 	s.False(checker.CheckReleaseManualFlushNeed([]int64{1301}))
 
-	wb.CreateNewGrowingSegment(0, 1302, &msgpb.MsgPosition{Timestamp: 100}, 100)
+	err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:    0,
+		SegmentID:      1302,
+		StartPos:       &msgpb.MsgPosition{Timestamp: 100},
+		SchemaVersion:  100,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
 	mc.UpdateSegments(metacache.SetFlushSourceMode(metacache.FlushSourceGrowing), metacache.WithSegmentIDs(1302))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1302}))
 
@@ -1678,7 +1719,14 @@ func (s *L0WriteBufferSuite) TestCheckReleaseManualFlushNeed() {
 	s.False(checker.CheckReleaseManualFlushNeed([]int64{1302}))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1301, 1300}))
 
-	wb.CreateNewGrowingSegment(0, 1303, &msgpb.MsgPosition{Timestamp: 100}, 100)
+	err = wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:    0,
+		SegmentID:      1303,
+		StartPos:       &msgpb.MsgPosition{Timestamp: 100},
+		SchemaVersion:  100,
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
 	mc.UpdateSegments(metacache.SetFlushSourceMode(metacache.FlushSourceGrowing), metacache.WithSegmentIDs(1303))
 	s.True(checker.CheckReleaseManualFlushNeed([]int64{1300, 1303}))
 }
