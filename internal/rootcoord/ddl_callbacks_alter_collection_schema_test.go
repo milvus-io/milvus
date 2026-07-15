@@ -626,7 +626,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	resp, err = core.AlterCollectionSchema(ctx, functionOnlyReq)
 	alterErr = merr.CheckRPCCall(resp.GetAlterStatus(), err)
 	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, alterErr, "cannot change the function-output role")
+	require.ErrorContains(t, alterErr, "output field must be newly created")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 6)
 	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
