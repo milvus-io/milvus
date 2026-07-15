@@ -242,6 +242,28 @@ type epochManagerAdmitter struct {
 	expected []task.BalancePendingRevision
 }
 
+type epochManagerBlockingRejectAdmitter struct {
+	entered chan struct{}
+	release chan struct{}
+	reason  task.BalanceAdmissionReason
+}
+
+func (a *epochManagerBlockingRejectAdmitter) AdmitBalanceTaskAtPendingRevision(
+	balanceTask task.Task,
+	expected task.BalancePendingRevision,
+	validate task.BalanceAdmissionValidator,
+) task.BalanceAdmissionResult {
+	if reason := validate(); reason != task.BalanceAdmissionAccepted {
+		balanceTask.Cancel(errors.New(reason.String()))
+		return task.BalanceAdmissionResult{Reason: reason, Err: errors.New(reason.String()), PendingRevision: expected}
+	}
+	close(a.entered)
+	<-a.release
+	err := errors.New(a.reason.String())
+	balanceTask.Cancel(err)
+	return task.BalanceAdmissionResult{Reason: a.reason, Err: err, PendingRevision: expected}
+}
+
 func (a *epochManagerAdmitter) AdmitBalanceTaskAtPendingRevision(
 	balanceTask task.Task,
 	expected task.BalancePendingRevision,
@@ -392,6 +414,8 @@ func publishEpochManagerSegments(
 			switch id {
 			case 101:
 				collectionID, partitionID, rows, channel = 100, 10, 100, "channel-a"
+			case 103:
+				collectionID, partitionID, rows, channel = 100, 10, 40, "channel-a"
 			case 201:
 				collectionID, partitionID, rows, channel = 200, 20, 200, "channel-b"
 			default:
@@ -410,6 +434,56 @@ func publishEpochManagerSegments(
 	}
 	fixture.dist.PublishNodeDistribution(1, segments(1, node1SegmentIDs), fixture.node1Channels)
 	fixture.dist.PublishNodeDistribution(3, segments(3, node3SegmentIDs), nil)
+}
+
+func publishEpochManagerAcceptedSegmentMove(
+	t *testing.T,
+	fixture *placementSnapshotFixture,
+	balanceTask task.Task,
+) {
+	t.Helper()
+	segmentTask, ok := balanceTask.(*task.SegmentTask)
+	require.True(t, ok)
+	var source, target int64
+	for _, action := range balanceTask.Actions() {
+		switch action.Type() {
+		case task.ActionTypeGrow:
+			target = action.Node()
+		case task.ActionTypeReduce:
+			source = action.Node()
+		}
+	}
+	require.NotZero(t, source)
+	require.NotZero(t, target)
+
+	captured := fixture.dist.Capture()
+	byNode := map[int64][]*meta.Segment{1: {}, 3: {}}
+	var moved *meta.Segment
+	for _, record := range captured.Segments {
+		if record.NodeID != 1 && record.NodeID != 3 {
+			continue
+		}
+		segment := &meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID: record.SegmentID, CollectionID: record.CollectionID,
+				PartitionID: record.PartitionID, InsertChannel: record.Channel,
+				NumOfRows: record.RowCount,
+			},
+			Node:    record.NodeID,
+			Version: record.Version,
+		}
+		if record.SegmentID == segmentTask.SegmentID() && record.NodeID == source {
+			moved = segment
+			continue
+		}
+		byNode[record.NodeID] = append(byNode[record.NodeID], segment)
+	}
+	require.NotNil(t, moved)
+	moved.Node = target
+	moved.Version++
+	byNode[target] = append(byNode[target], moved)
+	fixture.dist.PublishNodeDistribution(1, byNode[1], fixture.node1Channels)
+	fixture.dist.PublishNodeDistribution(3, byNode[3], nil)
 }
 
 func TestEpochManagerCoalescesRepeatedRGTriggers(t *testing.T) {
@@ -609,7 +683,6 @@ func TestEpochManagerNodeOrRGChangeSupersedesGeneration(t *testing.T) {
 	for _, reason := range []task.BalanceAdmissionReason{
 		task.BalanceAdmissionNodeIneligible,
 		task.BalanceAdmissionRGChanged,
-		task.BalanceAdmissionStaleEpoch,
 	} {
 		t.Run(reason.String(), func(t *testing.T) {
 			fixture := newEpochManagerTestFixture(t)
@@ -625,6 +698,50 @@ func TestEpochManagerNodeOrRGChangeSupersedesGeneration(t *testing.T) {
 			require.True(t, fixture.manager.HasActive(testSnapshotRG))
 		})
 	}
+}
+
+func TestEpochManagerOwnTaskRemovalDoesNotSupersede(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+
+	started := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	accepted := fixture.admitter.acceptedTasks()[0]
+	accepted.SetStatus(task.TaskStatusSucceeded)
+	accepted.Cancel(nil)
+	publishEpochManagerSegments(fixture.placement, []int64{201}, []int64{101})
+	fixture.source.setValidate(func(AdmissionToken) task.BalanceAdmissionReason {
+		return task.BalanceAdmissionStaleEpoch
+	})
+
+	result := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochCompleted, result.State)
+	require.True(t, result.Terminal)
+	require.Zero(t, result.Rejected[task.BalanceAdmissionStaleEpoch])
+}
+
+func TestEpochManagerAdmissionStaleStopsPrefix(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plans := []EpochPlan{
+		epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3),
+		epochSegmentPlan(*fixture.snapshot, testOtherReplica, 201, 1, 3),
+	}
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plans...))
+	fixture.source.setValidate(func(AdmissionToken) task.BalanceAdmissionReason {
+		return task.BalanceAdmissionStaleEpoch
+	})
+
+	result := fixture.manager.Advance(
+		context.Background(),
+		epochManagerRequest(testSnapshotRG, testEligibleReplica, testOtherReplica),
+	)
+	require.Equal(t, EpochSuperseded, result.State)
+	require.Equal(t, 2, result.Planned)
+	require.Zero(t, result.Admitted)
+	require.Equal(t, 1, result.Rejected[task.BalanceAdmissionStaleEpoch])
+	require.Empty(t, fixture.admitter.acceptedTasks())
 }
 
 func TestEpochManagerTargetChangeScopesReconciliation(t *testing.T) {
@@ -755,6 +872,209 @@ func TestEpochManagerRelevantDistributionProgressResetsNoProgressDeadline(t *tes
 	fixture.clock.Advance(500 * time.Millisecond)
 	result := fixture.manager.Advance(context.Background(), request)
 	require.Equal(t, EpochExecuting, result.State)
+}
+
+func TestEpochManagerNoProgressIgnoresUnrelatedOrReorderedRecords(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.Deadline = time.Minute
+	request.NoProgressDeadline = time.Second
+
+	started := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	accepted := fixture.admitter.acceptedTasks()[0]
+	work := &admittedWork{plan: plan, task: accepted}
+	from := meta.SegmentSnapshotRecord{
+		SegmentID: 101, CollectionID: 100, PartitionID: 10, Channel: "channel-a",
+		NodeID: 1, RowCount: 100, Version: 11, Scope: querypb.DataScope_Historical, Present: true,
+	}
+	to := from
+	to.NodeID = 3
+	to.Version = 12
+	left := observeWork(work, meta.DistributionSnapshot{Segments: []meta.SegmentSnapshotRecord{from, to}})
+	right := observeWork(work, meta.DistributionSnapshot{Segments: []meta.SegmentSnapshotRecord{to, from}})
+	require.Equal(t, left.detailDigest, right.detailDigest)
+
+	fixture.clock.Advance(750 * time.Millisecond)
+	fixture.placement.dist.PublishNodeDistribution(4, []*meta.Segment{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID: 301, CollectionID: 300, PartitionID: 30,
+				InsertChannel: "channel-c", NumOfRows: 300,
+			},
+			Node: 4, Version: 41,
+		},
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID: 101, CollectionID: 100, PartitionID: 10,
+				InsertChannel: "channel-a", NumOfRows: 100,
+			},
+			Node: 4, Version: 999,
+		},
+	}, nil)
+	progress := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, progress.State)
+
+	fixture.clock.Advance(500 * time.Millisecond)
+	result := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochTimedOut, result.State)
+}
+
+func TestEpochManagerAmbiguousQuiescentIsDegraded(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+
+	fixture.manager.Advance(context.Background(), request)
+	fixture.admitter.acceptedTasks()[0].Cancel(errors.New("executor outcome ambiguous"))
+	result := fixture.manager.Advance(context.Background(), request)
+
+	require.Equal(t, EpochDegraded, result.State)
+	require.True(t, result.Terminal)
+	require.Error(t, result.Err)
+	require.Contains(t, result.Err.Error(), "ambiguous")
+}
+
+func TestEpochManagerAmbiguousCarryAddsDiagnosticAfterBudgetStop(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	carriedPlan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	newPlan := epochSegmentPlan(*fixture.snapshot, testOtherReplica, 201, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(carriedPlan), epochManagerWave(newPlan))
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica, testOtherReplica)
+	request.Deadline = time.Second
+	request.NoProgressDeadline = 0
+
+	fixture.manager.Advance(context.Background(), request)
+	fixture.clock.Advance(2 * time.Second)
+	timedOut := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochTimedOut, timedOut.State)
+
+	request.Deadline = time.Minute
+	request.Budget.MaxSegmentTasks = 0
+	result := fixture.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochDegraded, result.State)
+	require.True(t, result.Terminal)
+	require.Error(t, result.Err)
+	require.Contains(t, result.Err.Error(), "ambiguous")
+}
+
+func TestEpochManagerDeadlineAfterRejectedAdmissionWinsOrdinaryFailure(t *testing.T) {
+	fixture := newEpochManagerTestFixture(t)
+	plan := epochSegmentPlan(*fixture.snapshot, testEligibleReplica, 101, 1, 3)
+	fixture.policy.setWaves(testSnapshotRG, epochManagerWave(plan))
+	blocking := &epochManagerBlockingRejectAdmitter{
+		entered: make(chan struct{}), release: make(chan struct{}),
+		reason: task.BalanceAdmissionDuplicate,
+	}
+	fixture.manager.admitter = blocking
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.Deadline = time.Second
+
+	resultCh := make(chan EpochAdvanceResult, 1)
+	go func() {
+		resultCh <- fixture.manager.Advance(context.Background(), request)
+	}()
+	receiveBalanceTestSignal(t, blocking.entered, "blocked rejecting admission")
+	fixture.clock.Advance(2 * time.Second)
+	close(blocking.release)
+	result := receiveBalanceTestSignal(t, resultCh, "post-deadline rejection")
+
+	require.Equal(t, EpochTimedOut, result.State)
+	require.True(t, result.Terminal)
+	require.Equal(t, 1, result.Rejected[task.BalanceAdmissionDuplicate])
+}
+
+func TestEpochManagerStaticTargetConvergesWithProductionPolicy(t *testing.T) {
+	fixture := newPlacementSnapshotFixture(t)
+	fixture.targetState.mu.Lock()
+	fixture.targetState.currentSegments[100] = map[int64]*datapb.SegmentInfo{
+		101: {ID: 101, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+		103: {ID: 103, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+		104: {ID: 104, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+		105: {ID: 105, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+	}
+	fixture.targetState.nextSegments[100] = map[int64]*datapb.SegmentInfo{
+		101: {ID: 101, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+		103: {ID: 103, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+		104: {ID: 104, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+		105: {ID: 105, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
+	}
+	fixture.targetState.mu.Unlock()
+	node1Segments := []*meta.Segment{fixture.node1Segments[1]}
+	for _, segmentID := range []int64{101, 103, 104, 105} {
+		node1Segments = append(node1Segments, &meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID: segmentID, CollectionID: 100, PartitionID: 10,
+				InsertChannel: "channel-a", NumOfRows: 10,
+			},
+			Node: 1, Version: segmentID,
+		})
+	}
+	fixture.dist.PublishNodeDistribution(1, node1Segments, fixture.node1Channels)
+	fixture.dist.PublishNodeDistribution(3, nil, nil)
+
+	admitter := &epochManagerAdmitter{}
+	clock := newEpochManagerClock()
+	policy := newScoreEpochPolicy(false)
+	manager := NewBalanceEpochManager(
+		fixture.meta,
+		fixture.dist,
+		fixture.target,
+		fixture.nodes,
+		nil,
+		admitter,
+		admitter,
+		task.WrapIDSource(6),
+		func() (EpochBalancePolicy, bool) { return policy, true },
+		WithEpochClock(clock.Now),
+		WithLeaderTerm(99),
+	)
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.PolicyConfig = scorePolicyTestConfig(false)
+	request.Budget.MaxSegmentTasks = 1
+
+	admittedByGeneration := make([]int, 0, 4)
+	moves := make(map[int64][2]int64)
+	consumedTasks := 0
+	for generation := 0; generation < 10; generation++ {
+		result := manager.Advance(context.Background(), request)
+		admittedByGeneration = append(admittedByGeneration, result.Admitted)
+		if result.Admitted == 0 {
+			require.Equal(t, EpochCompleted, result.State)
+			require.True(t, result.Converged)
+			require.GreaterOrEqual(t, len(admittedByGeneration), 3)
+			for _, admitted := range admittedByGeneration[:len(admittedByGeneration)-1] {
+				require.Equal(t, 1, admitted)
+			}
+			require.Zero(t, admittedByGeneration[len(admittedByGeneration)-1])
+			return
+		}
+
+		require.Equal(t, EpochExecuting, result.State)
+		require.Equal(t, 1, result.Admitted)
+		accepted := admitter.acceptedTasks()[consumedTasks]
+		consumedTasks++
+		segmentTask := accepted.(*task.SegmentTask)
+		var source, target int64
+		for _, action := range accepted.Actions() {
+			if action.Type() == task.ActionTypeGrow {
+				target = action.Node()
+			} else if action.Type() == task.ActionTypeReduce {
+				source = action.Node()
+			}
+		}
+		if previous, ok := moves[segmentTask.SegmentID()]; ok {
+			require.NotEqual(t, [2]int64{previous[1], previous[0]}, [2]int64{source, target})
+		}
+		moves[segmentTask.SegmentID()] = [2]int64{source, target}
+		publishEpochManagerAcceptedSegmentMove(t, fixture, accepted)
+		reconciled := manager.Advance(context.Background(), request)
+		require.Equal(t, EpochCompleted, reconciled.State)
+	}
+	t.Fatal("static target did not converge within 10 generations")
 }
 
 func TestEpochManagerReconcilesInheritedCarryWhenNewAdmissionStops(t *testing.T) {

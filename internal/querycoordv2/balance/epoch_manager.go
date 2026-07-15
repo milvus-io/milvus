@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"hash/fnv"
 	"sort"
 	"sync"
@@ -584,6 +585,7 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 			}
 			return manager.snapshotBuilder.Validate(plan.Token)
 		})
+		admissionDeadlineExpired := manager.deadlineExpired(active, manager.now())
 		if admission.Reason != task.BalanceAdmissionAccepted {
 			active.ledger.Release(plan)
 			active.result.Rejected[admission.Reason]++
@@ -592,6 +594,9 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 				active.terminalIntent = EpochSuperseded
 			} else {
 				active.terminalIntent = EpochDegraded
+			}
+			if admissionDeadlineExpired && active.terminalIntent != EpochSuperseded {
+				active.terminalIntent = EpochTimedOut
 			}
 			break
 		}
@@ -603,7 +608,7 @@ func (manager *BalanceEpochManager) admitWaveLocked(
 		if active.result.Admitted <= len(active.wave.PrefixAfter) {
 			active.result.ObjectiveAfter = active.wave.PrefixAfter[active.result.Admitted-1].Value
 		}
-		if manager.deadlineExpired(active, manager.now()) {
+		if admissionDeadlineExpired {
 			active.terminalIntent = EpochTimedOut
 			break
 		}
@@ -692,14 +697,19 @@ func (manager *BalanceEpochManager) reconcileLocked(
 	if hadLostPlacement {
 		state = EpochDegraded
 	} else if state == EpochIdle {
-		if hadFailure || hadLostPlacement {
+		if hadFailure {
+			state = EpochDegraded
+		} else if len(nextCarry) != 0 {
 			state = EpochDegraded
 		} else {
 			state = EpochCompleted
 		}
 	}
-	if state == EpochTimedOut && len(nextCarry) == 0 && !hadFailure {
-		state = EpochCompleted
+	if len(nextCarry) != 0 && state != EpochTimedOut && state != EpochSuperseded {
+		state = EpochDegraded
+		if active.result.Err == nil {
+			active.result.Err = fmt.Errorf("%d balance object(s) remain ambiguous after reconciliation", len(nextCarry))
+		}
 	}
 	return manager.finishLocked(runtime, active, state, active.result.Err)
 }
@@ -882,7 +892,8 @@ func (manager *BalanceEpochManager) currentInvalidation(
 		})
 		switch reason {
 		case task.BalanceAdmissionAccepted,
-			task.BalanceAdmissionSourceGone:
+			task.BalanceAdmissionSourceGone,
+			task.BalanceAdmissionStaleEpoch:
 			continue
 		default:
 			return reason
@@ -1041,51 +1052,120 @@ func observeWork(work *admittedWork, distribution meta.DistributionSnapshot) wor
 	plan := work.plan
 	switch plan.Kind {
 	case PlanKindSegment:
-		for _, segment := range distribution.Segments {
-			if !segment.Present || segment.CollectionID != plan.CollectionID ||
-				segment.SegmentID != plan.SegmentID || segment.Scope != plan.Scope {
-				continue
-			}
-			if segment.NodeID == plan.From {
-				observation.sourcePresent = true
-			}
-			if segment.NodeID == plan.To {
-				observation.targetPresent = true
-				observation.targetReady = true
-			}
-			_, _ = fmt.Fprintf(
-				detail,
-				"segment/%d/%d/%d/%s/%d/%d/%d/%t;",
-				segment.NodeID, segment.CollectionID, segment.SegmentID, segment.Channel,
-				segment.RowCount, segment.Version, segment.Scope, segment.Present,
-			)
-		}
+		source := segmentRecordsForPlanNode(distribution, plan, plan.From)
+		target := segmentRecordsForPlanNode(distribution, plan, plan.To)
+		observation.sourcePresent = len(source) != 0
+		observation.targetPresent = len(target) != 0
+		observation.targetReady = observation.targetPresent
+		hashSegmentRecords(detail, "source", source)
+		hashSegmentRecords(detail, "target", target)
 	case PlanKindChannel:
 		minimumTargetVersion := plan.Token.Snapshot.CurrentTargetVersion[plan.CollectionID]
-		for _, channel := range distribution.Channels {
-			if !channel.Present || channel.CollectionID != plan.CollectionID || channel.Channel != plan.Channel {
-				continue
+		source := channelRecordsForPlanNode(distribution, plan, plan.From)
+		target := channelRecordsForPlanNode(distribution, plan, plan.To)
+		observation.sourcePresent = len(source) != 0
+		observation.targetPresent = len(target) != 0
+		for _, channel := range target {
+			if channel.Serviceable && channel.LeaderID != 0 &&
+				channel.LeaderID == plan.To &&
+				(minimumTargetVersion == 0 || channel.LeaderTargetVersion >= minimumTargetVersion) {
+				observation.targetReady = true
+				break
 			}
-			if channel.NodeID == plan.From {
-				observation.sourcePresent = true
-			}
-			if channel.NodeID == plan.To {
-				observation.targetPresent = true
-				observation.targetReady = channel.Serviceable && channel.LeaderID != 0 &&
-					channel.LeaderID == plan.To &&
-					(minimumTargetVersion == 0 || channel.LeaderTargetVersion >= minimumTargetVersion)
-			}
-			_, _ = fmt.Fprintf(
-				detail,
-				"channel/%d/%d/%s/%d/%t/%t/%d/%d/%d/%d;",
-				channel.NodeID, channel.CollectionID, channel.Channel, channel.Version,
-				channel.Present, channel.Serviceable, channel.LeaderID,
-				channel.LeaderVersion, channel.LeaderTargetVersion, channel.NumOfGrowingRows,
-			)
 		}
+		hashChannelRecords(detail, "source", source)
+		hashChannelRecords(detail, "target", target)
 	}
 	observation.detailDigest = detail.Sum64()
 	return observation
+}
+
+func segmentRecordsForPlanNode(
+	distribution meta.DistributionSnapshot,
+	plan EpochPlan,
+	nodeID int64,
+) []meta.SegmentSnapshotRecord {
+	records := make([]meta.SegmentSnapshotRecord, 0, 1)
+	for _, segment := range distribution.Segments {
+		if segment.Present && segment.NodeID == nodeID &&
+			segment.CollectionID == plan.CollectionID &&
+			segment.SegmentID == plan.SegmentID && segment.Scope == plan.Scope {
+			records = append(records, segment)
+		}
+	}
+	sort.Slice(records, func(i, j int) bool {
+		left, right := records[i], records[j]
+		if left.Version != right.Version {
+			return left.Version < right.Version
+		}
+		if left.PartitionID != right.PartitionID {
+			return left.PartitionID < right.PartitionID
+		}
+		if left.Channel != right.Channel {
+			return left.Channel < right.Channel
+		}
+		return left.RowCount < right.RowCount
+	})
+	return records
+}
+
+func hashSegmentRecords(detail hash.Hash64, role string, records []meta.SegmentSnapshotRecord) {
+	_, _ = fmt.Fprintf(detail, "%s-segments/%d;", role, len(records))
+	for _, segment := range records {
+		_, _ = fmt.Fprintf(
+			detail,
+			"%d/%d/%d/%d/%s/%d/%d/%d/%t;",
+			segment.NodeID, segment.CollectionID, segment.SegmentID, segment.PartitionID,
+			segment.Channel, segment.RowCount, segment.Version, segment.Scope, segment.Present,
+		)
+	}
+}
+
+func channelRecordsForPlanNode(
+	distribution meta.DistributionSnapshot,
+	plan EpochPlan,
+	nodeID int64,
+) []meta.ChannelSnapshotRecord {
+	records := make([]meta.ChannelSnapshotRecord, 0, 1)
+	for _, channel := range distribution.Channels {
+		if channel.Present && channel.NodeID == nodeID &&
+			channel.CollectionID == plan.CollectionID && channel.Channel == plan.Channel {
+			records = append(records, channel)
+		}
+	}
+	sort.Slice(records, func(i, j int) bool {
+		left, right := records[i], records[j]
+		if left.Version != right.Version {
+			return left.Version < right.Version
+		}
+		if left.LeaderID != right.LeaderID {
+			return left.LeaderID < right.LeaderID
+		}
+		if left.LeaderVersion != right.LeaderVersion {
+			return left.LeaderVersion < right.LeaderVersion
+		}
+		if left.LeaderTargetVersion != right.LeaderTargetVersion {
+			return left.LeaderTargetVersion < right.LeaderTargetVersion
+		}
+		if left.Serviceable != right.Serviceable {
+			return !left.Serviceable && right.Serviceable
+		}
+		return left.NumOfGrowingRows < right.NumOfGrowingRows
+	})
+	return records
+}
+
+func hashChannelRecords(detail hash.Hash64, role string, records []meta.ChannelSnapshotRecord) {
+	_, _ = fmt.Fprintf(detail, "%s-channels/%d;", role, len(records))
+	for _, channel := range records {
+		_, _ = fmt.Fprintf(
+			detail,
+			"%d/%d/%s/%d/%t/%t/%d/%d/%d/%d;",
+			channel.NodeID, channel.CollectionID, channel.Channel, channel.Version,
+			channel.Present, channel.Serviceable, channel.LeaderID,
+			channel.LeaderVersion, channel.LeaderTargetVersion, channel.NumOfGrowingRows,
+		)
+	}
 }
 
 func classifyTerminalWork(observation workObservation) terminalWorkClass {
