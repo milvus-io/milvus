@@ -472,6 +472,72 @@ func TestPlacementSnapshotStopsAfterThreeUnstableAttempts(t *testing.T) {
 	require.Equal(t, []int{0, 1, 2}, attempts)
 }
 
+func TestPlacementSnapshotRetryObserver(t *testing.T) {
+	t.Run("notifies once before a successful retry", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		retries := make([]string, 0, 1)
+		fixture.builder = NewPlacementSnapshotBuilder(
+			fixture.meta,
+			fixture.dist,
+			fixture.target,
+			fixture.nodes,
+			fixture.inspector,
+			WithSnapshotRetryObserver(func(resourceGroup string) {
+				retries = append(retries, resourceGroup)
+			}),
+		)
+
+		mutated := false
+		fixture.targetState.mu.Lock()
+		fixture.targetState.segmentsHook = func(collectionID int64, scope int32) {
+			if collectionID != 100 || scope != meta.CurrentTarget || mutated {
+				return
+			}
+			mutated = true
+			fixture.targetState.mu.Lock()
+			fixture.targetState.currentVersion[collectionID]++
+			fixture.targetState.mu.Unlock()
+		}
+		fixture.targetState.mu.Unlock()
+
+		snapshot, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
+		require.NoError(t, err)
+		require.NotNil(t, snapshot)
+		require.Equal(t, []string{testSnapshotRG}, retries)
+	})
+
+	t.Run("notifies twice before third-attempt exhaustion", func(t *testing.T) {
+		fixture := newPlacementSnapshotFixture(t)
+		retries := make([]string, 0, 2)
+		fixture.builder = NewPlacementSnapshotBuilder(
+			fixture.meta,
+			fixture.dist,
+			fixture.target,
+			fixture.nodes,
+			fixture.inspector,
+			WithSnapshotRetryObserver(func(resourceGroup string) {
+				retries = append(retries, resourceGroup)
+			}),
+		)
+
+		fixture.targetState.mu.Lock()
+		fixture.targetState.segmentsHook = func(collectionID int64, scope int32) {
+			if collectionID != 100 || scope != meta.CurrentTarget {
+				return
+			}
+			fixture.targetState.mu.Lock()
+			fixture.targetState.currentVersion[collectionID]++
+			fixture.targetState.mu.Unlock()
+		}
+		fixture.targetState.mu.Unlock()
+
+		snapshot, err := fixture.builder.Build(fixture.ctx, testSnapshotRG, []int64{testEligibleReplica}, nil)
+		require.Nil(t, snapshot)
+		require.EqualError(t, err, "placement snapshot changed during all capture attempts")
+		require.Equal(t, []string{testSnapshotRG, testSnapshotRG}, retries)
+	})
+}
+
 func TestPlacementSnapshotRetriesForNilReplicaUnscopedMutations(t *testing.T) {
 	pendingTask := task.PendingBalanceTaskSnapshot{
 		TaskID:        71,
