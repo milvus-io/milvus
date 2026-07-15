@@ -60,6 +60,7 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
@@ -640,9 +641,78 @@ TEST_P(ExprTest, TestCancellationInExprEval) {
     auto plan =
         CreateSearchPlanByExpr(schema, bin_plan.data(), bin_plan.size());
 
-    // This should throw ExecOperatorException (wrapping FutureCancellation) when visiting the plan
-    ASSERT_THROW({ auto result = visitor.get_moved_result(*plan->plan_node_); },
-                 milvus::ExecOperatorException);
+    // This should throw ExecOperatorException (wrapping FutureCancellation)
+    // when visiting the plan. The wrapped cause is not a SegcoreError, so the
+    // wrapper keeps the legacy UnexpectedError classification.
+    try {
+        auto result = visitor.get_moved_result(*plan->plan_node_);
+        FAIL() << "expected ExecOperatorException";
+    } catch (const milvus::ExecOperatorException& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::UnexpectedError);
+    }
+}
+
+// The driver's CALL_OPERATOR wrap (exec/Driver.cpp) must preserve the error
+// code of a classified SegcoreError thrown during operator execution instead
+// of collapsing it to UnexpectedError: a user-fixable error (e.g. ExprInvalid)
+// must not reach the CGO boundary looking like a retriable internal failure.
+TEST(ExprTest, DriverPreservesSegcoreErrorCode) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // A NullExpr with an Invalid op on a non-nullable column passes plan
+    // construction but throws SegcoreError(ExprInvalid) inside
+    // PhyNullExpr::PreCheckNullable during operator execution — exactly the
+    // classified-throw-inside-CALL_OPERATOR path this test pins down.
+    auto null_expr = std::make_shared<milvus::expr::NullExpr>(
+        milvus::expr::ColumnInfo(i64_fid, DataType::INT64),
+        proto::plan::NullExpr_NullOp_Invalid);
+    auto plan = milvus::test::CreateRetrievePlanByExpr(null_expr);
+
+    try {
+        auto result = ExecuteQueryExpr(plan, seg_promote, N, MAX_TIMESTAMP);
+        FAIL() << "expected ExecOperatorException";
+    } catch (const milvus::ExecOperatorException& e) {
+        // The classified code chosen at the throw site survives the driver
+        // wrap; the message still carries the operator context.
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::ExprInvalid);
+        EXPECT_NE(std::string(e.what()).find("unsupported null expr type"),
+                  std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("Operator::"), std::string::npos);
+    }
+
+    // The wrapper must also be catchable as SegcoreError with the same code —
+    // this is what FailureCStatus(const std::exception*) and the futures
+    // consume arm (Future.h thenError<milvus::SegcoreError>) rely on to build
+    // the CStatus that crosses the CGO boundary.
+    try {
+        auto result = ExecuteQueryExpr(plan, seg_promote, N, MAX_TIMESTAMP);
+        FAIL() << "expected SegcoreError";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::ExprInvalid);
+        CStatus status = milvus::FailureCStatus(&e);
+        EXPECT_EQ(status.error_code,
+                  static_cast<int>(milvus::ErrorCode::ExprInvalid));
+        free((void*)status.error_msg);
+    }
 }
 
 TEST(ExprTest, TestCancellationHelper) {

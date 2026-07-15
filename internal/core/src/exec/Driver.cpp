@@ -262,9 +262,26 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
     return result;
 }
 
+// Wraps an operator call so a failure carries the operator context. A
+// SegcoreError is rethrown with its ORIGINAL error code preserved (the
+// classification chosen at the throw site, e.g. ExprInvalid, must survive to
+// the CGO boundary instead of collapsing to UnexpectedError); any other
+// std::exception keeps the legacy UnexpectedError classification.
 #define CALL_OPERATOR(call_func, operator, method_name)            \
     try {                                                          \
         call_func;                                                 \
+    } catch (milvus::SegcoreError & e) {                           \
+        std::string stack_trace = milvus::impl::EasyStackTrace();  \
+        auto err_msg = fmt::format(                                \
+            "Operator::{} failed for [Operator:{}, plan node id: " \
+            "{}] : {}\nStack trace: {}",                           \
+            method_name,                                           \
+            operator->ToString(),                                  \
+            operator->get_plannode_id(),                           \
+            e.what(),                                              \
+            stack_trace);                                          \
+        LOG_ERROR("{}", err_msg);                                  \
+        throw ExecOperatorException(e.get_error_code(), err_msg);  \
     } catch (std::exception & e) {                                 \
         std::string stack_trace = milvus::impl::EasyStackTrace();  \
         auto err_msg = fmt::format(                                \
