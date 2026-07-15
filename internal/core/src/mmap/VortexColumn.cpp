@@ -18,7 +18,10 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+
+#include <fmt/format.h>
 
 #include "arrow/array.h"
 #include "arrow/array/array_binary.h"
@@ -39,6 +42,19 @@
 namespace milvus {
 
 namespace {
+
+[[noreturn]] void
+ThrowVortexStatus(const arrow::Status& status,
+                  ErrorCode fallback_code,
+                  std::string_view action) {
+    auto code = fallback_code;
+    if (status.IsOutOfMemory()) {
+        code = ErrorCode::MemAllocateFailed;
+    } else if (status.IsCancelled()) {
+        code = ErrorCode::FollyCancel;
+    }
+    ThrowInfo(code, "{}: {}", action, status.ToString());
+}
 
 void
 ResetScanBatchOutput(ChunkedColumnInterface::ScanBatch* out) {
@@ -412,9 +428,11 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
 
             std::shared_ptr<arrow::RecordBatch> batch;
             auto status = matched_reader_->get()->ReadNext(&batch);
-            AssertInfo(status.ok(),
-                       "failed to read vortex row id scan batch: {}",
-                       status.ToString());
+            if (!status.ok()) {
+                ThrowVortexStatus(status,
+                                  ErrorCode::DataFormatBroken,
+                                  "failed to read vortex row id scan batch");
+            }
             if (batch == nullptr) {
                 matched_reader_.reset();
                 break;
@@ -441,9 +459,12 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
 
             std::shared_ptr<arrow::RecordBatch> batch;
             auto status = invalid_reader_->get()->ReadNext(&batch);
-            AssertInfo(status.ok(),
-                       "failed to read vortex row id validity batch: {}",
-                       status.ToString());
+            if (!status.ok()) {
+                ThrowVortexStatus(
+                    status,
+                    ErrorCode::DataFormatBroken,
+                    "failed to read vortex row id validity batch");
+            }
             if (batch == nullptr) {
                 AssertInfo(invalid_reader_next_row_id_ == reader_range_end_,
                            "vortex row id validity scan ended after row {}, "
@@ -667,9 +688,11 @@ class VortexDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
             if (reader_.has_value()) {
                 std::shared_ptr<arrow::RecordBatch> batch;
                 auto status = reader_->get()->ReadNext(&batch);
-                AssertInfo(status.ok(),
-                           "failed to read vortex data scan batch: {}",
-                           status.ToString());
+                if (!status.ok()) {
+                    ThrowVortexStatus(status,
+                                      ErrorCode::DataFormatBroken,
+                                      "failed to read vortex data scan batch");
+                }
                 if (batch != nullptr) {
                     AssertInfo(batch->num_columns() == 1,
                                "vortex data scan expects one column, got {}",
@@ -1508,20 +1531,27 @@ VortexColumn::MakeFilePlanner(
     const VortexColumnGroup::FileState& group_file) const {
     auto cell_metas_result = milvus_storage::vortex::BuildVortexCellMetas(
         group_file.footer_reader, field_name_);
-    AssertInfo(cell_metas_result.ok(),
-               "failed to build vortex cell metas for field {} file {}: {}",
-               field_id_.get(),
-               group_file.path,
-               cell_metas_result.status().ToString());
+    if (!cell_metas_result.ok()) {
+        ThrowVortexStatus(
+            cell_metas_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format(
+                "failed to build vortex cell metas for field {} file {}",
+                field_id_.get(),
+                group_file.path));
+    }
     auto planner_result = milvus_storage::vortex::VortexPlanner::Make(
         group_file.footer_reader,
         field_name_,
         std::move(cell_metas_result).ValueOrDie());
-    AssertInfo(planner_result.ok(),
-               "failed to create vortex planner for field {} file {}: {}",
-               field_id_.get(),
-               group_file.path,
-               planner_result.status().ToString());
+    if (!planner_result.ok()) {
+        ThrowVortexStatus(
+            planner_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to create vortex planner for field {} file {}",
+                        field_id_.get(),
+                        group_file.path));
+    }
     return std::move(planner_result).ValueOrDie();
 }
 
@@ -1539,10 +1569,13 @@ VortexColumn::BuildFileReader(
         group_file.footer_reader->file_size(),
         group_file.footer_reader->footer_size());
     auto status = reader->open();
-    AssertInfo(status.ok(),
-               "failed to open vortex data reader for file {}: {}",
-               group_file.path,
-               status.ToString());
+    if (!status.ok()) {
+        ThrowVortexStatus(
+            status,
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to open vortex data reader for file {}",
+                        group_file.path));
+    }
     return reader;
 }
 
@@ -1658,11 +1691,14 @@ VortexColumn::PlanRowRange(const FileState& file,
                            uint64_t row_end,
                            const std::string& predicate) const {
     auto result = file.planner->PlanForRowRange(row_start, row_end, predicate);
-    AssertInfo(result.ok(),
-               "failed to plan vortex read for row range [{}, {}): {}",
-               row_start,
-               row_end,
-               result.status().ToString());
+    if (!result.ok()) {
+        ThrowVortexStatus(
+            result.status(),
+            ErrorCode::UnexpectedError,
+            fmt::format("failed to plan vortex read for row range [{}, {})",
+                        row_start,
+                        row_end));
+    }
     return std::move(result).ValueOrDie();
 }
 
@@ -1670,9 +1706,11 @@ milvus_storage::vortex::VortexPlan
 VortexColumn::PlanOffsets(const FileState& file,
                           const std::vector<int64_t>& offsets) const {
     auto result = file.planner->PlanForOffsets(offsets);
-    AssertInfo(result.ok(),
-               "failed to plan vortex read for offsets: {}",
-               result.status().ToString());
+    if (!result.ok()) {
+        ThrowVortexStatus(result.status(),
+                          ErrorCode::UnexpectedError,
+                          "failed to plan vortex read for offsets");
+    }
     return std::move(result).ValueOrDie();
 }
 
@@ -1730,18 +1768,24 @@ VortexColumn::OpenDataScanForFile(milvus::OpContext* op_ctx,
                              static_cast<uint64_t>(start_offset + length));
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
     auto stream_result = file.reader->read_with_plan(plan.read_plan);
-    AssertInfo(stream_result.ok(),
-               "failed to open vortex data scan field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               stream_result.status().ToString());
+    if (!stream_result.ok()) {
+        ThrowVortexStatus(
+            stream_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to open vortex data scan field {} chunk {}",
+                        field_id_.get(),
+                        chunk_id));
+    }
     auto array_stream = std::move(stream_result).ValueOrDie();
     auto reader_result = arrow::ImportRecordBatchReader(&array_stream);
-    AssertInfo(reader_result.ok(),
-               "failed to open vortex data scan field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               reader_result.status().ToString());
+    if (!reader_result.ok()) {
+        ThrowVortexStatus(
+            reader_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to import vortex data scan field {} chunk {}",
+                        field_id_.get(),
+                        chunk_id));
+    }
     return PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>(
         pin, std::move(reader_result).ValueOrDie());
 }
@@ -1766,18 +1810,24 @@ VortexColumn::OpenRowIdScanForFile(milvus::OpContext* op_ctx,
                              predicate);
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
     auto stream_result = file.reader->read_row_ids_with_plan(plan.read_plan);
-    AssertInfo(stream_result.ok(),
-               "failed to open vortex row id scan field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               stream_result.status().ToString());
+    if (!stream_result.ok()) {
+        ThrowVortexStatus(
+            stream_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to open vortex row id scan field {} chunk {}",
+                        field_id_.get(),
+                        chunk_id));
+    }
     auto array_stream = std::move(stream_result).ValueOrDie();
     auto reader_result = arrow::ImportRecordBatchReader(&array_stream);
-    AssertInfo(reader_result.ok(),
-               "failed to open vortex row id scan field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               reader_result.status().ToString());
+    if (!reader_result.ok()) {
+        ThrowVortexStatus(
+            reader_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to import vortex row id scan field {} chunk {}",
+                        field_id_.get(),
+                        chunk_id));
+    }
     return PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>(
         pin, std::move(reader_result).ValueOrDie());
 }
@@ -1818,26 +1868,36 @@ VortexColumn::ScanStringLikeViewsFromFile(
                              static_cast<uint64_t>(start + length));
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
     auto stream_result = file.reader->read_with_plan(plan.read_plan);
-    AssertInfo(stream_result.ok(),
-               "failed to open vortex string-like scan field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               stream_result.status().ToString());
+    if (!stream_result.ok()) {
+        ThrowVortexStatus(
+            stream_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format(
+                "failed to open vortex string-like scan field {} chunk {}",
+                field_id_.get(),
+                chunk_id));
+    }
     auto array_stream = std::move(stream_result).ValueOrDie();
     auto reader_result = arrow::ImportRecordBatchReader(&array_stream);
-    AssertInfo(reader_result.ok(),
-               "failed to open vortex string-like scan field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               reader_result.status().ToString());
+    if (!reader_result.ok()) {
+        ThrowVortexStatus(
+            reader_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format(
+                "failed to import vortex string-like scan field {} chunk {}",
+                field_id_.get(),
+                chunk_id));
+    }
 
     auto reader = std::move(reader_result).ValueOrDie();
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = reader->ReadNext(&batch);
-        AssertInfo(status.ok(),
-                   "failed to read vortex string-like scan batch: {}",
-                   status.ToString());
+        if (!status.ok()) {
+            ThrowVortexStatus(status,
+                              ErrorCode::DataFormatBroken,
+                              "failed to read vortex string-like scan batch");
+        }
         if (batch == nullptr) {
             break;
         }
@@ -1879,37 +1939,48 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
     auto plan = PlanOffsets(file, offsets);
     auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
     auto stream_result = file.reader->read_with_plan(plan.read_plan);
-    AssertInfo(stream_result.ok(),
-               "failed to take vortex field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               stream_result.status().ToString());
+    if (!stream_result.ok()) {
+        ThrowVortexStatus(stream_result.status(),
+                          ErrorCode::DataFormatBroken,
+                          fmt::format("failed to take vortex field {} chunk {}",
+                                      field_id_.get(),
+                                      chunk_id));
+    }
     auto array_stream = std::move(stream_result).ValueOrDie();
     auto chunked_array_result = arrow::ImportChunkedArray(&array_stream);
-    AssertInfo(chunked_array_result.ok(),
-               "failed to take vortex field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               chunked_array_result.status().ToString());
+    if (!chunked_array_result.ok()) {
+        ThrowVortexStatus(
+            chunked_array_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to import vortex take field {} chunk {}",
+                        field_id_.get(),
+                        chunk_id));
+    }
     auto chunked_array = chunked_array_result.ValueOrDie();
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
     batches.reserve(chunked_array->num_chunks());
     for (int i = 0; i < chunked_array->num_chunks(); ++i) {
         auto batch_result =
             arrow::RecordBatch::FromStructArray(chunked_array->chunk(i));
-        AssertInfo(batch_result.ok(),
-                   "failed to take vortex field {} chunk {}: {}",
-                   field_id_.get(),
-                   chunk_id,
-                   batch_result.status().ToString());
+        if (!batch_result.ok()) {
+            ThrowVortexStatus(
+                batch_result.status(),
+                ErrorCode::DataFormatBroken,
+                fmt::format("failed to convert vortex take field {} chunk {}",
+                            field_id_.get(),
+                            chunk_id));
+        }
         batches.emplace_back(batch_result.ValueOrDie());
     }
     auto table_result = arrow::Table::FromRecordBatches(batches);
-    AssertInfo(table_result.ok(),
-               "failed to take vortex field {} chunk {}: {}",
-               field_id_.get(),
-               chunk_id,
-               table_result.status().ToString());
+    if (!table_result.ok()) {
+        ThrowVortexStatus(
+            table_result.status(),
+            ErrorCode::DataFormatBroken,
+            fmt::format("failed to build vortex take table field {} chunk {}",
+                        field_id_.get(),
+                        chunk_id));
+    }
     ArrowTakeResult result;
     result.pin = std::move(pin);
     result.table = table_result.ValueOrDie();
@@ -2249,9 +2320,12 @@ VortexColumn::BulkStringLikeAt(
             while (true) {
                 std::shared_ptr<arrow::RecordBatch> batch;
                 auto status = scan.get()->ReadNext(&batch);
-                AssertInfo(status.ok(),
-                           "failed to read vortex string-like scan batch: {}",
-                           status.ToString());
+                if (!status.ok()) {
+                    ThrowVortexStatus(
+                        status,
+                        ErrorCode::DataFormatBroken,
+                        "failed to read vortex string-like scan batch");
+                }
                 if (batch == nullptr) {
                     break;
                 }

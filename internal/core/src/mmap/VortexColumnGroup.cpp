@@ -17,7 +17,10 @@
 #include "mmap/VortexColumnGroup.h"
 
 #include <memory>
+#include <string_view>
 #include <utility>
+
+#include <fmt/format.h>
 
 #include "arrow/filesystem/filesystem.h"
 #include "cachinglayer/Manager.h"
@@ -31,6 +34,23 @@
 #include "milvus-storage/format/vortex/vortex_translater.h"
 
 namespace milvus {
+
+namespace {
+
+[[noreturn]] void
+ThrowVortexStatus(const arrow::Status& status,
+                  ErrorCode fallback_code,
+                  std::string_view action) {
+    auto code = fallback_code;
+    if (status.IsOutOfMemory()) {
+        code = ErrorCode::MemAllocateFailed;
+    } else if (status.IsCancelled()) {
+        code = ErrorCode::FollyCancel;
+    }
+    ThrowInfo(code, "{}: {}", action, status.ToString());
+}
+
+}  // namespace
 
 VortexColumnGroup::VortexColumnGroup(
     const std::vector<VortexColumnFileInfo>& files,
@@ -50,15 +70,20 @@ VortexColumnGroup::VortexColumnGroup(
     for (const auto& file : files) {
         auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
             *properties, file.path);
-        AssertInfo(fs_result.ok(),
-                   "failed to get filesystem for vortex file {}: {}",
-                   file.path,
-                   fs_result.status().ToString());
+        if (!fs_result.ok()) {
+            ThrowVortexStatus(fs_result.status(),
+                              ErrorCode::FileOpenFailed,
+                              fmt::format("failed to get filesystem for vortex "
+                                          "file {}",
+                                          file.path));
+        }
         auto uri_result = milvus_storage::StorageUri::Parse(file.path);
-        AssertInfo(uri_result.ok(),
-                   "failed to parse vortex file uri {}: {}",
-                   file.path,
-                   uri_result.status().ToString());
+        if (!uri_result.ok()) {
+            ThrowVortexStatus(
+                uri_result.status(),
+                ErrorCode::PathInvalid,
+                fmt::format("failed to parse vortex file uri {}", file.path));
+        }
 
         FileState state;
         state.path = file.path;
@@ -74,26 +99,35 @@ VortexColumnGroup::VortexColumnGroup(
                 file.file_size,
                 file.footer_size);
         auto open_status = state.footer_reader->Open(state.source_fs);
-        AssertInfo(open_status.ok(),
-                   "failed to open vortex file {}: {}",
-                   file.path,
-                   open_status.ToString());
+        if (!open_status.ok()) {
+            ThrowVortexStatus(
+                open_status,
+                ErrorCode::DataFormatBroken,
+                fmt::format("failed to open vortex file {}", file.path));
+        }
 
         auto cell_metas_result =
             milvus_storage::vortex::BuildVortexGroupCellMetas(
                 state.footer_reader, field_names);
-        AssertInfo(cell_metas_result.ok(),
-                   "failed to build vortex group cell metas for file {}: {}",
-                   file.path,
-                   cell_metas_result.status().ToString());
+        if (!cell_metas_result.ok()) {
+            ThrowVortexStatus(
+                cell_metas_result.status(),
+                ErrorCode::DataFormatBroken,
+                fmt::format("failed to build vortex group cell metas for file "
+                            "{}",
+                            file.path));
+        }
         auto cell_metas = std::move(cell_metas_result).ValueOrDie();
 
         auto planner_result = milvus_storage::vortex::VortexPlanner::MakeGroup(
             state.footer_reader, cell_metas);
-        AssertInfo(planner_result.ok(),
-                   "failed to create vortex group planner for file {}: {}",
-                   file.path,
-                   planner_result.status().ToString());
+        if (!planner_result.ok()) {
+            ThrowVortexStatus(
+                planner_result.status(),
+                ErrorCode::DataFormatBroken,
+                fmt::format("failed to create vortex group planner for file {}",
+                            file.path));
+        }
         auto planner = std::move(planner_result).ValueOrDie();
 
         auto translater_result = milvus_storage::vortex::VortexTranslater::Make(
@@ -103,10 +137,14 @@ VortexColumnGroup::VortexColumnGroup(
             state.sparse_fs,
             state.sparse_path,
             cache_warmup_policy);
-        AssertInfo(translater_result.ok(),
-                   "failed to create vortex group translater for file {}: {}",
-                   file.path,
-                   translater_result.status().ToString());
+        if (!translater_result.ok()) {
+            ThrowVortexStatus(
+                translater_result.status(),
+                ErrorCode::FileOpenFailed,
+                fmt::format(
+                    "failed to create vortex group translator for file {}",
+                    file.path));
+        }
         std::unique_ptr<
             cachinglayer::Translator<milvus_storage::vortex::VortexCellGuard>>
             translater = std::move(translater_result).ValueOrDie();
