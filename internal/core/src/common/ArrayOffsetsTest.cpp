@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -1108,8 +1110,363 @@ TEST_F(ArrayOffsetsTest, GrowingCopyRowElementRanges) {
     {
         std::vector<int32_t> pending_rows = {5, 4};
         std::vector<std::pair<int32_t, int32_t>> pending_out(2);
-        offsets.CopyRowElementRanges(pending_rows.data(), 2, pending_out.data());
+        offsets.CopyRowElementRanges(
+            pending_rows.data(), 2, pending_out.data());
         EXPECT_EQ(pending_out[0], (std::pair<int32_t, int32_t>{0, 0}));
         EXPECT_EQ(pending_out[1], (std::pair<int32_t, int32_t>{0, 0}));
     }
+}
+
+// ==== Chunked growing storage: boundary + concurrency coverage ====
+
+// Rows, batches and validity materialization straddling the fixed chunk
+// size K (and 2K): the growing implementation stores starts/validity in
+// K-entry chunks, so every logical index computation, memcpy run, pending
+// drain and validity backfill has an edge exactly at multiples of K.
+TEST_F(ArrayOffsetsTest, GrowingChunkBoundary) {
+    constexpr int64_t K = ArrayOffsetsGrowing::kEntriesPerChunk;
+    constexpr int64_t kTotalRows = 2 * K + 137;
+
+    // Lengths mix empty rows and small rows. The first NULL row is K + 123
+    // (mid-chunk 1), so validity materialization backfills all of chunk 0
+    // plus a partial chunk 1 (mid-chunk trigger + cross-chunk backfill).
+    std::vector<int32_t> lens(kTotalRows);
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        lens[i] = static_cast<int32_t>(i % 4);  // 0..3, includes empties
+    }
+    for (int64_t i = K + 123; i < kTotalRows; ++i) {
+        if (i % 7 == 0) {
+            lens[i] = -1;
+        }
+    }
+    lens[K + 123] = -1;
+
+    // Reference starts table.
+    std::vector<int32_t> exp(kTotalRows + 1, 0);
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        exp[i + 1] = exp[i] + std::max(lens[i], 0);
+    }
+
+    ArrayOffsetsGrowing offsets;
+    // Out-of-order commit around the first chunk boundary: rows
+    // [K+3, K+40) arrive while [K-3, K+3) is still missing, then the gap
+    // batch drains straight across K.
+    offsets.Insert(0, lens.data(), K - 3);
+    EXPECT_EQ(offsets.GetRowCount(), K - 3);
+    offsets.Insert(K + 3, lens.data() + K + 3, 37);
+    EXPECT_EQ(offsets.GetRowCount(), K - 3);  // pending, gap at K-3
+    offsets.Insert(K - 3, lens.data() + K - 3, 6);
+    EXPECT_EQ(offsets.GetRowCount(), K + 40);
+
+    // Same around the 2K boundary: the tail goes pending first, then one
+    // batch commits across 2K and drains it.
+    offsets.Insert(
+        2 * K + 1, lens.data() + 2 * K + 1, kTotalRows - (2 * K + 1));
+    EXPECT_EQ(offsets.GetRowCount(), K + 40);
+    offsets.Insert(K + 40, lens.data() + K + 40, 2 * K + 1 - (K + 40));
+    EXPECT_EQ(offsets.GetRowCount(), kTotalRows);
+    EXPECT_EQ(offsets.GetTotalElementCount(), exp[kTotalRows]);
+
+    // Per-row ranges at and around both chunk boundaries.
+    for (int64_t row : {int64_t{0},
+                        K - 2,
+                        K - 1,
+                        K,
+                        K + 1,
+                        2 * K - 1,
+                        2 * K,
+                        2 * K + 1,
+                        kTotalRows - 1}) {
+        auto [start, end] =
+            offsets.ElementIDRangeOfRow(static_cast<int32_t>(row));
+        EXPECT_EQ(start, exp[row]) << "row " << row;
+        EXPECT_EQ(end, exp[row + 1]) << "row " << row;
+    }
+    {
+        auto [start, end] =
+            offsets.ElementIDRangeOfRow(static_cast<int32_t>(kTotalRows));
+        EXPECT_EQ(start, exp[kTotalRows]);
+        EXPECT_EQ(end, exp[kTotalRows]);
+    }
+
+    // ElementIDToRowID (binary search over chunked entries) against an
+    // upper_bound on the reference table, probing element ids that sit at
+    // the chunk-boundary rows' starts.
+    auto check_elem_to_row = [&](int32_t e) {
+        auto it = std::upper_bound(exp.begin(), exp.end(), e);
+        const auto want_row = static_cast<int32_t>(it - exp.begin()) - 1;
+        auto [row_id, elem_idx] = offsets.ElementIDToRowID(e);
+        EXPECT_EQ(row_id, want_row) << "elem " << e;
+        EXPECT_EQ(elem_idx, e - exp[want_row]) << "elem " << e;
+    };
+    for (int32_t e : {0,
+                      exp[K] - 1,
+                      exp[K],
+                      exp[K] + 1,
+                      exp[2 * K] - 1,
+                      exp[2 * K],
+                      exp[kTotalRows] - 1}) {
+        check_elem_to_row(e);
+    }
+
+    // Chunk-run memcpy path across the K boundary.
+    {
+        std::vector<int32_t> out(201, -1);
+        offsets.CopyRowElementStarts(K - 100, 200, out.data());
+        for (int64_t i = 0; i <= 200; ++i) {
+            ASSERT_EQ(out[i], exp[K - 100 + i]) << "entry " << i;
+        }
+    }
+    // Full-table copy (spans all three chunks).
+    {
+        std::vector<int32_t> out(kTotalRows + 1, -1);
+        offsets.CopyRowElementStarts(0, kTotalRows, out.data());
+        EXPECT_TRUE(std::equal(out.begin(), out.end(), exp.begin()));
+    }
+
+    // Batched ranges spanning both boundaries + out-of-range insurance.
+    {
+        std::vector<int32_t> rows = {static_cast<int32_t>(K - 1),
+                                     static_cast<int32_t>(K),
+                                     static_cast<int32_t>(2 * K),
+                                     static_cast<int32_t>(kTotalRows),
+                                     static_cast<int32_t>(kTotalRows + 5),
+                                     -1};
+        std::vector<std::pair<int32_t, int32_t>> out(rows.size());
+        offsets.CopyRowElementRanges(
+            rows.data(), static_cast<int64_t>(rows.size()), out.data());
+        EXPECT_EQ(out[0], (std::pair<int32_t, int32_t>{exp[K - 1], exp[K]}));
+        EXPECT_EQ(out[1], (std::pair<int32_t, int32_t>{exp[K], exp[K + 1]}));
+        EXPECT_EQ(out[2],
+                  (std::pair<int32_t, int32_t>{exp[2 * K], exp[2 * K + 1]}));
+        EXPECT_EQ(
+            out[3],
+            (std::pair<int32_t, int32_t>{exp[kTotalRows], exp[kTotalRows]}));
+        EXPECT_EQ(out[4], (std::pair<int32_t, int32_t>{0, 0}));
+        EXPECT_EQ(out[5], (std::pair<int32_t, int32_t>{0, 0}));
+    }
+
+    // Validity was materialized mid-chunk-1; the backfill covered chunk 0
+    // entirely and part of chunk 1.
+    {
+        milvus::TargetBitmap probe(kTotalRows, true);
+        offsets.AndRowValidBitmap(probe.view(), 0, kTotalRows);
+        for (int64_t i = 0; i < kTotalRows; ++i) {
+            ASSERT_EQ(bool(probe[i]), lens[i] >= 0) << "row " << i;
+        }
+    }
+    // Windowed validity across the 2K boundary.
+    {
+        milvus::TargetBitmap probe(200, true);
+        offsets.AndRowValidBitmap(probe.view(), 2 * K - 100, 200);
+        for (int64_t i = 0; i < 200; ++i) {
+            ASSERT_EQ(bool(probe[i]), lens[2 * K - 100 + i] >= 0)
+                << "row " << (2 * K - 100 + i);
+        }
+    }
+
+    // Word-wise ANY reduction across the K boundary (per-bit reference).
+    {
+        const int64_t row_start = K - 50;
+        const int64_t row_count = 150;
+        const int64_t elem_lo = exp[row_start];
+        const int64_t elem_hi = exp[row_start + row_count];
+        TargetBitmap local(elem_hi - elem_lo);
+        for (int64_t e = elem_lo; e < elem_hi; ++e) {
+            if (e % 3 == 0) {
+                local[e - elem_lo] = true;
+            }
+        }
+        CheckAnyReduce(offsets, local, elem_lo, row_start, row_count);
+    }
+
+    // Row->element bitset expansion across the K boundary.
+    {
+        const int64_t row_start = K - 8;
+        const int64_t row_count = 16;
+        TargetBitmap row_bits(row_count);
+        for (int64_t i = 0; i < row_count; i += 2) {
+            row_bits[i] = true;
+        }
+        TargetBitmap valid_bits(row_count, true);
+        auto [elem_bits, valid_elem_bits] = offsets.RowBitsetToElementBitset(
+            row_bits.view(), valid_bits.view(), row_start);
+        ASSERT_EQ(static_cast<int64_t>(elem_bits.size()),
+                  exp[row_start + row_count] - exp[row_start]);
+        for (int64_t i = 0; i < row_count; ++i) {
+            for (int64_t e = exp[row_start + i]; e < exp[row_start + i + 1];
+                 ++e) {
+                ASSERT_EQ(bool(elem_bits[e - exp[row_start]]),
+                          bool(row_bits[i]))
+                    << "row " << (row_start + i) << " elem " << e;
+            }
+        }
+    }
+}
+
+// One writer inserting many small batches (in-order, out-of-order and
+// -1 NULL rows) while four readers continuously hit the committed prefix.
+// The committed prefix is deterministic (a single writer commits rows in
+// order), so every read is checked EXACTLY against a reference table --
+// stronger than just monotonicity -- and the final state is verified
+// entry for entry after the join.
+TEST_F(ArrayOffsetsTest, GrowingConcurrentWriterReaderStress) {
+    constexpr int64_t kTotalRows = 100000;
+    // No NULLs in the prefix, so readers exercise both the
+    // pre-materialization phase and the live has_row_valid_ flip (which
+    // lands mid-chunk and backfills across multiple chunks).
+    constexpr int64_t kNullFreeRows = 20000;
+
+    std::vector<int32_t> lens(kTotalRows);
+    std::mt19937 gen(4242);
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        const auto p = gen() % 8;
+        if (p == 7 && i >= kNullFreeRows) {
+            lens[i] = -1;  // NULL row
+        } else {
+            lens[i] = static_cast<int32_t>(p % 5);  // 0..4 elements
+        }
+    }
+    lens[kNullFreeRows] = -1;  // deterministic materialization point
+
+    std::vector<int32_t> exp(kTotalRows + 1, 0);
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        exp[i + 1] = exp[i] + std::max(lens[i], 0);
+    }
+
+    ArrayOffsetsGrowing offsets;
+    std::atomic<bool> done{false};
+
+    std::thread writer([&]() {
+        std::mt19937 wgen(999);
+        int64_t next = 0;
+        while (next < kTotalRows) {
+            int64_t b1 = 1 + wgen() % 40;
+            b1 = std::min(b1, kTotalRows - next);
+            if (wgen() % 4 == 0 && next + b1 < kTotalRows) {
+                int64_t b2 = 1 + wgen() % 40;
+                b2 = std::min(b2, kTotalRows - next - b1);
+                // Out of order: the lookahead batch goes pending...
+                offsets.Insert(next + b1, lens.data() + next + b1, b2);
+                // ...until the gap batch commits and drains it.
+                offsets.Insert(next, lens.data() + next, b1);
+                next += b1 + b2;
+            } else {
+                offsets.Insert(next, lens.data() + next, b1);
+                next += b1;
+            }
+        }
+        done.store(true);
+    });
+
+    std::vector<std::thread> readers;
+    for (int t = 0; t < 4; ++t) {
+        readers.emplace_back([&, t]() {
+            std::mt19937 rgen(1000 + t);
+            int64_t last_count = 0;
+            int64_t iters = 0;
+            // Keep reading until the writer finishes, with a minimum
+            // iteration count so the full committed table is also swept.
+            while (!done.load() || iters < 200) {
+                ++iters;
+                const int64_t count = offsets.GetRowCount();
+                EXPECT_GE(count, last_count);  // watermark is monotone
+                EXPECT_LE(count, kTotalRows);
+                last_count = count;
+
+                const int64_t total = offsets.GetTotalElementCount();
+                // total == exp[W'] for some W' >= count (monotone
+                // watermark, loaded after count).
+                EXPECT_GE(total, exp[count]);
+                EXPECT_LE(total, exp[kTotalRows]);
+
+                if (count == 0) {
+                    continue;
+                }
+
+                const int64_t row_start = rgen() % count;
+                const int64_t row_cnt =
+                    std::min<int64_t>(512, count - row_start);
+
+                // Starts of committed rows match the reference exactly
+                // (also proves monotone non-decreasing within the read).
+                std::vector<int32_t> buf(row_cnt + 1, -1);
+                offsets.CopyRowElementStarts(row_start, row_cnt, buf.data());
+                for (int64_t i = 0; i <= row_cnt; ++i) {
+                    EXPECT_EQ(buf[i], exp[row_start + i]);
+                }
+
+                // ElementIDToRowID against the reference.
+                if (total > 0) {
+                    const auto e = static_cast<int32_t>(rgen() % total);
+                    auto it = std::upper_bound(exp.begin(), exp.end(), e);
+                    const auto want_row =
+                        static_cast<int32_t>(it - exp.begin()) - 1;
+                    auto [row_id, elem_idx] = offsets.ElementIDToRowID(e);
+                    EXPECT_EQ(row_id, want_row);
+                    EXPECT_EQ(elem_idx, e - exp[want_row]);
+                }
+
+                // Row validity of the committed window is exact: having
+                // acquired `count`, a NULL row < count implies the
+                // materialization flag is visible.
+                {
+                    milvus::TargetBitmap probe(row_cnt, true);
+                    offsets.AndRowValidBitmap(probe.view(), row_start, row_cnt);
+                    for (int64_t i = 0; i < row_cnt; ++i) {
+                        EXPECT_EQ(bool(probe[i]), lens[row_start + i] >= 0);
+                    }
+                }
+
+                // ANY-reduce over the window matches a per-row recompute.
+                {
+                    const int64_t elem_lo = exp[row_start];
+                    const int64_t elem_hi = exp[row_start + row_cnt];
+                    TargetBitmap local(elem_hi - elem_lo);
+                    for (int64_t e = elem_lo; e < elem_hi; ++e) {
+                        if (e % 3 == 0) {
+                            local[e - elem_lo] = true;
+                        }
+                    }
+                    TargetBitmap row_result(row_cnt);
+                    offsets.ElementBitsetToRowBitsetAny(
+                        local.view(), elem_lo, row_start, row_result.view());
+                    for (int64_t i = 0; i < row_cnt; ++i) {
+                        bool want = false;
+                        for (int64_t e = exp[row_start + i];
+                             e < exp[row_start + i + 1] && !want;
+                             ++e) {
+                            want = (e % 3 == 0);
+                        }
+                        EXPECT_EQ(bool(row_result[i]), want);
+                    }
+                }
+            }
+        });
+    }
+
+    writer.join();
+    for (auto& r : readers) {
+        r.join();
+    }
+
+    // Final state must be exact.
+    EXPECT_EQ(offsets.GetRowCount(), kTotalRows);
+    EXPECT_EQ(offsets.GetTotalElementCount(), exp[kTotalRows]);
+    std::vector<int32_t> all(kTotalRows + 1, -1);
+    offsets.CopyRowElementStarts(0, kTotalRows, all.data());
+    EXPECT_TRUE(std::equal(all.begin(), all.end(), exp.begin()));
+    milvus::TargetBitmap probe(kTotalRows, true);
+    offsets.AndRowValidBitmap(probe.view(), 0, kTotalRows);
+    for (int64_t i = 0; i < kTotalRows; ++i) {
+        ASSERT_EQ(bool(probe[i]), lens[i] >= 0) << "row " << i;
+    }
+    TargetBitmap elem_bitset(exp[kTotalRows]);
+    std::mt19937 fgen(777);
+    for (int64_t e = 0; e < exp[kTotalRows]; ++e) {
+        if (fgen() % 100 == 0) {
+            elem_bitset[e] = true;
+        }
+    }
+    CheckAnyReduce(offsets, elem_bitset, 0, 0, kTotalRows);
 }
