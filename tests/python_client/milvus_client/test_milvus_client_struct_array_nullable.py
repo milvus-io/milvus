@@ -18,7 +18,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from minio import Minio
 from minio.error import S3Error
-from pymilvus import DataType
+from pymilvus import AnnSearchRequest, DataType, WeightedRanker
 from pymilvus.bulk_writer import (
     bulk_import,
     get_import_progress,
@@ -1176,6 +1176,267 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         assert collect_observations() == baseline
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "template, params, inline, include_offset, check_hybrid",
+        [
+            pytest.param(
+                f"MATCH_LEAST({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= {{min_score}}, threshold=1)",
+                {"min_score": 10},
+                f"MATCH_LEAST({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 10, threshold=1)",
+                False,
+                True,
+                id="match_int",
+            ),
+            pytest.param(
+                f"array_contains_any({STRUCT_TAG_FIELD}, {{tags}})",
+                {"tags": ["blue"]},
+                f'array_contains_any({STRUCT_TAG_FIELD}, ["blue"])',
+                False,
+                False,
+                id="contains_any_list",
+            ),
+            pytest.param(
+                f"array_contains_all({STRUCT_TAG_FIELD}, {{tags}})",
+                {"tags": []},
+                f"array_contains_all({STRUCT_TAG_FIELD}, [])",
+                False,
+                False,
+                id="contains_all_empty_list",
+            ),
+        ],
+    )
+    def test_struct_array_filter_template_matches_inline_expression(
+        self,
+        template,
+        params,
+        inline,
+        include_offset,
+        check_hybrid,
+    ):
+        """
+        target: verify filter templates compose with Struct element syntax and nested scalar indexes
+        method: compare inline and parameterized MATCH and contains expressions through query,
+            normal-vector search, and hybrid search, including scalar, string, list, and empty-list parameters
+        expected: template and inline forms return identical PK/offset results; incompatible parameter types fail
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_filter_template")
+        schema = gen_struct_array_schema(self, client, include_vector_subfield=False)
+        index_params = gen_index_params(self, client)
+        index_params.add_index(VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(STRUCT_INT_FIELD, index_type="STL_SORT")
+        index_params.add_index(STRUCT_TAG_FIELD, index_type="BITMAP")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        rows = [
+            gen_row_by_schema(schema, 0, "null", profile=None),
+            gen_row_by_schema(schema, 1, "empty", profile=[]),
+            gen_row_by_schema(
+                schema,
+                2,
+                "red",
+                profile=[{INT_SUBFIELD: 5, TAG_SUBFIELD: "red"}],
+            ),
+            gen_row_by_schema(
+                schema,
+                3,
+                "mixed",
+                profile=[
+                    {INT_SUBFIELD: 10, TAG_SUBFIELD: "blue"},
+                    {INT_SUBFIELD: 20, TAG_SUBFIELD: "red"},
+                ],
+            ),
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        failures = []
+        inline_query = client.query(
+            collection_name,
+            filter=inline,
+            output_fields=[PK_FIELD],
+            limit=len(rows) * STRUCT_MAX_CAPACITY,
+        )
+        try:
+            template_query = client.query(
+                collection_name,
+                filter=template,
+                filter_params=params,
+                output_fields=[PK_FIELD],
+                limit=len(rows) * STRUCT_MAX_CAPACITY,
+            )
+            key = (lambda row: (row[PK_FIELD], row["offset"])) if include_offset else (lambda row: row[PK_FIELD])
+            assert sorted(map(key, template_query)) == sorted(map(key, inline_query))
+        except Exception as exc:
+            failures.append(f"query failed: {exc}")
+
+        inline_search = client.search(
+            collection_name,
+            data=[rows[-1][VECTOR_FIELD]],
+            anns_field=VECTOR_FIELD,
+            search_params=NORMAL_VECTOR_SEARCH_PARAMS,
+            filter=inline,
+            output_fields=[PK_FIELD],
+            limit=len(rows),
+        )[0]
+        try:
+            template_search = client.search(
+                collection_name,
+                data=[rows[-1][VECTOR_FIELD]],
+                anns_field=VECTOR_FIELD,
+                search_params=NORMAL_VECTOR_SEARCH_PARAMS,
+                filter=template,
+                filter_params=params,
+                output_fields=[PK_FIELD],
+                limit=len(rows),
+            )[0]
+            assert [hit[PK_FIELD] for hit in template_search] == [hit[PK_FIELD] for hit in inline_search]
+        except Exception as exc:
+            failures.append(f"search failed: {exc}")
+
+        if check_hybrid:
+            template_request = AnnSearchRequest(
+                data=[rows[-1][VECTOR_FIELD]],
+                anns_field=VECTOR_FIELD,
+                param=NORMAL_VECTOR_SEARCH_PARAMS,
+                limit=len(rows),
+                expr=template,
+                expr_params=params,
+            )
+            inline_request = AnnSearchRequest(
+                data=[rows[-1][VECTOR_FIELD]],
+                anns_field=VECTOR_FIELD,
+                param=NORMAL_VECTOR_SEARCH_PARAMS,
+                limit=len(rows),
+                expr=inline,
+            )
+            inline_hybrid = client.hybrid_search(
+                collection_name,
+                [inline_request],
+                ranker=WeightedRanker(1.0),
+                limit=len(rows),
+                output_fields=[PK_FIELD],
+            )[0]
+            try:
+                template_hybrid = client.hybrid_search(
+                    collection_name,
+                    [template_request],
+                    ranker=WeightedRanker(1.0),
+                    limit=len(rows),
+                    output_fields=[PK_FIELD],
+                )[0]
+                assert [hit[PK_FIELD] for hit in template_hybrid] == [hit[PK_FIELD] for hit in inline_hybrid]
+            except Exception as exc:
+                failures.append(f"hybrid search failed: {exc}")
+
+            with pytest.raises(Exception):
+                client.query(
+                    collection_name,
+                    filter=f"MATCH_ANY({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= {{min_score}})",
+                    filter_params={"min_score": "not-an-integer"},
+                    output_fields=[PK_FIELD],
+                )
+
+        assert not failures, "\n".join(failures)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_struct_array_dynamic_field_name_isolation(self):
+        """
+        target: verify dynamic JSON keys remain isolated from same-name Struct child fields
+        method: insert top-level dynamic keys named like a Struct child, query both namespaces, build a nested index,
+            and submit a Struct element containing an unknown child key
+        expected: dynamic projection/filter and Struct projection/filter do not overwrite each other; unknown child fails
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_dynamic_isolation")
+        schema = gen_struct_array_schema(
+            self,
+            client,
+            include_vector_subfield=False,
+            enable_dynamic_field=True,
+        )
+        index_params = gen_index_params(self, client)
+        index_params.add_index(VECTOR_FIELD, index_type="FLAT", metric_type="L2")
+        index_params.add_index(STRUCT_TAG_FIELD, index_type="BITMAP")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        rows = [
+            {
+                PK_FIELD: 0,
+                VECTOR_FIELD: gen_vector(0),
+                TAG_FIELD: "row_0",
+                TAG_SUBFIELD: "dynamic_top",
+                "shadow": "dynamic_shadow",
+                STRUCT_FIELD: [{INT_SUBFIELD: 10, TAG_SUBFIELD: "struct_value"}],
+            },
+            {
+                PK_FIELD: 1,
+                VECTOR_FIELD: gen_vector(1),
+                TAG_FIELD: "row_1",
+                TAG_SUBFIELD: "dynamic_other",
+                "shadow": "other_shadow",
+                STRUCT_FIELD: [],
+            },
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        projected = self.query(
+            client,
+            collection_name,
+            filter=f'{TAG_SUBFIELD} == "dynamic_top"',
+            output_fields=[PK_FIELD, TAG_SUBFIELD, "shadow", STRUCT_FIELD],
+        )[0]
+        assert len(projected) == 1
+        assert projected[0][PK_FIELD] == 0
+        assert projected[0][TAG_SUBFIELD] == "dynamic_top"
+        assert projected[0]["shadow"] == "dynamic_shadow"
+        assert projected[0][STRUCT_FIELD][0][TAG_SUBFIELD] == "struct_value"
+
+        struct_rows = self.query(
+            client,
+            collection_name,
+            filter=f'array_contains({STRUCT_TAG_FIELD}, "struct_value")',
+            output_fields=[PK_FIELD, STRUCT_FIELD],
+        )[0]
+        assert [row[PK_FIELD] for row in struct_rows] == [0]
+        assert struct_rows[0][STRUCT_FIELD][0][TAG_SUBFIELD] == "struct_value"
+
+        with pytest.raises(Exception) as exc_info:
+            client.insert(
+                collection_name,
+                [
+                    {
+                        PK_FIELD: 2,
+                        VECTOR_FIELD: gen_vector(2),
+                        TAG_FIELD: "row_2",
+                        STRUCT_FIELD: [
+                            {
+                                INT_SUBFIELD: 20,
+                                TAG_SUBFIELD: "known",
+                                "unknown_child": "must_not_become_dynamic",
+                            }
+                        ],
+                    }
+                ],
+            )
+        assert "unexpected fields" in str(exc_info.value)
+        count = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert count[0]["count(*)"] == len(rows)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_struct_array_field_schema_nullable_propagation(self):
