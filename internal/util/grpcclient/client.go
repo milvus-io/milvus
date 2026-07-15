@@ -100,22 +100,8 @@ type ClientBase[T interface {
 	getAddrFunc   func() (string, error)
 	newGrpcClient func(cc *grpc.ClientConn) T
 
-	// grpcClientPool holds up to poolSize connections used round-robin, to avoid a single
-	// HTTP/2 connection's max-concurrent-streams bottleneck under high concurrency. It is
-	// grown lazily one connection per call (see GetGrpcClient): the first caller dials
-	// connection #1, the next dials #2, and so on until poolSize is reached; later callers
-	// just reuse. dialMtx serializes growth so only one connection is dialed at a time.
-	//
-	// Lock order: dialMtx BEFORE grpcClientMtx, never the reverse. Anything that
-	// invalidates the whole pool (resetConnection, Close) must take dialMtx first so an
-	// in-flight dial lands in the pool before the pool is torn down — otherwise that
-	// dial would re-add a live connection to a pool that was already drained. Never
-	// call resetConnection/Close/GetGrpcClient while holding either lock.
-	grpcClientPool        []*clientConnWrapper[T]
-	roundRobinIdx         atomic.Uint64
-	dialMtx               sync.Mutex
-	poolSize              int
-	closed                bool // guarded by grpcClientMtx; Close is terminal
+	// grpcClient             T
+	grpcClient            *clientConnWrapper[T]
 	encryption            bool
 	cpInternalTLS         *x509.CertPool
 	addr                  atomic.String
@@ -171,7 +157,6 @@ func NewClientBase[T interface {
 		minResetInterval:        config.MinResetInterval.GetAsDuration(time.Millisecond),
 		minSessionCheckInterval: config.MinSessionCheckInterval.GetAsDuration(time.Millisecond),
 		maxCancelError:          config.MaxCancelError.GetAsInt32(),
-		poolSize:                config.ConnectionPoolSize.GetAsInt(),
 	}
 }
 
@@ -218,171 +203,66 @@ func (c *ClientBase[T]) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) T) {
 	c.newGrpcClient = f
 }
 
-// GetGrpcClient returns one grpc client from the connection pool, chosen round-robin.
-//
-// The pool is grown lazily, one connection per call, instead of dialing poolSize
-// connections up front: the first caller dials connection #1, the next #2, ... until
-// the pool reaches poolSize, after which callers just reuse it. Dialing happens
-// OUTSIDE grpcClientMtx (each dial uses grpc.WithBlock and can block up to DialTimeout),
-// and growth is serialized by dialMtx so only one connection is dialed at a time. A
-// caller that finds the pool already warm but cannot grab the grow lock reuses an
-// existing connection rather than waiting on a dial — so there is no thundering herd of
-// concurrent dials and no redundant connections to discard.
+// GetGrpcClient returns grpc client
 func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T], error) {
-	size := c.poolSize
-	if size <= 0 {
-		size = 1
-	}
-
-	// Fast path: pool already at target size → round-robin reuse, no lock contention.
 	c.grpcClientMtx.RLock()
-	if c.closed {
-		c.grpcClientMtx.RUnlock()
-		return nil, grpc.ErrClientConnClosing
-	}
-	n := len(c.grpcClientPool)
-	if n >= size {
-		w := c.pickLocked()
-		c.grpcClientMtx.RUnlock()
-		return w, nil
+
+	if !generic.IsZero(c.grpcClient) {
+		defer c.grpcClientMtx.RUnlock()
+		return c.grpcClient, nil
 	}
 	c.grpcClientMtx.RUnlock()
-
-	// Pool is below target size. Become the sole grower (dialMtx). If the pool is already
-	// warm and another caller is growing it, reuse an existing connection instead of waiting.
-	if n > 0 && !c.dialMtx.TryLock() {
-		c.grpcClientMtx.RLock()
-		if c.closed {
-			c.grpcClientMtx.RUnlock()
-			return nil, grpc.ErrClientConnClosing
-		}
-		if len(c.grpcClientPool) > 0 {
-			w := c.pickLocked()
-			c.grpcClientMtx.RUnlock()
-			return w, nil
-		}
-		c.grpcClientMtx.RUnlock()
-		c.dialMtx.Lock() // pool drained meanwhile; block and (re)establish it ourselves
-	} else if n == 0 {
-		c.dialMtx.Lock() // empty pool: serialize so a single caller dials connection #1
-	}
-	defer c.dialMtx.Unlock()
-
-	// Re-check under dialMtx: another grower may have advanced or filled the pool.
-	c.grpcClientMtx.RLock()
-	if c.closed {
-		c.grpcClientMtx.RUnlock()
-		return nil, grpc.ErrClientConnClosing
-	}
-	n = len(c.grpcClientPool)
-	addr := c.addr.Load()
-	if n >= size && n > 0 {
-		w := c.pickLocked()
-		c.grpcClientMtx.RUnlock()
-		return w, nil
-	}
-	c.grpcClientMtx.RUnlock()
-
-	// Connections in a pool all target the same address; resolve it only for the first one.
-	if n == 0 || addr == "" {
-		a, err := c.getAddrFunc()
-		if err != nil {
-			mlog.Warn(ctx, "failed to get client address", mlog.Err(err))
-			return nil, err
-		}
-		addr = a
-	}
-
-	conn, err := c.dialOne(ctx, addr)
-	if err != nil {
-		// Prefer reusing an existing connection over failing the call outright.
-		c.grpcClientMtx.RLock()
-		if len(c.grpcClientPool) > 0 {
-			w := c.pickLocked()
-			c.grpcClientMtx.RUnlock()
-			return w, nil
-		}
-		c.grpcClientMtx.RUnlock()
-		return nil, wrapErrConnect(addr, err)
-	}
-	w := &clientConnWrapper[T]{client: c.newGrpcClient(conn), conn: conn}
 
 	c.grpcClientMtx.Lock()
-	if c.closed {
-		c.grpcClientMtx.Unlock()
-		_ = conn.Close()
-		return nil, grpc.ErrClientConnClosing
-	}
-	if len(c.grpcClientPool) == 0 {
-		c.addr.Store(addr)
-		c.ctxCounter.Store(0)
-	}
-	c.grpcClientPool = append(c.grpcClientPool, w)
-	w = c.pickLocked()
-	c.grpcClientMtx.Unlock()
-	return w, nil
-}
+	defer c.grpcClientMtx.Unlock()
 
-// pickLocked returns the next pool connection round-robin.
-// The caller must hold grpcClientMtx (read or write).
-func (c *ClientBase[T]) pickLocked() *clientConnWrapper[T] {
-	idx := c.roundRobinIdx.Add(1)
-	return c.grpcClientPool[int(idx)%len(c.grpcClientPool)]
+	if !generic.IsZero(c.grpcClient) {
+		return c.grpcClient, nil
+	}
+
+	err := c.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.grpcClient, nil
 }
 
 func (c *ClientBase[T]) resetConnection(wrapper *clientConnWrapper[T], forceReset bool) {
 	if !forceReset && time.Since(c.lastReset.Load()) < c.minResetInterval {
 		return
 	}
-	// Take dialMtx first (see lock-order comment on the field): wait for an in-flight
-	// dial to land so the connection it adds is torn down with the rest of the pool
-	// instead of surviving as a stale entry pointing at the pre-reset address.
-	c.dialMtx.Lock()
-	defer c.dialMtx.Unlock()
 	c.grpcClientMtx.Lock()
 	defer c.grpcClientMtx.Unlock()
 	if !forceReset && time.Since(c.lastReset.Load()) < c.minResetInterval {
 		return
 	}
-	if len(c.grpcClientPool) == 0 {
+	if generic.IsZero(c.grpcClient) {
 		return
 	}
-	// Only reset if wrapper belongs to the current pool; otherwise the pool was already
-	// replaced by a concurrent caller and this is a stale wrapper.
-	found := false
-	for _, w := range c.grpcClientPool {
-		if w == wrapper {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if c.grpcClient != wrapper {
 		return
 	}
-	// Resetting the whole pool is intentional. Errors that reach this path are
-	// treated as target-level failures (server, endpoint, or network), so sibling
-	// connections are likely affected as well. Non-forced resets are throttled by
-	// minResetInterval above to bound connection churn.
-	// wrapper close may block waiting pending request finish, so close the whole pool async.
-	go func(pool []*clientConnWrapper[T], role, addr string) {
-		for _, w := range pool {
-			w.Close()
-		}
-		// detached background close; no request context by design.
-		mlog.Info(context.Background(), "previous client pool closed", mlog.String("role", role), mlog.String("addr", addr))
-	}(c.grpcClientPool, c.role, c.addr.Load())
+	// wrapper close may block waiting pending request finish
+	go func(w *clientConnWrapper[T], addr string) {
+		w.Close()
+		mlog.Info(context.TODO(), "previous client closed", mlog.String("role", c.role), mlog.String("addr", c.addr.Load()))
+	}(c.grpcClient, c.addr.Load())
 	c.addr.Store("")
-	c.grpcClientPool = nil
+	c.grpcClient = nil
 	c.lastReset.Store(time.Now())
 }
 
-// dialOne establishes a single grpc connection to addr, used to grow the pool.
-func (c *ClientBase[T]) dialOne(ctx context.Context, addr string) (*grpc.ClientConn, error) {
+func (c *ClientBase[T]) connect(ctx context.Context) error {
+	addr, err := c.getAddrFunc()
+	if err != nil {
+		mlog.Warn(ctx, "failed to get client address", mlog.Err(err))
+		return err
+	}
+
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
-	defer cancel()
 
 	var conn *grpc.ClientConn
-	var err error
 	compress := None
 	if c.CompressionEnabled {
 		compress = Zstd
@@ -476,10 +356,18 @@ func (c *ClientBase[T]) dialOne(ctx context.Context, addr string) (*grpc.ClientC
 		)
 	}
 
+	cancel()
 	if err != nil {
-		return nil, err
+		return wrapErrConnect(addr, err)
 	}
-	return conn, nil
+
+	c.addr.Store(addr)
+	c.ctxCounter.Store(0)
+	c.grpcClient = &clientConnWrapper[T]{
+		client: c.newGrpcClient(conn),
+		conn:   conn,
+	}
+	return nil
 }
 
 func (c *ClientBase[T]) verifySession(ctx context.Context) error {
@@ -604,9 +492,6 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	defer cancel()
 	err := retry.Handle(ctx, func() (bool, error) {
 		if wrapper == nil {
-			if IsConnectionClosingErr(clientErr) {
-				return false, clientErr
-			}
 			if ok := c.checkNodeSessionExist(ctx); !ok {
 				// if session doesn't exist, no need to reset connection for datanode/indexnode/querynode
 				return false, merr.ErrNodeNotFound
@@ -713,32 +598,12 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 
 // Close close the client connection
 func (c *ClientBase[T]) Close() error {
-	// Take dialMtx first (see lock-order comment on the field): a dial that is in
-	// flight when Close is called must land in the pool before we drain it, or its
-	// connection would be appended after the drain and leak forever.
-	c.dialMtx.Lock()
-	defer c.dialMtx.Unlock()
-	// Detach the pool under the lock, then close OUTSIDE it. wrapper.Close takes the
-	// wrapper's write lock and blocks until in-flight RPCs (which hold it via Pin)
-	// finish; holding grpcClientMtx across that would stall every concurrent
-	// GetGrpcClient on connection acquisition until those RPCs drain.
 	c.grpcClientMtx.Lock()
-	if c.closed {
-		c.grpcClientMtx.Unlock()
-		return nil
+	defer c.grpcClientMtx.Unlock()
+	if c.grpcClient != nil {
+		return c.grpcClient.Close()
 	}
-	c.closed = true
-	pool := c.grpcClientPool
-	c.grpcClientPool = nil
-	c.grpcClientMtx.Unlock()
-
-	var err error
-	for _, w := range pool {
-		if e := w.Close(); e != nil {
-			err = e
-		}
-	}
-	return err
+	return nil
 }
 
 // SetNodeID set ID role of client

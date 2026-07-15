@@ -86,10 +86,9 @@ func (releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
 
 	buf := data.MaterializeToBuffer(mem.DefaultBufferPool())
 	defer buf.Free()
-	// Fast path: hand-written, wire-equivalent decoders for the hot read/write
-	// message types (RetrieveResults / InsertRequest / SearchResultData). Any
-	// other type is not handled and falls through to the official codec. No
-	// runtime hacks; only differential+fuzz-tested types take the fast path.
+	// Fast path for the top-level hot RPC messages supported by TryUnmarshal:
+	// RetrieveResults, InsertRequest, and UpsertRequest. Unsupported message
+	// types fall through to the official codec.
 	if handled, err := fastpb.TryUnmarshal(v, buf.ReadOnlyData()); handled {
 		return err
 	}

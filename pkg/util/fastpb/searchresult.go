@@ -114,7 +114,11 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 			if srd.Ids == nil {
 				srd.Ids = ids
 			} else {
-				proto.Merge(srd.Ids, ids) // repeated singular message on wire → proto3 merge
+				// wire-level merge: a later occurrence's explicit proto3-default
+				// scalar must overwrite, matching proto.Unmarshal (not proto.Merge).
+				if err := protoMerge(v, srd.Ids); err != nil {
+					return err
+				}
 			}
 		case 6: // topks (packed varint)
 			if err := appendPackedI64(v, &srd.Topks); err != nil {
@@ -134,7 +138,9 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 			if srd.GroupByFieldValue == nil {
 				srd.GroupByFieldValue = fd
 			} else {
-				proto.Merge(srd.GroupByFieldValue, fd)
+				if err := protoMerge(v, srd.GroupByFieldValue); err != nil { // wire-level merge (see Ids)
+					return err
+				}
 			}
 		case 10: // distances (packed fixed32)
 			if err := appendPackedF32(v, &srd.Distances); err != nil {
@@ -148,7 +154,9 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 			if srd.SearchIteratorV2Results == nil {
 				srd.SearchIteratorV2Results = m
 			} else {
-				proto.Merge(srd.SearchIteratorV2Results, m)
+				if err := protoMerge(v, srd.SearchIteratorV2Results); err != nil { // wire-level merge (see Ids)
+					return err
+				}
 			}
 		case 12: // recalls (packed fixed32)
 			if err := appendPackedF32(v, &srd.Recalls); err != nil {
@@ -174,7 +182,9 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 			if srd.ElementIndices == nil {
 				srd.ElementIndices = la
 			} else {
-				proto.Merge(srd.ElementIndices, la)
+				if err := protoMerge(v, srd.ElementIndices); err != nil { // wire-level merge (see Ids)
+					return err
+				}
 			}
 		case 17: // group_by_field_values (repeated FieldData)
 			fd := &schemapb.FieldData{}

@@ -25,7 +25,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -361,7 +361,9 @@ func lateMaterializeOutputFields(
 	}
 
 	var fieldResult schemapb.SearchResultData
-	if err := proto.Unmarshal(protoBytes, &fieldResult); err != nil {
+	// fastpb: wire-equivalent fast decoder for the late-materialize output-fields
+	// hot path (~2x varchar / ~6x vector vs proto.Unmarshal).
+	if err := fastpb.UnmarshalSearchResultData(protoBytes, &fieldResult); err != nil {
 		return err
 	}
 	searchResultData.FieldsData = fieldResult.FieldsData

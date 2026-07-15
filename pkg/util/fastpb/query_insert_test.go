@@ -179,3 +179,104 @@ func TestEquiv_Fuzz_InsertRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestEquiv_UpsertRequest(t *testing.T) {
+	ns := "tenant-x"
+	src := &milvuspb.UpsertRequest{
+		Base:            &commonpb.MsgBase{MsgID: 1},
+		DbName:          "db",
+		CollectionName:  "coll",
+		PartitionName:   "part",
+		HashKeys:        []uint32{1, 2, 3, 4},
+		NumRows:         3,
+		SchemaTimestamp: 123456,
+		PartialUpdate:   true, // field 9 (varint)  → folded to official merge
+		Namespace:       &ns,  // field 10 (bytes)  → folded to official merge
+		FieldOps: []*schemapb.FieldPartialUpdateOp{ // field 11 (message) → folded
+			{FieldName: "title"},
+		},
+		FieldsData: []*schemapb.FieldData{
+			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x", "y", "z"}}}}}},
+			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},
+		},
+	}
+	wire, err := proto.Marshal(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got milvuspb.UpsertRequest
+	if err := UnmarshalUpsertRequest(wire, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !proto.Equal(src, &got) {
+		t.Fatalf("mismatch:\n src=%v\n got=%v", src, &got)
+	}
+	// TryUnmarshal must dispatch UpsertRequest to fastpb (RPC-boundary coverage).
+	var viaDispatch milvuspb.UpsertRequest
+	handled, err := TryUnmarshal(&viaDispatch, wire)
+	if !handled || err != nil || !proto.Equal(src, &viaDispatch) {
+		t.Fatalf("TryUnmarshal(UpsertRequest) dispatch failed: handled=%v err=%v", handled, err)
+	}
+}
+
+// UpsertRequest is untrusted ingress too: fastpb must agree with official proto on
+// whether invalid UTF-8 in a string field is rejected.
+func TestUpsertRequest_UTF8MatchesOfficial(t *testing.T) {
+	// field 3 (collection_name), wire type 2, len 2, bytes 0xFF 0xFE (invalid UTF-8)
+	wire := []byte{0x1A, 0x02, 0xFF, 0xFE}
+	var official milvuspb.UpsertRequest
+	officialErr := proto.Unmarshal(wire, &official)
+	var got milvuspb.UpsertRequest
+	gotErr := UnmarshalUpsertRequest(wire, &got)
+	if (officialErr == nil) != (gotErr == nil) {
+		t.Fatalf("UTF-8 accept/reject diverges: official err=%v, fastpb err=%v", officialErr, gotErr)
+	}
+}
+
+func randUpsertRequest(r *rand.Rand) *milvuspb.UpsertRequest {
+	rows := r.Intn(20)
+	ur := &milvuspb.UpsertRequest{
+		DbName:         randString(r),
+		CollectionName: randString(r),
+		PartitionName:  randString(r),
+		NumRows:        uint32(rows),
+		PartialUpdate:  r.Intn(2) == 0, // exercise the field-9 fold path
+	}
+	for i := 0; i < r.Intn(3); i++ {
+		ur.FieldsData = append(ur.FieldsData, randFieldData(r, rows))
+	}
+	hk := make([]uint32, rows)
+	for i := range hk {
+		hk[i] = r.Uint32()
+	}
+	ur.HashKeys = hk
+	if r.Intn(2) == 0 {
+		ns := randString(r) // exercise the field-10 fold path
+		ur.Namespace = &ns
+	}
+	for i := 0; i < r.Intn(3); i++ { // exercise the field-11 (field_ops) fold path
+		ur.FieldOps = append(ur.FieldOps, &schemapb.FieldPartialUpdateOp{
+			FieldName: randString(r),
+			Op:        schemapb.FieldPartialUpdateOp_OpType(r.Intn(2)),
+		})
+	}
+	return ur
+}
+
+func TestEquiv_Fuzz_UpsertRequest(t *testing.T) {
+	r := rand.New(rand.NewSource(0xCAFE))
+	for i := 0; i < 3000; i++ {
+		src := randUpsertRequest(r)
+		wire, err := proto.Marshal(src)
+		if err != nil {
+			t.Fatalf("marshal %d: %v", i, err)
+		}
+		var got milvuspb.UpsertRequest
+		if err := UnmarshalUpsertRequest(wire, &got); err != nil {
+			t.Fatalf("decode %d: %v", i, err)
+		}
+		if !proto.Equal(src, &got) {
+			t.Fatalf("mismatch %d:\n src=%v\n got=%v", i, src, &got)
+		}
+	}
+}

@@ -179,6 +179,16 @@ func TestReleaseCodecFastpbFastPath(t *testing.T) {
 	require.NoError(t, codec.Unmarshal(out, gotIR))
 	require.True(t, proto.Equal(ir, gotIR))
 
+	// UpsertRequest takes the fast path too; the upsert-only fields
+	// (partial_update/namespace/field_ops) fold to the official codec.
+	ns := "tenant-x"
+	ur := &milvuspb.UpsertRequest{CollectionName: "c", NumRows: 3, PartialUpdate: true, Namespace: &ns}
+	out, err = codec.Marshal(ur)
+	require.NoError(t, err)
+	gotUR := &milvuspb.UpsertRequest{}
+	require.NoError(t, codec.Unmarshal(out, gotUR))
+	require.True(t, proto.Equal(ur, gotUR))
+
 	// malformed wire (truncated varint tag) → fast path must return the error
 	bad := mem.BufferSlice{mem.SliceBuffer([]byte{0x80})}
 	require.Error(t, codec.Unmarshal(bad, &internalpb.RetrieveResults{}))

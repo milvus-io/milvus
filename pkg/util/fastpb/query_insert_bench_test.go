@@ -112,3 +112,78 @@ func BenchmarkInsert_Vector(b *testing.B) {
 	ir := &milvuspb.InsertRequest{CollectionName: "c", FieldsData: vectorFieldData(1000, 768)}
 	benchInsert(b, ir)
 }
+
+// --- Upsert path: UpsertRequest (UTF-8 validated; fields 1-8 fast, 9/10/11 fold) ---
+
+func benchUpsert(b *testing.B, ur *milvuspb.UpsertRequest) {
+	wire, err := proto.Marshal(ur)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Run("official", func(b *testing.B) {
+		b.SetBytes(int64(len(wire)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var out milvuspb.UpsertRequest
+			if err := proto.Unmarshal(wire, &out); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("fastpb", func(b *testing.B) {
+		b.SetBytes(int64(len(wire)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var out milvuspb.UpsertRequest
+			if err := UnmarshalUpsertRequest(wire, &out); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkUpsert_Varchar(b *testing.B) {
+	benchUpsert(b, &milvuspb.UpsertRequest{CollectionName: "c", FieldsData: varcharFieldData(1000, 12)})
+}
+
+func BenchmarkUpsert_Vector(b *testing.B) {
+	benchUpsert(b, &milvuspb.UpsertRequest{CollectionName: "c", FieldsData: vectorFieldData(1000, 768)})
+}
+
+// BenchmarkUpsert_ColdFields measures the fold-to-official path: the upsert-only
+// fields partial_update (9) / namespace (10) / field_ops (11) are not
+// hand-decoded — they accumulate into `rest` and merge via the official codec on
+// top of the fast-decoded fields 1-8. This is also the shape unknown/future
+// fields take.
+func BenchmarkUpsert_ColdFields(b *testing.B) {
+	ns := "tenant-x"
+	ops := make([]*schemapb.FieldPartialUpdateOp, 16)
+	for i := range ops {
+		ops[i] = &schemapb.FieldPartialUpdateOp{FieldName: fmt.Sprintf("f%d", i)}
+	}
+	benchUpsert(b, &milvuspb.UpsertRequest{
+		CollectionName: "c", NumRows: 1000, PartialUpdate: true, Namespace: &ns,
+		FieldOps: ops, FieldsData: varcharFieldData(1000, 12),
+	})
+}
+
+// BenchmarkUpsert_Malformed measures the reject path: a fields_data (5)
+// sub-message whose declared length overruns the buffer, which both the official
+// codec and fastpb must reject.
+func BenchmarkUpsert_Malformed(b *testing.B) {
+	wire := []byte{0x2A, 0x04, 0x08} // field 5, wtype 2, len=4, but only 1 byte follows
+	b.Run("official", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var out milvuspb.UpsertRequest
+			_ = proto.Unmarshal(wire, &out)
+		}
+	})
+	b.Run("fastpb", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var out milvuspb.UpsertRequest
+			_ = UnmarshalUpsertRequest(wire, &out)
+		}
+	})
+}

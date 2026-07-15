@@ -36,6 +36,35 @@ func appendUnknownVarint(b []byte, num int32) []byte {
 	return protowire.AppendVarint(b, 0x7FFFFFFF)
 }
 
+// TestDuplicatedMessage_ExplicitDefaultScalar reproduces a wire-equivalence gap.
+// When a nested message field (Base) appears twice and the SECOND occurrence
+// explicitly encodes a proto3-default scalar (TargetID=0), official proto.Unmarshal
+// applies it (wire-level merge -> 0). A decoder that accumulates via message-level
+// proto.Merge instead DROPS it (proto.Merge skips proto3-default scalars), keeping
+// the stale 7. External/adversarial Upsert/Insert input can craft exactly this.
+func TestDuplicatedMessage_ExplicitDefaultScalar(t *testing.T) {
+	base7 := protowire.AppendVarint(protowire.AppendTag(nil, 5, protowire.VarintType), 7) // MsgBase{TargetID:7}
+	base0 := protowire.AppendVarint(protowire.AppendTag(nil, 5, protowire.VarintType), 0) // MsgBase{TargetID:0 explicit}
+	dupBase := func() []byte {
+		w := protowire.AppendBytes(protowire.AppendTag(nil, 1, protowire.BytesType), base7)
+		return protowire.AppendBytes(protowire.AppendTag(w, 1, protowire.BytesType), base0)
+	}
+	t.Run("RetrieveResults", func(t *testing.T) { diffDecode(t, dupBase(), newRetrieve, decRetrieve) })
+	t.Run("InsertRequest", func(t *testing.T) { diffDecode(t, dupBase(), newInsertRequest, decInsertRequest) })
+	t.Run("UpsertRequest", func(t *testing.T) { diffDecode(t, dupBase(), newUpsertRequest, decUpsertRequest) })
+
+	// Same class of bug on a hand-decoded nested field: SearchResultData's
+	// GroupByFieldValue (field 8, a FieldData) appearing twice where the second
+	// occurrence explicitly encodes FieldData.FieldId=0.
+	t.Run("SearchResultData/GroupByFieldValue", func(t *testing.T) {
+		fd9 := protowire.AppendVarint(protowire.AppendTag(nil, 5, protowire.VarintType), 9) // FieldData{FieldId:9}
+		fd0 := protowire.AppendVarint(protowire.AppendTag(nil, 5, protowire.VarintType), 0) // FieldData{FieldId:0 explicit}
+		w := protowire.AppendBytes(protowire.AppendTag(nil, 8, protowire.BytesType), fd9)
+		w = protowire.AppendBytes(protowire.AppendTag(w, 8, protowire.BytesType), fd0)
+		diffDecode(t, w, newSearchResult, decSearchResult)
+	})
+}
+
 // diffDecode asserts the fastpb decoder matches the official codec for wire,
 // both in error behavior and (on success) in the decoded message.
 func diffDecode(t *testing.T, wire []byte, fresh func() proto.Message, fast func([]byte, proto.Message) error) {
@@ -63,6 +92,7 @@ var (
 		return UnmarshalRetrieveResults(b, m.(*internalpb.RetrieveResults))
 	}
 	decInsertRequest = func(b []byte, m proto.Message) error { return UnmarshalInsertRequest(b, m.(*milvuspb.InsertRequest)) }
+	decUpsertRequest = func(b []byte, m proto.Message) error { return UnmarshalUpsertRequest(b, m.(*milvuspb.UpsertRequest)) }
 	newFieldData     = func() proto.Message { return &schemapb.FieldData{} }
 	newScalarField   = func() proto.Message { return &schemapb.ScalarField{} }
 	newVectorField   = func() proto.Message { return &schemapb.VectorField{} }
@@ -70,6 +100,7 @@ var (
 	newSearchResult  = func() proto.Message { return &schemapb.SearchResultData{} }
 	newRetrieve      = func() proto.Message { return &internalpb.RetrieveResults{} }
 	newInsertRequest = func() proto.Message { return &milvuspb.InsertRequest{} }
+	newUpsertRequest = func() proto.Message { return &milvuspb.UpsertRequest{} }
 )
 
 // TestUnknownFieldSkipAndMerge feeds each entry point a canonical message with a
@@ -94,6 +125,8 @@ func TestUnknownFieldSkipAndMerge(t *testing.T) {
 	require.NoError(t, err)
 	canonIR, err := proto.Marshal(&milvuspb.InsertRequest{CollectionName: "c", DbName: "db", NumRows: 3})
 	require.NoError(t, err)
+	canonUR, err := proto.Marshal(&milvuspb.UpsertRequest{CollectionName: "c", DbName: "db", NumRows: 3, PartialUpdate: true})
+	require.NoError(t, err)
 
 	entries := []struct {
 		name    string
@@ -109,6 +142,7 @@ func TestUnknownFieldSkipAndMerge(t *testing.T) {
 		{"SearchResultData", canonSRD, 30, newSearchResult, decSearchResult},
 		{"RetrieveResults", canonRR, 30, newRetrieve, decRetrieve},
 		{"InsertRequest", canonIR, 30, newInsertRequest, decInsertRequest},
+		{"UpsertRequest", canonUR, 30, newUpsertRequest, decUpsertRequest},
 	}
 	for _, e := range entries {
 		for _, w := range []struct {
@@ -201,7 +235,7 @@ func TestColdSearchResultFields(t *testing.T) {
 
 // TestRepeatedSingularMessageMerge: a singular message field encoded twice on the
 // wire is merged by proto3 (last-wins per scalar, concatenated repeated). This hits
-// the "already set → proto.Merge" branches for Base/Status/Ids/CostAggregation.
+// the "already set → raw-wire merge" branches for Base/Status/Ids/CostAggregation.
 func TestRepeatedSingularMessageMerge(t *testing.T) {
 	t.Run("RetrieveResults Base/Ids/Cost twice", func(t *testing.T) {
 		// Build manually: field 1 (Base) twice, field 4 (Ids) twice, field 13 (Cost) twice.
@@ -313,8 +347,8 @@ func TestInvalidUTF8Ingress(t *testing.T) {
 	})
 }
 
-// TestTryUnmarshalDispatch covers TryUnmarshal: the two hot types report handled,
-// every other type reports (false, nil) so the caller uses the official codec.
+// TestTryUnmarshalDispatch covers representative TryUnmarshal fast paths;
+// unsupported types report (false, nil) so the caller uses the official codec.
 func TestTryUnmarshalDispatch(t *testing.T) {
 	rrWire, _ := proto.Marshal(&internalpb.RetrieveResults{ReqID: 1})
 	irWire, _ := proto.Marshal(&milvuspb.InsertRequest{CollectionName: "c"})

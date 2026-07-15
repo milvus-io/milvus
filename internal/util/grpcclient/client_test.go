@@ -75,7 +75,7 @@ func TestClientBase_connect(t *testing.T) {
 			},
 			DialTimeout: time.Millisecond,
 		}
-		_, err := base.GetGrpcClient(context.Background())
+		err := base.connect(context.Background())
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrConnect))
 	})
@@ -88,7 +88,7 @@ func TestClientBase_connect(t *testing.T) {
 			},
 			DialTimeout: time.Millisecond,
 		}
-		_, err := base.GetGrpcClient(context.Background())
+		err := base.connect(context.Background())
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, errMock))
 	})
@@ -108,7 +108,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	mockSession.EXPECT().GetSessions(mock.Anything, mock.Anything).Return(nil, 0, nil)
 	base.sess = mockSession
 	base.grpcClientMtx.Lock()
-	base.grpcClientPool = nil
+	base.grpcClient = nil
 	base.grpcClientMtx.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -119,7 +119,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 
 	// test querynode/datanode/indexnode/proxy already down, but new node start up with same ip and port
 	base.grpcClientMtx.Lock()
-	base.grpcClientPool = []*clientConnWrapper[*mockClient]{{client: &mockClient{}}}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
 		return struct{}{}, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error())
@@ -128,7 +128,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 
 	// test querynode/datanode/indexnode/proxy down, return unavailable error
 	base.grpcClientMtx.Lock()
-	base.grpcClientPool = []*clientConnWrapper[*mockClient]{{client: &mockClient{}}}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
 		return struct{}{}, status.Error(codes.Unavailable, "fake error")
@@ -154,7 +154,7 @@ func testCall(t *testing.T, compressed bool) {
 	base.CompressionEnabled = compressed
 	initClient := func() {
 		base.grpcClientMtx.Lock()
-		base.grpcClientPool = []*clientConnWrapper[*mockClient]{{client: &mockClient{}}}
+		base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 		base.grpcClientMtx.Unlock()
 	}
 	base.MaxAttempts = 1
@@ -202,7 +202,7 @@ func testCall(t *testing.T, compressed bool) {
 		assert.True(t, errors.Is(err, errMock))
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
-		assert.NotEmpty(t, base.grpcClientPool)
+		assert.NotNil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 
@@ -220,7 +220,7 @@ func testCall(t *testing.T, compressed bool) {
 		assert.True(t, errors.Is(err, errMock))
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
-		assert.NotEmpty(t, base.grpcClientPool)
+		assert.NotNil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 
@@ -237,7 +237,7 @@ func testCall(t *testing.T, compressed bool) {
 		assert.True(t, errors.Is(err, errGrpc))
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
-		assert.Empty(t, base.grpcClientPool)
+		assert.Nil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 
@@ -257,7 +257,7 @@ func testCall(t *testing.T, compressed bool) {
 		assert.True(t, errors.Is(err, errGrpc))
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
-		assert.NotEmpty(t, base.grpcClientPool)
+		assert.NotNil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 	t.Run("Call returns canceled grpc error exceed limit", func(t *testing.T) {
@@ -277,12 +277,12 @@ func testCall(t *testing.T, compressed bool) {
 		assert.True(t, errors.Is(err, errGrpc))
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
-		assert.Empty(t, base.grpcClientPool)
+		assert.Nil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 
 	base.grpcClientMtx.Lock()
-	base.grpcClientPool = nil
+	base.grpcClient = nil
 	base.grpcClientMtx.Unlock()
 	base.SetGetAddrFunc(func() (string, error) { return "", nil })
 
@@ -302,7 +302,7 @@ func TestClientBase_Recall(t *testing.T) {
 	base := ClientBase[*mockClient]{}
 	initClient := func() {
 		base.grpcClientMtx.Lock()
-		base.grpcClientPool = []*clientConnWrapper[*mockClient]{{client: &mockClient{}}}
+		base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 		base.grpcClientMtx.Unlock()
 	}
 	base.MaxAttempts = 1
@@ -342,12 +342,12 @@ func TestClientBase_Recall(t *testing.T) {
 		assert.True(t, errors.Is(err, errMock))
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
-		assert.NotEmpty(t, base.grpcClientPool)
+		assert.NotNil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 
 	base.grpcClientMtx.Lock()
-	base.grpcClientPool = nil
+	base.grpcClient = nil
 	base.grpcClientMtx.Unlock()
 	base.SetGetAddrFunc(func() (string, error) { return "", nil })
 
@@ -364,7 +364,7 @@ func TestClientBase_Recall(t *testing.T) {
 
 func TestClientBase_CheckGrpcError(t *testing.T) {
 	base := ClientBase[*mockClient]{}
-	base.grpcClientPool = []*clientConnWrapper[*mockClient]{{client: &mockClient{}}}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.MaxAttempts = 1
 
 	ctx := context.Background()
@@ -589,7 +589,7 @@ func TestClientBase_CheckGrpcError_ServerIDMismatch_Node(t *testing.T) {
 	base := ClientBase[*mockClient]{
 		isNode: true,
 	}
-	base.grpcClientPool = []*clientConnWrapper[*mockClient]{{client: &mockClient{}}}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 
 	ctx := context.Background()
 
@@ -617,7 +617,7 @@ func TestClientBase_ServerIDMismatch_NodeFastFail(t *testing.T) {
 	mockSession := sessionutil.NewMockSession(t)
 	base.sess = mockSession
 	base.grpcClientMtx.Lock()
-	base.grpcClientPool = []*clientConnWrapper[*mockClient]{{client: &mockClient{}}}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.grpcClientMtx.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())

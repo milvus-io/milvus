@@ -19,6 +19,8 @@ func TryUnmarshal(v any, b []byte) (bool, error) {
 		return true, UnmarshalRetrieveResults(b, m)
 	case *milvuspb.InsertRequest:
 		return true, UnmarshalInsertRequest(b, m)
+	case *milvuspb.UpsertRequest:
+		return true, UnmarshalUpsertRequest(b, m)
 	default:
 		// Everything else (incl. SearchResultData, which is never a top-level gRPC
 		// message — it travels as the SlicedBlob bytes of internalpb.SearchResults and
@@ -107,7 +109,11 @@ func (d dec) retrieveResults(b []byte, rr *internalpb.RetrieveResults) error {
 			if rr.Base == nil {
 				rr.Base = m
 			} else {
-				proto.Merge(rr.Base, m) // repeated singular message on wire → proto3 merge
+				// wire-level merge: a later occurrence's explicit proto3-default
+				// scalar (e.g. TargetID=0) must overwrite, matching proto.Unmarshal.
+				if err := protoMerge(v, rr.Base); err != nil {
+					return err
+				}
 			}
 		case 2: // Status (delegate)
 			m := &commonpb.Status{}
@@ -117,7 +123,9 @@ func (d dec) retrieveResults(b []byte, rr *internalpb.RetrieveResults) error {
 			if rr.Status == nil {
 				rr.Status = m
 			} else {
-				proto.Merge(rr.Status, m)
+				if err := protoMerge(v, rr.Status); err != nil { // wire-level merge (see Base)
+					return err
+				}
 			}
 		case 4: // Ids
 			ids := &schemapb.IDs{}
@@ -127,7 +135,9 @@ func (d dec) retrieveResults(b []byte, rr *internalpb.RetrieveResults) error {
 			if rr.Ids == nil {
 				rr.Ids = ids
 			} else {
-				proto.Merge(rr.Ids, ids)
+				if err := protoMerge(v, rr.Ids); err != nil { // wire-level merge (see Base)
+					return err
+				}
 			}
 		case 5: // fields_data (HOT)
 			fd := &schemapb.FieldData{}
@@ -157,7 +167,9 @@ func (d dec) retrieveResults(b []byte, rr *internalpb.RetrieveResults) error {
 			if rr.CostAggregation == nil {
 				rr.CostAggregation = m
 			} else {
-				proto.Merge(rr.CostAggregation, m)
+				if err := protoMerge(v, rr.CostAggregation); err != nil { // wire-level merge (see Base)
+					return err
+				}
 			}
 		case 19: // element_indices (repeated message, delegate)
 			m := &internalpb.ElementIndices{}
@@ -242,7 +254,9 @@ func (d dec) insertRequest(b []byte, ir *milvuspb.InsertRequest) error {
 			if ir.Base == nil {
 				ir.Base = m
 			} else {
-				proto.Merge(ir.Base, m) // repeated singular message on wire → proto3 merge
+				if err := protoMerge(v, ir.Base); err != nil { // wire-level merge (see rr.Base)
+					return err
+				}
 			}
 		case 2: // DbName
 			s, err := d.str(v)
@@ -285,6 +299,118 @@ func (d dec) insertRequest(b []byte, ir *milvuspb.InsertRequest) error {
 	}
 	if len(rest) > 0 {
 		return protoMerge(rest, ir)
+	}
+	return nil
+}
+
+// UnmarshalUpsertRequest decodes milvuspb.UpsertRequest (write path, client→proxy;
+// UNTRUSTED ingress → strings are UTF-8 validated). Fields 1-8 share InsertRequest's
+// exact wire layout (hot field: fields_data (5)); the upsert-only fields
+// partial_update (9), namespace (10) and field_ops (11) are folded into the official
+// merge, so they decode via the standard codec and stay wire-equivalent.
+func UnmarshalUpsertRequest(b []byte, ur *milvuspb.UpsertRequest) error {
+	proto.Reset(ur) // match official proto.Unmarshal: clear target before decode
+	if err := (dec{utf8: true}).upsertRequest(b, ur); err != nil {
+		if fallbackOnProto2(err) {
+			proto.Reset(ur) // discard partial decode before the authoritative pass
+			return proto.Unmarshal(b, ur)
+		}
+		return err
+	}
+	return nil
+}
+
+func (d dec) upsertRequest(b []byte, ur *milvuspb.UpsertRequest) error {
+	var rest []byte
+	for len(b) > 0 {
+		start := b
+		num, wtype, tn := consumeTag(b)
+		if tn <= 0 {
+			return errMalformed
+		}
+		b = b[tn:]
+		if isProto2Group(wtype) {
+			return errProto2
+		}
+		if wtype == 0 {
+			v, vn := consumeVarint(b)
+			if vn <= 0 {
+				return errMalformed
+			}
+			b = b[vn:]
+			switch num {
+			case 6:
+				ur.HashKeys = append(ur.HashKeys, uint32(v))
+			case 7:
+				ur.NumRows = uint32(v)
+			case 8:
+				ur.SchemaTimestamp = v
+			default: // partial_update (9) and any future varint field → official merge
+				rest = append(rest, start[:tn+vn]...)
+			}
+			continue
+		}
+		if wtype != 2 {
+			sn := skipField(b, wtype)
+			if sn <= 0 {
+				return errMalformed
+			}
+			rest = append(rest, start[:tn+sn]...)
+			b = b[sn:]
+			continue
+		}
+		v, vn := consumeBytes(b)
+		if vn <= 0 {
+			return errMalformed
+		}
+		b = b[vn:]
+		switch num {
+		case 1: // Base (delegate)
+			m := &commonpb.MsgBase{}
+			if err := protoUnmarshal(v, m); err != nil {
+				return err
+			}
+			if ur.Base == nil {
+				ur.Base = m
+			} else {
+				if err := protoMerge(v, ur.Base); err != nil { // wire-level merge (see rr.Base)
+					return err
+				}
+			}
+		case 2: // DbName
+			s, err := d.str(v)
+			if err != nil {
+				return err
+			}
+			ur.DbName = s
+		case 3: // CollectionName
+			s, err := d.str(v)
+			if err != nil {
+				return err
+			}
+			ur.CollectionName = s
+		case 4: // PartitionName
+			s, err := d.str(v)
+			if err != nil {
+				return err
+			}
+			ur.PartitionName = s
+		case 5: // fields_data (HOT)
+			fd := &schemapb.FieldData{}
+			if err := d.fieldData(v, fd); err != nil {
+				return err
+			}
+			ur.FieldsData = append(ur.FieldsData, fd)
+		case 6: // hash_keys (packed uint32)
+			if err := appendPackedU32(v, &ur.HashKeys); err != nil {
+				return err
+			}
+		default: // namespace (10), field_ops (11), any future field → official merge
+			rest = append(rest, start[:tn+vn]...)
+		}
+	}
+	if len(rest) > 0 {
+		return protoMerge(rest, ur)
 	}
 	return nil
 }

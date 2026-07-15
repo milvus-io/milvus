@@ -58,6 +58,7 @@ func TestProtoContract_FieldSetsPinned(t *testing.T) {
 		// top-level fast-pathed types (TryUnmarshal dispatch)
 		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 13, 14, 15, 16, 17, 18, 19}},
 		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9}},
+		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}},
 		{"schemapb.SearchResultData", &schemapb.SearchResultData{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19}},
 		// nested hand-decoded types (oneof-bearing — highest divergence risk)
 		{"schemapb.FieldData", &schemapb.FieldData{}, []int{1, 2, 3, 4, 5, 6, 7, 8}},
