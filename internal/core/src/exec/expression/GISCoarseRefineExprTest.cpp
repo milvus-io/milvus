@@ -132,6 +132,21 @@ EquivExprs() {
         // independent coarse/refine pairs for that field, so this dual-pair
         // path is the trickiest one -- pin it down with an ON-vs-OFF case.
         R"expr(st_within(geo, "POLYGON((-100 -100, 100 -100, 100 100, -100 100, -100 -100))") and (st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))") or st_intersects(geo, "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")))expr",
+        // (10) DWithin mixed with a groupable GIS leaf on the SAME field.
+        // DWithin must stay on the baseline path: the fusion group drops its
+        // distance (Pred carries none, EvalPrepared hardcodes 0.0) and
+        // RunRTreeQuery skips the coarse bbox expansion
+        // (create_bounding_box_for_dwithin), so a grouped DWithin would
+        // silently under-match -- the quiet failure mode the as_groupable_gis
+        // whitelist exists to prevent, pinned here so a future whitelist edit
+        // fails this equivalence instead of going green. Unlike shape (8),
+        // the baseline leaf here also queries the R-Tree, so this is the one
+        // shape where an R-Tree-pinning baseline node and the split pair
+        // coexist on one field. The 5,000,000 m geodesic radius matches a
+        // meaningful minority of the globally-spread DataGen rows, keeping
+        // the shape discriminating (a ~10 m radius would select nothing and
+        // the ON-vs-OFF comparison would degenerate to 0 == 0).
+        R"expr(st_dwithin(geo, "POINT(0 0)", 5000000) and st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))"))expr",
     };
     return exprs;
 }

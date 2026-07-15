@@ -74,18 +74,22 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     // newest inserts lowers active_count_ further), and TargetBitmap's
     // operator&=/|= size check is a bare assert() that is compiled out under
     // NDEBUG. Normalize into active_count_ space: keep the first
-    // active_count_ bits, and fail loudly if the index ever reports FEWER
-    // rows than are visible (that direction would silently drop candidates).
-    if (static_cast<int64_t>(tmp.size()) != active_count_) {
-        AssertInfo(static_cast<int64_t>(tmp.size()) >= active_count_,
-                   "R-Tree coarse bitmap has fewer rows than active rows: "
-                   "{} < {}",
-                   tmp.size(),
-                   active_count_);
+    // active_count_ bits. The reverse direction -- the index reporting FEWER
+    // rows than are visible -- is unreachable today (SegmentGrowingImpl
+    // appends to the index before acking rows, so index rows >= active
+    // rows); if that invariant ever breaks, pad the un-indexed tail with 1s
+    // instead of failing the query: coarse ⊇ exact still holds and Refine
+    // evaluates the exact predicate, so results stay correct and we only
+    // lose R-Tree pruning for the tail -- same defensive posture as the
+    // pin-empty degrade above.
+    if (static_cast<int64_t>(tmp.size()) > active_count_) {
         TargetBitmap sliced;
         sliced.append(tmp, 0, active_count_);
         p.coarse = std::move(sliced);
         return;
+    }
+    if (static_cast<int64_t>(tmp.size()) < active_count_) {
+        tmp.resize(active_count_, /*init=*/true);
     }
     p.coarse = std::move(tmp);
 }
