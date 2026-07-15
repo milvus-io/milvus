@@ -82,6 +82,9 @@ log:
 extraConfigFiles:
   user.yaml: |+
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         enablev2: true
         # enable storage v3
@@ -105,6 +108,9 @@ extraConfigFiles:
         growingMmapEnabled: true
     queryCoord:
       checkNodeInReplicaInterval: 3
+    function:
+      pyUDF:
+        enabled: true
 metrics:
   serviceMonitor:
     enabled: true

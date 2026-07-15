@@ -115,6 +115,10 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 # **************************** Project ****************************
 project( milvus VERSION "${MILVUS_VERSION}" )
 
+# Define build options before their first use so a clean configure observes
+# the declared defaults even when callers do not pass explicit -D values.
+include( DefineOptions )
+
 # Unity (jumbo) build: merge multiple .cpp files per target into fewer
 # translation units, dramatically reducing redundant header parsing.
 if ( MILVUS_UNITY_BUILD )
@@ -152,6 +156,46 @@ set( CMAKE_BUILD_RPATH "${CMAKE_BINARY_DIR}/lib" )
 # Conan 2: CMakeToolchain sets CMAKE_PREFIX_PATH via toolchain file
 # CMakeDeps generates <pkg>-config.cmake files for find_package()
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/conan )
+
+# Use the first Python installation satisfying the requested policy. Configure
+# it before adding source targets so enabled PyUDF targets can consume its usage
+# requirements; normal build tools need only the interpreter.
+set(Python3_FIND_STRATEGY "LOCATION")
+# On Windows, use registry last, not first.
+set(Python3_FIND_REGISTRY "LAST")
+# On macOS, use framework last, not first.
+set(Python3_FIND_FRAMEWORK "LAST")
+if (MILVUS_ENABLE_PY_UDF)
+    if (MILVUS_PY_UDF_PYTHON_VERSION)
+        if (NOT MILVUS_PY_UDF_PYTHON_VERSION MATCHES "^[0-9]+\\.[0-9]+$")
+            message(FATAL_ERROR
+                    "MILVUS_PY_UDF_PYTHON_VERSION must be an exact major.minor value, for example 3.12")
+        endif()
+        find_package(
+            Python3 ${MILVUS_PY_UDF_PYTHON_VERSION} EXACT REQUIRED
+            COMPONENTS Interpreter Development.Embed)
+        set(PYUDF_PYTHON_VERSION_POLICY
+            "exact ${MILVUS_PY_UDF_PYTHON_VERSION}")
+    else()
+        find_package(
+            Python3 3.10 REQUIRED
+            COMPONENTS Interpreter Development.Embed)
+        set(PYUDF_PYTHON_VERSION_POLICY "Python 3.10+")
+    endif()
+    if (NOT TARGET Python3::Python)
+        message(FATAL_ERROR
+                "MILVUS_ENABLE_PY_UDF requires Python3::Python (${PYUDF_PYTHON_VERSION_POLICY}) with Development.Embed")
+    endif()
+else()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+endif()
+set(PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
+message(STATUS "Found Python interpreter at ${PYTHON_EXECUTABLE}")
+if (MILVUS_ENABLE_PY_UDF)
+    message(STATUS
+            "PyUDF embedded CPython runtime enabled: ${Python3_VERSION} (${PYUDF_PYTHON_VERSION_POLICY})")
+    message(STATUS "PyUDF embedded CPython library: ${Python3_LIBRARIES}")
+endif()
 
 find_package(Protobuf REQUIRED)
 find_package(Boost REQUIRED)
@@ -202,7 +246,6 @@ find_package(Azure REQUIRED)
 
 include( CTest )
 include( BuildUtils )
-include( DefineOptions )
 using_ccache_if_defined(MILVUS_USE_CCACHE)
 
 include( ExternalProject )
@@ -311,17 +354,6 @@ add_custom_target(lint
 
 find_program( CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR} )
 message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
-
-# Use the first Python installation on PATH, not the newest one
-set(Python3_FIND_STRATEGY "LOCATION")
-# On Windows, use registry last, not first
-set(Python3_FIND_REGISTRY "LAST")
-# On macOS, use framework last, not first
-set(Python3_FIND_FRAMEWORK "LAST")
-find_package(Python3)
-set(PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
-
-message( STATUS "Found Python at ${PYTHON_EXECUTABLE}")
 
 #
 # "make clang-format" and "make check-clang-format" targets
@@ -453,6 +485,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
 # Install rescores
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/rescores/
         DESTINATION include/rescores
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
+# Install pyudf
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/pyudf/
+        DESTINATION include/pyudf
         FILES_MATCHING PATTERN "*_c.h"
 )
 

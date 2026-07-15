@@ -1,6 +1,13 @@
+FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+
 FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
 
 ARG TARGETARCH
+
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV UV_PYTHON_BIN_DIR=/usr/local/bin
+ENV PYTHON=python3.12
 
 # Install ca-certificates first, then switch to HTTPS and install other packages
 RUN apt-get update && \
@@ -15,6 +22,11 @@ RUN apt-get update && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
+RUN uv python install 3.12.13 && \
+    python_lib="$(python3.12 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" && \
+    printf '%s\n' "${python_lib}" > /etc/ld.so.conf.d/milvus-python.conf && \
+    ldconfig
+
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
@@ -23,6 +35,10 @@ RUN mkdir -p /milvus/bin
 COPY --chown=root:root --chmod=774 ./bin/milvus /milvus/bin/milvus 
 COPY --chown=root:root --chmod=774 ./configs/ /milvus/configs/
 COPY --chown=root:root --chmod=774 ./lib/ /milvus/lib/
+
+RUN uv pip install --python python3.12 --system --break-system-packages \
+        /milvus/lib/pyudf/milvus_pyudf_runtime-*.whl && \
+    rm -rf /milvus/lib/pyudf
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
