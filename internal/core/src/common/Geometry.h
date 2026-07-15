@@ -83,6 +83,30 @@ class Geometry {
         geometry_ = geom;
     }
 
+    // Non-throwing WKB parse into this instance. On failure (reader allocation
+    // or unparseable WKB) it leaves this invalid (IsValid() == false) and
+    // returns false, instead of the throwing WKB constructor's AssertInfo.
+    // Mirrors the geometry cache's GetByOffsetUnsafe() == nullptr contract so
+    // exact refinement can `continue` past a corrupt/placeholder row in every
+    // configuration (geometry cache on or off) rather than throwing and failing
+    // the whole query. See PR #50951 review.
+    bool
+    TryParseFromWkb(GEOSContextHandle_t ctx, const void* wkb, size_t size) {
+        if (geometry_ != nullptr) {
+            GEOSGeom_destroy_r(ctx_, geometry_);
+            geometry_ = nullptr;
+        }
+        ctx_ = ctx;
+        GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
+        if (reader == nullptr) {
+            return false;
+        }
+        geometry_ = GEOSWKBReader_read_r(
+            ctx, reader, static_cast<const unsigned char*>(wkb), size);
+        GEOSWKBReader_destroy_r(ctx, reader);
+        return geometry_ != nullptr;
+    }
+
     // Copy assignment (deep clone). Releases any geometry this instance
     // already owns before taking a clone of `other`, so the two instances
     // never share a raw GEOSGeometry* (which would double-free on

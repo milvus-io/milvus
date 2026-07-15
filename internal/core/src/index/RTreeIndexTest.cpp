@@ -549,8 +549,12 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
 
     rtree.Build(build_cfg);
 
-    // expect: 3 geometries (0, 2, 4) are valid and parsable, 1st geometry is marked null and skipped, 3rd geometry is bad WKB and skipped
-    ASSERT_EQ(rtree.Count(), 4);
+    // All 5 rows are indexed. The bad-WKB row (index 3) is NOT dropped: like the
+    // growing add_geometry path, bulk_load now indexes it with a placeholder MBR
+    // so the index row count stays in lockstep with the segment rows, and exact
+    // refinement tolerates the placeholder (Geometry::TryParseFromWkb -> skip) in
+    // every configuration. See PR #50951 review.
+    ASSERT_EQ(rtree.Count(), 5);
 
     // upload -> load back and verify consistency
     auto stats = rtree.UploadUnified({});
@@ -566,7 +570,7 @@ TEST_F(RTreeIndexTest, Build_BulkLoad_Nulls_And_BadWKB) {
 
     milvus::tracer::TraceContext trace_ctx;
     rtree_load.LoadUnified(cfg);
-    ASSERT_EQ(rtree_load.Count(), 4);
+    ASSERT_EQ(rtree_load.Count(), 5);
 }
 
 TEST_F(RTreeIndexTest, LoadSlicedNullOffsets) {
@@ -903,6 +907,122 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
 
     // Clean up any remaining index files
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS filtering test");
+}
+
+// Regression for PR #50951 review (RTreeIndexWrapper:212): an unparseable-WKB
+// row is indexed with a placeholder MBR at the origin (never dropped), so an
+// origin-covering query selects it as a coarse candidate. Exact refinement must
+// then tolerate the corrupt WKB instead of throwing. With the geometry cache
+// OFF (the default), refinement re-parses the raw WKB, so before the fix the
+// throwing Geometry(ctx, wkb) ctor failed the ENTIRE query; now
+// Geometry::TryParseFromWkb skips the row. Drives EvalForIndexSegment, which is
+// exactly what stayed green before (the empty/unparseable index tests only
+// check Count(), never a query over such a row).
+TEST_F(RTreeIndexTest, GIS_Index_Refine_ToleratesUnparseableCandidate) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_id);
+
+    const int N = 40;
+    const int kBad = 7;  // the one unparseable row
+    auto full_ds = DataGen(schema, N);
+    auto sealed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    // Every row is POINT(0 0) (so a valid row intersects the origin), except
+    // kBad which is a truncated -- unparseable -- WKB. The placeholder MBR the
+    // index assigns kBad is also the origin, so the origin query below pulls it
+    // into the candidate set and forces refinement to re-parse its raw bytes.
+    std::vector<std::string> wkbs;
+    wkbs.reserve(N);
+    auto ctx = GEOS_init_r();
+    std::string origin_wkb =
+        milvus::Geometry(ctx, "POINT(0 0)").to_wkb_string();
+    GEOS_finish_r(ctx);
+    for (int i = 0; i < N; ++i) {
+        if (i == kBad) {
+            std::string bad = origin_wkb;
+            bad.resize(bad.size() / 2);  // truncate -> unparseable
+            wkbs.emplace_back(std::move(bad));
+        } else {
+            wkbs.emplace_back(origin_wkb);
+        }
+    }
+
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         false);
+    geo_field_data->FillFieldData(wkbs.data(), wkbs.size());
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+    sealed->LoadFieldData(load_info);
+
+    // Distinct field/index ids so the index build temp dir (derived from
+    // collection_partition_segment_field) does not collide with the leftovers
+    // of GIS_Index_Exact_Filtering, which reuses the fixture's {1,1,1,100}.
+    milvus::storage::FieldDataMeta bad_field_meta{1, 1, 1, 300};
+    bad_field_meta.field_schema.set_data_type(
+        ::milvus::proto::schema::DataType::Geometry);
+    milvus::storage::IndexMeta bad_index_meta{1, 300, 1, 1};
+    auto remote_file = (temp_path_.get() / "rtree_bad_refine.parquet").string();
+    WriteGeometryInsertFile(chunk_manager_, bad_field_meta, remote_file, wkbs);
+    milvus::storage::FileManagerContext fm_ctx(
+        bad_field_meta, bad_index_meta, chunk_manager_, fs_);
+    auto rtree_index =
+        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
+    nlohmann::json build_cfg;
+    build_cfg["insert_files"] = std::vector<std::string>{remote_file};
+    build_cfg["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    rtree_index->Build(build_cfg);
+    auto stats = rtree_index->UploadUnified({});
+
+    milvus::segcore::LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = 1;
+    info.field_id = geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema = proto::schema::FieldSchema();
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.index_params["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    nlohmann::json cfg_load;
+    cfg_load["index_files"] = stats->GetIndexFiles();
+    rtree_index->LoadUnified(cfg_load);
+    info.cache_index =
+        CreateTestCacheIndex("rtree_bad_refine_key", std::move(rtree_index));
+    sealed->LoadIndex(info);
+
+    // Origin-covering intersects query: must NOT throw, must select every valid
+    // origin point and skip the unparseable row.
+    auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+        milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        "POINT(0 0)");
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gis_expr);
+    BitsetType bits;
+    ASSERT_NO_THROW(
+        { bits = ExecuteQueryExpr(plan, sealed.get(), N, MAX_TIMESTAMP); });
+    ASSERT_EQ(bits.size(), static_cast<size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(bool(bits[i]), i != kBad) << "row " << i;
+    }
+
+    sealed.reset();
+    CleanupIndexFiles(stats->GetIndexFiles(), "GIS bad-refine test");
 }
 
 // Exercises the growing-segment path where a single writer keeps inserting
