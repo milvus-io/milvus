@@ -209,9 +209,11 @@ FormatRuntimeFieldIds(
     return fmt::format("{}", ids);
 }
 
-static MmapChunkWritebackConfig
-CreateMmapChunkWritebackConfig(const storage::MmapConfig& mmap_config) {
-    return {mmap_config.GetMmapWriteback()};
+static MmapChunkWritebackMode
+CreateMmapChunkWritebackMode(const storage::MmapConfig& mmap_config) {
+    return mmap_config.GetMmapWriteback()
+               ? MmapChunkWritebackMode::FdatasyncOnFinish
+               : MmapChunkWritebackMode::Disabled;
 }
 
 static void
@@ -2564,7 +2566,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     ArrowSchemaPtr arrow_schema = schema_snapshot->ConvertToArrowSchema();
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-    auto writeback_config = CreateMmapChunkWritebackConfig(mmap_config);
+    auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
 
     for (auto& [id, info] : load_info.field_infos) {
         AssertInfo(info.row_count > 0,
@@ -2667,7 +2669,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 milvus_field_ids.size(),
                 load_info.load_priority,
                 warmup_policy,
-                writeback_config);
+                writeback_mode);
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -2920,7 +2922,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
     SCOPE_CGO_CALL_METRIC();
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-    auto writeback_config = CreateMmapChunkWritebackConfig(mmap_config);
+    auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     auto visible_runtime_owner =
@@ -3004,7 +3006,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     mmap_config.GetMmapPopulate(),
                     load_info.load_priority,
                     warmup_policy,
-                    writeback_config);
+                    writeback_mode);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -7713,7 +7715,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
         schema_snapshot->MmapEnabled(field_id);
     auto is_vector = IsVectorDataType(field_meta.get_data_type());
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-    auto writeback_config = CreateMmapChunkWritebackConfig(mmap_config);
+    auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     bool use_mmap = field_has_setting ? field_mmap_enabled : global_use_mmap;
@@ -7739,7 +7741,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
             use_mmap,
             mmap_config.GetMmapPopulate(),
             warmup_policy,
-            writeback_config);
+            writeback_mode);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     auto column = MakeChunkedColumnBase(data_type, std::move(slot), field_meta);
@@ -8280,7 +8282,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-    auto writeback_config = CreateMmapChunkWritebackConfig(mmap_config);
+    auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
@@ -8356,7 +8358,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             cache_key_suffix,
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
-            writeback_config,
+            writeback_mode,
             storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -8440,7 +8442,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-    auto writeback_config = CreateMmapChunkWritebackConfig(mmap_config);
+    auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
@@ -8505,7 +8507,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
             std::move(column_size_estimate),
-            writeback_config,
+            writeback_mode,
             storagev2translator::StorageV2AsyncLoadEnabled());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));

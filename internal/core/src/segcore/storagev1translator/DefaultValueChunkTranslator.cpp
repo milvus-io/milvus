@@ -41,14 +41,14 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     bool use_mmap,
     bool mmap_populate,
     const std::string& warmup_policy,
-    MmapChunkWritebackConfig writeback_config)
+    MmapChunkWritebackMode writeback_mode)
     : total_rows_(field_data_info.row_count),
       segment_id_(segment_id),
       key_(
           fmt::format("seg_{}_f_{}_def", segment_id, field_data_info.field_id)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
-      writeback_config_(writeback_config),
+      writeback_mode_(writeback_mode),
       mmap_dir_path_(field_data_info.mmap_dir_path),
       field_meta_(field_meta),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -288,7 +288,7 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
                                            mmap_populate_,
                                            filepath.string(),
                                            proto::common::LoadPriority::HIGH,
-                                           writeback_config_);
+                                           writeback_mode_);
     }
 }
 
