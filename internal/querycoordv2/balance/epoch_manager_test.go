@@ -19,6 +19,7 @@ package balance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	pkgmetrics "github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1671,94 +1673,1087 @@ func TestEpochManagerDeadlineAfterRejectedAdmissionWinsOrdinaryFailure(t *testin
 	require.Equal(t, 1, result.Rejected[task.BalanceAdmissionDuplicate])
 }
 
-func TestEpochManagerStaticTargetConvergesWithProductionPolicy(t *testing.T) {
-	fixture := newPlacementSnapshotFixture(t)
-	fixture.targetState.mu.Lock()
-	fixture.targetState.currentSegments[100] = map[int64]*datapb.SegmentInfo{
-		101: {ID: 101, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-		103: {ID: 103, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-		104: {ID: 104, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-		105: {ID: 105, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-	}
-	fixture.targetState.nextSegments[100] = map[int64]*datapb.SegmentInfo{
-		101: {ID: 101, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-		103: {ID: 103, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-		104: {ID: 104, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-		105: {ID: 105, CollectionID: 100, PartitionID: 10, InsertChannel: "channel-a", NumOfRows: 10},
-	}
-	fixture.targetState.mu.Unlock()
-	node1Segments := []*meta.Segment{fixture.node1Segments[1]}
-	for _, segmentID := range []int64{101, 103, 104, 105} {
-		node1Segments = append(node1Segments, &meta.Segment{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID: segmentID, CollectionID: 100, PartitionID: 10,
-				InsertChannel: "channel-a", NumOfRows: 10,
-			},
-			Node: 1, Version: segmentID,
-		})
-	}
-	fixture.dist.PublishNodeDistribution(1, node1Segments, fixture.node1Channels)
-	fixture.dist.PublishNodeDistribution(3, nil, nil)
+type balanceEpochRecordedMove struct {
+	epoch      task.BalanceEpochMeta
+	object     BalanceObjectKey
+	collection int64
+	from       int64
+	to         int64
+}
 
-	admitter := &epochManagerAdmitter{}
+func (move balanceEpochRecordedMove) String() string {
+	return fmt.Sprintf(
+		"epoch=%d replica=%d object=%v collection=%d %d->%d",
+		move.epoch.Sequence,
+		move.object.ReplicaID,
+		move.object,
+		move.collection,
+		move.from,
+		move.to,
+	)
+}
+
+type balanceEpochPotentialSample struct {
+	epoch    uint64
+	planned  int
+	admitted int
+	before   float64
+	prefix   []float64
+	after    float64
+}
+
+func (sample balanceEpochPotentialSample) String() string {
+	return fmt.Sprintf(
+		"epoch=%d planned=%d admitted=%d potential=%.6f prefix=%v ->%.6f",
+		sample.epoch,
+		sample.planned,
+		sample.admitted,
+		sample.before,
+		sample.prefix,
+		sample.after,
+	)
+}
+
+type balanceEpochAdmissionGate struct {
+	entered chan struct{}
+	release chan struct{}
+	reason  task.BalanceAdmissionReason
+	fired   bool
+}
+
+type balanceEpochRecordingAdmitter struct {
+	mu sync.Mutex
+
+	nextID          int64
+	revision        uint64
+	rgRevisions     map[string]uint64
+	epochRevisions  map[task.BalanceEpochMeta]uint64
+	pending         map[int64]task.Task
+	accepted        []task.Task
+	moves           []balanceEpochRecordedMove
+	concurrent      []BalanceObjectKey
+	gates           map[string]*balanceEpochAdmissionGate
+	pendingByObject map[BalanceObjectKey]int64
+}
+
+func newBalanceEpochRecordingAdmitter() *balanceEpochRecordingAdmitter {
+	return &balanceEpochRecordingAdmitter{
+		rgRevisions:     make(map[string]uint64),
+		epochRevisions:  make(map[task.BalanceEpochMeta]uint64),
+		pending:         make(map[int64]task.Task),
+		gates:           make(map[string]*balanceEpochAdmissionGate),
+		pendingByObject: make(map[BalanceObjectKey]int64),
+	}
+}
+
+func (admitter *balanceEpochRecordingAdmitter) blockNext(
+	resourceGroup string,
+	reason task.BalanceAdmissionReason,
+) (<-chan struct{}, func()) {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	gate := &balanceEpochAdmissionGate{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+		reason:  reason,
+	}
+	admitter.gates[resourceGroup] = gate
+	var once sync.Once
+	return gate.entered, func() { once.Do(func() { close(gate.release) }) }
+}
+
+func (admitter *balanceEpochRecordingAdmitter) AdmitBalanceTaskAtPendingRevision(
+	balanceTask task.Task,
+	expected task.BalancePendingRevision,
+	validate task.BalanceAdmissionValidator,
+) task.BalanceAdmissionResult {
+	if reason := validate(); reason != task.BalanceAdmissionAccepted {
+		err := errors.New(reason.String())
+		balanceTask.Cancel(err)
+		return task.BalanceAdmissionResult{Reason: reason, Err: err, PendingRevision: expected}
+	}
+	if reason := validate(); reason != task.BalanceAdmissionAccepted {
+		err := errors.New(reason.String())
+		balanceTask.Cancel(err)
+		return task.BalanceAdmissionResult{Reason: reason, Err: err, PendingRevision: expected}
+	}
+
+	admitter.mu.Lock()
+	current := admitter.pendingRevisionLocked(expected.ResourceGroup, expected.Epoch)
+	if current.EffectiveRevision() != expected.EffectiveRevision() {
+		admitter.mu.Unlock()
+		err := errors.New(task.BalanceAdmissionStaleEpoch.String())
+		balanceTask.Cancel(err)
+		return task.BalanceAdmissionResult{
+			Reason: task.BalanceAdmissionStaleEpoch, Err: err, PendingRevision: current,
+		}
+	}
+	gate := admitter.gates[expected.ResourceGroup]
+	if gate != nil && !gate.fired {
+		gate.fired = true
+		admitter.mu.Unlock()
+		close(gate.entered)
+		<-gate.release
+		err := errors.New(gate.reason.String())
+		balanceTask.Cancel(err)
+		return task.BalanceAdmissionResult{Reason: gate.reason, Err: err, PendingRevision: expected}
+	}
+
+	object, move := recordedBalanceEpochMove(balanceTask)
+	if _, exists := admitter.pendingByObject[object]; exists {
+		admitter.concurrent = append(admitter.concurrent, object)
+		admitter.mu.Unlock()
+		err := errors.New(task.BalanceAdmissionDuplicate.String())
+		balanceTask.Cancel(err)
+		return task.BalanceAdmissionResult{Reason: task.BalanceAdmissionDuplicate, Err: err, PendingRevision: current}
+	}
+
+	admitter.nextID++
+	balanceTask.SetID(admitter.nextID)
+	move.epoch = balanceTask.BalanceEpoch()
+	admitter.pending[balanceTask.ID()] = balanceTask
+	admitter.pendingByObject[object] = balanceTask.ID()
+	admitter.accepted = append(admitter.accepted, balanceTask)
+	admitter.moves = append(admitter.moves, move)
+	admitter.revision++
+	admitter.rgRevisions[expected.ResourceGroup]++
+	admitter.epochRevisions[expected.Epoch]++
+	current = admitter.pendingRevisionLocked(expected.ResourceGroup, expected.Epoch)
+	admitter.mu.Unlock()
+
+	return task.BalanceAdmissionResult{
+		TaskID: balanceTask.ID(), Reason: task.BalanceAdmissionAccepted, PendingRevision: current,
+	}
+}
+
+func (admitter *balanceEpochRecordingAdmitter) pendingRevisionLocked(
+	resourceGroup string,
+	epoch task.BalanceEpochMeta,
+) task.BalancePendingRevision {
+	return task.BalancePendingRevision{
+		ResourceGroup: resourceGroup,
+		Epoch:         epoch,
+		Revision:      admitter.rgRevisions[resourceGroup],
+		EpochRevision: admitter.epochRevisions[epoch],
+	}
+}
+
+func (admitter *balanceEpochRecordingAdmitter) GetPendingBalanceTasks() task.PendingBalanceSnapshot {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	rgRevisions := make(map[string]uint64, len(admitter.rgRevisions))
+	for resourceGroup, revision := range admitter.rgRevisions {
+		rgRevisions[resourceGroup] = revision
+	}
+	epochRevisions := make(map[task.BalanceEpochMeta]uint64, len(admitter.epochRevisions))
+	for epoch, revision := range admitter.epochRevisions {
+		epochRevisions[epoch] = revision
+	}
+	tasks := make([]task.PendingBalanceTaskSnapshot, 0, len(admitter.pending))
+	for _, pending := range admitter.pending {
+		tasks = append(tasks, snapshotBalanceEpochTask(pending))
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].TaskID < tasks[j].TaskID })
+	return task.PendingBalanceSnapshot{
+		Revision:               admitter.revision,
+		ResourceGroupRevisions: rgRevisions,
+		EpochRevisions:         epochRevisions,
+		Tasks:                  tasks,
+	}
+}
+
+func (admitter *balanceEpochRecordingAdmitter) tasksForEpoch(epoch task.BalanceEpochMeta) []task.Task {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	tasks := make([]task.Task, 0)
+	for _, accepted := range admitter.accepted {
+		if accepted.BalanceEpoch() == epoch {
+			tasks = append(tasks, accepted)
+		}
+	}
+	return tasks
+}
+
+func (admitter *balanceEpochRecordingAdmitter) acceptedTasks() []task.Task {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	return append([]task.Task(nil), admitter.accepted...)
+}
+
+func (admitter *balanceEpochRecordingAdmitter) recordedMoves() []balanceEpochRecordedMove {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	return append([]balanceEpochRecordedMove(nil), admitter.moves...)
+}
+
+func (admitter *balanceEpochRecordingAdmitter) concurrentObjects() []BalanceObjectKey {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	return append([]BalanceObjectKey(nil), admitter.concurrent...)
+}
+
+func (admitter *balanceEpochRecordingAdmitter) remove(balanceTask task.Task) {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	if _, ok := admitter.pending[balanceTask.ID()]; !ok {
+		return
+	}
+	delete(admitter.pending, balanceTask.ID())
+	object, _ := recordedBalanceEpochMove(balanceTask)
+	delete(admitter.pendingByObject, object)
+	admitter.revision++
+	resourceGroup := balanceTask.ResourceGroup()
+	admitter.rgRevisions[resourceGroup]++
+	epoch := balanceTask.BalanceEpoch()
+	for _, pending := range admitter.pending {
+		if pending.BalanceEpoch() == epoch {
+			return
+		}
+	}
+	delete(admitter.epochRevisions, epoch)
+}
+
+func (admitter *balanceEpochRecordingAdmitter) pendingNodeCounts() map[int64]int {
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	counts := make(map[int64]int)
+	for _, pending := range admitter.pending {
+		seen := make(map[int64]struct{})
+		for _, action := range pending.Actions() {
+			seen[action.Node()] = struct{}{}
+		}
+		for nodeID := range seen {
+			counts[nodeID]++
+		}
+	}
+	return counts
+}
+
+func snapshotBalanceEpochTask(balanceTask task.Task) task.PendingBalanceTaskSnapshot {
+	snapshot := task.PendingBalanceTaskSnapshot{
+		TaskID:        balanceTask.ID(),
+		CollectionID:  balanceTask.CollectionID(),
+		ReplicaID:     balanceTask.ReplicaID(),
+		ResourceGroup: balanceTask.ResourceGroup(),
+		Epoch:         balanceTask.BalanceEpoch(),
+		Status:        balanceTask.Status(),
+		Actions:       make([]task.PendingBalanceActionSnapshot, 0, len(balanceTask.Actions())),
+	}
+	for _, action := range balanceTask.Actions() {
+		primitive := task.PendingBalanceActionSnapshot{
+			NodeID: action.Node(), Type: action.Type(), Workload: action.WorkLoadEffect(),
+		}
+		switch action := action.(type) {
+		case *task.SegmentAction:
+			primitive.SegmentID = action.GetSegmentID()
+			primitive.Shard = action.GetShard()
+			primitive.Scope = action.GetScope()
+		case *task.ChannelAction:
+			primitive.Channel = action.ChannelName()
+			primitive.Shard = action.GetShard()
+		}
+		snapshot.Actions = append(snapshot.Actions, primitive)
+	}
+	return snapshot
+}
+
+func recordedBalanceEpochMove(balanceTask task.Task) (BalanceObjectKey, balanceEpochRecordedMove) {
+	move := balanceEpochRecordedMove{
+		collection: balanceTask.CollectionID(),
+	}
+	for _, action := range balanceTask.Actions() {
+		switch action.Type() {
+		case task.ActionTypeGrow:
+			move.to = action.Node()
+		case task.ActionTypeReduce:
+			move.from = action.Node()
+		}
+	}
+	switch typed := balanceTask.(type) {
+	case *task.SegmentTask:
+		scope := querypb.DataScope_Historical
+		for _, action := range balanceTask.Actions() {
+			if segmentAction, ok := action.(*task.SegmentAction); ok {
+				scope = segmentAction.GetScope()
+				break
+			}
+		}
+		move.object = BalanceObjectKey{
+			Kind: BalanceObjectSegment, ReplicaID: balanceTask.ReplicaID(),
+			SegmentID: typed.SegmentID(), Scope: scope,
+		}
+	case *task.ChannelTask:
+		move.object = BalanceObjectKey{
+			Kind: BalanceObjectChannel, ReplicaID: balanceTask.ReplicaID(), Channel: typed.Channel(),
+		}
+	}
+	return move.object, move
+}
+
+type balanceEpochSegmentSpec struct {
+	id           int64
+	collectionID int64
+	partitionID  int64
+	channel      string
+	rows         int64
+}
+
+type balanceEpochScenario struct {
+	placement *placementSnapshotFixture
+	admitter  *balanceEpochRecordingAdmitter
+	clock     *epochManagerClock
+	policy    EpochBalancePolicy
+	manager   *BalanceEpochManager
+}
+
+func newBalanceEpochScenario(t *testing.T) *balanceEpochScenario {
+	t.Helper()
+	placement := newPlacementSnapshotFixture(t)
+	placement.nodes.Get(1).UpdateStats(session.WithMemCapacity(1024))
+	placement.nodes.Get(3).UpdateStats(session.WithMemCapacity(1024))
+	admitter := newBalanceEpochRecordingAdmitter()
 	clock := newEpochManagerClock()
 	policy := newScoreEpochPolicy(false)
 	manager := NewBalanceEpochManager(
-		fixture.meta,
-		fixture.dist,
-		fixture.target,
-		fixture.nodes,
+		placement.meta,
+		placement.dist,
+		placement.target,
+		placement.nodes,
 		nil,
 		admitter,
 		admitter,
 		task.WrapIDSource(6),
 		func(string, EpochPolicyConfig) (EpochBalancePolicy, bool) { return policy, true },
 		WithEpochClock(clock.Now),
-		WithLeaderTerm(99),
+		WithLeaderTerm(51244),
 	)
+	return &balanceEpochScenario{
+		placement: placement,
+		admitter:  admitter,
+		clock:     clock,
+		policy:    policy,
+		manager:   manager,
+	}
+}
+
+func balanceEpochSegments(collectionID, firstID int64, rows ...int64) []balanceEpochSegmentSpec {
+	channel := "channel-a"
+	partitionID := int64(10)
+	if collectionID == 200 {
+		channel = "channel-b"
+		partitionID = 20
+	}
+	segments := make([]balanceEpochSegmentSpec, 0, len(rows))
+	for index, rowCount := range rows {
+		segments = append(segments, balanceEpochSegmentSpec{
+			id: firstID + int64(index), collectionID: collectionID,
+			partitionID: partitionID, channel: channel, rows: rowCount,
+		})
+	}
+	return segments
+}
+
+func (scenario *balanceEpochScenario) setSegments(specs ...balanceEpochSegmentSpec) {
+	byCollection := make(map[int64]map[int64]*datapb.SegmentInfo)
+	segments := make([]*meta.Segment, 0, len(specs))
+	for _, spec := range specs {
+		info := &datapb.SegmentInfo{
+			ID: spec.id, CollectionID: spec.collectionID, PartitionID: spec.partitionID,
+			InsertChannel: spec.channel, NumOfRows: spec.rows,
+		}
+		if byCollection[spec.collectionID] == nil {
+			byCollection[spec.collectionID] = make(map[int64]*datapb.SegmentInfo)
+		}
+		byCollection[spec.collectionID][spec.id] = info
+		segments = append(segments, &meta.Segment{SegmentInfo: info, Node: 1, Version: 1000 + spec.id})
+	}
+
+	scenario.placement.targetState.mu.Lock()
+	for collectionID, targets := range byCollection {
+		current := make(map[int64]*datapb.SegmentInfo, len(targets))
+		next := make(map[int64]*datapb.SegmentInfo, len(targets))
+		for segmentID, info := range targets {
+			current[segmentID] = info
+			next[segmentID] = info
+		}
+		scenario.placement.targetState.currentSegments[collectionID] = current
+		scenario.placement.targetState.nextSegments[collectionID] = next
+	}
+	scenario.placement.targetState.mu.Unlock()
+	scenario.placement.dist.PublishNodeDistribution(1, segments, scenario.placement.node1Channels)
+	scenario.placement.dist.PublishNodeDistribution(3, nil, nil)
+}
+
+func (scenario *balanceEpochScenario) setChannels(channelsByCollection map[int64][]string) {
+	channels := make([]*meta.DmChannel, 0)
+	scenario.placement.targetState.mu.Lock()
+	for collectionID, names := range channelsByCollection {
+		current := make(map[string]*meta.DmChannel, len(names))
+		next := make(map[string]*meta.DmChannel, len(names))
+		for _, name := range names {
+			target := &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}}
+			current[name] = target
+			next[name] = target
+			version := scenario.placement.targetState.currentVersion[collectionID]
+			channels = append(channels, &meta.DmChannel{
+				VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name},
+				Version:      version + int64(len(channels)) + 1,
+				View: &meta.LeaderView{
+					ID: 1, CollectionID: collectionID, Channel: name,
+					Version: version + int64(len(channels)) + 1, TargetVersion: version,
+					Status: &querypb.LeaderViewStatus{Serviceable: true},
+				},
+			})
+		}
+		scenario.placement.targetState.currentChannels[collectionID] = current
+		scenario.placement.targetState.nextChannels[collectionID] = next
+	}
+	scenario.placement.targetState.mu.Unlock()
+
+	captured := scenario.placement.dist.Capture()
+	segmentsByNode, _ := primitiveBalanceEpochDistribution(captured)
+	scenario.placement.dist.PublishNodeDistribution(1, segmentsByNode[1], channels)
+	scenario.placement.dist.PublishNodeDistribution(3, segmentsByNode[3], nil)
+}
+
+func (scenario *balanceEpochScenario) publishGrow(balanceTask task.Task) {
+	_, move := recordedBalanceEpochMove(balanceTask)
+	captured := scenario.placement.dist.Capture()
+	switch move.object.Kind {
+	case BalanceObjectSegment:
+		var source *meta.SegmentSnapshotRecord
+		for index := range captured.Segments {
+			record := &captured.Segments[index]
+			if record.CollectionID == move.collection && record.SegmentID == move.object.SegmentID &&
+				record.Scope == move.object.Scope && record.NodeID == move.from {
+				source = record
+				break
+			}
+		}
+		if source == nil {
+			panic(fmt.Sprintf("source segment missing for %s", move))
+		}
+		for _, record := range captured.Segments {
+			if record.CollectionID == move.collection && record.SegmentID == move.object.SegmentID &&
+				record.Scope == move.object.Scope && record.NodeID == move.to {
+				return
+			}
+		}
+		target := *source
+		target.NodeID = move.to
+		target.Version++
+		captured.Segments = append(captured.Segments, target)
+	case BalanceObjectChannel:
+		var source *meta.ChannelSnapshotRecord
+		for index := range captured.Channels {
+			record := &captured.Channels[index]
+			if record.CollectionID == move.collection && record.Channel == move.object.Channel && record.NodeID == move.from {
+				source = record
+				break
+			}
+		}
+		if source == nil {
+			panic(fmt.Sprintf("source channel missing for %s", move))
+		}
+		for _, record := range captured.Channels {
+			if record.CollectionID == move.collection && record.Channel == move.object.Channel && record.NodeID == move.to {
+				return
+			}
+		}
+		target := *source
+		target.NodeID = move.to
+		target.Version++
+		target.Serviceable = true
+		target.LeaderID = move.to
+		target.LeaderVersion++
+		target.LeaderTargetVersion = scenario.frozenCurrentTargetVersion(balanceTask)
+		captured.Channels = append(captured.Channels, target)
+	}
+	scenario.publish(captured)
+}
+
+func (scenario *balanceEpochScenario) frozenCurrentTargetVersion(balanceTask task.Task) int64 {
+	runtime := scenario.manager.runtime(balanceTask.ResourceGroup())
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.active == nil {
+		panic(fmt.Sprintf("active epoch missing for task %d", balanceTask.ID()))
+	}
+	work := runtime.active.admitted[balanceTask.ID()]
+	if work == nil {
+		for _, carried := range runtime.carryOver {
+			if carried.task != nil && carried.task.ID() == balanceTask.ID() {
+				work = carried
+				break
+			}
+		}
+	}
+	if work == nil {
+		panic(fmt.Sprintf("admitted work missing for task %d", balanceTask.ID()))
+	}
+	return work.plan.Token.Snapshot.CurrentTargetVersion[balanceTask.CollectionID()]
+}
+
+func (scenario *balanceEpochScenario) publishReduce(balanceTask task.Task) {
+	_, move := recordedBalanceEpochMove(balanceTask)
+	captured := scenario.placement.dist.Capture()
+	switch move.object.Kind {
+	case BalanceObjectSegment:
+		segments := captured.Segments[:0]
+		for _, record := range captured.Segments {
+			if record.CollectionID == move.collection && record.SegmentID == move.object.SegmentID &&
+				record.Scope == move.object.Scope && record.NodeID == move.from {
+				continue
+			}
+			segments = append(segments, record)
+		}
+		captured.Segments = segments
+	case BalanceObjectChannel:
+		channels := captured.Channels[:0]
+		for _, record := range captured.Channels {
+			if record.CollectionID == move.collection && record.Channel == move.object.Channel && record.NodeID == move.from {
+				continue
+			}
+			channels = append(channels, record)
+		}
+		captured.Channels = channels
+	}
+	scenario.publish(captured)
+}
+
+func (scenario *balanceEpochScenario) publish(captured meta.DistributionSnapshot) {
+	segmentsByNode, channelsByNode := primitiveBalanceEpochDistribution(captured)
+	for _, nodeID := range []int64{1, 3} {
+		scenario.placement.dist.PublishNodeDistribution(nodeID, segmentsByNode[nodeID], channelsByNode[nodeID])
+	}
+}
+
+func primitiveBalanceEpochDistribution(
+	captured meta.DistributionSnapshot,
+) (map[int64][]*meta.Segment, map[int64][]*meta.DmChannel) {
+	segmentsByNode := make(map[int64][]*meta.Segment)
+	for _, record := range captured.Segments {
+		if record.NodeID != 1 && record.NodeID != 3 {
+			continue
+		}
+		segmentsByNode[record.NodeID] = append(segmentsByNode[record.NodeID], &meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID: record.SegmentID, CollectionID: record.CollectionID, PartitionID: record.PartitionID,
+				InsertChannel: record.Channel, NumOfRows: record.RowCount,
+			},
+			Node: record.NodeID, Version: record.Version,
+		})
+	}
+	channelsByNode := make(map[int64][]*meta.DmChannel)
+	for _, record := range captured.Channels {
+		if record.NodeID != 1 && record.NodeID != 3 {
+			continue
+		}
+		growing := make(map[int64]*meta.Segment, len(record.GrowingSegments))
+		for _, segment := range record.GrowingSegments {
+			growing[segment.SegmentID] = &meta.Segment{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID: segment.SegmentID, CollectionID: record.CollectionID,
+					InsertChannel: record.Channel, NumOfRows: segment.RowCount,
+				},
+				Node: segment.NodeID,
+			}
+		}
+		channelsByNode[record.NodeID] = append(channelsByNode[record.NodeID], &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: record.CollectionID, ChannelName: record.Channel},
+			Version:      record.Version,
+			View: &meta.LeaderView{
+				ID: record.LeaderID, CollectionID: record.CollectionID, Channel: record.Channel,
+				Version: record.LeaderVersion, TargetVersion: record.LeaderTargetVersion,
+				Status:          &querypb.LeaderViewStatus{Serviceable: record.Serviceable},
+				GrowingSegments: growing,
+			},
+		})
+	}
+	return segmentsByNode, channelsByNode
+}
+
+func (scenario *balanceEpochScenario) complete(balanceTask task.Task) {
+	scenario.publishGrow(balanceTask)
+	scenario.publishReduce(balanceTask)
+	balanceTask.SetStatus(task.TaskStatusSucceeded)
+	scenario.admitter.remove(balanceTask)
+}
+
+func (scenario *balanceEpochScenario) failGrow(balanceTask task.Task, err error) {
+	balanceTask.Fail(err)
+	scenario.admitter.remove(balanceTask)
+}
+
+func (scenario *balanceEpochScenario) failReduce(balanceTask task.Task, err error) {
+	scenario.publishGrow(balanceTask)
+	balanceTask.Fail(err)
+	scenario.admitter.remove(balanceTask)
+}
+
+func requireBalanceEpochTaskBudgets(
+	t *testing.T,
+	tasks []task.Task,
+	budget BalanceWaveBudget,
+) {
+	t.Helper()
+	segments := 0
+	channels := 0
+	collections := make(map[int64]int)
+	nodes := make(map[int64]int)
+	for _, balanceTask := range tasks {
+		switch balanceTask.(type) {
+		case *task.SegmentTask:
+			segments++
+		case *task.ChannelTask:
+			channels++
+		}
+		collections[balanceTask.CollectionID()]++
+		seen := make(map[int64]struct{})
+		for _, action := range balanceTask.Actions() {
+			seen[action.Node()] = struct{}{}
+		}
+		for nodeID := range seen {
+			nodes[nodeID]++
+		}
+	}
+	require.LessOrEqual(t, segments, budget.MaxSegmentTasks)
+	require.LessOrEqual(t, channels, budget.MaxChannelTasks)
+	for collectionID, count := range collections {
+		require.LessOrEqual(t, count, budget.MaxTasksPerCollection, "collection %d", collectionID)
+	}
+	for nodeID, count := range nodes {
+		require.LessOrEqual(t, count, budget.MaxTasksPerNode, "node %d", nodeID)
+	}
+}
+
+func requireBalanceEpochNoReverseMoves(t *testing.T, moves []balanceEpochRecordedMove) {
+	t.Helper()
+	last := make(map[BalanceObjectKey]balanceEpochRecordedMove)
+	for _, move := range moves {
+		if previous, ok := last[move.object]; ok {
+			require.Falsef(
+				t,
+				previous.from == move.to && previous.to == move.from,
+				"reverse cycle: %s then %s; sequence=%v",
+				previous,
+				move,
+				moves,
+			)
+		}
+		last[move.object] = move
+	}
+}
+
+func requireBalanceEpochPlacement(
+	t *testing.T,
+	scenario *balanceEpochScenario,
+	balanceTask task.Task,
+	sourcePresent bool,
+	targetPresent bool,
+) {
+	t.Helper()
+	_, move := recordedBalanceEpochMove(balanceTask)
+	observation := observeWork(&admittedWork{
+		plan: EpochPlan{
+			Kind: func() PlanKind {
+				if move.object.Kind == BalanceObjectChannel {
+					return PlanKindChannel
+				}
+				return PlanKindSegment
+			}(),
+			CollectionID: move.collection,
+			ReplicaID:    move.object.ReplicaID,
+			SegmentID:    move.object.SegmentID,
+			Channel:      move.object.Channel,
+			Scope:        move.object.Scope,
+			From:         move.from,
+			To:           move.to,
+			Token: AdmissionToken{Snapshot: SnapshotToken{CurrentTargetVersion: map[int64]int64{
+				move.collection: scenario.frozenCurrentTargetVersion(balanceTask),
+			}}},
+		},
+		task: balanceTask,
+	}, scenario.placement.dist.Capture())
+	require.Equal(t, sourcePresent, observation.sourcePresent, move.String())
+	require.Equal(t, targetPresent, observation.targetPresent, move.String())
+	if move.object.Kind == BalanceObjectChannel && targetPresent {
+		require.True(t, observation.targetReady, move.String())
+	}
+}
+
+func totalBalanceEpochRejections(rejected map[task.BalanceAdmissionReason]int) int {
+	total := 0
+	for _, count := range rejected {
+		total += count
+	}
+	return total
+}
+
+func balanceEpochPotentialForResult(
+	t *testing.T,
+	manager *BalanceEpochManager,
+	result EpochAdvanceResult,
+) balanceEpochPotentialSample {
+	t.Helper()
+	sample := balanceEpochPotentialSample{
+		epoch: result.Epoch.Sequence, planned: result.Planned, admitted: result.Admitted,
+		before: result.ObjectiveBefore, after: result.ObjectiveAfter,
+	}
+	if result.Admitted == 0 {
+		return sample
+	}
+	runtime := manager.runtime(result.ResourceGroup)
+	runtime.mu.Lock()
+	active := runtime.active
+	var epoch task.BalanceEpochMeta
+	var prefix []ScorePotential
+	if active != nil {
+		epoch = active.epoch
+		prefix = append([]ScorePotential(nil), active.wave.PrefixAfter...)
+	}
+	runtime.mu.Unlock()
+	require.NotNil(t, active)
+	require.Equal(t, result.Epoch, epoch)
+	require.GreaterOrEqual(t, len(prefix), result.Admitted)
+	for _, potential := range prefix[:result.Admitted] {
+		sample.prefix = append(sample.prefix, potential.Value)
+	}
+
+	previous := sample.before
+	for _, potential := range sample.prefix {
+		require.LessOrEqual(t, potential, previous+1e-9, "%v", sample)
+		previous = potential
+	}
+	require.InDelta(t, previous, sample.after, 1e-9, "%v", sample)
+	return sample
+}
+
+func TestBalanceEpochIssue51244StaticTargetConverges(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	scenario.setSegments(balanceEpochSegments(100, 110, 10, 20, 30, 40, 50, 60, 70, 80)...)
 	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
 	request.PolicyConfig = scorePolicyTestConfig(false)
-	request.Budget.MaxSegmentTasks = 1
+	request.Budget = BalanceWaveBudget{
+		MaxSegmentTasks: 2, MaxChannelTasks: 1,
+		MaxTasksPerNode: 2, MaxTasksPerCollection: 2,
+	}
 
-	admittedByGeneration := make([]int, 0, 4)
-	moves := make(map[int64][2]int64)
-	consumedTasks := 0
-	for generation := 0; generation < 10; generation++ {
-		result := manager.Advance(context.Background(), request)
-		admittedByGeneration = append(admittedByGeneration, result.Admitted)
+	potentials := make([]balanceEpochPotentialSample, 0, 8)
+	converged := false
+	for generation := 0; generation < 12; generation++ {
+		result := scenario.manager.Advance(context.Background(), request)
+		potentials = append(potentials, balanceEpochPotentialForResult(t, scenario.manager, result))
 		if result.Admitted == 0 {
 			require.Equal(t, EpochCompleted, result.State)
 			require.True(t, result.Converged)
-			require.GreaterOrEqual(t, len(admittedByGeneration), 3)
-			for _, admitted := range admittedByGeneration[:len(admittedByGeneration)-1] {
-				require.Equal(t, 1, admitted)
-			}
-			require.Zero(t, admittedByGeneration[len(admittedByGeneration)-1])
-			return
+			require.Zero(t, result.Planned)
+			converged = true
+			break
 		}
 
 		require.Equal(t, EpochExecuting, result.State)
-		require.Equal(t, 1, result.Admitted)
-		accepted := admitter.acceptedTasks()[consumedTasks]
-		consumedTasks++
-		segmentTask := accepted.(*task.SegmentTask)
-		var source, target int64
-		for _, action := range accepted.Actions() {
-			if action.Type() == task.ActionTypeGrow {
-				target = action.Node()
-			} else if action.Type() == task.ActionTypeReduce {
-				source = action.Node()
-			}
+		require.Equal(t, result.Planned, result.Admitted, "rejected suffix in %v", potentials)
+		require.Zero(t, totalBalanceEpochRejections(result.Rejected), "rejected suffix in %v", potentials)
+		require.LessOrEqual(t, result.ObjectiveAfter, result.ObjectiveBefore+1e-9, "%v", potentials)
+		if len(potentials) > 1 {
+			previous := potentials[len(potentials)-2]
+			require.LessOrEqual(t, result.ObjectiveBefore, previous.after+1e-9, "%v", potentials)
 		}
-		if previous, ok := moves[segmentTask.SegmentID()]; ok {
-			require.NotEqual(t, [2]int64{previous[1], previous[0]}, [2]int64{source, target})
+		tasks := scenario.admitter.tasksForEpoch(result.Epoch)
+		require.Len(t, tasks, result.Admitted)
+		requireBalanceEpochTaskBudgets(t, tasks, request.Budget)
+		for _, accepted := range tasks {
+			scenario.complete(accepted)
 		}
-		moves[segmentTask.SegmentID()] = [2]int64{source, target}
-		publishEpochManagerAcceptedSegmentMove(t, fixture, accepted)
-		reconciled := manager.Advance(context.Background(), request)
+		reconciled := scenario.manager.Advance(context.Background(), request)
 		require.Equal(t, EpochCompleted, reconciled.State)
+		require.True(t, reconciled.Terminal)
 	}
-	t.Fatal("static target did not converge within 10 generations")
+	require.True(t, converged, "static target did not converge; potentials=%v moves=%v", potentials, scenario.admitter.recordedMoves())
+	require.NotEmpty(t, scenario.admitter.recordedMoves())
+	require.Empty(t, scenario.admitter.concurrentObjects())
+	requireBalanceEpochNoReverseMoves(t, scenario.admitter.recordedMoves())
+	require.Zero(t, potentials[len(potentials)-1].admitted, "move sequence never reached zero: %v", potentials)
+	t.Logf("#51244 potentials=%v", potentials)
+	t.Logf("#51244 moves=%v", scenario.admitter.recordedMoves())
+}
+
+func TestBalanceEpochDelayedGrowDistributionDoesNotReplanObject(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	scenario.setSegments(balanceEpochSegments(100, 120, 25, 25, 25, 25)...)
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.PolicyConfig = scorePolicyTestConfig(false)
+	request.Budget.MaxSegmentTasks = 1
+	request.Budget.MaxTasksPerCollection = 1
+	request.Budget.MaxTasksPerNode = 1
+
+	started := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	require.Equal(t, 1, started.Admitted)
+	tasks := scenario.admitter.tasksForEpoch(started.Epoch)
+	require.Len(t, tasks, 1)
+	moveCount := len(scenario.admitter.recordedMoves())
+
+	withheld := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, withheld.State)
+	require.Equal(t, started.Epoch, withheld.Epoch)
+	require.Len(t, scenario.admitter.recordedMoves(), moveCount)
+	require.Len(t, scenario.admitter.acceptedTasks(), 1)
+	requireBalanceEpochPlacement(t, scenario, tasks[0], true, false)
+
+	scenario.publishGrow(tasks[0])
+	growObserved := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, growObserved.State)
+	require.Len(t, scenario.admitter.recordedMoves(), moveCount)
+	requireBalanceEpochPlacement(t, scenario, tasks[0], true, true)
+
+	scenario.publishReduce(tasks[0])
+	tasks[0].SetStatus(task.TaskStatusSucceeded)
+	scenario.admitter.remove(tasks[0])
+	completed := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochCompleted, completed.State)
+	require.True(t, completed.Terminal)
+	requireBalanceEpochPlacement(t, scenario, tasks[0], false, true)
+	require.Empty(t, scenario.admitter.concurrentObjects())
+}
+
+func TestBalanceEpochOneFailedTaskDoesNotRollbackSuccessfulMove(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	scenario.setSegments(balanceEpochSegments(100, 130, 10, 10, 10, 10, 10, 10, 10, 10)...)
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.PolicyConfig = scorePolicyTestConfig(false)
+	request.Budget = BalanceWaveBudget{
+		MaxSegmentTasks: 3, MaxChannelTasks: 1,
+		MaxTasksPerNode: 3, MaxTasksPerCollection: 3,
+	}
+
+	started := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	require.Equal(t, 3, started.Admitted)
+	require.Equal(t, started.Planned, started.Admitted)
+	require.LessOrEqual(t, started.ObjectiveAfter, started.ObjectiveBefore+1e-9)
+	tasks := scenario.admitter.tasksForEpoch(started.Epoch)
+	require.Len(t, tasks, 3)
+	requireBalanceEpochTaskBudgets(t, tasks, request.Budget)
+
+	scenario.complete(tasks[0])
+	scenario.failGrow(tasks[1], errors.New("grow failed"))
+	scenario.failReduce(tasks[2], errors.New("reduce failed"))
+	reconciled := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochDegraded, reconciled.State)
+	require.True(t, reconciled.Terminal)
+	requireBalanceEpochPlacement(t, scenario, tasks[0], false, true)
+	requireBalanceEpochPlacement(t, scenario, tasks[1], true, false)
+	requireBalanceEpochPlacement(t, scenario, tasks[2], true, true)
+	require.Empty(t, scenario.admitter.concurrentObjects())
+	requireBalanceEpochNoReverseMoves(t, scenario.admitter.recordedMoves())
+}
+
+func TestBalanceEpochStuckObjectAllowsUnrelatedCollectionProgress(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	scenario.placement.nodes.Get(1).UpdateStats(session.WithMemCapacity(1024))
+	scenario.placement.nodes.Get(3).UpdateStats(session.WithMemCapacity(4096))
+	segments := append(
+		balanceEpochSegments(100, 140, 100),
+		balanceEpochSegments(200, 240, 200)...,
+	)
+	scenario.setSegments(segments...)
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica, testOtherReplica)
+	request.PolicyConfig = scorePolicyTestConfig(false)
+	request.NoProgressDeadline = time.Second
+	request.Budget = BalanceWaveBudget{
+		MaxSegmentTasks: 1, MaxChannelTasks: 1,
+		MaxTasksPerNode: 2, MaxTasksPerCollection: 1,
+	}
+
+	first := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, first.State)
+	require.Equal(t, 1, first.Admitted)
+	firstTasks := scenario.admitter.tasksForEpoch(first.Epoch)
+	require.Len(t, firstTasks, 1)
+	scenario.publishGrow(firstTasks[0])
+	requireBalanceEpochPlacement(t, scenario, firstTasks[0], true, true)
+	require.Equal(t, EpochExecuting, scenario.manager.Advance(context.Background(), request).State)
+	scenario.clock.Advance(2 * time.Second)
+	timedOut := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochTimedOut, timedOut.State)
+	require.True(t, timedOut.Terminal)
+
+	second := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, second.State)
+	require.Equal(t, 1, second.Admitted)
+	secondTasks := scenario.admitter.tasksForEpoch(second.Epoch)
+	require.Len(t, secondTasks, 1)
+	require.NotEqual(t, firstTasks[0].CollectionID(), secondTasks[0].CollectionID())
+	require.NotEqual(t, firstTasks[0].ReplicaID(), secondTasks[0].ReplicaID())
+	requireBalanceEpochTaskBudgets(t, secondTasks, request.Budget)
+	for nodeID, count := range scenario.admitter.pendingNodeCounts() {
+		require.LessOrEqual(t, count, request.Budget.MaxTasksPerNode, "node %d", nodeID)
+	}
+
+	scenario.complete(secondTasks[0])
+	requireBalanceEpochPlacement(t, scenario, secondTasks[0], false, true)
+	require.Equal(t, EpochExecuting, scenario.manager.Advance(context.Background(), request).State)
+	scenario.clock.Advance(2 * time.Second)
+	secondTimedOut := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochTimedOut, secondTimedOut.State)
+	require.True(t, secondTimedOut.Terminal)
+	requireBalanceEpochPlacement(t, scenario, firstTasks[0], true, true)
+	requireBalanceEpochPlacement(t, scenario, secondTasks[0], false, true)
+	require.Empty(t, scenario.admitter.concurrentObjects())
+}
+
+func TestEpochManagerExecutionAllowsAdmittedChannelLeaderHandoff(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	scenario.setChannels(map[int64][]string{
+		100: {"channel-a", "channel-a-2", "channel-a-3"},
+	})
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.PolicyConfig = scorePolicyTestConfig(true)
+	request.Budget = BalanceWaveBudget{
+		MaxSegmentTasks: 1, MaxChannelTasks: 1,
+		MaxTasksPerNode: 1, MaxTasksPerCollection: 1,
+	}
+
+	started := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	require.Equal(t, 1, started.Admitted)
+	tasks := scenario.admitter.tasksForEpoch(started.Epoch)
+	require.Len(t, tasks, 1)
+	require.IsType(t, &task.ChannelTask{}, tasks[0])
+
+	scenario.complete(tasks[0])
+	reconciled := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochCompleted, reconciled.State)
+	require.True(t, reconciled.Terminal)
+	requireBalanceEpochPlacement(t, scenario, tasks[0], false, true)
+}
+
+func TestEpochManagerExecutionDoesNotSupersedeOnPostAdmissionLeaderPublication(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	scenario.setSegments(balanceEpochSegments(100, 145, 25, 25, 25, 25)...)
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	request.PolicyConfig = scorePolicyTestConfig(false)
+	request.Budget = BalanceWaveBudget{
+		MaxSegmentTasks: 1, MaxChannelTasks: 1,
+		MaxTasksPerNode: 1, MaxTasksPerCollection: 1,
+	}
+
+	started := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochExecuting, started.State)
+	tasks := scenario.admitter.tasksForEpoch(started.Epoch)
+	require.Len(t, tasks, 1)
+	require.IsType(t, &task.SegmentTask{}, tasks[0])
+
+	captured := scenario.placement.dist.Capture()
+	changed := false
+	for index := range captured.Channels {
+		if captured.Channels[index].CollectionID == 200 && captured.Channels[index].Channel == "channel-b" {
+			captured.Channels[index].LeaderVersion++
+			changed = true
+			break
+		}
+	}
+	require.True(t, changed)
+	scenario.publish(captured)
+	scenario.complete(tasks[0])
+
+	reconciled := scenario.manager.Advance(context.Background(), request)
+	require.Equal(t, EpochCompleted, reconciled.State)
+	require.True(t, reconciled.Terminal)
+	require.Zero(t, reconciled.Rejected[task.BalanceAdmissionLeaderMissing])
+	requireBalanceEpochPlacement(t, scenario, tasks[0], false, true)
+}
+
+func TestBalanceEpochOneRGFailureDoesNotBlockAnotherRG(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	scenario.setSegments(balanceEpochSegments(100, 150, 25, 25, 25, 25)...)
+	requestA := epochManagerRequest(testSnapshotRG, testEligibleReplica)
+	requestA.PolicyConfig = scorePolicyTestConfig(false)
+	requestA.Budget.MaxSegmentTasks = 1
+	requestA.Budget.MaxTasksPerCollection = 1
+	requestA.Budget.MaxTasksPerNode = 1
+	entered, release := scenario.admitter.blockNext(testSnapshotRG, task.BalanceAdmissionDuplicate)
+	defer release()
+
+	resultA := make(chan EpochAdvanceResult, 1)
+	go func() { resultA <- scenario.manager.Advance(context.Background(), requestA) }()
+	receiveBalanceTestSignal(t, entered, "RG-A blocked admission")
+
+	requestB := epochManagerRequest(testUnrelatedRG, 13)
+	requestB.PolicyConfig = scorePolicyTestConfig(false)
+	resultB := make(chan EpochAdvanceResult, 1)
+	go func() { resultB <- scenario.manager.Advance(context.Background(), requestB) }()
+	independent := receiveBalanceTestSignal(t, resultB, "RG-B independent epoch")
+	require.Equal(t, EpochCompleted, independent.State)
+	require.True(t, independent.Terminal)
+	require.True(t, independent.Converged)
+
+	release()
+	failed := receiveBalanceTestSignal(t, resultA, "RG-A rejected admission")
+	require.Equal(t, EpochDegraded, failed.State)
+	require.True(t, failed.Terminal)
+	require.Equal(t, 1, failed.Rejected[task.BalanceAdmissionDuplicate])
+}
+
+func TestBalanceEpochHardBudgetAcrossCollectionsAndReplicas(t *testing.T) {
+	scenario := newBalanceEpochScenario(t)
+	segments := append(
+		balanceEpochSegments(100, 160, 10, 10, 10, 10),
+		balanceEpochSegments(200, 260, 20, 20, 20, 20)...,
+	)
+	scenario.setSegments(segments...)
+	scenario.setChannels(map[int64][]string{
+		100: {"channel-a", "channel-a-2", "channel-a-3"},
+		200: {"channel-b", "channel-b-2", "channel-b-3"},
+	})
+	request := epochManagerRequest(testSnapshotRG, testEligibleReplica, testOtherReplica)
+	request.PolicyConfig = scorePolicyTestConfig(true)
+	request.Budget = BalanceWaveBudget{
+		MaxSegmentTasks: 2, MaxChannelTasks: 2,
+		MaxTasksPerNode: 2, MaxTasksPerCollection: 1,
+	}
+
+	sawSegments := false
+	sawChannels := false
+	converged := false
+	potentials := make([]balanceEpochPotentialSample, 0, 8)
+	for generation := 0; generation < 8; generation++ {
+		result := scenario.manager.Advance(context.Background(), request)
+		potentials = append(potentials, balanceEpochPotentialForResult(t, scenario.manager, result))
+		if result.Admitted == 0 {
+			require.Equal(t, EpochCompleted, result.State)
+			require.True(t, result.Converged)
+			converged = true
+			break
+		}
+		require.Equal(t, EpochExecuting, result.State)
+		require.Equal(t, result.Planned, result.Admitted)
+		require.Zero(t, totalBalanceEpochRejections(result.Rejected))
+		require.LessOrEqual(t, result.ObjectiveAfter, result.ObjectiveBefore+1e-9)
+		tasks := scenario.admitter.tasksForEpoch(result.Epoch)
+		require.Len(t, tasks, result.Admitted)
+		requireBalanceEpochTaskBudgets(t, tasks, request.Budget)
+		for _, balanceTask := range tasks {
+			switch balanceTask.(type) {
+			case *task.SegmentTask:
+				sawSegments = true
+			case *task.ChannelTask:
+				sawChannels = true
+			}
+			scenario.complete(balanceTask)
+		}
+		reconciled := scenario.manager.Advance(context.Background(), request)
+		require.Equal(t, EpochCompleted, reconciled.State, "potentials=%v moves=%v", potentials, scenario.admitter.recordedMoves())
+	}
+	require.True(t, converged, "hard-budget fixture did not converge; potentials=%v moves=%v", potentials, scenario.admitter.recordedMoves())
+	require.True(t, sawChannels, "channel budget was not exercised; moves=%v", scenario.admitter.recordedMoves())
+	require.True(t, sawSegments, "segment budget was not exercised; moves=%v", scenario.admitter.recordedMoves())
+	require.Empty(t, scenario.admitter.concurrentObjects())
+	requireBalanceEpochNoReverseMoves(t, scenario.admitter.recordedMoves())
+	t.Logf("hard-budget potentials=%v", potentials)
+	t.Logf("hard-budget moves=%v", scenario.admitter.recordedMoves())
 }
 
 func TestEpochManagerReconcilesInheritedCarryWhenNewAdmissionStops(t *testing.T) {

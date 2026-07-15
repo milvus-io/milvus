@@ -1183,7 +1183,14 @@ func (manager *BalanceEpochManager) currentInvalidation(
 		switch reason {
 		case task.BalanceAdmissionAccepted,
 			task.BalanceAdmissionSourceGone,
-			task.BalanceAdmissionStaleEpoch:
+			task.BalanceAdmissionStaleEpoch,
+			// Leader publications are mutable execution-plane state: a successful
+			// channel Grow changes the RG leader hash by design, and delegators may
+			// publish again while already-admitted work runs. Admission still fences
+			// the frozen leader topology; execution is reconciled from authoritative
+			// placement/readiness plus task outcome. RG/node/replica/target changes
+			// remain superseding through the other admission reasons.
+			task.BalanceAdmissionLeaderMissing:
 			continue
 		default:
 			return reason
