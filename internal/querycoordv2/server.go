@@ -100,9 +100,8 @@ type Server struct {
 	queryNodeCreator session.QueryNodeCreator
 
 	// Schedulers
-	jobScheduler             *job.Scheduler
-	taskScheduler            task.Scheduler
-	placementSnapshotBuilder *balance.PlacementSnapshotBuilder
+	jobScheduler  *job.Scheduler
+	taskScheduler task.Scheduler
 
 	// HeartBeat
 	distController dist.Controller
@@ -324,13 +323,6 @@ func (s *Server) initQueryCoord() error {
 		s.nodeMgr,
 	)
 	s.taskScheduler = concreteTaskScheduler
-	s.placementSnapshotBuilder = balance.NewPlacementSnapshotBuilder(
-		s.meta,
-		s.dist,
-		s.targetMgr,
-		s.nodeMgr,
-		concreteTaskScheduler,
-	)
 
 	// init proxy client manager
 	s.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
