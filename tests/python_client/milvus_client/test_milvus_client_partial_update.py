@@ -8,6 +8,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType, Function, FunctionType
 from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.client.field_ops import FieldOp
 from sklearn import preprocessing
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
@@ -368,6 +369,208 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
             assert search_results[0][0]["id"] == row_id
             assert search_results[0][0]["payload"] == f"payload_{row_id}"
             self._assert_struct_array_partial_update_events_equal(search_results[0][0]["events"], expected_events)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_partial_update_struct_array_state_transitions(self):
+        """
+        target: verify whole-Struct partial updates preserve null, empty, and element offset semantics
+        method: transition sealed rows through null, empty, and different non-empty lengths while omitting
+            ordinary fields, then compare nested-index query and element search before/after compact and reload
+        expected: the whole Struct is replaced, omitted ordinary fields are preserved, and stale elements disappear
+        """
+        client = self._client()
+        dim = 8
+        collection_name = cf.gen_unique_str(f"{prefix}_pu_struct_states")
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("payload", DataType.VARCHAR, max_length=64)
+        struct_schema = self.create_struct_field_schema(client)[0]
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("score", DataType.INT64)
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=64)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+            nullable=True,
+        )
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vector", index_type="FLAT", metric_type="COSINE")
+        index_params.add_index("events[embedding]", index_type="FLAT", metric_type="COSINE")
+        index_params.add_index("events[tag]", index_type="BITMAP")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        def vector(axis):
+            value = [0.0] * dim
+            value[axis % dim] = 1.0
+            return value
+
+        def events(row_id, count, state):
+            return [
+                {
+                    "embedding": vector(row_id + offset),
+                    "score": row_id * 100 + offset,
+                    "tag": f"{state}_{row_id}_{offset}",
+                }
+                for offset in range(count)
+            ]
+
+        expected = {
+            0: {"id": 0, "vector": vector(0), "payload": "payload_0", "events": None},
+            1: {"id": 1, "vector": vector(1), "payload": "payload_1", "events": []},
+            2: {"id": 2, "vector": vector(2), "payload": "payload_2", "events": events(2, 1, "initial")},
+            3: {"id": 3, "vector": vector(3), "payload": "payload_3", "events": events(3, 2, "initial")},
+        }
+        self.insert(client, collection_name, list(expected.values()))
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        first_transition = {
+            0: [],
+            1: events(1, 1, "first"),
+            2: None,
+            3: events(3, 3, "first"),
+        }
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": row_id, "events": value} for row_id, value in first_transition.items()],
+            partial_update=True,
+        )
+        for row_id, value in first_transition.items():
+            expected[row_id]["events"] = value
+        self.flush(client, collection_name)
+
+        second_transition = {
+            0: events(0, 2, "final"),
+            1: None,
+            2: [],
+            3: events(3, 1, "final"),
+        }
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": row_id, "events": value} for row_id, value in second_transition.items()],
+            partial_update=True,
+        )
+        for row_id, value in second_transition.items():
+            expected[row_id]["events"] = value
+        self.flush(client, collection_name)
+
+        def collect_observations():
+            rows = self.query(
+                client,
+                collection_name,
+                filter="id >= 0",
+                output_fields=["id", "vector", "payload", "events"],
+                limit=len(expected),
+            )[0]
+            rows_by_id = {row["id"]: row for row in rows}
+            assert set(rows_by_id) == set(expected)
+            for row_id, expected_row in expected.items():
+                assert rows_by_id[row_id]["payload"] == expected_row["payload"]
+                assert np.allclose(rows_by_id[row_id]["vector"], expected_row["vector"])
+                self._assert_struct_array_partial_update_events_equal(
+                    rows_by_id[row_id]["events"] or [], expected_row["events"] or []
+                )
+                assert (rows_by_id[row_id]["events"] is None) == (expected_row["events"] is None)
+
+            indexed_rows = self.query(
+                client,
+                collection_name,
+                filter='array_contains(events[tag], "final_0_1")',
+                output_fields=["id"],
+                limit=len(expected),
+            )[0]
+            element_hits = self.search(
+                client,
+                collection_name,
+                data=[vector(0)],
+                anns_field="events[embedding]",
+                search_params={"metric_type": "COSINE"},
+                filter="element_filter(events, $[score] >= 0)",
+                output_fields=["id"],
+                limit=3,
+            )[0][0]
+            return {
+                "projection": sorted(
+                    (row_id, rows_by_id[row_id]["payload"], rows_by_id[row_id]["events"]) for row_id in rows_by_id
+                ),
+                "indexed_ids": sorted(row["id"] for row in indexed_rows),
+                "element_keys": sorted((hit["id"], hit["offset"]) for hit in element_hits),
+            }
+
+        baseline = collect_observations()
+        assert baseline["indexed_ids"] == [0]
+        assert baseline["element_keys"] == [(0, 0), (0, 1), (3, 0)]
+
+        compact_id = self.compact(client, collection_name)[0]
+        assert compact_id > 0
+        assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        assert collect_observations() == baseline
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "field_name",
+        ["events", "events[tag]"],
+        ids=["struct-parent", "struct-subfield"],
+    )
+    def test_milvus_client_partial_update_struct_array_field_ops_rejected(self, field_name):
+        """
+        target: verify Array partial-update operators cannot mutate Struct parents or Struct sub-fields
+        method: apply ARRAY_APPEND to a whole Struct field and to one child field
+        expected: both requests are rejected and the original Struct remains unchanged
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_pu_struct_op")
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+        struct_schema = self.create_struct_field_schema(client)[0]
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=32)
+        schema.add_field(
+            "events",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+            nullable=True,
+        )
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vector", index_type="FLAT", metric_type="COSINE")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
+        original = {"id": 0, "vector": [1.0, 0.0, 0.0, 0.0], "events": [{"tag": "original"}]}
+        self.insert(client, collection_name, [original])
+        self.load_collection(client, collection_name)
+
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f'op ARRAY_APPEND is not supported for struct field "{field_name}"',
+        }
+        self.upsert(
+            client,
+            collection_name,
+            [{"id": 0, "events": [{"tag": "new"}]}],
+            field_ops={field_name: FieldOp.array_append()},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        rows = self.query(client, collection_name, filter="id == 0", output_fields=["events"])[0]
+        assert rows[0]["events"] == original["events"]
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partial_update_all_field_types_one_by_one(self):
