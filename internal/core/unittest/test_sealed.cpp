@@ -69,13 +69,13 @@
 #include "query/PlanImpl.h"
 #include "query/Utils.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/InsertRecord.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
@@ -1433,7 +1433,6 @@ TEST(Sealed, DeleteCount) {
 
         auto dataset = DataGen(schema, N);
         auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
-        segment->get_insert_record().seal_pks();
 
         int64_t c = 10;
         ASSERT_EQ(segment->get_deleted_count(), 0);
@@ -4678,6 +4677,123 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     EXPECT_EQ(next->runtime->ngram_fields.count(payload), 0);
 }
 
+TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto old_dataset = DataGen(schema, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto replacement_dataset = DataGen(schema,
+                                       4,
+                                       /*seed=*/314159,
+                                       /*ts_offset=*/0,
+                                       /*repeat_count=*/1,
+                                       /*array_len=*/10,
+                                       /*group_count=*/1,
+                                       /*random_pk=*/true);
+    auto replacement_segment =
+        CreateSealedWithFieldDataLoaded(schema, replacement_dataset);
+    auto* replacement_sealed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(replacement_segment.get());
+    ASSERT_NE(replacement_sealed, nullptr);
+
+    auto old_pks = old_dataset.get_col<int64_t>(pk);
+    auto replacement_pks = replacement_dataset.get_col<int64_t>(pk);
+    auto old_only =
+        std::find_if(old_pks.begin(), old_pks.end(), [&](int64_t value) {
+            return std::find(replacement_pks.begin(),
+                             replacement_pks.end(),
+                             value) == replacement_pks.end();
+        });
+    auto replacement_only = std::find_if(
+        replacement_pks.begin(), replacement_pks.end(), [&](int64_t value) {
+            return std::find(old_pks.begin(), old_pks.end(), value) ==
+                   old_pks.end();
+        });
+    ASSERT_NE(old_only, old_pks.end());
+    ASSERT_NE(replacement_only, replacement_pks.end());
+    PkType old_pk = *old_only;
+    PkType replacement_pk = *replacement_only;
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(current->runtime->pk_index_slot, nullptr);
+    ASSERT_TRUE(sealed->Contain(old_pk));
+    ASSERT_FALSE(sealed->Contain(replacement_pk));
+    auto old_pk_index_slot = current->runtime->pk_index_slot;
+
+    auto replacement_state =
+        replacement_sealed->TestGetPublishedStateSnapshot();
+    auto replacement_column = replacement_state->runtime->fields.at(pk);
+
+    auto stage_replacement = [&](bool fail_before_publish) {
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        ChunkedSegmentSealedImpl::StateDelta initial_delta;
+        initial_delta.schema = current->schema;
+        initial_delta.load_info = current->load_info;
+        initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+        initial_delta.commit_ts = current->commit_ts;
+        auto staged =
+            sealed->TestBuildNextPublishedState(current, initial_delta);
+
+        ChunkedSegmentSealedImpl::StateDelta final_delta;
+        final_delta.schema = current->schema;
+        final_delta.load_info = current->load_info;
+        final_delta.commit_ts = current->commit_ts;
+
+        auto stage_and_publish = [&] {
+            sealed->TestStageLoadFieldDataThenPublish(
+                pk,
+                replacement_column,
+                replacement_dataset.raw_->num_rows(),
+                DataType::INT64,
+                schema,
+                runtime,
+                staged.get(),
+                current,
+                final_delta,
+                [&] {
+                    ASSERT_NE(runtime->pk_index_slot, nullptr);
+                    EXPECT_NE(runtime->pk_index_slot,
+                              current->runtime->pk_index_slot);
+
+                    auto still_published =
+                        sealed->TestGetPublishedStateSnapshot();
+                    EXPECT_EQ(still_published, current);
+                    EXPECT_TRUE(sealed->Contain(old_pk));
+                    EXPECT_FALSE(sealed->Contain(replacement_pk));
+                    if (fail_before_publish) {
+                        throw std::runtime_error("abort staged PK publish");
+                    }
+                });
+        };
+
+        if (fail_before_publish) {
+            EXPECT_THROW(stage_and_publish(), std::runtime_error);
+        } else {
+            EXPECT_NO_THROW(stage_and_publish());
+        }
+    };
+
+    stage_replacement(true);
+    EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), current);
+    EXPECT_TRUE(sealed->Contain(old_pk));
+    EXPECT_FALSE(sealed->Contain(replacement_pk));
+
+    stage_replacement(false);
+    auto published = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(published, current);
+    EXPECT_NE(published->runtime->pk_index_slot,
+              current->runtime->pk_index_slot);
+    EXPECT_FALSE(sealed->Contain(old_pk));
+    EXPECT_TRUE(sealed->Contain(replacement_pk));
+
+    EXPECT_EQ(current->runtime->pk_index_slot, old_pk_index_slot);
+}
+
 TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -5054,6 +5170,42 @@ TEST(SealedSegmentCowState, ExternalSyntheticFieldsUseStagedLoadInfoRows) {
     ASSERT_NE(published, nullptr);
     ASSERT_NE(published->load_info, nullptr);
     EXPECT_EQ(published->load_info->GetNumOfRows(), 3);
+}
+
+TEST(SealedSegmentCowState, ExternalZeroRowsClearsStagedPkState) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_external_source("s3://bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    proto::segcore::SegmentLoadInfo nonempty_proto;
+    nonempty_proto.set_segmentid(1005);
+    nonempty_proto.set_num_of_rows(7);
+    SegmentLoadInfo nonempty_load_info(nonempty_proto, schema);
+    sealed->TestSynthesizeExternalSystemFields(
+        nonempty_load_info, schema, runtime.get());
+    ASSERT_TRUE(runtime->fields.count(pk) > 0);
+    ASSERT_NE(runtime->virtual_pk2offset, nullptr);
+
+    proto::segcore::SegmentLoadInfo empty_proto;
+    empty_proto.set_segmentid(1005);
+    empty_proto.set_num_of_rows(0);
+    SegmentLoadInfo empty_load_info(empty_proto, schema);
+    sealed->TestSynthesizeExternalSystemFields(
+        empty_load_info, schema, runtime.get());
+
+    EXPECT_EQ(runtime->fields.count(pk), 0);
+    EXPECT_EQ(runtime->pk_index_slot, nullptr);
+    ASSERT_NE(runtime->virtual_pk2offset, nullptr);
+    EXPECT_FALSE(runtime->virtual_pk2offset->contain(PkType{int64_t{0}}));
+    ASSERT_NE(runtime->timestamps, nullptr);
+    EXPECT_TRUE(runtime->timestamps->empty());
 }
 
 TEST(SealedSegmentCowState,
