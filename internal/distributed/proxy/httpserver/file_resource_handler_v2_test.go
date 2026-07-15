@@ -37,17 +37,25 @@ import (
 )
 
 type rejectingFileResourceLimiter struct {
-	t          *testing.T
-	checkCount int
+	t      *testing.T
+	checks []fileResourceLimiterCheck
+}
+
+type fileResourceLimiterCheck struct {
+	rateType internalpb.RateType
+	n        int
 }
 
 func (l *rejectingFileResourceLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
 	l.t.Helper()
 	require.Equal(l.t, util.InvalidDBID, dbID)
 	require.Empty(l.t, collectionIDToPartIDs)
+	l.checks = append(l.checks, fileResourceLimiterCheck{rateType: rateType, n: n})
+	if n <= 0 {
+		return nil
+	}
 	require.Equal(l.t, internalpb.RateType_DDLCollection, rateType)
 	require.Equal(l.t, 1, n)
-	l.checkCount++
 	return merr.ErrServiceRateLimit
 }
 
@@ -220,20 +228,30 @@ func TestFileResourceHandlerV2ChecksQuota(t *testing.T) {
 	limiter := &rejectingFileResourceLimiter{t: t}
 	mockProxy := mocks.NewMockProxy(t)
 	mockProxy.EXPECT().GetRateLimiter().Return(limiter, nil).Times(3)
+	mockProxy.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(&milvuspb.ListFileResourcesResponse{
+		Status: merr.Success(),
+	}, nil).Once()
 	server := initHTTPServerV2(mockProxy, false)
 
-	testCases := []struct {
+	writeCases := []struct {
 		path string
 		body string
 	}{
 		{path: versionalV2(FileResourceCategory, AddAction), body: `{"name":"synonyms","path":"synonyms.txt"}`},
 		{path: versionalV2(FileResourceCategory, RemoveAction), body: `{"name":"synonyms"}`},
-		{path: versionalV2(FileResourceCategory, ListAction), body: `{}`},
 	}
-	for _, testCase := range testCases {
+	for _, testCase := range writeCases {
 		response := postFileResourceRequest(t, server, testCase.path, testCase.body)
 		assert.EqualValues(t, merr.Code(merr.ErrHTTPRateLimit), response[HTTPReturnCode])
 		assert.Contains(t, response[HTTPReturnMessage], merr.ErrServiceRateLimit.Error())
 	}
-	require.Equal(t, len(testCases), limiter.checkCount)
+
+	response := postFileResourceRequest(t, server, versionalV2(FileResourceCategory, ListAction), `{}`)
+	assert.EqualValues(t, 0, response[HTTPReturnCode])
+	assert.Empty(t, response[HTTPReturnData])
+
+	require.Len(t, limiter.checks, 3)
+	assert.Equal(t, fileResourceLimiterCheck{rateType: internalpb.RateType_DDLCollection, n: 1}, limiter.checks[0])
+	assert.Equal(t, fileResourceLimiterCheck{rateType: internalpb.RateType_DDLCollection, n: 1}, limiter.checks[1])
+	assert.Zero(t, limiter.checks[2].n)
 }

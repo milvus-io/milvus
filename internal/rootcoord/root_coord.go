@@ -3070,6 +3070,9 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.GetName() == "" {
+		return merr.Status(merr.WrapErrParameterMissing("file resource name")), nil
+	}
 
 	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
 		return merr.Status(err), nil
@@ -3115,6 +3118,9 @@ func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileR
 
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
+	}
+	if req.GetName() == "" {
+		return merr.Status(merr.WrapErrParameterMissing("file resource name")), nil
 	}
 	err, exist := c.meta.RemoveFileResource(ctx, req.GetName())
 	if err != nil {

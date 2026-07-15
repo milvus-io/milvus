@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -136,29 +137,15 @@ func TestFileResourceCRUDAndValidation(t *testing.T) {
 	require.NoError(t, mc.RemoveFileResource(ctx, client.NewRemoveFileResourceOption(name)))
 }
 
-func TestFileResourceEmptyNameCompatibility(t *testing.T) {
+func TestFileResourceEmptyNameRejected(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createFileResourceMilvusClient(ctx, t)
-	_, path := setupFileResourceObject(t, ctx, "synonyms.txt", "search, retrieval, query\n")
 
-	// FileResource names currently have no server-side length or character
-	// validation. Lock down the existing empty-name behavior for SDK parity.
-	require.NoError(t, mc.AddFileResource(ctx, client.NewAddFileResourceOption("", path)))
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = removeFileResourceEventually(cleanupCtx, mc, "")
-	})
+	err := mc.AddFileResource(ctx, client.NewAddFileResourceOption("", "unused.txt"))
+	require.ErrorIs(t, err, merr.ErrParameterMissing)
 
-	resources, err := mc.ListFileResources(ctx, client.NewListFileResourcesOption())
-	require.NoError(t, err)
-	for _, resource := range resources {
-		if resource.Name == "" {
-			require.Equal(t, path, resource.Path)
-			return
-		}
-	}
-	t.Fatal("empty-name resource must round-trip through ListFileResources")
+	err = mc.RemoveFileResource(ctx, client.NewRemoveFileResourceOption(""))
+	require.ErrorIs(t, err, merr.ErrParameterMissing)
 }
 
 func TestFileResourceRemoteAnalyzerAndCollectionLifecycle(t *testing.T) {

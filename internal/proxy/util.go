@@ -3128,8 +3128,11 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		return dbInfo.dbID, map[int64][]int64{
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil
-	case *milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest,
-		*milvuspb.ListFileResourcesRequest:
+	case *milvuspb.ListFileResourcesRequest:
+		// ListFileResources is a cluster-scoped read-only request. Like the
+		// other cluster list APIs, it does not consume a limiter token.
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
+	case *milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest:
 		// File resources are cluster-scoped metadata used by collection
 		// analyzers. Charge the cluster collection-DDL limiter without
 		// attributing the request to an arbitrary database.
@@ -3177,10 +3180,6 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.AlterDatabaseRequest,
 		*milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest:
 		return merr.Status(err)
-	case *milvuspb.ListFileResourcesRequest:
-		return &milvuspb.ListFileResourcesResponse{
-			Status: merr.Status(err),
-		}
 	case *milvuspb.RestoreExternalSnapshotRequest:
 		return &milvuspb.RestoreExternalSnapshotResponse{
 			Status: merr.Status(err),
