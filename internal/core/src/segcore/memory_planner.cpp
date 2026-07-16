@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "arrow/api.h"
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include "common/Channel.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
@@ -86,6 +85,22 @@ FieldDataReadWindowBytes() {
                          kDefaultFieldDataReadWindowBytes);
 }
 
+int64_t
+LoadTransientPoolUpperBound(size_t max_task_overhead_bytes) {
+    // Load work can run concurrently in both pools because PriorityForLoad
+    // maps foreground loads to HIGH and background loads to LOW.
+    auto max_load_tasks = static_cast<size_t>(
+        milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()) +
+        milvus::ComputeThreadPoolMaxThreads(
+            milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    auto max_int64 = static_cast<size_t>(std::numeric_limits<int64_t>::max());
+    if (max_task_overhead_bytes > max_int64 / max_load_tasks) {
+        return std::numeric_limits<int64_t>::max();
+    }
+    return static_cast<int64_t>(max_load_tasks * max_task_overhead_bytes);
+}
+
 void
 SetFieldDataLoadBatchTargetBytes(int64_t bytes) {
     FIELD_DATA_LOAD_BATCH_TARGET_BYTES.store(
@@ -108,15 +123,24 @@ FieldDataLoadingOverheadUpperBound(int64_t max_memory_overhead,
     auto budget_capacity = static_cast<int64_t>(
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
             .CapacityBytes());
-    if (budget_capacity == 0) {
-        return milvus::cachinglayer::LoadingOverheadTracker::kUnlimited;
+    if (budget_capacity != 0) {
+        auto memory_ub =
+            std::max<int64_t>(budget_capacity, max_memory_overhead);
+        auto file_ub =
+            max_file_overhead.has_value()
+                ? std::max<int64_t>(budget_capacity, max_file_overhead.value())
+                : int64_t{0};
+        return {memory_ub, file_ub};
     }
 
-    auto memory_ub = std::max<int64_t>(budget_capacity, max_memory_overhead);
-    auto file_ub =
-        max_file_overhead.has_value()
-            ? std::max<int64_t>(budget_capacity, max_file_overhead.value())
-            : int64_t{0};
+    auto batch_target = FieldDataLoadBatchSplitTargetBytes();
+    auto memory_task_overhead =
+        static_cast<size_t>(std::max(batch_target, max_memory_overhead));
+    auto memory_ub = LoadTransientPoolUpperBound(memory_task_overhead);
+    auto file_ub = max_file_overhead.has_value()
+                       ? LoadTransientPoolUpperBound(static_cast<size_t>(
+                             std::max(batch_target, max_file_overhead.value())))
+                       : int64_t{0};
     return {memory_ub, file_ub};
 }
 
