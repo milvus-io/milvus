@@ -1180,12 +1180,12 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		if err != nil {
 			log.Warn(ctx, "delegator failed to find worker", mlog.Err(err))
 			releaseErr = err
-		}
-		req.Base.TargetID = targetNodeID
-		err = worker.ReleaseSegments(ctx, req)
-		if err != nil {
-			log.Warn(ctx, "worker failed to release segments", mlog.Err(err))
-			releaseErr = err
+		} else {
+			req.Base.TargetID = targetNodeID
+			if err = worker.ReleaseSegments(ctx, req); err != nil {
+				log.Warn(ctx, "worker failed to release segments", mlog.Err(err))
+				releaseErr = err
+			}
 		}
 	}
 	if len(growing) > 0 {
