@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "arrow/api.h"
-#include "cachinglayer/LoadingOverheadTracker.h"
 #include <folly/CancellationToken.h>
 #include "folly/ScopeGuard.h"
 #include "common/EasyAssert.h"
@@ -214,24 +213,38 @@ TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
     EXPECT_EQ(FieldDataLoadBatchSplitTargetBytes(), 8 * MB);
 }
 
-TEST(FieldDataLoadingOverheadUpperBound, UsesUnlimitedWhenBudgetDisabled) {
+TEST(FieldDataLoadingOverheadUpperBound, UsesPoolBoundWhenBudgetDisabled) {
     auto& budget =
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
-    auto cleanup = folly::makeGuard(
-        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    auto old_batch_target = FieldDataLoadBatchTargetBytes();
+    auto cleanup =
+        folly::makeGuard([&budget, old_capacity, old_batch_target]() {
+            budget.SetCapacityBytes(old_capacity);
+            SetFieldDataLoadBatchTargetBytes(old_batch_target);
+        });
 
     budget.SetCapacityBytes(0);
+    SetFieldDataLoadBatchTargetBytes(64);
+
+    auto max_load_tasks =
+        milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()) +
+        milvus::ComputeThreadPoolMaxThreads(
+            milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load());
 
     auto upper_bound =
         FieldDataLoadingOverheadUpperBound(/*max_memory_overhead=*/128);
 
-    EXPECT_EQ(
-        upper_bound.memory_bytes,
-        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.memory_bytes);
-    EXPECT_EQ(
-        upper_bound.file_bytes,
-        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.file_bytes);
+    EXPECT_EQ(upper_bound.memory_bytes, max_load_tasks * 128);
+    EXPECT_EQ(upper_bound.file_bytes, 0);
+
+    auto mmap_upper_bound = FieldDataLoadingOverheadUpperBound(
+        /*max_memory_overhead=*/128,
+        /*max_file_overhead=*/std::optional<int64_t>{256});
+
+    EXPECT_EQ(mmap_upper_bound.memory_bytes, max_load_tasks * 128);
+    EXPECT_EQ(mmap_upper_bound.file_bytes, max_load_tasks * 256);
 }
 
 TEST(FieldDataLoadingOverheadUpperBound, UsesBudgetWithMaxOverheadFloor) {
