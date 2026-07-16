@@ -108,7 +108,8 @@ SealedIndexTranslator::SealedIndexTranslator(
                 static_cast<size_t>(std::numeric_limits<int64_t>::max()));
         };
         auto memory_upper_bound =
-            budget_capacity != 0 ? budget_capacity
+            budget_capacity != 0
+                ? std::max<int64_t>(budget_capacity, max_task_overhead)
             : encrypted_stream
                 ? static_cast<int64_t>(encrypted_stream_upper_bound())
                 : milvus::segcore::LoadTransientPoolUpperBound(
