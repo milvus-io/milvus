@@ -1444,6 +1444,21 @@ func (suite *SegmentCheckerTestSuite) TestServingSetReleasesCandidateNotLoadedHe
 	suite.Len(run(view), 1, "a candidate that is not loaded on this leader must be released, not kept")
 }
 
+// The decisive delegator-reported path: the segment is loaded here on s.Node (knownLoaded) AND the
+// delegator reports it in the not-serving list => release it. This is the behaviour the PR adds; it
+// fails if the not-serving check is dropped (inUse := knownLoaded).
+func (suite *SegmentCheckerTestSuite) TestServingSetReleasesReportedNotServing() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	view := utils.CreateTestLeaderView(1, 1, "test-insert-channel",
+		map[int64]int64{seg.GetID(): seg.Node}, map[int64]*meta.Segment{}) // loaded here on s.Node
+	view.TargetVersion = currentTargetVersion
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet(seg.GetID()) // reported as no longer served
+
+	suite.Len(run(view), 1, "a segment loaded here but reported not-serving must be released")
+}
+
 // A copy of the candidate loaded on a DIFFERENT node than s.Node is a wrong-node duplicate and must
 // not be treated as "loaded here": view.Segments is one entry per segment id, so the coord-side check
 // must compare NodeID against s.Node, matching the sibling redundancy check.
