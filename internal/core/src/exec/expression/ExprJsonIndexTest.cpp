@@ -243,6 +243,23 @@ TEST(JsonIndexTest, JsonSortLikeUsesIndexWithoutRawJson) {
         R"({"s": null})",
         R"({"s": 42})",
     };
+
+    // Load only the system row IDs so the sealed segment has its production
+    // row count. The raw JSON field remains deliberately unloaded.
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto cm_w = ChunkManagerWrapper(cm);
+    std::vector<int64_t> row_ids(json_strs.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        row_ids[i] = i;
+    }
+    auto row_id_field_data =
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
+    row_id_field_data->FillFieldData(row_ids.data(), row_ids.size());
+    auto row_id_load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, RowFieldID.get(), {row_id_field_data}, cm);
+    seg->LoadFieldData(row_id_load_info);
+
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
     std::vector<milvus::Json> jsons;
@@ -251,7 +268,10 @@ TEST(JsonIndexTest, JsonSortLikeUsesIndexWithoutRawJson) {
         jsons.emplace_back(simdjson::padded_string(json));
     }
     json_field->add_json_data(jsons);
-    json_index->BuildWithFieldData({json_field});
+    auto scalar_index =
+        dynamic_cast<index::ScalarIndex<std::string>*>(json_index.get());
+    ASSERT_NE(scalar_index, nullptr);
+    scalar_index->BuildWithFieldData({json_field});
 
     segcore::LoadIndexInfo load_index_info;
     load_index_info.field_id = json_fid.get();
@@ -261,6 +281,7 @@ TEST(JsonIndexTest, JsonSortLikeUsesIndexWithoutRawJson) {
     load_index_info.cache_index =
         CreateTestCacheIndex("json_sort_like", std::move(json_index));
     seg->LoadIndex(load_index_info);
+    ASSERT_FALSE(seg->HasFieldData(json_fid));
 
     // Deliberately do not load raw JSON field data. These predicates must be
     // executable from the path index alone in lazy-load scenarios.
