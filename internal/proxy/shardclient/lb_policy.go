@@ -117,9 +117,19 @@ type LBPolicyImpl struct {
 	balancerMap    map[string]LBBalancer
 	retryOnReplica int
 	blacklist      *ChannelBlacklist
+
+	queryTrafficRouter *queryTrafficRouter
 }
 
-func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
+type LBPolicyOption func(*LBPolicyImpl)
+
+func WithQueryTrafficRouting(labelProvider QueryTrafficLabelProvider) LBPolicyOption {
+	return func(lb *LBPolicyImpl) {
+		lb.queryTrafficRouter = newQueryTrafficRouter(paramtableQueryTrafficConfig{}, labelProvider)
+	}
+}
+
+func NewLBPolicyImpl(clientMgr ShardClientMgr, options ...LBPolicyOption) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
@@ -134,13 +144,17 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 
 	retryOnReplica := paramtable.Get().ProxyCfg.RetryTimesOnReplica.GetAsInt()
 
-	return &LBPolicyImpl{
+	lb := &LBPolicyImpl{
 		getBalancer:    getBalancer,
 		clientMgr:      clientMgr,
 		balancerMap:    balancerMap,
 		retryOnReplica: retryOnReplica,
 		blacklist:      NewChannelBlacklist(),
 	}
+	for _, option := range options {
+		option(lb)
+	}
+	return lb
 }
 
 func (lb *LBPolicyImpl) Start(ctx context.Context) {
@@ -310,10 +324,20 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 
 		// prefer serviceable nodes
 		var targetNodeID int64
+		selectableNodes := candidateNodes
 		if len(serviceableNodes) > 0 {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(serviceableNodes), workload.Nq)
+			selectableNodes = serviceableNodes
+		}
+		availableNodeIDs := lo.Keys(selectableNodes)
+		weightedNodes, routed, routeErr := lb.queryTrafficRouter.route(ctx, availableNodeIDs)
+		if routeErr != nil {
+			log.Warn(ctx, "failed to apply query traffic routing, fallback to original candidates",
+				mlog.Err(routeErr))
+		}
+		if routed {
+			targetNodeID, err = selectWeightedNode(ctx, balancer, weightedNodes, workload.Nq)
 		} else {
-			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.Nq)
+			targetNodeID, err = balancer.SelectNode(ctx, availableNodeIDs, workload.Nq)
 		}
 		if err != nil {
 			return NodeInfo{}, false, err

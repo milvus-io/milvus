@@ -147,9 +147,9 @@ affinity is selected only by the `AZ` label.
 
 ### T0: Cross-AZ Affinity
 
-At this point the policy only expresses AZ affinity. It does not enumerate
-resource groups. Local AZ is preferred. If local candidates are unavailable,
-the policy falls back to any available candidate.
+During normal serving, the policy expresses cross-AZ affinity only. Local AZ
+replicas are preferred. If no local candidate is available, the policy falls
+back to any available candidate.
 
 ```yaml
 proxy:
@@ -179,9 +179,8 @@ proxy:
 
 ### T1: Add Replica by Resource Group
 
-The control plane expands replicas from `rg1-0, rg2-1` to
-`rg1-0, rg2-1, rg3-0`. Add `rg3-0` with `weight: 0` first, so the route exists
-but receives no traffic before the replica is ready for gray release.
+First add `rg3-0` into the routing config with `weight: 0`. The route exists,
+but it does not receive traffic before the replica is ready.
 
 ```yaml
 proxy:
@@ -193,14 +192,11 @@ proxy:
           sourceLabels:
             exists: ["AZ"]
         routes:
-          - name: rg1-0
+          - name: other-local-rgs
             weight: 100
             destinationLabels:
-              eq: {AZ: "${source.AZ}", RESOURCE_GROUP: "rg1-0"}
-          - name: rg2-1
-            weight: 100
-            destinationLabels:
-              eq: {AZ: "${source.AZ}", RESOURCE_GROUP: "rg2-1"}
+              eq: {AZ: "${source.AZ}"}
+              ne: {RESOURCE_GROUP: "rg3-0"}
           - name: rg3-0
             weight: 0
             destinationLabels:
@@ -217,11 +213,28 @@ proxy:
               any: true
 ```
 
+- Expand replicas from `rg1-0, rg2-1` to `rg1-0, rg2-1, rg3-0`.
+- Start gray traffic release after `rg3-0` is ready and observe stability during
+  each step:
+
+```text
+rg1-0:100, rg2-1:100, rg3-0:0
+--- rg3-0 ready ---
+rg1-0:100, rg2-1:100, rg3-0:10
+rg1-0:100, rg2-1:100, rg3-0:20
+...
+rg1-0:100, rg2-1:100, rg3-0:100
+--- Done ---
+```
+
+- After traffic release is complete, restore the route config to the AZ
+  affinity policy.
+
 ### T2: Replica Rolling Inside Resource Groups
 
-During rolling, traffic is shifted by changing only weights. For example,
-rolling `rg1-0` to `rg1-1`. Other local resource groups are kept by a negative
-matcher, so they do not need to be enumerated:
+First add `rg1-1` into the routing config with `weight: 0`. Keep `rg1-0` and
+other local resource groups at `weight: 100`, so the route exists without
+changing existing traffic distribution.
 
 ```yaml
 proxy:
@@ -234,11 +247,11 @@ proxy:
             exists: ["AZ"]
         routes:
           - name: rg1-0
-            weight: 90
+            weight: 100
             destinationLabels:
               eq: {AZ: "${source.AZ}", RESOURCE_GROUP: "rg1-0"}
           - name: rg1-1
-            weight: 10
+            weight: 0
             destinationLabels:
               eq: {AZ: "${source.AZ}", RESOURCE_GROUP: "rg1-1"}
           - name: other-local-rgs
@@ -259,51 +272,111 @@ proxy:
               any: true
 ```
 
-The timeline is:
+- Expand replicas from `rg1-0, rg2-1` to `rg1-0, rg1-1, rg2-1`.
+- Shift traffic by changing only weights and observe stability during each step:
 
 ```text
-rg1-0:100, rg1-1:0
-rg1-0:90,  rg1-1:10
+rg1-0:100, rg1-1:0,   rg2-1:100
+--- rg1-1 ready ---
+rg1-0:90,  rg1-1:10,  rg2-1:100
 ...
-rg1-0:0,   rg1-1:100
-rg1-1:100
+rg1-0:0,   rg1-1:100, rg2-1:100
+--- Done ---
 ```
 
-### T3: Rolling With AZ Change
+- After traffic has drained from `rg1-0`, reclaim the `rg1-0` replica and
+  restore the route config to the AZ affinity policy.
+
+### T3: AZ Changes During Rolling
 
 If the rolling replica is placed in another AZ, no special routing config is
-needed. The T2 config is reused as-is. Routes still keep
-`AZ: "${source.AZ}"`, so non-rolling traffic remains local-AZ locked.
+needed. Reuse the T2 config. Routes still keep `AZ: "${source.AZ}"`, so
+non-rolling traffic remains pinned to the local AZ.
 
-The AZ change is produced by Session labels:
+AZ changes are reflected by Session labels:
 
-1. The current AZ continues to match the old replica while it exists locally.
-2. The new replica starts receiving traffic from the AZ where it is placed.
-3. As the old replica weight drains to `0`, traffic naturally moves to the new
-   replica in its own AZ.
+1. when the old replica still exists in the current AZ, current-AZ traffic keeps
+   hitting the old replica;
+2. the new replica starts receiving traffic from the AZ where it is located;
+3. after the old replica weight is drained to `0`, traffic naturally moves to
+   the AZ where the new replica is located.
 
-The routing policy does not explicitly write `AZ: "az1"` or `AZ: "az2"` for
-the rolling step.
+The routing policy does not explicitly write `AZ: "az1"` or `AZ: "az2"` during
+rolling.
+
+### T4: Scale Down Replica by Resource Group
+
+For scale-down, first put the target replica in the route config and drain its
+weight to `0`. For example, scale replicas from `rg1-0, rg2-1, rg3-0` back to
+`rg1-0, rg2-1`:
+
+```yaml
+proxy:
+  queryTrafficRouting:
+    enabled: true
+    rules:
+      - name: az-affinity-with-rg
+        match:
+          sourceLabels:
+            exists: ["AZ"]
+        routes:
+          - name: other-local-rgs
+            weight: 100
+            destinationLabels:
+              eq: {AZ: "${source.AZ}"}
+              ne: {RESOURCE_GROUP: "rg3-0"}
+          - name: rg3-0
+            weight: 100
+            destinationLabels:
+              eq: {AZ: "${source.AZ}", RESOURCE_GROUP: "rg3-0"}
+
+      - name: fallback
+        match:
+          sourceLabels:
+            any: true
+        routes:
+          - name: any
+            weight: 100
+            destinationLabels:
+              any: true
+```
+
+- Drain `rg3-0` by changing only its weight:
+
+```text
+rg1-0:100, rg2-1:100, rg3-0:100
+rg1-0:100, rg2-1:100, rg3-0:50
+rg1-0:100, rg2-1:100, rg3-0:10
+rg1-0:100, rg2-1:100, rg3-0:0
+--- Done ---
+```
+
+- After `rg3-0` has no traffic, reclaim the `rg3-0` replica.
+- After scale-down is complete, restore the route config to the AZ affinity
+  policy.
 
 ## 8. Fallback and Compatibility
 
-Query availability is preferred over policy strictness.
+Query availability has priority over strict policy enforcement.
 
-Fallback should normally be expressed as the last rule with `any: true`.
-The engine continues to later rules when a matched rule produces no candidates.
+Fallback should normally be expressed as the last `any: true` rule. When a
+matched rule cannot produce candidates, the engine continues evaluating later
+rules.
 
-Routing falls back to the original candidate set only when:
+The router falls back to the original candidate set only in these cases:
 
 1. the feature is disabled;
 2. no rule matches;
-3. no matched rule can produce candidates;
+3. no matching rule can produce candidates;
 4. Session labels cannot be resolved.
 
-The feature is opt-in. When disabled, query routing behavior is unchanged.
+The feature is disabled by default. When disabled, query routing behavior is
+unchanged.
 
 ## 9. Observability
 
-Routing decisions should expose bounded fields only:
+Routing decisions expose only bounded fields used to evaluate rule hit counts
+and downstream request distribution:
 
 1. selected rule name;
 2. selected route name;
