@@ -588,7 +588,7 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
         expected_total_size += translator->estimated_byte_size_of_cell(i).first;
     }
     pk_index_size = expected_total_size.memory_bytes;
-    stats_.mem_size += pk_index_size;
+    stats_.mem_size.fetch_add(pk_index_size, std::memory_order_relaxed);
     LOG_INFO(
         "Adding pk to offset index with size {} for segment {} , mem_size= "
         "{}",

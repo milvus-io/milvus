@@ -2233,7 +2233,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     IndexMetaPtr col_index_meta_;
     SegcoreConfig segcore_config_;
 
-    SegmentStats stats_{};
+    mutable SegmentStats stats_{};
 
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
