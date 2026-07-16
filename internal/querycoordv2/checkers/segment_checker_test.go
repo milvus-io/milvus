@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SegmentCheckerTestSuite struct {
@@ -1250,6 +1251,159 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	ch2DelegatorList = getCh2DelegatorList()
 	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 0, "Should release all segments when partition is nil")
+}
+
+// setupServingSetCase builds one collection/replica/channel with a current target, and returns
+// the release candidate plus a helper running filterOutSegmentInUse against a given leader view.
+func (suite *SegmentCheckerTestSuite) setupServingSetCase() (*meta.Segment, int64, func(*meta.LeaderView) []*meta.Segment) {
+	ctx := context.Background()
+	checker := suite.checker
+
+	collectionID := int64(1)
+	partitionID := int64(1)
+	segmentID := int64(1)
+	nodeID := int64(1)
+	channel := "test-insert-channel"
+
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+	replica := utils.CreateTestReplica(1, collectionID, []int64{nodeID})
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{{CollectionID: collectionID, ChannelName: channel}},
+		[]*datapb.SegmentInfo{}, nil).Maybe()
+	// publish a current target, then a fresh next target so the current and next versions are both
+	// non-zero and distinct -- otherwise the next-target release arm is exercised with 0.
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+
+	seg := utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 1, channel)
+
+	run := func(view *meta.LeaderView) []*meta.Segment {
+		checker.dist.ChannelDistManager.Update(nodeID, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channel},
+			Node:         nodeID,
+			View:         view,
+		})
+		delegatorList := checker.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+		ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string { return d.View.Channel })
+		return checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{seg}, ch2DelegatorList)
+	}
+	return seg, currentTargetVersion, run
+}
+
+func newTestLeaderView(targetVersion int64) *meta.LeaderView {
+	view := utils.CreateTestLeaderView(1, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
+	view.TargetVersion = targetVersion
+	return view
+}
+
+// The delegator reports it no longer serves the segment => release it, even though its readable
+// view is ahead of the current target, a state where the version guard alone refuses to release.
+func (suite *SegmentCheckerTestSuite) TestServingSetReleasesWhatDelegatorDropped() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	view := newTestLeaderView(currentTargetVersion + 1)
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet(seg.GetID())
+
+	suite.Len(run(view), 1, "segment must be released when the delegator reports it is not serving it")
+}
+
+// The delegator is still serving the segment => protect it, even though the version guard alone
+// would have released it (view == current). The segment is in the reported loaded universe
+// (view.Segments) and not on the not-serving list, so it is known to be served.
+func (suite *SegmentCheckerTestSuite) TestServingSetProtectsSegmentStillServed() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	view := utils.CreateTestLeaderView(1, 1, "test-insert-channel",
+		map[int64]int64{seg.GetID(): seg.Node}, map[int64]*meta.Segment{})
+	view.TargetVersion = currentTargetVersion
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet() // empty => still serving the candidate
+
+	suite.Len(run(view), 0, "segment must be protected while the delegator still serves it")
+}
+
+// A release candidate that is not loaded on this leader at all (absent from the reported loaded
+// universe view.Segments) must be released, not kept: absence from the negative NotServingSegments
+// list does not prove the segment is served. Keeping it here would block reclamation indefinitely.
+func (suite *SegmentCheckerTestSuite) TestServingSetReleasesCandidateNotLoadedHere() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	view := newTestLeaderView(currentTargetVersion)
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet()
+	_, present := view.Segments[seg.GetID()]
+	suite.False(present, "precondition: candidate is not in the reported loaded universe")
+
+	suite.Len(run(view), 1, "a candidate that is not loaded on this leader must be released, not kept")
+}
+
+// The decisive delegator-reported path: the segment is loaded here on s.Node (knownLoaded) AND the
+// delegator reports it in the not-serving list => release it. This is the behaviour the PR adds; it
+// fails if the not-serving check is dropped (inUse := knownLoaded).
+func (suite *SegmentCheckerTestSuite) TestServingSetReleasesReportedNotServing() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	view := utils.CreateTestLeaderView(1, 1, "test-insert-channel",
+		map[int64]int64{seg.GetID(): seg.Node}, map[int64]*meta.Segment{}) // loaded here on s.Node
+	view.TargetVersion = currentTargetVersion
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet(seg.GetID()) // reported as no longer served
+
+	suite.Len(run(view), 1, "a segment loaded here but reported not-serving must be released")
+}
+
+// A copy of the candidate loaded on a DIFFERENT node than s.Node is a wrong-node duplicate and must
+// not be treated as "loaded here": view.Segments is one entry per segment id, so the coord-side check
+// must compare NodeID against s.Node, matching the sibling redundancy check.
+func (suite *SegmentCheckerTestSuite) TestServingSetReleasesWrongNodeCopy() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	// the candidate is on s.Node (1), but the leader view reports the segment loaded on node 2
+	view := utils.CreateTestLeaderView(1, 1, "test-insert-channel",
+		map[int64]int64{seg.GetID(): 2}, map[int64]*meta.Segment{})
+	view.TargetVersion = currentTargetVersion
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet()
+
+	suite.Len(run(view), 1, "a copy on a different node must not be treated as loaded here and must be released")
+}
+
+// Older QueryNode: no serving set reported => coord falls back to the target versions and may
+// release only when the readable set is provably free of the segment, i.e. when the delegator's
+// view is the current or the next target. Any other view is a version coord no longer holds.
+func (suite *SegmentCheckerTestSuite) TestServingSetFallsBackToTargetVersionsOnOldQueryNode() {
+	ctx := context.Background()
+	_, currentTargetVersion, run := suite.setupServingSetCase()
+	nextTargetVersion := suite.checker.targetMgr.GetCollectionTargetVersion(ctx, 1, meta.NextTarget)
+	suite.NotZero(nextTargetVersion, "next target must exist so the next-arm is exercised with a real version")
+	suite.NotEqual(currentTargetVersion, nextTargetVersion)
+
+	suite.Len(run(newTestLeaderView(currentTargetVersion)), 1,
+		"release: at view == current the readable set is the current target's segment set, which excludes the segment")
+	suite.Len(run(newTestLeaderView(nextTargetVersion)), 1,
+		"release: at view == next the readable set is the next target's segment set, which excludes the segment too")
+	suite.Len(run(newTestLeaderView(currentTargetVersion-1)), 0,
+		"keep: a view coord holds no snapshot of - the readable set cannot be proven free of the segment")
+	suite.Len(run(newTestLeaderView(currentTargetVersion+1)), 0,
+		"keep: an orphan view ahead of current - this is the straddle that releases in-use segments")
+}
+
+// A delegator whose view coord has not synced yet has an empty readable set, which would make every
+// loaded segment look "not serving". The QueryNode leaves ReportsServingSet false in that state, so
+// the checker must fall back to the guard instead of trusting an empty readable set.
+func (suite *SegmentCheckerTestSuite) TestServingSetNotTrustedBeforeFirstSync() {
+	seg, _, run := suite.setupServingSetCase()
+
+	view := newTestLeaderView(initialTargetVersion)
+	view.ReportsServingSet = false
+	view.NotServingSegments = typeutil.NewUniqueSet(seg.GetID())
+
+	suite.Len(run(view), 1, "an unsynced delegator must fall back to the guard, not to its empty readable set")
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {

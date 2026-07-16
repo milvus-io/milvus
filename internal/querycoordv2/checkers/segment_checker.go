@@ -429,10 +429,24 @@ func (c *SegmentChecker) filterOutExistedOnLeader(replica *meta.Replica, segment
 }
 
 // for sealed segment which doesn't exist in target, we should release it after delegator has updated to latest readable version
+// provablyNotInReadableSet reports whether a delegator's readable set can be reconstructed from the
+// target versions coord holds and is guaranteed free of a redundant segment. That holds only when
+// the view equals the initial, current or next target -- any other version is one coord no longer
+// snapshots (the strict straddle current < view < next), where the readable set cannot be proven.
+func provablyNotInReadableSet(view *meta.LeaderView, currentTargetVersion, nextTargetVersion int64) bool {
+	switch view.TargetVersion {
+	case initialTargetVersion, currentTargetVersion, nextTargetVersion:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment, ch2DelegatorList map[string][]*meta.DmChannel) []*meta.Segment {
 	notUsed := make([]*meta.Segment, 0, len(segments))
 	for _, s := range segments {
 		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
+		nextTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.NextTarget)
 		partition := c.meta.GetPartition(ctx, s.PartitionID)
 
 		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
@@ -441,12 +455,50 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 		}
 
 		stillInUseByDelegator := false
-		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
 		for _, delegator := range delegatorList {
-			// Notice: if syncTargetVersion stuck, segment on delegator won't be released
-			readableVersionNotUpdate := delegator.View.TargetVersion != initialTargetVersion && delegator.View.TargetVersion < currentTargetVersion
-			if partition != nil && readableVersionNotUpdate {
-				// leader view version hasn't been updated, segment maybe still in use
+			view := delegator.View
+
+			// The delegator is the only party that knows whether it is still serving a segment: its
+			// readable snapshot is not derivable from the target versions alone. When it reports that
+			// fact, trust it and release only what it says it no longer serves.
+			if view.ReportsServingSet {
+				// NotServingSegments is a negative list: loaded sealed segments minus the readable
+				// set. Absence from it is ambiguous -- a candidate that is not loaded on this leader
+				// at all (e.g. during a leader/distribution transition) is also absent, and must not
+				// be mistaken for "in use", or its reclamation is blocked indefinitely. A segment is
+				// in use only when it is known loaded here (present in the reported loaded universe,
+				// view.Segments) AND not on the not-serving list. The readable set is a subset of the
+				// loaded universe, so a segment actually being served is always known loaded -- the
+				// straddle protection is unaffected.
+				// known loaded means this leader has the segment loaded on s's node -- a copy on a
+				// different node is a wrong-node duplicate and must not be treated as in use (the
+				// sibling redundancy check gates on NodeID == s.Node the same way).
+				segInView, loadedHere := view.Segments[s.GetID()]
+				knownLoaded := loadedHere && segInView.GetNodeID() == s.Node
+				inUse := knownLoaded && !view.NotServingSegments.Contain(s.GetID())
+				if inUse && provablyNotInReadableSet(view, currentTargetVersion, nextTargetVersion) {
+					// The version guard would have released a segment the delegator is still serving
+					// -- exactly the failure this reported fact exists to prevent.
+					log.Ctx(ctx).RatedWarn(60, "target-version guard disagrees with delegator, keeping segment",
+						zap.Int64("collectionID", s.CollectionID),
+						zap.Int64("segmentID", s.GetID()),
+						zap.String("channel", s.GetInsertChannel()),
+						zap.Int64("leaderView", view.TargetVersion),
+						zap.Int64("currentTarget", currentTargetVersion))
+				}
+				if partition != nil && inUse {
+					stillInUseByDelegator = true
+					break
+				}
+				continue
+			}
+
+			// Fall back to the target versions for delegators that do not report their serving set
+			// (older QueryNodes, or a view coord has not synced yet). Release only when the readable
+			// set is provably free of the segment; when it cannot be proven, keep it: a wrong release
+			// drops loadedRatio below 1.0 and makes the shard unserviceable.
+			// Notice: if syncTargetVersion stuck, segment on delegator won't be released.
+			if partition != nil && !provablyNotInReadableSet(view, currentTargetVersion, nextTargetVersion) {
 				stillInUseByDelegator = true
 				break
 			}

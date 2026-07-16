@@ -653,11 +653,13 @@ message LeaderView {
     int64 num_of_growing_rows = 7;
     map<int64, int64> partition_stats_versions = 8;
     LeaderViewStatus status = 9;
+    repeated int64 not_serving_segmentIDs = 10; // loaded sealed segments this delegator no longer serves
 }
 
 message LeaderViewStatus {
     bool serviceable = 1;
     bool catching_up_streaming_data = 2;  // true = still catching up, not ready
+    bool reports_serving_set = 3; // true => the delegator reports not_serving_segmentIDs
 }
 
 message SegmentDist {
