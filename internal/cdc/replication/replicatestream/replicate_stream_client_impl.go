@@ -169,7 +169,7 @@ func (r *replicateStreamClient) Replicate(msg message.ImmutableMessage) error {
 	case <-r.ctx.Done():
 		return nil
 	default:
-		if msg.MessageType().IsSelfControlled() {
+		if msg.MessageType().IsSelfControlled() || msg.IsUnreplicable() {
 			// If no messages are being replicated, update the last replicated time tick.
 			if r.pendingMessages.Len() == 0 {
 				r.metrics.UpdateLastReplicatedTimeTick(msg.TimeTick())

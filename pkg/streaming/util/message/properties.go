@@ -17,6 +17,7 @@ const (
 	messageNotPersisteted                   = "_np"  // check if the message is unpersisted.
 	messagePChannelLevel                    = "_pcl" // mark the message as pchannel level message.
 	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
+	messageUnreplicable                     = "_ur"  // mark the message as unsafe to replicate.
 	messageTraceContext                     = "_tc"  // Trace context subset header.
 )
 
