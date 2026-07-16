@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260323081523-53649783989c
 	github.com/milvus-io/milvus/client/v2 v2.6.4-0.20251104142533-a2ce70d25256
-	google.golang.org/grpc v1.80.0
+	google.golang.org/grpc v1.79.3
 )
 
 replace (
