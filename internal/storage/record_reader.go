@@ -37,10 +37,10 @@ func (pr *packedRecordReader) Next() (Record, error) {
 }
 
 func (pr *packedRecordReader) Close() error {
-	if pr.reader != nil {
-		return pr.reader.Close()
+	if pr == nil || pr.reader == nil {
+		return nil
 	}
-	return nil
+	return pr.reader.Close()
 }
 
 func newPackedRecordReader(
@@ -112,10 +112,19 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		ir.cur, err = ir.iterate()
-		if err != nil {
-			return nil, err
+		// Clear cur before iterating: iterate() returns a typed-nil reader
+		// (e.g. a nil *packedRecordReader boxed into the RecordReader
+		// interface) together with an error when opening the next chunk
+		// fails, e.g. a binlog object is missing in object storage. Assigning
+		// that to ir.cur would leave a non-nil interface holding a nil pointer,
+		// and the deferred Close() would then dereference it and panic. Only
+		// publish the reader once iterate() succeeds.
+		ir.cur = nil
+		next, iterErr := ir.iterate()
+		if iterErr != nil {
+			return nil, iterErr
 		}
+		ir.cur = next
 		rec, err = ir.cur.Next()
 	}
 	return rec, err
