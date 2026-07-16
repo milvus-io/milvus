@@ -63,6 +63,11 @@ func (m *messageImpl) Properties() RProperties {
 	return m.properties
 }
 
+// IsUnreplicable returns true if the message cannot be replicated.
+func (m *messageImpl) IsUnreplicable() bool {
+	return m.properties.Exist(messageUnreplicable)
+}
+
 // IsPersisted returns true if the message is persisted.
 func (m *messageImpl) IsPersisted() bool {
 	return !m.properties.Exist(messageNotPersisteted)
