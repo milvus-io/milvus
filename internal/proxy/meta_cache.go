@@ -561,6 +561,17 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	collInfo := m.collInfo[bucketDB][collectionName]
 	m.indexCollInfoLocked(collInfo)
 
+	// Index this collection's own aliases (alias -> real name) so an alias DDL,
+	// which invalidates by alias name with CollectionID=0, can still find and
+	// evict this canonical entry and its by-id index. Without this a DropAlias/
+	// AlterAlias leaves collInfo[db][realName] and collInfoByID[id] holding a
+	// stale Aliases list that an id-only Describe would then serve.
+	for _, alias := range collection.Aliases {
+		if alias != "" && alias != collectionName {
+			m.setAliasLocked(bucketDB, alias, &aliasEntry{collectionName: collectionName, cachedAt: time.Now()})
+		}
+	}
+
 	return collInfo, nil
 }
 
@@ -1137,6 +1148,31 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 	return result
 }
 
+// removeCollectionByAliasLocked, when alias is a cached alias in database,
+// invalidates the collection it points to (by id) so an alias DDL clears that
+// target's stale Aliases list and by-id index entry. Returns true if it found and
+// invalidated a target. Caller must hold m.mu write lock.
+func (m *MetaCache) removeCollectionByAliasLocked(ctx context.Context, database, alias string, version uint64) bool {
+	aliases, ok := m.aliasInfo[database]
+	if !ok {
+		return false
+	}
+	entry, ok := aliases[alias]
+	if !ok || entry == nil || entry.collectionName == "" {
+		return false
+	}
+	db, ok := m.collInfo[database]
+	if !ok {
+		return false
+	}
+	target, ok := db[entry.collectionName]
+	if !ok {
+		return false
+	}
+	m.removeCollectionByID(ctx, target.collID, version, false)
+	return true
+}
+
 func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string, version uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1154,6 +1190,19 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 				m.removeCollectionByID(ctx, coll.collID, version, false)
 				found = true
 			}
+		}
+	}
+	// The name may be an alias whose target collection is stored under its real
+	// name (so the lookups above missed it) yet still holds a stale Aliases list
+	// and by-id index entry. Resolve the alias to its target and invalidate that
+	// too, so an alias DDL (DropAlias/AlterAlias carries only the alias name with
+	// CollectionID=0) clears the canonical entry an id-only Describe would serve.
+	if m.removeCollectionByAliasLocked(ctx, database, collectionName, version) {
+		found = true
+	}
+	if database == "" {
+		if m.removeCollectionByAliasLocked(ctx, defaultDB, collectionName, version) {
+			found = true
 		}
 	}
 	// If the collection was not in cache, alias entries pointing to it won't

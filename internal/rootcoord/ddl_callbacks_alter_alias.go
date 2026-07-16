@@ -112,5 +112,11 @@ func (c *DDLCallback) alterAliasV2AckCallback(ctx context.Context, result messag
 		ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(result.Message.Header().DbName),
 			ce.OptLPCMCollectionName(result.Message.Header().Alias),
+			// Forward the new target's collection id so the proxy also evicts the
+			// canonical entry (and by-id index) of the collection now gaining the
+			// alias; the old target is evicted by the proxy resolving the alias
+			// name to it. Without this, an id-only Describe of the new target would
+			// serve a stale Aliases list.
+			ce.OptLPCMCollectionID(result.Message.Header().CollectionId),
 			ce.OptLPCMMsgType(commonpb.MsgType_AlterAlias)))
 }

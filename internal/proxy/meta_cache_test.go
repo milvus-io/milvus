@@ -3450,6 +3450,230 @@ func TestMetaCache_ConcurrentAliasResolveInvalidate(t *testing.T) {
 	wg.Wait()
 }
 
+// TestMetaCache_DropAliasInvalidatesCanonicalCollectionAndByIDIndex is a
+// regression test: an alias DDL broadcasts only the alias name with
+// CollectionID=0, so the proxy sees RemoveCollection(db, alias). The collection
+// is stored under its real name, so the direct lookup misses. Before the fix the
+// canonical entry and its by-id index kept a stale Aliases list that an id-only
+// Describe (via the cluster-wide by-id index) would then serve. The proxy must
+// resolve the alias to its target and evict it.
+func TestMetaCache_DropAliasInvalidatesCanonicalCollectionAndByIDIndex(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	var dropped atomic.Bool
+	var reqTime atomic.Int64
+	reqTime.Store(100)
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			var aliases []string
+			if !dropped.Load() {
+				aliases = []string{"a"}
+			}
+			if req.GetCollectionID() == 1 || (req.GetDbName() == "db1" && req.GetCollectionName() == "A") {
+				return &milvuspb.DescribeCollectionResponse{
+					Status:       merr.Success(),
+					CollectionID: 1,
+					DbName:       "db1",
+					Schema:       &schemapb.CollectionSchema{Name: "A", Fields: []*schemapb.FieldSchema{}},
+					Aliases:      aliases,
+					RequestTime:  uint64(reqTime.Add(1)),
+				}, nil
+			}
+			return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionName()))}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// cache collection A in the non-default db1 by its real name; its Aliases=[a]
+	// must populate the reverse alias index
+	info, err := cache.GetCollectionInfo(ctx, "db1", "A", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"a"}, info.aliases)
+
+	cache.mu.RLock()
+	_, hasID := cache.collInfoByID[1]
+	aliasEntry, hasAlias := cache.aliasInfo["db1"]["a"]
+	cache.mu.RUnlock()
+	assert.True(t, hasID, "collection must be in the by-id index")
+	if assert.True(t, hasAlias, "the collection's alias must be reverse-indexed") {
+		assert.Equal(t, "A", aliasEntry.collectionName)
+	}
+
+	// DropAlias(a) -> the proxy sees RemoveCollection(db1, "a") with the alias name
+	dropped.Store(true)
+	cache.RemoveCollection(ctx, "db1", "a", 0)
+
+	cache.mu.RLock()
+	_, hasID = cache.collInfoByID[1]
+	_, hasA := cache.collInfo["db1"]["A"]
+	cache.mu.RUnlock()
+	assert.False(t, hasID, "DropAlias must evict the target's by-id index entry")
+	assert.False(t, hasA, "DropAlias must evict the target's collInfo entry")
+
+	// an id-only Describe now re-queries rootcoord and must get the fresh aliases
+	// (without the dropped alias), not the stale cached [a]
+	info2, err := cache.GetCollectionInfo(ctx, "", "", 1)
+	assert.NoError(t, err)
+	assert.Empty(t, info2.aliases, "id-only describe must not serve the dropped alias")
+}
+
+// TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget verifies AlterAlias
+// evicts BOTH the old target (via the proxy resolving the alias name to it) and
+// the new target (via the collection id the rootcoord callback now forwards), so
+// neither serves a stale Aliases list afterwards.
+func TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	var altered atomic.Bool
+	var reqTime atomic.Int64
+	reqTime.Store(100)
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			var id int64
+			name := req.GetCollectionName()
+			if req.GetCollectionID() != 0 {
+				id = req.GetCollectionID()
+				switch id {
+				case 1:
+					name = "A"
+				case 2:
+					name = "B"
+				}
+			} else if name == "A" {
+				id = 1
+			} else if name == "B" {
+				id = 2
+			}
+			if id != 1 && id != 2 {
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionName()))}, nil
+			}
+			var aliases []string
+			// before alter: alias "a" -> A; after: alias "a" -> B
+			if (id == 1 && !altered.Load()) || (id == 2 && altered.Load()) {
+				aliases = []string{"a"}
+			}
+			return &milvuspb.DescribeCollectionResponse{
+				Status:       merr.Success(),
+				CollectionID: id,
+				DbName:       "db1",
+				Schema:       &schemapb.CollectionSchema{Name: name, Fields: []*schemapb.FieldSchema{}},
+				Aliases:      aliases,
+				RequestTime:  uint64(reqTime.Add(1)),
+			}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	_, err = cache.GetCollectionInfo(ctx, "db1", "A", 0)
+	assert.NoError(t, err)
+	_, err = cache.GetCollectionInfo(ctx, "db1", "B", 0)
+	assert.NoError(t, err)
+	cache.mu.RLock()
+	aliasEntry, hasAlias := cache.aliasInfo["db1"]["a"]
+	cache.mu.RUnlock()
+	if assert.True(t, hasAlias, "alias of the old target must be reverse-indexed") {
+		assert.Equal(t, "A", aliasEntry.collectionName)
+	}
+
+	// AlterAlias(a: A -> B): the proxy sees RemoveCollection(db1, "a") for the old
+	// target plus RemoveCollectionsByID(2) for the new target (id forwarded by the
+	// rootcoord callback).
+	altered.Store(true)
+	cache.RemoveCollection(ctx, "db1", "a", 0)
+	cache.RemoveCollectionsByID(ctx, 2, 0, false)
+
+	cache.mu.RLock()
+	_, hasA := cache.collInfoByID[1]
+	_, hasB := cache.collInfoByID[2]
+	cache.mu.RUnlock()
+	assert.False(t, hasA, "old target A must be evicted")
+	assert.False(t, hasB, "new target B must be evicted")
+	assertMetaCacheByIDConsistent(t, cache)
+
+	// fresh describes: A no longer reports the alias, B now does
+	infoA, err := cache.GetCollectionInfo(ctx, "", "", 1)
+	assert.NoError(t, err)
+	assert.Empty(t, infoA.aliases, "old target must no longer report the moved alias")
+	infoB, err := cache.GetCollectionInfo(ctx, "", "", 2)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"a"}, infoB.aliases, "new target must report the moved alias")
+}
+
+// TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID verifies CreateAlias
+// evicts the target collection even though the proxy's reverse alias index has no
+// entry for the brand-new alias (the collection was cached before it existed) --
+// it relies on the collection id forwarded by the rootcoord callback.
+func TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	var created atomic.Bool
+	var reqTime atomic.Int64
+	reqTime.Store(100)
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			var aliases []string
+			if created.Load() {
+				aliases = []string{"a"}
+			}
+			if req.GetCollectionID() == 1 || (req.GetDbName() == "db1" && req.GetCollectionName() == "A") {
+				return &milvuspb.DescribeCollectionResponse{
+					Status:       merr.Success(),
+					CollectionID: 1,
+					DbName:       "db1",
+					Schema:       &schemapb.CollectionSchema{Name: "A", Fields: []*schemapb.FieldSchema{}},
+					Aliases:      aliases,
+					RequestTime:  uint64(reqTime.Add(1)),
+				}, nil
+			}
+			return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionName()))}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// cache A with no alias yet -> the reverse index has no entry for "a"
+	_, err = cache.GetCollectionInfo(ctx, "db1", "A", 0)
+	assert.NoError(t, err)
+	cache.mu.RLock()
+	_, hasAliasRev := cache.aliasInfo["db1"]["a"]
+	cache.mu.RUnlock()
+	assert.False(t, hasAliasRev, "A had no alias, so the reverse index has no entry for a")
+
+	// CreateAlias(a -> A): the proxy's RemoveCollection(db1, "a") cannot resolve a
+	// (not reverse-indexed); eviction relies on RemoveCollectionsByID(1) with the
+	// forwarded id.
+	created.Store(true)
+	cache.RemoveCollection(ctx, "db1", "a", 0)
+	cache.RemoveCollectionsByID(ctx, 1, 0, false)
+
+	cache.mu.RLock()
+	_, hasID := cache.collInfoByID[1]
+	cache.mu.RUnlock()
+	assert.False(t, hasID, "CreateAlias must evict the target via the forwarded id")
+
+	// id-only Describe now reports the newly created alias
+	info, err := cache.GetCollectionInfo(ctx, "", "", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"a"}, info.aliases, "target must report the newly created alias")
+}
+
 func TestMetaCache_Close(t *testing.T) {
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
