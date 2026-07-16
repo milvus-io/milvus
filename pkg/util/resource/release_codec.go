@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -85,6 +86,12 @@ func (releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
 
 	buf := data.MaterializeToBuffer(mem.DefaultBufferPool())
 	defer buf.Free()
+	// Fast path for the top-level hot RPC messages supported by TryUnmarshal:
+	// RetrieveResults, InsertRequest, and UpsertRequest. Unsupported message
+	// types fall through to the official codec.
+	if handled, err := fastpb.TryUnmarshal(v, buf.ReadOnlyData()); handled {
+		return err
+	}
 	return proto.Unmarshal(buf.ReadOnlyData(), msg)
 }
 
