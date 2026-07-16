@@ -70,6 +70,24 @@ func (suite *LookAsideBalancerSuite) TestUpdateMetrics() {
 	suite.True(time.Now().UnixMilli()-metrics.ts.Load() <= 5)
 }
 
+func (suite *LookAsideBalancerSuite) TestSelectNodeWithWeightsUsesWeightedRoundRobinWhenWorkloadIsSimilar() {
+	nodes := []WeightedNode{
+		{NodeID: 1, Weight: 2},
+		{NodeID: 2, Weight: 1},
+	}
+
+	counts := map[int64]int{}
+	for i := 0; i < 6; i++ {
+		nodeID, err := suite.balancer.SelectNodeWithWeights(context.Background(), nodes, 1)
+		suite.NoError(err)
+		counts[nodeID]++
+		suite.balancer.CancelWorkload(nodeID, 1)
+	}
+
+	suite.Equal(4, counts[1])
+	suite.Equal(2, counts[2])
+}
+
 func (suite *LookAsideBalancerSuite) TestCalculateScore() {
 	costMetrics1 := &internalpb.CostAggregation{
 		ResponseTime: 5,

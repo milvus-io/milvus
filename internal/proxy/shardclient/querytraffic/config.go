@@ -14,28 +14,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package shardclient
+package querytraffic
 
 import (
-	"context"
-
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"encoding/json"
+	"strings"
 )
 
-type LBBalancer interface {
-	RegisterNodeInfo(nodeInfos []NodeInfo)
-	SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error)
-	CancelWorkload(node int64, nq int64)
-	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)
-	Start(ctx context.Context)
-	Close()
-}
+func ParseRules(raw string) ([]RuleConfig, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
 
-type WeightedNode struct {
-	NodeID int64
-	Weight int
-}
+	var rules []RuleConfig
+	if err := json.Unmarshal([]byte(raw), &rules); err == nil {
+		return rules, nil
+	}
 
-type WeightedLBBalancer interface {
-	SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, nq int64) (int64, error)
+	var policy PolicyConfig
+	if err := json.Unmarshal([]byte(raw), &policy); err != nil {
+		return nil, err
+	}
+	return policy.Rules, nil
 }

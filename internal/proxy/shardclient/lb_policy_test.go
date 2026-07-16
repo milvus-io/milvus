@@ -29,6 +29,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient/querytraffic"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -53,6 +54,54 @@ type LBPolicySuite struct {
 	collectionName string
 	collectionID   int64
 }
+
+type staticQueryTrafficConfig struct {
+	enabled bool
+	rules   string
+}
+
+func (c staticQueryTrafficConfig) Enabled() bool {
+	return c.enabled
+}
+
+func (c staticQueryTrafficConfig) Rules() string {
+	return c.rules
+}
+
+type staticQueryTrafficLabelProvider struct {
+	source querytraffic.Labels
+	nodes  map[int64]querytraffic.Labels
+}
+
+func (p staticQueryTrafficLabelProvider) GetLabels(ctx context.Context, nodeIDs []int64) (querytraffic.Labels, map[int64]querytraffic.Labels, error) {
+	return p.source, p.nodes, nil
+}
+
+type captureWeightedBalancer struct {
+	weightedNodes []WeightedNode
+}
+
+func (b *captureWeightedBalancer) RegisterNodeInfo(nodeInfos []NodeInfo) {}
+
+func (b *captureWeightedBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+	if len(availableNodes) == 0 {
+		return 0, merr.ErrNodeNotAvailable
+	}
+	return availableNodes[0], nil
+}
+
+func (b *captureWeightedBalancer) SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, nq int64) (int64, error) {
+	b.weightedNodes = append([]WeightedNode(nil), availableNodes...)
+	return availableNodes[0].NodeID, nil
+}
+
+func (b *captureWeightedBalancer) CancelWorkload(node int64, nq int64) {}
+
+func (b *captureWeightedBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {}
+
+func (b *captureWeightedBalancer) Start(ctx context.Context) {}
+
+func (b *captureWeightedBalancer) Close() {}
 
 func (s *LBPolicySuite) SetupSuite() {
 	paramtable.Init()
@@ -227,6 +276,43 @@ func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
 	s.NoError(err)
 	s.Equal(int64(1), targetNode.NodeID)
 	s.True(selectedByBalancer)
+}
+
+func (s *LBPolicySuite) TestSelectNodeAppliesQueryTrafficRoutingBeforeBalancer() {
+	ctx := context.Background()
+	weightedBalancer := &captureWeightedBalancer{}
+	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
+		staticQueryTrafficConfig{
+			enabled: true,
+			rules:   `[{"name":"local-az","match":{"sourceLabels":{"exists":["AZ"]}},"routes":[{"name":"local","weight":100,"destinationLabels":{"eq":{"AZ":"${source.AZ}"}}}]}]`,
+		},
+		staticQueryTrafficLabelProvider{
+			source: querytraffic.Labels{"AZ": "az1"},
+			nodes: map[int64]querytraffic.Labels{
+				1: {"AZ": "az1"},
+				2: {"AZ": "az2"},
+				3: {"AZ": "az1"},
+			},
+		},
+	)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes[:3], nil)
+
+	excludeNodes := typeutil.NewUniqueSet()
+	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, weightedBalancer, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        s.channels[0],
+		Nq:             1,
+	}, &excludeNodes)
+
+	s.NoError(err)
+	s.True(selectedByBalancer)
+	s.Contains([]int64{1, 3}, targetNode.NodeID)
+	s.ElementsMatch([]WeightedNode{
+		{NodeID: 1, Weight: 100},
+		{NodeID: 3, Weight: 100},
+	}, weightedBalancer.weightedNodes)
 }
 
 func (s *LBPolicySuite) TestExecuteUsesPreferredNodeHint() {
