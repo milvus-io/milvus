@@ -22,9 +22,10 @@ package merr
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )

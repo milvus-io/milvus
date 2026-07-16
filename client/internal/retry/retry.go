@@ -18,8 +18,9 @@ package retry
 
 import (
 	"context"
-	"errors"
 	"time"
+
+	"github.com/cockroachdb/errors"
 )
 
 const (
