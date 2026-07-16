@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -22,6 +23,56 @@ import (
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerManagerSuite))
+}
+
+// TestSubmitSingleViewRefundsGatedTokenOnDrop covers the L2 backpressure refund
+// wiring end-to-end: a single view whose segment consumed an admission token is
+// dropped before enqueue (here via an AllocN failure), and the shared bucket
+// must recover the token. A non-gated view leaves the bucket untouched.
+func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewRefundsGatedTokenOnDrop() {
+	newView := func(gated bool) *MixSegmentView {
+		seg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            777,
+			CollectionID:  s.testLabel.CollectionID,
+			PartitionID:   s.testLabel.PartitionID,
+			InsertChannel: s.testLabel.Channel,
+			NumOfRows:     1000,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L2,
+		}}
+		return &MixSegmentView{
+			label:          s.testLabel,
+			segments:       GetViewsByInfo(seg),
+			triggerID:      1,
+			admissionGated: gated,
+		}
+	}
+	// AllocN failure drops the view before it is enqueued.
+	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("mock alloc fail"))
+
+	a := getSingleCompactionAdmitter()
+
+	s.Run("gated view refunds its token", func() {
+		a.mu.Lock()
+		a.tokens = 5
+		a.mu.Unlock()
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), newView(true), TriggerTypeSingle)
+		a.mu.Lock()
+		got := a.tokens
+		a.mu.Unlock()
+		s.InDelta(6.0, got, 0.01, "a dropped gated view must refund its token")
+	})
+
+	s.Run("non-gated view does not refund", func() {
+		a.mu.Lock()
+		a.tokens = 5
+		a.mu.Unlock()
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), newView(false), TriggerTypeSingle)
+		a.mu.Lock()
+		got := a.tokens
+		a.mu.Unlock()
+		s.InDelta(5.0, got, 0.01, "a dropped non-gated view must not touch the bucket")
+	})
 }
 
 type CompactionTriggerManagerSuite struct {

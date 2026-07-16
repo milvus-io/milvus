@@ -234,6 +234,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			!segment.GetIsInvisible()
 	}))
 
+	var admissionCandidates []*SegmentInfo
 	for _, group := range partSegments {
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 			group.segments = FilterInIndexedSegments(ctx, policy.handler, policy.meta, false, group.segments...)
@@ -241,16 +242,31 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 
 		for _, segment := range group.segments {
 			if hasTooManyDeletions(segment) {
-				segmentViews := GetViewsByInfo(segment)
-				view := &MixSegmentView{
-					label:         segmentViews[0].label,
-					segments:      segmentViews,
-					collectionTTL: collectionTTL,
-					triggerID:     newTriggerID,
-				}
-				views = append(views, view)
+				admissionCandidates = append(admissionCandidates, segment)
 			}
 		}
+	}
+	// Share the single-compaction admission budget with the legacy trigger so
+	// mass eligibility drains as a paced stream instead of an avalanche;
+	// deferred segments are stateless and re-evaluated next round.
+	admitted, gatedIDs, deferred := getSingleCompactionAdmitter().admit(admissionCandidates)
+	for _, segment := range admitted {
+		segmentViews := GetViewsByInfo(segment)
+		_, gated := gatedIDs[segment.GetID()]
+		view := &MixSegmentView{
+			label:          segmentViews[0].label,
+			segments:       segmentViews,
+			collectionTTL:  collectionTTL,
+			triggerID:      newTriggerID,
+			admissionGated: gated,
+		}
+		views = append(views, view)
+	}
+	if deferred > 0 {
+		log.RatedInfo(10, "deferred L2 single compaction candidates by admission limit",
+			zap.Int64("collectionID", collectionID),
+			zap.Int("admitted", len(admitted)),
+			zap.Int("deferred", deferred))
 	}
 
 	if len(views) > 0 {
@@ -268,6 +284,11 @@ type MixSegmentView struct {
 	segments      []*SegmentView
 	collectionTTL time.Duration
 	triggerID     int64
+	// admissionGated marks a view whose segment consumed a single-compaction
+	// admission token at selection time. If the view is later dropped before it
+	// is enqueued (alloc/handler error, inspector busy), the submitter refunds
+	// the token so the effective admission rate is not depressed by that leak.
+	admissionGated bool
 }
 
 func (v *MixSegmentView) GetGroupLabel() *CompactionGroupLabel {

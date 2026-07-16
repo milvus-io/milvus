@@ -470,6 +470,18 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, triggerType CompactionTriggerType) {
 	// single view is definitely one-one mapping
 	log := log.Ctx(ctx).With(zap.String("trigger type", triggerType.String()), zap.String("view", view.String()))
+	// A view whose segment consumed a single-compaction admission token refunds
+	// it if the view is dropped before it is enqueued (alloc/handler error,
+	// inspector busy), so transient failures do not permanently depress the
+	// configured admission rate.
+	submitted := false
+	if mv, ok := view.(*MixSegmentView); ok && mv.admissionGated {
+		defer func() {
+			if !submitted {
+				getSingleCompactionAdmitter().refund(1)
+			}
+		}()
+	}
 	// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
 	// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
 	n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
@@ -520,6 +532,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 			zap.Error(err))
 		return
 	}
+	submitted = true
 	log.Info("Finish to submit a single compaction task",
 		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
