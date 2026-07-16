@@ -548,6 +548,28 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             bool is_replace_field = was_default_filled || files_changed;
             bool index_has_raw_data =
                 new_info.field_index_has_raw_data_.count(fid) > 0;
+            // When the vector index already carries the raw data, the separate
+            // raw column is redundant and must NOT be made resident — neither
+            // eager nor "lazy" (the loon lazy path still materializes a
+            // ProxyChunkColumn and sets field_data_ready, so it stays on disk on
+            // top of the index, doubling the footprint). Mirror the binlog path
+            // (ChunkedSegmentSealedImpl: "skip fielddata because index has raw
+            // data"): drop it from the load set entirely. prefer_field_data is
+            // the explicit opt-in to keep both resident; system fields always load.
+            if (field_id >= START_USER_FIELDID && index_has_raw_data &&
+                !prefer_field_data) {
+                // Only the no-raw-index -> raw-index reopen transition can
+                // leave a stale resident copy: current had no raw-data index,
+                // so the raw column was loaded, and now the index carries it.
+                // Drop it in that case. In steady state the column was already
+                // skipped (never resident), so there is nothing to free and no
+                // diff to emit.
+                if (cur_iter != cur_field_to_files.end() &&
+                    field_index_has_raw_data_.count(fid) == 0) {
+                    diff.field_data_to_drop.emplace(field_id);
+                }
+                continue;
+            }
             // Eager-load when: system field, OR schema says load AND
             // (we want to keep field data alongside index, OR index can't serve raw).
             bool should_eager_load =
@@ -568,15 +590,12 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 } else {
                     lazy_replace_fields.emplace_back(field_id);
                 }
-            } else {
-                // Field at same position — check if needs lazification
-                // (transitioning from no-raw-data-index to raw-data-index)
-                if (!prefer_field_data &&
-                    new_info.field_index_has_raw_data_.count(fid) > 0 &&
-                    field_index_has_raw_data_.count(fid) == 0) {
-                    lazy_replace_fields.emplace_back(field_id);
-                }
             }
+            // No else: a field at the same position whose index gained raw
+            // data (the no-raw-index -> raw-index transition) is handled by the
+            // early "skip raw column" branch above, which drops the stale
+            // resident copy instead of lazifying it (lazy still keeps it on
+            // disk on top of the index — the double-footprint bug this fixes).
         }
         if (!fields.empty()) {
             diff.column_groups_to_load.emplace_back(i, fields);
