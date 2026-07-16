@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -45,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1353,6 +1356,48 @@ func TestMetaCache_ByIDDefaultedRequestDBNameNotCached(t *testing.T) {
 	assert.Equal(t, int32(2), atomic.LoadInt32(&describeCount))
 }
 
+// TestMetaCache_GetCollectionInfoByIDCacheHit verifies GetCollectionInfo serves
+// an id-only lookup straight from the cluster-wide by-id index as a cache HIT,
+// instead of probing collInfoByID[0] (an unconditional miss) and routing through
+// UpdateByID with a spurious cache-miss metric.
+func TestMetaCache_GetCollectionInfoByIDCacheHit(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+	describeCount := int32(0)
+	mix.SetDescribeCollectionFunc(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		atomic.AddInt32(&describeCount, 1)
+		return &milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 1,
+			DbName:       "db1",
+			DbId:         3,
+			Schema:       &schemapb.CollectionSchema{Name: "foo"},
+			RequestTime:  100,
+		}, nil
+	})
+	cache, err := NewMetaCache(mix)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	hitCounter := metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), "GetCollectionInfo", metrics.CacheHitLabel)
+	hitBefore := testutil.ToFloat64(hitCounter)
+
+	// first id-only lookup primes the by-id index (one describe, recorded as a miss)
+	info, err := cache.GetCollectionInfo(ctx, "", "", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", info.schema.GetName())
+
+	// a second id-only lookup must be served from the by-id index as a HIT, with
+	// no additional describe and no cache-miss metric
+	info, err = cache.GetCollectionInfo(ctx, "", "", 1)
+	assert.NoError(t, err)
+	assert.Equal(t, UniqueID(1), info.collID)
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&describeCount), "cached id-only lookup should not re-describe")
+	assert.Equal(t, float64(1), testutil.ToFloat64(hitCounter)-hitBefore,
+		"id-only GetCollectionInfo should record exactly one cache hit, not a miss")
+}
+
 func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
@@ -2526,12 +2571,11 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
-		// A real rootcoord always reports the collection's db; the by-id refresh
-		// in ensureCollectionForPartitionInvalidation relies on it to cache the
-		// collection and resolve the alias -> real-name mapping used to stale the
-		// partition entries. (An empty DbName here is only the older-rootcoord
-		// upgrade window, where update() deliberately skips caching for id
-		// lookups, so alias resolution during invalidation degrades.)
+		// A real rootcoord always reports the collection's db, so this exercises
+		// the normal (cached-collection) invalidation path. The older-rootcoord
+		// empty-DbName upgrade path — where the collection is not cached and the
+		// alias must be expanded from the fetched-but-uncached info — is covered
+		// by TestMetaCache_RemovePartitionViaAliasInvalidatesRealNameOnEmptyDBName.
 		DbName: "db",
 		Schema: &schemapb.CollectionSchema{
 			Name:   "collection",
@@ -2566,6 +2610,76 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 
 	_, err = cache.GetPartitionInfo(ctx, "db", "alias", "par1")
 	assert.NoError(t, err)
+}
+
+// TestMetaCache_RemovePartitionViaAliasInvalidatesRealNameOnEmptyDBName is a
+// regression test for the rolling-upgrade case: an older rootcoord resolves a
+// by-id describe but omits DbName, so update() does not cache the collection.
+// A partition DDL issued via an alias must still invalidate the partition cache
+// keyed by the collection's REAL name -- otherwise those entries stay active and
+// serve stale partition info. ensureCollectionForPartitionInvalidation now hands
+// the (uncached) schema/aliases back so RemovePartition can expand the alias.
+func TestMetaCache_RemovePartitionViaAliasInvalidatesRealNameOnEmptyDBName(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	// older rootcoord: by-id describe resolves the real name + aliases but reports
+	// no db name, so update() intentionally skips caching the collection.
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		DbName:       "",
+		Schema: &schemapb.CollectionSchema{
+			Name:   "collection",
+			Fields: []*schemapb.FieldSchema{},
+		},
+		Aliases:     []string{"alias"},
+		RequestTime: 1000,
+	}, nil).Maybe()
+
+	var mu sync.Mutex
+	showByName := map[string]int{}
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			mu.Lock()
+			showByName[req.GetCollectionName()]++
+			mu.Unlock()
+			return &milvuspb.ShowPartitionsResponse{
+				Status:               merr.Success(),
+				PartitionIDs:         []int64{100},
+				PartitionNames:       []string{"par1"},
+				CreatedTimestamps:    []uint64{1000},
+				CreatedUtcTimestamps: []uint64{1000},
+			}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// a data-plane access primed the partition cache under the REAL collection
+	// name (the collection itself is not in collInfo because of the empty db name)
+	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+
+	// a DropPartition issued via the alias arrives: collectionID is the real id,
+	// collectionName is the alias
+	cache.RemovePartition(ctx, "db", 1, "alias", "par1", 2000)
+
+	// the real-name partition entry must have been invalidated too, so this
+	// re-fetches (a second ShowPartitions for "collection") rather than serving
+	// the stale cached partition
+	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 2, showByName["collection"],
+		"real-name partition cache should be invalidated by an alias-based partition DDL even when the collection is uncached (empty DbName)")
 }
 
 func TestMetaCache_RemovePartitionInvalidatesCollectionInfo(t *testing.T) {

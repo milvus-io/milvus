@@ -699,7 +699,11 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 }
 
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
-	collInfo, ok := m.getCollection(database, collectionName, 0)
+	// Pass collectionID through so an id-only lookup (collectionName == "") hits
+	// the cluster-wide by-id index instead of probing collInfoByID[0], which
+	// always misses and forces a needless UpdateByID/singleflight round plus a
+	// spurious cache-miss metric. For name lookups getCollection ignores the id.
+	collInfo, ok := m.getCollection(database, collectionName, collectionID)
 
 	method := "GetCollectionInfo"
 	// if collInfo.collID != collectionID, means that the cache is not trustable
@@ -1314,7 +1318,7 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 }
 
 func (m *MetaCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64) {
-	m.ensureCollectionForPartitionInvalidation(ctx, database, collectionID, collectionName)
+	ensured := m.ensureCollectionForPartitionInvalidation(ctx, database, collectionID, collectionName)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1324,6 +1328,22 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 	realNames := make(map[string]struct{})
 	for _, dbName := range partitionInvalidationDatabases(database) {
 		m.collectPartitionCacheNamesLocked(dbName, collectionID, collectionName, names, realNames)
+		// Fold in the ensured collection's real name and aliases directly. During a
+		// rolling upgrade an id-only lookup may return an UNCACHED collectionInfo
+		// (older rootcoord omits DbName, so update() skips caching), leaving
+		// collectPartitionCacheNamesLocked unable to expand alias -> real name from
+		// collInfo. Without this, a partition DDL issued via an alias would only
+		// stale the alias-keyed entries and leave the real-name partition entries
+		// active, serving stale partition info.
+		if ensured != nil && ensured.schema != nil {
+			if realName := ensured.schema.GetName(); realName != "" {
+				names[realName] = struct{}{}
+				realNames[realName] = struct{}{}
+			}
+			for _, alias := range ensured.aliases {
+				names[alias] = struct{}{}
+			}
+		}
 		for name := range names {
 			if coll, ok := m.getCollectionLocked(dbName, name); ok && coll.schema != nil {
 				realName := coll.schema.GetName()
@@ -1367,11 +1387,19 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 	mlog.Debug(ctx, "remove partition", mlog.String("db", database), mlog.Int64("collectionID", collectionID), mlog.String("collection", collectionName), mlog.String("partition", partitionName), mlog.Uint64("version", version))
 }
 
-func (m *MetaCache) ensureCollectionForPartitionInvalidation(ctx context.Context, database string, collectionID UniqueID, collectionName string) {
+// ensureCollectionForPartitionInvalidation makes sure the collection metadata
+// needed to expand a partition invalidation (real name + aliases) is available,
+// and returns it. The returned *collectionInfo may NOT be in the cache: an
+// id-only lookup whose describe response omits DbName (older rootcoord during a
+// rolling upgrade) is deliberately not cached by update(), yet the caller still
+// needs its schema/aliases to invalidate the real-name partition entries — so
+// we hand the fetched info back rather than relying on it being in collInfo.
+// Returns nil only when the collection could not be resolved at all.
+func (m *MetaCache) ensureCollectionForPartitionInvalidation(ctx context.Context, database string, collectionID UniqueID, collectionName string) *collectionInfo {
 	if collectionID != 0 {
 		for _, dbName := range partitionInvalidationDatabases(database) {
-			if _, ok := m.getCollection(dbName, "", collectionID); ok {
-				return
+			if info, ok := m.getCollection(dbName, "", collectionID); ok {
+				return info
 			}
 		}
 
@@ -1379,22 +1407,24 @@ func (m *MetaCache) ensureCollectionForPartitionInvalidation(ctx context.Context
 		if fetchDB == "" {
 			fetchDB = defaultDB
 		}
-		if _, err := m.UpdateByID(ctx, fetchDB, collectionID); err != nil {
+		info, err := m.UpdateByID(ctx, fetchDB, collectionID)
+		if err != nil {
 			mlog.Debug(ctx, "failed to refresh collection cache before partition invalidation",
 				mlog.String("db", fetchDB),
 				mlog.Int64("collectionID", collectionID),
 				mlog.Err(err))
+			return nil
 		}
-		return
+		return info
 	}
 
 	if collectionName == "" {
-		return
+		return nil
 	}
 
 	for _, dbName := range partitionInvalidationDatabases(database) {
-		if _, ok := m.getCollection(dbName, collectionName, 0); ok {
-			return
+		if info, ok := m.getCollection(dbName, collectionName, 0); ok {
+			return info
 		}
 	}
 
@@ -1402,12 +1432,15 @@ func (m *MetaCache) ensureCollectionForPartitionInvalidation(ctx context.Context
 	if fetchDB == "" {
 		fetchDB = defaultDB
 	}
-	if _, err := m.UpdateByName(ctx, fetchDB, collectionName); err != nil {
+	info, err := m.UpdateByName(ctx, fetchDB, collectionName)
+	if err != nil {
 		mlog.Debug(ctx, "failed to refresh collection cache by name before partition invalidation",
 			mlog.String("db", fetchDB),
 			mlog.String("collection", collectionName),
 			mlog.Err(err))
+		return nil
 	}
+	return info
 }
 
 func partitionInvalidationDatabases(database string) []string {
