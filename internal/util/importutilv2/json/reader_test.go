@@ -327,6 +327,7 @@ func (suite *ReaderSuite) TestDecodeError() {
 			r := importcommon.NewMockReader(jsonContent)
 			return r, nil
 		})
+		cm.EXPECT().Size(mock.Anything, "mockPath").Return(int64(len(jsonContent)), nil).Maybe()
 		var reader *reader
 		var err error
 		if isLinesFormat {
@@ -440,6 +441,39 @@ func (suite *ReaderSuite) TestReadCount() {
 	data, err = reader.Read()
 	suite.NoError(err)
 	suite.Equal(20, data.GetRowNum())
+}
+
+func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+	jsonContent := `[{"pk":1},{"pk":2},{"pk":3}]`
+	openCount := 0
+
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, "mockPath").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
+		openCount++
+		if openCount == 1 {
+			return importcommon.NewPrematureEOFReader(jsonContent, 10), nil
+		}
+		return importcommon.NewMockReader(jsonContent), nil
+	})
+
+	reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
+	suite.NoError(err)
+	defer reader.Close()
+
+	data, err := reader.Read()
+	suite.NoError(err)
+	suite.Equal(3, data.GetRowNum())
+	suite.GreaterOrEqual(openCount, 2)
 }
 
 func TestJsonReader(t *testing.T) {

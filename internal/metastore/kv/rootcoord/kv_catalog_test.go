@@ -1178,6 +1178,63 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
 	})
+
+	t.Run("modify removes stale schema keys", func(t *testing.T) {
+		var collectionID int64 = 1
+		snapshot := mocks.NewTxnKV(t)
+		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+				assert.Contains(t, saves, BuildCollectionKey(0, collectionID))
+				assert.Contains(t, saves, BuildFieldKey(collectionID, 100))
+				assert.Contains(t, saves, BuildStructArrayFieldKey(collectionID, 200))
+				assert.Contains(t, saves, BuildFunctionKey(collectionID, 300))
+				assert.NotContains(t, saves, BuildFieldKey(collectionID, 101))
+				assert.NotContains(t, saves, BuildStructArrayFieldKey(collectionID, 201))
+				assert.NotContains(t, saves, BuildFunctionKey(collectionID, 301))
+				assert.ElementsMatch(t, []string{
+					BuildFieldKey(collectionID, 101),
+					BuildStructArrayFieldKey(collectionID, 201),
+					BuildFunctionKey(collectionID, 301),
+				}, removals)
+				return nil
+			})
+
+		kc := NewCatalog(snapshot).(*Catalog)
+		ctx := context.Background()
+		oldC := &model.Collection{
+			DBID:         0,
+			CollectionID: collectionID,
+			State:        pb.CollectionState_CollectionCreated,
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "keep_field"},
+				{FieldID: 101, Name: "drop_field"},
+			},
+			StructArrayFields: []*model.StructArrayField{
+				{FieldID: 200, Name: "keep_struct"},
+				{FieldID: 201, Name: "drop_struct"},
+			},
+			Functions: []*model.Function{
+				{ID: 300, Name: "keep_function"},
+				{ID: 301, Name: "drop_function"},
+			},
+		}
+		newC := &model.Collection{
+			DBID:         0,
+			CollectionID: collectionID,
+			State:        pb.CollectionState_CollectionCreated,
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "keep_field"},
+			},
+			StructArrayFields: []*model.StructArrayField{
+				{FieldID: 200, Name: "keep_struct"},
+			},
+			Functions: []*model.Function{
+				{ID: 300, Name: "keep_function"},
+			},
+		}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCatalog_AlterCollectionDB(t *testing.T) {
@@ -3299,6 +3356,162 @@ func TestRBACPrefixMatch(t *testing.T) {
 		}
 		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Insert"))
 		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Delete"))
+	})
+}
+
+func TestRBACReadSkipsEmptyKeySegments(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+
+	t.Run("getRolesByUsername", func(t *testing.T) {
+		username := "ai_voice"
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, username)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock).(*Catalog)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "default_db_rw",
+				prefix,
+				prefix + "kb_db_rw",
+			},
+			nil,
+			nil,
+		)
+
+		roles, err := c.getRolesByUsername(ctx, tenant, username)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"default_db_rw", "kb_db_rw"}, roles)
+		require.NotContains(t, roles, "")
+	})
+
+	t.Run("ListUserRole", func(t *testing.T) {
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "user1/role1",
+				prefix + "user1/",
+				prefix + "/role2",
+			},
+			nil,
+			nil,
+		)
+
+		userRoles, err := c.ListUserRole(ctx, tenant)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"user1/role1"}, userRoles)
+	})
+
+	t.Run("ListRole", func(t *testing.T) {
+		roleName := "role1"
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "user1/" + roleName,
+				prefix + "/" + roleName,
+				prefix + "user2/",
+			},
+			nil,
+			nil,
+		)
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("", nil)
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, true)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		require.Equal(t, roleName, roles[0].GetRole().GetName())
+		require.Len(t, roles[0].GetUsers(), 1)
+		require.Equal(t, "user1", roles[0].GetUsers()[0].GetName())
+	})
+
+	t.Run("ListRoleAllRoles", func(t *testing.T) {
+		prefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "role1",
+				prefix + "   ",
+			},
+			nil,
+			nil,
+		)
+
+		roles, err := c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		require.Equal(t, "role1", roles[0].GetRole().GetName())
+	})
+
+	t.Run("ListGrant", func(t *testing.T) {
+		roleName := "role1"
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, roleName)
+		validIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{
+				granteePrefix + "Collection/default.coll",
+				granteePrefix + "Collection/",
+			},
+			[]string{"grant-id", "bad-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validIDPrefix).Return(
+			[]string{validIDPrefix + "PrivilegeLoad", validIDPrefix},
+			[]string{"root", "root"},
+			nil,
+		)
+
+		grants, err := c.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+			Role:   &milvuspb.RoleEntity{Name: roleName},
+			DbName: util.AnyWord,
+		})
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
+		require.Equal(t, roleName, grants[0].GetRole().GetName())
+		require.Equal(t, "Collection", grants[0].GetObject().GetName())
+		require.Equal(t, "coll", grants[0].GetObjectName())
+		require.Equal(t, util.DefaultDBName, grants[0].GetDbName())
+		require.Equal(t, util.PrivilegeNameForAPI("PrivilegeLoad"), grants[0].GetGrantor().GetPrivilege().GetName())
+	})
+
+	t.Run("ListPolicy", func(t *testing.T) {
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		validIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{
+				granteePrefix + "role1/Collection/default.coll",
+				granteePrefix + "role2/Collection/",
+			},
+			[]string{"grant-id", "bad-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validIDPrefix).Return(
+			[]string{validIDPrefix + "PrivilegeLoad", validIDPrefix},
+			nil,
+			nil,
+		)
+
+		policy, err := c.ListPolicy(ctx, tenant)
+		require.NoError(t, err)
+		require.Len(t, policy, 1)
+		require.Equal(t, "role1", policy[0].GetRole().GetName())
+		require.Equal(t, "Collection", policy[0].GetObject().GetName())
+		require.Equal(t, "coll", policy[0].GetObjectName())
+		require.Equal(t, util.DefaultDBName, policy[0].GetDbName())
+		require.Equal(t, util.PrivilegeNameForAPI("PrivilegeLoad"), policy[0].GetGrantor().GetPrivilege().GetName())
 	})
 }
 

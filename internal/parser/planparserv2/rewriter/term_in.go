@@ -93,6 +93,12 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out = append(out, others...)
 	for _, g := range groups {
 		if len(g.values) >= 2 {
+			if hasMissingPathNotEqualSemantics(g.col, g.values...) {
+				for _, i := range g.origIndices {
+					out = append(out, indexToExpr[i])
+				}
+				continue
+			}
 			g.values = sortGenericValues(g.values)
 			in := newTermExpr(g.col, g.values)
 			out = append(out, notExpr(in))
@@ -179,6 +185,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		}
 		// If multiple different equals present, AND implies contradiction unless identical.
 		if len(eqUnique) > 1 {
+			if !canFoldBoolDomainToConstant(g.col) {
+				continue
+			}
 			for _, ti := range g.termIdxs {
 				used[ti] = true
 			}
@@ -197,6 +206,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 				inSet = true
 				break
 			}
+		}
+		if !inSet && !canFoldBoolDomainToConstant(g.col) {
+			continue
 		}
 		for _, ti := range g.termIdxs {
 			used[ti] = true
@@ -368,6 +380,9 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		filtered := filterValuesByRange(effectiveDataType(g.col), termVals, g.lower, g.lowerInc, g.upper, g.upperInc)
+		if len(filtered) == 0 && !canFoldBoolDomainToConstant(g.col) {
+			continue
+		}
 		used[g.termIdx] = true
 		for _, ri := range g.rangeIdxs {
 			used[ri] = true
@@ -493,6 +508,9 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 				inter = append(inter, v)
 			}
 		}
+		if len(inter) == 0 && !canFoldBoolDomainToConstant(g.col) {
+			continue
+		}
 		for _, i := range g.idxs {
 			used[i] = true
 		}
@@ -568,6 +586,9 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 			if !excluded {
 				filtered = append(filtered, tv)
 			}
+		}
+		if len(filtered) == 0 && !canFoldBoolDomainToConstant(g.col) {
+			continue
 		}
 		used[g.termIdx] = true
 		for _, ni := range g.neqIdxs {
@@ -647,6 +668,9 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 		}
 		if containsAny {
+			if !canFoldBoolDomainToConstant(g.col) {
+				continue
+			}
 			used[g.termIdx] = true
 			for _, ni := range g.neqIdxs {
 				used[ni] = true

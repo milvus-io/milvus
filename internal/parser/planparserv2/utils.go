@@ -823,7 +823,7 @@ func checkValidPoint(wktStr string) error {
 	if err != nil {
 		return err
 	}
-	if g.(*geom.Point) == nil {
+	if _, ok := g.(*geom.Point); !ok {
 		return fmt.Errorf("only supports POINT geometry: %s", wktStr)
 	}
 	return nil

@@ -58,7 +58,11 @@ func (gcs *GcpNativeObjectStorage) GetObject(ctx context.Context, bucketName, ob
 	if offset == 0 && size == 0 {
 		reader, err = obj.NewReader(ctx)
 	} else {
-		reader, err = obj.NewRangeReader(ctx, offset, size)
+		length := size
+		if offset > 0 && size == 0 {
+			length = -1
+		}
+		reader, err = obj.NewRangeReader(ctx, offset, length)
 	}
 
 	if err != nil {

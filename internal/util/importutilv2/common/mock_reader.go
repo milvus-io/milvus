@@ -56,6 +56,48 @@ func CustomMockReader(reader io.Reader) storage.FileReader {
 	}
 }
 
+type prematureEOFReader struct {
+	*strings.Reader
+	limit        int
+	read         int
+	reportedSize int64
+}
+
+// NewPrematureEOFReader creates a test reader that returns EOF before the reported object size is reached.
+func NewPrematureEOFReader(content string, limit int) storage.FileReader {
+	return NewPrematureEOFReaderWithSize(content, limit, int64(len(content)))
+}
+
+// NewPrematureEOFReaderWithSize creates a test reader that reports a custom object size.
+func NewPrematureEOFReaderWithSize(content string, limit int, reportedSize int64) storage.FileReader {
+	reader := strings.NewReader(content)
+	return &prematureEOFReader{
+		Reader:       reader,
+		limit:        limit,
+		reportedSize: reportedSize,
+	}
+}
+
+func (r *prematureEOFReader) Read(p []byte) (int, error) {
+	if r.read >= r.limit {
+		return 0, io.EOF
+	}
+	if remaining := r.limit - r.read; len(p) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.Reader.Read(p)
+	r.read += n
+	return n, err
+}
+
+func (r *prematureEOFReader) Close() error {
+	return nil
+}
+
+func (r *prematureEOFReader) Size() (int64, error) {
+	return r.reportedSize, nil
+}
+
 func newErrorMockReader(content string, err error, errCount int) storage.FileReader {
 	reader := strings.NewReader(content)
 	return &mockFileReader{
