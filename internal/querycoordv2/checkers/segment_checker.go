@@ -502,7 +502,11 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 				// view.Segments) AND not on the not-serving list. The readable set is a subset of the
 				// loaded universe, so a segment actually being served is always known loaded -- the
 				// straddle protection is unaffected.
-				_, knownLoaded := view.Segments[s.GetID()]
+				// known loaded means this leader has the segment loaded on s's node -- a copy on a
+				// different node is a wrong-node duplicate and must not be treated as in use (the
+				// sibling redundancy check gates on NodeID == s.Node the same way).
+				segInView, loadedHere := view.Segments[s.GetID()]
+				knownLoaded := loadedHere && segInView.GetNodeID() == s.Node
 				inUse := knownLoaded && !view.NotServingSegments.Contain(s.GetID())
 				if inUse && provablyNotInReadableSet(view, currentTargetVersion, nextTargetVersion) {
 					// The version guard would have released a segment the delegator is still
