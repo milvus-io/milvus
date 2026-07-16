@@ -4911,6 +4911,9 @@ type dataCoordConfig struct {
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
+	SingleCompactionThresholdJitter   ParamItem `refreshable:"true"`
+	SingleCompactionRateLimitTokens   ParamItem `refreshable:"true"`
+	SingleCompactionRateLimitInterval ParamItem `refreshable:"true"`
 
 	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
@@ -5430,6 +5433,42 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
+
+	p.SingleCompactionThresholdJitter = ParamItem{
+		Key:          "dataCoord.compaction.single.thresholdJitter",
+		Version:      "2.6.17",
+		DefaultValue: "0.25",
+		Doc: "Deterministic per-segment jitter applied to the single-compaction accumulation thresholds " +
+			"(deltalog count/size, deleted-rows ratio, expired-entities ratio/size). Each segment's effective " +
+			"threshold becomes configured x [1, 1+jitter], de-synchronizing same-batch segments so they do not " +
+			"trigger rewrites simultaneously. 0 disables (legacy behavior).",
+		Export: false,
+	}
+	p.SingleCompactionThresholdJitter.Init(base.mgr)
+
+	p.SingleCompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.single.rateLimitTokens",
+		Version:      "2.6.17",
+		DefaultValue: "256",
+		Doc: "Max delete-accumulation single-compaction candidates admitted per rateLimitInterval (token bucket). " +
+			"Shock protection against mass eligibility (e.g. a threshold config change); size it well above " +
+			"steady-state demand — an undersized bucket defers rewrites and lets deltalog backlog grow. A segment " +
+			"whose normalized delete pressure (max over deltalog count, deleted-rows ratio and delete-log size, each " +
+			"vs its threshold) reaches 4x on any axis — scaled by the segment's jitter multiplier — bypasses the " +
+			"limit so deferral stays bounded. Expiry-accumulation, strict age-TTL and index-rebuild compaction are " +
+			"never gated (de-synchronized by jitter only). 0 disables (legacy behavior).",
+		Export: false,
+	}
+	p.SingleCompactionRateLimitTokens.Init(base.mgr)
+
+	p.SingleCompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.single.rateLimitInterval",
+		Version:      "2.6.17",
+		DefaultValue: "60",
+		Doc:          "Refill interval of the single-compaction admission token bucket, in seconds.",
+		Export:       false,
+	}
+	p.SingleCompactionRateLimitInterval.Init(base.mgr)
 
 	p.StorageVersionCompactionEnabled = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.enabled",

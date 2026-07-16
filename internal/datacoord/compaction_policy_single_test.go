@@ -109,6 +109,11 @@ func buildTestSegment(id int64,
 }
 
 func (s *SingleCompactionPolicySuite) TestIsDeleteRowsTooManySegment() {
+	// This case asserts the exact legacy threshold boundary (201 vs 200), so
+	// disable the per-segment jitter which otherwise raises the effective bound.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionThresholdJitter.Key)
+
 	segment0 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, true)
 	s.Equal(true, hasTooManyDeletions(segment0))
 
@@ -123,6 +128,10 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 	ctx := context.Background()
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+	// One candidate sits exactly at the legacy deltalog boundary (201 vs 200);
+	// disable jitter so the expected view count is deterministic.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionThresholdJitter.Key)
 
 	collID := int64(100)
 	coll := &collectionInfo{

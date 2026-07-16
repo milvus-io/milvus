@@ -379,9 +379,22 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		expectedSize := getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)
-		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
+		plans, gatedIDs := t.generatePlans(group.segments, signal, ct, expectedSize)
+		// A token was consumed per admission-gated segment at selection time. If
+		// a plan is dropped below (inspector full, alloc error, enqueue error)
+		// its segments are not rewritten this round, so refund those tokens; the
+		// segments are stateless and re-evaluated next round. Without this the
+		// effective admission rate silently collapses below the configured rate
+		// under sustained backpressure.
+		enqueuedGated := 0
+		refundUnusedTokens := func() {
+			if remaining := len(gatedIDs) - enqueuedGated; remaining > 0 {
+				getSingleCompactionAdmitter().refund(remaining)
+			}
+		}
 		for _, plan := range plans {
 			if !signal.isForce && t.inspector.isFull() {
+				refundUnusedTokens()
 				log.Warn("skip to generate compaction plan due to handler full")
 				return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 			}
@@ -390,6 +403,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 			startID, endID, err := t.allocator.AllocN(n)
 			if err != nil {
+				refundUnusedTokens()
 				log.Warn("fail to allocate id", zap.Error(err))
 				return err
 			}
@@ -423,6 +437,11 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 					zap.Error(err))
 				continue
 			}
+			for _, sid := range inputSegmentIDs {
+				if _, ok := gatedIDs[sid]; ok {
+					enqueuedGated++
+				}
+			}
 
 			log.Info("time cost of generating compaction",
 				zap.Int64("planID", task.GetPlanID()),
@@ -430,14 +449,19 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 				zap.Int64("target size", task.GetMaxSize()),
 				zap.Int64s("inputSegments", inputSegmentIDs))
 		}
+		// Refund tokens for any gated segment whose plan failed to enqueue.
+		refundUnusedTokens()
 	}
 	return nil
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) []*typeutil.Pair[int64, []int64] {
+// generatePlans returns the compaction plans for a candidate group together
+// with the set of segment IDs that consumed an admission token, so handleSignal
+// can refund tokens for any plan it drops under inspector backpressure.
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) ([]*typeutil.Pair[int64, []int64], map[int64]struct{}) {
 	if len(segments) == 0 {
 		log.Warn("the number of candidate segments is 0, skip to generate compaction plan")
-		return []*typeutil.Pair[int64, []int64]{}
+		return []*typeutil.Pair[int64, []int64]{}, nil
 	}
 
 	// find segments need internal compaction
@@ -445,18 +469,47 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	var prioritizedCandidates []*SegmentInfo
 	var smallCandidates []*SegmentInfo
 	var nonPlannedSegments []*SegmentInfo
+	// admissionCandidates hold avalanche-shaped delete-accumulation segments that
+	// are paced by the token bucket. Expiry accumulation, strict age-TTL and
+	// index-rebuild segments bypass pacing (they are correctness / retention
+	// obligations and must not be starved behind a delete backlog).
+	var admissionCandidates []*SegmentInfo
 
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
-		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime) {
+		if signal.isForce {
+			// manual/force compaction expresses explicit operator intent and
+			// bypasses admission limiting.
 			prioritizedCandidates = append(prioritizedCandidates, segment)
-		} else if t.isSmallSegment(segment, expectedSize) {
-			smallCandidates = append(smallCandidates, segment)
-		} else {
-			nonPlannedSegments = append(nonPlannedSegments, segment)
+			continue
 		}
+		switch reason := t.singleCompactionReasonFor(segment, compactTime); {
+		case reason == reasonNone:
+			if t.isSmallSegment(segment, expectedSize) {
+				smallCandidates = append(smallCandidates, segment)
+			} else {
+				nonPlannedSegments = append(nonPlannedSegments, segment)
+			}
+		case reason.admissionGated():
+			admissionCandidates = append(admissionCandidates, segment)
+		default:
+			prioritizedCandidates = append(prioritizedCandidates, segment)
+		}
+	}
+
+	// Rate-limit single-compaction admissions so that mass eligibility (a
+	// same-batch cohort crossing thresholds together, a threshold config change)
+	// becomes a paced stream instead of an avalanche. Deferred segments carry no
+	// state and are re-evaluated next round.
+	admitted, gatedIDs, deferred := getSingleCompactionAdmitter().admit(admissionCandidates)
+	prioritizedCandidates = append(prioritizedCandidates, admitted...)
+	if deferred > 0 {
+		log.RatedInfo(10, "deferred single compaction candidates by admission limit",
+			zap.Int64("collectionID", signal.collectionID),
+			zap.Int("admitted", len(admitted)),
+			zap.Int("deferred", deferred))
 	}
 
 	buckets := [][]*SegmentInfo{}
@@ -535,7 +588,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 			zap.String("channel", signal.channel),
 			zap.Int("smallRemainingCount", len(smallRemaining)))
 	}
-	return tasks
+	return tasks, gatedIDs
 }
 
 // getCandidates converts signal criterion into corresponding compaction candidate groups
@@ -638,34 +691,42 @@ func hasTooManyDeletions(segment *SegmentInfo) bool {
 		deltaLogCount += len(deltaLogs.GetBinlogs())
 	}
 
+	// Deterministic per-segment jitter de-synchronizes same-batch segments,
+	// whose accumulation rates are nearly identical, so they do not cross the
+	// hard thresholds simultaneously (see compaction_admission.go).
+	mult := singleCompactionThresholdMultiplier(segment.ID)
+
 	// Too many deltalog files, accumulates IO count.
-	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+	if float64(deltaLogCount) > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsFloat()*mult {
 		log.Ctx(context.TODO()).Info("delta logs file count exceeds threshold",
 			zap.Int64("segmentID", segment.ID),
 			zap.Int("delta log count", deltaLogCount),
 			zap.Int("file number threshold", Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()),
+			zap.Float64("jitterMultiplier", mult),
 		)
 		return true
 	}
 
 	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() {
+	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*mult {
 		log.Ctx(context.TODO()).Info("deleted entities rows proportion exceeds threshold",
 			zap.Int64("segmentID", segment.ID),
 			zap.Int64("number of rows", segment.GetNumOfRows()),
 			zap.Int("deleted rows", totalDeletedRows),
 			zap.Float64("proportion threshold", Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()),
+			zap.Float64("jitterMultiplier", mult),
 		)
 		return true
 	}
 
 	// Delete size is too large, varchar PK tends to accumulates deltalog size.
-	if totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
+	if float64(totalDeleteLogSize) > float64(Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64())*mult {
 		log.Ctx(context.TODO()).Info("total delete entries size exceeds threshold",
 			zap.Int64("segmentID", segment.ID),
 			zap.Int64("numRows", segment.GetNumOfRows()),
 			zap.Int64("delete entries size", totalDeleteLogSize),
 			zap.Int64("size threshold", Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()),
+			zap.Float64("jitterMultiplier", mult),
 		)
 		return true
 	}
@@ -695,7 +756,46 @@ func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *comp
 	return false
 }
 
-func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
+// singleCompactionReason identifies why a segment qualifies for single
+// compaction. It lets the caller decide whether the reason is avalanche-shaped
+// (delete accumulation — paced by the admission limiter) or a correctness /
+// retention obligation (strict age-based TTL, expiry accumulation, index
+// rebuild) that must bypass pacing so it cannot be starved behind a delete
+// backlog.
+type singleCompactionReason int
+
+const (
+	reasonNone               singleCompactionReason = iota
+	reasonExpiryStrict                              // strict age-based TTL: bypass admission
+	reasonExpiryAccumulation                        // proportion/size of expired entities: bypass admission
+	reasonTooManyDeletions                          // deltalog count/size/deleted-rows ratio: paced
+	reasonRebuildIndex                              // index engine version upgrade: bypass admission
+)
+
+// admissionGated reports whether a candidate with this reason should be paced by
+// the single-compaction admission limiter. Only delete accumulation is gated:
+// its dirtiness (deleted-rows ratio) and bounded-deferral escape hatch (deltalog
+// count vs the hard cap) are both measured from delete deltalogs. Expiry
+// accumulation lives in insert binlogs, so it has neither an ordering signal nor
+// a hard-cap fallback here; pacing it would let a delete backlog starve
+// retention reclamation without bound. It therefore bypasses admission (its
+// bounded per-segment jitter still de-synchronizes a cohort), together with
+// strict age-TTL and index rebuild.
+func (r singleCompactionReason) admissionGated() bool {
+	return r == reasonTooManyDeletions
+}
+
+// singleCompactionReasonFor classifies a segment. Reasons are evaluated in
+// priority order and the first match wins; because delete accumulation is the
+// only gated reason, first-match interacts with gating as follows:
+//   - A delete-heavy segment that is also index-old is checked for deletions
+//     before rebuild, so it is paced (its rewrite rebuilds the index anyway).
+//   - A delete-heavy segment that also trips strict age-TTL or expiry
+//     accumulation matches those first (they precede deletions) and therefore
+//     bypasses pacing — retention must not be starved behind a delete backlog.
+//   - A segment whose only reason is expiry / age-TTL / index rebuild bypasses
+//     pacing.
+func (t *compactionTrigger) singleCompactionReasonFor(segment *SegmentInfo, compactTime *compactTime) singleCompactionReason {
 	// no longer restricted binlog numbers because this is now related to field numbers
 	log := log.Ctx(context.TODO())
 
@@ -719,27 +819,36 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		}
 	}
 	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
-		return true
+		return reasonExpiryStrict
 	}
 
-	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
-		totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
+	// Accumulation-type expiry thresholds share the per-segment jitter; the pure
+	// age-based TTL check above is deliberately not jittered (delaying retention
+	// cleanup is a semantic change).
+	expiryMult := singleCompactionThresholdMultiplier(segment.ID)
+	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*expiryMult ||
+		float64(totalExpiredSize) > float64(Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64())*expiryMult {
 		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segmentID", segment.ID),
 			zap.Int("expiredRows", totalExpiredRows), zap.Int64("expiredLogSize", totalExpiredSize),
-			zap.Bool("createdByCompaction", segment.CreatedByCompaction), zap.Int64s("compactionFrom", segment.CompactionFrom))
-		return true
+			zap.Bool("createdByCompaction", segment.CreatedByCompaction), zap.Int64s("compactionFrom", segment.CompactionFrom),
+			zap.Float64("jitterMultiplier", expiryMult))
+		return reasonExpiryAccumulation
 	}
 
 	// check if deltalog count, size, and deleted rowcount ratio exceeds threshold
 	if hasTooManyDeletions(segment) {
-		return true
+		return reasonTooManyDeletions
 	}
 
 	if t.ShouldRebuildSegmentIndex(segment) {
-		return true
+		return reasonRebuildIndex
 	}
 
-	return false
+	return reasonNone
+}
+
+func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
+	return t.singleCompactionReasonFor(segment, compactTime) != reasonNone
 }
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool {

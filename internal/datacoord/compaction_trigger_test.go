@@ -2778,7 +2778,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				testingOnly:   true,
 			}
 
-			if got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize); !reflect.DeepEqual(got, tt.want) {
+			if got, _ := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("compactionTrigger.generatePlans() = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -3074,7 +3074,7 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 				testingOnly:   true,
 			}
 
-			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
+			got, _ := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
 			for i, pair := range got {
 				t.Logf("got[%d]: totalRows=%d, segmentIDs=%v", i, pair.A, pair.B)
 			}
