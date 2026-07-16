@@ -54,21 +54,6 @@ std::atomic<int64_t> FIELD_DATA_LOAD_BATCH_TARGET_BYTES(
 std::atomic<int64_t> FIELD_DATA_READ_WINDOW_BYTES(
     kDefaultFieldDataReadWindowBytes);
 
-void
-CompleteCellBatchFuture(const std::shared_ptr<std::promise<void>>& promise,
-                        const std::shared_ptr<CellReaderChannel>& channel,
-                        const std::shared_ptr<std::atomic<size_t>>& remaining,
-                        std::exception_ptr error = nullptr) {
-    if (error) {
-        promise->set_exception(std::move(error));
-    } else {
-        promise->set_value();
-    }
-    if (remaining->fetch_sub(1) == 1) {
-        channel->close();
-    }
-}
-
 int64_t
 PositiveBytes(int64_t bytes, int64_t fallback) {
     return bytes > 0 ? bytes : fallback;
@@ -394,16 +379,14 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     }
 }
 
-std::vector<std::future<void>>
+std::vector<CellLoadFuture>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
                    BatchReaderFactory reader_factory,
-                   std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
                    milvus::proto::common::LoadPriority priority,
                    CellFinalizeFunc finalize_cell) {
     if (cell_specs.empty()) {
-        channel->close();
         return {};
     }
 
@@ -482,7 +465,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     }
 
     if (batches.empty()) {
-        channel->close();
         return {};
     }
 
@@ -498,7 +480,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         FieldDataReadWindowBytes() >> 20);
 
     auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
-    auto remaining = std::make_shared<std::atomic<size_t>>(batches.size());
     auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
     auto shared_finalizer =
@@ -506,13 +487,13 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     AssertInfo(static_cast<bool>(*shared_finalizer),
                "[StorageV2] LoadCellBatchAsync requires a cell finalizer");
 
-    std::vector<std::future<void>> futures;
+    std::vector<CellLoadFuture> futures;
     futures.reserve(batches.size());
 
     auto append_failed_future = [&](std::exception_ptr error) {
-        auto promise = std::make_shared<std::promise<void>>();
-        futures.emplace_back(promise->get_future());
-        CompleteCellBatchFuture(promise, channel, remaining, error);
+        std::promise<LoadedCellBatch> promise;
+        futures.emplace_back(promise.get_future());
+        promise.set_exception(std::move(error));
     };
 
     for (auto& batch : batches) {
@@ -538,16 +519,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                               shared_factory,
                                               batch_loading_overhead_bytes,
                                               reader_memory_limit,
-                                              channel,
-                                              remaining,
                                               shared_finalizer,
                                               op_ctx]() mutable {
-                auto task_guard = folly::makeGuard([&channel, &remaining]() {
-                    if (remaining->fetch_sub(1) == 1) {
-                        channel->close();
-                    }
-                });
-
                 auto& budget = milvus::storage::TransientMemoryBudget::
                     GetLoadTransientBudget();
                 size_t transferred_loading_overhead_bytes = 0;
@@ -580,34 +553,28 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                 CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
                 int64_t table_offset = 0;
-                std::vector<std::shared_ptr<CellLoadResult>> cell_results;
-                cell_results.reserve(batch.cells.size());
+                LoadedCellBatch loaded_cells;
+                loaded_cells.reserve(batch.cells.size());
                 for (const auto& cell : batch.cells) {
                     CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                    auto cell_result = std::make_shared<CellLoadResult>();
-                    cell_result->cid = cell.cid;
                     auto cell_loading_overhead_bytes =
                         CellLoadingOverheadBytes(cell);
-                    cell_result->loading_overhead_bytes =
-                        cell_loading_overhead_bytes;
-                    cell_result->tables.reserve(cell.rg_count);
+                    std::vector<std::shared_ptr<arrow::Table>> cell_tables;
+                    cell_tables.reserve(cell.rg_count);
                     for (int64_t i = 0; i < cell.rg_count; ++i) {
-                        cell_result->tables.push_back(
+                        cell_tables.push_back(
                             std::move(all_tables[table_offset + i]));
                     }
                     table_offset += cell.rg_count;
-                    cell_result->chunk =
-                        (*shared_finalizer)(cell_result->tables, cell.cid);
-                    ReleaseCellLoadResultBudget(cell_result);
+                    auto chunk = (*shared_finalizer)(cell_tables, cell.cid);
+                    cell_tables.clear();
+                    budget.Release(cell_loading_overhead_bytes);
                     transferred_loading_overhead_bytes +=
                         cell_loading_overhead_bytes;
-                    cell_results.push_back(std::move(cell_result));
-                }
-
-                for (auto& cell_result : cell_results) {
                     CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
-                    channel->push(std::move(cell_result));
+                    loaded_cells.push_back({cell.cid, std::move(chunk)});
                 }
+                return loaded_cells;
             }));
         } catch (...) {
             if (budget_admitted) {
@@ -619,21 +586,6 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     }
 
     return futures;
-}
-
-void
-ReleaseCellLoadResultBudget(
-    const std::shared_ptr<CellLoadResult>& cell_load_result) {
-    if (cell_load_result == nullptr) {
-        return;
-    }
-    cell_load_result->tables.clear();
-    if (cell_load_result->loading_overhead_bytes == 0) {
-        return;
-    }
-    milvus::storage::TransientMemoryBudget::GetLoadTransientBudget().Release(
-        cell_load_result->loading_overhead_bytes);
-    cell_load_result->loading_overhead_bytes = 0;
 }
 
 BatchReaderFactory
