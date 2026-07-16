@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -101,6 +103,7 @@ func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			metrics.DataNodeFlushBufferCount.Reset()
 			callbackCalled := false
 			task := NewGrowingSourceSyncTask().
 				WithFailureCallback(func(error) {
@@ -110,8 +113,14 @@ func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(
 
 			require.NotPanics(t, func() {
 				task.HandleError(tc.err)
+				task.HandleError(tc.err)
 			})
 			require.False(t, callbackCalled)
+			require.Zero(t, testutil.ToFloat64(metrics.DataNodeFlushBufferCount.WithLabelValues(
+				paramtable.GetStringNodeID(),
+				metrics.FailLabel,
+				task.level.String(),
+			)))
 		})
 	}
 }
