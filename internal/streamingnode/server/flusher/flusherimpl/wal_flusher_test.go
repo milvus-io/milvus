@@ -148,6 +148,20 @@ func TestWALFlusher_DispatchDefersAckSyncUpDropCollectionObserve(t *testing.T) {
 	require.ErrorContains(t, flusher.dispatch(msg), "observe failed")
 }
 
+func TestWALFlusher_DispatchStopsCreateCollectionOnObserveError(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	flusher := newTestWALFlusher(rs)
+
+	msg := message.CreateTestCreateCollectionMessage(t, 2, 100, rmq.NewRmqID(100)).
+		IntoImmutableMessage(rmq.NewRmqID(101))
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(context.Canceled).Twice()
+
+	err := flusher.dispatch(msg)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, flusher.flusherComponents.dataServices)
+	rs.AssertNotCalled(t, "GetSchema", mock.Anything, mock.Anything, mock.Anything)
+}
+
 func TestWALFlusher_DispatchObservesAckSyncUpTruncateCollectionBeforeHandling(t *testing.T) {
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(errors.New("observe failed")).Once()

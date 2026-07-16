@@ -289,7 +289,9 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			impl.logger.DPanic(ctx, "the message type is not CreateCollectionMessage", mlog.Err(err))
 			return nil
 		}
-		impl.flusherComponents.WhenCreateCollection(ctx, createCollectionMsg)
+		if err := impl.flusherComponents.WhenCreateCollection(ctx, createCollectionMsg); err != nil {
+			return err
+		}
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
