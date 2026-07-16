@@ -144,15 +144,13 @@ struct CellSpec {
         0;  // extra transient bytes during loading; 0 = memory_size
 };
 
-// Result of loading a single cell: cid + finalized group chunk.
-struct CellLoadResult {
+struct LoadedCell {
     int64_t cid;
-    size_t loading_overhead_bytes{0};
-    std::vector<std::shared_ptr<arrow::Table>> tables;
     std::unique_ptr<milvus::GroupChunk> chunk;
 };
 
-using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
+using LoadedCellBatch = std::vector<LoadedCell>;
+using CellLoadFuture = std::future<LoadedCellBatch>;
 
 // Creates a batch reader for a range of contiguous row groups.
 // Returns all row groups as a vector of tables in one call.
@@ -173,36 +171,29 @@ using CellFinalizeFunc = std::function<std::unique_ptr<milvus::GroupChunk>(
 /**
  * Load cells in batches using a pluggable reader factory. Cells are sorted by
  * (file_idx, local_rg_offset) and grouped into IO-merged batches.
- * Each completed cell is finalized and pushed to the channel immediately.
+ * Each completed cell is finalized and returned in its batch future.
  * Batch admission waits on the global transient memory budget before
  * submitting work to the load pool. After finalize_cell returns, the batch task
- * releases transient Arrow tables before pushing the result, so admitted budget
- * is not held while a producer waits on the bounded channel.
+ * releases transient Arrow tables before storing the result in the future.
  *
  * @param op_ctx operation context for cancellation
  * @param cell_specs cell specifications (sorted internally)
  * @param reader_factory factory that reads all row groups for a batch
- * @param channel channel to receive loaded cell data; closed when all done
  * @param memory_limit split target for per-batch loading overhead and
  * per-reader upper bound for final loaded memory. A global transient memory
  * budget gates concurrent batch loading across calls.
  * @param priority load priority
  * @param finalize_cell converts loaded Arrow tables into the final GroupChunk
- * before the cell is pushed to the channel
- * @return vector of futures for the batch loading tasks
+ * before the cell is stored in the batch result
+ * @return futures containing finalized cells for each batch
  */
-std::vector<std::future<void>>
+std::vector<CellLoadFuture>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
                    BatchReaderFactory reader_factory,
-                   std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
                    milvus::proto::common::LoadPriority priority,
                    CellFinalizeFunc finalize_cell);
-
-void
-ReleaseCellLoadResultBudget(
-    const std::shared_ptr<CellLoadResult>& cell_load_result);
 
 /**
  * Creates a BatchReaderFactory that reads from Parquet files via
