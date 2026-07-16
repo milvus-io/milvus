@@ -996,22 +996,22 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
         translator = std::make_unique<storagev2translator::PkIndexTranslator>(
             id_, column, data_type, is_sorted_by_pk_);
     size_t pk_index_size = 0;
-        ResourceUsage expected_total_size;
-        for (size_t i = 0; i < translator->num_cells(); ++i) {
-            expected_total_size += translator->estimated_byte_size_of_cell(i).first;
-        }
-        pk_index_size = expected_total_size.memory_bytes;
-        stats_.mem_size += pk_index_size;
-        LOG_INFO(
-            "Adding pk to offset index with size {} for segment {} , mem_size= "
-            "{}",
-            pk_index_size,
-            id_,
-            stats_.mem_size.load());
-    auto slot = Manager::GetInstance()
+    ResourceUsage expected_total_size;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        expected_total_size += translator->estimated_byte_size_of_cell(i).first;
+    }
+    pk_index_size = expected_total_size.memory_bytes;
+    stats_.mem_size.fetch_add(pk_index_size, std::memory_order_relaxed);
+    LOG_INFO(
+        "Adding pk to offset index with size {} for segment {} , mem_size= "
+        "{}",
+        pk_index_size,
+        id_,
+        stats_.mem_size.load());
+     auto slot = Manager::GetInstance()
                     .CreateCacheSlot<storagev2translator::PkIndexCell>(
                         std::move(translator));
-    if (eager) {
+     if (eager) {
         auto cell_holder =
             cachinglayer::SemiInlineGet(slot->PinCells(op_ctx, {0}));
         AssertInfo(cell_holder->get_cell_of(0) != nullptr,
