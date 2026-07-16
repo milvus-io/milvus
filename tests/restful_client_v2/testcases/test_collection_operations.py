@@ -1,8 +1,10 @@
 import datetime
 import logging
+import random
 import threading
 import time
 
+import numpy as np
 import pytest
 from api.milvus import CollectionClient
 from base.testbase import TestBase
@@ -1981,7 +1983,6 @@ class TestCollectionAddFieldNegative(TestBase):
 class TestCollectionMaintenance(TestBase):
     """Test collection maintenance operations"""
 
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/39546")
     def test_collection_flush(self):
         """
         target: test collection flush
@@ -2073,3 +2074,530 @@ class TestCollectionMaintenance(TestBase):
         assert "state" in response["data"]
         assert "compactionID" in response["data"]
         # TODO need verification by pymilvus
+
+
+DEFAULT_STRUCT_ARRAY_DIM = 8
+DEFAULT_STRUCT_ARRAY_SUB_CAPACITY = 16
+
+
+def _rand_struct_array_vector(dim=DEFAULT_STRUCT_ARRAY_DIM):
+    return [random.random() for _ in range(dim)]
+
+
+def _build_struct_array_schema_payload(
+    name,
+    dim=DEFAULT_STRUCT_ARRAY_DIM,
+    max_capacity=DEFAULT_STRUCT_ARRAY_SUB_CAPACITY,
+    include_index_params=False,
+    metric_type="COSINE",
+    sub_metric_type="COSINE",
+    enable_dynamic_field=False,
+):
+    payload = {
+        "collectionName": name,
+        "schema": {
+            "autoId": False,
+            "enableDynamicField": enable_dynamic_field,
+            "fields": [
+                {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                {
+                    "fieldName": "vec",
+                    "dataType": "FloatVector",
+                    "elementTypeParams": {"dim": f"{dim}"},
+                },
+            ],
+            "structFields": [
+                {
+                    "fieldName": "my_struct",
+                    "fields": [
+                        {
+                            "fieldName": "sub_int",
+                            "dataType": "Array",
+                            "elementDataType": "Int32",
+                            "elementTypeParams": {"max_capacity": max_capacity},
+                        },
+                        {
+                            "fieldName": "sub_vec",
+                            "dataType": "ArrayOfVector",
+                            "elementDataType": "FloatVector",
+                            "elementTypeParams": {
+                                "dim": dim,
+                                "max_capacity": max_capacity,
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    if include_index_params:
+        payload["indexParams"] = [
+            {"fieldName": "vec", "indexName": "vec_idx", "metricType": metric_type},
+            {
+                "fieldName": "my_struct[sub_vec]",
+                "indexName": "sub_vec_idx",
+                "metricType": sub_metric_type,
+            },
+        ]
+    return payload
+
+
+def _gen_struct_array_row(row_id, num_elems, dim=DEFAULT_STRUCT_ARRAY_DIM):
+    struct_elems = []
+    for j in range(num_elems):
+        struct_elems.append(
+            {
+                "sub_int": row_id * 100 + j,
+                "sub_vec": _rand_struct_array_vector(dim),
+            }
+        )
+    return {
+        "id": row_id,
+        "vec": _rand_struct_array_vector(dim),
+        "my_struct": struct_elems,
+    }
+
+
+@pytest.mark.L0
+class TestStructArrayCollection(TestBase):
+    def test_create_struct_array_collection(self):
+        name = gen_collection_name()
+        payload = _build_struct_array_schema_payload(name, include_index_params=True)
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0
+
+        rsp = self.collection_client.collection_describe(name)
+        assert rsp["code"] == 0
+        struct_fields = rsp["data"].get("structFields", [])
+        assert len(struct_fields) == 1, f"expected 1 struct field, got {struct_fields}"
+
+        struct_field = struct_fields[0]
+        assert struct_field["name"] == "my_struct"
+        assert struct_field["type"] == "ArrayOfStruct"
+
+        sub_fields = struct_field.get("fields", [])
+        sub_names = sorted(s["name"] for s in sub_fields)
+        assert sub_names == ["sub_int", "sub_vec"], sub_names
+
+        by_name = {s["name"]: s for s in sub_fields}
+        assert by_name["sub_int"]["type"] == "Array"
+        assert by_name["sub_int"]["elementType"] == "Int32"
+        assert by_name["sub_vec"]["elementType"] == "FloatVector"
+
+
+@pytest.mark.L1
+class TestStructArraySchemaValidation(TestBase):
+    def _create_with_bad_sub_field(self, name, bad_sub_field):
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {
+                        "fieldName": "vec",
+                        "dataType": "FloatVector",
+                        "elementTypeParams": {"dim": f"{DEFAULT_STRUCT_ARRAY_DIM}"},
+                    },
+                ],
+                "structFields": [
+                    {
+                        "fieldName": "bad_struct",
+                        "fields": [bad_sub_field],
+                    }
+                ],
+            },
+            "indexParams": [
+                {"fieldName": "vec", "indexName": "vec_idx", "metricType": "L2"},
+            ],
+        }
+        return self.collection_client.collection_create(payload)
+
+    def test_reject_nullable_sub_field(self):
+        name = gen_collection_name()
+        rsp = self._create_with_bad_sub_field(
+            name,
+            {
+                "fieldName": "sub",
+                "dataType": "Array",
+                "elementDataType": "Int32",
+                "elementTypeParams": {"max_capacity": DEFAULT_STRUCT_ARRAY_SUB_CAPACITY},
+                "nullable": True,
+            },
+        )
+        assert rsp["code"] != 0, rsp
+        assert "nullable" in rsp.get("message", "").lower()
+
+    def test_reject_default_value_sub_field(self):
+        name = gen_collection_name()
+        rsp = self._create_with_bad_sub_field(
+            name,
+            {
+                "fieldName": "sub",
+                "dataType": "Array",
+                "elementDataType": "Int32",
+                "elementTypeParams": {"max_capacity": DEFAULT_STRUCT_ARRAY_SUB_CAPACITY},
+                "defaultValue": 1,
+            },
+        )
+        assert rsp["code"] != 0, rsp
+        assert "default" in rsp.get("message", "").lower()
+
+    def test_reject_primary_key_sub_field(self):
+        name = gen_collection_name()
+        rsp = self._create_with_bad_sub_field(
+            name,
+            {
+                "fieldName": "sub",
+                "dataType": "Array",
+                "elementDataType": "Int64",
+                "elementTypeParams": {"max_capacity": DEFAULT_STRUCT_ARRAY_SUB_CAPACITY},
+                "isPrimary": True,
+            },
+        )
+        assert rsp["code"] != 0, rsp
+
+    def test_reject_partition_key_sub_field(self):
+        name = gen_collection_name()
+        rsp = self._create_with_bad_sub_field(
+            name,
+            {
+                "fieldName": "sub",
+                "dataType": "Array",
+                "elementDataType": "Int64",
+                "elementTypeParams": {"max_capacity": DEFAULT_STRUCT_ARRAY_SUB_CAPACITY},
+                "isPartitionKey": True,
+            },
+        )
+        assert rsp["code"] != 0, rsp
+
+    def test_reject_clustering_key_sub_field(self):
+        name = gen_collection_name()
+        rsp = self._create_with_bad_sub_field(
+            name,
+            {
+                "fieldName": "sub",
+                "dataType": "Array",
+                "elementDataType": "Int64",
+                "elementTypeParams": {"max_capacity": DEFAULT_STRUCT_ARRAY_SUB_CAPACITY},
+                "isClusteringKey": True,
+            },
+        )
+        assert rsp["code"] != 0, rsp
+
+    def test_reject_non_array_sub_field(self):
+        name = gen_collection_name()
+        rsp = self._create_with_bad_sub_field(
+            name,
+            {
+                "fieldName": "sub",
+                "dataType": "Int32",
+            },
+        )
+        assert rsp["code"] != 0, rsp
+
+    def test_reject_empty_sub_fields(self):
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {
+                        "fieldName": "vec",
+                        "dataType": "FloatVector",
+                        "elementTypeParams": {"dim": f"{DEFAULT_STRUCT_ARRAY_DIM}"},
+                    },
+                ],
+                "structFields": [{"fieldName": "empty_struct", "fields": []}],
+            },
+            "indexParams": [
+                {"fieldName": "vec", "indexName": "vec_idx", "metricType": "L2"},
+            ],
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] != 0, rsp
+
+    def test_reject_duplicated_sub_field_name(self):
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {
+                        "fieldName": "vec",
+                        "dataType": "FloatVector",
+                        "elementTypeParams": {"dim": f"{DEFAULT_STRUCT_ARRAY_DIM}"},
+                    },
+                ],
+                "structFields": [
+                    {
+                        "fieldName": "dup_struct",
+                        "fields": [
+                            {
+                                "fieldName": "s",
+                                "dataType": "Array",
+                                "elementDataType": "Int32",
+                                "elementTypeParams": {"max_capacity": DEFAULT_STRUCT_ARRAY_SUB_CAPACITY},
+                            },
+                            {
+                                "fieldName": "s",
+                                "dataType": "Array",
+                                "elementDataType": "Int32",
+                                "elementTypeParams": {"max_capacity": DEFAULT_STRUCT_ARRAY_SUB_CAPACITY},
+                            },
+                        ],
+                    }
+                ],
+            },
+            "indexParams": [
+                {"fieldName": "vec", "indexName": "vec_idx", "metricType": "L2"},
+            ],
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] != 0, rsp
+
+
+@pytest.mark.L0
+class TestStructArrayInsertQuery(TestBase):
+    def _create_and_load(self, name, dim=DEFAULT_STRUCT_ARRAY_DIM):
+        payload = _build_struct_array_schema_payload(name, dim=dim, include_index_params=True)
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
+        self.collection_client.wait_load_completed(name, timeout=60)
+
+    def test_insert_and_query_struct_rows(self):
+        name = gen_collection_name()
+        self._create_and_load(name)
+
+        nb = 10
+        rows = [_gen_struct_array_row(i, num_elems=random.randint(1, 4)) for i in range(nb)]
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": rows})
+        assert rsp["code"] == 0, rsp
+        assert rsp["data"]["insertCount"] == nb
+
+        rsp = self.vector_client.vector_query(
+            {
+                "collectionName": name,
+                "filter": "id >= 0",
+                "outputFields": ["id", "my_struct"],
+                "limit": nb,
+            }
+        )
+        assert rsp["code"] == 0, rsp
+        got = sorted(rsp["data"], key=lambda r: r["id"])
+        assert len(got) == nb
+
+        for orig, back in zip(rows, got):
+            assert back["id"] == orig["id"]
+            elems_back = back["my_struct"]
+            assert len(elems_back) == len(orig["my_struct"]), (
+                f"row {orig['id']} elem count mismatch: {len(elems_back)} vs {len(orig['my_struct'])}"
+            )
+            for eb, eo in zip(elems_back, orig["my_struct"]):
+                assert int(eb["sub_int"]) == eo["sub_int"]
+                np.testing.assert_allclose(eb["sub_vec"], eo["sub_vec"], rtol=1e-5, atol=1e-5)
+
+    def test_insert_reject_missing_sub_field(self):
+        name = gen_collection_name()
+        self._create_and_load(name)
+
+        bad_row = {
+            "id": 1,
+            "vec": _rand_struct_array_vector(),
+            "my_struct": [
+                {"sub_int": 1},
+            ],
+        }
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": [bad_row]})
+        assert rsp["code"] != 0, rsp
+        assert "sub_vec" in rsp.get("message", "") or "missing" in rsp.get("message", "").lower()
+
+    def test_insert_reject_struct_value_not_array(self):
+        name = gen_collection_name()
+        self._create_and_load(name)
+
+        bad_row = {
+            "id": 1,
+            "vec": _rand_struct_array_vector(),
+            "my_struct": {"sub_int": 1, "sub_vec": _rand_struct_array_vector()},
+        }
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": [bad_row]})
+        assert rsp["code"] != 0, rsp
+
+
+@pytest.mark.L0
+class TestStructSubVectorSearch(TestBase):
+    def _setup_collection_with_sub_index(self, name, dim=DEFAULT_STRUCT_ARRAY_DIM, nb=50, sub_metric="COSINE"):
+        payload = _build_struct_array_schema_payload(name, dim=dim, include_index_params=False)
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
+
+        rsp = self.index_client.index_create(
+            {
+                "collectionName": name,
+                "indexParams": [
+                    {"fieldName": "vec", "indexName": "vec_idx", "metricType": "COSINE"},
+                ],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+
+        rsp = self.index_client.index_create(
+            {
+                "collectionName": name,
+                "indexParams": [
+                    {
+                        "fieldName": "my_struct[sub_vec]",
+                        "indexName": "sub_vec_idx",
+                        "metricType": sub_metric,
+                    },
+                ],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+
+        rsp = self.collection_client.collection_load(collection_name=name)
+        assert rsp["code"] == 0, rsp
+        self.collection_client.wait_load_completed(name, timeout=60)
+
+        rows = [_gen_struct_array_row(i, num_elems=random.randint(2, 5), dim=dim) for i in range(nb)]
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": rows})
+        assert rsp["code"] == 0, rsp
+        self.collection_client.flush(name)
+        self.collection_client.wait_load_completed(name, timeout=60)
+        return rows
+
+    def test_element_level_sub_vector_search(self):
+        name = gen_collection_name()
+        nq = 2
+        self._setup_collection_with_sub_index(name)
+
+        search_payload = {
+            "collectionName": name,
+            "annsField": "my_struct[sub_vec]",
+            "data": [_rand_struct_array_vector() for _ in range(nq)],
+            "limit": 5,
+            "outputFields": ["id"],
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) > 0, rsp
+
+    def test_embedding_list_sub_vector_search(self):
+        name = gen_collection_name()
+        nq = 2
+        per_query_vecs = 3
+        self._setup_collection_with_sub_index(name, sub_metric="MAX_SIM_COSINE")
+
+        search_payload = {
+            "collectionName": name,
+            "annsField": "my_struct[sub_vec]",
+            "data": [[_rand_struct_array_vector() for _ in range(per_query_vecs)] for _ in range(nq)],
+            "limit": 5,
+            "outputFields": ["id"],
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) > 0, rsp
+
+    def test_sub_vector_search_dim_mismatch(self):
+        name = gen_collection_name()
+        self._setup_collection_with_sub_index(name)
+
+        search_payload = {
+            "collectionName": name,
+            "annsField": "my_struct[sub_vec]",
+            "data": [_rand_struct_array_vector(DEFAULT_STRUCT_ARRAY_DIM + 1)],
+            "limit": 5,
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+        assert rsp["code"] != 0, rsp
+
+    def test_embedding_list_search_dim_mismatch(self):
+        name = gen_collection_name()
+        self._setup_collection_with_sub_index(name, sub_metric="MAX_SIM_COSINE")
+
+        search_payload = {
+            "collectionName": name,
+            "annsField": "my_struct[sub_vec]",
+            "data": [
+                [
+                    _rand_struct_array_vector(DEFAULT_STRUCT_ARRAY_DIM + 1),
+                    _rand_struct_array_vector(DEFAULT_STRUCT_ARRAY_DIM + 1),
+                ]
+            ],
+            "limit": 5,
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+        assert rsp["code"] != 0, rsp
+
+
+@pytest.mark.L0
+class TestStructSubVectorSearchOneStep(TestBase):
+    def _create_load_insert(self, name, sub_metric, nb=50):
+        payload = _build_struct_array_schema_payload(
+            name,
+            include_index_params=True,
+            sub_metric_type=sub_metric,
+        )
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
+        self.collection_client.wait_load_completed(name, timeout=60)
+
+        rows = [_gen_struct_array_row(i, num_elems=random.randint(2, 4)) for i in range(nb)]
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": rows})
+        assert rsp["code"] == 0, rsp
+        self.collection_client.flush(name)
+        self.collection_client.wait_load_completed(name, timeout=60)
+
+    def test_create_with_sub_vector_index_element_level(self):
+        name = gen_collection_name()
+        self._create_load_insert(name, sub_metric="COSINE")
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "annsField": "my_struct[sub_vec]",
+                "data": [_rand_struct_array_vector()],
+                "limit": 5,
+            }
+        )
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) > 0, rsp
+
+    def test_create_with_sub_vector_index_embedding_list(self):
+        name = gen_collection_name()
+        self._create_load_insert(name, sub_metric="MAX_SIM_COSINE")
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "annsField": "my_struct[sub_vec]",
+                "data": [
+                    [
+                        _rand_struct_array_vector(),
+                        _rand_struct_array_vector(),
+                        _rand_struct_array_vector(),
+                    ]
+                ],
+                "limit": 5,
+            }
+        )
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) > 0, rsp
+
+    def test_create_with_unknown_sub_field_rejected(self):
+        name = gen_collection_name()
+        payload = _build_struct_array_schema_payload(name, include_index_params=False)
+        payload["indexParams"] = [
+            {"fieldName": "vec", "indexName": "vec_idx", "metricType": "L2"},
+            {
+                "fieldName": "my_struct[no_such_sub]",
+                "indexName": "bad",
+                "metricType": "L2",
+            },
+        ]
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] != 0, rsp
+        assert "hasn't defined in schema" in rsp.get("message", ""), rsp

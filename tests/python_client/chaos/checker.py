@@ -1689,17 +1689,120 @@ class PartialUpdateChecker(Checker):
     def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartialUpdateChecker_")
-        super().__init__(
-            collection_name=collection_name, shards_num=shards_num, schema=schema, enable_struct_array_field=False
-        )
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
 
+    @staticmethod
+    def _schema_to_dict(schema):
+        if isinstance(schema, dict):
+            return schema
+        return cf.convert_orm_schema_to_dict_schema(schema)
+
+    @staticmethod
+    def _is_struct_array_field(field):
+        return field.get("type") == DataType.ARRAY and field.get("element_type") == DataType.STRUCT
+
+    @classmethod
+    def _struct_array_field_names(cls, schema):
+        schema = cls._schema_to_dict(schema)
+        names = []
+        for struct_field in schema.get("struct_fields", []) or []:
+            name = struct_field.get("name") if isinstance(struct_field, dict) else struct_field.name
+            if name:
+                names.append(name)
+        for field in schema.get("fields", []) or []:
+            name = field.get("name")
+            if name and name not in names and cls._is_struct_array_field(field):
+                names.append(name)
+        return names
+
+    @classmethod
+    def _partial_update_field_names(cls, schema, pk_field_name):
+        schema = cls._schema_to_dict(schema)
+        struct_array_field_names = set(cls._struct_array_field_names(schema))
+        function_output_field_names = set()
+        for func in schema.get("functions", []) or []:
+            function_output_field_names.update(func.get("output_field_names", []) or [])
+
+        field_names = []
+        for field in schema.get("fields", []) or []:
+            name = field.get("name")
+            if not name:
+                continue
+            if name == pk_field_name or name in struct_array_field_names or name in function_output_field_names:
+                continue
+            if field.get("auto_id", False) or cls._is_struct_array_field(field):
+                continue
+            field_names.append(name)
+        return field_names
+
+    def _gen_struct_array_partial_rows(self, schema, rows):
+        struct_array_field_names = self._struct_array_field_names(schema)
+        if not struct_array_field_names:
+            return None, []
+
+        struct_array_field_name = struct_array_field_names[0]
+        full_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema)
+        partial_rows = [
+            {self.int64_field_name: row[self.int64_field_name], struct_array_field_name: row[struct_array_field_name]}
+            for row in full_rows
+            if struct_array_field_name in row
+        ]
+        return struct_array_field_name, partial_rows
+
+    @staticmethod
+    def _values_equal(actual, expected):
+        if isinstance(expected, float):
+            return isinstance(actual, (float, int)) and math.isclose(
+                float(actual), expected, rel_tol=1e-5, abs_tol=1e-5
+            )
+        if isinstance(expected, list):
+            if not isinstance(actual, list) or len(actual) != len(expected):
+                return False
+            return all(PartialUpdateChecker._values_equal(a, e) for a, e in zip(actual, expected))
+        if isinstance(expected, dict):
+            if not isinstance(actual, dict) or set(actual.keys()) != set(expected.keys()):
+                return False
+            return all(PartialUpdateChecker._values_equal(actual[key], expected[key]) for key in expected)
+        return actual == expected
+
+    def _verify_struct_array_partial_update(self, struct_array_field_name, expected_rows):
+        if not expected_rows:
+            return "no struct array rows to verify", False
+
+        expected_by_pk = {row[self.int64_field_name]: row[struct_array_field_name] for row in expected_rows}
+        pks = list(expected_by_pk)
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=f"{self.int64_field_name} in {pks}",
+            output_fields=[self.int64_field_name, struct_array_field_name],
+            limit=len(pks),
+            timeout=query_timeout,
+        )
+        actual_by_pk = {row[self.int64_field_name]: row.get(struct_array_field_name) for row in res}
+        if set(actual_by_pk) != set(expected_by_pk):
+            return f"struct array partial update query mismatch, expected pks {pks}, got {list(actual_by_pk)}", False
+
+        for pk, expected_value in expected_by_pk.items():
+            actual_value = actual_by_pk[pk]
+            if not self._values_equal(actual_value, expected_value):
+                return (
+                    f"struct array partial update mismatch for pk {pk}, expected {expected_value}, got {actual_value}"
+                ), False
+        return res, True
+
     @trace()
-    def partial_update_entities(self):
+    def partial_update_entities(self, verify_struct_array_field_name=None, expected_struct_array_rows=None):
         try:
             res = self.milvus_client.upsert(
                 collection_name=self.c_name, data=self.data, partial_update=True, timeout=timeout
             )
+            if verify_struct_array_field_name is not None:
+                verify_res, verify_result = self._verify_struct_array_partial_update(
+                    verify_struct_array_field_name, expected_struct_array_rows
+                )
+                if not verify_result:
+                    return verify_res, False
             return res, True
         except SchemaMismatchRetryableException:
             # Schema changed concurrently (AddVectorFieldChecker). Invalidate the SDK schema cache
@@ -1713,6 +1816,12 @@ class PartialUpdateChecker(Checker):
                 res = self.milvus_client.upsert(
                     collection_name=self.c_name, data=self.data, partial_update=True, timeout=timeout
                 )
+                if verify_struct_array_field_name is not None:
+                    verify_res, verify_result = self._verify_struct_array_partial_update(
+                        verify_struct_array_field_name, expected_struct_array_rows
+                    )
+                    if not verify_result:
+                        return verify_res, False
                 return res, True
             except Exception as e:
                 log.info(f"partial update failed (retry): {e}")
@@ -1727,20 +1836,32 @@ class PartialUpdateChecker(Checker):
         schema = self.get_schema()
         pk_field_name = self.int64_field_name
         rows = len(self.data)
+        verify_struct_array_field_name = None
+        expected_struct_array_rows = None
 
-        # if count is even, use partial update; if count is odd, use full insert
+        # Alternate full upsert, StructArray partial update, and ordinary field partial update.
         if count % 2 == 0:
             # Generate a fresh full batch (used for inserts and as a source of values)
             full_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema)
             self.data = full_rows
+        elif count % 4 == 1 and self._struct_array_field_names(schema):
+            struct_array_field_name, partial_rows = self._gen_struct_array_partial_rows(schema, rows)
+            if not partial_rows:
+                return f"failed to generate partial update rows for struct array field {struct_array_field_name}", False
+            self.data = partial_rows
+            verify_struct_array_field_name = struct_array_field_name
+            expected_struct_array_rows = partial_rows[: min(10, len(partial_rows))]
         else:
-            num_fields = len(schema["fields"])
+            candidate_fields = self._partial_update_field_names(schema, pk_field_name)
+            if not candidate_fields:
+                self.data = cf.gen_row_data_by_schema(nb=rows, schema=schema)
+                res, result = self.partial_update_entities()
+                return res, result
             # Choose subset fields to update: always include PK + one non-PK field if available
-            num = count % num_fields
-            desired_fields = [pk_field_name, schema["fields"][num if num != 0 else 1]["name"]]
+            desired_fields = [pk_field_name, candidate_fields[count % len(candidate_fields)]]
             partial_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema, desired_field_names=desired_fields)
             self.data = partial_rows
-        res, result = self.partial_update_entities()
+        res, result = self.partial_update_entities(verify_struct_array_field_name, expected_struct_array_rows)
         return res, result
 
     def keep_running(self):
