@@ -62,6 +62,40 @@ const (
 
 var Params *paramtable.ComponentParam = paramtable.Get()
 
+var (
+	// errPredicateNotMet marks deterministic predicate mismatches inside write transaction builds.
+	errPredicateNotMet = errors.New("predicate not met")
+	errBuildAbort      = errors.New("deterministic build error")
+)
+
+func wrapWriteBuildErr(reason string, err error) error {
+	wrapped := merr.WrapErrIoFailedReason(reason, err.Error())
+	if isLocalMutationValidationErr(err) {
+		return markBuildAbort(wrapped)
+	}
+	return wrapped
+}
+
+func markPredicateNotMet(err error) error {
+	return markBuildAbort(errors.Mark(err, errPredicateNotMet))
+}
+
+func markBuildAbort(err error) error {
+	return errors.Mark(err, errBuildAbort)
+}
+
+func isLocalMutationValidationErr(err error) bool {
+	var keyTooLarge *tikverr.ErrKeyTooLarge
+	if errors.As(err, &keyTooLarge) {
+		return true
+	}
+	var entryTooLarge *tikverr.ErrEntryTooLarge
+	if errors.As(err, &entryTooLarge) {
+		return true
+	}
+	return errors.Is(err, tikverr.ErrCannotSetNilValue)
+}
+
 // For reads by prefix we can customize the scan size to increase/decrease rpc calls.
 var SnapshotScanSize int
 
@@ -356,7 +390,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 			}
 			// Save the value within a transaction
 			if err = txn.Set([]byte(key), byteValue); err != nil {
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set (%s:%s) for MultiSave()", key, value), err.Error())
+				return wrapWriteBuildErr(fmt.Sprintf("Failed to set (%s:%s) for MultiSave()", key, value), err)
 			}
 		}
 		return nil
@@ -394,7 +428,7 @@ func (kv *txnTiKV) MultiRemove(ctx context.Context, keys []string) error {
 		for _, key := range keys {
 			key = kv.GetPath(key)
 			if err := txn.Delete([]byte(key)); err != nil {
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to delete %s for MultiRemove", key), err.Error())
+				return wrapWriteBuildErr(fmt.Sprintf("Failed to delete %s for MultiRemove", key), err)
 			}
 		}
 		return nil
@@ -446,17 +480,20 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 			key := kv.GetPath(pred.Key())
 			val, err := txn.Get(ctx, []byte(key))
 			if err != nil {
+				if errors.Is(err, tikverr.ErrNotExist) {
+					return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
+				}
 				return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
 			}
 			if !pred.IsTrue(val.Value) {
-				return merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
+				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
 			}
 		}
 
 		for _, key := range removals {
 			key = kv.GetPath(key)
 			if err := txn.Delete([]byte(key)); err != nil {
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to delete %s for MultiSaveAndRemove", key), err.Error())
+				return wrapWriteBuildErr(fmt.Sprintf("Failed to delete %s for MultiSaveAndRemove", key), err)
 			}
 		}
 
@@ -468,7 +505,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 				return merr.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemove", key, value))
 			}
 			if err = txn.Set([]byte(key), byteValue); err != nil {
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemove", key, value), err.Error())
+				return wrapWriteBuildErr(fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemove", key, value), err)
 			}
 		}
 		return nil
@@ -494,37 +531,46 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 			key := kv.GetPath(pred.Key())
 			val, err := txn.Get(ctx, []byte(key))
 			if err != nil {
+				if errors.Is(err, tikverr.ErrNotExist) {
+					return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
+				}
 				return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
 			}
 			if !pred.IsTrue(val.Value) {
-				return merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
+				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
 			}
 		}
 
 		// Remove keys with prefix
 		for _, prefix := range removals {
 			prefix = kv.GetPath(prefix)
-			// Get the start and end keys for the prefix range
-			startKey := []byte(prefix)
-			endKey := tikv.PrefixNextKey([]byte(prefix))
+			if err := func(prefix string) error {
+				// Get the start and end keys for the prefix range
+				startKey := []byte(prefix)
+				endKey := tikv.PrefixNextKey([]byte(prefix))
 
-			// Use Scan to iterate over keys in the prefix range
-			iter, err := txn.Iter(startKey, endKey)
-			if err != nil {
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to create iterater for %s during MultiSaveAndRemoveWithPrefix()", prefix), err.Error())
-			}
-
-			// Iterate over keys and delete them
-			for iter.Valid() {
-				key := iter.Key()
-				if err = txn.Delete(key); err != nil {
-					return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveWithPrefix", string(key)), err.Error())
+				// Use Scan to iterate over keys in the prefix range
+				iter, err := txn.Iter(startKey, endKey)
+				if err != nil {
+					return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to create iterater for %s during MultiSaveAndRemoveWithPrefix()", prefix), err.Error())
 				}
+				defer iter.Close()
 
-				// Move the iterator to the next key
-				if err = iter.Next(); err != nil {
-					return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to move Iterator after key %s for MultiSaveAndRemoveWithPrefix", string(key)), err.Error())
+				// Iterate over keys and delete them
+				for iter.Valid() {
+					key := iter.Key()
+					if err = txn.Delete(key); err != nil {
+						return wrapWriteBuildErr(fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveWithPrefix", string(key)), err)
+					}
+
+					// Move the iterator to the next key
+					if err = iter.Next(); err != nil {
+						return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to move Iterator after key %s for MultiSaveAndRemoveWithPrefix", string(key)), err.Error())
+					}
 				}
+				return nil
+			}(prefix); err != nil {
+				return err
 			}
 		}
 
@@ -537,7 +583,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 				return merr.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
 			}
 			if err = txn.Set([]byte(key), byteValue); err != nil {
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value), err.Error())
+				return wrapWriteBuildErr(fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value), err)
 			}
 		}
 		return nil
@@ -596,17 +642,20 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 // runWriteTxnWithRetry begins a transaction, applies build to it and commits,
 // retrying the whole cycle on transient failures (see writeTxnRetryAttempts).
 // All mutations in this file are idempotent, so re-committing after an
-// undetermined commit result is safe. Errors returned by build itself (bad
-// input, unmet predicate) are deterministic and are not retried; they are
-// returned to the caller unwrapped. The commit function is passed in so that
-// callers keep their existing metrics accounting (executeTxn vs raw commitTxn);
-// note the asymmetry under retry: Multi* methods commit via executeTxn, whose
-// MetaTxnLabel counters fire once per attempt, while Save/Remove aggregate
-// their MetaPut/MetaRemove counters once per logical call after all retries.
+// undetermined commit result is safe. Deterministic build failures (bad input,
+// unmet predicates, missing predicate targets, local TiKV mutation validation)
+// abort immediately; transient IO errors from build reads are retried like
+// begin/commit failures. Build errors are returned to the caller unwrapped. The
+// commit function is passed in so that callers keep their existing metrics
+// accounting (executeTxn vs raw commitTxn); note the asymmetry under retry:
+// Multi* methods commit via executeTxn, whose MetaTxnLabel counters fire once
+// per attempt, while Save/Remove aggregate their MetaPut/MetaRemove counters
+// once per logical call after all retries.
 func (kv *txnTiKV) runWriteTxnWithRetry(ctx context.Context, op string, build func(txn *transaction.KVTxn) error, commit func(ctx context.Context, txn *transaction.KVTxn) error) error {
 	var buildErr error
 	err := retry.Do(ctx, func() error {
 		var attemptErr error
+		buildErr = nil
 		txn, err := beginTxn(kv.txn)
 		if err != nil {
 			return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to create txn for %s", op), err.Error())
@@ -616,7 +665,10 @@ func (kv *txnTiKV) runWriteTxnWithRetry(ctx context.Context, op string, build fu
 
 		if buildErr = build(txn); buildErr != nil {
 			attemptErr = buildErr
-			return retry.Unrecoverable(buildErr)
+			if errors.Is(buildErr, errBuildAbort) {
+				return retry.Unrecoverable(buildErr)
+			}
+			return buildErr
 		}
 		if err := commit(ctx, txn); err != nil {
 			attemptErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to commit for %s", op), err.Error())
@@ -693,7 +745,7 @@ func (kv *txnTiKV) putTiKVMeta(ctx context.Context, key, val string) error {
 
 	err = kv.runWriteTxnWithRetry(ctx1, "putTiKVMeta", func(txn *transaction.KVTxn) error {
 		if err := txn.Set([]byte(key), byteValue); err != nil {
-			return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to set value for key %s in putTiKVMeta", key), err.Error())
+			return wrapWriteBuildErr(fmt.Sprintf("Failed to set value for key %s in putTiKVMeta", key), err)
 		}
 		return nil
 	}, commitTxn)
@@ -719,7 +771,7 @@ func (kv *txnTiKV) removeTiKVMeta(ctx context.Context, key string) error {
 
 	err := kv.runWriteTxnWithRetry(ctx1, "removeTiKVMeta", func(txn *transaction.KVTxn) error {
 		if err := txn.Delete([]byte(key)); err != nil {
-			return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to remove key %s in removeTiKVMeta", key), err.Error())
+			return wrapWriteBuildErr(fmt.Sprintf("Failed to remove key %s in removeTiKVMeta", key), err)
 		}
 		return nil
 	}, commitTxn)

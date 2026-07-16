@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
@@ -747,7 +749,197 @@ func TestWriteTxnRetry(t *testing.T) {
 		assert.Equal(t, int(writeTxnRetryAttempts), commits)
 	})
 
-	t.Run("build failure is not retried and not wrapped", func(t *testing.T) {
+	t.Run("transient build failure recovers", func(t *testing.T) {
+		builds := 0
+		begins := 0
+		commits := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		err := kv.runWriteTxnWithRetry(ctx, "test transient build", func(txn *transaction.KVTxn) error {
+			builds++
+			if builds == 1 {
+				return merr.WrapErrIoFailedReason("transient build read", "epoch_not_match")
+			}
+			return nil
+		}, func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 2, builds)
+		assert.Equal(t, 2, begins)
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("persistent build failure still surfaces", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		builds := 0
+		commits := 0
+		err := kv.runWriteTxnWithRetry(ctx, "test persistent build", func(txn *transaction.KVTxn) error {
+			builds++
+			return merr.WrapErrIoFailedReason("transient build read", "epoch_not_match")
+		}, func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		})
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, int(writeTxnRetryAttempts), builds)
+		assert.Zero(t, commits)
+	})
+
+	t.Run("local mutation validation build failure is not retried", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		begins := 0
+		commits := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{strings.Repeat("k", 1<<16): "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.Contains(t, err.Error(), "key size too large")
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, begins)
+		assert.Zero(t, commits)
+	})
+
+	t.Run("later begin failure is not hidden by previous build failure", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		begins := 0
+		builds := 0
+		commits := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			if begins > 1 {
+				return nil, errors.New("pd timeout")
+			}
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		err := kv.runWriteTxnWithRetry(ctx, "test build then begin", func(txn *transaction.KVTxn) error {
+			builds++
+			return merr.WrapErrIoFailedReason("transient build read", "epoch_not_match")
+		}, func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		})
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.Contains(t, err.Error(), "Failed to create txn for test build then begin")
+		assert.Equal(t, int(writeTxnRetryAttempts), begins)
+		assert.Equal(t, 1, builds)
+		assert.Zero(t, commits)
+	})
+
+	t.Run("predicate failure is not retried and not wrapped", func(t *testing.T) {
+		err := kv.MultiSave(ctx, map[string]string{"predicate_key": "1"})
+		require.NoError(t, err)
+
+		for _, test := range []struct {
+			name string
+			run  func() error
+		}{
+			{
+				name: "MultiSaveAndRemoveWrongValue",
+				run: func() error {
+					return kv.MultiSaveAndRemove(ctx, map[string]string{"predicate_save": "v"}, nil, predicates.ValueEqual("predicate_key", "2"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveWithPrefixWrongValue",
+				run: func() error {
+					return kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"predicate_prefix_save": "v"}, nil, predicates.ValueEqual("predicate_key", "2"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveMissingKey",
+				run: func() error {
+					return kv.MultiSaveAndRemove(ctx, map[string]string{"predicate_missing_save": "v"}, nil, predicates.ValueEqual("predicate_missing_key", "1"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveWithPrefixMissingKey",
+				run: func() error {
+					return kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"predicate_missing_prefix_save": "v"}, nil, predicates.ValueEqual("predicate_missing_key", "1"))
+				},
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				origSleep := writeTxnRetrySleep
+				writeTxnRetrySleep = time.Millisecond
+				defer func() {
+					writeTxnRetrySleep = origSleep
+				}()
+
+				begins := 0
+				beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+					begins++
+					return tiTxnBegin(txn)
+				}
+				defer func() {
+					beginTxn = tiTxnBegin
+				}()
+
+				err := test.run()
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrIoFailed)
+				assert.True(t, retry.IsRecoverable(err))
+				assert.Equal(t, 1, begins)
+			})
+		}
+	})
+
+	t.Run("reserved value build failure is not retried and not wrapped", func(t *testing.T) {
+		begins := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
 		commits := 0
 		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
 			commits++
@@ -760,6 +952,8 @@ func TestWriteTxnRetry(t *testing.T) {
 		// Reserved empty-value placeholder is rejected while building mutations.
 		err := kv.MultiSave(ctx, map[string]string{"bad_key": EmptyValueString})
 		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, 1, begins)
 		assert.Zero(t, commits)
 		// The retry.Unrecoverable marker must not leak to callers.
 		assert.True(t, retry.IsRecoverable(err))
