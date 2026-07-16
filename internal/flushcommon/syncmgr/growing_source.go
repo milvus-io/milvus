@@ -564,7 +564,7 @@ func (t *GrowingSourceSyncTask) TargetOffset() int64 {
 }
 
 func (t *GrowingSourceSyncTask) HandleError(err error) {
-	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+	if errors.Is(err, merr.ErrChannelNotFound) {
 		return
 	}
 	if t.failureCallback != nil {
