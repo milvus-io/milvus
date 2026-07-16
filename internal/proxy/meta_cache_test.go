@@ -3064,6 +3064,16 @@ func TestMetaCache_RenameInvalidationCleansAllNameKeys(t *testing.T) {
 	assert.False(t, hasBar, "new name must be evicted too")
 	assert.False(t, hasID, "by-id index must be cleared")
 	assertMetaCacheByIDConsistent(t, cache)
+
+	// real stale-read check: the pre-rename name must not resolve any more -- it
+	// re-describes, and since the collection was renamed it is now not found
+	// (rather than returning the stale id 1 from a lingering cache entry)
+	_, err = cache.GetCollectionID(ctx, "db", "foo")
+	assert.Error(t, err, "the pre-rename name must not resolve after invalidation")
+	// the new name still resolves correctly
+	id, err = cache.GetCollectionID(ctx, "db", "bar")
+	assert.NoError(t, err)
+	assert.Equal(t, UniqueID(1), id)
 }
 
 // TestMetaCache_AliasRepointResolvesToNewTarget verifies an alias re-point is
@@ -3246,11 +3256,19 @@ func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
 				name := fmt.Sprintf("coll%d", id)
 				switch (i + g) % 5 {
 				case 0:
-					_, _ = cache.GetCollectionName(ctx, "", id)
+					// id-only read must never return another collection's name
+					if got, err := cache.GetCollectionName(ctx, "", id); err == nil {
+						assert.Equalf(t, name, got, "by-id read returned wrong name for id %d", id)
+					}
 				case 1:
-					_, _ = cache.GetCollectionID(ctx, "db", name)
+					// by-name read must never return another collection's id
+					if got, err := cache.GetCollectionID(ctx, "db", name); err == nil {
+						assert.Equalf(t, id, got, "by-name read returned wrong id for %s", name)
+					}
 				case 2:
-					_, _ = cache.GetPartitionInfos(ctx, "db", name)
+					if infos, err := cache.GetPartitionInfos(ctx, "db", name); err == nil {
+						assert.NotNil(t, infos)
+					}
 				case 3:
 					cache.RemovePartition(ctx, "db", id, name, "par1", uint64(2000+i))
 				case 4:
@@ -3262,6 +3280,174 @@ func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
 	wg.Wait()
 
 	assertMetaCacheByIDConsistent(t, cache)
+}
+
+// TestMetaCache_CrossDBSameNameDropIsolation verifies that dropping a collection
+// in one database never disturbs a same-name collection in another database: the
+// by-id index, collInfo bucket, and partition cache of the untouched db must all
+// survive.
+func TestMetaCache_CrossDBSameNameDropIsolation(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			switch {
+			case req.GetCollectionID() == 1 || (req.GetDbName() == "db1" && req.GetCollectionName() == "foo"):
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), CollectionID: 1, DbName: "db1", Schema: &schemapb.CollectionSchema{Name: "foo", Fields: []*schemapb.FieldSchema{}}, RequestTime: 100}, nil
+			case req.GetCollectionID() == 2 || (req.GetDbName() == "db2" && req.GetCollectionName() == "foo"):
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), CollectionID: 2, DbName: "db2", Schema: &schemapb.CollectionSchema{Name: "foo", Fields: []*schemapb.FieldSchema{}}, RequestTime: 100}, nil
+			default:
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionName()))}, nil
+			}
+		})
+	var mu sync.Mutex
+	showByDB := map[string]int{}
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			mu.Lock()
+			showByDB[req.GetDbName()]++
+			mu.Unlock()
+			return &milvuspb.ShowPartitionsResponse{Status: merr.Success(), PartitionIDs: []int64{100}, PartitionNames: []string{"par1"}, CreatedTimestamps: []uint64{100}, CreatedUtcTimestamps: []uint64{100}}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	for _, db := range []string{"db1", "db2"} {
+		_, err = cache.GetCollectionID(ctx, db, "foo")
+		assert.NoError(t, err)
+		_, err = cache.GetPartitionInfos(ctx, db, "foo")
+		assert.NoError(t, err)
+	}
+	mu.Lock()
+	assert.Equal(t, 1, showByDB["db1"])
+	assert.Equal(t, 1, showByDB["db2"])
+	mu.Unlock()
+
+	// drop only db1/foo
+	cache.RemoveCollectionsByID(ctx, 1, 0, true)
+
+	cache.mu.RLock()
+	_, hasDB1 := cache.collInfo["db1"]["foo"]
+	coll2, hasDB2 := cache.collInfo["db2"]["foo"]
+	_, hasID1 := cache.collInfoByID[1]
+	id2Entry, hasID2 := cache.collInfoByID[2]
+	cache.mu.RUnlock()
+	assert.False(t, hasDB1, "dropped db1/foo must be gone")
+	assert.False(t, hasID1, "dropped id 1 must leave the by-id index")
+	assert.True(t, hasDB2, "db2/foo must be untouched")
+	assert.True(t, hasID2)
+	assert.Same(t, coll2, id2Entry)
+	assertMetaCacheByIDConsistent(t, cache)
+
+	// db2/foo partitions must still be a cache hit (not swept by db1's drop)
+	_, err = cache.GetPartitionInfos(ctx, "db2", "foo")
+	assert.NoError(t, err)
+	mu.Lock()
+	assert.Equal(t, 1, showByDB["db2"], "db2 partitions must not be re-fetched after dropping db1/foo")
+	mu.Unlock()
+}
+
+// TestMetaCache_EmptyDBSharesDefaultForPartitionInvalidation proves the core of
+// this PR end-to-end: a partition entry populated via the empty db name is keyed
+// under the canonical "default" bucket, so an invalidation keyed on "default"
+// (as a real DDL broadcast is) actually clears it. Without the normalization, the
+// empty-db entry would live under ""/coll and survive the default-keyed sweep.
+func TestMetaCache_EmptyDBSharesDefaultForPartitionInvalidation(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(), CollectionID: 1, DbName: "default", Schema: &schemapb.CollectionSchema{Name: "coll", Fields: []*schemapb.FieldSchema{}}, RequestTime: 100,
+	}, nil).Maybe()
+	var showCount atomic.Int32
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			showCount.Add(1)
+			return &milvuspb.ShowPartitionsResponse{Status: merr.Success(), PartitionIDs: []int64{100}, PartitionNames: []string{"par1"}, CreatedTimestamps: []uint64{100}, CreatedUtcTimestamps: []uint64{100}}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// cache the collection (so a later drop can find it) and its partitions via
+	// the EMPTY db name; both normalize to "default"
+	_, err = cache.GetCollectionID(ctx, "", "coll")
+	assert.NoError(t, err)
+	_, err = cache.GetPartitionInfos(ctx, "", "coll")
+	assert.NoError(t, err)
+	assert.Equal(t, int32(1), showCount.Load())
+
+	// an explicit "default" request hits the SAME normalized entry (no re-fetch)
+	_, err = cache.GetPartitionInfos(ctx, "default", "coll")
+	assert.NoError(t, err)
+	assert.Equal(t, int32(1), showCount.Load(), "empty-db and default must share one partition cache entry")
+
+	// a DDL broadcast invalidates keyed on the canonical "default" db
+	cache.RemoveCollectionsByID(ctx, 1, 0, true)
+
+	// the empty-db lookup must now re-fetch, proving the default-keyed invalidation
+	// reached the entry the empty-db request had populated
+	_, err = cache.GetPartitionInfos(ctx, "", "coll")
+	assert.NoError(t, err)
+	assert.Equal(t, int32(2), showCount.Load(), "invalidation keyed on default must clear the empty-db-populated partition entry")
+}
+
+// TestMetaCache_ConcurrentAliasResolveInvalidate exercises the alias cache under
+// concurrent resolution and invalidation. Run under -race it flags any data race
+// or map corruption in the alias path, and asserts resolution never returns a
+// garbage value. NOTE: this does NOT prove the C1 stale-write race (a late
+// DescribeAlias overwriting a concurrent RemoveAlias) is fixed -- that is a
+// separate, deferred correctness issue; this only guards low-level safety.
+func TestMetaCache_ConcurrentAliasResolveInvalidate(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Status(merr.WrapErrCollectionNotFound("")),
+	}, nil).Maybe()
+	var flip atomic.Int64
+	rootCoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error) {
+			target := "collA"
+			if flip.Add(1)%2 == 0 {
+				target = "collB"
+			}
+			return &milvuspb.DescribeAliasResponse{Status: merr.Success(), Alias: req.GetAlias(), Collection: target}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	valid := []string{"collA", "collB", "myalias"}
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				if i%3 == 0 {
+					cache.RemoveAlias(ctx, "db", "myalias")
+				} else {
+					got, err := cache.ResolveCollectionAlias(ctx, "db", "myalias")
+					if err == nil {
+						assert.Containsf(t, valid, got, "alias resolved to a corrupted value %q", got)
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestMetaCache_Close(t *testing.T) {
