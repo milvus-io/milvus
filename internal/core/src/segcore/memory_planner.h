@@ -128,6 +128,9 @@ SetFieldDataLoadBatchTargetBytes(int64_t bytes);
 void
 SetFieldDataReadWindowBytes(int64_t bytes);
 
+int64_t
+LoadTransientPoolUpperBound(size_t max_task_overhead_bytes);
+
 milvus::cachinglayer::ResourceUsage
 FieldDataLoadingOverheadUpperBound(
     int64_t max_memory_overhead,
