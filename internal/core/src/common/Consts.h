@@ -154,6 +154,10 @@ const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
 const float EPSILON = 0.0000000119;
 const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
 const std::string MMAP_ENABLED_KEY = "mmap.enabled";
+constexpr const char* LOCAL_FORMAT_KEY = "local_format";
+constexpr const char* LOCAL_FORMAT_RAW = "raw";
+constexpr const char* LOCAL_FORMAT_VORTEX = "vortex";
+constexpr const char* STORAGE_FORMAT_VORTEX = "vortex";
 
 const int64_t LOGICAL_BITS = 18;
 // Warmup policy keys
