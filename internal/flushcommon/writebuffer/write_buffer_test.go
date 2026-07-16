@@ -2,11 +2,13 @@ package writebuffer
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -18,9 +20,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -28,6 +32,93 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestClosedWriteBufferTreatsGrowingSourceChannelNotFoundAsCancellation(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	metrics.DataNodeGrowingSourceSyncFailureCount.Reset()
+	metrics.DataNodeFlushBufferCount.Reset()
+
+	const (
+		collectionID = int64(100)
+		partitionID  = int64(10)
+		segmentID    = int64(1001)
+		channelName  = "by-dev-rootcoord-dml_0_100v0"
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "closed_wb_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+		},
+	}
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		InsertChannel: channelName,
+		ManifestPath:  "manifest",
+	}, pkoracle.NewBloomFilterSet(), nil)
+
+	metaCache := metacache.NewMockMetaCache(t)
+	metaCache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	metaCache.EXPECT().GetSchema(mock.Anything).Return(schema).Maybe()
+	metaCache.EXPECT().Collection().Return(collectionID).Maybe()
+
+	metaWriter := syncmgr.NewMockMetaWriter(t)
+	metaWriter.EXPECT().UpdateGrowingSourceSync(mock.Anything, mock.AnythingOfType("*syncmgr.GrowingSourceSyncTask")).
+		Return(merr.WrapErrChannelNotFound(channelName)).
+		Once()
+
+	manager := syncmgr.NewSyncManager(mocks.NewChunkManager(t))
+	defer manager.Close()
+
+	wb := &writeBufferBase{
+		collectionID:   collectionID,
+		channelName:    channelName,
+		metaCache:      metaCache,
+		syncMgr:        manager,
+		closed:         true,
+		syncCheckpoint: newCheckpointCandiates(),
+		growingSourceProgress: map[int64]*growingSourceProgress{
+			segmentID: {
+				segmentID:     segmentID,
+				targetOffset:  0,
+				syncing:       true,
+				syncingOffset: 0,
+			},
+		},
+	}
+	task := syncmgr.NewGrowingSourceSyncTask().
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 100}).
+		WithTargetOffset(0).
+		WithMetaCache(metaCache).
+		WithMetaWriter(metaWriter).
+		WithSchema(schema).
+		WithFailureCallback(func(error) {
+			panic("stale channel should not reach fatal failure callback")
+		})
+
+	futures := wb.submitSyncTasks(context.Background(), []syncmgr.Task{task})
+	assert.Len(t, futures, 1)
+	assert.NoError(t, conc.AwaitAll(futures...))
+	assert.NotContains(t, wb.growingSourceProgress, segmentID)
+	assert.Zero(t, testutil.ToFloat64(metrics.DataNodeGrowingSourceSyncFailureCount.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		fmt.Sprint(collectionID),
+		channelName,
+	)))
+	assert.Zero(t, testutil.ToFloat64(metrics.DataNodeFlushBufferCount.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		metrics.FailLabel,
+		datapb.SegmentLevel_L0.String(),
+	)))
+}
 
 type WriteBufferSuite struct {
 	suite.Suite
