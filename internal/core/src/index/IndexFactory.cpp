@@ -64,6 +64,7 @@
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/PluginLoader.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
@@ -72,15 +73,19 @@ namespace {
 
 uint64_t
 ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
-                                int32_t scalar_version) {
+                                int32_t scalar_version,
+                                bool encrypted) {
     if (index_size_in_bytes == 0) {
         return 0;
     }
     if (scalar_version < 3) {
         return index_size_in_bytes;
     }
-    return std::min<uint64_t>(index_size_in_bytes,
-                              milvus::storage::EntryStreamMaxTransientBytes());
+    auto stream_data_bound = milvus::storage::EntryStreamDataTransientBytes(
+        index_size_in_bytes, encrypted);
+    return std::min<uint64_t>(
+        stream_data_bound,
+        milvus::storage::EntryStreamMaxTransientBytes(encrypted));
 }
 
 uint64_t
@@ -568,8 +573,14 @@ IndexFactory::ScalarIndexLoadResource(
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    auto stream_memory_overhead =
-        ScalarIndexStreamMemoryOverhead(index_size_in_bytes, scalar_version);
+    // The plugin is loaded only when cluster disk encryption is enabled.
+    // Plaintext clusters keep the original, lower stream estimate.
+    auto encrypted_stream =
+        scalar_version >= 3 &&
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
+            nullptr;
+    auto stream_memory_overhead = ScalarIndexStreamMemoryOverhead(
+        index_size_in_bytes, scalar_version, encrypted_stream);
 
     LoadResourceRequest request{};
     request.has_raw_data = false;
