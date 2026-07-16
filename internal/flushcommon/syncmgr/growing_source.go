@@ -564,6 +564,10 @@ func (t *GrowingSourceSyncTask) TargetOffset() int64 {
 }
 
 func (t *GrowingSourceSyncTask) HandleError(err error) {
+	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+		metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+		return
+	}
 	if t.failureCallback != nil {
 		t.failureCallback(err)
 	}

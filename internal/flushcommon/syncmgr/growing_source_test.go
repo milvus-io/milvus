@@ -82,6 +82,40 @@ func (s *fakeCommitGrowingFlushSource) CommitGrowingFlush(targetOffset int64) {
 	s.commits = append(s.commits, targetOffset)
 }
 
+func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	testCases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "channel_not_found",
+			err:  merr.WrapErrChannelNotFound("ch"),
+		},
+		{
+			name: "segment_not_found",
+			err:  merr.WrapErrSegmentNotFound(1),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			callbackCalled := false
+			task := NewGrowingSourceSyncTask().
+				WithFailureCallback(func(error) {
+					callbackCalled = true
+					panic("failure callback should not be called")
+				})
+
+			require.NotPanics(t, func() {
+				task.HandleError(tc.err)
+			})
+			require.False(t, callbackCalled)
+		})
+	}
+}
+
 func TestGrowingSourceSyncTaskBuildFlushConfigBM25(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key, "12345")
