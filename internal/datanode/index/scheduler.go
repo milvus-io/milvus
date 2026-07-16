@@ -262,20 +262,22 @@ func (sched *TaskScheduler) processTask(t Task) {
 			if indexTask != nil {
 				endMs := taskcost.NowMs()
 				costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
-				indexTask.manager.StoreIndexTaskExecutionEnd(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), endMs, costTimeMs)
+				// End bookkeeping and final state must land in one critical
+				// section, so a concurrent QueryTask never sees a final cost
+				// paired with an in-progress state.
+				indexTask.SetStateWithCost(getStateFromError(err), err.Error(), endMs, costTimeMs)
 				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
 			} else {
+				t.SetState(getStateFromError(err), err.Error())
 				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err))
 			}
-			t.SetState(getStateFromError(err), err.Error())
 			return
 		}
 	}
 	if indexTask != nil {
 		endMs := taskcost.NowMs()
 		costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
-		indexTask.manager.StoreIndexTaskExecutionEnd(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), endMs, costTimeMs)
-		t.SetState(indexpb.JobState_JobStateFinished, "")
+		indexTask.SetStateWithCost(indexpb.JobState_JobStateFinished, "", endMs, costTimeMs)
 		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
 	} else {
 		t.SetState(indexpb.JobState_JobStateFinished, "")

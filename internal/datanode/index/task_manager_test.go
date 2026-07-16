@@ -162,7 +162,7 @@ func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	s.manager.LoadOrStoreIndexTask(s.cluster, buildID, &IndexTaskInfo{State: commonpb.IndexState_InProgress})
 
 	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, 111, 4)
-	s.manager.StoreIndexTaskExecutionEnd(s.cluster, buildID, 222, 111)
+	s.manager.StoreIndexTaskExecutionEndWithState(s.cluster, buildID, 222, 111, commonpb.IndexState_Failed, "mock failure")
 
 	info := s.manager.GetIndexTaskInfo(s.cluster, buildID)
 	s.Require().NotNil(info)
@@ -170,6 +170,9 @@ func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	s.Equal(int64(222), info.ExecEndMs)
 	s.Equal(int64(111), info.CostTimeMs)
 	s.Equal(int64(4), info.CostCPUNum)
+	// state/failReason land together with the cost in one critical section
+	s.Equal(commonpb.IndexState_Failed, info.State)
+	s.Equal("mock failure", info.FailReason)
 
 	info.CostCPUNum = 999
 	reloaded := s.manager.GetIndexTaskInfo(s.cluster, buildID)

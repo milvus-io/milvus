@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -302,5 +303,30 @@ func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 		assert.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
 		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
 		assert.Equal(t, int64(1), info.CostCPUNum)
+	})
+
+	t.Run("vector index records build pool cpu num", func(t *testing.T) {
+		manager := NewTaskManager(context.Background())
+		task := newSchedulerIndexBuildTask(t, manager, 1003)
+
+		vecMock := mockey.Mock((*indexBuildTask).IsVectorIndex).Return(true).Build()
+		defer vecMock.UnPatch()
+		preMock := mockey.Mock((*indexBuildTask).PreExecute).Return(nil).Build()
+		defer preMock.UnPatch()
+		executeMock := mockey.Mock((*indexBuildTask).Execute).Return(nil).Build()
+		defer executeMock.UnPatch()
+		postMock := mockey.Mock((*indexBuildTask).PostExecute).Return(nil).Build()
+		defer postMock.UnPatch()
+
+		scheduler := NewTaskScheduler(context.Background())
+		scheduler.processTask(task)
+
+		info := manager.GetIndexTaskInfo("test-cluster", 1003)
+		assert.NotNil(t, info)
+		assert.Equal(t, commonpb.IndexState_Finished, info.State)
+		assert.Greater(t, info.ExecStartMs, int64(0))
+		assert.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
+		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
+		assert.Equal(t, int64(hardware.GetCPUNum()), info.CostCPUNum)
 	})
 }

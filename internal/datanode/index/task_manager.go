@@ -150,13 +150,22 @@ func (m *TaskManager) StoreIndexTaskExecutionStart(clusterID string, buildID typ
 	}
 }
 
-func (m *TaskManager) StoreIndexTaskExecutionEnd(clusterID string, buildID typeutil.UniqueID, endMs int64, costTimeMs int64) {
+// StoreIndexTaskExecutionEndWithState records the execution-end cost bookkeeping
+// together with the final task state/failReason in a single critical section, so
+// a concurrent reader can never observe a final cost paired with a stale state
+// (or vice versa).
+func (m *TaskManager) StoreIndexTaskExecutionEndWithState(clusterID string, buildID typeutil.UniqueID, endMs int64, costTimeMs int64, state commonpb.IndexState, failReason string) {
 	key := Key{ClusterID: clusterID, TaskID: buildID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	if task, ok := m.indexTasks[key]; ok {
+		mlog.Debug(m.ctx, "store task execution end with state", mlog.String("clusterID", clusterID), mlog.FieldBuildID(buildID),
+			mlog.String("state", state.String()), mlog.String("fail reason", failReason),
+			mlog.Int64("costTimeMs", costTimeMs))
 		task.ExecEndMs = endMs
 		task.CostTimeMs = costTimeMs
+		task.State = state
+		task.FailReason = failReason
 	}
 }
 

@@ -118,6 +118,19 @@ func (it *indexBuildTask) Name() string {
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	it.observeStateMetrics(state)
+}
+
+// SetStateWithCost stores the final state/failReason together with the
+// execution-end cost bookkeeping in one TaskManager critical section, so a
+// concurrent QueryTask can never observe a final cost paired with a stale
+// in-progress state.
+func (it *indexBuildTask) SetStateWithCost(state indexpb.JobState, failReason string, endMs, costTimeMs int64) {
+	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), endMs, costTimeMs, commonpb.IndexState(state), failReason)
+	it.observeStateMetrics(state)
+}
+
+func (it *indexBuildTask) observeStateMetrics(state indexpb.JobState) {
 	if state == indexpb.JobState_JobStateFinished {
 		metrics.DataNodeBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(it.tr.ElapseSpan().Seconds())
 		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(it.queueDur.Milliseconds()))
