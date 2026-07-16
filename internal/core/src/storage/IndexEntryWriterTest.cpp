@@ -1221,8 +1221,7 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
     milvus::SetLoadTransientBudgetBytes(
         static_cast<int64_t>(configured_budget));
     ASSERT_EQ(budget.CapacityBytes(), configured_budget);
-    ASSERT_EQ(EntryStreamMaxTransientBytes(),
-              configured_budget + kTailMergeGrace);
+    ASSERT_EQ(EntryStreamMaxTransientBytes(), configured_budget);
 
     const std::string file_path = kV3FilePath + "_stream_configured_default";
     const size_t tail_size = kTailMergeGrace + 17;
@@ -1264,7 +1263,8 @@ TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamUsesThreeBufferPoolBound) {
     const auto encrypted_pool_bound = max_tasks * per_task_bound;
 
     EXPECT_EQ(EntryStreamPoolBoundTransientBytes(true), encrypted_pool_bound);
-    EXPECT_EQ(EntryStreamMaxTransientBytes(true), encrypted_pool_bound);
+    EXPECT_EQ(EntryStreamMaxTransientBytes(true),
+              std::numeric_limits<size_t>::max());
 }
 
 TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamAccountsForPlaintextCopies) {
@@ -1286,6 +1286,33 @@ TEST_F(IndexEntryWriterV3Test,
 
     const auto per_task_bound = 3 * (slice_size + kTailMergeGrace);
     EXPECT_EQ(EntryStreamMaxTransientBytes(true), per_task_bound);
+}
+
+TEST_F(IndexEntryWriterV3Test, PlainEntryStreamIncludesOversizedSingleTask) {
+    IndexEntryStreamConfigGuard guard;
+    milvus::SetLoadTransientBudgetBytes(1 * 1024 * 1024);
+
+    EXPECT_EQ(EntryStreamMaxTransientBytes(),
+              DefaultStreamSliceSize() + kTailMergeGrace);
+}
+
+TEST_F(IndexEntryWriterV3Test, PlainEntryStreamPoolBoundCountsTailPerTask) {
+    const auto configured_tasks =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+
+    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(),
+              configured_tasks * (DefaultStreamSliceSize() + kTailMergeGrace));
+}
+
+TEST_F(IndexEntryWriterV3Test, EntryStreamPoolBoundUsesLiveWorkerFloor) {
+    const auto configured_tasks =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    const auto live_workers = configured_tasks + 1;
+
+    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(false, live_workers),
+              live_workers * (DefaultStreamSliceSize() + kTailMergeGrace));
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMergesSmallTail) {

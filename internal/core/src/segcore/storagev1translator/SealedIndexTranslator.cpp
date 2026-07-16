@@ -1,6 +1,7 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -98,10 +99,20 @@ SealedIndexTranslator::SealedIndexTranslator(
                 ? milvus::storage::EncryptedEntryStreamTaskTransientBytes()
                 : milvus::storage::DefaultStreamSliceSize() +
                       milvus::storage::kTailMergeGrace;
+        auto encrypted_stream_upper_bound = [&]() {
+            auto index_size = static_cast<size_t>(
+                std::max<int64_t>(0, index_load_info_.index_size));
+            return std::min(
+                milvus::storage::EntryStreamDataTransientBytes(index_size,
+                                                               true),
+                static_cast<size_t>(std::numeric_limits<int64_t>::max()));
+        };
         auto memory_upper_bound =
-            budget_capacity == 0 ? milvus::segcore::LoadTransientPoolUpperBound(
-                                       max_task_overhead)
-                                 : budget_capacity;
+            budget_capacity != 0 ? budget_capacity
+            : encrypted_stream
+                ? static_cast<int64_t>(encrypted_stream_upper_bound())
+                : milvus::segcore::LoadTransientPoolUpperBound(
+                      max_task_overhead);
         auto upper_bound =
             milvus::cachinglayer::ResourceUsage{memory_upper_bound, int64_t{0}};
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
