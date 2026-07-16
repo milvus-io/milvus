@@ -41,6 +41,7 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "geos_c.h"
 #include "gtest/gtest.h"
@@ -881,4 +882,42 @@ TEST_P(ExprTest, TestFloatingPointModulo) {
         }
         ASSERT_EQ(final.count(), expected_count);
     }
+}
+
+// Regression for the GIS offset-input contract. PhyGISFunctionFilterExpr slices
+// only by its own batch cursor (GetNextBatchSize) and never reads the
+// offset-input list, but the SegmentExpr base defaults SupportOffsetInput() to
+// true. Left at the default, the native offset-input path (IterativeFilterNode
+// / rescore) would feed a sparse offset list into an Eval that ignores it and
+// return misaligned rows -- a silent wrong-results bug on any GIS predicate
+// reached through iterative filtering. The override must report false so the
+// consumer takes its non-native fallback. This pins the contract so a future
+// change cannot regress it.
+TEST(ExprTest, GISFilterDoesNotSupportOffsetInput) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto geo_fid = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    const int64_t N = 256;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Compile a bare GIS leaf into its physical expr and inspect the contract.
+    milvus::expr::TypedExprPtr leaf =
+        std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(geo_fid, DataType::GEOMETRY),
+            proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+            "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))");
+    std::vector<milvus::expr::TypedExprPtr> filters{leaf};
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+    milvus::exec::ExecContext exec_context(query_context.get());
+    milvus::exec::ExprSet expr_set(filters, &exec_context);
+
+    ASSERT_EQ(expr_set.exprs().size(), 1u);
+    EXPECT_FALSE(expr_set.exprs()[0]->SupportOffsetInput());
 }
