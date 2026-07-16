@@ -2968,6 +2968,302 @@ func TestMetaCache_GetPartitionInfoNormalizesEmptyDB(t *testing.T) {
 	assert.Equal(t, p1, p2)
 }
 
+// assertMetaCacheByIDConsistent verifies the by-id index has no orphans: every
+// collInfoByID entry still lives in collInfo under its own db/name and carries a
+// matching id. collInfo may legitimately hold extra stale duplicate-name entries
+// (e.g. an old name after a rename, pending invalidation), so the reverse
+// direction is intentionally not asserted.
+func assertMetaCacheByIDConsistent(t *testing.T, cache *MetaCache) {
+	t.Helper()
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+	for id, entry := range cache.collInfoByID {
+		if !assert.NotNil(t, entry) {
+			continue
+		}
+		assert.Equalf(t, id, entry.collID, "id index key %d must equal entry.collID", id)
+		db, ok := cache.collInfo[entry.dbName]
+		if !assert.Truef(t, ok, "id index -> db %q missing from collInfo", entry.dbName) {
+			continue
+		}
+		got, ok := db[entry.schema.GetName()]
+		if !assert.Truef(t, ok, "id index -> %q/%q missing from collInfo", entry.dbName, entry.schema.GetName()) {
+			continue
+		}
+		assert.Samef(t, entry, got, "id index entry must be the same pointer as collInfo[%q][%q]", entry.dbName, entry.schema.GetName())
+	}
+}
+
+// TestMetaCache_RenameInvalidationCleansAllNameKeys locks in cache correctness
+// across a rename: after foo -> bar, a lookup of the new name re-caches under
+// "bar" while the stale "foo" key lingers (update() does not delete other-name
+// keys of the same id). The rename invalidation (RemoveCollectionsByID) must then
+// evict BOTH name keys and the by-id index, leaving no stale old-name entry to
+// serve a wrong id. (This guards the full-scan cleanup any future O(1) rewrite
+// must preserve.)
+func TestMetaCache_RenameInvalidationCleansAllNameKeys(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	var renamed atomic.Bool
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			name := "foo"
+			rt := uint64(100)
+			if renamed.Load() {
+				name = "bar"
+				rt = 200
+			}
+			if req.GetCollectionID() == 1 || req.GetCollectionName() == name {
+				return &milvuspb.DescribeCollectionResponse{
+					Status:       merr.Success(),
+					CollectionID: 1,
+					DbName:       "db",
+					Schema:       &schemapb.CollectionSchema{Name: name, Fields: []*schemapb.FieldSchema{}},
+					RequestTime:  rt,
+				}, nil
+			}
+			return &milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionName())),
+			}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	id, err := cache.GetCollectionID(ctx, "db", "foo")
+	assert.NoError(t, err)
+	assert.Equal(t, UniqueID(1), id)
+
+	renamed.Store(true)
+	id, err = cache.GetCollectionID(ctx, "db", "bar")
+	assert.NoError(t, err)
+	assert.Equal(t, UniqueID(1), id)
+
+	cache.mu.RLock()
+	_, hasFoo := cache.collInfo["db"]["foo"]
+	_, hasBar := cache.collInfo["db"]["bar"]
+	cache.mu.RUnlock()
+	assert.True(t, hasFoo, "stale old-name key lingers until invalidation")
+	assert.True(t, hasBar)
+	assertMetaCacheByIDConsistent(t, cache)
+
+	// the rename invalidation must sweep every name key of this id
+	cache.RemoveCollectionsByID(ctx, 1, 0, true)
+
+	cache.mu.RLock()
+	_, hasFoo = cache.collInfo["db"]["foo"]
+	_, hasBar = cache.collInfo["db"]["bar"]
+	_, hasID := cache.collInfoByID[1]
+	cache.mu.RUnlock()
+	assert.False(t, hasFoo, "old name must be evicted (no stale read of the pre-rename name)")
+	assert.False(t, hasBar, "new name must be evicted too")
+	assert.False(t, hasID, "by-id index must be cleared")
+	assertMetaCacheByIDConsistent(t, cache)
+}
+
+// TestMetaCache_AliasRepointResolvesToNewTarget verifies an alias re-point is
+// reflected after invalidation: alias -> collA is cached, then AlterAlias points
+// it at collB and broadcasts RemoveAlias; the next resolution must return collB,
+// not the stale collA. (Guards the alias-cache correctness the RBAC path depends
+// on for its object-name resolution.)
+func TestMetaCache_AliasRepointResolvesToNewTarget(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	// ResolveCollectionAlias L1 (getCollection) never RPCs; a not-found describe
+	// keeps any accidental probe harmless.
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Status(merr.WrapErrCollectionNotFound("")),
+	}, nil).Maybe()
+
+	var repointed atomic.Bool
+	rootCoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error) {
+			target := "collA"
+			if repointed.Load() {
+				target = "collB"
+			}
+			return &milvuspb.DescribeAliasResponse{
+				Status:     merr.Success(),
+				Alias:      req.GetAlias(),
+				Collection: target,
+			}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	got, err := cache.ResolveCollectionAlias(ctx, "db", "myalias")
+	assert.NoError(t, err)
+	assert.Equal(t, "collA", got)
+
+	repointed.Store(true)
+	cache.RemoveAlias(ctx, "db", "myalias")
+
+	got, err = cache.ResolveCollectionAlias(ctx, "db", "myalias")
+	assert.NoError(t, err)
+	assert.Equal(t, "collB", got, "alias must re-resolve to the new target after RemoveAlias")
+}
+
+// TestMetaCache_DropCollectionClearsAllCaches verifies a drop clears every cache
+// structure keyed on the collection: collInfo, the by-id index, the alias entry
+// pointing at it, and both partition caches.
+func TestMetaCache_DropCollectionClearsAllCaches(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		DbName:       "db",
+		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
+		RequestTime:  1000,
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything).Return(&milvuspb.DescribeAliasResponse{
+		Status:     merr.Success(),
+		Alias:      "myalias",
+		Collection: "collection",
+	}, nil).Maybe()
+
+	var showCount atomic.Int32
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			showCount.Add(1)
+			return &milvuspb.ShowPartitionsResponse{
+				Status:               merr.Success(),
+				PartitionIDs:         []int64{100},
+				PartitionNames:       []string{"par1"},
+				CreatedTimestamps:    []uint64{1000},
+				CreatedUtcTimestamps: []uint64{1000},
+			}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	_, err = cache.GetCollectionID(ctx, "db", "collection")
+	assert.NoError(t, err)
+	_, err = cache.GetPartitionInfos(ctx, "db", "collection")
+	assert.NoError(t, err)
+	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+	target, err := cache.ResolveCollectionAlias(ctx, "db", "myalias")
+	assert.NoError(t, err)
+	assert.Equal(t, "collection", target)
+	assert.Equal(t, int32(2), showCount.Load(), "collection-level and partition-level caches each fetched once")
+
+	cache.mu.RLock()
+	_, hasColl := cache.collInfo["db"]["collection"]
+	_, hasID := cache.collInfoByID[1]
+	aliasEntry, hasAlias := cache.aliasInfo["db"]["myalias"]
+	cache.mu.RUnlock()
+	assert.True(t, hasColl)
+	assert.True(t, hasID)
+	assert.True(t, hasAlias)
+	assert.Equal(t, "collection", aliasEntry.collectionName)
+
+	cache.RemoveCollectionsByID(ctx, 1, 0, true)
+
+	cache.mu.RLock()
+	_, hasColl = cache.collInfo["db"]["collection"]
+	_, hasID = cache.collInfoByID[1]
+	_, hasAlias = cache.aliasInfo["db"]["myalias"]
+	cache.mu.RUnlock()
+	assert.False(t, hasColl, "collInfo entry must be cleared on drop")
+	assert.False(t, hasID, "by-id index must be cleared on drop")
+	assert.False(t, hasAlias, "alias pointing to the dropped collection must be cleared")
+	assertMetaCacheByIDConsistent(t, cache)
+
+	// both partition caches must have been staled: they re-fetch
+	_, err = cache.GetPartitionInfos(ctx, "db", "collection")
+	assert.NoError(t, err)
+	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+	assert.Equal(t, int32(4), showCount.Load(), "dropped collection's partition caches must be re-fetched, proving they were cleared")
+}
+
+// TestMetaCache_ConcurrentIDPartitionInvalidateConsistency hammers the cache with
+// id-only reads, by-name reads, partition reads, and both invalidation paths
+// concurrently. Run under -race it flags any data race; the final consistency
+// check flags any by-id/collInfo desync left behind.
+func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			var id int64
+			if req.GetCollectionName() != "" {
+				fmt.Sscanf(req.GetCollectionName(), "coll%d", &id)
+			} else {
+				id = req.GetCollectionID()
+			}
+			if id < 1 || id > 5 {
+				return &milvuspb.DescribeCollectionResponse{
+					Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionName())),
+				}, nil
+			}
+			return &milvuspb.DescribeCollectionResponse{
+				Status:       merr.Success(),
+				CollectionID: id,
+				DbName:       "db",
+				Schema:       &schemapb.CollectionSchema{Name: fmt.Sprintf("coll%d", id), Fields: []*schemapb.FieldSchema{}},
+				RequestTime:  1000,
+			}, nil
+		})
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []int64{100},
+		PartitionNames:       []string{"par1"},
+		CreatedTimestamps:    []uint64{1000},
+		CreatedUtcTimestamps: []uint64{1000},
+	}, nil).Maybe()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				id := int64((i % 5) + 1)
+				name := fmt.Sprintf("coll%d", id)
+				switch (i + g) % 5 {
+				case 0:
+					_, _ = cache.GetCollectionName(ctx, "", id)
+				case 1:
+					_, _ = cache.GetCollectionID(ctx, "db", name)
+				case 2:
+					_, _ = cache.GetPartitionInfos(ctx, "db", name)
+				case 3:
+					cache.RemovePartition(ctx, "db", id, name, "par1", uint64(2000+i))
+				case 4:
+					cache.RemoveCollectionsByID(ctx, id, 0, false)
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	assertMetaCacheByIDConsistent(t, cache)
+}
+
 func TestMetaCache_Close(t *testing.T) {
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
