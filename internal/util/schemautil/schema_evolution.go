@@ -174,7 +174,7 @@ func validateKeptEvolutionFields(oldFields, newFields *evolutionFieldMaps) error
 				return merr.WrapErrParameterInvalidMsg("cannot add sub-field id %d to kept struct field %q", childID, oldField.GetName())
 			}
 		}
-		if err := validateMonotonicNumericBounds(oldField.GetName(), oldField.GetTypeParams(), newField.GetTypeParams()); err != nil {
+		if err := validateNumericBoundsEvolution(oldField.GetName(), oldField.GetTypeParams(), newField.GetTypeParams()); err != nil {
 			return err
 		}
 	}
@@ -201,7 +201,7 @@ func validateKeptEvolutionField(oldField, newField *schemapb.FieldSchema) error 
 		oldField.GetIsDynamic() != newField.GetIsDynamic():
 		return merr.WrapErrParameterInvalidMsg("cannot change the structural role of field %q in place", name)
 	}
-	return validateMonotonicNumericBounds(name, oldField.GetTypeParams(), newField.GetTypeParams())
+	return validateNumericBoundsEvolution(name, oldField.GetTypeParams(), newField.GetTypeParams())
 }
 
 func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newSchema *schemapb.CollectionSchema) error {
@@ -354,21 +354,23 @@ func validateEvolutionDynamicGraph(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func validateMonotonicNumericBounds(fieldName string, oldParams, newParams []*commonpb.KeyValuePair) error {
+// validateNumericBoundsEvolution rejects field-param changes that would
+// reinterpret already-written data. A vector dimension is immutable: reading
+// existing vectors under a new dim yields garbage. max_length / max_capacity
+// are write-time bounds only — existing rows stay readable and new inserts are
+// validated against the new bound — so they may grow or shrink freely; they may
+// not be removed or invalidated (that would drop the bound entirely).
+func validateNumericBoundsEvolution(fieldName string, oldParams, newParams []*commonpb.KeyValuePair) error {
 	for _, key := range []string{common.MaxLengthKey, common.MaxCapacityKey} {
-		oldValue, existed, err := evolutionNumericValue(oldParams, key)
+		_, existed, err := evolutionNumericValue(oldParams, key)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("field %q has an invalid old %s bound", fieldName, key)
 		}
 		if !existed {
 			continue
 		}
-		newValue, kept, err := evolutionNumericValue(newParams, key)
-		if err != nil || !kept {
+		if _, kept, err := evolutionNumericValue(newParams, key); err != nil || !kept {
 			return merr.WrapErrParameterInvalidMsg("cannot remove or invalidate %s of field %q", key, fieldName)
-		}
-		if newValue < oldValue {
-			return merr.WrapErrParameterInvalidMsg("cannot shrink %s of field %q", key, fieldName)
 		}
 	}
 

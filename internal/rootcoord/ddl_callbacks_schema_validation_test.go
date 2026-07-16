@@ -116,11 +116,13 @@ func TestDDLCallbacksSchemaEvolutionRejectsInPlaceFieldMutation(t *testing.T) {
 	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{DbName: dbName, CollectionName: collectionName, Schema: schemaBytes})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 
+	// Resizing max_length (grow or shrink) is allowed; removing the bound
+	// entirely is still rejected, since it would drop the write-time bound.
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldName:      "text",
-		Properties:     []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
+		DeleteKeys:     []string{common.MaxLengthKey},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)

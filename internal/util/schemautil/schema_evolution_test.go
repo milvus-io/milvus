@@ -207,9 +207,7 @@ func TestValidateSchemaEvolutionRejectsNonMonotonicBounds(t *testing.T) {
 		value  string
 		remove bool
 	}{
-		{name: "shrink max length", field: 104, key: common.MaxLengthKey, value: "64"},
 		{name: "remove max length", field: 104, key: common.MaxLengthKey, remove: true},
-		{name: "shrink max capacity", field: 105, key: common.MaxCapacityKey, value: "16"},
 		{name: "remove max capacity", field: 105, key: common.MaxCapacityKey, remove: true},
 	}
 
@@ -247,6 +245,30 @@ func TestValidateSchemaEvolutionRejectsNonMonotonicBounds(t *testing.T) {
 		setMaxFieldID(newSchema, 110)
 		require.Error(t, ValidateSchemaEvolution(oldSchema, newSchema))
 	})
+}
+
+func TestValidateSchemaEvolutionAllowsResizingFieldBounds(t *testing.T) {
+	// max_length / max_capacity are write-time bounds, not a reinterpretation of
+	// already-written data, so they may grow or shrink freely.
+	tests := []struct {
+		name  string
+		field int64
+		key   string
+		value string
+	}{
+		{name: "shrink max length", field: 104, key: common.MaxLengthKey, value: "64"},
+		{name: "grow max length", field: 104, key: common.MaxLengthKey, value: "1024"},
+		{name: "shrink max capacity", field: 105, key: common.MaxCapacityKey, value: "16"},
+		{name: "grow max capacity", field: 105, key: common.MaxCapacityKey, value: "256"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			oldSchema := evolutionBaseSchema()
+			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+			setEvolutionTypeParam(evolutionFieldByID(newSchema, test.field), test.key, test.value)
+			require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+		})
+	}
 }
 
 func TestValidateSchemaEvolutionRejectsUnsafeAddedFields(t *testing.T) {
