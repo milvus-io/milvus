@@ -1252,6 +1252,42 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamUsesDefaultSliceSize) {
               (std::vector<size_t>{slice_size, slice_size, tail_size}));
 }
 
+TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamUsesThreeBufferPoolBound) {
+    IndexEntryStreamConfigGuard guard;
+    milvus::SetLoadTransientBudgetBytes(0);
+
+    const auto max_tasks =
+        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
+            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+    const auto per_task_bound =
+        3 * (DefaultStreamSliceSize() + kTailMergeGrace);
+    const auto encrypted_pool_bound = max_tasks * per_task_bound;
+
+    EXPECT_EQ(EntryStreamPoolBoundTransientBytes(true), encrypted_pool_bound);
+    EXPECT_EQ(EntryStreamMaxTransientBytes(true), encrypted_pool_bound);
+}
+
+TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamAccountsForPlaintextCopies) {
+    constexpr size_t stream_bytes = 8 * 1024 * 1024;
+
+    EXPECT_EQ(EntryStreamDataTransientBytes(stream_bytes, false), stream_bytes);
+    EXPECT_EQ(EntryStreamDataTransientBytes(stream_bytes, true),
+              3 * stream_bytes);
+    EXPECT_EQ(
+        EntryStreamDataTransientBytes(std::numeric_limits<size_t>::max(), true),
+        std::numeric_limits<size_t>::max());
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       EncryptedEntryStreamIncludesOversizedSingleTask) {
+    IndexEntryStreamConfigGuard guard;
+    const auto slice_size = DefaultStreamSliceSize();
+    milvus::SetLoadTransientBudgetBytes(static_cast<int64_t>(slice_size));
+
+    const auto per_task_bound = 3 * (slice_size + kTailMergeGrace);
+    EXPECT_EQ(EntryStreamMaxTransientBytes(true), per_task_bound);
+}
+
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMergesSmallTail) {
     const size_t slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
     const size_t tail_size = kTailMergeGrace / 2;

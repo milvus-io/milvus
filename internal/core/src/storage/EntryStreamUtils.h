@@ -37,6 +37,9 @@ namespace milvus::storage {
 constexpr size_t kMinStreamSliceSize = 64 * 1024;
 constexpr size_t kStreamSliceAlignment = 4 * 1024;
 constexpr size_t kTailMergeGrace = 1 * 1024 * 1024;
+// Encrypted reads may simultaneously retain ciphertext, decrypted plaintext,
+// and the returned plaintext buffer.
+constexpr size_t kEncryptedStreamBufferMultiplier = 3;
 
 inline bool
 IsStreamSliceSizeAligned(size_t slice_size) {
@@ -204,10 +207,37 @@ class TransientMemoryBudget {
 };
 
 inline size_t
-EntryStreamPoolBoundTransientBytes() {
+EntryStreamDataTransientBytes(size_t stream_bytes, bool encrypted) {
+    if (!encrypted) {
+        return stream_bytes;
+    }
+    if (stream_bytes >
+        std::numeric_limits<size_t>::max() / kEncryptedStreamBufferMultiplier) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return stream_bytes * kEncryptedStreamBufferMultiplier;
+}
+
+inline size_t
+EncryptedEntryStreamTaskTransientBytes() {
+    // Reuse the tail grace as a conservative allowance for cipher expansion.
+    return EntryStreamDataTransientBytes(
+        DefaultStreamSliceSize() + kTailMergeGrace, true);
+}
+
+inline size_t
+EntryStreamPoolBoundTransientBytes(bool encrypted = false) {
     auto max_threads = milvus::ComputeThreadPoolMaxThreads(
         milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load());
     auto max_tasks = static_cast<size_t>(max_threads);
+    if (encrypted) {
+        auto task_bound = EncryptedEntryStreamTaskTransientBytes();
+        if (task_bound > std::numeric_limits<size_t>::max() / max_tasks) {
+            return std::numeric_limits<size_t>::max();
+        }
+        return max_tasks * task_bound;
+    }
+
     auto slice_size = DefaultStreamSliceSize();
     if (slice_size >
         (std::numeric_limits<size_t>::max() - kTailMergeGrace) / max_tasks) {
@@ -217,13 +247,19 @@ EntryStreamPoolBoundTransientBytes() {
 }
 
 inline size_t
-EntryStreamMaxTransientBytes() {
+EntryStreamMaxTransientBytes(bool encrypted = false) {
     auto capacity =
         TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
-    auto pool_bound = EntryStreamPoolBoundTransientBytes();
+    auto pool_bound = EntryStreamPoolBoundTransientBytes(encrypted);
     if (capacity == 0) {
         return pool_bound;
     }
+    if (encrypted) {
+        return std::min(
+            std::max(capacity, EncryptedEntryStreamTaskTransientBytes()),
+            pool_bound);
+    }
+
     auto configured_bound =
         capacity > std::numeric_limits<size_t>::max() - kTailMergeGrace
             ? std::numeric_limits<size_t>::max()
