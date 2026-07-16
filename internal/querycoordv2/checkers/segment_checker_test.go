@@ -1372,7 +1372,11 @@ func (suite *SegmentCheckerTestSuite) setupServingSetCase() (*meta.Segment, int6
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 		[]*datapb.VchannelInfo{{CollectionID: collectionID, ChannelName: channel}},
 		[]*datapb.SegmentInfo{}, nil).Maybe()
+	// publish a current target, then a fresh next target so the current and next versions are both
+	// non-zero and distinct -- otherwise the next-target release arm is exercised with 0.
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 
 	seg := utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 1, channel)
@@ -1440,6 +1444,21 @@ func (suite *SegmentCheckerTestSuite) TestServingSetReleasesCandidateNotLoadedHe
 	suite.Len(run(view), 1, "a candidate that is not loaded on this leader must be released, not kept")
 }
 
+// A copy of the candidate loaded on a DIFFERENT node than s.Node is a wrong-node duplicate and must
+// not be treated as "loaded here": view.Segments is one entry per segment id, so the coord-side check
+// must compare NodeID against s.Node, matching the sibling redundancy check.
+func (suite *SegmentCheckerTestSuite) TestServingSetReleasesWrongNodeCopy() {
+	seg, currentTargetVersion, run := suite.setupServingSetCase()
+
+	view := utils.CreateTestLeaderView(1, 1, "test-insert-channel",
+		map[int64]int64{seg.GetID(): 2}, map[int64]*meta.Segment{})
+	view.TargetVersion = currentTargetVersion
+	view.ReportsServingSet = true
+	view.NotServingSegments = typeutil.NewUniqueSet()
+
+	suite.Len(run(view), 1, "a copy on a different node must not be treated as loaded here and must be released")
+}
+
 // Older QueryNode: no serving set reported => coord falls back to the target versions and may
 // release only when the readable set is provably free of the segment, i.e. when the delegator's
 // view is the current or the next target. Any other view is a version coord no longer holds, so
@@ -1448,6 +1467,8 @@ func (suite *SegmentCheckerTestSuite) TestServingSetFallsBackToTargetVersionsOnO
 	ctx := context.Background()
 	_, currentTargetVersion, run := suite.setupServingSetCase()
 	nextTargetVersion := suite.checker.targetMgr.GetCollectionTargetVersion(ctx, 1, meta.NextTarget)
+	suite.NotZero(nextTargetVersion, "next target must exist so the next-arm is exercised with a real version")
+	suite.NotEqual(currentTargetVersion, nextTargetVersion)
 
 	suite.Len(run(newTestLeaderView(currentTargetVersion)), 1,
 		"release: at view == current the readable set is the current target's segment set, which excludes the segment")
