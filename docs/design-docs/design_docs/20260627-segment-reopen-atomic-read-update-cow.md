@@ -52,6 +52,30 @@ This design does **not** require the following:
 
 The goal is **one unified direction with phased delivery**, not a one-shot rewrite of the entire sealed segment implementation.
 
+### 1.4 Rolling Upgrade Compatibility
+
+The index-update migration assumes a coordinator baseline whose IndexChecker
+schedules segment index changes through `LoadScope_Reopen`. The historical
+`LoadScope_Index` wire value (`2`) is retired and remains reserved so it cannot
+be reused for another meaning.
+
+This design does not support a mixed-version deployment in which an older
+QueryCoord still emits `LoadScope_Index` requests to a newer QueryNode after the
+legacy index-update handler has been removed. A QueryNode that receives wire
+value `2` rejects it as an internal protocol mismatch with an explicit upgrade
+message. The deployment must upgrade QueryCoord to a version that emits
+`LoadScope_Reopen` before routing index-update requests to these QueryNodes.
+
+The retired value must not fall through to the full segment load path: an index
+update is not a full load and must not trigger full-load distribution, bloom
+filter, or delete-stream side effects. It must also not be blindly remapped to
+`LoadScope_Reopen`, because a legacy request may omit newer
+`SegmentLoadInfo` fields; publishing that request as the new load-info snapshot
+could discard metadata already held by the newer QueryNode. Supporting that
+version skew would require a dedicated compatibility adapter that merges and
+normalizes the legacy request against the current published load info before
+reopen, which is outside the scope of this design.
+
 ---
 
 ## 2. Core Problem
