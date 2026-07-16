@@ -1877,7 +1877,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	mlog.Info(context.TODO(), "receive import request from proxy, will broadcast",
+	mlog.Info(context.TODO(), "receive import request from proxy",
 		mlog.Int("fileNum", len(in.GetFiles())),
 		mlog.Any("files", in.GetFiles()),
 		mlog.Any("options", in.GetOptions()))
@@ -1893,12 +1893,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	// Reject L0 import when disabled (default). Restoring L0 (delete-only) segments
 	// is incompatible with commit_timestamp (2PC / replication imports), where it
 	// silently breaks delete semantics. Backups should have their L0 deletes folded
-	// into per-segment deltalogs beforehand; set dataCoord.import.l0ImportDisabled=false
+	// into per-segment deltalogs beforehand; set dataCoord.import.enableL0Import=true
 	// to re-enable the legacy behavior.
-	if importutilv2.IsL0Import(in.GetOptions()) && Params.DataCoordCfg.L0ImportDisabled.GetAsBool() {
+	if importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool() {
 		resp.Status = merr.Status(merr.WrapErrImportFailed("l0 import is disabled " +
-			"(dataCoord.import.l0ImportDisabled=true); fold L0 deletes into data segment deltalogs " +
-			"before restore, or set the config to false to re-enable the legacy L0 import"))
+			"(dataCoord.import.enableL0Import=false); fold L0 deletes into data segment deltalogs " +
+			"before restore, or set the config to true to re-enable the legacy L0 import"))
 		return resp, nil
 	}
 
@@ -1944,6 +1944,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 // createImportJobFromAck creates an import job from ack callback.
 // This is called internally when broadcast ack is received.
+// Note: the L0-import gate deliberately lives in ImportV2 only — broadcast happens
+// after that gate, so no new L0 job can reach here, and an L0 import already
+// broadcast to the WAL before an upgrade/config flip still runs to completion
+// instead of being torn in half.
 func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
