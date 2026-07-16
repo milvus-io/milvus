@@ -1161,15 +1161,20 @@ func (m *MetaCache) removeCollectionByAliasLocked(ctx context.Context, database,
 	if !ok || entry == nil || entry.collectionName == "" {
 		return false
 	}
-	db, ok := m.collInfo[database]
-	if !ok {
-		return false
+	// alias is a known alias. If its target is cached, evict it -- removeCollectionByID
+	// also drops this alias entry via removeAliasesForCollectionLocked. If the target
+	// is not cached (it was only ever resolved into aliasInfo, or was independently
+	// evicted), drop this now-dangling reverse-index entry directly so it cannot
+	// outlive the alias and mis-resolve a later ResolveCollectionAlias (which returns
+	// a Level-2 aliasInfo hit as-is, feeding RBAC object resolution). Do not rely on
+	// the caller's compensating RemoveAlias to clean it up.
+	if db, ok := m.collInfo[database]; ok {
+		if target, ok := db[entry.collectionName]; ok {
+			m.removeCollectionByID(ctx, target.collID, version, false)
+			return true
+		}
 	}
-	target, ok := db[entry.collectionName]
-	if !ok {
-		return false
-	}
-	m.removeCollectionByID(ctx, target.collID, version, false)
+	delete(aliases, alias)
 	return true
 }
 

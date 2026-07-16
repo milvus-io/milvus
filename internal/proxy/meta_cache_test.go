@@ -3674,6 +3674,55 @@ func TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID(t *testing.T) {
 	assert.Equal(t, []string{"a"}, info.aliases, "target must report the newly created alias")
 }
 
+// TestMetaCache_DropAliasCleansDanglingReverseIndexWhenTargetUncached covers the
+// case where an alias was only ever resolved into aliasInfo (via DescribeAlias)
+// without its target collection ever entering collInfo. A DropAlias must still
+// clean that dangling reverse-index entry, so a later ResolveCollectionAlias
+// (whose Level-2 hit is returned as-is and feeds RBAC object resolution) cannot
+// return the stale target. The proxy must not rely on the caller's compensating
+// RemoveAlias to do this.
+func TestMetaCache_DropAliasCleansDanglingReverseIndexWhenTargetUncached(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Status(merr.WrapErrCollectionNotFound("")),
+	}, nil).Maybe()
+	rootCoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything).Return(&milvuspb.DescribeAliasResponse{
+		Status:     merr.Success(),
+		Alias:      "a",
+		Collection: "foo",
+	}, nil).Maybe()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	// resolving the alias populates aliasInfo[db1][a] -> foo WITHOUT caching
+	// collInfo[db1][foo] (ResolveCollectionAlias only resolves the name)
+	got, err := cache.ResolveCollectionAlias(ctx, "db1", "a")
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", got)
+
+	cache.mu.RLock()
+	_, hasRev := cache.aliasInfo["db1"]["a"]
+	_, hasColl := cache.collInfo["db1"]["foo"]
+	cache.mu.RUnlock()
+	assert.True(t, hasRev, "resolve populated the alias reverse index")
+	assert.False(t, hasColl, "the target collection was never cached")
+
+	// DropAlias(a): the proxy sees RemoveCollection(db1, "a"); the target is not in
+	// collInfo, so the dangling reverse-index entry must be cleaned here.
+	cache.RemoveCollection(ctx, "db1", "a", 0)
+
+	cache.mu.RLock()
+	_, hasRev = cache.aliasInfo["db1"]["a"]
+	cache.mu.RUnlock()
+	assert.False(t, hasRev, "the dangling alias reverse-index entry must be cleaned even when the target is uncached")
+}
+
 func TestMetaCache_Close(t *testing.T) {
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
