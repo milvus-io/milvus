@@ -76,7 +76,7 @@ func (view *LeaderView) Clone() *LeaderView {
 		NumOfGrowingRows:       view.NumOfGrowingRows,
 		PartitionStatsVersions: view.PartitionStatsVersions,
 		ReportsServingSet:      view.ReportsServingSet,
-		NotServingSegments:     view.NotServingSegments,
+		NotServingSegments:     view.NotServingSegments.Clone(),
 	}
 }
 
@@ -175,11 +175,13 @@ func (channel *DmChannel) Clone() *DmChannel {
 		Node:         channel.Node,
 		Version:      channel.Version,
 		View: &LeaderView{
-			ID:           channel.View.ID,
-			CollectionID: channel.View.CollectionID,
-			Channel:      channel.View.Channel,
-			Version:      channel.View.Version,
-			Status:       proto.Clone(channel.View.Status).(*querypb.LeaderViewStatus),
+			ID:                 channel.View.ID,
+			CollectionID:       channel.View.CollectionID,
+			Channel:            channel.View.Channel,
+			Version:            channel.View.Version,
+			Status:             proto.Clone(channel.View.Status).(*querypb.LeaderViewStatus),
+			ReportsServingSet:  channel.View.ReportsServingSet,
+			NotServingSegments: channel.View.NotServingSegments.Clone(),
 		},
 	}
 }
