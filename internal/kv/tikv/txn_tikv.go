@@ -109,8 +109,11 @@ const (
 // unreachable store) escape txn.Commit() as plain errors once client-go's
 // internal backoff budget is exhausted, and a failed KVTxn cannot be reused,
 // so the retry must re-run the whole transaction on a fresh region cache.
-// Bounded by the per-call requestTimeout context; a persistently failing
-// call spends up to ~6s in backoff sleep before surfacing the error.
+// Commit is bounded by the per-call requestTimeout context. The begin-phase
+// startTS fetch is not; client-go may spend up to its TSO backoff budget
+// (~15s) before returning. retry.Do checks the deadline between attempts, so
+// a persistently failing call can spend approximately one overlong begin
+// attempt past requestTimeout but will not start another retry afterward.
 // Declared as vars so tests injecting persistent failures can lower them.
 var (
 	writeTxnRetryAttempts = uint(5)
@@ -641,21 +644,24 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 
 // runWriteTxnWithRetry begins a transaction, applies build to it and commits,
 // retrying the whole cycle on transient failures (see writeTxnRetryAttempts).
-// All mutations in this file are idempotent, so re-committing after an
-// undetermined commit result is safe. Deterministic build failures (bad input,
-// unmet predicates, missing predicate targets, local TiKV mutation validation)
-// abort immediately; transient IO errors from build reads are retried like
-// begin/commit failures. Build errors are returned to the caller unwrapped. The
-// commit function is passed in so that callers keep their existing metrics
-// accounting (executeTxn vs raw commitTxn); note the asymmetry under retry:
+// Undetermined commit results and caller cancellation abort immediately with
+// the original error preserved; only classified-transient commit failures are
+// replayed. Deterministic build failures (bad input, unmet predicates, missing
+// predicate targets, local TiKV mutation validation) abort immediately;
+// transient IO errors from build reads are retried like begin/commit failures.
+// Build errors are returned to the caller unwrapped. The commit function is
+// passed in so that callers keep their existing metrics accounting (executeTxn
+// vs raw commitTxn); note the asymmetry under retry:
 // Multi* methods commit via executeTxn, whose MetaTxnLabel counters fire once
 // per attempt, while Save/Remove aggregate their MetaPut/MetaRemove counters
 // once per logical call after all retries.
 func (kv *txnTiKV) runWriteTxnWithRetry(ctx context.Context, op string, build func(txn *transaction.KVTxn) error, commit func(ctx context.Context, txn *transaction.KVTxn) error) error {
 	var buildErr error
+	var commitAbortErr error
 	err := retry.Do(ctx, func() error {
 		var attemptErr error
 		buildErr = nil
+		commitAbortErr = nil
 		txn, err := beginTxn(kv.txn)
 		if err != nil {
 			return merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to create txn for %s", op), err.Error())
@@ -671,6 +677,19 @@ func (kv *txnTiKV) runWriteTxnWithRetry(ctx context.Context, op string, build fu
 			return buildErr
 		}
 		if err := commit(ctx, txn); err != nil {
+			if tikverr.IsErrorUndetermined(err) {
+				commitAbortErr = err
+			} else if ctxErr := ctx.Err(); ctxErr != nil {
+				// client-go backoffers can return the last real error instead
+				// of ctx.Err() when the caller context dies mid-commit.
+				commitAbortErr = ctxErr
+			} else if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+				commitAbortErr = err
+			}
+			if commitAbortErr != nil {
+				attemptErr = commitAbortErr
+				return retry.Unrecoverable(commitAbortErr)
+			}
 			attemptErr = merr.WrapErrIoFailedReason(fmt.Sprintf("Failed to commit for %s", op), err.Error())
 			return attemptErr
 		}
@@ -678,6 +697,9 @@ func (kv *txnTiKV) runWriteTxnWithRetry(ctx context.Context, op string, build fu
 	}, retry.Attempts(writeTxnRetryAttempts), retry.Sleep(writeTxnRetrySleep))
 	if buildErr != nil {
 		return buildErr
+	}
+	if commitAbortErr != nil {
+		return commitAbortErr
 	}
 	return err
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tikverr "github.com/tikv/client-go/v2/error"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
@@ -746,7 +747,127 @@ func TestWriteTxnRetry(t *testing.T) {
 
 		err := kv.MultiSave(ctx, map[string]string{"retry_key_4": "v4"})
 		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.True(t, retry.IsRecoverable(err))
 		assert.Equal(t, int(writeTxnRetryAttempts), commits)
+	})
+
+	t.Run("undetermined commit aborts on first attempt", func(t *testing.T) {
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return fmt.Errorf("commit failed: %w", tikverr.ErrResultUndetermined)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"undetermined_commit_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("undetermined commit wins over transient shape", func(t *testing.T) {
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return fmt.Errorf("%w after %w", tikverr.ErrResultUndetermined, tikverr.ErrRegionUnavailable)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"undetermined_region_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("undetermined commit wins over caller cancellation", func(t *testing.T) {
+		callerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			cancel()
+			return fmt.Errorf("commit failed: %w", tikverr.ErrResultUndetermined)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(callerCtx, map[string]string{"undetermined_cancel_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("canceled commit aborts and surfaces", func(t *testing.T) {
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return context.Canceled
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"canceled_commit_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("mid commit caller cancel aborts with context error", func(t *testing.T) {
+		callerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			cancel()
+			return tikverr.ErrRegionUnavailable
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(callerCtx, map[string]string{"mid_cancel_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("deadline stops commit retries", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = 200 * time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		deadlineCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tikverr.ErrRegionUnavailable
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(deadlineCtx, map[string]string{"deadline_commit_key": "v"})
+		assert.Error(t, err)
+		assert.Less(t, commits, int(writeTxnRetryAttempts))
+		assert.GreaterOrEqual(t, commits, 1)
 	})
 
 	t.Run("transient build failure recovers", func(t *testing.T) {
