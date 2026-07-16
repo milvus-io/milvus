@@ -751,7 +751,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
 }
 
 TYPED_TEST_P(HybridIndexTestInverted,
-             ScalarIndexLoadingOverheadUsesPoolBoundForMemoryOnly) {
+             ScalarIndexLoadingOverheadUsesPoolAndSingleTaskBounds) {
     auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
@@ -809,6 +809,23 @@ TYPED_TEST_P(HybridIndexTestInverted,
     EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.memory_bytes,
               max_load_tasks * max_task_overhead);
     EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
+
+    budget.SetCapacityBytes(storage::kTailMergeGrace);
+    Config budgeted_config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator
+        budgeted_translator(index_info,
+                            &load_info,
+                            milvus::tracer::TraceContext{},
+                            ctx,
+                            std::move(budgeted_config));
+
+    ASSERT_TRUE(budgeted_translator.meta()->loading_overhead.has_value());
+    EXPECT_EQ(
+        budgeted_translator.meta()->loading_overhead->upper_bound.memory_bytes,
+        max_task_overhead);
+    EXPECT_EQ(
+        budgeted_translator.meta()->loading_overhead->upper_bound.file_bytes,
+        0);
 }
 
 template <typename T>
@@ -1008,7 +1025,7 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
 REGISTER_TYPED_TEST_SUITE_P(
     HybridIndexTestInverted,
     ResourceEstimateUsesInternalInvertedIndexType,
-    ScalarIndexLoadingOverheadUsesPoolBoundForMemoryOnly);
+    ScalarIndexLoadingOverheadUsesPoolAndSingleTaskBounds);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,

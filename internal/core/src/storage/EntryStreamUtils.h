@@ -234,8 +234,11 @@ PlainEntryStreamTaskTransientBytes() {
 inline size_t
 EntryStreamPoolBoundTransientBytes(bool encrypted = false,
                                    size_t live_worker_count = 0) {
-    auto configured_threads = milvus::ComputeThreadPoolMaxThreads(
-        milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+    auto configured_threads =
+        std::max(milvus::ComputeThreadPoolMaxThreads(
+                     milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()),
+                 milvus::ComputeThreadPoolMaxThreads(
+                     milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
     auto max_tasks =
         std::max(static_cast<size_t>(configured_threads), live_worker_count);
     auto task_bound = encrypted ? EncryptedEntryStreamTaskTransientBytes()
@@ -250,10 +253,12 @@ inline size_t
 EntryStreamMaxTransientBytes(bool encrypted = false) {
     auto capacity =
         TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
-    auto& pool =
+    auto& high_pool =
         milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-    auto pool_bound =
-        EntryStreamPoolBoundTransientBytes(encrypted, pool.GetThreadNum());
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto pool_bound = EntryStreamPoolBoundTransientBytes(
+        encrypted, std::max(high_pool.GetThreadNum(), low_pool.GetThreadNum()));
     if (capacity == 0) {
         // The runtime reservation for encrypted streams includes the actual
         // ciphertext length, which has no static upper bound in ICipherPlugin.
