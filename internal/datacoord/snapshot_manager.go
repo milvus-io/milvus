@@ -761,6 +761,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast()
 
 	if _, bcErr := restoreBroadcaster.Broadcast(ctx, msg); bcErr != nil {
