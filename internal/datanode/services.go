@@ -814,22 +814,31 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Index:
-		resp, err := node.queryIndexTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})
-		if err != nil {
-			return nil, err
-		}
+		// State/reason and cost must come from one snapshot cloned under one
+		// lock, so a concurrently completing task can never yield a final cost
+		// paired with an in-progress state (or vice versa).
 		resProperties := taskcommon.NewProperties(nil)
-		results := resp.GetIndexJobResults().GetResults()
-		if len(results) > 0 {
-			resProperties.AppendTaskState(taskcommon.State(results[0].GetState()))
-			resProperties.AppendReason(results[0].GetFailReason())
-		}
-		if taskInfo := node.taskManager.GetIndexTaskInfo(clusterID, taskID); taskInfo != nil {
-			resProperties.AppendCostTime(taskInfo.CostTimeMs)
-			resProperties.AppendCostCPUNum(taskInfo.CostCPUNum)
-		} else {
+		info := node.taskManager.GetIndexTaskInfo(clusterID, taskID)
+		if info == nil {
 			resProperties.AppendCostTime(0)
 			resProperties.AppendCostCPUNum(0)
+			resp := &workerpb.QueryJobsV2Response{
+				Status: merr.Status(merr.WrapErrServiceInternalMsg("tasks '%v' not found", []int64{taskID})),
+			}
+			return wrapQueryTaskResult(resp, resProperties)
+		}
+		resProperties.AppendTaskState(taskcommon.State(info.State))
+		resProperties.AppendReason(info.FailReason)
+		resProperties.AppendCostTime(info.CostTimeMs)
+		resProperties.AppendCostCPUNum(info.CostCPUNum)
+		resp := &workerpb.QueryJobsV2Response{
+			Status:    merr.Success(),
+			ClusterID: clusterID,
+			Result: &workerpb.QueryJobsV2Response_IndexJobResults{
+				IndexJobResults: &workerpb.IndexJobResults{
+					Results: []*workerpb.IndexTaskInfo{info.ToIndexTaskInfo(taskID)},
+				},
+			},
 		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Stats:

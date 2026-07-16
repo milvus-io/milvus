@@ -36,6 +36,11 @@ func CalcCostTimeMs(startMs, endMs int64) int64 {
 // EstimateIndexBuildCPUNum returns the approximate number of CPU threads an
 // index build task consumes during execution.
 //
+// The value is task-level statistics for observability only and is never used
+// for coordinator-side scheduling, so approximation error is acceptable (e.g.
+// standalone sizes the build pool to NumCPU * buildIndexThreadPoolRatio, and
+// concurrent builds share one pool).
+//
 // Vector indexes go through knowhere's build thread pool (sized to NumCPU
 // in cluster mode, see internal/datanode/index/init_segcore.go:74), so they
 // report hardware.GetCPUNum(). All current scalar indexes build
