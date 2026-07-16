@@ -366,6 +366,8 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, Params.UseSSL.GetAsBool(), false)
 
+		assert.False(t, Params.DisableAWSChunkedEncoding.GetAsBool())
+
 		assert.Empty(t, Params.SslCACert.GetValue())
 
 		assert.Equal(t, Params.UseIAM.GetAsBool(), false)
