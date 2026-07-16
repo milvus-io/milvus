@@ -1709,8 +1709,9 @@ class TestCollectionProperties(TestBase):
                     if p["key"] == "max_length":
                         assert p["value"] == "256"
 
-        # alter field properties
-        field_params = {"max_length": "100"}
+        # alter field properties: max_length may grow (256 -> 512) but not shrink,
+        # since existing rows must stay valid under the new bound (schema-evolution gate).
+        field_params = {"max_length": "512"}
         rsp = client.alter_field_properties(name, "book_describe", field_params)
         assert rsp["code"] == 0
 
@@ -1720,7 +1721,7 @@ class TestCollectionProperties(TestBase):
             if field["name"] == "book_describe":
                 for p in field["params"]:
                     if p["key"] == "max_length":
-                        assert p["value"] == "100"
+                        assert p["value"] == "512"
 
 
 @pytest.mark.tags(CaseLabel.L1)
