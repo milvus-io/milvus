@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestValidateMQType(t *testing.T) {
@@ -64,4 +65,19 @@ func TestHealthCheck(t *testing.T) {
 			assert.Equal(t, tc.health, status.Health)
 		})
 	}
+}
+
+func TestHealthCheckResolvesDefaultMQType(t *testing.T) {
+	paramtable.Init()
+
+	status := HealthCheck(mqTypeDefault)
+
+	// "default" is a placeholder, not a real MQ type: it must be resolved to the
+	// actually-enabled MQ before probing, otherwise the status reports an unknown
+	// type with health=false forever (issue #51497).
+	assert.NotEqual(t, mqTypeDefault, status.MqType)
+	params := paramtable.Get()
+	expected := mustSelectMQType(paramtable.GetRole() == typeutil.StandaloneRole, mqTypeDefault,
+		mqEnable{params.RocksmqEnable(), params.PulsarEnable(), params.KafkaEnable(), params.WoodpeckerEnable()})
+	assert.Equal(t, expected, status.MqType)
 }

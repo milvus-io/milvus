@@ -461,3 +461,103 @@ func TestAlterConfigsInEtcd(t *testing.T) {
 		}, time.Second*5, 100*time.Millisecond)
 	})
 }
+
+func TestProcessImmutableConfigsRenderer(t *testing.T) {
+	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
+	cfg.Dir = "/tmp/milvus/test_process_immutable_renderer"
+	e, err := embed.StartEtcd(cfg)
+	assert.NoError(t, err)
+	defer e.Close()
+	defer os.RemoveAll(cfg.Dir)
+
+	mgr, _ := Init(WithEtcdSource(&EtcdInfo{
+		Endpoints:       []string{cfg.AdvertiseClientUrls[0].Host},
+		KeyPrefix:       "test-immutable-renderer",
+		RefreshInterval: 10 * time.Millisecond,
+	}))
+
+	etcdSource, ok := mgr.GetEtcdSource()
+	assert.True(t, ok, "should get etcd source")
+
+	t.Run("renderer converts placeholder value before first persist", func(t *testing.T) {
+		mgr.SetConfig("render.mq.type", "default")
+		mgr.ImmutableUpdate("render.mq.type")
+
+		err := mgr.ProcessImmutableConfigs(map[string]func(string) string{
+			"render.mq.type": func(raw string) string {
+				assert.Equal(t, "default", raw)
+				return "woodpecker"
+			},
+		})
+		assert.NoError(t, err)
+
+		v, err := etcdSource.GetConfigurationByKey(formatKey("render.mq.type"))
+		assert.NoError(t, err)
+		assert.Equal(t, "woodpecker", v)
+	})
+
+	t.Run("existing etcd value is not overwritten and renderer is not applied", func(t *testing.T) {
+		err := mgr.UpdateConfigInEtcd(etcdSource, "render.existing", "pulsar")
+		assert.NoError(t, err)
+
+		mgr.SetConfig("render.existing", "default")
+		mgr.ImmutableUpdate("render.existing")
+
+		err = mgr.ProcessImmutableConfigs(map[string]func(string) string{
+			"render.existing": func(raw string) string {
+				t.Errorf("renderer must not run for a key already persisted in etcd")
+				return "must-not-be-used"
+			},
+		})
+		assert.NoError(t, err)
+
+		v, err := etcdSource.GetConfigurationByKey(formatKey("render.existing"))
+		assert.NoError(t, err)
+		assert.Equal(t, "pulsar", v)
+	})
+
+	t.Run("key without renderer persists raw value unchanged", func(t *testing.T) {
+		mgr.SetConfig("render.plain", "rawvalue")
+		mgr.ImmutableUpdate("render.plain")
+
+		err := mgr.ProcessImmutableConfigs(nil)
+		assert.NoError(t, err)
+
+		v, err := etcdSource.GetConfigurationByKey(formatKey("render.plain"))
+		assert.NoError(t, err)
+		assert.Equal(t, "rawvalue", v)
+	})
+}
+
+func TestProcessImmutableConfigsRendererKeyAbsentFromSources(t *testing.T) {
+	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
+	cfg.Dir = "/tmp/milvus/test_process_immutable_renderer_absent"
+	e, err := embed.StartEtcd(cfg)
+	assert.NoError(t, err)
+	defer e.Close()
+	defer os.RemoveAll(cfg.Dir)
+
+	mgr, _ := Init(WithEtcdSource(&EtcdInfo{
+		Endpoints:       []string{cfg.AdvertiseClientUrls[0].Host},
+		KeyPrefix:       "test-immutable-renderer-absent",
+		RefreshInterval: 10 * time.Millisecond,
+	}))
+
+	etcdSource, ok := mgr.GetEtcdSource()
+	assert.True(t, ok, "should get etcd source")
+
+	// The key exists in no source at all: a registered renderer must still be able
+	// to produce the value to pin into etcd (raw is passed as empty string).
+	mgr.ImmutableUpdate("render.absent")
+	err = mgr.ProcessImmutableConfigs(map[string]func(string) string{
+		"render.absent": func(raw string) string {
+			assert.Equal(t, "", raw)
+			return "woodpecker"
+		},
+	})
+	assert.NoError(t, err)
+
+	v, err := etcdSource.GetConfigurationByKey(formatKey("render.absent"))
+	assert.NoError(t, err)
+	assert.Equal(t, "woodpecker", v)
+}
