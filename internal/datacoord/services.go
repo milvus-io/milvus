@@ -2954,23 +2954,38 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 	)
 }
 
-// AbortImport aborts a 2PC import job that has not yet been committed.
-// It broadcasts a RollbackImport WAL message to cancel the job.
-// Returns an error if the job is already committed or committing.
+// AbortImport rolls back a 2PC import job that has not been committed by
+// broadcasting a RollbackImport WAL message. A job that has already Failed (for
+// example because its own import failed) is still abortable, so the control plane
+// can proactively release the peer cluster's replicated Uncommitted job instead of
+// waiting for the failed source's GC self-heal (see importChecker.checkGC).
+// Committing/Completed jobs are terminal and rejected.
+//
+// Behavior change for non-CDC clusters: aborting an already-Failed 2PC job used to
+// return an error; it now succeeds and (re)broadcasts a RollbackImport, which the
+// flusher no-ops. Repeated aborts on a real-failure source therefore re-broadcast
+// each time — harmless, but not deduplicated (there is no persisted "rolled back"
+// flag in this change; that idempotency is a follow-up).
 func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
 		func(job ImportJob) *commonpb.Status {
 			state := job.GetState()
+			// Idempotent only for a job that was previously Uncommitted and then
+			// user-aborted (its reason is rewritten to importJobReasonAbortedByUser). A
+			// source that failed on its own keeps its real failure reason, so this does
+			// NOT fire for it and each abort re-broadcasts (see the note above).
 			if state == internalpb.ImportJobState_Failed && job.GetReason() == importJobReasonAbortedByUser {
 				return merr.Success()
 			}
-			if state == internalpb.ImportJobState_Failed ||
-				state == internalpb.ImportJobState_Committing ||
+			// Committed states are truly terminal and cannot be rolled back.
+			if state == internalpb.ImportJobState_Committing ||
 				state == internalpb.ImportJobState_Completed {
 				return merr.Status(merr.WrapErrImportFailed(
 					fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", req.GetJobId(), state)))
 			}
-			return nil // proceed
+			// Uncommitted, or a Failed source (its own import failed) → broadcast the
+			// rollback so the peer cluster's replicated Uncommitted job is released.
+			return nil
 		},
 		func(ctx context.Context, job ImportJob) error {
 			mlog.Info(context.TODO(), "aborting import job via WAL broadcast")
