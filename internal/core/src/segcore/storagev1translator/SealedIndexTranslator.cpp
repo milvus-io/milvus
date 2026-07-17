@@ -81,6 +81,9 @@ SealedIndexTranslator::SealedIndexTranslator(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
+    // TODO: Recompute scalar V3 stream estimates and the registered loading
+    // overhead upper bound when refreshable load-pool sizes grow. CacheSlot
+    // snapshots both at translator construction and reuses them on reload.
     load_resource_request_ = EstimateLoadResource();
 
     auto scalar_version =
@@ -110,10 +113,10 @@ SealedIndexTranslator::SealedIndexTranslator(
         auto memory_upper_bound =
             budget_capacity != 0
                 ? std::max<int64_t>(budget_capacity, max_task_overhead)
-            : encrypted_stream
-                ? static_cast<int64_t>(encrypted_stream_upper_bound())
-                : milvus::segcore::LoadTransientPoolUpperBound(
-                      max_task_overhead);
+            : encrypted_stream ? milvus::segcore::LoadTransientPoolUpperBound(
+                                     encrypted_stream_upper_bound())
+                               : milvus::segcore::LoadTransientPoolUpperBound(
+                                     max_task_overhead);
         auto upper_bound =
             milvus::cachinglayer::ResourceUsage{memory_upper_bound, int64_t{0}};
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
