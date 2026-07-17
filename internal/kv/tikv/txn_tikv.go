@@ -227,6 +227,12 @@ func (kv *txnTiKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV HasPrefix() error", mlog.String("prefix", prefix))
 
+	// The snapshot iterator below does not accept a context, so honor
+	// caller cancellation explicitly before starting the scan.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+
 	ss := getSnapshot(kv.txn, SnapshotScanSize)
 
 	// Retrieve bounding keys for prefix
@@ -273,8 +279,9 @@ func (kv *txnTiKV) Load(ctx context.Context, key string) (string, error) {
 func batchConvertFromString(prefix string, keys []string) [][]byte {
 	output := make([][]byte, len(keys))
 	for i := 0; i < len(keys); i++ {
-		keys[i] = util.GetPath(prefix, keys[i])
-		output[i] = []byte(keys[i])
+		// Never write the prefixed path back into the caller's slice:
+		// callers may legally reuse it across calls (e.g. on retry).
+		output[i] = []byte(util.GetPath(prefix, keys[i]))
 	}
 	return output
 }
@@ -303,9 +310,10 @@ func (kv *txnTiKV) MultiLoad(ctx context.Context, keys []string) ([]string, erro
 	missingValues := []string{}
 	validValues := []string{}
 
-	// Loop through keys and build valid/invalid slices
-	for _, k := range keys {
-		v, ok := keyMap[k]
+	// Loop through keys and build valid/invalid slices, looking up by the
+	// prefixed path while reporting the caller's original key.
+	for i, k := range keys {
+		v, ok := keyMap[string(byteKeys[i])]
 		if !ok {
 			missingValues = append(missingValues, k)
 		}
@@ -329,6 +337,12 @@ func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string,
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV LoadWithPrefix() error", mlog.String("prefix", prefix))
 
+	// The snapshot iterator below does not accept a context, so honor
+	// caller cancellation explicitly before starting the scan.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, nil, ctxErr
+	}
+
 	ss := getSnapshot(kv.txn, SnapshotScanSize)
 
 	// Retrieve key-value pairs with the specified prefix
@@ -344,8 +358,13 @@ func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string,
 	var keys []string
 	var values []string
 
-	// Iterate over the key-value pairs
+	// Iterate over the key-value pairs. The iterator does not accept a
+	// context, so poll caller cancellation each step: a caller that has
+	// given up must not leave an unkillable scan running.
 	for iter.Valid() {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		val := iter.Value()
 		// Check if empty value placeholder
 		strVal := convertEmptyByteToString(val)
@@ -559,8 +578,14 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 				}
 				defer iter.Close()
 
-				// Iterate over keys and delete them
+				// Iterate over keys and delete them. The transaction
+				// iterator does not accept a context either, so poll
+				// caller cancellation each step; the bare context error
+				// surfaces to the caller through the build-error path.
 				for iter.Valid() {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						return ctxErr
+					}
 					key := iter.Key()
 					if err = txn.Delete(key); err != nil {
 						return wrapWriteBuildErr(fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveWithPrefix", string(key)), err)
@@ -606,6 +631,12 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV WalkWithPagination error", mlog.String("prefix", prefix))
 
+	// The snapshot iterator below does not accept a context, so honor
+	// caller cancellation explicitly before starting the scan.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+
 	// Since only reading, use Snapshot for less overhead
 	ss := getSnapshot(kv.txn, paginationSize)
 
@@ -619,8 +650,13 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 	}
 	defer iter.Close()
 
-	// Iterate over the key-value pairs
+	// Iterate over the key-value pairs. The iterator does not accept a
+	// context, so poll caller cancellation each step: a caller that has
+	// given up must not leave an unkillable scan running.
 	for iter.Valid() {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		// Grab value for empty check
 		byteVal := iter.Value()
 		// Check if empty val and replace with placeholder
@@ -707,9 +743,9 @@ func (kv *txnTiKV) runWriteTxnWithRetry(ctx context.Context, op string, build fu
 func (kv *txnTiKV) executeTxn(ctx context.Context, txn *transaction.KVTxn) error {
 	start := timerecord.NewTimeRecorder("executeTxn")
 
-	elapsed := start.ElapseSpan()
 	metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.TotalLabel).Inc()
 	err := commitTxn(ctx, txn)
+	elapsed := start.ElapseSpan()
 	if err == nil {
 		metrics.MetaRequestLatency.WithLabelValues(metrics.MetaTxnLabel).Observe(float64(elapsed.Milliseconds()))
 		metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.SuccessLabel).Inc()
