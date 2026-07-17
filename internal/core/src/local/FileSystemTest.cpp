@@ -198,6 +198,23 @@ TEST_F(LocalFileSystemTest, FileHandleOwnsAndTransfersTheDescriptor) {
     EXPECT_EQ(close(released_fd), 0);
 }
 
+TEST_F(LocalFileSystemTest, AdoptsAnExistingDescriptor) {
+    auto path = root_ / "adopt";
+    auto fd = open(path.c_str(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    ASSERT_NE(fd, -1);
+
+    {
+        auto handle = FileHandle::Adopt(fd, path, false);
+        EXPECT_EQ(handle.Get(), fd);
+        EXPECT_EQ(handle.DebugPath(), path);
+        EXPECT_FALSE(handle.DirectIOEnabled());
+    }
+
+    errno = 0;
+    EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+}
+
 TEST_F(LocalFileSystemTest, RejectsWriteSideEffectsForReadOnlyHandle) {
     try {
         static_cast<void>(files_->Open(

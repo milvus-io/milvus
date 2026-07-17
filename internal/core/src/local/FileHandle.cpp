@@ -22,6 +22,13 @@
 
 namespace milvus::local {
 
+FileHandle
+FileHandle::Adopt(int fd,
+                  std::filesystem::path debug_path,
+                  bool direct_io) noexcept {
+    return FileHandle(fd, std::move(debug_path), direct_io);
+}
+
 FileHandle::FileHandle(int fd,
                        std::filesystem::path debug_path,
                        bool direct_io) noexcept

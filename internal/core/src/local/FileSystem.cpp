@@ -466,7 +466,8 @@ FileSystem::Open(const Path& path, const OpenOptions& options) const {
                   strerror(direct_io_error));
     }
 #endif
-    return FileHandle(fd.Release(), std::move(native_path), options.direct_io);
+    return FileHandle::Adopt(
+        fd.Release(), std::move(native_path), options.direct_io);
 }
 
 io::MappedRegion
