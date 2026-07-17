@@ -215,8 +215,17 @@ ResolveHybridInternalIndexType(
 bool
 IndexFactory::CanUseIndexRawDataForField(DataType field_type,
                                          bool has_raw_data) {
+    // ARRAY and JSON indexes only index a projection of the value (array
+    // elements / a JSON path) and cannot reconstruct the whole raw value, so
+    // their index is never a stand-in for the raw column. This mirrors the
+    // segment runtime contract (HasRawDataFromState returns column-based
+    // field_data_ready for JSON), so no loader path treats a JSON index as
+    // raw-serving and skips its raw column. VECTOR_ARRAY indexes may carry raw
+    // vector payloads, but the field column is still needed for struct offsets
+    // and parent-row validity.
     return has_raw_data && field_type != DataType::ARRAY &&
-           field_type != DataType::VECTOR_ARRAY;
+           field_type != DataType::VECTOR_ARRAY &&
+           field_type != DataType::JSON;
 }
 
 template <typename T>
