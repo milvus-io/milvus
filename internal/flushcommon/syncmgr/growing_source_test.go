@@ -49,11 +49,28 @@ func (a *fakeAllocator) AllocOne() (allocator.UniqueID, error) {
 }
 
 type fakeCommitGrowingFlushSource struct {
-	commits []int64
+	commits     []int64
+	primaryKeys []storage.PrimaryKey
+	primaryErr  error
+	checkConfig func(*GrowingFlushConfig)
 }
 
 func (s *fakeCommitGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
 	return []int64{0, 1, 100, 101, 102}, nil
+}
+
+func (s *fakeCommitGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+	if s.primaryErr != nil {
+		return nil, s.primaryErr
+	}
+	if s.primaryKeys != nil {
+		return s.primaryKeys, nil
+	}
+	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
+	for i := startOffset; i < endOffset; i++ {
+		pks = append(pks, storage.NewInt64PrimaryKey(i))
+	}
+	return pks, nil
 }
 
 func (s *fakeCommitGrowingFlushSource) CurrentOffset() int64 {
@@ -61,6 +78,9 @@ func (s *fakeCommitGrowingFlushSource) CurrentOffset() int64 {
 }
 
 func (s *fakeCommitGrowingFlushSource) FlushGrowingData(_ context.Context, _, _ int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
+	if s.checkConfig != nil {
+		s.checkConfig(config)
+	}
 	return &GrowingFlushResult{
 		ManifestPath:  "manifest",
 		NumRows:       10,
@@ -122,6 +142,31 @@ func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(
 				task.level.String(),
 			)))
 		})
+	}
+}
+
+func pkStatsAsOracle(stats *storage.PrimaryKeyStats) *storage.PkStatistics {
+	return &storage.PkStatistics{
+		PkFilter: stats.BF,
+		MaxPK:    stats.MaxPk,
+		MinPK:    stats.MinPk,
+	}
+}
+
+func requirePKStatsHit(t *testing.T, stats []*storage.PrimaryKeyStats, pk storage.PrimaryKey) {
+	t.Helper()
+	for _, stat := range stats {
+		if pkStatsAsOracle(stat).PkExist(pk) {
+			return
+		}
+	}
+	require.Failf(t, "primary key missing from stats", "pk=%v", pk)
+}
+
+func requirePKStatsMiss(t *testing.T, stats []*storage.PrimaryKeyStats, pk storage.PrimaryKey) {
+	t.Helper()
+	for _, stat := range stats {
+		require.False(t, pkStatsAsOracle(stat).PkExist(pk), "pk=%v", pk)
 	}
 }
 
@@ -445,6 +490,13 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 
 	cm := mock_storage.NewMockChunkManager(t)
 	cm.EXPECT().RootPath().Return("/root").Maybe()
+	source := &fakeCommitGrowingFlushSource{
+		checkConfig: func(config *GrowingFlushConfig) {
+			require.EqualValues(t, 100, config.PKStatsFieldID)
+			require.EqualValues(t, 503, config.PKStatsLogID)
+			require.NotEmpty(t, config.PKStatsBlob)
+		},
+	}
 	metaWriter := NewMockMetaWriter(t)
 	metaWriter.EXPECT().UpdateGrowingSourceSync(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, task *GrowingSourceSyncTask) error {
@@ -474,11 +526,178 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 		WithSchema(schema).
 		WithChunkManager(cm).
 		WithAllocator(&fakeAllocator{next: 500}).
-		WithSource(&fakeCommitGrowingFlushSource{})
+		WithSource(source)
 
 	require.NoError(t, task.Run(context.Background()))
 	require.Len(t, segment.GetCurrentSplit(), 3)
 	require.Equal(t, []int64{100}, segment.GetCurrentSplit()[0].Fields)
+	require.Len(t, segment.GetHistory(), 1)
+	require.EqualValues(t, 360, task.flushedSize)
+}
+
+func TestGrowingSourceSyncTaskBuildsMergedPKStatsForFlush(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "pk",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		},
+	}
+	oldStats, err := storage.NewPrimaryKeyStats(100, int64(schemapb.DataType_Int64), 2)
+	require.NoError(t, err)
+	oldStats.Update(storage.NewInt64PrimaryKey(1))
+	oldStats.Update(storage.NewInt64PrimaryKey(2))
+
+	bfs := pkoracle.NewBloomFilterSet()
+	bfs.Roll(oldStats)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		State:          commonpb.SegmentState_Flushing,
+		StorageVersion: storage.StorageV3,
+		NumOfRows:      10,
+	}, bfs, nil)
+	mc := metacache.NewMockMetaCache(t)
+	mc.EXPECT().Collection().Return(int64(3)).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+
+	config := &GrowingFlushConfig{}
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithSegmentID(segmentID).
+		WithTargetOffset(10).
+		WithLevel(datapb.SegmentLevel_L1).
+		WithFlush().
+		WithMetaCache(mc).
+		WithSchema(schema).
+		WithAllocator(&fakeAllocator{next: 500}).
+		WithSource(&fakeCommitGrowingFlushSource{
+			primaryKeys: []storage.PrimaryKey{
+				storage.NewInt64PrimaryKey(10),
+				storage.NewInt64PrimaryKey(11),
+				storage.NewInt64PrimaryKey(12),
+				storage.NewInt64PrimaryKey(13),
+				storage.NewInt64PrimaryKey(14),
+				storage.NewInt64PrimaryKey(15),
+				storage.NewInt64PrimaryKey(16),
+				storage.NewInt64PrimaryKey(17),
+				storage.NewInt64PrimaryKey(18),
+				storage.NewInt64PrimaryKey(19),
+			},
+		})
+
+	require.NoError(t, task.fillPrimaryKeyStatsConfig(context.Background(), 0, 10, config))
+	require.EqualValues(t, 100, config.PKStatsFieldID)
+	require.EqualValues(t, 500, config.PKStatsLogID)
+	require.NotEmpty(t, config.PKStatsBlob)
+	require.NotEmpty(t, config.MergedPKStatsBlob)
+	require.NotNil(t, task.singlePKStats)
+
+	singleStats, err := storage.DeserializeStats([]*storage.Blob{{Value: config.PKStatsBlob}})
+	require.NoError(t, err)
+	require.Len(t, singleStats, 1)
+	require.EqualValues(t, schemapb.DataType_Int64, singleStats[0].PkType)
+	requirePKStatsHit(t, singleStats, storage.NewInt64PrimaryKey(10))
+	requirePKStatsHit(t, singleStats, storage.NewInt64PrimaryKey(19))
+	requirePKStatsMiss(t, singleStats, storage.NewInt64PrimaryKey(9))
+	requirePKStatsMiss(t, singleStats, storage.NewInt64PrimaryKey(20))
+
+	mergedStats, err := storage.DeserializeStatsList(&storage.Blob{Value: config.MergedPKStatsBlob})
+	require.NoError(t, err)
+	require.Len(t, mergedStats, 2)
+	requirePKStatsHit(t, mergedStats, storage.NewInt64PrimaryKey(1))
+	requirePKStatsHit(t, mergedStats, storage.NewInt64PrimaryKey(2))
+	requirePKStatsHit(t, mergedStats, storage.NewInt64PrimaryKey(10))
+	requirePKStatsHit(t, mergedStats, storage.NewInt64PrimaryKey(19))
+	requirePKStatsMiss(t, mergedStats, storage.NewInt64PrimaryKey(0))
+	requirePKStatsMiss(t, mergedStats, storage.NewInt64PrimaryKey(20))
+}
+
+func TestGrowingSourceSyncTaskBuildsVarCharPKStatsContent(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "varchar_pk",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		},
+	}
+	config := &GrowingFlushConfig{}
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithSegmentID(segmentID).
+		WithTargetOffset(3).
+		WithSchema(schema).
+		WithAllocator(&fakeAllocator{next: 500}).
+		WithSource(&fakeCommitGrowingFlushSource{
+			primaryKeys: []storage.PrimaryKey{
+				storage.NewVarCharPrimaryKey("alice"),
+				storage.NewVarCharPrimaryKey("bob"),
+				storage.NewVarCharPrimaryKey("carol"),
+			},
+		})
+
+	require.NoError(t, task.fillPrimaryKeyStatsConfig(context.Background(), 0, 3, config))
+	require.EqualValues(t, 100, config.PKStatsFieldID)
+	require.EqualValues(t, 500, config.PKStatsLogID)
+	require.NotEmpty(t, config.PKStatsBlob)
+	require.Empty(t, config.MergedPKStatsBlob)
+
+	stats, err := storage.DeserializeStats([]*storage.Blob{{Value: config.PKStatsBlob}})
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	require.EqualValues(t, schemapb.DataType_VarChar, stats[0].PkType)
+	requirePKStatsHit(t, stats, storage.NewVarCharPrimaryKey("alice"))
+	requirePKStatsHit(t, stats, storage.NewVarCharPrimaryKey("bob"))
+	requirePKStatsHit(t, stats, storage.NewVarCharPrimaryKey("carol"))
+	requirePKStatsMiss(t, stats, storage.NewVarCharPrimaryKey("aaron"))
+	requirePKStatsMiss(t, stats, storage.NewVarCharPrimaryKey("dave"))
+}
+
+func TestGrowingSourceSyncTaskRequiresPrimaryKeysForGrowingFlush(t *testing.T) {
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "pk",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		},
+	}
+	mc := metacache.NewMockMetaCache(t)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    2,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV3,
+	}, pkoracle.NewBloomFilterSet(), nil)
+	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
+
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().RootPath().Return("/root").Maybe()
+	source := &fakeCommitGrowingFlushSource{
+		primaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(1)},
+	}
+
+	task := NewGrowingSourceSyncTask().
+		WithCollectionID(3).
+		WithPartitionID(2).
+		WithSegmentID(segmentID).
+		WithChannelName("ch").
+		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
+		WithBatchRows(10).
+		WithTargetOffset(10).
+		WithMetaCache(mc).
+		WithSchema(schema).
+		WithChunkManager(cm).
+		WithAllocator(&fakeAllocator{next: 500}).
+		WithSource(source)
+
+	err := task.Run(context.Background())
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
+	require.ErrorContains(t, err, "primary key count mismatch")
 }
 
 func TestBuildGrowingSourceInsertBinlogsRequiresColumnGroupMemorySize(t *testing.T) {
@@ -562,6 +781,14 @@ func (s *fakeBM25GrowingFlushSource) MaterializedFieldIDs(ctx context.Context) (
 	return []int64{0, 1, 100, 101, 102}, nil
 }
 
+func (s *fakeBM25GrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
+	for i := startOffset; i < endOffset; i++ {
+		pks = append(pks, storage.NewInt64PrimaryKey(i))
+	}
+	return pks, nil
+}
+
 func (s *fakeBM25GrowingFlushSource) CurrentOffset() int64 {
 	return 10
 }
@@ -597,6 +824,14 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 	segmentID := int64(1)
 	stats := storage.NewBM25Stats()
 	stats.Append(map[uint32]float32{10: 2})
+	schema := &schemapb.CollectionSchema{
+		Name: "bm25",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+	}
 
 	mc := metacache.NewMockMetaCache(t)
 	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -624,7 +859,9 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 		WithBatchRows(10).
 		WithTargetOffset(10).
 		WithMetaCache(mc).
+		WithSchema(schema).
 		WithChunkManager(cm).
+		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(&fakeBM25GrowingFlushSource{stats: map[int64]*storage.BM25Stats{102: stats}})
 
 	require.NoError(t, task.Run(context.Background()))
@@ -642,6 +879,10 @@ type fakeMaterializedGrowingFlushSource struct {
 }
 
 func (s *fakeMaterializedGrowingFlushSource) CurrentOffset() int64 { return 0 }
+
+func (s *fakeMaterializedGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+	return nil, nil
+}
 
 func (s *fakeMaterializedGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
 	return s.materialized, nil
@@ -730,4 +971,24 @@ func TestBuildGrowingSourceInsertBinlogsTrimsToFlushedFields(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, binlogs, 1)
 	require.Equal(t, []int64{0, 1, 100}, binlogs[0].GetChildFields())
+}
+
+func TestGrowingSourceFlushedSize(t *testing.T) {
+	result := &GrowingFlushResult{
+		ColumnGroupMemorySizes: map[int64]int64{
+			10: 100,
+			20: 30,
+		},
+	}
+	require.EqualValues(t, 130, growingSourceFlushedSizeFromResult(result))
+
+	binlogs := map[int64]*datapb.FieldBinlog{
+		10: {
+			Binlogs: []*datapb.Binlog{
+				{LogSize: 7, MemorySize: 100},
+				{MemorySize: 30},
+			},
+		},
+	}
+	require.EqualValues(t, 37, growingSourceFlushedSizeFromBinlogs(binlogs))
 }

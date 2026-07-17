@@ -510,6 +510,12 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 			if err != nil {
 				return err, err
 			}
+			if segment.GetManifest() != "" && len(paths) == 0 {
+				err := merr.WrapErrDataIntegrityMsg(
+					"L0 compaction target segment %d manifest %s missing bloom filter stats for primary field %d",
+					segment.GetSegmentID(), segment.GetManifest(), pkField.GetFieldID())
+				return err, err
+			}
 
 			pks, err := compaction.LoadStatsFromPaths(innerCtx, t.cm, segment.GetSegmentID(), paths)
 			if err != nil {
