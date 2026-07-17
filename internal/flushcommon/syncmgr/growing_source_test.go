@@ -87,37 +87,42 @@ func (s *fakeCommitGrowingFlushSource) CommitGrowingFlush(targetOffset int64) {
 func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 
-	metrics.DataNodeFlushBufferCount.Reset()
-	callbackCalled := false
-	task := NewGrowingSourceSyncTask().
-		WithFailureCallback(func(error) {
-			callbackCalled = true
-			panic("failure callback should not be called")
+	testCases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "channel_not_found",
+			err:  merr.WrapErrChannelNotFound("ch"),
+		},
+		{
+			name: "segment_not_found",
+			err:  merr.WrapErrSegmentNotFound(1),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics.DataNodeFlushBufferCount.Reset()
+			callbackCalled := false
+			task := NewGrowingSourceSyncTask().
+				WithFailureCallback(func(error) {
+					callbackCalled = true
+					panic("failure callback should not be called")
+				})
+
+			require.NotPanics(t, func() {
+				task.HandleError(tc.err)
+				task.HandleError(tc.err)
+			})
+			require.False(t, callbackCalled)
+			require.Zero(t, testutil.ToFloat64(metrics.DataNodeFlushBufferCount.WithLabelValues(
+				paramtable.GetStringNodeID(),
+				metrics.FailLabel,
+				task.level.String(),
+			)))
 		})
-
-	require.NotPanics(t, func() {
-		task.HandleError(merr.WrapErrChannelNotFound("ch"))
-		task.HandleError(merr.WrapErrChannelNotFound("ch"))
-	})
-	require.False(t, callbackCalled)
-	require.Zero(t, testutil.ToFloat64(metrics.DataNodeFlushBufferCount.WithLabelValues(
-		paramtable.GetStringNodeID(),
-		metrics.FailLabel,
-		task.level.String(),
-	)))
-}
-
-func TestGrowingSourceSyncTaskHandleErrorPropagatesSegmentNotFound(t *testing.T) {
-	paramtable.Get().Init(paramtable.NewBaseTable())
-
-	callbackCalled := false
-	task := NewGrowingSourceSyncTask().
-		WithFailureCallback(func(error) {
-			callbackCalled = true
-		})
-
-	task.HandleError(merr.WrapErrSegmentNotFound(1))
-	require.True(t, callbackCalled)
+	}
 }
 
 func TestGrowingSourceSyncTaskBuildFlushConfigBM25(t *testing.T) {
