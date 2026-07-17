@@ -215,8 +215,11 @@ ResolveHybridInternalIndexType(
 bool
 IndexFactory::CanUseIndexRawDataForField(DataType field_type,
                                          bool has_raw_data) {
+    // A JSON path index only retains values extracted from one path. It
+    // cannot reconstruct the complete JSON field for output or raw-data
+    // fallback on another path.
     return has_raw_data && field_type != DataType::ARRAY &&
-           field_type != DataType::VECTOR_ARRAY;
+           field_type != DataType::VECTOR_ARRAY && field_type != DataType::JSON;
 }
 
 template <typename T>
