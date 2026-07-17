@@ -1325,53 +1325,17 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	return act.result, nil
 }
 
+// AddCollectionFunction is the deprecated legacy attach RPC. A function is coupled
+// to its output field: BM25/MinHash add a brand-new output field via
+// add_function_field, and TextEmbedding is defined at collection creation (runtime
+// add awaits embedding backfill). This RPC only allowed the unsafe attach-over-
+// existing-field path, so it is rejected.
 func (node *Proxy) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionFunction")
-	defer sp.End()
-	method := "AddCollectionFunction"
-	tr := timerecord.NewTimeRecorder(method)
-	task := &addCollectionFunctionTask{
-		ctx:                          ctx,
-		Condition:                    NewTaskCondition(ctx),
-		AddCollectionFunctionRequest: request,
-		mixCoord:                     node.mixCoord,
-	}
-	mlog.Info(ctx, rpcReceived(method))
-
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToEnqueue(method),
-			mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	mlog.Debug(ctx,
-		rpcEnqueued(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()),
-		mlog.Uint64("timestamp", request.Base.Timestamp))
-
-	if err := task.WaitToFinish(); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
-			mlog.Uint64("BeginTs", task.BeginTs()),
-			mlog.Uint64("EndTs", task.EndTs()))
-
-		return merr.Status(err), nil
-	}
-
-	mlog.Info(ctx,
-		rpcDone(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()))
-
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"AddCollectionFunction RPC is no longer supported; add BM25/MinHash via add_function_field, and define a TextEmbedding function at collection creation")), nil
 }
 
 func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
@@ -1423,53 +1387,16 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	return task.result, nil
 }
 
+// DropCollectionFunction is the deprecated legacy detach RPC. pymilvus
+// drop_collection_function routes through AlterCollectionSchema (drop_function_field
+// / detach) instead, so this RPC is unused; reject to avoid a second, divergent DDL
+// path.
 func (node *Proxy) DropCollectionFunction(ctx context.Context, request *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropCollectionFunction")
-	defer sp.End()
-	method := "DropCollectionFunction"
-	tr := timerecord.NewTimeRecorder(method)
-	task := &dropCollectionFunctionTask{
-		ctx:                           ctx,
-		Condition:                     NewTaskCondition(ctx),
-		DropCollectionFunctionRequest: request,
-		mixCoord:                      node.mixCoord,
-	}
-	mlog.Info(ctx, rpcReceived(method))
-
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToEnqueue(method),
-			mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	mlog.Debug(ctx,
-		rpcEnqueued(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()),
-		mlog.Uint64("timestamp", request.Base.Timestamp))
-
-	if err := task.WaitToFinish(); err != nil {
-		mlog.Warn(ctx,
-			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
-			mlog.Uint64("BeginTs", task.BeginTs()),
-			mlog.Uint64("EndTs", task.EndTs()))
-
-		return merr.Status(err), nil
-	}
-
-	mlog.Info(ctx,
-		rpcDone(method),
-		mlog.Uint64("BeginTs", task.BeginTs()),
-		mlog.Uint64("EndTs", task.EndTs()))
-
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return merr.Status(merr.WrapErrParameterInvalidMsg(
+		"DropCollectionFunction RPC is no longer supported; drop a function via drop_function_field")), nil
 }
 
 func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {

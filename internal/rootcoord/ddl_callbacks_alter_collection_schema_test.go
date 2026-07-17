@@ -346,7 +346,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
-	require.Contains(t, resp.GetAlterStatus().GetReason(), "output field missing_minhash_output")
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "adding a function over existing fields is not supported")
 
 	// case 4.3: BM25 function with multiple output fields is rejected.
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -608,9 +608,9 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	}))
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
-	require.Contains(t, resp.GetAlterStatus().GetReason(), "output field missing_minhash_output_late")
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "adding a function over existing fields is not supported")
 
-	// Function-only add cannot relabel an existing field as a function output.
+	// function-only add (marking an existing field as output) is no longer supported.
 	functionOnlyReq := buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
 		Name:             "minhash_existing_fn",
 		Type:             schemapb.FunctionType_MinHash,
@@ -624,36 +624,9 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	resp, err = core.AlterCollectionSchema(ctx, functionOnlyReq)
-	alterErr = merr.CheckRPCCall(resp.GetAlterStatus(), err)
-	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, alterErr, "cannot repurpose existing field")
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 6)
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
-	require.NoError(t, err)
-	require.Len(t, coll.Functions, 1)
-	existingOutputFound := false
-	for _, field := range coll.Fields {
-		if field.Name == "existing_minhash_output" {
-			existingOutputFound = true
-			require.False(t, field.IsFunctionOutput)
-		}
-	}
-	require.True(t, existingOutputFound)
-
-	// function-only rejects output fields already owned by another function.
-	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
-		Name:             "minhash_existing_fn2",
-		Type:             schemapb.FunctionType_MinHash,
-		InputFieldNames:  []string{"text_input"},
-		OutputFieldNames: []string{"existing_minhash_output"},
-		Params: []*commonpb.KeyValuePair{
-			{Key: "num_hashes", Value: "128"},
-			{Key: "shingle_size", Value: "3"},
-			{Key: "hash_function", Value: "xxhash64"},
-			{Key: "seed", Value: "42"},
-		},
-	}))
-	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	functionOnlyErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, functionOnlyErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, functionOnlyErr, "adding a function over existing fields is not supported")
 
 	// happy path: add sparse vector output field + BM25 function.
 	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn")
@@ -797,7 +770,7 @@ func TestDDLCallbacksAlterCollectionSchemaAnalyzerFileResourceRefs(t *testing.T)
 	assertFieldNotExists(t, ctx, core, dbName, collectionName, fieldName)
 }
 
-func TestDDLCallbacksAlterCollectionSchemaRejectsFunctionOnlyMaterializedOutput(t *testing.T) {
+func TestDDLCallbacksAlterCollectionSchemaRejectsFunctionOnlyAdd(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -853,7 +826,7 @@ func TestDDLCallbacksAlterCollectionSchemaRejectsFunctionOnlyMaterializedOutput(
 	}))
 	alterErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
 	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, alterErr, "cannot repurpose existing field")
+	require.ErrorContains(t, alterErr, "adding a function over existing fields is not supported")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 }
 
@@ -1084,83 +1057,6 @@ func mustParseInt64(s string) int64 {
 	return v
 }
 
-func TestBuildSchemaForDetachFunction(t *testing.T) {
-	t.Run("function not found", func(t *testing.T) {
-		coll := &model.Collection{
-			Functions: []*model.Function{
-				{Name: "func1", OutputFieldIDs: []int64{103}},
-			},
-		}
-		_, _, _, err := buildSchemaForDetachFunction(coll, "nonexistent")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "function not found")
-	})
-
-	t.Run("detach function keeps output fields", func(t *testing.T) {
-		coll := &model.Collection{
-			Name: "test_coll",
-			Fields: []*model.Field{
-				{FieldID: 100, Name: "pk"},
-				{FieldID: 101, Name: "text"},
-				{FieldID: 102, Name: "minhash_vec", IsFunctionOutput: true},
-				{FieldID: 103, Name: "dense_vec"},
-			},
-			Functions: []*model.Function{
-				{
-					Name:             "minhash_func",
-					Type:             schemapb.FunctionType_MinHash,
-					InputFieldIDs:    []int64{101},
-					InputFieldNames:  []string{"text"},
-					OutputFieldIDs:   []int64{102},
-					OutputFieldNames: []string{"minhash_vec"},
-				},
-				{
-					Name:             "embed_func",
-					Type:             schemapb.FunctionType_TextEmbedding,
-					InputFieldIDs:    []int64{101},
-					InputFieldNames:  []string{"text"},
-					OutputFieldIDs:   []int64{103},
-					OutputFieldNames: []string{"dense_vec"},
-				},
-			},
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.MaxFieldIDKey, Value: "103"},
-			},
-			SchemaVersion: 3,
-		}
-
-		schema, properties, droppedFieldIDs, err := buildSchemaForDetachFunction(coll, "minhash_func")
-		require.NoError(t, err)
-		require.Empty(t, droppedFieldIDs)
-		require.Equal(t, coll.Properties, properties)
-		require.Equal(t, int32(4), schema.Version)
-
-		require.Len(t, schema.Fields, 4)
-		var minhashField *schemapb.FieldSchema
-		for _, field := range schema.Fields {
-			if field.GetName() == "minhash_vec" {
-				minhashField = field
-				break
-			}
-		}
-		require.NotNil(t, minhashField)
-		require.False(t, minhashField.GetIsFunctionOutput())
-		require.Len(t, schema.Functions, 1)
-		require.Equal(t, "embed_func", schema.Functions[0].GetName())
-	})
-
-	t.Run("detach bm25 function fails", func(t *testing.T) {
-		coll := &model.Collection{
-			Functions: []*model.Function{
-				{Name: "bm25_func", Type: schemapb.FunctionType_BM25, OutputFieldIDs: []int64{102}},
-			},
-		}
-		_, _, _, err := buildSchemaForDetachFunction(coll, "bm25_func")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
-	})
-}
-
 func TestBuildSchemaForDropFunctionField(t *testing.T) {
 	t.Run("function not found", func(t *testing.T) {
 		coll := &model.Collection{
@@ -1173,15 +1069,43 @@ func TestBuildSchemaForDropFunctionField(t *testing.T) {
 		require.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("unsupported function type", func(t *testing.T) {
+	t.Run("dropping the last vector field rejected", func(t *testing.T) {
 		coll := &model.Collection{
-			Functions: []*model.Function{
-				{Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding, OutputFieldIDs: []int64{103}},
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "only_vec", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
 			},
+			Functions: []*model.Function{
+				{Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding, InputFieldIDs: []int64{101}, OutputFieldIDs: []int64{102}, OutputFieldNames: []string{"only_vec"}},
+			},
+			SchemaVersion: 1,
 		}
 		_, _, _, err := buildSchemaForDropFunctionField(coll, "embed_func")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "only BM25 and MinHash functions support dropping output fields")
+		require.ErrorContains(t, err, "leave no vector field")
+	})
+
+	t.Run("text embedding function can be dropped", func(t *testing.T) {
+		coll := &model.Collection{
+			Name: "test_coll",
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk"},
+				{FieldID: 101, Name: "text"},
+				{FieldID: 102, Name: "keep_vec"},
+				{FieldID: 103, Name: "dense_vec", IsFunctionOutput: true},
+			},
+			Functions: []*model.Function{
+				{Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding, InputFieldIDs: []int64{101}, OutputFieldIDs: []int64{103}, OutputFieldNames: []string{"dense_vec"}},
+			},
+			SchemaVersion: 2,
+		}
+		schema, _, droppedFieldIDs, err := buildSchemaForDropFunctionField(coll, "embed_func")
+		require.NoError(t, err)
+		require.Equal(t, []int64{103}, droppedFieldIDs)
+		require.Equal(t, 0, len(schema.Functions))
+		for _, f := range schema.Fields {
+			require.NotEqual(t, "dense_vec", f.Name)
+		}
 	})
 
 	t.Run("drop function removes function and output fields", func(t *testing.T) {
@@ -1272,6 +1196,32 @@ func TestBuildSchemaForDropFunctionField(t *testing.T) {
 		require.Equal(t, 1, len(schema.Functions))
 		require.Equal(t, "embed_func", schema.Functions[0].Name)
 	})
+
+	t.Run("corrupt persisted output ids rejected (primary key protection)", func(t *testing.T) {
+		// Stored with output name "sparse_vec" (id 102) but a stale/injected pk id
+		// (100) in OutputFieldIDs; drop must re-resolve from the name and reject the
+		// mismatch instead of deleting the primary key past the name-based guard.
+		coll := &model.Collection{
+			Name: "test_coll",
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse_vec", DataType: schemapb.DataType_SparseFloatVector},
+				{FieldID: 103, Name: "keep_vec", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*model.Function{
+				{
+					Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+					InputFieldIDs:    []int64{101},
+					OutputFieldIDs:   []int64{100, 102}, // 100 = pk injected
+					OutputFieldNames: []string{"sparse_vec"},
+				},
+			},
+			SchemaVersion: 3,
+		}
+		_, _, _, err := buildSchemaForDropFunctionField(coll, "bm25_func")
+		require.ErrorContains(t, err, "do not align with output field names")
+	})
 }
 
 func TestBuildSchemaForDropField(t *testing.T) {
@@ -1294,6 +1244,18 @@ func TestBuildSchemaForDropField(t *testing.T) {
 		require.NotNil(t, properties)
 		require.Equal(t, []int64{102}, droppedFieldIDs)
 		require.Equal(t, int32(4), schema.Version)
+	})
+
+	t.Run("field referenced by function rejected", func(t *testing.T) {
+		coll := baseColl()
+		coll.Functions = []*model.Function{
+			{Name: "bm25", InputFieldNames: []string{"extra"}, OutputFieldNames: []string{"vec"}},
+		}
+		_, _, _, err := buildSchemaForDropField(coll, "extra", 0)
+		require.ErrorContains(t, err, "referenced by function bm25 as input, drop function first")
+
+		_, _, _, err = buildSchemaForDropField(coll, "vec", 0)
+		require.ErrorContains(t, err, "referenced by function bm25 as output, drop function first")
 	})
 
 	t.Run("drop by field id", func(t *testing.T) {

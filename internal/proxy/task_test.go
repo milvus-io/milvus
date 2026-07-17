@@ -8012,7 +8012,9 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 	t.Run("PreExecute add function without fieldInfos", func(t *testing.T) {
 		task := buildTask(buildAddFunctionRequest(minHashFunctionOnlySchema), functionOnlyOldSchema)
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("PreExecute rejects function-only BM25 request", func(t *testing.T) {
@@ -8191,7 +8193,7 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		task := buildTask(req, oldSchema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.ErrorContains(t, err, "function output field not found")
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("PreExecute happy path", func(t *testing.T) {
@@ -8257,16 +8259,13 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		}
 	})
 
-	t.Run("Execute supports function-only add request", func(t *testing.T) {
+	t.Run("PreExecute rejects function-only add request", func(t *testing.T) {
 		req := buildAddFunctionRequest(minHashFunctionOnlySchema)
 		task := buildTask(req, functionOnlyOldSchema)
 
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
-
-		err = task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.Empty(t, req.GetAction().GetAddRequest().GetFieldInfos())
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "adding a function over existing fields is not supported")
 	})
 
 	t.Run("Execute skips nil field infos", func(t *testing.T) {
@@ -8754,7 +8753,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop by function_name - detach minhash success", func(t *testing.T) {
+	t.Run("drop by function_name - detach minhash rejected", func(t *testing.T) {
 		schemaWithFunc := &schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -8783,7 +8782,8 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 			},
 		}
 		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "detaching a function without dropping its output field is not supported")
 	})
 
 	t.Run("drop by function_name - bm25 function field success", func(t *testing.T) {
@@ -8976,7 +8976,7 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("detach minhash function succeeds", func(t *testing.T) {
+	t.Run("detach minhash function rejected", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -8991,10 +8991,11 @@ func TestValidateDropFunction(t *testing.T) {
 			},
 		}
 		err := validateDropFunction(schema, "minhash_func", false)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
 	})
 
-	t.Run("detach bm25 function fails", func(t *testing.T) {
+	t.Run("detach bm25 function rejected", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -9010,7 +9011,26 @@ func TestValidateDropFunction(t *testing.T) {
 		}
 		err := validateDropFunction(schema, "bm25_func", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
+	})
+
+	t.Run("detach text embedding function rejected (coupled like all types)", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "vec_func_out", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec_func_out"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "embed_func", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "detaching a function without dropping its output field is not supported")
 	})
 
 	t.Run("drop function field leaves another vector field", func(t *testing.T) {
@@ -9051,7 +9071,7 @@ func TestValidateDropFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop unsupported function field fails", func(t *testing.T) {
+	t.Run("drop text embedding function field succeeds", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -9067,8 +9087,7 @@ func TestValidateDropFunction(t *testing.T) {
 			},
 		}
 		err := validateDropFunction(schema, "embed_func", true)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "only BM25 and MinHash functions support dropping output fields")
+		assert.NoError(t, err)
 	})
 
 	t.Run("drop function field would leave no vector field", func(t *testing.T) {
