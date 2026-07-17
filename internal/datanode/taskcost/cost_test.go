@@ -33,12 +33,12 @@ func TestNowMs(t *testing.T) {
 	assert.LessOrEqual(t, got, after)
 }
 
-func TestCalcCostTimeMs(t *testing.T) {
-	assert.Equal(t, int64(50), CalcCostTimeMs(100, 150))
-	assert.Equal(t, int64(0), CalcCostTimeMs(100, 100))
-	assert.Equal(t, int64(0), CalcCostTimeMs(0, 150), "zero start returns 0")
-	assert.Equal(t, int64(0), CalcCostTimeMs(100, 0), "zero end returns 0")
-	assert.Equal(t, int64(0), CalcCostTimeMs(200, 100), "end before start returns 0")
+func TestElapsedMs(t *testing.T) {
+	start := time.Now()
+	time.Sleep(10 * time.Millisecond)
+	got := ElapsedMs(start)
+	// Sleep guarantees at least 10ms elapsed on the monotonic clock.
+	assert.GreaterOrEqual(t, got, int64(10))
 }
 
 func TestEstimateIndexBuildCPUNum(t *testing.T) {

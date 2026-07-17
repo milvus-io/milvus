@@ -22,15 +22,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 )
 
+// NowMs returns the current wall-clock time in milliseconds. Use it only for
+// externally exposed timestamps (ExecStartMs / ExecEndMs); never subtract two
+// NowMs readings to derive a duration — use ElapsedMs instead.
 func NowMs() int64 {
 	return time.Now().UnixMilli()
 }
 
-func CalcCostTimeMs(startMs, endMs int64) int64 {
-	if startMs <= 0 || endMs <= 0 || endMs < startMs {
-		return 0
-	}
-	return endMs - startMs
+// ElapsedMs returns the duration since start in milliseconds. It relies on the
+// monotonic clock reading embedded in start (time.Since), so the result is
+// immune to wall-clock steps such as NTP corrections and is never negative.
+func ElapsedMs(start time.Time) int64 {
+	return time.Since(start).Milliseconds()
 }
 
 // EstimateIndexBuildCPUNum returns the approximate number of CPU threads an
