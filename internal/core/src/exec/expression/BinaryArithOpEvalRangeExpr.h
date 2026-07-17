@@ -651,6 +651,14 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
             return;
         }
 
+        // MATCH_*/element_filter arithmetic ($ predicate) is element-level and
+        // can only use a nested index. Use the non-reentrant
+        // PinnedIndexIsNested() — we are inside DetermineExecPath().
+        if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
+            FallbackToRawDataExecPath();
+            return;
+        }
+
         auto data_type = expr_->column_.data_type_;
         if (expr_->column_.element_level_) {
             data_type = expr_->column_.element_type_;
@@ -659,7 +667,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         // JSON, ARRAY and VECTOR_ARRAY types cannot use index for arith ops.
         if (data_type == DataType::JSON || data_type == DataType::ARRAY ||
             data_type == DataType::VECTOR_ARRAY) {
-            exec_path_ = ExprExecPath::RawData;
+            FallbackToRawDataExecPath();
             return;
         }
 
@@ -691,7 +699,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
                 has_raw = false;
         }
         if (!has_raw) {
-            exec_path_ = ExprExecPath::RawData;
+            FallbackToRawDataExecPath();
         }
     }
 
@@ -741,6 +749,18 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     template <typename ValueType>
     VectorPtr
     ExecRangeVisitorImplForVectorArray(OffsetVector* input = nullptr);
+
+    // Fast path for `array_length(field) <op> N`: serve every row's length
+    // straight from the segment's IArrayOffsets prefix sums
+    // (length = starts[row + 1] - starts[row]) without materializing any
+    // array data. Shared by the ARRAY and VECTOR_ARRAY visitors; callers
+    // must fall back to the data-reading path when the segment has no
+    // offsets for the field (e.g. index-only load).
+    template <typename ValueType>
+    VectorPtr
+    ExecArrayLengthFromOffsets(const IArrayOffsets& array_offsets,
+                               OffsetVector* input,
+                               int64_t real_batch_size);
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;

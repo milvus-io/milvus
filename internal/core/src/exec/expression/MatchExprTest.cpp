@@ -24,6 +24,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <set>
@@ -31,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/Array.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/IndexMeta.h"
@@ -39,20 +41,30 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
+#include "exec/expression/Expr.h"
+#include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
+#include "index/BitmapIndex.h"
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "query/Plan.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -296,6 +308,80 @@ class MatchExprTest : public ::testing::Test {
         std::cout << "==============================" << std::endl;
     }
 
+    // Execute retrieve and return results (full-scan, not top-K limited).
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    ExecuteRetrieve(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.Parse(filter_expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+
+        return seg_->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    // Compute the exact set of rows that should match, directly from the
+    // inserted data and the predicate semantics encoded by verify_func.
+    std::set<int64_t>
+    ComputeExpectedRows(int64_t threshold, VerifyFunc verify_func) const {
+        std::set<int64_t> expected;
+        for (size_t i = 0; i < N_; ++i) {
+            int match_count = CountMatchingElements(static_cast<int64_t>(i));
+            if (verify_func(match_count, array_len_, threshold)) {
+                expected.insert(static_cast<int64_t>(i));
+            }
+        }
+        return expected;
+    }
+
+    // Full-recall verification: issue a Retrieve with the same predicate and
+    // assert the returned offset set is EXACTLY the expected matched set
+    // (catches both false positives AND false negatives, unlike the top-K
+    // search check in VerifyResults).
+    void
+    VerifyRetrieveRecall(const std::string& match_type_name,
+                         const std::string& filter_expr,
+                         int64_t threshold,
+                         VerifyFunc verify_func) {
+        auto result = ExecuteRetrieve(filter_expr);
+        ASSERT_NE(result, nullptr);
+
+        auto expected_rows = ComputeExpectedRows(threshold, verify_func);
+
+        std::set<int64_t> actual_rows;
+        for (const auto& offset : result->offset()) {
+            actual_rows.insert(offset);
+        }
+
+        std::vector<int64_t> missing_rows;
+        for (auto row : expected_rows) {
+            if (actual_rows.find(row) == actual_rows.end()) {
+                missing_rows.push_back(row);
+            }
+        }
+        std::vector<int64_t> extra_rows;
+        for (auto row : actual_rows) {
+            if (expected_rows.find(row) == expected_rows.end()) {
+                extra_rows.push_back(row);
+            }
+        }
+
+        std::cout << "=== " << match_type_name
+                  << " Retrieve Recall (Growing) ===" << std::endl;
+        std::cout << "Expected rows: " << expected_rows.size()
+                  << ", Actual rows: " << actual_rows.size() << std::endl;
+
+        EXPECT_TRUE(missing_rows.empty())
+            << match_type_name << " has " << missing_rows.size()
+            << " false negatives";
+        EXPECT_TRUE(extra_rows.empty())
+            << match_type_name << " has " << extra_rows.size()
+            << " false positives";
+        EXPECT_EQ(expected_rows, actual_rows)
+            << match_type_name << " matched-row set mismatch";
+    }
+
     // Member variables
     std::shared_ptr<Schema> schema_;
     FieldId vec_fid_;
@@ -328,6 +414,15 @@ TEST_F(MatchExprTest, MatchAny) {
             // MatchAny: at least one element matches
             return match_count > 0;
         });
+
+    // Full-recall check: assert the Retrieve returns EXACTLY the expected set.
+    VerifyRetrieveRecall(
+        "MatchAny",
+        filter_expr,
+        0,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
 }
 
 TEST_F(MatchExprTest, MatchAll) {
@@ -340,6 +435,14 @@ TEST_F(MatchExprTest, MatchAll) {
         0,
         [](int match_count, int element_count, int64_t /*threshold*/) {
             // MatchAll: all elements must match
+            return match_count == element_count;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchAll",
+        filter_expr,
+        0,
+        [](int match_count, int element_count, int64_t /*threshold*/) {
             return match_count == element_count;
         });
 }
@@ -357,6 +460,14 @@ TEST_F(MatchExprTest, MatchLeast) {
             // MatchLeast: at least N elements match
             return match_count >= threshold;
         });
+
+    VerifyRetrieveRecall(
+        "MatchLeast(3)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
 }
 
 TEST_F(MatchExprTest, MatchMost) {
@@ -370,6 +481,14 @@ TEST_F(MatchExprTest, MatchMost) {
         threshold,
         [](int match_count, int /*element_count*/, int64_t threshold) {
             // MatchMost: at most N elements match
+            return match_count <= threshold;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchMost(2)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count <= threshold;
         });
 }
@@ -387,6 +506,14 @@ TEST_F(MatchExprTest, MatchExact) {
             // MatchExact: exactly N elements match
             return match_count == threshold;
         });
+
+    VerifyRetrieveRecall(
+        "MatchExact(2)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
 }
 
 // Edge case: MatchLeast with threshold = 1 (equivalent to MatchAny)
@@ -398,6 +525,14 @@ TEST_F(MatchExprTest, MatchLeastOne) {
     VerifyResults(
         result.get(),
         "MatchLeast(1)",
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchLeast(1)",
+        filter_expr,
         threshold,
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count >= threshold;
@@ -417,6 +552,14 @@ TEST_F(MatchExprTest, MatchMostZero) {
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count <= threshold;
         });
+
+    VerifyRetrieveRecall(
+        "MatchMost(0)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count <= threshold;
+        });
 }
 
 // Edge case: MatchExact with threshold = 0 (no elements should match)
@@ -428,6 +571,14 @@ TEST_F(MatchExprTest, MatchExactZero) {
     VerifyResults(
         result.get(),
         "MatchExact(0)",
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchExact(0)",
+        filter_expr,
         threshold,
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count == threshold;
@@ -485,6 +636,273 @@ TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
     ASSERT_NE(result, nullptr);
     ASSERT_EQ(result->offset_size(), 1);
     EXPECT_EQ(result->offset(0), 2);
+}
+
+namespace {
+
+// Shared helpers for the nullable-struct three-valued-logic tests below.
+
+// Build the insert payload for a schema {id, struct_array[sub_int](nullable)}:
+// row0=[1,2], row1=NULL, row2=[], row3=[9001], row4=NULL. A NULL row and an
+// empty [] row both have zero elements; only three-valued handling
+// (PhyMatchFilterExpr::MaskNullRows) can tell them apart.
+std::unique_ptr<InsertRecordProto>
+BuildNullableStructInsertData(const std::shared_ptr<Schema>& schema,
+                              FieldId int64_fid,
+                              FieldId sub_int_fid,
+                              int64_t N) {
+    auto insert_data = std::make_unique<InsertRecordProto>();
+
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, N, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+    // Dense layout: NULL rows occupy an empty ScalarField slot.
+    std::vector<milvus::proto::schema::ScalarField> sub_int_data(N);
+    sub_int_data[0].mutable_int_data()->add_data(1);
+    sub_int_data[0].mutable_int_data()->add_data(2);
+    sub_int_data[3].mutable_int_data()->add_data(9001);
+    FixedVector<bool> valid = {true, false, true, true, false};
+    auto sub_int_array = CreateDataArrayFrom(
+        sub_int_data.data(), valid.data(), N, schema->operator[](sub_int_fid));
+    insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
+    insert_data->set_num_rows(N);
+    return insert_data;
+}
+
+std::set<int64_t>
+RetrieveOffsets(SegmentInternalInterface* segment,
+                const std::shared_ptr<Schema>& schema,
+                const std::string& expr) {
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.Parse(expr);
+    auto plan =
+        CreateRetrievePlanByExpr(schema, plan_str.data(), plan_str.size());
+    EXPECT_NE(plan, nullptr);
+    auto result = segment->Retrieve(
+        nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_NE(result, nullptr);
+    std::set<int64_t> offsets;
+    for (const auto& offset : result->offset()) {
+        offsets.insert(offset);
+    }
+    return offsets;
+}
+
+// Three-valued MATCH over a NULLABLE struct array: a NULL row yields UNKNOWN
+// and must be excluded from every MATCH_* result -- including under `not`
+// (NOT UNKNOWN is still UNKNOWN) -- while a real empty [] row is a valid
+// zero-element array evaluated vacuously (ALL/EXACT(0) keep it, ANY drops
+// it). At offsets level a NULL row is indistinguishable from []: without
+// PhyMatchFilterExpr::MaskNullRows, MATCH_ALL vacuously matches NULL rows and
+// `not MATCH_ANY` turns their definite-FALSE into TRUE.
+void
+CheckNullableStructMatchThreeValued(SegmentInternalInterface* segment,
+                                    const std::shared_ptr<Schema>& schema) {
+    // Only row3 has a hit; NULL rows have no elements to begin with.
+    EXPECT_EQ(RetrieveOffsets(
+                  segment, schema, "match_any(struct_array, $[sub_int] >= 9000)"),
+              (std::set<int64_t>{3}));
+
+    // Every element of every REAL row satisfies >= 0 ([] vacuously). The NULL
+    // rows (1, 4) have zero elements too: without MaskNullRows they would be
+    // wrongly included as vacuous matches.
+    EXPECT_EQ(RetrieveOffsets(
+                  segment, schema, "match_all(struct_array, $[sub_int] >= 0)"),
+              (std::set<int64_t>{0, 2, 3}));
+
+    // NOT of MATCH_ANY: real zero-hit rows only. Without MaskNullRows the
+    // NULL rows read as definite FALSE and negation wrongly includes them.
+    EXPECT_EQ(
+        RetrieveOffsets(
+            segment, schema, "not match_any(struct_array, $[sub_int] >= 9000)"),
+        (std::set<int64_t>{0, 2}));
+
+    // EXACT(0): zero-hit REAL rows (incl. the empty array), never NULL rows.
+    EXPECT_EQ(RetrieveOffsets(segment,
+                              schema,
+                              "match_exact(struct_array, $[sub_int] == 12345, "
+                              "threshold=0)"),
+              (std::set<int64_t>{0, 2, 3}));
+}
+
+}  // namespace
+
+TEST(MatchExprNullableStruct, SealedNullRowsExcludedIncludingUnderNot) {
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    // Batch size 2 makes the last batch contain ONLY the trailing NULL row
+    // (zero elements), exercising the all-empty-batch path of
+    // PhyMatchFilterExpr::Eval (MatchEmptyElements + MaskNullRows) in
+    // addition to the normal batched path.
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+
+    constexpr int64_t N = 5;
+    auto insert_data =
+        BuildNullableStructInsertData(schema, int64_fid, sub_int_fid, N);
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema;
+    generated_data.raw_ = insert_data.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated_data.row_ids_.push_back(i);
+        generated_data.timestamps_.push_back(i);
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
+    CheckNullableStructMatchThreeValued(segment.get(), schema);
+}
+
+TEST(MatchExprNullableStruct, GrowingNullRowsExcludedIncludingUnderNot) {
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+
+    constexpr int64_t N = 5;
+    auto insert_data =
+        BuildNullableStructInsertData(schema, int64_fid, sub_int_fid, N);
+
+    std::vector<idx_t> row_ids(N);
+    std::vector<Timestamp> timestamps(N);
+    for (int64_t i = 0; i < N; ++i) {
+        row_ids[i] = i;
+        timestamps[i] = i;
+    }
+
+    // The realtime Insert path records the NULL rows through
+    // ExtractArrayLengths' -1 sentinel (zero elements, row-invalid).
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(N);
+    segment->Insert(
+        0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CheckNullableStructMatchThreeValued(segment.get(), schema);
+
+    // The growing offsets table must also report the NULL rows invalid for
+    // row-level consumers (AndRowValidBitmap), not merely zero-length.
+    auto offsets = segment->GetArrayOffsets(sub_int_fid);
+    ASSERT_NE(offsets, nullptr);
+    milvus::TargetBitmap probe(N, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, N);
+    EXPECT_TRUE(probe[0]);
+    EXPECT_FALSE(probe[1]);
+    EXPECT_TRUE(probe[2]);
+    EXPECT_TRUE(probe[3]);
+    EXPECT_FALSE(probe[4]);
+}
+
+// Schema evolution backfill: rows that existed before a nullable struct-array
+// field was added are NULL, not empty arrays. The growing Reopen path must
+// register the field's offsets via InsertNulls so AndRowValidBitmap reports
+// every backfilled row invalid (mirroring ArrayOffsetsSealed::BuildAllNulls).
+TEST(StructArrayNullBackfill, GrowingReopenRecordsBackfilledRowsAsNull) {
+    auto schema_v1 = std::make_shared<Schema>();
+    auto pk_fid = schema_v1->AddDebugField("id", DataType::INT64);
+    schema_v1->set_primary_field_id(pk_fid);
+    schema_v1->set_schema_version(1);
+
+    constexpr int64_t N = 3;
+    auto segment = CreateGrowingSegment(schema_v1, empty_index_meta);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, N, schema_v1->operator[](pk_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+    insert_data->set_num_rows(N);
+
+    std::vector<idx_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {0, 1, 2};
+    segment->PreInsert(N);
+    segment->Insert(
+        0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    ASSERT_EQ(segment->get_row_count(), N);
+
+    // V2 copies V1 (identical ids for shared fields) and adds a nullable
+    // struct-array sub-field, as AddCollectionField would.
+    auto schema_v2 = std::make_shared<Schema>(*schema_v1);
+    auto sub_fid = schema_v2->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+    schema_v2->set_schema_version(2);
+
+    segment->LazyCheckSchema(schema_v2, nullptr);
+
+    auto offsets = segment->GetArrayOffsets(sub_fid);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), N);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+
+    // All backfilled rows must be NULL (row-invalid), not empty arrays.
+    milvus::TargetBitmap probe(N, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, N);
+    EXPECT_TRUE(probe.none());
+}
+
+// Sealed counterpart: the sealed Reopen path must register
+// ArrayOffsetsSealed::BuildAllNulls (all-false row validity), not
+// BuildAllZeros (which would read the backfilled NULLs as empty arrays).
+TEST(StructArrayNullBackfill, SealedReopenRecordsBackfilledRowsAsNull) {
+    auto schema_v1 = std::make_shared<Schema>();
+    auto pk_fid = schema_v1->AddDebugField("id", DataType::INT64);
+    schema_v1->set_primary_field_id(pk_fid);
+    schema_v1->set_schema_version(1);
+
+    constexpr int64_t N = 3;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, N, schema_v1->operator[](pk_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+    insert_data->set_num_rows(N);
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema_v1;
+    generated_data.raw_ = insert_data.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated_data.row_ids_.push_back(i);
+        generated_data.timestamps_.push_back(i);
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema_v1, generated_data);
+
+    auto schema_v2 = std::make_shared<Schema>(*schema_v1);
+    auto sub_fid = schema_v2->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, /*nullable=*/true);
+    schema_v2->set_schema_version(2);
+
+    segment->LazyCheckSchema(schema_v2, nullptr);
+
+    auto offsets = segment->GetArrayOffsets(sub_fid);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), N);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+
+    milvus::TargetBitmap probe(N, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, N);
+    EXPECT_TRUE(probe.none());
 }
 
 class SealedMatchExprTest : public ::testing::Test {
@@ -1975,3 +2393,2428 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<IntTypeTestParam>& info) {
         return info.param.type_name;
     });
+
+// ============================================================================
+// Scalar ARRAY field MATCH_*/element_filter tests.
+//
+// These exercise MATCH_* over a top-level scalar ARRAY field (not a struct
+// array sub-field). The expression syntax uses a bare `$` to refer to the
+// element value, e.g. `MATCH_ANY(scores, $ > 90)`. The plan is built through
+// the real Go planparserv2 (via ScopedSchemaHandle) and executed with
+// Retrieve so we can assert the exact set of matched rows.
+//
+// Runs for BOTH sealed and growing segments.
+// ============================================================================
+enum class ScalarArraySegType { kSealed, kGrowing };
+
+class ScalarArrayMatchExprTest
+    : public ::testing::TestWithParam<ScalarArraySegType> {
+ protected:
+    // Build an insert proto holding: pk (INT64) + a scalar Array<Int64>
+    // "scores" field with the given per-row contents.
+    std::unique_ptr<InsertRecordProto>
+    BuildInt64ArrayInsert(const Schema& schema,
+                          FieldId pk_fid,
+                          FieldId scores_fid,
+                          const std::vector<std::vector<int64_t>>& rows) {
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        const int64_t N = static_cast<int64_t>(rows.size());
+
+        std::vector<int64_t> ids(N);
+        std::iota(ids.begin(), ids.end(), 0);
+        auto id_array =
+            CreateDataArrayFrom(ids.data(), nullptr, N, schema[pk_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        std::vector<milvus::proto::schema::ScalarField> scores(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : rows[i]) {
+                scores[i].mutable_long_data()->add_data(v);
+            }
+        }
+        auto scores_array =
+            CreateDataArrayFrom(scores.data(), nullptr, N, schema[scores_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(
+            scores_array.release());
+
+        insert_data->set_num_rows(N);
+        return insert_data;
+    }
+
+    // Create a segment (sealed or growing per param) populated with the insert
+    // proto. Returns a SegmentInterface usable for Retrieve.
+    std::shared_ptr<SegmentInterface>
+    MakeSegment(SchemaPtr schema, std::unique_ptr<InsertRecordProto> insert) {
+        const int64_t N = insert->num_rows();
+        std::vector<idx_t> row_ids(N);
+        std::vector<Timestamp> tss(N);
+        for (int64_t i = 0; i < N; ++i) {
+            row_ids[i] = i;
+            tss[i] = i;
+        }
+
+        if (GetParam() == ScalarArraySegType::kGrowing) {
+            auto seg = CreateGrowingSegment(schema, empty_index_meta);
+            seg->PreInsert(N);
+            seg->Insert(0, N, row_ids.data(), tss.data(), insert.get());
+            return std::shared_ptr<SegmentInterface>(std::move(seg));
+        }
+
+        GeneratedData generated;
+        generated.schema_ = schema;
+        generated.raw_ = insert.release();
+        for (int64_t i = 0; i < N; ++i) {
+            generated.row_ids_.push_back(i);
+            generated.timestamps_.push_back(i);
+        }
+        auto seg = CreateSealedWithFieldDataLoaded(schema, generated);
+        return std::shared_ptr<SegmentInterface>(std::move(seg));
+    }
+
+    // Parse `expr` against `schema`, run Retrieve, and return the matched
+    // segment offsets as a set.
+    std::set<int64_t>
+    RetrieveMatchedRows(SegmentInterface* seg,
+                        const Schema& schema,
+                        SchemaPtr schema_ptr,
+                        const std::string& expr) {
+        ScopedSchemaHandle schema_handle(schema);
+        auto plan_str = schema_handle.Parse(expr);
+        auto plan = CreateRetrievePlanByExpr(
+            schema_ptr, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        auto result = seg->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+        EXPECT_NE(result, nullptr);
+        std::set<int64_t> rows;
+        for (const auto& offset : result->offset()) {
+            rows.insert(offset);
+        }
+        return rows;
+    }
+};
+
+TEST_P(ScalarArrayMatchExprTest, Int64Array) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, false);
+
+    // Rows: [[95,80],[40],[100,100,100],[]]
+    std::vector<std::vector<int64_t>> rows = {
+        {95, 80}, {40}, {100, 100, 100}, {}};
+    auto insert = BuildInt64ArrayInsert(*schema, pk_fid, scores_fid, rows);
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(scores, $ > 90) -> rows {0, 2}
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ANY(scores, $ > 90)"),
+              (std::set<int64_t>{0, 2}));
+
+    // MATCH_ALL(scores, $ >= 60): row0 (95,80) all>=60 true;
+    // row1 (40) false; row2 (100,100,100) true; row3 [] vacuous true.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ALL(scores, $ >= 60)"),
+              (std::set<int64_t>{0, 2, 3}));
+
+    // MATCH_LEAST(scores, $ == 100, threshold=2) -> only row2 has >=2.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_LEAST(scores, $ == 100, threshold=2)"),
+              (std::set<int64_t>{2}));
+
+    // MATCH_EXACT(scores, $ == 100, threshold=3) -> only row2 has exactly 3.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_EXACT(scores, $ == 100, threshold=3)"),
+              (std::set<int64_t>{2}));
+
+    // MATCH_MOST(scores, $ > 90, threshold=0): match count <= 0.
+    // row0 (95,80) -> 1 match; row1 (40) -> 0; row2 (100,100,100) -> 3;
+    // row3 [] -> 0 (empty array). Only rows with 0 matches qualify -> {1, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_MOST(scores, $ > 90, threshold=0)"),
+              (std::set<int64_t>{1, 3}));
+
+    // Compound element predicate with two `$` references in one predicate.
+    // MATCH_ANY(scores, $ > 60 && $ < 90): an element matches when it is in
+    // (60, 90). row0 (95,80) -> 80 matches; row1 (40) -> none; row2 (100s) ->
+    // none; row3 [] -> none. -> {0}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, "MATCH_ANY(scores, $ > 60 && $ < 90)"),
+        (std::set<int64_t>{0}));
+
+    // MATCH_ALL(scores, $ >= 40 && $ <= 100): all elements in [40, 100].
+    // row0 (95,80) all in range; row1 (40) in range; row2 (100s) in range;
+    // row3 [] vacuously true. -> {0, 1, 2, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_ALL(scores, $ >= 40 && $ <= 100)"),
+              (std::set<int64_t>{0, 1, 2, 3}));
+
+    // Range form: the grammar accepts `$` inside a ternary range, lowering to a
+    // BinaryRangeExpr over the element. MATCH_ANY(scores, 60 < $ < 90) is
+    // equivalent to the compound `$ > 60 && $ < 90` above -> {0}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ANY(scores, 60 < $ < 90)"),
+              (std::set<int64_t>{0}));
+
+    // Empty-array edge case made explicit. row3 holds an empty array:
+    //   - MATCH_ALL is vacuously true for it (no element violates the
+    //     predicate), so row3 IS included.
+    //   - MATCH_ANY requires at least one matching element, so an empty array
+    //     can never satisfy it and row3 is excluded.
+    auto match_all_60 = RetrieveMatchedRows(
+        seg.get(), *schema, schema, "MATCH_ALL(scores, $ >= 60)");
+    EXPECT_NE(match_all_60.find(3), match_all_60.end())
+        << "empty-array row must satisfy MATCH_ALL (vacuous truth)";
+    auto match_any_any = RetrieveMatchedRows(
+        seg.get(), *schema, schema, "MATCH_ANY(scores, $ >= 0)");
+    EXPECT_EQ(match_any_any.find(3), match_any_any.end())
+        << "empty-array row must never satisfy MATCH_ANY";
+
+    // NOTE(VERIFY): standalone `element_filter(scores, $ > 90)` is intentionally
+    // NOT asserted here. Although planparserv2 parses it, element_filter lowers
+    // to an element-level bitset (ElementFilterBitsNode) intended for
+    // element-level vector search; it is not a row-level Retrieve predicate (the
+    // proxy rejects it as such, see task_search.go). Row-level array filtering
+    // must use MATCH_ANY/MATCH_*. Adding a row-set assertion here would encode
+    // undefined behavior, so it is deliberately omitted.
+}
+
+TEST_P(ScalarArrayMatchExprTest, VarCharArray) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid =
+        schema->AddDebugArrayField("tags", DataType::VARCHAR, false);
+
+    // Rows: [["x","y"],["z"],[],["x"]]
+    std::vector<std::vector<std::string>> rows = {{"x", "y"}, {"z"}, {}, {"x"}};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+
+    std::vector<milvus::proto::schema::ScalarField> tags(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (const auto& v : rows[i]) {
+            tags[i].mutable_string_data()->add_data(v);
+        }
+    }
+    auto tags_array = CreateDataArrayFrom(
+        tags.data(), nullptr, N, schema->operator[](tags_fid));
+    insert->mutable_fields_data()->AddAllocated(tags_array.release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(tags, $ == "x") -> rows {0, 3}
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(tags, $ == "x"))"),
+              (std::set<int64_t>{0, 3}));
+
+    // MATCH_ALL(tags, $ != ""): every element is non-empty.
+    // row0 ("x","y") all non-empty; row1 ("z") non-empty; row2 [] vacuously
+    // true; row3 ("x") non-empty. -> {0, 1, 2, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ALL(tags, $ != ""))"),
+              (std::set<int64_t>{0, 1, 2, 3}));
+
+    // Compound string-element predicate with two `$` references.
+    // MATCH_ANY(tags, $ == "x" || $ == "y"): row0 ("x","y") matches;
+    // row1 ("z") no; row2 [] no; row3 ("x") matches. -> {0, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(tags, $ == "x" || $ == "y"))"),
+              (std::set<int64_t>{0, 3}));
+}
+
+// Element-level `$ in []` on a typed array must yield a definite FALSE per
+// element, so MATCH_ALL over a NON-empty row must not degenerate into a
+// vacuous true. Both the lone and compound predicate shapes are asserted.
+TEST_P(ScalarArrayMatchExprTest, EmptyInElementPredicate) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, false);
+
+    // row0: non-empty array; row1: empty array.
+    std::vector<std::vector<int64_t>> rows = {{1, 2, 3}, {}};
+    auto insert = BuildInt64ArrayInsert(*schema, pk_fid, scores_fid, rows);
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ALL($ > 1 && $ in []): every element of row0 is a definite false
+    // -> row0 excluded; row1 [] vacuously true -> {1}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, "MATCH_ALL(scores, $ > 1 && $ in [])"),
+        (std::set<int64_t>{1}));
+
+    // MATCH_ANY($ > 1 && $ in []): nothing can satisfy `$ in []` -> no rows.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, "MATCH_ANY(scores, $ > 1 && $ in [])"),
+        (std::set<int64_t>{}));
+
+    // Lone empty-IN forms (parseable on typed arrays).
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ALL(scores, $ in [])"),
+              (std::set<int64_t>{1}));
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ANY(scores, $ in [])"),
+              (std::set<int64_t>{}));
+
+    // Control: `$ not in []` is a definite TRUE per element, so the compound
+    // reduces to `$ >= 1`, which every element of row0 satisfies -> {0,1}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_ALL(scores, $ >= 1 && $ not in [])"),
+              (std::set<int64_t>{0, 1}));
+}
+
+// Nullable arrays: a scalar array (`tags`, referenced via `$`) and a struct
+// array sub-field (`st[val]`, referenced via `$[val]`) must produce IDENTICAL
+// row sets as each other on the same NULL/empty layout (scalar-vs-struct
+// alignment). NULL and empty rows themselves are NOT equivalent -- see below.
+//
+// THREE-VALUED SEMANTICS (PostgreSQL-aligned): a NULL array row yields UNKNOWN
+// for every quantified comparison and is therefore EXCLUDED from ALL MATCH_*
+// operators (a filter keeps only `true`; both `false` and UNKNOWN are dropped).
+// This is distinct from a genuine empty array `[]`, which is a real (non-null)
+// array and keeps vacuous-truth semantics: MATCH_ALL / MATCH_MOST(0) /
+// MATCH_EXACT(0) INCLUDE an empty row, while MATCH_ANY / MATCH_LEAST(>=1)
+// exclude it. row1 (NULL) is therefore excluded everywhere below; row3 (`[]`)
+// still participates vacuously. The scalar-vs-struct equality assertion holds
+// under this aligned behavior.
+TEST_P(ScalarArrayMatchExprTest, NullableArrayScalarStructAligned) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    // Nullable scalar VarChar array, and a nullable struct array sub-field
+    // (struct name "st", sub-field "val").
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+    auto st_val_fid =
+        schema->AddDebugArrayField("st[val]", DataType::VARCHAR, true);
+
+    // Shared layout for both fields. row1 is NULL (valid=false); row3 is an
+    // empty array (valid=true). row1 and row3 both have zero elements, so under
+    // current behavior they are indistinguishable.
+    const std::vector<std::vector<std::string>> rows = {
+        {"x", "y"}, {}, {"z"}, {}, {"x"}};
+    const std::vector<bool> row_valid = {true, false, true, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    // Build a string-array DataArray (with the shared null bitmap) for `fid`.
+    // `data`/`valid` are consumed synchronously (copied into the proto), so it
+    // is safe for them to go out of scope when this returns.
+    auto make_str_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (const auto& v : rows[i]) {
+                data[i].mutable_string_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(tags_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(st_val_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    struct Case {
+        std::string scalar_expr;  // over `tags` using `$`
+        std::string struct_expr;  // over `st`   using `$[val]`
+        std::set<int64_t> expected;
+    };
+    const std::vector<Case> cases = {
+        // Only rows containing "x" -> {0,4}. NULL(1) and empty(3) excluded.
+        {R"(MATCH_ANY(tags, $ == "x"))",
+         R"(MATCH_ANY(st, $[val] == "x"))",
+         {0, 4}},
+        // Every element != "": row0/2/4 have only non-empty elements; empty(3)
+        // is vacuously true; NULL(1) is excluded (three-valued) -> {0,2,3,4}.
+        {R"(MATCH_ALL(tags, $ != ""))",
+         R"(MATCH_ALL(st, $[val] != ""))",
+         {0, 2, 3, 4}},
+        // At least one "x": {0,4}.
+        {R"(MATCH_LEAST(tags, $ == "x", threshold=1))",
+         R"(MATCH_LEAST(st, $[val] == "x", threshold=1))",
+         {0, 4}},
+        // At most zero "x" -> non-null rows with no "x": empty(3), row2 -> {2,3}.
+        // NULL(1) excluded (three-valued, not a vacuous match).
+        {R"(MATCH_MOST(tags, $ == "x", threshold=0))",
+         R"(MATCH_MOST(st, $[val] == "x", threshold=0))",
+         {2, 3}},
+        // Exactly zero "x" -> {2,3}. NULL(1) excluded.
+        {R"(MATCH_EXACT(tags, $ == "x", threshold=0))",
+         R"(MATCH_EXACT(st, $[val] == "x", threshold=0))",
+         {2, 3}},
+    };
+
+    for (const auto& c : cases) {
+        auto scalar_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.scalar_expr);
+        auto struct_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.struct_expr);
+        EXPECT_EQ(scalar_rows, c.expected)
+            << "scalar expr result mismatch: " << c.scalar_expr;
+        EXPECT_EQ(struct_rows, c.expected)
+            << "struct expr result mismatch: " << c.struct_expr;
+        // Core guarantee: scalar array and struct array agree on NULL/empty.
+        EXPECT_EQ(scalar_rows, struct_rows)
+            << "scalar vs struct divergence: " << c.scalar_expr << " | "
+            << c.struct_expr;
+    }
+}
+
+// Three-valued MATCH under negation. `not MATCH_*` must propagate UNKNOWN:
+// a NULL-array row is UNKNOWN for the MATCH, stays UNKNOWN after NOT
+// (ThreeValuedLogicOp::Not flips only definite values), and is EXCLUDED by
+// the filter -- while an empty [] row is a definite false/true that NOT
+// inverts normally. A lost valid bit anywhere in the chain would silently
+// flip NULL rows into `not MATCH` results; this is the execution-level lock
+// on that behavior for both the scalar-array and struct-array paths.
+TEST_P(ScalarArrayMatchExprTest, NullableNotMatchThreeValued) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+    auto st_val_fid =
+        schema->AddDebugArrayField("st[val]", DataType::VARCHAR, true);
+
+    // Same layout as NullableArrayScalarStructAligned:
+    // row0 {"x","y"}, row1 NULL, row2 {"z"}, row3 [] (empty), row4 {"x"}.
+    const std::vector<std::vector<std::string>> rows = {
+        {"x", "y"}, {}, {"z"}, {}, {"x"}};
+    const std::vector<bool> row_valid = {true, false, true, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto make_str_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (const auto& v : rows[i]) {
+                data[i].mutable_string_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(tags_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(st_val_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    struct Case {
+        std::string scalar_expr;
+        std::string struct_expr;
+        std::set<int64_t> expected;
+    };
+    const std::vector<Case> cases = {
+        // MATCH_ANY($=="x"): T{0,4} F{2,3} U{1}. NOT keeps definite-false
+        // rows {2,3}; NULL(1) stays UNKNOWN and is excluded; empty(3) is a
+        // definite false that NOT flips to true.
+        {R"(not MATCH_ANY(tags, $ == "x"))",
+         R"(not MATCH_ANY(st, $[val] == "x"))",
+         {2, 3}},
+        // MATCH_MOST(threshold=0, $=="x"): T{2,3} F{0,4} U{1}.
+        // NOT -> {0,4}; NULL(1) excluded.
+        {R"(not MATCH_MOST(tags, $ == "x", threshold=0))",
+         R"(not MATCH_MOST(st, $[val] == "x", threshold=0))",
+         {0, 4}},
+        // MATCH_ALL($!=""): T{0,2,3,4} (empty vacuous) U{1}.
+        // NOT -> nothing definite-false remains; NULL(1) must NOT surface.
+        {R"(not MATCH_ALL(tags, $ != ""))",
+         R"(not MATCH_ALL(st, $[val] != ""))",
+         {}},
+    };
+
+    for (const auto& c : cases) {
+        auto scalar_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.scalar_expr);
+        auto struct_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.struct_expr);
+        EXPECT_EQ(scalar_rows, c.expected)
+            << "scalar expr result mismatch: " << c.scalar_expr;
+        EXPECT_EQ(struct_rows, c.expected)
+            << "struct expr result mismatch: " << c.struct_expr;
+        EXPECT_EQ(scalar_rows, struct_rows)
+            << "scalar vs struct divergence under NOT: " << c.scalar_expr;
+    }
+}
+
+// LIKE / pattern predicates inside MATCH_* on VARCHAR elements, for BOTH the
+// scalar-array (`tags`, bare `$`) and struct-array sub-field (`st[val]`,
+// `$[val]`) containers. `like` lowers per wildcard shape to PrefixMatch
+// ("ab%"), PostfixMatch ("%bc"), InnerMatch ("%b%") or the general Match op
+// ("a%c"); all four must run through the element-level UnaryExpr path with the
+// usual quantifier folding and three-valued NULL semantics (NULL row excluded,
+// [] row vacuous under MATCH_ALL).
+TEST_P(ScalarArrayMatchExprTest, VarCharArrayLikePatterns) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+    auto st_val_fid =
+        schema->AddDebugArrayField("st[val]", DataType::VARCHAR, true);
+
+    // row1 is NULL; row3 is a genuine empty array.
+    const std::vector<std::vector<std::string>> rows = {
+        {"abc", "abd"}, {}, {"xyz"}, {}, {"abc", "xyz"}, {"cab"}};
+    const std::vector<bool> row_valid = {true, false, true, true, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto make_str_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (const auto& v : rows[i]) {
+                data[i].mutable_string_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(tags_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(st_val_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    struct Case {
+        std::string scalar_expr;
+        std::string struct_expr;
+        std::set<int64_t> expected;
+    };
+    const std::vector<Case> cases = {
+        // prefix: elements starting "ab" -> row0 (abc,abd), row4 (abc).
+        {R"(MATCH_ANY(tags, $ like "ab%"))",
+         R"(MATCH_ANY(st, $[val] like "ab%"))",
+         {0, 4}},
+        // prefix ALL: row0 all-prefix; empty row3 vacuous; NULL row1 excluded.
+        {R"(MATCH_ALL(tags, $ like "ab%"))",
+         R"(MATCH_ALL(st, $[val] like "ab%"))",
+         {0, 3}},
+        // suffix: elements ending "bc" -> "abc" in row0, row4.
+        {R"(MATCH_ANY(tags, $ like "%bc"))",
+         R"(MATCH_ANY(st, $[val] like "%bc"))",
+         {0, 4}},
+        // infix: elements containing "b" -> row0, row4 ("abc"), row5 ("cab").
+        {R"(MATCH_ANY(tags, $ like "%b%"))",
+         R"(MATCH_ANY(st, $[val] like "%b%"))",
+         {0, 4, 5}},
+        // infix ALL: row0 (abc,abd), row3 vacuous, row5 (cab); row4 has "xyz".
+        {R"(MATCH_ALL(tags, $ like "%b%"))",
+         R"(MATCH_ALL(st, $[val] like "%b%"))",
+         {0, 3, 5}},
+        // general pattern (Match op): starts "a" AND ends "c" -> only "abc".
+        {R"(MATCH_ANY(tags, $ like "a%c"))",
+         R"(MATCH_ANY(st, $[val] like "a%c"))",
+         {0, 4}},
+        // quantified LIKE: >=2 prefix-matching elements -> only row0.
+        {R"(MATCH_LEAST(tags, $ like "ab%", threshold=2))",
+         R"(MATCH_LEAST(st, $[val] like "ab%", threshold=2))",
+         {0}},
+        // NOT over a pattern MATCH keeps three-valued semantics: T{0,4}
+        // F{2,3,5} U{1} -> NOT keeps the definite-false rows only.
+        {R"(not MATCH_ANY(tags, $ like "ab%"))",
+         R"(not MATCH_ANY(st, $[val] like "ab%"))",
+         {2, 3, 5}},
+    };
+
+    for (const auto& c : cases) {
+        auto scalar_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.scalar_expr);
+        auto struct_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.struct_expr);
+        EXPECT_EQ(scalar_rows, c.expected)
+            << "scalar expr result mismatch: " << c.scalar_expr;
+        EXPECT_EQ(struct_rows, c.expected)
+            << "struct expr result mismatch: " << c.struct_expr;
+        EXPECT_EQ(scalar_rows, struct_rows)
+            << "scalar vs struct divergence: " << c.scalar_expr;
+    }
+}
+
+// Non-empty term IN / NOT IN element predicates on INT64 elements, again for
+// both the scalar-array and struct-array containers with a shared NULL/empty
+// layout. Only the EMPTY in-list was execution-tested before; this pins the
+// populated TermElement path (SetElement) plus NOT-of-MATCH over it.
+TEST_P(ScalarArrayMatchExprTest, TermInNotInElementPredicate) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, true);
+    auto st_val_fid =
+        schema->AddDebugArrayField("st[val]", DataType::INT64, true);
+
+    // row2 is a genuine empty array; row4 is NULL.
+    const std::vector<std::vector<int64_t>> rows = {
+        {1, 2, 3}, {5}, {}, {2, 2}, {}};
+    const std::vector<bool> row_valid = {true, true, true, true, false};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto make_int_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : rows[i]) {
+                data[i].mutable_long_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_int_array(scores_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_int_array(st_val_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    struct Case {
+        std::string scalar_expr;
+        std::string struct_expr;
+        std::set<int64_t> expected;
+    };
+    const std::vector<Case> cases = {
+        // any element in {2,5}: row0(2), row1(5), row3(2,2).
+        {"MATCH_ANY(scores, $ in [2, 5])",
+         "MATCH_ANY(st, $[val] in [2, 5])",
+         {0, 1, 3}},
+        // every element in {2,5}: row1{5}, row2[] vacuous, row3{2,2}.
+        {"MATCH_ALL(scores, $ in [2, 5])",
+         "MATCH_ALL(st, $[val] in [2, 5])",
+         {1, 2, 3}},
+        // >=2 elements in {2,5}: only row3 (two 2s); row0 has just one.
+        {"MATCH_LEAST(scores, $ in [2, 5], threshold=2)",
+         "MATCH_LEAST(st, $[val] in [2, 5], threshold=2)",
+         {3}},
+        // any element != 2 (NOT IN): row0(1,3), row1(5); row3 all-2s fails;
+        // empty row2 can never satisfy ANY.
+        {"MATCH_ANY(scores, $ not in [2])",
+         "MATCH_ANY(st, $[val] not in [2])",
+         {0, 1}},
+        // no element equals 2: row1, row2 (vacuous).
+        {"MATCH_ALL(scores, $ not in [2])",
+         "MATCH_ALL(st, $[val] not in [2])",
+         {1, 2}},
+        // NOT over term MATCH, three-valued: MATCH_ANY($ in [2,5]) is
+        // T{0,1,3} F{2} U{4} -> NOT keeps {2}; NULL row4 must not surface.
+        {"not MATCH_ANY(scores, $ in [2, 5])",
+         "not MATCH_ANY(st, $[val] in [2, 5])",
+         {2}},
+        // NOT over NOT-IN MATCH_ALL: T{1,2} F{0,3} U{4} -> {0,3}.
+        {"not MATCH_ALL(scores, $ not in [2])",
+         "not MATCH_ALL(st, $[val] not in [2])",
+         {0, 3}},
+    };
+
+    for (const auto& c : cases) {
+        auto scalar_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.scalar_expr);
+        auto struct_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.struct_expr);
+        EXPECT_EQ(scalar_rows, c.expected)
+            << "scalar expr result mismatch: " << c.scalar_expr;
+        EXPECT_EQ(struct_rows, c.expected)
+            << "struct expr result mismatch: " << c.struct_expr;
+        EXPECT_EQ(scalar_rows, struct_rows)
+            << "scalar vs struct divergence: " << c.scalar_expr;
+    }
+}
+
+// Struct sub-field inner-predicate variety beyond plain comparisons: ternary
+// range (BinaryRangeExpr over the element), modulo arithmetic
+// (BinaryArithOpEvalRangeExpr over the element), addition arithmetic, and
+// NOT-of-MATCH three-valued behavior over those predicate shapes.
+TEST_P(ScalarArrayMatchExprTest, StructSubFieldPredicateVariety) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto st_val_fid =
+        schema->AddDebugArrayField("st[val]", DataType::INT64, true);
+
+    // row2 is NULL; row3 is a genuine empty array.
+    const std::vector<std::vector<int64_t>> rows = {
+        {1, 2, 3}, {4, 6}, {}, {}, {7}};
+    const std::vector<bool> row_valid = {true, true, false, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : rows[i]) {
+                data[i].mutable_long_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        auto arr = CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](st_val_fid));
+        insert->mutable_fields_data()->AddAllocated(arr.release());
+    }
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        // Ternary range 1 < $[val] < 5: row0 (2,3), row1 (4).
+        {"MATCH_ANY(st, 1 < $[val] < 5)", {0, 1}},
+        // ALL in (1,5): row0 has 1, row1 has 6 -> both fail; empty row3
+        // vacuous; NULL row2 excluded.
+        {"MATCH_ALL(st, 1 < $[val] < 5)", {3}},
+        // Modulo arith: even elements -> row0 (2), row1 (4,6).
+        {"MATCH_ANY(st, $[val] % 2 == 0)", {0, 1}},
+        {"MATCH_ALL(st, $[val] % 2 == 0)", {1, 3}},
+        {"MATCH_LEAST(st, $[val] % 2 == 0, threshold=2)", {1}},
+        // Addition arith: $+1 == 8 -> only row4 (7).
+        {"MATCH_ANY(st, $[val] + 1 == 8)", {4}},
+        // NOT over arith MATCH, three-valued: MATCH_ANY(% 2 == 0) is T{0,1}
+        // F{3,4} U{2} -> {3,4}; the empty row inverts as a definite value
+        // while NULL row2 stays excluded.
+        {"not MATCH_ANY(st, $[val] % 2 == 0)", {3, 4}},
+        // NOT over MATCH_ALL(% 2 == 0): T{1,3} F{0,4} U{2} -> {0,4}.
+        {"not MATCH_ALL(st, $[val] % 2 == 0)", {0, 4}},
+    };
+    for (const auto& [expr, expected] : cases) {
+        EXPECT_EQ(RetrieveMatchedRows(seg.get(), *schema, schema, expr),
+                  expected)
+            << "struct predicate-variety mismatch: " << expr;
+    }
+}
+
+// BOOL element arrays through MATCH_* on both scalar-array and struct
+// sub-field containers.
+TEST_P(ScalarArrayMatchExprTest, BoolArray) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto flags_fid = schema->AddDebugArrayField("flags", DataType::BOOL, true);
+    auto st_flag_fid =
+        schema->AddDebugArrayField("st[flag]", DataType::BOOL, true);
+
+    // row2 is NULL; row3 is a genuine empty array.
+    const std::vector<std::vector<bool>> rows = {
+        {true, false}, {false}, {}, {}, {true, true}};
+    const std::vector<bool> row_valid = {true, true, false, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto make_bool_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (bool v : rows[i]) {
+                data[i].mutable_bool_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_bool_array(flags_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_bool_array(st_flag_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    struct Case {
+        std::string scalar_expr;
+        std::string struct_expr;
+        std::set<int64_t> expected;
+    };
+    const std::vector<Case> cases = {
+        {"MATCH_ANY(flags, $ == true)",
+         "MATCH_ANY(st, $[flag] == true)",
+         {0, 4}},
+        // all true: empty row3 vacuous, row4; NULL row2 excluded.
+        {"MATCH_ALL(flags, $ == true)",
+         "MATCH_ALL(st, $[flag] == true)",
+         {3, 4}},
+        {"MATCH_ANY(flags, $ == false)",
+         "MATCH_ANY(st, $[flag] == false)",
+         {0, 1}},
+        {"MATCH_ALL(flags, $ != false)",
+         "MATCH_ALL(st, $[flag] != false)",
+         {3, 4}},
+        // exactly two true elements -> only row4.
+        {"MATCH_EXACT(flags, $ == true, threshold=2)",
+         "MATCH_EXACT(st, $[flag] == true, threshold=2)",
+         {4}},
+        // zero true elements among non-null rows: row1, empty row3.
+        {"MATCH_MOST(flags, $ == true, threshold=0)",
+         "MATCH_MOST(st, $[flag] == true, threshold=0)",
+         {1, 3}},
+    };
+    for (const auto& c : cases) {
+        auto scalar_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.scalar_expr);
+        auto struct_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.struct_expr);
+        EXPECT_EQ(scalar_rows, c.expected)
+            << "scalar expr result mismatch: " << c.scalar_expr;
+        EXPECT_EQ(struct_rows, c.expected)
+            << "struct expr result mismatch: " << c.struct_expr;
+        EXPECT_EQ(scalar_rows, struct_rows)
+            << "scalar vs struct divergence: " << c.scalar_expr;
+    }
+}
+
+// FLOAT and DOUBLE element arrays through MATCH_*, on the scalar-array
+// (both element widths) and struct sub-field (FLOAT) containers. All literal
+// values used are exactly representable in binary floating point, so the
+// expected sets are exact.
+TEST_P(ScalarArrayMatchExprTest, FloatDoubleArray) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto fvals_fid = schema->AddDebugArrayField("fvals", DataType::FLOAT, true);
+    auto dvals_fid =
+        schema->AddDebugArrayField("dvals", DataType::DOUBLE, true);
+    auto st_fv_fid =
+        schema->AddDebugArrayField("st[fv]", DataType::FLOAT, true);
+
+    // row2 is NULL; row3 is a genuine empty array.
+    const std::vector<std::vector<double>> rows = {
+        {1.0, 2.5}, {0.5}, {}, {}, {2.0, 3.5}};
+    const std::vector<bool> row_valid = {true, true, false, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto make_float_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (double v : rows[i]) {
+                data[i].mutable_float_data()->add_data(static_cast<float>(v));
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+    auto make_double_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (double v : rows[i]) {
+                data[i].mutable_double_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_float_array(fvals_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_double_array(dvals_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_float_array(st_fv_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // (field name, element accessor) pairs for the three containers; every
+    // case template is instantiated against each and must agree.
+    const std::vector<std::pair<std::string, std::string>> containers = {
+        {"fvals", "$"}, {"dvals", "$"}, {"st", "$[fv]"}};
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        // any element > 1.5: row0 (2.5), row4 (2.0, 3.5).
+        {"MATCH_ANY({F}, {E} > 1.5)", {0, 4}},
+        // all elements > 1.5: empty row3 vacuous, row4; NULL row2 excluded.
+        {"MATCH_ALL({F}, {E} > 1.5)", {3, 4}},
+        // >=2 elements > 1.5: only row4.
+        {"MATCH_LEAST({F}, {E} > 1.5, threshold=2)", {4}},
+        // all elements >= 0.5: rows 0,1,4; empty row3 vacuous.
+        {"MATCH_ALL({F}, {E} >= 0.5)", {0, 1, 3, 4}},
+        // ternary range over float elements: 0.25 < $ < 1.25 -> row0 (1.0),
+        // row1 (0.5).
+        {"MATCH_ANY({F}, 0.25 < {E} < 1.25)", {0, 1}},
+    };
+
+    auto instantiate = [](std::string tmpl,
+                          const std::string& field,
+                          const std::string& elem) {
+        auto replace_all =
+            [](std::string& s, const std::string& from, const std::string& to) {
+                for (size_t pos = s.find(from); pos != std::string::npos;
+                     pos = s.find(from, pos + to.size())) {
+                    s.replace(pos, from.size(), to);
+                }
+            };
+        replace_all(tmpl, "{F}", field);
+        replace_all(tmpl, "{E}", elem);
+        return tmpl;
+    };
+
+    for (const auto& [tmpl, expected] : cases) {
+        std::set<std::set<int64_t>> distinct_results;
+        for (const auto& [field, elem] : containers) {
+            auto expr = instantiate(tmpl, field, elem);
+            auto rows_out =
+                RetrieveMatchedRows(seg.get(), *schema, schema, expr);
+            EXPECT_EQ(rows_out, expected)
+                << "float/double MATCH mismatch: " << expr;
+            distinct_results.insert(rows_out);
+        }
+        EXPECT_EQ(distinct_results.size(), 1u)
+            << "float/double/struct containers diverged for: " << tmpl;
+    }
+}
+
+// An ALL-NULL array segment (every row's array is NULL) must yield ZERO rows
+// for every quantifier: each row is UNKNOWN under three-valued MATCH and a
+// filter keeps only definite trues. Covers scalar-array and struct sub-field
+// containers, sealed and growing via the suite param.
+TEST_P(ScalarArrayMatchExprTest, AllNullRowsMatchNothing) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, true);
+    auto st_val_fid =
+        schema->AddDebugArrayField("st[val]", DataType::INT64, true);
+
+    const int64_t N = 4;
+    const std::vector<std::vector<int64_t>> rows(N);  // all zero-element
+    const std::vector<bool> row_valid(N, false);      // every row NULL
+
+    auto make_int_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_int_array(scores_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_int_array(st_val_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    const std::vector<std::string> exprs = {
+        "MATCH_ANY(scores, $ >= 0)",
+        "MATCH_ALL(scores, $ >= 0)",
+        "MATCH_MOST(scores, $ >= 0, threshold=5)",
+        "MATCH_EXACT(scores, $ >= 0, threshold=0)",
+        "MATCH_ANY(st, $[val] >= 0)",
+        "MATCH_ALL(st, $[val] >= 0)",
+    };
+    for (const auto& e : exprs) {
+        EXPECT_EQ(RetrieveMatchedRows(seg.get(), *schema, schema, e),
+                  (std::set<int64_t>{}))
+            << "all-NULL segment must match nothing: " << e;
+    }
+}
+
+// OR / AND composition of two independent MATCH_* expressions over two
+// different array fields, exercising the ConjunctExpr folding of two
+// quantified children.
+TEST_P(ScalarArrayMatchExprTest, OrOfTwoMatchExprs) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, false);
+    auto tags_fid =
+        schema->AddDebugArrayField("tags", DataType::VARCHAR, false);
+
+    const std::vector<std::vector<int64_t>> score_rows = {
+        {95}, {40}, {}, {100}};
+    const std::vector<std::vector<std::string>> tag_rows = {
+        {"x"}, {"y"}, {"x"}, {}};
+    const int64_t N = static_cast<int64_t>(score_rows.size());
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : score_rows[i]) {
+                data[i].mutable_long_data()->add_data(v);
+            }
+        }
+        auto arr = CreateDataArrayFrom(
+            data.data(), nullptr, N, schema->operator[](scores_fid));
+        insert->mutable_fields_data()->AddAllocated(arr.release());
+    }
+    {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (const auto& v : tag_rows[i]) {
+                data[i].mutable_string_data()->add_data(v);
+            }
+        }
+        auto arr = CreateDataArrayFrom(
+            data.data(), nullptr, N, schema->operator[](tags_fid));
+        insert->mutable_fields_data()->AddAllocated(arr.release());
+    }
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(scores,$>90) -> {0,3}; MATCH_ANY(tags,$=="x") -> {0,2}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(scores, $ > 90) || )"
+                                  R"(MATCH_ANY(tags, $ == "x"))"),
+              (std::set<int64_t>{0, 2, 3}));
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(scores, $ > 90) && )"
+                                  R"(MATCH_ANY(tags, $ == "x"))"),
+              (std::set<int64_t>{0}));
+    // MATCH_ALL(scores,$>90) -> {0,2,3} ([] vacuous); OR {0,2} -> {0,2,3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ALL(scores, $ > 90) || )"
+                                  R"(MATCH_ANY(tags, $ == "x"))"),
+              (std::set<int64_t>{0, 2, 3}));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SegTypes,
+    ScalarArrayMatchExprTest,
+    ::testing::Values(ScalarArraySegType::kSealed,
+                      ScalarArraySegType::kGrowing),
+    [](const ::testing::TestParamInfo<ScalarArraySegType>& info) {
+        return info.param == ScalarArraySegType::kSealed ? "Sealed" : "Growing";
+    });
+
+namespace milvus::segcore {
+// Test-only accessor for the private FillDefaultValueFields() entry point.
+// ApplyLoadDiff() normally calls it for diff.fields_to_fill_default during a
+// schema-evolution reopen; this lets a unit test drive it directly without
+// constructing a full SegmentLoadInfo proto.
+class ScalarArrayFillDefaultTestAccess {
+ public:
+    static void
+    FillDefaultValueFields(ChunkedSegmentSealedImpl* segment,
+                           const std::vector<FieldId>& field_ids) {
+        segment->FillDefaultValueFields(field_ids);
+    }
+};
+}  // namespace milvus::segcore
+
+// Regression: a nullable scalar ARRAY field added AFTER a segment was sealed is
+// materialized through ChunkedSegmentSealedImpl::FillDefaultValueFields() ->
+// fill_empty_field() for the pre-existing rows, NOT through the normal load
+// path that builds array offsets. Before the fix, EnsureArrayOffsetsForStructField()
+// early-returned for non-struct (scalar) arrays, so array_offsets_map_ never got
+// an entry; MATCH_* then hit `AssertInfo(array_offsets != nullptr)` and threw.
+//
+// The fill path must register all-NULL offsets: element ranges are all empty,
+// but row validity is all false. DefaultValueChunkTranslator materializes every
+// backfilled row as NULL (Arrow AppendNulls), NOT as an empty array. Under
+// three-valued MATCH/contains semantics a NULL row yields UNKNOWN and remains
+// excluded under NOT. (An actual non-null empty array `[]` would still be
+// vacuously true for MATCH_ALL -- see the row3 case in
+// ScalarArrayMatchExprTest.Int64Array.)
+TEST(ScalarArrayFillDefaultAfterSeal, MatchTreatsBackfilledRowsAsNull) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    // Fields added after creation must be nullable (proxy AddField constraint).
+    auto scores_fid = schema->AddDebugArrayField(
+        "scores", DataType::INT64, /*nullable=*/true);
+
+    constexpr int64_t N = 4;
+
+    // Build an insert carrying ONLY `id`. `scores` is absent from the binlog,
+    // exactly as an old sealed segment whose data predates AddField(scores).
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->set_num_rows(N);
+
+    GeneratedData generated;
+    generated.schema_ = schema;
+    generated.raw_ = insert.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated.row_ids_.push_back(i);
+        generated.timestamps_.push_back(i);
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, generated);
+
+    auto* sealed_impl =
+        dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed_impl, nullptr);
+
+    // Sanity: before the fill, the scalar array has no offsets registered.
+    ASSERT_EQ(sealed_impl->GetArrayOffsets(scores_fid), nullptr);
+
+    // Drive the schema-evolution fill path for the newly added scalar array.
+    milvus::segcore::ScalarArrayFillDefaultTestAccess::FillDefaultValueFields(
+        sealed_impl, {scores_fid});
+
+    // The fix must register all-NULL offsets: zero element ranges plus an
+    // explicit all-false row-valid bitmap.
+    auto offsets = sealed_impl->GetArrayOffsets(scores_fid);
+    ASSERT_NE(offsets, nullptr)
+        << "scalar ARRAY field filled after seal must get array offsets";
+    milvus::TargetBitmap row_valid_probe(N, true);
+    offsets->AndRowValidBitmap(row_valid_probe.view(), 0, N);
+    EXPECT_TRUE(row_valid_probe.none());
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto run = [&](const std::string& expr) {
+        auto plan_str = schema_handle.Parse(expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        auto result = segment->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+        EXPECT_NE(result, nullptr);
+        std::set<int64_t> rows;
+        for (const auto& offset : result->offset()) {
+            rows.insert(offset);
+        }
+        return rows;
+    };
+
+    // MATCH_ANY over NULL rows: excluded -> no rows. The key assertion is that
+    // this does NOT throw (the pre-fix missing-offsets assert).
+    EXPECT_EQ(run("MATCH_ANY(scores, $ > 0)"), (std::set<int64_t>{}));
+
+    // MATCH_ALL over NULL rows: three-valued -> UNKNOWN -> excluded (NOT a
+    // vacuous match, since these rows are NULL, not empty arrays).
+    EXPECT_EQ(run("MATCH_ALL(scores, $ >= 60)"), (std::set<int64_t>{}));
+
+    // Load an empty nested index. The element bitmap alone cannot distinguish
+    // NULL from [], so row validity must come from IArrayOffsets. In particular,
+    // NOT must not turn the zero-hit NULL rows into matches.
+    std::vector<boost::container::vector<int64_t>> arrays(N);
+    auto index = std::make_unique<index::InvertedIndexTantivy<int64_t>>();
+    Config cfg;
+    cfg["is_array"] = true;
+    cfg["is_nested_index"] = true;
+    index->BuildWithRawDataForUT(N, arrays.data(), cfg);
+
+    LoadIndexInfo info{};
+    info.field_id = scores_fid.get();
+    info.index_params = GenIndexParams(index.get());
+    info.cache_index =
+        CreateTestCacheIndex("backfilled_scores", std::move(index));
+    sealed_impl->LoadIndex(info);
+
+    EXPECT_EQ(run("array_contains(scores, 5)"), (std::set<int64_t>{}));
+    EXPECT_EQ(run("not array_contains(scores, 5)"), (std::set<int64_t>{}));
+}
+
+// Nullable scalar array, two ingestion paths must agree.
+//
+// A growing segment can receive array data two ways, and MATCH_*/element_filter
+// builds its per-row element-offset table differently for each:
+//   - "new" data  -> realtime Insert      -> ExtractArrayLengths
+//                                             (reads the dense insert proto)
+//   - "old" data  -> binlog LoadFieldData  -> ExtractArrayLengthsFromFieldData
+//                                             (reads in-memory FieldData, which
+//                                              is COMPACT for nullable arrays:
+//                                              a NULL row occupies no slot)
+//
+// The binlog-load path must therefore index the compact buffer by physical
+// (valid-only) position, not by logical row index -- otherwise a NULL row that
+// precedes valid rows shifts every later read and runs past the buffer end.
+// This test loads a nullable Int64 array whose NULLs are at the front/interior
+// (rows 0 and 2) through the binlog path, and builds a second growing segment
+// with the identical layout through Insert, then asserts both produce the SAME,
+// correct MATCH_* row sets.
+//
+// Behavior asserted is the three-valued one (a NULL row yields UNKNOWN and is
+// excluded from every MATCH_* -- see
+// ScalarArrayMatchExprTest.NullableArrayScalarStructAligned); the point of this
+// test is that the load path and the insert path agree and neither corrupts
+// lengths.
+TEST(ScalarArrayMatchNullableIngest, BinlogLoadAndInsertAgree) {
+    // row0=NULL, row1=[95,80], row2=NULL, row3=[100,100,100], row4=[40]
+    const std::vector<std::vector<int64_t>> rows = {
+        {}, {95, 80}, {}, {100, 100, 100}, {40}};
+    const std::vector<bool> row_valid = {false, true, false, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto make_schema = [&]() {
+        auto schema = std::make_shared<Schema>();
+        auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+        schema->set_primary_field_id(pk_fid);
+        auto scores_fid =
+            schema->AddDebugArrayField("scores", DataType::INT64, true);
+        return std::make_tuple(schema, pk_fid, scores_fid);
+    };
+
+    // Parse `expr`, run a full-recall Retrieve, return matched segment offsets.
+    auto retrieve_rows = [](SegmentInterface* seg,
+                            const Schema& schema,
+                            const SchemaPtr& schema_ptr,
+                            const std::string& expr) {
+        ScopedSchemaHandle schema_handle(schema);
+        auto plan_str = schema_handle.Parse(expr);
+        auto plan = CreateRetrievePlanByExpr(
+            schema_ptr, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        auto result = seg->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+        EXPECT_NE(result, nullptr);
+        std::set<int64_t> out;
+        for (const auto& off : result->offset()) {
+            out.insert(off);
+        }
+        return out;
+    };
+
+    // ---- "old" data: build a growing segment via the binlog LoadFieldData path.
+    auto [load_schema, load_pk_fid, load_scores_fid] = make_schema();
+    auto loaded = CreateGrowingSegment(load_schema, empty_index_meta);
+    {
+        // Build the same logical layout as a proto InsertRecord (pk + the
+        // nullable scores array with its valid bitmap), then load it through the
+        // canonical binlog path. LoadGeneratedDataIntoSegment bundles RowID +
+        // Timestamp + pk + user fields into a SINGLE LoadFieldDataInfo (matching
+        // SegmentGrowingImpl::Load, whose load_field_data_internal asserts the
+        // system+pk fields are present together) and converts each field via
+        // CreateFieldDataFromDataArray -- the SAME production conversion that
+        // materializes a nullable scalar ARRAY FieldData COMPACTLY (a NULL row
+        // occupies no slot in the underlying buffer). Hand-building the
+        // FieldData with the dense 4-arg FillFieldData does NOT reproduce that
+        // compact layout, so ExtractArrayLengthsFromFieldData (which indexes the
+        // compact buffer by physical position) would read wrong element lengths.
+        auto proto = std::make_unique<InsertRecordProto>();
+        std::vector<int64_t> ids(N);
+        std::iota(ids.begin(), ids.end(), 0);
+        auto id_array = CreateDataArrayFrom(
+            ids.data(), nullptr, N, load_schema->operator[](load_pk_fid));
+        proto->mutable_fields_data()->AddAllocated(id_array.release());
+
+        std::vector<milvus::proto::schema::ScalarField> scores(N);
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : rows[i]) {
+                scores[i].mutable_long_data()->add_data(v);
+            }
+            valid[i] = row_valid[i];
+        }
+        auto scores_array =
+            CreateDataArrayFrom(scores.data(),
+                                valid.data(),
+                                N,
+                                load_schema->operator[](load_scores_fid));
+        proto->mutable_fields_data()->AddAllocated(scores_array.release());
+        proto->set_num_rows(N);
+
+        GeneratedData generated;
+        generated.schema_ = load_schema;
+        generated.raw_ = proto.release();
+        for (int64_t i = 0; i < N; ++i) {
+            generated.row_ids_.push_back(i);
+            generated.timestamps_.push_back(i);
+        }
+        LoadGeneratedDataIntoSegment(generated, loaded.get());
+    }
+
+    // ---- "new" data: build a growing segment with the same layout via Insert.
+    auto [ins_schema, ins_pk_fid, ins_scores_fid] = make_schema();
+    auto inserted = CreateGrowingSegment(ins_schema, empty_index_meta);
+    {
+        auto insert = std::make_unique<InsertRecordProto>();
+        std::vector<int64_t> ids(N);
+        std::iota(ids.begin(), ids.end(), 0);
+        auto id_array = CreateDataArrayFrom(
+            ids.data(), nullptr, N, ins_schema->operator[](ins_pk_fid));
+        insert->mutable_fields_data()->AddAllocated(id_array.release());
+
+        std::vector<milvus::proto::schema::ScalarField> scores(N);
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : rows[i]) {
+                scores[i].mutable_long_data()->add_data(v);
+            }
+            valid[i] = row_valid[i];
+        }
+        auto scores_array =
+            CreateDataArrayFrom(scores.data(),
+                                valid.data(),
+                                N,
+                                ins_schema->operator[](ins_scores_fid));
+        insert->mutable_fields_data()->AddAllocated(scores_array.release());
+        insert->set_num_rows(N);
+
+        std::vector<idx_t> row_ids(N);
+        std::vector<Timestamp> tss(N);
+        for (int64_t i = 0; i < N; ++i) {
+            row_ids[i] = i;
+            tss[i] = i;
+        }
+        inserted->PreInsert(N);
+        inserted->Insert(0, N, row_ids.data(), tss.data(), insert.get());
+    }
+
+    // Expected MATCH_* row sets under three-valued semantics (NULL -> UNKNOWN,
+    // excluded from every quantifier):
+    //   $ > 90   : row1(95) and row3(100,100,100)               -> {1, 3}
+    //   $ >= 60  : row1 ok; row3 ok; NULL rows 0,2 excluded;
+    //              row4 (40) fails                                -> {1, 3}
+    //   $ < 50   : only row4 (40)                                 -> {4}
+    //   == 100, threshold>=2 : only row3 (three 100s)            -> {3}
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        {"MATCH_ANY(scores, $ > 90)", {1, 3}},
+        {"MATCH_ALL(scores, $ >= 60)", {1, 3}},
+        {"MATCH_ANY(scores, $ < 50)", {4}},
+        {"MATCH_LEAST(scores, $ == 100, threshold=2)", {3}},
+    };
+
+    for (const auto& [expr, expected] : cases) {
+        auto loaded_rows =
+            retrieve_rows(loaded.get(), *load_schema, load_schema, expr);
+        auto inserted_rows =
+            retrieve_rows(inserted.get(), *ins_schema, ins_schema, expr);
+        EXPECT_EQ(loaded_rows, expected)
+            << "binlog-load path wrong for: " << expr;
+        EXPECT_EQ(inserted_rows, expected) << "insert path wrong for: " << expr;
+        // The two ingestion paths must agree on a nullable array.
+        EXPECT_EQ(loaded_rows, inserted_rows)
+            << "load vs insert divergence for: " << expr;
+    }
+}
+
+namespace {
+
+// Build a sealed segment with pk(INT64) + a scalar VARCHAR Array field `tags`
+// holding `rows`. `valid` (if non-empty) marks per-row nullability. When
+// `exclude_tags_raw` is true the array field's RAW data is NOT loaded (only the
+// system fields + pk are), simulating an "index-only" load.
+std::unique_ptr<SegmentSealed>
+MakeSealedScalarVarCharArray(const SchemaPtr& schema,
+                             FieldId pk_fid,
+                             FieldId tags_fid,
+                             const std::vector<std::vector<std::string>>& rows,
+                             const std::vector<bool>& valid,
+                             bool exclude_tags_raw) {
+    const int64_t N = static_cast<int64_t>(rows.size());
+    auto insert = std::make_unique<InsertRecordProto>();
+
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_arr =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_arr.release());
+
+    std::vector<milvus::proto::schema::ScalarField> tags(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (const auto& v : rows[i]) {
+            tags[i].mutable_string_data()->add_data(v);
+        }
+    }
+    FixedVector<bool> vb;
+    const void* valid_ptr = nullptr;
+    if (!valid.empty()) {
+        vb.resize(N);
+        for (int64_t i = 0; i < N; ++i) {
+            vb[i] = valid[i];
+        }
+        valid_ptr = vb.data();
+    }
+    auto tags_arr = CreateDataArrayFrom(
+        tags.data(), valid_ptr, N, schema->operator[](tags_fid));
+    insert->mutable_fields_data()->AddAllocated(tags_arr.release());
+    insert->set_num_rows(N);
+
+    GeneratedData generated;
+    generated.schema_ = schema;
+    generated.raw_ = insert.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated.row_ids_.push_back(i);
+        generated.timestamps_.push_back(i);
+    }
+
+    std::vector<int64_t> excluded;
+    if (exclude_tags_raw) {
+        excluded.push_back(tags_fid.get());
+    }
+    return CreateSealedWithFieldDataLoaded(schema, generated, false, excluded);
+}
+
+// Build + load a nested inverted index over the scalar VARCHAR array `tags_fid`.
+void
+LoadScalarVarCharArrayNestedIndex(
+    SegmentSealed* seg,
+    FieldId tags_fid,
+    int64_t N,
+    const std::vector<std::vector<std::string>>& rows) {
+    std::vector<boost::container::vector<std::string>> arrays(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (const auto& v : rows[i]) {
+            arrays[i].push_back(v);
+        }
+    }
+    auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
+    Config cfg;
+    cfg["is_array"] = true;
+    cfg["is_nested_index"] = true;
+    index->BuildWithRawDataForUT(N, arrays.data(), cfg);
+    LoadIndexInfo info{};
+    info.field_id = tags_fid.get();
+    info.index_params = GenIndexParams(index.get());
+    info.cache_index = CreateTestCacheIndex("scalar_tags", std::move(index));
+    seg->LoadIndex(info);
+}
+
+std::set<int64_t>
+RetrieveMatchRowsLocal(SegmentInterface* seg,
+                       const Schema& schema,
+                       const SchemaPtr& schema_ptr,
+                       const std::string& expr) {
+    ScopedSchemaHandle handle(schema);
+    auto plan_str = handle.Parse(expr);
+    auto plan =
+        CreateRetrievePlanByExpr(schema_ptr, plan_str.data(), plan_str.size());
+    auto result = seg->Retrieve(
+        nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    std::set<int64_t> out;
+    for (const auto& off : result->offset()) {
+        out.insert(off);
+    }
+    return out;
+}
+
+}  // namespace
+
+// Case A: scalar ARRAY + nested inverted index, non-nullable. MATCH must use the
+// index (acceleration path) and still produce the correct row sets -- the index
+// serves the element predicate, IArrayOffsets (built from raw) does the
+// per-row quantifier counting.
+TEST(ScalarArrayMatchIndex, NestedInvertedIndexAccelerates) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid =
+        schema->AddDebugArrayField("tags", DataType::VARCHAR, false);
+
+    const std::vector<std::vector<std::string>> rows = {
+        {"x", "y"}, {"z"}, {"x"}, {}, {"y"}};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto seg = MakeSealedScalarVarCharArray(schema,
+                                            pk_fid,
+                                            tags_fid,
+                                            rows,
+                                            /*valid=*/{},
+                                            /*exclude_tags_raw=*/false);
+    LoadScalarVarCharArrayNestedIndex(seg.get(), tags_fid, N, rows);
+
+    EXPECT_EQ(RetrieveMatchRowsLocal(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(tags, $ == "x"))"),
+              (std::set<int64_t>{0, 2}));
+    // every element != "z": row1 ("z") fails; empty row3 vacuously true.
+    EXPECT_EQ(RetrieveMatchRowsLocal(
+                  seg.get(), *schema, schema, R"(MATCH_ALL(tags, $ != "z"))"),
+              (std::set<int64_t>{0, 2, 3, 4}));
+    EXPECT_EQ(
+        RetrieveMatchRowsLocal(seg.get(),
+                               *schema,
+                               schema,
+                               R"(MATCH_LEAST(tags, $ == "x", threshold=1))"),
+        (std::set<int64_t>{0, 2}));
+}
+
+// Case B: scalar ARRAY + nested inverted index, NULLABLE. The index has no
+// entries for NULL/empty rows. Three-valued MATCH excludes the NULL row while
+// the genuine empty `[]` row still participates vacuously -- and this stays
+// correct even on the index path.
+TEST(ScalarArrayMatchIndex, NestedInvertedIndexNullable) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+
+    // row1 = NULL, row3 = empty []
+    const std::vector<std::vector<std::string>> rows = {
+        {"x", "y"}, {}, {"z"}, {}, {"x"}};
+    const std::vector<bool> valid = {true, false, true, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto seg = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+    LoadScalarVarCharArrayNestedIndex(seg.get(), tags_fid, N, rows);
+
+    EXPECT_EQ(RetrieveMatchRowsLocal(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(tags, $ == "x"))"),
+              (std::set<int64_t>{0, 4}));
+    // every element != "" : empty(3) is vacuously true and all valued rows have
+    // non-empty elements; NULL(1) is excluded (three-valued) -> {0,2,3,4}.
+    EXPECT_EQ(RetrieveMatchRowsLocal(
+                  seg.get(), *schema, schema, R"(MATCH_ALL(tags, $ != ""))"),
+              (std::set<int64_t>{0, 2, 3, 4}));
+}
+
+// Case C: "index-only" -- the array field's nested index is loaded but its RAW
+// data is NOT, so no IArrayOffsets is built. MATCH cannot quantify without the
+// offsets and raises a typed ExprInvalid error (a stable deployment-config
+// limitation, not an internal bug), rather than silently dropping rows. This
+// pins the known index-only limitation: an index alone cannot serve MATCH
+// because it carries no row<->element mapping and no zero-element rows.
+TEST(ScalarArrayMatchIndex, IndexOnlyWithoutRawHasNoOffsets) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+
+    const std::vector<std::vector<std::string>> rows = {
+        {"x", "y"}, {}, {"z"}, {}, {"x"}};
+    const std::vector<bool> valid = {true, false, true, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    // Raw for `tags` is excluded -> load_field_data_common never runs for it ->
+    // ArrayOffsetsSealed is never built; only the nested index is present.
+    auto seg = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/true);
+    LoadScalarVarCharArrayNestedIndex(seg.get(), tags_fid, N, rows);
+
+    // Build MATCH_ANY(tags, $ == "x") as a typed expr and evaluate it directly
+    // via ExprSet: the Driver-level executor behind seg->Retrieve re-wraps
+    // every operator exception into ExecOperatorException, which would hide
+    // the error code this test pins.
+    proto::plan::ColumnInfo pred_col_pb;
+    pred_col_pb.set_field_id(tags_fid.get());
+    pred_col_pb.set_data_type(proto::schema::DataType::Array);
+    pred_col_pb.set_element_type(proto::schema::DataType::VarChar);
+    pred_col_pb.set_is_element_level(true);
+    pred_col_pb.set_nullable(true);
+    proto::plan::GenericValue x_val;
+    x_val.set_string_val("x");
+    auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(pred_col_pb), proto::plan::OpType::Equal, x_val);
+    auto match_expr = std::make_shared<expr::MatchExpr>(
+        "tags", proto::plan::MatchType::MatchAny, 0, predicate);
+
+    exec::QueryContext query_context(
+        DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    exec::ExprSet expr_set({match_expr}, &exec_context);
+    exec::EvalCtx eval_ctx(&exec_context);
+    std::vector<VectorPtr> results;
+
+    // GetArrayOffsets returns null -> MATCH raises ExprInvalid instead of
+    // returning a wrong (silently null-/empty-dropping) result.
+    EXPECT_THROW(
+        try {
+            expr_set.Eval(eval_ctx, results);
+        } catch (const SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), ErrorCode::ExprInvalid);
+            throw;
+        },
+        SegcoreError);
+}
+
+namespace {
+
+// Sealed segment with pk(INT64) + a scalar INT64 Array field holding `rows`
+// (with per-row null `valid`), raw loaded.
+std::unique_ptr<SegmentSealed>
+MakeSealedScalarInt64Array(const SchemaPtr& schema,
+                           FieldId pk_fid,
+                           FieldId scores_fid,
+                           const std::vector<std::vector<int64_t>>& rows,
+                           const std::vector<bool>& valid) {
+    const int64_t N = static_cast<int64_t>(rows.size());
+    auto insert = std::make_unique<InsertRecordProto>();
+
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_arr =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_arr.release());
+
+    std::vector<milvus::proto::schema::ScalarField> scores(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (auto v : rows[i]) {
+            scores[i].mutable_long_data()->add_data(v);
+        }
+    }
+    FixedVector<bool> vb;
+    const void* valid_ptr = nullptr;
+    if (!valid.empty()) {
+        vb.resize(N);
+        for (int64_t i = 0; i < N; ++i) {
+            vb[i] = valid[i];
+        }
+        valid_ptr = vb.data();
+    }
+    auto scores_arr = CreateDataArrayFrom(
+        scores.data(), valid_ptr, N, schema->operator[](scores_fid));
+    insert->mutable_fields_data()->AddAllocated(scores_arr.release());
+    insert->set_num_rows(N);
+
+    GeneratedData generated;
+    generated.schema_ = schema;
+    generated.raw_ = insert.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated.row_ids_.push_back(i);
+        generated.timestamps_.push_back(i);
+    }
+    return CreateSealedWithFieldDataLoaded(schema, generated, false, {});
+}
+
+void
+LoadScalarInt64ArrayNestedIndex(SegmentSealed* seg,
+                                FieldId scores_fid,
+                                int64_t N,
+                                const std::vector<std::vector<int64_t>>& rows) {
+    std::vector<boost::container::vector<int64_t>> arrays(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (auto v : rows[i]) {
+            arrays[i].push_back(v);
+        }
+    }
+    auto index = std::make_unique<index::InvertedIndexTantivy<int64_t>>();
+    Config cfg;
+    cfg["is_array"] = true;
+    cfg["is_nested_index"] = true;
+    index->BuildWithRawDataForUT(N, arrays.data(), cfg);
+    LoadIndexInfo info{};
+    info.field_id = scores_fid.get();
+    info.index_params = GenIndexParams(index.get());
+    info.cache_index = CreateTestCacheIndex("scalar_scores", std::move(index));
+    seg->LoadIndex(info);
+}
+
+}  // namespace
+
+// Differential consistency: the SAME randomized data is loaded into two sealed
+// segments -- one with a nested inverted index (DetermineExecPath commits to the
+// ScalarIndex path, since a compatible index is present) and one without (the
+// RawData / brute-force path). Every MATCH_* expression must produce the
+// IDENTICAL row set on both. There are no hand-computed expected sets: the
+// brute-force segment is the oracle for the indexed one, so any divergence
+// between the index and brute-force code paths fails the test.
+TEST(ScalarArrayMatchIndexConsistency, Int64IndexedEqualsBruteForce) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, true);
+
+    const int64_t N = 300;
+    std::default_random_engine rng(20260625);
+    std::uniform_int_distribution<int> len_dist(0, 5);   // 0 => empty arrays
+    std::uniform_int_distribution<int> val_dist(0, 9);   // small value domain
+    std::uniform_int_distribution<int> null_dist(0, 9);  // ~10% null rows
+
+    std::vector<std::vector<int64_t>> rows(N);
+    std::vector<bool> valid(N, true);
+    for (int64_t i = 0; i < N; ++i) {
+        if (null_dist(rng) == 0) {
+            valid[i] = false;
+            continue;  // null row: no elements
+        }
+        int len = len_dist(rng);
+        for (int j = 0; j < len; ++j) {
+            rows[i].push_back(val_dist(rng));
+        }
+    }
+
+    auto indexed =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+    LoadScalarInt64ArrayNestedIndex(indexed.get(), scores_fid, N, rows);
+    auto brute =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+
+    const std::vector<std::string> exprs = {
+        "MATCH_ANY(scores, $ > 5)",
+        "MATCH_ALL(scores, $ >= 0)",
+        "MATCH_ALL(scores, $ < 5)",
+        "MATCH_ANY(scores, $ == 7)",
+        "MATCH_LEAST(scores, $ > 5, threshold=2)",
+        "MATCH_MOST(scores, $ == 0, threshold=1)",
+        "MATCH_EXACT(scores, $ == 9, threshold=0)",
+        "MATCH_EXACT(scores, $ == 9, threshold=2)",
+        "MATCH_ANY(scores, $ > 2 && $ < 8)",
+        "MATCH_ALL(scores, $ >= 0 && $ <= 9)",
+        "MATCH_ANY(scores, 2 < $ < 8)",
+        "MATCH_ANY(scores, $ == 1 || $ == 2)",
+    };
+    for (const auto& e : exprs) {
+        auto ri = RetrieveMatchRowsLocal(indexed.get(), *schema, schema, e);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, e);
+        EXPECT_EQ(ri, rb) << "index vs brute-force mismatch for: " << e;
+    }
+}
+
+TEST(ScalarArrayMatchIndexConsistency, VarCharIndexedEqualsBruteForce) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+
+    const int64_t N = 300;
+    const std::vector<std::string> vocab = {"a", "b", "c", "d", "e"};
+    std::default_random_engine rng(7777);
+    std::uniform_int_distribution<int> len_dist(0, 5);
+    std::uniform_int_distribution<int> val_dist(0, 4);
+    std::uniform_int_distribution<int> null_dist(0, 9);
+
+    std::vector<std::vector<std::string>> rows(N);
+    std::vector<bool> valid(N, true);
+    for (int64_t i = 0; i < N; ++i) {
+        if (null_dist(rng) == 0) {
+            valid[i] = false;
+            continue;
+        }
+        int len = len_dist(rng);
+        for (int j = 0; j < len; ++j) {
+            rows[i].push_back(vocab[val_dist(rng)]);
+        }
+    }
+
+    auto indexed = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+    LoadScalarVarCharArrayNestedIndex(indexed.get(), tags_fid, N, rows);
+    auto brute = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+
+    const std::vector<std::string> exprs = {
+        R"(MATCH_ANY(tags, $ == "a"))",
+        R"(MATCH_ALL(tags, $ == "a"))",
+        R"(MATCH_ALL(tags, $ != "e"))",
+        R"(MATCH_LEAST(tags, $ == "a", threshold=2))",
+        R"(MATCH_MOST(tags, $ == "b", threshold=1))",
+        R"(MATCH_EXACT(tags, $ == "c", threshold=0))",
+        R"(MATCH_EXACT(tags, $ == "c", threshold=2))",
+        R"(MATCH_ANY(tags, $ == "a" || $ == "b"))",
+    };
+    for (const auto& e : exprs) {
+        auto ri = RetrieveMatchRowsLocal(indexed.get(), *schema, schema, e);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, e);
+        EXPECT_EQ(ri, rb) << "index vs brute-force mismatch for: " << e;
+    }
+}
+
+namespace {
+// Build + load a NON-nested inverted index over a scalar VarChar array. The
+// `is_nested_index` key is deliberately omitted (BuildWithRawDataForUT treats
+// the key's presence, not its value, as the nested flag), so this produces a
+// legacy-style non-nested array index (IsNestedIndex()==false).
+void
+LoadScalarVarCharArrayNonNestedIndex(
+    SegmentSealed* seg,
+    FieldId tags_fid,
+    int64_t N,
+    const std::vector<std::vector<std::string>>& rows) {
+    std::vector<boost::container::vector<std::string>> arrays(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (const auto& v : rows[i]) {
+            arrays[i].push_back(v);
+        }
+    }
+    auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
+    Config cfg;
+    cfg["is_array"] = true;  // NOTE: no "is_nested_index" key -> non-nested
+    index->BuildWithRawDataForUT(N, arrays.data(), cfg);
+    LoadIndexInfo info{};
+    info.field_id = tags_fid.get();
+    info.index_params = GenIndexParams(index.get());
+    info.cache_index =
+        CreateTestCacheIndex("scalar_tags_nonnested", std::move(index));
+    seg->LoadIndex(info);
+}
+}  // namespace
+
+// A non-nested (legacy) array index must NOT corrupt MATCH_*: the element-level
+// child detects the index is not nested and falls back to brute force, so the
+// result equals a segment with no index. (Without the exec-path guard, the
+// element-level predicate would feed a row-level non-nested index result into
+// element-level logic and could return wrong rows.)
+TEST(ScalarArrayMatchIndexConsistency, NonNestedIndexFallsBackToBruteForce) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+
+    const int64_t N = 300;
+    const std::vector<std::string> vocab = {"a", "b", "c", "d", "e"};
+    std::default_random_engine rng(31337);
+    std::uniform_int_distribution<int> len_dist(0, 5);
+    std::uniform_int_distribution<int> val_dist(0, 4);
+    std::uniform_int_distribution<int> null_dist(0, 9);
+
+    std::vector<std::vector<std::string>> rows(N);
+    std::vector<bool> valid(N, true);
+    for (int64_t i = 0; i < N; ++i) {
+        if (null_dist(rng) == 0) {
+            valid[i] = false;
+            continue;
+        }
+        int len = len_dist(rng);
+        for (int j = 0; j < len; ++j) {
+            rows[i].push_back(vocab[val_dist(rng)]);
+        }
+    }
+
+    // Segment with a legacy non-nested array index, plus a brute-force oracle.
+    auto with_legacy_index = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+    LoadScalarVarCharArrayNonNestedIndex(
+        with_legacy_index.get(), tags_fid, N, rows);
+    auto brute = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+
+    const std::vector<std::string> exprs = {
+        R"(MATCH_ANY(tags, $ == "a"))",
+        R"(MATCH_ALL(tags, $ != "e"))",
+        R"(MATCH_LEAST(tags, $ == "a", threshold=2))",
+        R"(MATCH_MOST(tags, $ == "b", threshold=1))",
+        R"(MATCH_EXACT(tags, $ == "c", threshold=0))",
+        R"(MATCH_ANY(tags, $ == "a" || $ == "b"))",
+    };
+    for (const auto& e : exprs) {
+        auto ri =
+            RetrieveMatchRowsLocal(with_legacy_index.get(), *schema, schema, e);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, e);
+        EXPECT_EQ(ri, rb)
+            << "non-nested index must fall back to brute force for: " << e;
+    }
+}
+
+namespace {
+
+// Build + load a NESTED bitmap index over the scalar INT64 array `scores_fid`.
+// Unlike InvertedIndexTantivy, BitmapIndex has no BuildWithRawDataForUT: its
+// nested build path triggers on (field schema is ARRAY && is_nested_index), so
+// hand it a FileManagerContext carrying the ARRAY/INT64 field schema plus a
+// throwaway local chunk manager (BitmapIndex::Load logs through the file
+// manager, so the context must be Valid() even though build / Serialize /
+// Load(BinarySet) never touch remote storage). A freshly built BitmapIndex
+// finalizes its queryable structures on Serialize/Load, so the segment
+// receives the LOADED copy -- matching the production load path.
+void
+LoadScalarInt64ArrayNestedBitmapIndex(
+    SegmentSealed* seg,
+    FieldId scores_fid,
+    const std::vector<std::vector<int64_t>>& rows,
+    const std::vector<bool>& valid) {
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    // Compact nullable ARRAY FieldData: a NULL row occupies no slot.
+    std::vector<milvus::proto::schema::ScalarField> scores(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (auto v : rows[i]) {
+            scores[i].mutable_long_data()->add_data(v);
+        }
+    }
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(N);
+    for (const auto& s : scores) {
+        array_data.emplace_back(s);
+    }
+    std::vector<uint8_t> valid_bytes((N + 7) / 8, 0);
+    for (int64_t i = 0; i < N; ++i) {
+        if (valid[i]) {
+            valid_bytes[i / 8] |= (1 << (i % 8));
+        }
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    field_data->FillFieldData(array_data.data(), valid_bytes.data(), N, 0);
+
+    milvus::proto::schema::FieldSchema field_schema;
+    field_schema.set_data_type(milvus::proto::schema::DataType::Array);
+    field_schema.set_element_type(milvus::proto::schema::DataType::Int64);
+    field_schema.set_nullable(true);
+    auto field_meta =
+        storage::FieldDataMeta{1, 2, 3, scores_fid.get(), field_schema};
+    auto index_meta = storage::IndexMeta{3, scores_fid.get(), 4001, 4001};
+
+    auto root_path = TestLocalPath + "/match_nested_bitmap";
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto built = std::make_unique<index::BitmapIndex<int64_t>>(
+        ctx, /*is_nested_index=*/true);
+    built->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_TRUE(built->IsNestedIndex());
+
+    auto binary_set = built->Serialize({});
+    auto loaded = std::make_unique<index::BitmapIndex<int64_t>>(
+        ctx, /*is_nested_index=*/false);
+    loaded->Load(binary_set, {});
+    // The persisted nested marker must be restored on load; the segment's
+    // pinned scalar index for the field IS this nested bitmap.
+    ASSERT_TRUE(loaded->IsNestedIndex());
+
+    LoadIndexInfo info{};
+    info.field_id = scores_fid.get();
+    info.index_params = GenIndexParams(loaded.get());
+    info.cache_index =
+        CreateTestCacheIndex("scalar_scores_bitmap", std::move(loaded));
+    seg->LoadIndex(info);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+}  // namespace
+
+// MATCH execution end-to-end through a nested BITMAP index. The nested-index
+// e2e coverage above goes through tantivy/INVERTED only; the exec path is
+// index-type agnostic, so a nested BitmapIndex must serve the element
+// predicate the same way: bitmap In/Range answers element-level bits,
+// IArrayOffsets (built from raw) folds them per row for the quantifier, and
+// three-valued NULL semantics hold. All five quantifiers are pinned against
+// hand-computed sets AND cross-checked against an identical index-free
+// (brute-force) segment.
+TEST(ScalarArrayMatchIndex, NestedBitmapIndexNullable) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, true);
+
+    // Against the element predicate $ > 100:
+    //   row0 = NULL, row1 = [] (empty, non-null), row2 = one match,
+    //   row3 = all match, row4 = zero match.
+    const std::vector<std::vector<int64_t>> rows = {
+        {}, {}, {10, 200}, {150, 250}, {10, 20}};
+    const std::vector<bool> valid = {false, true, true, true, true};
+
+    auto indexed =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+    LoadScalarInt64ArrayNestedBitmapIndex(
+        indexed.get(), scores_fid, rows, valid);
+    auto brute =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+
+    // NULL row0 is excluded from every quantifier (three-valued semantics);
+    // empty row1 still participates: vacuously true under MATCH_ALL and zero
+    // matching elements under MATCH_MOST/MATCH_EXACT(threshold=0).
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        {"MATCH_ANY(scores, $ > 100)", {2, 3}},
+        {"MATCH_ALL(scores, $ > 100)", {1, 3}},
+        {"MATCH_LEAST(scores, $ > 100, threshold=1)", {2, 3}},
+        {"MATCH_MOST(scores, $ > 100, threshold=0)", {1, 4}},
+        {"MATCH_EXACT(scores, $ > 100, threshold=0)", {1, 4}},
+    };
+    for (const auto& [expr, expected] : cases) {
+        auto ri = RetrieveMatchRowsLocal(indexed.get(), *schema, schema, expr);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, expr);
+        EXPECT_EQ(ri, expected) << "bitmap-index path wrong for: " << expr;
+        EXPECT_EQ(rb, expected) << "brute-force path wrong for: " << expr;
+        EXPECT_EQ(ri, rb) << "bitmap index vs brute-force mismatch for: "
+                          << expr;
+    }
+}
+
+// array_contains_all(scores, []) has IS-NOT-NULL-like semantics: vacuously
+// TRUE for every row holding a real array (including the empty []), UNKNOWN
+// for the NULL row — matching the non-empty ContainsAll NULL treatment and
+// pg's strict `arr @> '{}'` (NULL @> '{}' yields NULL, not true). Checked on
+// a brute-force segment AND on one with a nested scalar index, where the
+// empty-set ContainsAll must bypass the index and scan raw data.
+TEST(ScalarArrayMatchIndex, ContainsAllEmptyListIsNotNullSemantics) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, true);
+
+    // row0: real array, row1: real EMPTY array, row2: NULL.
+    const std::vector<std::vector<int64_t>> rows = {{10, 20}, {}, {}};
+    const std::vector<bool> valid = {true, true, false};
+
+    auto brute =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+    auto indexed =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+    LoadScalarInt64ArrayNestedBitmapIndex(
+        indexed.get(), scores_fid, rows, valid);
+
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        // Real arrays — even the empty one — vacuously contain all zero
+        // requested elements; the NULL row is UNKNOWN, not true.
+        {"array_contains_all(scores, [])", {0, 1}},
+        // UNKNOWN survives negation: the NULL row stays excluded under NOT.
+        {"not array_contains_all(scores, [])", {}},
+        // ContainsAny over an empty candidate set can never match.
+        {"array_contains_any(scores, [])", {}},
+    };
+    for (const auto& [expr, expected] : cases) {
+        EXPECT_EQ(RetrieveMatchRowsLocal(brute.get(), *schema, schema, expr),
+                  expected)
+            << "brute-force path wrong for: " << expr;
+        EXPECT_EQ(RetrieveMatchRowsLocal(indexed.get(), *schema, schema, expr),
+                  expected)
+            << "indexed-segment path wrong for: " << expr;
+    }
+}
+
+// LIKE / pattern predicates on a scalar VARCHAR array WITH a nested inverted
+// index present. ShouldUseOp routes PrefixMatch ("ab%") and Match ("a%c")
+// through the index, while PostfixMatch ("%bc") / InnerMatch ("%b%") are
+// forced back to brute force -- both routes must produce the identical,
+// hand-computed row sets, and match an index-free oracle segment.
+TEST(ScalarArrayMatchIndex, LikePatternsNestedIndexEqualsBruteForce) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+
+    // Same layout as VarCharArrayLikePatterns: row1 NULL, row3 empty [].
+    const std::vector<std::vector<std::string>> rows = {
+        {"abc", "abd"}, {}, {"xyz"}, {}, {"abc", "xyz"}, {"cab"}};
+    const std::vector<bool> valid = {true, false, true, true, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto indexed = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+    LoadScalarVarCharArrayNestedIndex(indexed.get(), tags_fid, N, rows);
+    auto brute = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        // prefix -> index path (ShouldUseOp(PrefixMatch) == true).
+        {R"(MATCH_ANY(tags, $ like "ab%"))", {0, 4}},
+        {R"(MATCH_ALL(tags, $ like "ab%"))", {0, 3}},
+        {R"(MATCH_LEAST(tags, $ like "ab%", threshold=2))", {0}},
+        // suffix/infix -> brute-force fallback (ShouldUseOp == false).
+        {R"(MATCH_ANY(tags, $ like "%bc"))", {0, 4}},
+        {R"(MATCH_ANY(tags, $ like "%b%"))", {0, 4, 5}},
+        {R"(MATCH_ALL(tags, $ like "%b%"))", {0, 3, 5}},
+        // general pattern -> Match op, index path.
+        {R"(MATCH_ANY(tags, $ like "a%c"))", {0, 4}},
+        // three-valued NOT stays correct with the index present.
+        {R"(not MATCH_ANY(tags, $ like "ab%"))", {2, 3, 5}},
+    };
+    for (const auto& [expr, expected] : cases) {
+        auto ri = RetrieveMatchRowsLocal(indexed.get(), *schema, schema, expr);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, expr);
+        EXPECT_EQ(ri, expected) << "indexed LIKE path wrong for: " << expr;
+        EXPECT_EQ(rb, expected) << "brute-force LIKE path wrong for: " << expr;
+        EXPECT_EQ(ri, rb) << "index vs brute-force LIKE mismatch for: " << expr;
+    }
+}
+
+namespace {
+
+// Build + load a NESTED ScalarIndexSort (STL_SORT) over the scalar INT64
+// array `scores_fid`. Mirrors LoadScalarInt64ArrayNestedBitmapIndex: sort
+// indexes have no BuildWithRawDataForUT, so build from ARRAY FieldData with a
+// FileManagerContext carrying the ARRAY/INT64 field schema, then Serialize +
+// Load a fresh instance so the segment receives the loaded copy (and the
+// persisted nested marker is exercised).
+void
+LoadScalarInt64ArrayNestedSortIndex(
+    SegmentSealed* seg,
+    FieldId scores_fid,
+    const std::vector<std::vector<int64_t>>& rows,
+    const std::vector<bool>& valid) {
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    std::vector<milvus::proto::schema::ScalarField> scores(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (auto v : rows[i]) {
+            scores[i].mutable_long_data()->add_data(v);
+        }
+    }
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(N);
+    for (const auto& s : scores) {
+        array_data.emplace_back(s);
+    }
+    std::vector<uint8_t> valid_bytes((N + 7) / 8, 0);
+    for (int64_t i = 0; i < N; ++i) {
+        if (valid[i]) {
+            valid_bytes[i / 8] |= (1 << (i % 8));
+        }
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    field_data->FillFieldData(array_data.data(), valid_bytes.data(), N, 0);
+
+    milvus::proto::schema::FieldSchema field_schema;
+    field_schema.set_data_type(milvus::proto::schema::DataType::Array);
+    field_schema.set_element_type(milvus::proto::schema::DataType::Int64);
+    field_schema.set_nullable(true);
+    auto field_meta =
+        storage::FieldDataMeta{1, 2, 3, scores_fid.get(), field_schema};
+    auto index_meta = storage::IndexMeta{3, scores_fid.get(), 4002, 4002};
+
+    auto root_path = TestLocalPath + "/match_nested_sort_i64";
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto built = std::make_unique<index::ScalarIndexSort<int64_t>>(
+        ctx, /*is_nested_index=*/true);
+    built->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_TRUE(built->IsNestedIndex());
+
+    auto binary_set = built->Serialize({});
+    auto loaded = std::make_unique<index::ScalarIndexSort<int64_t>>(
+        ctx, /*is_nested_index=*/false);
+    loaded->Load(binary_set, {});
+    // The persisted nested marker must be restored on load.
+    ASSERT_TRUE(loaded->IsNestedIndex());
+
+    LoadIndexInfo info{};
+    info.field_id = scores_fid.get();
+    info.index_params = GenIndexParams(loaded.get());
+    info.cache_index =
+        CreateTestCacheIndex("scalar_scores_sort", std::move(loaded));
+    seg->LoadIndex(info);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// Build + load a NESTED StringIndexSort over the scalar VARCHAR array
+// `tags_fid`, following the same FieldData + Serialize/Load protocol.
+void
+LoadScalarVarCharArrayNestedStringSortIndex(
+    SegmentSealed* seg,
+    FieldId tags_fid,
+    const std::vector<std::vector<std::string>>& rows,
+    const std::vector<bool>& valid) {
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    std::vector<milvus::proto::schema::ScalarField> tags(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (const auto& v : rows[i]) {
+            tags[i].mutable_string_data()->add_data(v);
+        }
+    }
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(N);
+    for (const auto& t : tags) {
+        array_data.emplace_back(t);
+    }
+    std::vector<uint8_t> valid_bytes((N + 7) / 8, 0);
+    for (int64_t i = 0; i < N; ++i) {
+        if (valid[i]) {
+            valid_bytes[i / 8] |= (1 << (i % 8));
+        }
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    field_data->FillFieldData(array_data.data(), valid_bytes.data(), N, 0);
+
+    milvus::proto::schema::FieldSchema field_schema;
+    field_schema.set_data_type(milvus::proto::schema::DataType::Array);
+    field_schema.set_element_type(milvus::proto::schema::DataType::VarChar);
+    field_schema.set_nullable(true);
+    auto field_meta =
+        storage::FieldDataMeta{1, 2, 3, tags_fid.get(), field_schema};
+    auto index_meta = storage::IndexMeta{3, tags_fid.get(), 4003, 4003};
+
+    auto root_path = TestLocalPath + "/match_nested_sort_str";
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto built =
+        std::make_unique<index::StringIndexSort>(ctx, /*is_nested_index=*/true);
+    built->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_TRUE(built->IsNestedIndex());
+
+    auto binary_set = built->Serialize({});
+    auto loaded = std::make_unique<index::StringIndexSort>(
+        ctx, /*is_nested_index=*/false);
+    loaded->Load(binary_set, {});
+    ASSERT_TRUE(loaded->IsNestedIndex());
+
+    LoadIndexInfo info{};
+    info.field_id = tags_fid.get();
+    info.index_params = GenIndexParams(loaded.get());
+    info.cache_index =
+        CreateTestCacheIndex("scalar_tags_sort", std::move(loaded));
+    seg->LoadIndex(info);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+}  // namespace
+
+// MATCH execution end-to-end through a nested ScalarIndexSort (STL_SORT).
+// IndexFactory routes non-INVERTED/BITMAP nested array index builds to
+// CreateNestedIndexScalarIndexSort, but no execution test covered a sort
+// index serving the element predicate. Same layout and hand-computed
+// expectations as NestedBitmapIndexNullable, cross-checked against an
+// index-free brute-force segment.
+TEST(ScalarArrayMatchIndex, NestedScalarSortIndexNullable) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, true);
+
+    // Against the element predicate $ > 100:
+    //   row0 = NULL, row1 = [] (empty, non-null), row2 = one match,
+    //   row3 = all match, row4 = zero match.
+    const std::vector<std::vector<int64_t>> rows = {
+        {}, {}, {10, 200}, {150, 250}, {10, 20}};
+    const std::vector<bool> valid = {false, true, true, true, true};
+
+    auto indexed =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+    LoadScalarInt64ArrayNestedSortIndex(indexed.get(), scores_fid, rows, valid);
+    auto brute =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        {"MATCH_ANY(scores, $ > 100)", {2, 3}},
+        {"MATCH_ALL(scores, $ > 100)", {1, 3}},
+        {"MATCH_LEAST(scores, $ > 100, threshold=1)", {2, 3}},
+        {"MATCH_MOST(scores, $ > 100, threshold=0)", {1, 4}},
+        {"MATCH_EXACT(scores, $ > 100, threshold=0)", {1, 4}},
+        // Term IN / NOT IN through the sort index as well.
+        {"MATCH_ANY(scores, $ in [10, 250])", {2, 3, 4}},
+        {"MATCH_ALL(scores, $ not in [10])", {1, 3}},
+    };
+    for (const auto& [expr, expected] : cases) {
+        auto ri = RetrieveMatchRowsLocal(indexed.get(), *schema, schema, expr);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, expr);
+        EXPECT_EQ(ri, expected) << "sort-index path wrong for: " << expr;
+        EXPECT_EQ(rb, expected) << "brute-force path wrong for: " << expr;
+        EXPECT_EQ(ri, rb) << "sort index vs brute-force mismatch for: " << expr;
+    }
+}
+
+// Differential consistency for the nested ScalarIndexSort on randomized
+// nullable INT64 array data: the brute-force segment is the oracle. Mirrors
+// Int64IndexedEqualsBruteForce (nested inverted) for the sort-index engine.
+TEST(ScalarArrayMatchIndexConsistency, Int64SortIndexedEqualsBruteForce) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, true);
+
+    const int64_t N = 300;
+    std::default_random_engine rng(20260709);
+    std::uniform_int_distribution<int> len_dist(0, 5);   // 0 => empty arrays
+    std::uniform_int_distribution<int> val_dist(0, 9);   // small value domain
+    std::uniform_int_distribution<int> null_dist(0, 9);  // ~10% null rows
+
+    std::vector<std::vector<int64_t>> rows(N);
+    std::vector<bool> valid(N, true);
+    for (int64_t i = 0; i < N; ++i) {
+        if (null_dist(rng) == 0) {
+            valid[i] = false;
+            continue;
+        }
+        int len = len_dist(rng);
+        for (int j = 0; j < len; ++j) {
+            rows[i].push_back(val_dist(rng));
+        }
+    }
+
+    auto indexed =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+    LoadScalarInt64ArrayNestedSortIndex(indexed.get(), scores_fid, rows, valid);
+    auto brute =
+        MakeSealedScalarInt64Array(schema, pk_fid, scores_fid, rows, valid);
+
+    const std::vector<std::string> exprs = {
+        "MATCH_ANY(scores, $ > 5)",
+        "MATCH_ALL(scores, $ >= 0)",
+        "MATCH_ALL(scores, $ < 5)",
+        "MATCH_ANY(scores, $ == 7)",
+        "MATCH_LEAST(scores, $ > 5, threshold=2)",
+        "MATCH_MOST(scores, $ == 0, threshold=1)",
+        "MATCH_EXACT(scores, $ == 9, threshold=0)",
+        "MATCH_EXACT(scores, $ == 9, threshold=2)",
+        "MATCH_ANY(scores, $ > 2 && $ < 8)",
+        "MATCH_ANY(scores, 2 < $ < 8)",
+        "MATCH_ANY(scores, $ in [1, 5, 9])",
+        "MATCH_ALL(scores, $ not in [0, 9])",
+    };
+    for (const auto& e : exprs) {
+        auto ri = RetrieveMatchRowsLocal(indexed.get(), *schema, schema, e);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, e);
+        EXPECT_EQ(ri, rb) << "sort index vs brute-force mismatch for: " << e;
+    }
+}
+
+// Differential consistency for the nested StringIndexSort on randomized
+// nullable VARCHAR array data, including LIKE patterns (prefix routes to the
+// index when supported; suffix/infix fall back to brute force -- either way
+// results must equal the index-free oracle).
+TEST(ScalarArrayMatchIndexConsistency, VarCharSortIndexedEqualsBruteForce) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+
+    const int64_t N = 300;
+    const std::vector<std::string> vocab = {"ab", "ac", "ba", "bc", "ca"};
+    std::default_random_engine rng(20260710);
+    std::uniform_int_distribution<int> len_dist(0, 5);
+    std::uniform_int_distribution<int> val_dist(0, 4);
+    std::uniform_int_distribution<int> null_dist(0, 9);
+
+    std::vector<std::vector<std::string>> rows(N);
+    std::vector<bool> valid(N, true);
+    for (int64_t i = 0; i < N; ++i) {
+        if (null_dist(rng) == 0) {
+            valid[i] = false;
+            continue;
+        }
+        int len = len_dist(rng);
+        for (int j = 0; j < len; ++j) {
+            rows[i].push_back(vocab[val_dist(rng)]);
+        }
+    }
+
+    auto indexed = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+    LoadScalarVarCharArrayNestedStringSortIndex(
+        indexed.get(), tags_fid, rows, valid);
+    auto brute = MakeSealedScalarVarCharArray(
+        schema, pk_fid, tags_fid, rows, valid, /*exclude_tags_raw=*/false);
+
+    const std::vector<std::string> exprs = {
+        R"(MATCH_ANY(tags, $ == "ab"))",
+        R"(MATCH_ALL(tags, $ != "ca"))",
+        R"(MATCH_LEAST(tags, $ == "ab", threshold=2))",
+        R"(MATCH_MOST(tags, $ == "bc", threshold=1))",
+        R"(MATCH_EXACT(tags, $ == "ac", threshold=0))",
+        R"(MATCH_ANY(tags, $ in ["ab", "bc"]))",
+        R"(MATCH_ALL(tags, $ not in ["ca"]))",
+        R"(MATCH_ANY(tags, $ like "a%"))",
+        R"(MATCH_ALL(tags, $ like "a%"))",
+        R"(MATCH_ANY(tags, $ like "%c"))",
+        R"(MATCH_ANY(tags, $ like "%b%"))",
+        R"(MATCH_ANY(tags, "a" < $ < "c"))",
+    };
+    for (const auto& e : exprs) {
+        auto ri = RetrieveMatchRowsLocal(indexed.get(), *schema, schema, e);
+        auto rb = RetrieveMatchRowsLocal(brute.get(), *schema, schema, e);
+        EXPECT_EQ(ri, rb) << "string-sort index vs brute-force mismatch for: "
+                          << e;
+    }
+}

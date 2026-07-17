@@ -962,6 +962,19 @@ func (sm *snapshotManager) RestoreData(
 		return 0, merr.Wrap(err, "failed to read snapshot data")
 	}
 
+	// Nested (element-level) array index guard, mirroring
+	// checkJSONPathIndexVersion for restored segment indexes: the build-time
+	// version gate only protects NEW builds, while restore re-introduces
+	// ALREADY-BUILT nested indexes past it. A pre-v5 querynode loading nested
+	// files composite-interprets them (HYBRID/AUTOINDEX fails on the missing
+	// INDEX_TYPE entry; INVERTED reads element ordinals as row offsets —
+	// silently wrong results). Only markers persisted as true are affected;
+	// legacy row-level snapshots restore unconditionally.
+	if err := sm.checkNestedArrayIndexVersion(snapshotData); err != nil {
+		mlog.Error(context.TODO(), "nested array index version check failed", mlog.Err(err))
+		return 0, err
+	}
+
 	// ========== Phase 2: Build partition mapping ==========
 	partitionMapping, err := sm.buildPartitionMapping(ctx, snapshotData, collectionID)
 	if err != nil {
@@ -1470,6 +1483,33 @@ func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 // checkJSONPathIndexVersion rejects JSON path indexes with STL_SORT, BITMAP,
 // or HYBRID if the cluster's scalar index engine version is below
 // MinScalarIndexVersionForJsonPathMultiType.
+// checkNestedArrayIndexVersion rejects restoring segment indexes that were
+// built as nested (element-level) array indexes when the current querynode
+// pool has not fully reached MinScalarIndexVersionForNestedArrayIndex. See
+// the call site in RestoreData for the failure modes this prevents.
+func (sm *snapshotManager) checkNestedArrayIndexVersion(snapshotData *SnapshotData) error {
+	if sm.indexEngineVersionManager == nil {
+		return nil
+	}
+	resolved := sm.indexEngineVersionManager.ResolveScalarIndexVersion()
+	if resolved >= common.MinScalarIndexVersionForNestedArrayIndex {
+		return nil
+	}
+	for _, segment := range snapshotData.Segments {
+		for _, indexFile := range segment.GetIndexFiles() {
+			if indexFile.GetIsNestedIndex() {
+				return merr.WrapErrParameterInvalidMsg(
+					"snapshot contains a nested (element-level) array index (segment %d, index build %d), "+
+						"which requires scalar index engine version >= %d on every querynode, "+
+						"current resolved version: %d; please complete the rolling upgrade first",
+					segment.GetSegmentId(), indexFile.GetBuildID(),
+					common.MinScalarIndexVersionForNestedArrayIndex, resolved)
+			}
+		}
+	}
+	return nil
+}
+
 func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 	indexType := GetIndexType(index.IndexParams)
 	if indexType != indexparamcheck.IndexSTLSORT &&

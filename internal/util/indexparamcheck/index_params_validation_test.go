@@ -260,3 +260,20 @@ func TestValidateIndexName(t *testing.T) {
 	assert.Error(t, ValidateIndexName("bad-name"))
 	assert.Error(t, ValidateIndexName(strings.Repeat("x", paramtable.Get().ProxyCfg.MaxNameLength.GetAsInt()+1)))
 }
+
+// TestValidateIndexParamsReservedNestedIndexKey pins the reserved-key guard:
+// "nested_index" is the internal nested-array marker config key, and a
+// user-supplied value would bypass the scalar-index-version gate.
+func TestValidateIndexParamsReservedNestedIndexKey(t *testing.T) {
+	reserved := &commonpb.KeyValuePair{Key: common.NestedIndexKey, Value: "true"}
+	base := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: AutoIndex}}
+	for _, index := range []*model.Index{
+		{IndexParams: append(append([]*commonpb.KeyValuePair{}, base...), reserved)},
+		{IndexParams: base, UserIndexParams: []*commonpb.KeyValuePair{reserved}},
+		{IndexParams: base, TypeParams: []*commonpb.KeyValuePair{reserved}},
+	} {
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "reserved")
+	}
+}

@@ -189,6 +189,11 @@ V1SealedIndexTranslator::LoadScalarIndex() {
             milvus::index::GetValueFromConfig<int32_t>(
                 config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
                 .value_or(1);
+        // Persisted per-segment marker; missing/false = legacy row-level
+        // index.
+        index_info.nested_array_index = milvus::index::GetValueFromConfig<bool>(
+                                            config, milvus::index::NESTED_INDEX)
+                                            .value_or(false);
 
         index_info.tantivy_index_version =
             index_info.scalar_index_engine_version <= 1

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // IndexBuildTask is used to record the information of the index tasks.
@@ -146,6 +147,28 @@ func (it *indexBuildTask) IsVectorIndex() bool {
 	return vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 }
 
+// normalizeNestedIndexMarker re-derives the nested-array marker from the field
+// schema and the POST-CLAMP scalar index version, overriding whatever the
+// request carried. The value drives the cgo build path, is echoed into the
+// task result, and is persisted with the segment index meta, so deriving it
+// locally (rather than trusting the request bit) keeps the invariant
+// "scalar index version >= 5 on a plain ARRAY field <=> nested" under version
+// skew in BOTH directions:
+//   - an old datacoord has no nested field in its request proto but can still
+//     resolve scalar version 5 from upgraded querynodes; trusting the absent
+//     bit would build a row-level index stamped v5, which any later marker
+//     re-derivation (snapshot-restore copy path) would classify as nested and
+//     route through the nested loader — silently wrong results;
+//   - a node clamped below v5 builds a legacy row-level index and must report
+//     the marker false regardless of what the request said.
+//
+// Struct sub-field indexes never carry the marker (they are routed nested by
+// NAME on every released binary); typeutil.IsNestedArrayIndex excludes them,
+// matching the datacoord decision site (prepareJobRequest).
+func normalizeNestedIndexMarker(req *workerpb.CreateJobRequest) {
+	req.IsNestedIndex = typeutil.IsNestedArrayIndex(req.GetField(), req.GetCurrentScalarIndexVersion())
+}
+
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	it.queueDur = it.tr.RecordSpan()
 	mlog.Info(ctx, "Begin to prepare indexBuildTask", mlog.FieldBuildID(it.req.GetBuildID()),
@@ -213,12 +236,14 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 	it.req.CurrentScalarIndexVersion = common.ClampScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
+	normalizeNestedIndexMarker(it.req)
 
 	mlog.Info(ctx, "Successfully prepare indexBuildTask", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.FieldCollectionID(it.req.GetCollectionID()), mlog.FieldSegmentID(it.req.GetSegmentID()),
 		mlog.Int64("taskVersion", it.req.GetIndexVersion()),
 		mlog.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
 		mlog.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
+		mlog.Bool("isNestedIndex", it.req.GetIsNestedIndex()),
 	)
 	return nil
 }
@@ -299,6 +324,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		IndexVersion:              it.req.GetIndexVersion(),
 		CurrentIndexVersion:       it.req.GetCurrentIndexVersion(),
 		CurrentScalarIndexVersion: it.req.GetCurrentScalarIndexVersion(),
+		IsNestedIndex:             it.req.GetIsNestedIndex(),
 		NumRows:                   it.req.GetNumRows(),
 		Dim:                       it.req.GetDim(),
 		IndexFilePrefix:           it.req.GetIndexFilePrefix(),
@@ -390,6 +416,9 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		uint64(indexStats.MemSize),
 		it.req.GetCurrentIndexVersion(),
 		it.req.GetCurrentScalarIndexVersion(),
+		// The nested marker is echoed from the (Prepare-adjusted) request:
+		// C++ builds exactly what the request asked for.
+		it.req.GetIsNestedIndex(),
 		it.req.GetIndexStorePathVersion(),
 	)
 	saveIndexFileDur := it.tr.RecordSpan()

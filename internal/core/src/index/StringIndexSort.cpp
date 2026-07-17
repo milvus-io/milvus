@@ -245,7 +245,12 @@ StringIndexSort::BuildWithFieldData(
         }
     }
 
-    if (total_num_rows_ == 0) {
+    // A nested (element-level) array index legitimately has zero elements when
+    // every row is null/empty; build a valid empty index in that case (raw data
+    // is retained, HasRawData()==false, so IS NULL / array_length / MATCH_*
+    // still resolve off raw). Non-nested input still rejects a truly-empty
+    // build as before.
+    if (total_num_rows_ == 0 && !is_nested_index_) {
         ThrowInfo(DataIsEmpty, "StringIndexSort cannot build null values!");
     }
 
@@ -396,13 +401,19 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
         }
     }
 
-    // Deserialize is_nested_index (optional for backward compatibility)
+    // Deserialize is_nested_index. The file describes the physical layout of
+    // the postings -- on disagreement with the routing marker (constructor
+    // value), trust the file so a mis-marked index degrades to the correct
+    // legacy row-level behavior instead of misreading postings. A file
+    // without the entry predates nested-array support and is row-level.
+    // Matches ScalarIndexSort.
+    is_nested_index_ = false;
     auto is_nested_data = binary_set.GetByName("is_nested_index");
     if (is_nested_data != nullptr) {
         bool loaded_is_nested_index = false;
         milvus::fastmem::FastMemcpy(
             &loaded_is_nested_index, is_nested_data->data.get(), sizeof(bool));
-        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
+        is_nested_index_ = loaded_is_nested_index;
     }
 
     auto version_data = binary_set.GetByName("version");
@@ -620,7 +631,13 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               SERIALIZATION_VERSION));
     }
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    // The file describes the physical layout of the postings -- on
+    // disagreement with the routing marker (constructor value), trust the
+    // file so a mis-marked index degrades to the correct legacy row-level
+    // behavior instead of misreading postings. Default false: a V3 file
+    // written before nested-array support (no is_nested key) is row-level.
+    // Matches ScalarIndexSort.
+    is_nested_index_ = reader.GetMeta<bool>("is_nested", false);
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
@@ -685,7 +702,15 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
             fw.Finish();
         }
 
-        if (reader.HasEntry("idx_to_offsets")) {
+        if (reader.HasEntry("idx_to_offsets") &&
+            get_idx_to_offsets_bytes() == 0) {
+            // Empty nested index (all-null / all-empty array field): the
+            // idx_to_offsets entry legitimately has zero bytes and mmap(len=0)
+            // fails with EINVAL. Skip the meta mapping; query paths see
+            // idx_to_offsets_size_ == 0.
+            idx_to_offsets_ptr_ = nullptr;
+            idx_to_offsets_size_ = 0;
+        } else if (reader.HasEntry("idx_to_offsets")) {
             // Stream idx_to_offsets to meta file, then mmap it
             mmap_meta_filepath_ = mmap_path + "-meta";
             size_t offsets_bytes = get_idx_to_offsets_bytes();

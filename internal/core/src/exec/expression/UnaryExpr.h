@@ -1138,6 +1138,23 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayEqualForIndex(EvalCtx& context, bool reverse);
 
+    // Whole-array Equal/NotEqual served EXACTLY from a NESTED (element-space)
+    // scalar index: positional AND of per-value element bitsets against the
+    // row->element offsets. Dispatches on the array's element type.
+    VectorPtr
+    ExecArrayEqualForNestedIndex(EvalCtx& context, bool reverse);
+
+    // Whether ExecArrayEqualForNestedIndex can serve this expression exactly
+    // (Equal/NotEqual with a type-consistent array target, offsets loaded).
+    // Called from DetermineExecPath so the RawData fallback decision is made
+    // once, not per batch.
+    bool
+    CanServeNestedArrayEquality() const;
+
+    template <typename T>
+    VectorPtr
+    ExecArrayEqualForNestedIndexImpl(EvalCtx& context, bool reverse);
+
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr

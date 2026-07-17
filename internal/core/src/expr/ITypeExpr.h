@@ -914,25 +914,26 @@ using MatchType = proto::plan::MatchType;
 
 class MatchExpr : public ITypeFilterExpr {
  public:
-    MatchExpr(const std::string& struct_name,
+    MatchExpr(const std::string& field_name,
               MatchType match_type,
               int64_t count,
               const TypedExprPtr& predicate)
-        : struct_name_(struct_name), match_type_(match_type), count_(count) {
+        : field_name_(field_name), match_type_(match_type), count_(count) {
         inputs_.push_back(predicate);
     }
 
     std::string
     ToString() const override {
-        return fmt::format("MatchExpr(struct_name={}, match_type={}, count={})",
-                           struct_name_,
-                           proto::plan::MatchType_Name(match_type_),
-                           count_);
+        return fmt::format(
+            "MatchExpr(field_name={}, match_type={}, count={})",
+            field_name_,
+            proto::plan::MatchType_Name(match_type_),
+            count_);
     }
 
     const std::string&
-    get_struct_name() const {
-        return struct_name_;
+    get_field_name() const {
+        return field_name_;
     }
 
     MatchType
@@ -946,7 +947,12 @@ class MatchExpr : public ITypeFilterExpr {
     }
 
  private:
-    std::string struct_name_;
+    // field_name identifies where to fetch ArrayOffsets from. Resolution is
+    // name-only: MatchExpr::Eval resolves the array field (scalar array or
+    // struct array) via schema.ResolveArrayElementField(field_name). A
+    // struct's Go-side logical field id is not resolvable in C++
+    // schema.fields_, so no id-based lookup exists.
+    std::string field_name_;
     MatchType match_type_;
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
 };

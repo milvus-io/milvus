@@ -146,6 +146,7 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 			ret.IndexInfos[i].FailReason = info.FailReason
 			ret.IndexInfos[i].CurrentIndexVersion = info.CurrentIndexVersion
 			ret.IndexInfos[i].CurrentScalarIndexVersion = info.CurrentScalarIndexVersion
+			ret.IndexInfos[i].IsNestedIndex = info.IsNestedIndex
 			mlog.RatedDebug(context.TODO(), rate.Limit(5), "querying index build task",
 				mlog.Int64("indexBuildID", buildID),
 				mlog.String("state", info.State.String()),
