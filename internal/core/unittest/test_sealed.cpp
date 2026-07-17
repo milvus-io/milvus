@@ -4235,6 +4235,50 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
     EXPECT_NE(old_state->runtime->skip_index, new_state->runtime->skip_index);
 }
 
+TEST(SealedSegmentCowState,
+     DropFieldDataPreservesAvgSizeForSchemaRetainedField) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto payload = schema->AddDebugVarcharField(FieldName("payload"),
+                                                DataType::VARCHAR,
+                                                1024,
+                                                /*nullable=*/false,
+                                                /*enable_match=*/false,
+                                                /*enable_analyzer=*/false,
+                                                analyzer_params,
+                                                std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 8;
+    auto dataset = DataGen(schema, row_count);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->set_field_avg_size(payload, 1, 128);
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_state->runtime, nullptr);
+    ASSERT_EQ(old_state->runtime->fields.count(payload), 1);
+    ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
+    auto old_avg_info =
+        old_state->runtime->variable_fields_avg_size.at(payload);
+    ASSERT_GT(old_avg_info.second, 0);
+
+    sealed->DropFieldData(payload);
+
+    auto new_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_state->runtime, nullptr);
+    EXPECT_EQ(new_state->runtime->fields.count(payload), 0);
+    ASSERT_EQ(new_state->runtime->variable_fields_avg_size.count(payload), 1);
+    EXPECT_EQ(new_state->runtime->variable_fields_avg_size.at(payload),
+              old_avg_info);
+
+    EXPECT_EQ(old_state->runtime->fields.count(payload), 1);
+    EXPECT_EQ(old_state->runtime->variable_fields_avg_size.at(payload),
+              old_avg_info);
+}
+
 TEST(SealedSegmentCowState, StagedTextIndexIsInvisibleBeforePublish) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);

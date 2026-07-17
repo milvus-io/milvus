@@ -3900,7 +3900,12 @@ ChunkedSegmentSealedImpl::DropFieldData(
         runtime->fields.erase(field_id);
         runtime->array_offsets_map.erase(field_id);
         runtime->mmap_field_ids.erase(field_id);
-        runtime->variable_fields_avg_size.erase(field_id);
+        // Average size describes the retrievable field value, not the
+        // resident raw column. Keep it when an index with raw data remains
+        // responsible for retrieval.
+        if (!schema_has_field) {
+            runtime->variable_fields_avg_size.erase(field_id);
+        }
         if (runtime->skip_index != nullptr) {
             runtime->skip_index->Erase(field_id);
         }
@@ -3909,7 +3914,11 @@ ChunkedSegmentSealedImpl::DropFieldData(
         next_runtime->fields.erase(field_id);
         next_runtime->array_offsets_map.erase(field_id);
         next_runtime->mmap_field_ids.erase(field_id);
-        next_runtime->variable_fields_avg_size.erase(field_id);
+        // See the staged-runtime branch above: only schema removal retires
+        // field-level size metadata.
+        if (!schema_has_field) {
+            next_runtime->variable_fields_avg_size.erase(field_id);
+        }
         if (next_runtime->skip_index != nullptr) {
             next_runtime->skip_index->Erase(field_id);
         }
