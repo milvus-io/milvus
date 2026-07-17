@@ -60,28 +60,30 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		metrics.TotalLabel,
+		metrics.CauseNA,
 		dbName,
 		collectionName,
 	).Inc()
 
 	start := time.Now()
 	resp, err := handler(ctx, req)
-	label := requestutil.ParseMetricLabel(resp, err)
+	label, cause := requestutil.ParseMetricLabel(resp, err)
 
 	// set metrics for state code
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		label,
+		cause,
 		dbName,
 		collectionName,
 	).Inc()
 
-	// Mirror the fail_input/fail_system metric split into the logs so a failed
-	// request can be filtered by error_type the same way the metric is. System
-	// failures are logged at Warn (actionable for SRE); input failures at Info
-	// (expected user mistakes — keeping them at Warn would spam the logs).
-	if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+	// Mirror the metric's cause into the logs so a failed request can be
+	// filtered by error_type the same way the metric is. System failures are
+	// logged at Warn (actionable for SRE); input failures at Info (expected user
+	// mistakes — keeping them at Warn would spam the logs).
+	if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
 		var status *commonpb.Status
 		switch r := resp.(type) {
 		case interface{ GetStatus() *commonpb.Status }:
@@ -90,7 +92,7 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 			status = r
 		}
 		errType := merr.SystemError
-		if label == metrics.FailInputLabel {
+		if cause == metrics.CauseUser {
 			errType = merr.InputError
 		}
 		logger := mlog.With(
@@ -111,6 +113,7 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		label,
+		cause,
 	).Observe(float64(time.Since(start).Milliseconds()))
 
 	return resp, err
