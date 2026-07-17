@@ -251,8 +251,7 @@ CachedSearchIterator::NextBatch(const SearchInfo& search_info,
 
     for (size_t query_idx = 0; query_idx < nq_; ++query_idx) {
         auto rst = GetBatchedNextResults(query_idx, search_info);
-        WriteSingleQuerySearchResult(
-            search_result, query_idx, rst, search_info.round_decimal_);
+        WriteSingleQuerySearchResult(search_result, query_idx, rst);
     }
 }
 
@@ -368,20 +367,11 @@ void
 CachedSearchIterator::WriteSingleQuerySearchResult(
     SearchResult& search_result,
     const size_t idx,
-    std::vector<DisIdPair>& rst,
-    const int64_t round_decimal) {
-    const float multiplier = pow(10.0, round_decimal);
-
+    std::vector<DisIdPair>& rst) {
     std::transform(rst.begin(),
                    rst.end(),
                    search_result.distances_.begin() + idx * batch_size_,
-                   [multiplier, round_decimal](DisIdPair& x) {
-                       if (round_decimal != -1) {
-                           x.first =
-                               std::round(x.first * multiplier) / multiplier;
-                       }
-                       return x.first;
-                   });
+                   [](const DisIdPair& x) { return x.first; });
 
     std::transform(rst.begin(),
                    rst.end(),
