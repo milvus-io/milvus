@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -225,6 +227,11 @@ func (t *copySegmentTask) GetTR() *timerecord.TimeRecorder {
 // Why needed:
 // - UpdateTask clones before applying actions to avoid race conditions
 // - Original task remains accessible to other goroutines during update
+//
+// The protobuf payload must be deep-copied (proto.Clone): update actions
+// mutate the proto in place, so sharing the pointer would leak mutations
+// into the cached task before the catalog save succeeds — a failed save
+// would leave memory and etcd out of sync.
 func (t *copySegmentTask) Clone() CopySegmentTask {
 	cloned := &copySegmentTask{
 		copyMeta:     t.copyMeta,
@@ -234,7 +241,7 @@ func (t *copySegmentTask) Clone() CopySegmentTask {
 		tr:           t.tr,
 		times:        t.times,
 	}
-	cloned.task.Store(t.task.Load())
+	cloned.task.Store(proto.Clone(t.task.Load()).(*datapb.CopySegmentTask))
 	return cloned
 }
 

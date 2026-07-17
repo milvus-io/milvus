@@ -553,6 +553,36 @@ func (s *CopySegmentMetaSuite) TestUpdateTask_Success() {
 	s.Equal("executing", updatedTask.GetReason())
 }
 
+func (s *CopySegmentMetaSuite) TestUpdateTask_SaveFailureLeavesCacheUnchanged() {
+	// AddTask persists fine; the subsequent UpdateTask save fails.
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable")).Once()
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+	})
+	err := s.copyMeta.AddTask(context.TODO(), task)
+	s.NoError(err)
+
+	err = s.copyMeta.UpdateTask(context.TODO(), 1001,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+		UpdateCopyTaskReason("should not stick"))
+	s.Error(err)
+
+	// The in-memory cache must still reflect the persisted (old) state.
+	cachedTask := s.copyMeta.GetTask(context.TODO(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, cachedTask.GetState())
+	s.Empty(cachedTask.GetReason())
+}
+
 func (s *CopySegmentMetaSuite) TestUpdateTask_NotFound() {
 	// Try to update non-existent task (should not error, just no-op)
 	err := s.copyMeta.UpdateTask(context.TODO(), 9999,

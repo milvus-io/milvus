@@ -688,6 +688,22 @@ func createTestIndexMeta(t *testing.T, collectionID int64, indexes map[int64]*mo
 }
 
 // createTestCopyTask creates a minimal CopySegmentTask for testing syncVectorScalarIndexes.
+func (s *CopySegmentTaskSuite) TestClone_DeepCopiesProto() {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+
+	cloned := task.Clone()
+	// Mutating the clone (as UpdateTask actions do) must not leak into the
+	// original task; otherwise a failed catalog save during UpdateTask leaves
+	// the in-memory cache already mutated while etcd keeps the old state.
+	UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed)(cloned)
+	UpdateCopyTaskReason("mutated on clone")(cloned)
+
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
+	s.Empty(task.GetReason())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, cloned.GetState())
+	s.Equal("mutated on clone", cloned.GetReason())
+}
+
 func createTestCopyTask(collectionID int64, segmentID int64) CopySegmentTask {
 	task := &copySegmentTask{
 		tr:    timerecord.NewTimeRecorder("test"),
