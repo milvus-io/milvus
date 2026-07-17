@@ -592,6 +592,16 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "handler client assignment not ready",
+			err:  handler.ErrClientAssignmentNotReady,
+			want: true,
+		},
+		{
+			name: "read only local wal",
+			err:  handler.ErrReadOnlyWAL,
+			want: true,
+		},
+		{
 			name: "no streaming node deployed",
 			err:  registry.ErrNoStreamingNodeDeployed,
 			want: true,
@@ -2596,6 +2606,7 @@ func TestQueryNodeService(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
+	local.EXPECT().PrepareReleaseManualFlushIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
 	scanner := mock_streaming.NewMockScanner(t)
@@ -2603,7 +2614,6 @@ func TestQueryNodeService(t *testing.T) {
 	scanner.EXPECT().Error().Return(nil).Maybe()
 	scanner.EXPECT().Close().Return().Maybe()
 	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner).Maybe()
-	wal.EXPECT().PrepareReleaseManualFlush(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	paramtable.SetRole(typeutil.StandaloneRole)
 	paramtable.Get().MQCfg.Type.SwapTempValue(message.WALNameRocksmq.String())
 	util.InitAndSelectWALName()

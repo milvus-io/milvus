@@ -720,7 +720,7 @@ func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collection
 	if wal == nil {
 		return false, merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
 	}
-	return wal.PrepareReleaseManualFlush(ctx, collectionID, channel, segmentIDs)
+	return wal.Local().PrepareReleaseManualFlushIfLocal(ctx, collectionID, channel, segmentIDs)
 }
 
 func isReleaseManualFlushPrepareUnavailable(err error) bool {
@@ -730,6 +730,8 @@ func isReleaseManualFlushPrepareUnavailable(err error) bool {
 	if errors.Is(err, merr.ErrServiceUnavailable) ||
 		errors.Is(err, merr.ErrChannelNotAvailable) ||
 		errors.Is(err, handler.ErrClientClosed) ||
+		errors.Is(err, handler.ErrClientAssignmentNotReady) ||
+		errors.Is(err, handler.ErrReadOnlyWAL) ||
 		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {
 		return true
