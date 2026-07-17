@@ -571,6 +571,12 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 				startKey := []byte(prefix)
 				endKey := tikv.PrefixNextKey([]byte(prefix))
 
+				// The transaction iterator does not accept a context, and
+				// Begin is not ctx-bound, so the deadline may already be dead.
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+
 				// Use Scan to iterate over keys in the prefix range
 				iter, err := txn.Iter(startKey, endKey)
 				if err != nil {

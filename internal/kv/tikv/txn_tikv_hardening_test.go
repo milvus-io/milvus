@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -181,4 +182,36 @@ func TestMultiSaveAndRemoveWithPrefixHonorsCanceledContext(t *testing.T) {
 	keys, _, err := kv.LoadWithPrefix(context.TODO(), "scan")
 	require.NoError(t, err)
 	require.Len(t, keys, 3, "a canceled prefix delete must not remove keys")
+}
+
+func TestMultiSaveAndRemoveWithPrefixStopsPrefixScanWhenContextCanceledDuringBegin(t *testing.T) {
+	rootPath := "/tikv/test/root/prefix_delete_cancel_during_begin"
+	kv := NewTiKV(txnClient, rootPath)
+	err := kv.RemoveWithPrefix(context.TODO(), "")
+	require.NoError(t, err)
+
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(context.TODO(), "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	origBegin := beginTxn
+	beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+		cancel()
+		return origBegin(txn)
+	}
+	defer func() { beginTxn = origBegin }()
+
+	commitCalled := false
+	origCommit := commitTxn
+	commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+		commitCalled = true
+		return origCommit(ctx, txn)
+	}
+	defer func() { commitTxn = origCommit }()
+
+	err = kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"save_after_cancel": "v"}, []string{"missing_prefix"})
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, commitCalled, "cancellation during begin must stop the prefix-removal scan before commit")
 }
