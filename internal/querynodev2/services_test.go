@@ -592,11 +592,6 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "handler client assignment not ready",
-			err:  handler.ErrClientAssignmentNotReady,
-			want: true,
-		},
-		{
 			name: "read only local wal",
 			err:  handler.ErrReadOnlyWAL,
 			want: true,
@@ -614,6 +609,16 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 		{
 			name: "streaming on shutdown",
 			err:  streamingstatus.NewOnShutdownError("wal is on shutdown"),
+			want: true,
+		},
+		{
+			name: "local wal channel not exist",
+			err:  streamingstatus.NewChannelNotExist("pchannel"),
+			want: true,
+		},
+		{
+			name: "local wal channel term unmatched",
+			err:  streamingstatus.NewUnmatchedChannelTerm("pchannel", 1, 2),
 			want: true,
 		},
 		{

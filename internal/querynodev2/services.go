@@ -730,13 +730,13 @@ func isReleaseManualFlushPrepareUnavailable(err error) bool {
 	if errors.Is(err, merr.ErrServiceUnavailable) ||
 		errors.Is(err, merr.ErrChannelNotAvailable) ||
 		errors.Is(err, handler.ErrClientClosed) ||
-		errors.Is(err, handler.ErrClientAssignmentNotReady) ||
 		errors.Is(err, handler.ErrReadOnlyWAL) ||
 		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {
 		return true
 	}
-	return streamingstatus.AsStreamingError(err).IsOnShutdown()
+	streamingErr := streamingstatus.AsStreamingError(err)
+	return streamingErr.IsOnShutdown() || streamingErr.IsWrongStreamingNode()
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
