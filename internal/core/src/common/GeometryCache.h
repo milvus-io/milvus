@@ -66,7 +66,18 @@ class SimpleGeometryCache {
     SimpleGeometryCache&
     operator=(const SimpleGeometryCache&) = delete;
 
-    // Append WKB data during field loading
+    // Append WKB data during field loading.
+    //
+    // A row with corrupt (unparseable) WKB is appended as an INVALID entry --
+    // GetByOffsetUnsafe() returns nullptr for it and every reader skips it --
+    // instead of throwing. Throwing here would make a single corrupt row fail
+    // the whole segment load whenever the geometry cache is enabled (the write
+    // paths deliberately keep such rows: add_geometry / bulk_load index a
+    // placeholder MBR rather than dropping them, so they DO reach the cache).
+    // The entry must still be appended: the cache is addressed by absolute
+    // segment offset, so dropping it would shift every later row. A transient
+    // resource failure (reader allocation) still throws a retriable system
+    // error via TryParseFromWkb -- that is not bad data. See PR #50951 review.
     void
     AppendData(const char* wkb_data, size_t size) {
         std::lock_guard<std::shared_mutex> lock(mutex_);
@@ -74,16 +85,18 @@ class SimpleGeometryCache {
         if (size == 0 || wkb_data == nullptr) {
             // Handle null/empty geometry - add invalid geometry
             geometries_.emplace_back();
-        } else {
-            try {
-                // Create geometry with the cache's own context
-                geometries_.emplace_back(ctx_, wkb_data, size);
-            } catch (const std::exception& e) {
-                ThrowInfo(UnexpectedError,
-                          "Failed to construct geometry from WKB data: {}",
-                          e.what());
-            }
+            return;
         }
+        Geometry geometry;
+        if (!geometry.TryParseFromWkb(ctx_, wkb_data, size)) {
+            LOG_WARN(
+                "unparseable WKB at cache offset {}; caching an invalid "
+                "placeholder entry, readers will skip it",
+                geometries_.size());
+            geometries_.emplace_back();
+            return;
+        }
+        geometries_.push_back(std::move(geometry));
     }
 
     // Get shared lock for batch operations (RAII)

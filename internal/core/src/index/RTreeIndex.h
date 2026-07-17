@@ -108,9 +108,17 @@ class RTreeIndex : public ScalarIndex<T> {
     void
     BuildWithStrings(const std::vector<std::string>& geometries);
 
-    // Add single geometry incrementally (for growing segment)
+    // Add single geometry incrementally (for growing segment).
+    //
+    // `is_valid` is the row's nullability from the caller's valid_data and is
+    // the ONLY signal that classifies the row as NULL: a valid row whose WKB
+    // payload is empty or unparseable is indexed with a placeholder MBR (like
+    // the sealed bulk_load path, which also checks is_valid first), NOT pushed
+    // into null_offset_. Inferring nullness from wkb_data.empty() would make
+    // ST_ISNOTNULL / Count() disagree between growing and sealed for such a
+    // row. See PR #50951 review.
     void
-    AddGeometry(const std::string& wkb_data, int64_t row_offset);
+    AddGeometry(const std::string& wkb_data, int64_t row_offset, bool is_valid);
 
     BinarySet
     Serialize(const Config& config) override;
