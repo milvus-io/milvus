@@ -44,8 +44,7 @@ class ManagedSubtree final
 
         ~WriteLease();
 
-        explicit
-        operator bool() const noexcept {
+        explicit operator bool() const noexcept {
             return directory_ != nullptr;
         }
 
