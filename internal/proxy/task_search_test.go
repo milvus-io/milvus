@@ -5504,6 +5504,33 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		request.FunctionChains = []*schemapb.FunctionChain{l0Chain, l2Chain}
 		return request, l0Chain, l2Chain
 	}
+	newFunctionScoreRequest := func() *milvuspb.SearchRequest {
+		request := newRequest()
+		request.FunctionScore = &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "decay",
+					Type:             schemapb.FunctionType_Rerank,
+					InputFieldNames:  []string{"ts"},
+					OutputFieldNames: []string{},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "reranker", Value: "decay"},
+						{Key: "origin", Value: "100"},
+						{Key: "scale", Value: "10"},
+					},
+				},
+			},
+		}
+		return request
+	}
+	withSearchIteratorV2 := func(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+		request.SearchParams = append(request.SearchParams,
+			&commonpb.KeyValuePair{Key: IteratorField, Value: "true"},
+			&commonpb.KeyValuePair{Key: SearchIterV2Key, Value: "true"},
+			&commonpb.KeyValuePair{Key: SearchIterBatchSizeKey, Value: "10"},
+		)
+		return request
+	}
 	newTask := func(request *milvuspb.SearchRequest) *searchTask {
 		translatedOutputFields, _, _, _, _, err := translateOutputFields(request.GetOutputFields(), schemaInfo, true)
 		require.NoError(t, err)
@@ -5581,29 +5608,38 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 	})
 
 	t.Run("ordinary search keeps function score rerank meta", func(t *testing.T) {
-		request := newRequest()
-		request.FunctionScore = &schemapb.FunctionScore{
-			Functions: []*schemapb.FunctionSchema{
-				{
-					Name:             "decay",
-					Type:             schemapb.FunctionType_Rerank,
-					InputFieldNames:  []string{"ts"},
-					OutputFieldNames: []string{},
-					Params: []*commonpb.KeyValuePair{
-						{Key: "reranker", Value: "decay"},
-						{Key: "origin", Value: "100"},
-						{Key: "scale", Value: "10"},
-					},
-				},
-			},
-		}
-		task := newTask(request)
+		task := newTask(newFunctionScoreRequest())
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		meta, ok := task.rerankMeta.(*funcScoreRerankMeta)
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+
+	t.Run("search iterator v2 rejects function score", func(t *testing.T) {
+		task := newTask(withSearchIteratorV2(newFunctionScoreRequest()))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+	})
+
+	t.Run("search iterator v2 rejects l2 function chain", func(t *testing.T) {
+		task := newTask(withSearchIteratorV2(newFunctionChainRequest()))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
+	})
+
+	t.Run("search iterator v2 rejects l0 function chain", func(t *testing.T) {
+		request, _ := newL0FunctionChainRequest()
+		task := newTask(withSearchIteratorV2(request))
+
+		err := task.initSearchRequest(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
 	})
 
 	t.Run("ordinary search routes l0 chain to querynode plan", func(t *testing.T) {
