@@ -53,6 +53,7 @@
 #include "pb/schema.pb.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/default_fs.h"
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
@@ -162,8 +163,19 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         AssertInfo(find_index_type == true,
                    "Can't find index type in index_params");
 
-        LoadResourceRequest request =
-            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        auto config = milvus::index::ParseConfigFromIndexParams(index_params);
+        auto scalar_version =
+            milvus::index::GetValueFromConfig<int32_t>(
+                config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(1);
+        // Production V3 callers have completed FinishLoadIndexInfo and carry
+        // the field schema needed to resolve the packed remote object.
+        auto use_file_context = !milvus::IsVectorDataType(field_type) &&
+                                scalar_version >= 3 &&
+                                !load_index_info->index_files.empty() &&
+                                load_index_info->schema.ByteSizeLong() > 0;
+        if (!use_file_context) {
+            return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
                 field_type,
                 element_type,
                 load_index_info->index_engine_version,
@@ -172,7 +184,39 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
                 load_index_info->enable_mmap,
                 load_index_info->num_rows,
                 load_index_info->dim);
-        return request;
+        }
+
+        milvus::storage::FieldDataMeta field_meta{
+            load_index_info->collection_id,
+            load_index_info->partition_id,
+            load_index_info->segment_id,
+            load_index_info->field_id,
+            load_index_info->schema};
+        milvus::storage::IndexMeta index_meta{load_index_info->segment_id,
+                                              load_index_info->field_id,
+                                              load_index_info->index_build_id,
+                                              load_index_info->index_version};
+        index_meta.index_store_path_version =
+            load_index_info->index_store_path_version;
+        auto remote_chunk_manager =
+            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                .GetRemoteChunkManager();
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        milvus::storage::FileManagerContext file_manager_context(
+            field_meta, index_meta, remote_chunk_manager, fs);
+        file_manager_context.set_for_loading_index(true);
+
+        return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+            field_type,
+            element_type,
+            load_index_info->index_engine_version,
+            load_index_info->index_size,
+            index_params,
+            load_index_info->enable_mmap,
+            load_index_info->num_rows,
+            load_index_info->dim,
+            load_index_info->index_files,
+            file_manager_context);
     } catch (std::exception& e) {
         ThrowInfo(milvus::UnexpectedError,
                   fmt::format("failed to estimate index load resource, "

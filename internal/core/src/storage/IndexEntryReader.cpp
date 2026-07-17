@@ -120,6 +120,14 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
     return cipher_len + 2 * plain_len;
 }
 
+size_t
+SaturatingAdd(size_t lhs, size_t rhs) {
+    if (rhs > std::numeric_limits<size_t>::max() - lhs) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return lhs + rhs;
+}
+
 constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
 
 void
@@ -330,6 +338,22 @@ DefaultEntryStreamSliceSize() {
     return DefaultStreamSliceSize();
 }
 
+EntryStreamLoadInfo
+IndexEntryReader::InspectStreamLoadInfo(
+    std::shared_ptr<milvus::InputStream> input,
+    int64_t file_size,
+    folly::CancellationToken cancellation_token) {
+    auto reader = std::unique_ptr<IndexEntryReader>(new IndexEntryReader());
+    reader->input_ = std::move(input);
+    reader->file_size_ = file_size;
+    reader->cancellation_token_ = cancellation_token;
+    reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
+    reader->ValidateMagic();
+    reader->ReadFooterAndDirectory();
+    reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
+    return reader->stream_load_info_;
+}
+
 std::unique_ptr<IndexEntryReader>
 IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                        int64_t file_size,
@@ -346,6 +370,12 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     reader->ValidateMagic();
     reader->ReadFooterAndDirectory();
     reader->CheckCancelled("IndexEntryReader::Open");
+
+    if (reader->is_encrypted_) {
+        reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
+        AssertInfo(reader->cipher_plugin_ != nullptr,
+                   "Cipher plugin required for encrypted V3 index");
+    }
 
     // Parse __meta__ entry
     auto meta_entry = reader->ReadEntry(MILVUS_V3_META_ENTRY_NAME);
@@ -462,6 +492,7 @@ IndexEntryReader::ReadFooterAndDirectory() {
 
     if (dir_json.contains("__edek__")) {
         is_encrypted_ = true;
+        stream_load_info_.encrypted = true;
         edek_ = dir_json["__edek__"].get<std::string>();
         ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
         slice_size_ = dir_json["slice_size"].get<size_t>();
@@ -470,19 +501,37 @@ IndexEntryReader::ReadFooterAndDirectory() {
                    kStreamSliceAlignment,
                    slice_size_);
 
-        cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(cipher_plugin_ != nullptr,
-                   "Cipher plugin required for encrypted V3 index");
-
         for (const auto& entry : dir_json["entries"]) {
             EntryMeta meta;
             meta.encrypted = true;
             meta.enc.original_size = entry["original_size"].get<uint64_t>();
             meta.enc.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
+            size_t output_offset = 0;
             for (const auto& s : entry["slices"]) {
-                meta.enc.slices.push_back(
-                    {s["offset"].get<uint64_t>(), s["size"].get<uint64_t>()});
+                auto slice = SliceMeta{s["offset"].get<uint64_t>(),
+                                       s["size"].get<uint64_t>()};
+                meta.enc.slices.push_back(slice);
+
+                AssertInfo(output_offset < meta.enc.original_size,
+                           "Encrypted slice exceeds original entry size {}",
+                           meta.enc.original_size);
+                auto remaining =
+                    static_cast<size_t>(meta.enc.original_size - output_offset);
+                auto plain_len = std::min(remaining, slice_size_);
+                auto task_transient_bytes = EncryptedStreamBudgetBytes(
+                    static_cast<size_t>(slice.size), plain_len);
+                stream_load_info_.total_transient_bytes =
+                    SaturatingAdd(stream_load_info_.total_transient_bytes,
+                                  task_transient_bytes);
+                stream_load_info_.max_task_transient_bytes =
+                    std::max(stream_load_info_.max_task_transient_bytes,
+                             task_transient_bytes);
+                output_offset += plain_len;
             }
+            AssertInfo(output_offset == meta.enc.original_size,
+                       "Encrypted slices cover {} bytes, expected {}",
+                       output_offset,
+                       meta.enc.original_size);
             std::string name = entry["name"].get<std::string>();
             entry_names_.push_back(name);
             entry_index_.emplace(std::move(name), std::move(meta));
