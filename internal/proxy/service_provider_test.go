@@ -637,28 +637,32 @@ func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) 
 		name         string
 		onCall       func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 		expectStatus string
+		expectCause  string
 	}{
 		{
 			name: "response input error",
 			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad request"))}, nil
 			},
-			expectStatus: metrics.FailInputLabel,
+			expectStatus: metrics.FailLabel,
+			expectCause:  metrics.CauseUser,
 		},
 		{
 			name: "go system error",
 			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 				return nil, merr.WrapErrServiceInternalMsg("internal failure")
 			},
-			expectStatus: metrics.FailSystemLabel,
+			expectStatus: metrics.FailLabel,
+			expectCause:  metrics.CauseSystem,
 		},
 		{
 			name: "provider abandon",
 			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 				return nil, withServiceProviderMetric(
-					merr.WrapErrServiceInternalMsg("enqueue failed"), metrics.AbandonLabel)
+					merr.WrapErrServiceInternalMsg("enqueue failed"), metrics.AbandonLabel, metrics.CauseNA)
 			},
 			expectStatus: metrics.AbandonLabel,
+			expectCause:  metrics.CauseNA,
 		},
 		{
 			name: "success",
@@ -666,6 +670,7 @@ func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) 
 				return &milvuspb.DescribeCollectionResponse{Status: merr.Success()}, nil
 			},
 			expectStatus: metrics.SuccessLabel,
+			expectCause:  metrics.CauseNA,
 		},
 	}
 
@@ -673,9 +678,9 @@ func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			method := "DescribeCollectionMetric_" + tc.name
 			outcomeCounter := metrics.ProxyFunctionCall.WithLabelValues(
-				nodeID, method, tc.expectStatus, request.GetDbName(), request.GetCollectionName())
+				nodeID, method, tc.expectStatus, tc.expectCause, request.GetDbName(), request.GetCollectionName())
 			totalCounter := metrics.ProxyFunctionCall.WithLabelValues(
-				nodeID, method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName())
+				nodeID, method, metrics.TotalLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName())
 			latency := metrics.ProxyReqLatency.WithLabelValues(nodeID, method)
 			beforeOutcome := testutil.ToFloat64(outcomeCounter)
 			beforeTotal := testutil.ToFloat64(totalCounter)

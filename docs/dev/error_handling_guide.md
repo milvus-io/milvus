@@ -163,7 +163,7 @@ Two mechanisms, used in different situations:
 | Surface | InputError behavior |
 |---|---|
 | `commonpb.Status` | `ExtraInfo["is_input_error"]="true"`, `Retriable` forced `false` |
-| Prometheus | request counted as `fail_input` / `rejected_user` (vs `fail_system` / `rejected_system`) |
+| Prometheus | request counted with `cause="user"` (vs `cause="system"`) alongside the coarse `status="fail"` / `status="rejected"` |
 | Access log / failure log | `error_type` field set accordingly |
 | proxy lb_policy | **no cross-replica failover** — retrying a bad request elsewhere can't help |
 | `retry.Do` | aborts immediately instead of retrying |

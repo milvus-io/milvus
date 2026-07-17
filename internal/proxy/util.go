@@ -3509,17 +3509,18 @@ func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSch
 }
 
 // failMetricLabel classifies a request failure for the ProxyFunctionCall
-// metric, matching the fail_input/fail_system split that
-// requestutil.ParseMetricLabel emits at the gRPC interceptor; the legacy
-// bare "fail" value must not reappear in this metric's value domain.
-func failMetricLabel(err error) string {
-	// Client cancellation is neither party's failure; keep it out of the
-	// fail_system bucket (parity with ParseMetricLabel).
+// metric, returning the same (status, cause) pair that
+// requestutil.ParseMetricLabel emits at the gRPC interceptor. The status stays
+// the coarse "fail" so that a query written against it counts every hard
+// failure regardless of who caused it.
+func failMetricLabel(err error) (status string, cause string) {
+	// Client cancellation is neither party's failure; cause is what lets a
+	// consumer exclude it (parity with ParseMetricLabel).
 	if errors.Is(err, context.Canceled) {
-		return metrics.CancelLabel
+		return metrics.FailLabel, metrics.CauseCancel
 	}
 	if merr.GetErrorType(err) == merr.InputError {
-		return metrics.FailInputLabel
+		return metrics.FailLabel, metrics.CauseUser
 	}
-	return metrics.FailSystemLabel
+	return metrics.FailLabel, metrics.CauseSystem
 }
