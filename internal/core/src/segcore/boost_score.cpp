@@ -159,6 +159,12 @@ ComputeScorerScoresOnPreparedChunks(
     query_context->set_op_context(&op_context);
     auto exec_context = milvus::exec::ExecContext(query_context.get());
 
+    // A filter that cannot consume offset input (text match, GIS) is
+    // evaluated over the whole segment; do that once here instead of once
+    // per offset chunk inside ComputeScorerScores.
+    auto filter_bitset =
+        milvus::rescores::ComputeNonNativeFilterBitset(&exec_context, scorer);
+
     for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
          ++chunk_idx) {
         milvus::futures::throwIfCancelled(cancel_token);
@@ -180,7 +186,8 @@ ComputeScorerScoresOnPreparedChunks(
             scorer,
             scorer_offsets,
             output_score_chunks[chunk_idx],
-            output_has_score_chunks[chunk_idx]);
+            output_has_score_chunks[chunk_idx],
+            filter_bitset.has_value() ? &filter_bitset.value() : nullptr);
     }
 }
 

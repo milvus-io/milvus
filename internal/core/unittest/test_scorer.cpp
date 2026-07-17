@@ -472,3 +472,109 @@ TEST(BoostScoreRunnerTest, ComputeScorerScoresGISFilterCoversAllBatches) {
     ASSERT_TRUE(scores[4].has_value());   // 9998: inside the polygon
     EXPECT_FLOAT_EQ(scores[4].value(), 3.0F);
 }
+
+// The per-chunk scoring loop in boost_score.cpp must not re-evaluate a
+// non-native filter once per offset chunk; ComputeNonNativeFilterBitset is
+// its hoisting hook. Pin the contract: no filter and native filters yield
+// std::nullopt (nothing to hoist), non-native filters yield the
+// whole-segment bitset.
+TEST(BoostScoreRunnerTest, ComputeNonNativeFilterBitsetNulloptWithoutFilter) {
+    auto scorer = std::make_shared<WeightScorer>(nullptr, 2.0F);
+    EXPECT_FALSE(ComputeNonNativeFilterBitset(nullptr, scorer).has_value());
+}
+
+TEST(BoostScoreRunnerTest, ComputeNonNativeFilterBitsetNulloptForNativeFilter) {
+    const int64_t N = 100;
+    auto schema = GenTextMatchSchema();
+    auto raw_data = segcore::DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // An int64 unary range expression consumes offset input natively, so
+    // there is no whole-segment bitset to hoist.
+    proto::plan::GenericValue val;
+    val.set_int64_val(0);
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(FieldId(100), DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        val);
+    auto scorer = std::make_shared<WeightScorer>(filter, 2.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_native_filter_bitset", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    EXPECT_FALSE(
+        ComputeNonNativeFilterBitset(&exec_context, scorer).has_value());
+}
+
+// A non-native filter evaluated once via ComputeNonNativeFilterBitset must
+// cover the whole segment, and passing that bitset into per-chunk
+// ComputeScorerScores calls must score every chunk as if the filter had been
+// evaluated inside the call.
+TEST(BoostScoreRunnerTest, PrecomputedFilterBitsetScoresChunksConsistently) {
+    const int64_t N = 10000;  // more than one expression batch (8192)
+    auto schema = GenTextMatchSchema();
+    auto raw_data = segcore::DataGen(schema, N);
+    auto* str_col = raw_data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = (i % 2 == 0) ? "football match" : "swimming pool";
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    segment->CreateTextIndex(FieldId(101));
+
+    auto filter = GenTextMatchTypedExpr(schema, "football");
+    auto scorer = std::make_shared<WeightScorer>(filter, 2.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_precomputed_filter_bitset", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    auto filter_bitset = ComputeNonNativeFilterBitset(&exec_context, scorer);
+    ASSERT_TRUE(filter_bitset.has_value());
+    ASSERT_EQ(filter_bitset->size(), N);
+    EXPECT_TRUE((*filter_bitset)[0]);
+    EXPECT_FALSE((*filter_bitset)[1]);
+    EXPECT_TRUE((*filter_bitset)[9000]);
+    EXPECT_FALSE((*filter_bitset)[9001]);
+
+    // Chunk 1 through the optional<float> overload.
+    FixedVector<int32_t> chunk1 = {0, 1};
+    std::vector<std::optional<float>> scores1(chunk1.size(), std::nullopt);
+    ComputeScorerScores(&exec_context,
+                        &op_context,
+                        segment.get(),
+                        scorer,
+                        chunk1,
+                        scores1,
+                        &filter_bitset.value());
+    ASSERT_TRUE(scores1[0].has_value());
+    EXPECT_FLOAT_EQ(scores1[0].value(), 2.0F);
+    EXPECT_FALSE(scores1[1].has_value());
+
+    // Chunk 2 through the raw-buffer overload, with offsets beyond the
+    // first expression batch.
+    FixedVector<int32_t> chunk2 = {9000, 9001, static_cast<int32_t>(N - 2)};
+    std::vector<float> scores2(chunk2.size(), -1.0F);
+    auto has_scores2 = std::make_unique<bool[]>(chunk2.size());
+    ComputeScorerScores(&exec_context,
+                        &op_context,
+                        segment.get(),
+                        scorer,
+                        chunk2,
+                        scores2.data(),
+                        has_scores2.get(),
+                        &filter_bitset.value());
+    EXPECT_TRUE(has_scores2[0]);
+    EXPECT_FLOAT_EQ(scores2[0], 2.0F);
+    EXPECT_FALSE(has_scores2[1]);
+    EXPECT_TRUE(has_scores2[2]);
+    EXPECT_FLOAT_EQ(scores2[2], 2.0F);
+}
