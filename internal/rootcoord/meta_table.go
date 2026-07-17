@@ -621,6 +621,15 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		return nil
 	}
 
+	// Resolve the database before persisting the Dropping state. Once the
+	// collection becomes Dropping, callback retries take the idempotent return
+	// above, so no fallible lookup should remain before the in-memory counters
+	// and channel stats are updated.
+	db, err := mt.getDatabaseByIDInternal(ctx, normalizeCollectionDBID(coll.DBID), typeutil.MaxTimestamp)
+	if err != nil {
+		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
+	}
+
 	clone := coll.Clone()
 	clone.State = pb.CollectionState_CollectionDropping
 	clone.UpdateTimestamp = ts
@@ -643,11 +652,6 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		mlog.Int64("collectionID", collectionID),
 		mlog.String("state", clone.State.String()),
 	)
-
-	db, err := mt.getDatabaseByIDInternal(ctx, normalizeCollectionDBID(coll.DBID), typeutil.MaxTimestamp)
-	if err != nil {
-		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
-	}
 
 	pn := coll.GetPartitionNum(true)
 

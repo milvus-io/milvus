@@ -2234,6 +2234,62 @@ func TestMetaTable_AvailableCollectionCountTransitions(t *testing.T) {
 	assert.Equal(t, 0, total)
 }
 
+func TestMetaTable_DropCollectionDBLookupFailureIsRetryable(t *testing.T) {
+	ctx := context.Background()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).
+		Once()
+	catalog.On("DeleteGrantByCollectionName", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).
+		Once()
+
+	const dbID = int64(11)
+	meta := &MetaTable{
+		catalog: catalog,
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			100: {
+				CollectionID: 100,
+				DBID:         dbID,
+				DBName:       "db2",
+				Name:         "c1",
+				State:        pb.CollectionState_CollectionCreated,
+				ShardsNum:    1,
+				Partitions: []*model.Partition{
+					{PartitionID: 10, PartitionName: "_default", State: pb.PartitionState_PartitionCreated},
+				},
+			},
+		},
+		dbName2Meta:        map[string]*model.Database{},
+		fileResourceRefCnt: map[int64]int{},
+		generalCnt:         1,
+	}
+	meta.rebuildAvailableCollectionCountLocked()
+
+	err := meta.DropCollection(ctx, 100, 300)
+	require.ErrorIs(t, err, merr.ErrDatabaseNotFound)
+	assert.Equal(t, pb.CollectionState_CollectionCreated, meta.collID2Meta[100].State)
+	assert.Equal(t, 1, meta.generalCnt)
+	dbCount, total, ok := meta.GetAvailableCollectionCount(ctx, dbID)
+	require.True(t, ok)
+	assert.Equal(t, 1, dbCount)
+	assert.Equal(t, 1, total)
+	catalog.AssertNotCalled(t, "AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+	meta.dbName2Meta["db2"] = &model.Database{ID: dbID, Name: "db2"}
+	require.NoError(t, meta.DropCollection(ctx, 100, 300))
+	assert.Equal(t, pb.CollectionState_CollectionDropping, meta.collID2Meta[100].State)
+	assert.Equal(t, 0, meta.generalCnt)
+	dbCount, total, ok = meta.GetAvailableCollectionCount(ctx, dbID)
+	require.True(t, ok)
+	assert.Equal(t, 0, dbCount)
+	assert.Equal(t, 0, total)
+}
+
 func TestMetaTable_AddPartition(t *testing.T) {
 	t.Run("collection not available", func(t *testing.T) {
 		meta := &MetaTable{}
