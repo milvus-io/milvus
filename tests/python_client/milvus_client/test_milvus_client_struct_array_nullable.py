@@ -1039,6 +1039,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
     min_index_sealed_rows = 3000
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51414", strict=True)
     def test_struct_array_compaction_preserves_null_empty_offsets_and_indexes(self):
         """
         target: verify Struct Array data and element identities survive segment compaction
@@ -1267,6 +1268,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 f"MATCH_LEAST({STRUCT_FIELD}, $[{INT_SUBFIELD}] >= 10, threshold=1)",
                 False,
                 True,
+                marks=pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51416", strict=True),
                 id="match_int",
             ),
             pytest.param(
@@ -1283,6 +1285,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 f"array_contains_all({STRUCT_TAG_FIELD}, [])",
                 False,
                 False,
+                marks=pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51416", strict=True),
                 id="contains_all_empty_list",
             ),
         ],
@@ -2521,6 +2524,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 assert_scalar_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51381", strict=True)
     def test_nullable_struct_array_index_preserves_null_validity(self):
         """
         target: test nullable struct-array predicates before and after indexing every scalar struct subfield
@@ -7183,6 +7187,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51381", strict=True)
     def test_add_scalar_struct_array_field_match_null_vs_empty_after_reload(self):
         """
         target: test MATCH three-valued semantics for schema-evolution backfill rows
@@ -12293,7 +12298,17 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("file_format", SCALAR_IMPORT_FORMATS, ids=SCALAR_IMPORT_FORMATS)
-    @pytest.mark.parametrize("search_mode", ["embedding_list", "element"], ids=["embedding_list", "element"])
+    @pytest.mark.parametrize(
+        "search_mode",
+        [
+            pytest.param(
+                "embedding_list",
+                marks=pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51414", strict=True),
+                id="embedding_list",
+            ),
+            pytest.param("element", id="element"),
+        ],
+    )
     def test_import_nullable_struct_array_with_vector(self, file_format, search_mode):
         """
         target: test JSON and Parquet import for a nullable Struct Array field with scalar and vector sub-fields
