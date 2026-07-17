@@ -72,10 +72,13 @@ namespace milvus::index {
 namespace {
 
 uint64_t
-ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
-                                int32_t scalar_version,
-                                bool encrypted,
-                                bool file_stream) {
+ScalarIndexStreamMemoryOverhead(
+    uint64_t index_size_in_bytes,
+    int32_t scalar_version,
+    bool encrypted,
+    bool file_stream,
+    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info =
+        std::nullopt) {
     if (index_size_in_bytes == 0) {
         return 0;
     }
@@ -83,6 +86,11 @@ ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
         return index_size_in_bytes;
     }
     if (encrypted) {
+        if (stream_load_info.has_value()) {
+            return storage::EncryptedEntryStreamMaxTransientBytes(
+                stream_load_info->total_transient_bytes,
+                stream_load_info->max_task_transient_bytes);
+        }
         auto stream_data_bound = milvus::storage::EntryStreamDataTransientBytes(
             index_size_in_bytes, true);
         return std::min<uint64_t>(
@@ -229,6 +237,23 @@ ResolveHybridInternalIndexType(
     return std::nullopt;
 }
 
+std::optional<storage::EntryStreamLoadInfo>
+InspectScalarIndexStreamLoadInfo(
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    if (index_files.size() != 1 || !file_manager_context.Valid()) {
+        return std::nullopt;
+    }
+
+    storage::MemFileManagerImpl file_manager(file_manager_context);
+    auto input = file_manager.OpenInputStream(index_files[0]);
+    AssertInfo(input != nullptr,
+               "failed to open packed scalar index file: {}",
+               index_files[0]);
+    return storage::IndexEntryReader::InspectStreamLoadInfo(input,
+                                                            input->Size());
+}
+
 }  // namespace
 
 bool
@@ -343,7 +368,11 @@ IndexFactory::IndexLoadResource(
     int64_t num_rows,
     int64_t dim,
     const std::vector<std::string>& index_files,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    std::optional<storage::EntryStreamLoadInfo>* stream_load_info) {
+    if (stream_load_info != nullptr) {
+        stream_load_info->reset();
+    }
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
@@ -361,7 +390,8 @@ IndexFactory::IndexLoadResource(
                                    mmap_enable,
                                    num_rows,
                                    index_files,
-                                   file_manager_context);
+                                   file_manager_context,
+                                   stream_load_info);
 }
 
 LoadResourceRequest
@@ -576,6 +606,24 @@ IndexFactory::ScalarIndexLoadResource(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows) {
+    return ScalarIndexLoadResourceImpl(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows,
+                                       std::nullopt);
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResourceImpl(
+    DataType field_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -587,17 +635,23 @@ IndexFactory::ScalarIndexLoadResource(
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    // The plugin is loaded only when cluster disk encryption is enabled.
-    // Plaintext clusters keep the original, lower stream estimate.
+    // File-aware callers use the persisted __edek__ marker. Keep plugin state
+    // only as a compatibility fallback for callers without file context.
     auto encrypted_stream =
         scalar_version >= 3 &&
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
-            nullptr;
+        (stream_load_info.has_value()
+             ? stream_load_info->encrypted
+             : milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
+                   nullptr);
     auto file_stream = index_type == milvus::index::INVERTED_INDEX_TYPE ||
                        index_type == milvus::index::NGRAM_INDEX_TYPE ||
                        index_type == milvus::index::RTREE_INDEX_TYPE;
-    auto stream_memory_overhead = ScalarIndexStreamMemoryOverhead(
-        index_size_in_bytes, scalar_version, encrypted_stream, file_stream);
+    auto stream_memory_overhead =
+        ScalarIndexStreamMemoryOverhead(index_size_in_bytes,
+                                        scalar_version,
+                                        encrypted_stream,
+                                        file_stream,
+                                        stream_load_info);
 
     LoadResourceRequest request{};
     request.has_raw_data = false;
@@ -706,53 +760,55 @@ IndexFactory::ScalarIndexLoadResource(
     bool mmap_enable,
     int64_t num_rows,
     const std::vector<std::string>& index_files,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    std::optional<storage::EntryStreamLoadInfo>* stream_load_info) {
     auto index_type_it = index_params.find("index_type");
     AssertInfo(index_type_it != index_params.end(), "index type is empty");
-    if (index_type_it->second != milvus::index::HYBRID_INDEX_TYPE) {
-        return ScalarIndexLoadResource(field_type,
+    std::optional<storage::EntryStreamLoadInfo> inspected_stream_load_info;
+    auto config = milvus::index::ParseConfigFromIndexParams(index_params);
+    auto scalar_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    if (scalar_version >= 3) {
+        inspected_stream_load_info =
+            InspectScalarIndexStreamLoadInfo(index_files, file_manager_context);
+    }
+    if (stream_load_info != nullptr) {
+        *stream_load_info = inspected_stream_load_info;
+    }
+
+    auto resolved_params = index_params;
+    if (index_type_it->second == milvus::index::HYBRID_INDEX_TYPE) {
+        try {
+            auto internal_index_type = ResolveHybridInternalIndexType(
+                index_files, file_manager_context);
+            if (internal_index_type.has_value()) {
+                auto resolved_index_type = HybridInternalIndexTypeToIndexType(
+                    internal_index_type.value());
+                if (!resolved_index_type.empty()) {
+                    resolved_params["index_type"] = resolved_index_type;
+                    LOG_INFO(
+                        "estimate hybrid scalar index load resource by "
+                        "internal index type: {}",
+                        resolved_index_type);
+                }
+            }
+        } catch (std::exception& e) {
+            LOG_WARN(
+                "failed to resolve hybrid scalar internal index type, "
+                "fallback to hybrid estimate: {}",
+                e.what());
+        }
+    }
+
+    return ScalarIndexLoadResourceImpl(field_type,
                                        index_version,
                                        index_size_in_bytes,
-                                       index_params,
+                                       resolved_params,
                                        mmap_enable,
-                                       num_rows);
-    }
-
-    try {
-        auto internal_index_type =
-            ResolveHybridInternalIndexType(index_files, file_manager_context);
-        if (internal_index_type.has_value()) {
-            auto resolved_index_type =
-                HybridInternalIndexTypeToIndexType(internal_index_type.value());
-            if (!resolved_index_type.empty()) {
-                auto resolved_params = index_params;
-                resolved_params["index_type"] = resolved_index_type;
-                auto request = ScalarIndexLoadResource(field_type,
-                                                       index_version,
-                                                       index_size_in_bytes,
-                                                       resolved_params,
-                                                       mmap_enable,
-                                                       num_rows);
-                LOG_INFO(
-                    "estimate hybrid scalar index load resource by internal "
-                    "index type: {}",
-                    resolved_index_type);
-                return request;
-            }
-        }
-    } catch (std::exception& e) {
-        LOG_WARN(
-            "failed to resolve hybrid scalar internal index type, fallback to "
-            "hybrid estimate: {}",
-            e.what());
-    }
-
-    return ScalarIndexLoadResource(field_type,
-                                   index_version,
-                                   index_size_in_bytes,
-                                   index_params,
-                                   mmap_enable,
-                                   num_rows);
+                                       num_rows,
+                                       inspected_stream_load_info);
 }
 
 IndexBasePtr

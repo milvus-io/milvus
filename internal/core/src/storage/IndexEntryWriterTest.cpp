@@ -158,6 +158,51 @@ class MockCipherPlugin : public plugin::ICipherPlugin {
     }
 };
 
+class ExpandingMockEncryptor : public plugin::IEncryptor {
+ public:
+    std::string
+    Encrypt(const std::string& plaintext) const override {
+        return Encrypt(plaintext.data(), plaintext.size());
+    }
+
+    std::string
+    Encrypt(std::string_view plaintext) const override {
+        return Encrypt(plaintext.data(), plaintext.size());
+    }
+
+    std::string
+    Encrypt(const void*, size_t len) const override {
+        return std::string(4 * len + 17, 'E');
+    }
+
+    std::string
+    GetKey() const override {
+        return {};
+    }
+};
+
+class ExpandingMockCipherPlugin : public plugin::ICipherPlugin {
+ public:
+    std::string
+    getPluginName() const override {
+        return "ExpandingCipherPlugin";
+    }
+
+    void
+    Update(int64_t, int64_t, const std::string&) override {
+    }
+
+    std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>
+    GetEncryptor(int64_t, int64_t) const override {
+        return {std::make_shared<ExpandingMockEncryptor>(), "expanding_edek"};
+    }
+
+    std::shared_ptr<plugin::IDecryptor>
+    GetDecryptor(int64_t, int64_t, const std::string&) const override {
+        return nullptr;
+    }
+};
+
 class DelayedFailingInputStream : public milvus::InputStream {
  public:
     struct Rule {
@@ -1004,6 +1049,48 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), entry_size);
+}
+
+TEST_F(IndexEntryEncryptedV3Test,
+       InspectStreamLoadInfoUsesPersistedCiphertextSizes) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path = kV3FilePath + "_enc_stream_load_info";
+    const size_t slice_size = kStreamSliceAlignment;
+    const size_t entry_size = 2 * slice_size + 100;
+    auto data = GeneratePattern(entry_size);
+    auto expanding_cipher = std::make_shared<ExpandingMockCipherPlugin>();
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              expanding_cipher,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    auto info = IndexEntryReader::InspectStreamLoadInfo(input, input->Size());
+
+    // The encryptor expands ciphertext beyond 3x plaintext. The directory also
+    // contains the encrypted two-byte "{}" metadata entry.
+    EXPECT_TRUE(info.encrypted);
+    EXPECT_EQ(info.max_task_transient_bytes, 6 * slice_size + 17);
+    EXPECT_EQ(info.total_transient_bytes,
+              2 * (6 * slice_size + 17) + (6 * 100 + 17) + 29);
+
+    milvus::SetLoadTransientBudgetBytes(0);
+    EXPECT_EQ(EncryptedEntryStreamMaxTransientBytes(
+                  info.total_transient_bytes, info.max_task_transient_bytes),
+              info.total_transient_bytes);
+
+    milvus::SetLoadTransientBudgetBytes(1);
+    EXPECT_EQ(EncryptedEntryStreamMaxTransientBytes(
+                  info.total_transient_bytes, info.max_task_transient_bytes),
+              info.max_task_transient_bytes);
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {

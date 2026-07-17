@@ -1231,10 +1231,17 @@ class SegmentLoadInfo {
                 &index_info, info_.segmentid());
             auto index_type_it =
                 load_index_info.index_params.find(milvus::index::INDEX_TYPE);
-            auto needs_file_context =
+            auto scalar_version_it = load_index_info.index_params.find(
+                milvus::index::SCALAR_INDEX_ENGINE_VERSION);
+            auto scalar_v3 =
                 !IsVectorDataType(load_index_info.field_type) &&
-                index_type_it != load_index_info.index_params.end() &&
-                index_type_it->second == milvus::index::HYBRID_INDEX_TYPE;
+                scalar_version_it != load_index_info.index_params.end() &&
+                std::stoi(scalar_version_it->second) >= 3;
+            auto needs_file_context =
+                scalar_v3 ||
+                (!IsVectorDataType(load_index_info.field_type) &&
+                 index_type_it != load_index_info.index_params.end() &&
+                 index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
             if (!needs_file_context) {
                 load_index_info.load_resource_request =
                     milvus::index::IndexFactory::GetInstance()

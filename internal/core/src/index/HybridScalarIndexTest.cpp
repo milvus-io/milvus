@@ -716,6 +716,12 @@ TYPED_TEST_SUITE_P(HybridIndexTestInverted);
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ResourceEstimateUsesInternalInvertedIndexType) {
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.addPluginForTest(
+        std::make_shared<milvus::test::PlannerCipherPlugin>());
+    auto plugin_cleanup = folly::makeGuard(
+        [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
+
     auto stream_budget = storage::EntryStreamMaxTransientBytes();
     auto index_size = static_cast<uint64_t>(stream_budget);
     if (stream_budget == std::numeric_limits<size_t>::max() ||
@@ -848,23 +854,21 @@ TYPED_TEST_P(HybridIndexTestInverted,
         std::make_shared<milvus::test::PlannerCipherPlugin>());
     auto plugin_cleanup = folly::makeGuard(
         [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
-    Config encrypted_config = index_params;
+    Config plugin_loaded_config = index_params;
     milvus::segcore::storagev1translator::SealedIndexTranslator
-        encrypted_translator(index_info,
-                             &load_info,
-                             milvus::tracer::TraceContext{},
-                             ctx,
-                             std::move(encrypted_config));
+        plugin_loaded_translator(index_info,
+                                 &load_info,
+                                 milvus::tracer::TraceContext{},
+                                 ctx,
+                                 std::move(plugin_loaded_config));
 
-    auto encrypted_index_bound = storage::EntryStreamDataTransientBytes(
-        static_cast<size_t>(load_info.index_size), true);
     ASSERT_TRUE(
-        encrypted_translator.meta()->loading_overhead->memory.has_value());
+        plugin_loaded_translator.meta()->loading_overhead->memory.has_value());
     EXPECT_FALSE(
-        encrypted_translator.meta()->loading_overhead->file.has_value());
+        plugin_loaded_translator.meta()->loading_overhead->file.has_value());
     EXPECT_EQ(
-        encrypted_translator.meta()->loading_overhead->memory->upper_bound,
-        milvus::segcore::LoadTransientPoolUpperBound(encrypted_index_bound));
+        plugin_loaded_translator.meta()->loading_overhead->memory->upper_bound,
+        max_load_tasks * max_task_overhead);
 }
 
 template <typename T>

@@ -231,7 +231,8 @@ PlainEntryFileStreamTransientBytes(size_t stream_bytes) {
 
 inline size_t
 EncryptedEntryStreamTaskTransientBytes() {
-    // Reuse the tail grace as a conservative allowance for cipher expansion.
+    // Compatibility fallback for callers that cannot inspect a concrete V3
+    // directory. File-aware planning uses persisted ciphertext slice sizes.
     return EntryStreamDataTransientBytes(
         DefaultStreamSliceSize() + kTailMergeGrace, true);
 }
@@ -302,6 +303,29 @@ EntryStreamMaxTransientBytes(bool encrypted = false) {
 
     return std::min(std::max(capacity, PlainEntryStreamTaskTransientBytes()),
                     pool_bound);
+}
+
+inline size_t
+EncryptedEntryStreamMaxTransientBytes(size_t total_transient_bytes,
+                                      size_t max_task_transient_bytes) {
+    if (total_transient_bytes == 0 || max_task_transient_bytes == 0) {
+        return 0;
+    }
+
+    auto capacity =
+        TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto pool_bound = EntryStreamPoolBoundTransientBytesForTask(
+        max_task_transient_bytes,
+        std::max(high_pool.GetThreadNum(), low_pool.GetThreadNum()));
+    auto budget_bound =
+        capacity == 0 ? pool_bound
+                      : std::min(std::max(capacity, max_task_transient_bytes),
+                                 pool_bound);
+    return std::min(total_transient_bytes, budget_bound);
 }
 
 inline size_t

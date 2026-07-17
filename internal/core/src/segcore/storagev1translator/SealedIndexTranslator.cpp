@@ -84,7 +84,8 @@ SealedIndexTranslator::SealedIndexTranslator(
     // TODO: Recompute scalar V3 stream estimates and the registered loading
     // overhead upper bound when refreshable load-pool sizes grow. CacheSlot
     // snapshots both at translator construction and reuses them on reload.
-    load_resource_request_ = EstimateLoadResource();
+    std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
+    load_resource_request_ = EstimateLoadResource(&stream_load_info);
 
     auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
@@ -95,10 +96,14 @@ SealedIndexTranslator::SealedIndexTranslator(
             milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
                 .CapacityBytes());
         auto encrypted_stream =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
-            nullptr;
+            stream_load_info.has_value()
+                ? stream_load_info->encrypted
+                : milvus::storage::PluginLoader::GetInstance()
+                          .getCipherPlugin() != nullptr;
         auto max_task_overhead =
-            encrypted_stream
+            encrypted_stream && stream_load_info.has_value()
+                ? stream_load_info->max_task_transient_bytes
+            : encrypted_stream
                 ? milvus::storage::EncryptedEntryStreamTaskTransientBytes()
                 : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
         auto encrypted_stream_upper_bound = [&]() {
@@ -109,8 +114,27 @@ SealedIndexTranslator::SealedIndexTranslator(
                                                                true),
                 static_cast<size_t>(std::numeric_limits<int64_t>::max()));
         };
+        auto exact_encrypted_upper_bound = [&]() {
+            auto total_transient_bytes = static_cast<int64_t>(std::min(
+                stream_load_info->total_transient_bytes,
+                static_cast<size_t>(std::numeric_limits<int64_t>::max())));
+            auto task_transient_bytes = static_cast<int64_t>(std::min(
+                stream_load_info->max_task_transient_bytes,
+                static_cast<size_t>(std::numeric_limits<int64_t>::max())));
+            auto pool_upper_bound =
+                milvus::segcore::LoadTransientPoolUpperBound(
+                    stream_load_info->max_task_transient_bytes);
+            auto budget_upper_bound =
+                budget_capacity == 0
+                    ? pool_upper_bound
+                    : std::min(std::max(budget_capacity, task_transient_bytes),
+                               pool_upper_bound);
+            return std::min(total_transient_bytes, budget_upper_bound);
+        };
         auto memory_upper_bound =
-            budget_capacity != 0
+            encrypted_stream && stream_load_info.has_value()
+                ? exact_encrypted_upper_bound()
+            : budget_capacity != 0
                 ? std::max<int64_t>(budget_capacity, max_task_overhead)
             : encrypted_stream ? milvus::segcore::LoadTransientPoolUpperBound(
                                      encrypted_stream_upper_bound())
@@ -125,21 +149,26 @@ SealedIndexTranslator::SealedIndexTranslator(
 }
 
 LoadResourceRequest
-SealedIndexTranslator::EstimateLoadResource() const {
+SealedIndexTranslator::EstimateLoadResource(
+    std::optional<milvus::storage::EntryStreamLoadInfo>* stream_load_info)
+    const {
+    auto estimated =
+        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+            index_load_info_.field_type,
+            index_load_info_.element_type,
+            index_load_info_.index_engine_version,
+            index_load_info_.index_size,
+            index_load_info_.index_params,
+            index_load_info_.enable_mmap,
+            index_load_info_.num_rows,
+            index_load_info_.dim,
+            index_load_info_.index_files,
+            file_manager_context_,
+            stream_load_info);
     if (index_load_info_.load_resource_request.has_value()) {
         return *index_load_info_.load_resource_request;
     }
-    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        index_load_info_.field_type,
-        index_load_info_.element_type,
-        index_load_info_.index_engine_version,
-        index_load_info_.index_size,
-        index_load_info_.index_params,
-        index_load_info_.enable_mmap,
-        index_load_info_.num_rows,
-        index_load_info_.dim,
-        index_load_info_.index_files,
-        file_manager_context_);
+    return estimated;
 }
 
 size_t
