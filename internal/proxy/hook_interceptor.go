@@ -67,7 +67,7 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 func updateProxyFunctionCallMetric(fullMethod string, err error) {
 	strs := strings.Split(fullMethod, "/")
 	method := strs[len(strs)-1]
-	if method == "" {
+	if method == "" || !metrics.ShouldObserveProxyFunctionCall(method) {
 		return
 	}
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, "", "").Inc()

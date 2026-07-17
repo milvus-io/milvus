@@ -493,6 +493,10 @@ var (
 		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
 )
 
+func ShouldObserveProxyFunctionCall(method string) bool {
+	return method != "DropCollection"
+}
+
 // RegisterProxy registers Proxy metrics
 func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyReceivedNQ)

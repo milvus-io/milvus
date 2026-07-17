@@ -50,32 +50,37 @@ func init() {
 // when other interceptor rejects the request, it will record it as `RejectedLabel`
 func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	methodTag := FullMethodName2Tag(rpcInfo.FullMethod)
+	observeProxyFunctionCall := metrics.ShouldObserveProxyFunctionCall(methodTag)
 	db, _ := requestutil.GetDbNameFromRequest(req)
 	collection, _ := requestutil.GetCollectionNameFromRequest(req)
 
 	dbName := db.(string)
 	collectionName := collection.(string)
 
-	metrics.ProxyFunctionCall.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		methodTag,
-		metrics.TotalLabel,
-		dbName,
-		collectionName,
-	).Inc()
+	if observeProxyFunctionCall {
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			methodTag,
+			metrics.TotalLabel,
+			dbName,
+			collectionName,
+		).Inc()
+	}
 
 	start := time.Now()
 	resp, err := handler(ctx, req)
 	label := requestutil.ParseMetricLabel(resp, err)
 
 	// set metrics for state code
-	metrics.ProxyFunctionCall.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		methodTag,
-		label,
-		dbName,
-		collectionName,
-	).Inc()
+	if observeProxyFunctionCall {
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			methodTag,
+			label,
+			dbName,
+			collectionName,
+		).Inc()
+	}
 
 	// Mirror the fail_input/fail_system metric split into the logs so a failed
 	// request can be filtered by error_type the same way the metric is. System
