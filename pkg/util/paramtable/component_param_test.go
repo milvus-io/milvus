@@ -636,6 +636,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1024, Params.MaxImportJobNum.GetAsInt())
 		assert.Equal(t, true, Params.WaitForIndex.GetAsBool())
 		assert.Equal(t, false, Params.ImportInReplicatingCluster.GetAsBool())
+		assert.Equal(t, false, Params.EnableL0Import.GetAsBool())
 		assert.Equal(t, 4, Params.ImportFileNumPerSlot.GetAsInt())
 		assert.Equal(t, 160*1024*1024, Params.ImportMemoryLimitPerSlot.GetAsInt())
 
