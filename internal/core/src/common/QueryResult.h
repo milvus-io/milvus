@@ -214,8 +214,14 @@ class ChunkMergeIterator : public VectorIterator {
     void
     seal() {
         sealed = true;
-        int idx = 0;
-        for (auto& iter : iterators_) {
+        // idx must track each chunk's position in iterators_, because Next()
+        // refills from iterators_[OffsetDisPair::GetIteratorIdx()]. Incrementing
+        // only for non-empty iterators would misalign the index once a leading
+        // iterator is empty (e.g. emptied by a bitset filter), stamping later
+        // chunks with the wrong iterator and silently dropping their remaining
+        // results from the merged top-k.
+        for (int idx = 0; idx < static_cast<int>(iterators_.size()); ++idx) {
+            auto& iter = iterators_[idx];
             auto has_next = iter->HasNext();
             AssertInfo(has_next.has_value(),
                        "knowhere iterator HasNext failed: {}",
@@ -226,7 +232,7 @@ class ChunkMergeIterator : public VectorIterator {
                            "knowhere iterator Next failed: {}",
                            origin_pair.what());
                 auto off_dis_pair =
-                    std::make_shared<OffsetDisPair>(origin_pair.value(), idx++);
+                    std::make_shared<OffsetDisPair>(origin_pair.value(), idx);
                 heap_.push(off_dis_pair);
             }
         }
