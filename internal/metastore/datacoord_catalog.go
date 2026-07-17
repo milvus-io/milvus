@@ -73,12 +73,16 @@ type DataCoordCatalog interface {
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	// TODO Remove this later, we should update flush segments info for each segment separately, so far we still need transaction
 	AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...BinlogsIncrement) error
+	// Update applies a composite set of UpdateActions as a single atomic
+	// write (or, when the op count exceeds the txn size limit, via a
+	// caller-ordered chunked fallback). See kv/txn.Commit for the exact
+	// atomicity contract.
+	Update(ctx context.Context, actions ...UpdateAction) error
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
 	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
 	MarkChannelAdded(ctx context.Context, channel string) error
-	MarkChannelDeleted(ctx context.Context, channel string) error
 	ShouldDropChannel(ctx context.Context, channel string) bool
 	ChannelExists(ctx context.Context, channel string) bool
 	DropChannel(ctx context.Context, channel string) error
@@ -125,13 +129,9 @@ type DataCoordCatalog interface {
 
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
-	DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error
 
 	ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error)
-	SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
-	DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
 
-	SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error
 	GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error)
 	DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error
 
@@ -142,10 +142,8 @@ type DataCoordCatalog interface {
 	// External Collection Refresh - Separated Job/Task storage
 	ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error)
 	SaveExternalCollectionRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
-	DropExternalCollectionRefreshJob(ctx context.Context, jobID typeutil.UniqueID) error
 	ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error)
 	SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error
-	DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error
 
 	// Analyzer Resource
 	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error

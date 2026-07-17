@@ -61,6 +61,13 @@ type TxnKV interface {
 	BaseKV
 	MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error
 	MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error
+	// MaxTxnOps reports the maximum number of key operations this store applies
+	// as a single atomic transaction; a batch exceeding it must be split by the
+	// caller. This is a per-store property (etcd's is small, TiKV's is large),
+	// so callers composing an atomic multi-key write should size against it
+	// rather than a backend-specific constant. It bounds op COUNT only, not the
+	// request's total byte size.
+	MaxTxnOps() int
 }
 
 // MetaKv is TxnKV for metadata. It should save data with lease.

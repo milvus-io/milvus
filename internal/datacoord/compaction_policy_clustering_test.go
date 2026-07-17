@@ -53,7 +53,6 @@ type ClusteringCompactionPolicySuite struct {
 
 func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().SavePartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -507,7 +506,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 			partitionStatsMeta, err := newPartitionStatsMeta(ctx, s.catalog)
 			s.NoError(err)
 			for _, partitionStats := range test.partitionStats {
-				partitionStatsMeta.SavePartitionStatsInfo(partitionStats)
+				seedPartitionStatsInfo(partitionStatsMeta, partitionStats)
 			}
 			if test.currentVersion != 0 {
 				partitionStatsMeta.partitionStatsInfos[channel][partitionID].currentVersion = test.currentVersion

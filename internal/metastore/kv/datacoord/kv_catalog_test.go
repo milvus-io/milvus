@@ -832,17 +832,6 @@ func TestChannelCP(t *testing.T) {
 	})
 }
 
-func Test_MarkChannelDeleted_SaveError(t *testing.T) {
-	txn := mocks.NewMetaKv(t)
-	txn.EXPECT().
-		Save(mock.Anything, mock.Anything, mock.Anything).
-		Return(errors.New("mock error"))
-
-	catalog := NewCatalog(txn, rootPath, "")
-	err := catalog.MarkChannelDeleted(context.TODO(), "test_channel_1")
-	assert.Error(t, err)
-}
-
 func Test_MarkChannelAdded_SaveError(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	txn.EXPECT().
@@ -1661,22 +1650,6 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 		err = kc.SaveAnalyzeTask(context.Background(), task)
 		assert.Error(t, err)
 	})
-
-	t.Run("DropAnalyzeTask", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-		kc.MetaKv = txn
-
-		err := kc.DropAnalyzeTask(context.Background(), 1)
-		assert.NoError(t, err)
-
-		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
-		kc.MetaKv = txn
-
-		err = kc.DropAnalyzeTask(context.Background(), 1)
-		assert.Error(t, err)
-	})
 }
 
 func Test_PartitionStatsInfo(t *testing.T) {
@@ -1724,58 +1697,6 @@ func Test_PartitionStatsInfo(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, infos)
 	})
-
-	t.Run("SavePartitionStatsInfo", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(mockErr)
-		kc.MetaKv = txn
-
-		info := &datapb.PartitionStatsInfo{
-			CollectionID:  1,
-			PartitionID:   2,
-			VChannel:      "ch1",
-			Version:       1,
-			SegmentIDs:    nil,
-			AnalyzeTaskID: 3,
-			CommitTime:    10,
-		}
-
-		err := kc.SavePartitionStatsInfo(context.Background(), info)
-		assert.Error(t, err)
-
-		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
-		kc.MetaKv = txn
-
-		err = kc.SavePartitionStatsInfo(context.Background(), info)
-		assert.NoError(t, err)
-	})
-
-	t.Run("DropPartitionStatsInfo", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
-		kc.MetaKv = txn
-
-		info := &datapb.PartitionStatsInfo{
-			CollectionID:  1,
-			PartitionID:   2,
-			VChannel:      "ch1",
-			Version:       1,
-			SegmentIDs:    nil,
-			AnalyzeTaskID: 3,
-			CommitTime:    10,
-		}
-
-		err := kc.DropPartitionStatsInfo(context.Background(), info)
-		assert.Error(t, err)
-
-		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-		kc.MetaKv = txn
-
-		err = kc.DropPartitionStatsInfo(context.Background(), info)
-		assert.NoError(t, err)
-	})
 }
 
 func Test_CurrentPartitionStatsVersion(t *testing.T) {
@@ -1784,23 +1705,6 @@ func Test_CurrentPartitionStatsVersion(t *testing.T) {
 	collID := int64(1)
 	partID := int64(2)
 	vChannel := "ch1"
-	currentVersion := int64(1)
-
-	t.Run("SaveCurrentPartitionStatsVersion", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
-		kc.MetaKv = txn
-
-		err := kc.SaveCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel, currentVersion)
-		assert.Error(t, err)
-
-		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		kc.MetaKv = txn
-
-		err = kc.SaveCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel, currentVersion)
-		assert.NoError(t, err)
-	})
 
 	t.Run("GetCurrentPartitionStatsVersion", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
@@ -2162,15 +2066,6 @@ func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
 		assert.Equal(t, int64(12345), jobs[0].JobId)
 	})
 
-	t.Run("DropExternalCollectionRefreshJob", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Times(1)
-		kc.MetaKv = txn
-
-		err := kc.DropExternalCollectionRefreshJob(context.Background(), job.GetJobId())
-		assert.NoError(t, err)
-	})
-
 	t.Run("SaveExternalCollectionRefreshTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(1)
@@ -2195,15 +2090,6 @@ func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(tasks))
 		assert.Equal(t, int64(54321), tasks[0].TaskId)
-	})
-
-	t.Run("DropExternalCollectionRefreshTask", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Times(1)
-		kc.MetaKv = txn
-
-		err := kc.DropExternalCollectionRefreshTask(context.Background(), task.GetTaskId())
-		assert.NoError(t, err)
 	})
 
 	t.Run("SaveFileResource", func(t *testing.T) {

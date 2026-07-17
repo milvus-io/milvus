@@ -761,7 +761,13 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		mlog.Int("totalFiles", len(allFiles)),
 		mlog.Int("numTasks", len(chunks)))
 
-	var tasks []*refreshExternalCollectionTask
+	// Allocate IDs and build every task first (ID allocation order preserved),
+	// then persist all task saves plus the job's updated TaskIds as a single
+	// composite catalog write - the job written last as the commit marker - so
+	// a partial failure can no longer desync the job's TaskIds from the
+	// persisted task set. In-memory bookkeeping is applied only after that
+	// write succeeds.
+	rawTasks := make([]*datapb.ExternalCollectionRefreshTask, 0, len(chunks))
 	for _, chunk := range chunks {
 		taskID, err := m.allocator.AllocID(ctx)
 		if err != nil {
@@ -783,19 +789,17 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 			FileIndexBegin:      chunk.fileIndexBegin,
 			FileIndexEnd:        chunk.fileIndexEnd,
 		}
+		rawTasks = append(rawTasks, task)
+	}
 
-		if err = m.refreshMeta.AddTask(task); err != nil {
-			log.Warn(ctx, "failed to add task to meta", mlog.Err(err))
-			return nil, err
-		}
+	if err = m.refreshMeta.AddTasksToJob(job.GetJobId(), rawTasks); err != nil {
+		log.Warn(ctx, "failed to add tasks to job", mlog.Err(err))
+		return nil, err
+	}
 
-		if err = m.refreshMeta.AddTaskIDToJob(job.GetJobId(), taskID); err != nil {
-			log.Warn(ctx, "failed to add taskID to job", mlog.Err(err))
-			return nil, err
-		}
-
-		taskWrapper := m.wrapTask(task)
-		tasks = append(tasks, taskWrapper)
+	tasks := make([]*refreshExternalCollectionTask, 0, len(rawTasks))
+	for _, task := range rawTasks {
+		tasks = append(tasks, m.wrapTask(task))
 	}
 
 	log.Info(ctx, "tasks created for job",

@@ -140,15 +140,6 @@ func (m *externalCollectionRefreshMeta) addToJobTasks(task *datapb.ExternalColle
 	taskMap.Insert(task.GetTaskId(), task)
 }
 
-func (m *externalCollectionRefreshMeta) removeFromJobTasks(jobID int64, taskID int64) {
-	if taskMap, ok := m.jobTasks.Get(jobID); ok {
-		taskMap.Remove(taskID)
-		if taskMap.Len() == 0 {
-			m.jobTasks.Remove(jobID)
-		}
-	}
-}
-
 func cloneProtoSegments(segments []*datapb.SegmentInfo) []*datapb.SegmentInfo {
 	if len(segments) == 0 {
 		return nil
@@ -470,6 +461,67 @@ func (m *externalCollectionRefreshMeta) AddTaskIDToJob(jobID int64, taskID int64
 	return err
 }
 
+// AddTasksToJob persists a batch of newly-created tasks together with the
+// job's updated TaskIds list as a single composite catalog write, then applies
+// the in-memory bookkeeping of both. It replaces the per-task pair of writes
+// createTasksForJob used to do (AddTask followed by AddTaskIDToJob), which -
+// being 2N independent txns - could leave the job's TaskIds disagreeing with
+// the persisted task set on a partial failure.
+//
+// The job - the failover anchor for its tasks - is written LAST as the commit
+// marker, mirroring DropJob's ordering: a persisted job always references only
+// tasks that are themselves persisted. Both the job lock (collectionID) and
+// the task lock (jobID) are held across the whole compute -> catalog.Update ->
+// in-memory apply sequence so a concurrent AddTask / AddTaskIDToJob cannot
+// interleave and desync the job's TaskIds from its task set. (jobLock is taken
+// before taskLock; no path takes them in the opposite order, so this cannot
+// deadlock.) In-memory state is applied only after the write succeeds.
+func (m *externalCollectionRefreshMeta) AddTasksToJob(jobID int64, tasks []*datapb.ExternalCollectionRefreshTask) error {
+	job, ok := m.jobs.Get(jobID)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("job %d not found", jobID)
+	}
+
+	m.jobLock.Lock(job.GetCollectionId())
+	defer m.jobLock.Unlock(job.GetCollectionId())
+	m.taskLock.Lock(jobID)
+	defer m.taskLock.Unlock(jobID)
+
+	// Re-fetch after lock so the persisted job carries the freshest TaskIds.
+	job, ok = m.jobs.Get(jobID)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("job %d not found", jobID)
+	}
+
+	// Mirror AddTaskIDToJob: mutate a clone (append every new task ID) and
+	// persist that as the job record, so on-disk TaskIds cover all saved tasks.
+	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
+	actions := make([]metastore.UpdateAction, 0, len(tasks)+1)
+	for _, task := range tasks {
+		actions = append(actions, metastore.AddRefreshTask(task))
+		cloneJob.TaskIds = append(cloneJob.TaskIds, task.GetTaskId())
+	}
+	actions = append(actions, metastore.SaveRefreshJob(cloneJob))
+
+	if err := m.catalog.Update(m.ctx, actions...); err != nil {
+		mlog.Warn(m.ctx, "add tasks to job failed",
+			mlog.Int64("jobID", jobID),
+			mlog.Int("taskCount", len(tasks)),
+			mlog.Err(err))
+		return err
+	}
+
+	// Mirror AddTask's memory writes (task inserted as-is, no clone) and
+	// mutateJob's (the mutated clone replaces the in-memory job).
+	for _, task := range tasks {
+		m.tasks.Insert(task.GetTaskId(), task)
+		m.addToJobTasks(task)
+	}
+	m.jobs.Insert(jobID, cloneJob)
+	m.addToCollectionJobs(cloneJob)
+	return nil
+}
+
 // DropJob removes a job and all its associated tasks
 func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64) error {
 	job, ok := m.jobs.Get(jobID)
@@ -488,34 +540,36 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 		return nil
 	}
 
-	// Drop all associated tasks first
+	// Collect associated task IDs, then persist the drop of every task and
+	// the job as a single composite catalog write, with the job (the
+	// failover anchor) landing last. Memory is only mutated after the write
+	// succeeds, so a failed write leaves the in-memory state consistent with
+	// what is actually on disk.
+	var taskIDs []int64
 	if taskMap, ok := m.jobTasks.Get(jobID); ok {
-		var dropErr error
 		taskMap.Range(func(taskID int64, _ *datapb.ExternalCollectionRefreshTask) bool {
-			if err := m.catalog.DropExternalCollectionRefreshTask(ctx, taskID); err != nil {
-				mlog.Warn(ctx, "drop task failed during job drop",
-					mlog.Int64("jobID", jobID),
-					mlog.Int64("taskID", taskID),
-					mlog.Err(err))
-				dropErr = err
-				return false
-			}
-			m.tasks.Remove(taskID)
+			taskIDs = append(taskIDs, taskID)
 			return true
 		})
-		if dropErr != nil {
-			return dropErr
-		}
-		m.jobTasks.Remove(jobID)
 	}
 
-	// Drop job
-	if err := m.catalog.DropExternalCollectionRefreshJob(ctx, jobID); err != nil {
-		mlog.Warn(ctx, "drop job failed",
+	actions := make([]metastore.UpdateAction, 0, len(taskIDs)+1)
+	for _, taskID := range taskIDs {
+		actions = append(actions, metastore.DropRefreshTask(taskID))
+	}
+	actions = append(actions, metastore.DropRefreshJob(jobID))
+
+	if err := m.catalog.Update(ctx, actions...); err != nil {
+		mlog.Warn(ctx, "drop job and tasks failed",
 			mlog.Int64("jobID", jobID),
 			mlog.Err(err))
 		return err
 	}
+
+	for _, taskID := range taskIDs {
+		m.tasks.Remove(taskID)
+	}
+	m.jobTasks.Remove(jobID)
 
 	m.jobs.Remove(jobID)
 	m.removeFromCollectionJobs(job.GetCollectionId(), jobID)
@@ -747,39 +801,6 @@ func (m *externalCollectionRefreshMeta) UpdateTaskVersion(taskID, nodeID int64) 
 			mlog.Int64("newVersion", cloned.GetVersion()))
 	}
 	return err
-}
-
-// DropTask removes a task
-func (m *externalCollectionRefreshMeta) DropTask(ctx context.Context, taskID int64) error {
-	task, ok := m.tasks.Get(taskID)
-	if !ok {
-		mlog.Info(ctx, "drop task success, task already not exist", mlog.Int64("taskID", taskID))
-		return nil
-	}
-
-	m.taskLock.Lock(task.GetJobId())
-	defer m.taskLock.Unlock(task.GetJobId())
-
-	task, ok = m.tasks.Get(taskID)
-	if !ok {
-		mlog.Info(ctx, "drop task success, task already not exist", mlog.Int64("taskID", taskID))
-		return nil
-	}
-
-	if err := m.catalog.DropExternalCollectionRefreshTask(ctx, taskID); err != nil {
-		mlog.Warn(ctx, "drop task failed",
-			mlog.Int64("taskID", taskID),
-			mlog.Err(err))
-		return err
-	}
-
-	m.tasks.Remove(taskID)
-	m.removeFromJobTasks(task.GetJobId(), taskID)
-
-	mlog.Info(ctx, "drop task success",
-		mlog.Int64("taskID", taskID),
-		mlog.Int64("jobID", task.GetJobId()))
-	return nil
 }
 
 // ==================== Aggregation Operations ====================
