@@ -1990,6 +1990,23 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
+    bool
+    TryLoadVortexColumnGroup(
+        const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        int64_t index,
+        const std::vector<FieldId>& milvus_field_ids,
+        const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        bool eager_load,
+        bool has_warmup_setting,
+        const std::string& aggregated_warmup_policy,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        RuntimeResourceState* runtime,
+        StagedStateCommitter* committer);
+
     void
     ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
                   milvus::OpContext* op_ctx = nullptr);
@@ -2110,18 +2127,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
-
-    void
-    load_field_data_common(
-        FieldId field_id,
-        const std::shared_ptr<ChunkedColumnInterface>& column,
-        size_t num_rows,
-        DataType data_type,
-        bool enable_mmap,
-        bool is_proxy_column,
-        std::optional<ParquetStatistics> statistics = {},
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false);
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(const std::shared_ptr<const RuntimeResourceState>& runtime,

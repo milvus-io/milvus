@@ -55,6 +55,7 @@ class FixedWidthDataScanCursor final
         AssertInfo(out != nullptr, "data scan output batch is null");
         out->values = ChunkedColumnInterface::ValueView{};
         out->validity = ChunkedColumnInterface::ValidityView{};
+        out->row_ids.clear();
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
@@ -283,6 +284,7 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     ResetOutput(ChunkedColumnInterface::ScanBatch* out) {
         out->values = ChunkedColumnInterface::ValueView{};
         out->validity = ChunkedColumnInterface::ValidityView{};
+        out->row_ids.clear();
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
@@ -493,6 +495,11 @@ ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
                              const ScanOptions& options) const {
     auto data_type = GetDefaultScanDataType();
     if (!data_type.has_value()) {
+        return nullptr;
+    }
+
+    if (options.output != ScanOutput::Data ||
+        options.predicate != ScanPredicate::None) {
         return nullptr;
     }
 

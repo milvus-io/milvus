@@ -262,8 +262,21 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     fn(true, i);
                 }
             }
+            return;
         }
         // nullable:
+        if (offsets == nullptr) {
+            int64_t logical_offset = 0;
+            for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
+                auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
+                auto chunk = group_chunk.get()->GetChunk(field_id_);
+                for (int64_t i = 0; i < chunk->RowNums(); ++i) {
+                    fn(chunk->isValid(i), logical_offset + i);
+                }
+                logical_offset += chunk->RowNums();
+            }
+            return;
+        }
         if (count == 0) {
             return;
         }
