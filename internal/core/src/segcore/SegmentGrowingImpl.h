@@ -644,6 +644,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     std::shared_ptr<const IArrayOffsets>
     GetArrayOffsets(FieldId field_id) const override {
+        std::shared_lock lock(array_offsets_map_mutex_);
         auto it = array_offsets_map_.find(field_id);
         if (it != array_offsets_map_.end()) {
             return it->second;
@@ -892,6 +893,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // Representative field_id for each struct (used to extract array lengths during Insert)
     // One field_id per struct, since all fields in the same struct have identical array lengths
     std::unordered_set<FieldId> struct_representative_fields_;
+
+    // Guards array_offsets_map_ AND struct_representative_fields_: the Reopen
+    // (schema evolution) path mutates both concurrently with insert-path and
+    // query-path readers. Hold it only for map/set access -- copy the
+    // shared_ptr out and release before calling into the offsets object,
+    // which has its own internal mutex.
+    mutable std::shared_mutex array_offsets_map_mutex_;
 
     // Tracked resource usage for refund-then-charge pattern
     // This stores the last estimated resource usage that was charged to the cache manager

@@ -80,6 +80,47 @@ TEST(PlanProto, RejectsGlobalRefineRatiosBelowOne) {
         BuildSearchPlanNode(1.5f, 0.5f, vector_field_id)));
 }
 
+TEST(PlanProto, MatchExprLegacyStructNameFallback) {
+    // Rolling-upgrade fallback: a plan produced by an old proxy
+    // (pre-MatchColumnInfo) carries ONLY the deprecated MatchExpr.struct_name
+    // locator (wire tag 1); `column` is absent. ParseMatchExprs must fall back
+    // to struct_name (field_name = struct_name, field_id = 0) instead of
+    // reading an empty MatchColumnInfo.
+    using namespace milvus;
+    using namespace milvus::query;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, false);
+
+    proto::plan::Expr expr_pb;
+    auto* match_pb = expr_pb.mutable_match_expr();
+    match_pb->set_struct_name("struct_array");
+    match_pb->set_match_type(proto::plan::MatchType::MatchAny);
+    match_pb->set_count(0);
+    // Predicate `$[sub_int] > 1`: element-level UnaryRangeExpr over the
+    // struct-array sub-field, exactly what an old proxy emitted.
+    auto* pred_pb = match_pb->mutable_predicate()->mutable_unary_range_expr();
+    auto* column_pb = pred_pb->mutable_column_info();
+    column_pb->set_field_id(sub_int_fid.get());
+    column_pb->set_data_type(proto::schema::DataType::Array);
+    column_pb->set_element_type(proto::schema::DataType::Int32);
+    column_pb->set_is_element_level(true);
+    pred_pb->set_op(proto::plan::OpType::GreaterThan);
+    pred_pb->mutable_value()->set_int64_val(1);
+
+    ProtoParser parser(schema);
+    expr::TypedExprPtr parsed;
+    ASSERT_NO_THROW(parsed = parser.ParseExprs(expr_pb));
+    auto match_expr = std::dynamic_pointer_cast<const expr::MatchExpr>(parsed);
+    ASSERT_NE(match_expr, nullptr);
+    EXPECT_EQ(match_expr->get_field_name(), "struct_array");
+    EXPECT_EQ(match_expr->get_match_type(), proto::plan::MatchType::MatchAny);
+    EXPECT_EQ(match_expr->get_count(), 0);
+}
+
 TEST(PlanProto, VectorArrayFieldIdGapInStructArray) {
     namespace planpb = milvus::proto::plan;
     namespace schemapb = milvus::proto::schema;

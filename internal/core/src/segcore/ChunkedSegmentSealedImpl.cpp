@@ -6659,6 +6659,15 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 *column, field_meta, num_rows);
             target_runtime.struct_to_array_offsets[struct_name] = new_offsets;
             target_runtime.array_offsets_map[field_id] = new_offsets;
+        } else if (field_meta.get_data_type() == DataType::ARRAY &&
+                   target_runtime.array_offsets_map.find(field_id) ==
+                       target_runtime.array_offsets_map.end()) {
+            // Scalar ARRAY field (not part of a struct): build its own
+            // ArrayOffsetsSealed keyed by field_id so MATCH_*/element_filter
+            // can resolve element ranges. struct_to_array_offsets is untouched.
+            target_runtime.array_offsets_map[field_id] =
+                ArrayOffsetsSealed::BuildFromColumn(
+                    *column, field_meta, num_rows);
         }
     };
 
@@ -7340,12 +7349,26 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
     RuntimeResourceState& runtime) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
+        // Scalar ARRAY field (not part of a struct). When such a nullable field
+        // is materialized for old sealed rows via FillDefaultValueFields(), the
+        // translator appends NULLs and bypasses the normal offsets-build path.
+        // Register zero element ranges plus explicit all-NULL row validity so
+        // nested-index consumers do not mistake historical NULLs for [].
+        if (field_meta.get_data_type() == DataType::ARRAY &&
+            runtime.array_offsets_map.find(field_meta.get_id()) ==
+                runtime.array_offsets_map.end()) {
+            runtime.array_offsets_map[field_meta.get_id()] =
+                ArrayOffsetsSealed::BuildAllNulls(row_count);
+        }
         return;
     }
 
     auto it = runtime.struct_to_array_offsets.find(*struct_name);
     if (it == runtime.struct_to_array_offsets.end()) {
-        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(row_count);
+        // Backfilled rows of a schema-evolved struct array are NULL, not empty
+        // arrays: retain an explicit all-false row-valid bitmap so row-level
+        // consumers do not mistake historical NULLs for [].
+        auto array_offsets = ArrayOffsetsSealed::BuildAllNulls(row_count);
         it =
             runtime.struct_to_array_offsets.emplace(*struct_name, array_offsets)
                 .first;

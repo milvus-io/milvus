@@ -84,6 +84,26 @@ class PhyMatchFilterExpr : public Expr {
     }
 
  private:
+    // Evaluates the element-level predicate (inputs_[0]) and aggregates its
+    // per-element bitset back to rows using the supplied ArrayOffsets. Works
+    // for both scalar and struct ARRAY offsets.
+    void
+    EvalWithOffsets(EvalCtx& context,
+                    VectorPtr& result,
+                    std::shared_ptr<const milvus::IArrayOffsets> array_offsets,
+                    FieldId field_id);
+
+    // Three-valued MATCH: mask rows whose ARRAY field value is NULL. For each row
+    // in the batch, clears both the valid bit and the match bit when the field is
+    // NULL. Works for both sealed and growing segments (reads field validity via
+    // segment_->ApplyFieldValidDataByOffsets). No-op for a non-nullable field.
+    // Shared by the scalar-array and struct-array paths.
+    void
+    MaskNullRows(ColumnVector* col_vec,
+                 FieldId field_id,
+                 const OffsetVector* input,
+                 int64_t batch_rows);
+
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
     int64_t active_count_;
