@@ -18,13 +18,20 @@
 #include <utility>
 #include <vector>
 
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
+#include "query/PlanProto.h"
 #include "rescores/BoostScoreRunner.h"
 #include "rescores/Scorer.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::rescores;
@@ -239,4 +246,160 @@ TEST(BoostScoreRunnerTest, ComputeFunctionScoresRejectsMismatchedOutputSize) {
                                        offsets,
                                        scores),
                  milvus::SegcoreError);
+}
+
+// Test: TargetBitmap batch_score with out-of-bounds offsets (should NOT crash).
+// Unlike WeightScorer, RandomScorer had no bounds check on bitmap[offset].
+TEST(RandomScorerTest, BatchScoreTargetBitmapOutOfBoundsOffsets) {
+    // The segment is only consulted for get_segment_id() on the
+    // no-seed-field path of random_score.
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto raw_data = segcore::DataGen(schema, 8);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    expr::TypedExprPtr filter = nullptr;
+    ProtoParams params;
+    auto* seed = params.Add();
+    seed->set_key("seed");
+    seed->set_value("42");
+    RandomScorer scorer(filter, 1.0F, params);
+
+    TargetBitmap bitmap(50);
+    bitmap.set(10);
+    bitmap.set(40);
+
+    // Offsets where some are OUT OF BOUNDS (>= 50), e.g. when the filter
+    // bitmap does not cover the whole segment.
+    FixedVector<int32_t> offsets = {10, 40, 60, 100, 200};
+    std::vector<std::optional<float>> boost_scores(offsets.size(),
+                                                   std::nullopt);
+
+    ASSERT_NO_THROW(scorer.batch_score(nullptr,
+                                       segment.get(),
+                                       proto::plan::FunctionModeSum,
+                                       offsets,
+                                       bitmap,
+                                       boost_scores));
+
+    // In-bounds matched offsets should be scored.
+    EXPECT_TRUE(boost_scores[0].has_value());
+    EXPECT_TRUE(boost_scores[1].has_value());
+
+    // Out-of-bounds offsets should NOT have scores (safely skipped).
+    EXPECT_FALSE(boost_scores[2].has_value());
+    EXPECT_FALSE(boost_scores[3].has_value());
+    EXPECT_FALSE(boost_scores[4].has_value());
+}
+
+namespace {
+
+SchemaPtr
+GenTextMatchSchema() {
+    auto schema = std::make_shared<Schema>();
+    std::map<std::string, std::string> match_params;
+    {
+        FieldMeta f(FieldName("pk"),
+                    FieldId(100),
+                    DataType::INT64,
+                    false,
+                    std::nullopt);
+        schema->AddField(std::move(f));
+        schema->set_primary_field_id(FieldId(100));
+    }
+    {
+        FieldMeta f(FieldName("str"),
+                    FieldId(101),
+                    DataType::VARCHAR,
+                    65536,
+                    false,
+                    true,
+                    true,
+                    match_params,
+                    std::nullopt);
+        schema->AddField(std::move(f));
+    }
+    {
+        FieldMeta f(FieldName("fvec"),
+                    FieldId(102),
+                    DataType::VECTOR_FLOAT,
+                    16,
+                    knowhere::metric::L2,
+                    false,
+                    std::nullopt);
+        schema->AddField(std::move(f));
+    }
+    return schema;
+}
+
+expr::TypedExprPtr
+GenTextMatchTypedExpr(const SchemaPtr& schema, const std::string& query) {
+    const auto& str_meta = schema->operator[](FieldName("str"));
+    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                           proto::schema::DataType::VarChar,
+                                           false,
+                                           false);
+    auto unary_range_expr =
+        test::GenUnaryRangeExpr(proto::plan::OpType::TextMatch, query);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto slop = test::GenGenericValue(static_cast<int64_t>(0));
+    unary_range_expr->add_extra_values()->CopyFrom(*slop);
+    delete slop;
+    auto expr = test::GenExpr();
+    expr->set_allocated_unary_range_expr(unary_range_expr);
+    auto parser = query::ProtoParser(schema);
+    return parser.ParseExprs(*expr);
+}
+
+}  // namespace
+
+// Test: a filter whose expression does not support offset input (text match,
+// GIS) is evaluated batch by batch over the whole segment. The resulting
+// bitset must cover every active row, not just the first expression batch,
+// otherwise offsets beyond DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE silently lose
+// their boost.
+TEST(BoostScoreRunnerTest, ComputeScorerScoresNonNativeFilterCoversAllBatches) {
+    const int64_t N = 10000;  // more than one expression batch (8192)
+    auto schema = GenTextMatchSchema();
+    auto raw_data = segcore::DataGen(schema, N);
+    auto* str_col = raw_data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = (i % 2 == 0) ? "football match" : "swimming pool";
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    segment->CreateTextIndex(FieldId(101));
+
+    auto filter = GenTextMatchTypedExpr(schema, "football");
+    auto scorer = std::make_shared<WeightScorer>(filter, 2.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_scorer_multi_batch", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    FixedVector<int32_t> offsets = {
+        0, 1, 9000, 9001, static_cast<int32_t>(N - 2)};
+    std::vector<std::optional<float>> scores(offsets.size(), std::nullopt);
+    ComputeScorerScores(
+        &exec_context, &op_context, segment.get(), scorer, offsets, scores);
+
+    // First batch behaves as before.
+    ASSERT_TRUE(scores[0].has_value());  // 0: "football match"
+    EXPECT_FLOAT_EQ(scores[0].value(), 2.0F);
+    EXPECT_FALSE(scores[1].has_value());  // 1: "swimming pool"
+
+    // Offsets beyond the first expression batch must still be scored.
+    ASSERT_TRUE(scores[2].has_value());  // 9000: "football match"
+    EXPECT_FLOAT_EQ(scores[2].value(), 2.0F);
+    EXPECT_FALSE(scores[3].has_value());  // 9001: "swimming pool"
+    ASSERT_TRUE(scores[4].has_value());   // 9998: "football match"
+    EXPECT_FLOAT_EQ(scores[4].value(), 2.0F);
 }

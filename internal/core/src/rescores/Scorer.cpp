@@ -128,11 +128,18 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
     target_offsets.reserve(offsets.size());
     idx.reserve(offsets.size());
 
+    auto bitmap_size = bitmap.size();
     for (auto i = 0; i < offsets.size(); i++) {
-        if (bitmap[offsets[i]] > 0) {
-            target_offsets.push_back(static_cast<int64_t>(offsets[i]));
+        auto offset = offsets[i];
+        // Bounds check: offset must be within bitmap size.
+        // Race condition: text index may lag behind vector index,
+        // causing offsets to reference rows not yet in text index.
+        if (offset >= 0 && static_cast<size_t>(offset) < bitmap_size &&
+            bitmap[offset] > 0) {
+            target_offsets.push_back(static_cast<int64_t>(offset));
             idx.push_back(i);
         }
+        // If offset is out of bounds, treat as "no match" (don't apply boost)
     }
 
     // skip if empty
