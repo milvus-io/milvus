@@ -83,13 +83,15 @@ struct EmptyEmbListState {
 
 class DiskEmptyVectorIterator : public knowhere::IndexNode::iterator {
  public:
-    std::pair<int64_t, float>
-    Next() override {
-        throw std::runtime_error("empty vector iterator has no next result");
+    knowhere::expected<std::pair<int64_t, float>>
+    Next() noexcept override {
+        return knowhere::expected<std::pair<int64_t, float>>::Err(
+            knowhere::Status::knowhere_inner_error,
+            "empty vector iterator has no next result");
     }
 
-    bool
-    HasNext() override {
+    knowhere::expected<bool>
+    HasNext() noexcept override {
         return false;
     }
 };
