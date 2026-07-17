@@ -19,6 +19,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,13 +28,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -213,6 +217,50 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}, {Key: common.CollectionReplicaNumber, Value: "1"}},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func TestAlterCollectionRejectsReservedMaxFieldIDProperty(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "alter",
+			properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "999"}},
+		},
+		{
+			name:       "delete",
+			deleteKeys: []string{common.MaxFieldIDKey},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			streaming.SetupNoopWALForTest()
+			defer streaming.SetWALForTest(nil)
+
+			coll := new(DDLCallbacksCollectionFunctionTestSuite).createTestCollection()
+			mockMeta := mockrootcoord.NewIMetaTable(t)
+			mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil).Maybe()
+			core := newTestCore(withHealthyCode(), withMeta(mockMeta), withBroker(newValidMockBroker()))
+
+			mockBroadcaster := mock_broadcaster.NewMockBroadcastAPI(t)
+			mockBroadcaster.EXPECT().Close().Maybe()
+			mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+			lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcaster, nil).Build()
+			defer lockMocker.UnPatch()
+			cacheMocker := mockey.Mock((*Core).getCacheExpireForCollection).Return(nil, nil).Build()
+			defer cacheMocker.UnPatch()
+
+			err := core.broadcastAlterCollectionForAlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+				DbName:         "test_db",
+				CollectionName: "test_collection",
+				Properties:     tc.properties,
+				DeleteKeys:     tc.deleteKeys,
+			})
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, common.MaxFieldIDKey)
+		})
+	}
 }
 
 func TestValidateNamespaceModeImmutable(t *testing.T) {
