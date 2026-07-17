@@ -733,6 +733,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert top_hit["offset"] == target_elem, f"expected element offset={target_elem}, got {top_hit['offset']}"
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51416", strict=True)
     def test_element_filter_template_matches_inline_query_and_search(self):
         """
         target: verify filter templates bind Struct child values for element-level query and search
