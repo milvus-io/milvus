@@ -299,6 +299,19 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	}
 
 	newLeaderOnNode := dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
+
+	// Drop the retained target versions nobody reads any more: a version is kept only while some
+	// delegator's readable view still points at it (see TargetManager.rememberLiveVersion).
+	for _, dmChannel := range updates {
+		collectionID, channel := dmChannel.GetCollectionID(), dmChannel.GetChannelName()
+		readable := typeutil.NewUniqueSet()
+		for _, delegator := range dh.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel)) {
+			if delegator.View != nil {
+				readable.Insert(delegator.View.TargetVersion)
+			}
+		}
+		dh.target.GCLiveVersions(collectionID, channel, readable)
+	}
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
@@ -333,7 +346,7 @@ func checkDelegatorServiceable(ctx context.Context, dh *distHandler, view *meta.
 
 	// if target version hasn't been synced, delegator will get empty readable segment list
 	// so shard leader should be unserviceable until target version is synced
-	currentTargetVersion := dh.target.GetCollectionTargetVersion(ctx, view.CollectionID, meta.CurrentTarget)
+	currentTargetVersion := dh.target.GetChannelTargetVersion(ctx, view.CollectionID, view.Channel, meta.CurrentTarget)
 	if view.TargetVersion <= 0 {
 		mlog.RatedInfo(context.TODO(), rate.Limit(10), "delegator is not serviceable due to target version not ready",
 			mlog.Int64("currentTargetVersion", currentTargetVersion),

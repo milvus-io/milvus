@@ -481,7 +481,7 @@ func TestShouldUpdateCurrentTarget_EmptyNextTarget(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[string]*meta.DmChannel{}).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 
-	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
+	result := observer.syncAndPromoteChannels(ctx, collectionID)
 	assert.False(t, result)
 }
 
@@ -538,6 +538,8 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().GetChannelTargetVersion(mock.Anything, collectionID, mock.Anything, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().UpdateChannelCurrentTarget(mock.Anything, collectionID, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -599,7 +601,7 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 	// - replica2 is NOT ready (missing channel-2)
 	// Since ReplicaManager.GetByCollection returns empty (no replicas in the mock manager),
 	// readyDelegatorsInCollection will be empty, and shouldUpdateCurrentTarget returns false.
-	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
+	result := observer.syncAndPromoteChannels(ctx, collectionID)
 	assert.False(t, result)
 }
 
@@ -660,6 +662,8 @@ func TestShouldUpdateCurrentTarget_PartialReplicaReadinessDoesNotSync(t *testing
 
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().GetChannelTargetVersion(mock.Anything, collectionID, mock.Anything, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().UpdateChannelCurrentTarget(mock.Anything, collectionID, mock.Anything).Return(true).Maybe()
 	// Return a segment in target - this will be checked by CheckDelegatorDataReady
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(nil).Maybe()
@@ -717,26 +721,29 @@ func TestShouldUpdateCurrentTarget_PartialReplicaReadinessDoesNotSync(t *testing
 	})
 
 	// Execute the function under test
-	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
+	result := observer.syncAndPromoteChannels(ctx, collectionID)
 
 	assert.False(t, result)
 	cluster.AssertNotCalled(t, "SyncDistribution", mock.Anything, mock.Anything, mock.Anything)
 	broker.AssertNotCalled(t, "ListIndexes", mock.Anything, mock.Anything)
 }
 
-func TestShouldUpdateNextTarget_DoesNotExpireAfterDelegatorSyncStarted(t *testing.T) {
+// The next target may now be refreshed even while a delegator is synced to it: the version that
+// delegator reads is retained by the TargetManager, so replacing next strands nobody. The pin that
+// used to block this refresh (and could deadlock a collection whose delegator never became
+// serviceable) is gone.
+func TestShouldUpdateNextTarget_ExpiredTargetIsRefreshedEvenWhenADelegatorIsSyncedToIt(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.NextTargetSurviveTime.Key)
 
 	ctx := context.Background()
 	collectionID := int64(1000)
-	nextVersion := int64(100)
-
-	nodeMgr := session.NewNodeManager()
-	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
 
 	targetMgr := meta.NewMockTargetManager(t)
+	nodeMgr := session.NewNodeManager()
 	distMgr := meta.NewDistributionManager(nodeMgr)
+
 	observer := NewTargetObserver(
 		&meta.Meta{},
 		targetMgr,
@@ -747,103 +754,11 @@ func TestShouldUpdateNextTarget_DoesNotExpireAfterDelegatorSyncStarted(t *testin
 	)
 
 	observer.nextTargetLastUpdate.Insert(collectionID, time.Now().Add(-time.Hour))
-	observer.nextTargetSyncStarted.Insert(collectionID, nextVersion)
-	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, collectionID).Return(true).Once()
-	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(nextVersion).Once()
-
-	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
-}
-
-func TestShouldUpdateCurrentTarget_SyncMetadataFailureDoesNotPinNextTarget(t *testing.T) {
-	paramtable.Init()
-	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
-
-	ctx := context.Background()
-	collectionID := int64(1000)
-	newVersion := int64(100)
-	segmentID := int64(100)
-
-	nodeMgr := session.NewNodeManager()
-	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
-
-	targetMgr := meta.NewMockTargetManager(t)
-	distMgr := meta.NewDistributionManager(nodeMgr)
-	broker := meta.NewMockBroker(t)
-	cluster := session.NewMockCluster(t)
-
-	replica := meta.NewReplica(&querypb.Replica{
-		ID:            1,
-		CollectionID:  collectionID,
-		ResourceGroup: meta.DefaultResourceGroupName,
-		Nodes:         []int64{1},
-	})
-	mockCatalog := mocks.NewQueryCoordCatalog(t)
-	mockCatalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
-	replicaMgr := meta.NewReplicaManager(nil, mockCatalog)
-	assert.NoError(t, replicaMgr.Put(ctx, replica))
-
-	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
-		ReplicaManager:    replicaMgr,
-	}
-	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, broker, cluster, nodeMgr)
-
-	channelNames := map[string]*meta.DmChannel{
-		"channel-1": {
-			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "channel-1"},
-		},
-	}
-	targetSegments := map[int64]*datapb.SegmentInfo{
-		segmentID: {ID: segmentID, CollectionID: collectionID, InsertChannel: "channel-1"},
-	}
-
-	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
-	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
-	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
-	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
-	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
-	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
-	targetMgr.EXPECT().GetPartitions(mock.Anything, collectionID, mock.Anything).Return([]int64{}, nil).Maybe()
-	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(targetSegments).Maybe()
 	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, collectionID).Return(true).Once()
 
-	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return(nil, assert.AnError).Once()
-
-	distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
-		VchannelInfo: &datapb.VchannelInfo{
-			CollectionID: collectionID,
-			ChannelName:  "channel-1",
-		},
-		Node: 1,
-		View: &meta.LeaderView{
-			ID:           1,
-			CollectionID: collectionID,
-			Channel:      "channel-1",
-			Segments: map[int64]*querypb.SegmentDist{
-				segmentID: {NodeID: 1},
-			},
-			Status: &querypb.LeaderViewStatus{Serviceable: true},
-		},
-	})
-	distMgr.SegmentDistManager.Update(1, &meta.Segment{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            segmentID,
-			CollectionID:  collectionID,
-			InsertChannel: "channel-1",
-		},
-		Node: 1,
-	})
-
-	assert.False(t, observer.shouldUpdateCurrentTarget(ctx, collectionID))
-	cluster.AssertNotCalled(t, "SyncDistribution", mock.Anything, mock.Anything, mock.Anything)
-
-	observer.nextTargetLastUpdate.Insert(collectionID, time.Now().Add(-time.Hour))
 	assert.True(t, observer.shouldUpdateNextTarget(ctx, collectionID))
 }
 
-// TestShouldUpdateCurrentTarget_AllChannelsSynced tests that shouldUpdateCurrentTarget returns true
-// only when ALL channels are synced successfully. This validates the fix where we check:
-// syncSuccess && lo.Every(syncedChannelNames, lo.Keys(channelNames))
 func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -910,6 +825,8 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().GetChannelTargetVersion(mock.Anything, collectionID, mock.Anything, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().UpdateChannelCurrentTarget(mock.Anything, collectionID, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(targetSegments2).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -975,7 +892,7 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	)
 
 	// Execute the function under test
-	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
+	result := observer.syncAndPromoteChannels(ctx, collectionID)
 
 	// When all channels are synced, should return true
 	assert.True(t, result, "Expected true when ALL channels are synced successfully")
@@ -1049,6 +966,8 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().GetChannelTargetVersion(mock.Anything, collectionID, mock.Anything, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().UpdateChannelCurrentTarget(mock.Anything, collectionID, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(targetSegments2).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1093,7 +1012,7 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 	})
 
 	// Execute the function under test
-	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
+	result := observer.syncAndPromoteChannels(ctx, collectionID)
 
 	// When only partial channels are synced, should return false
 	// This is the key behavior being tested - with the new fix:
@@ -1158,6 +1077,8 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().GetChannelTargetVersion(mock.Anything, collectionID, mock.Anything, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().UpdateChannelCurrentTarget(mock.Anything, collectionID, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1186,7 +1107,7 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	})
 
 	// Execute the function under test
-	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
+	result := observer.syncAndPromoteChannels(ctx, collectionID)
 
 	// When no ready delegators exist, should return false
 	// syncedChannelNames = [] (no ready delegators)
@@ -1254,7 +1175,7 @@ func TestUpdateAllReplicasCheckpointMetric(t *testing.T) {
 	}
 
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(channels)
-	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.CurrentTarget).Return(currentVersion)
+	targetMgr.EXPECT().GetChannelTargetVersion(mock.Anything, collectionID, mock.Anything, meta.CurrentTarget).Return(currentVersion)
 
 	// Reset metric before test
 	metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.Reset()

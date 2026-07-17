@@ -71,6 +71,8 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
+	suite.target.EXPECT().GetChannelTargetVersion(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
+	suite.target.EXPECT().GCLiveVersions(mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
 }
 
 func (suite *DistHandlerSuite) TestBasic() {

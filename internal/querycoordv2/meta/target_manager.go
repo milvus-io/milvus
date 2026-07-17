@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -49,6 +50,11 @@ const (
 	NextTargetFirst
 )
 
+// liveVersionGCGrace is how long a retained version is kept after it stops being referenced by any
+// delegator's reported view, to bridge the window between a delegator being synced to a version and
+// its heartbeat reporting it back into dist. Overridable in tests.
+var liveVersionGCGrace = 30 * time.Second
+
 type TargetManagerInterface interface {
 	UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool
 	UpdateCollectionNextTarget(ctx context.Context, collectionID int64) error
@@ -65,6 +71,10 @@ type TargetManagerInterface interface {
 	GetDmChannel(ctx context.Context, collectionID int64, channel string, scope TargetScope) *DmChannel
 	GetSealedSegment(ctx context.Context, collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo
 	GetCollectionTargetVersion(ctx context.Context, collectionID int64, scope TargetScope) int64
+	GetChannelTargetVersion(ctx context.Context, collectionID int64, channel string, scope TargetScope) int64
+	UpdateChannelCurrentTarget(ctx context.Context, collectionID int64, channel string) bool
+	IsSegmentInLiveVersion(collectionID int64, channel string, version int64, segmentID int64) (bool, bool)
+	GCLiveVersions(collectionID int64, channel string, readableVersions typeutil.UniqueSet)
 	IsCurrentTargetExist(ctx context.Context, collectionID int64, partitionID int64) bool
 	IsNextTargetExist(ctx context.Context, collectionID int64) bool
 	SaveCurrentTarget(ctx context.Context, catalog metastore.QueryCoordCatalog)
@@ -85,14 +95,181 @@ type TargetManager struct {
 	// all remove segment/channel operation happens on Both current and next -> delete status should be consistent
 	current *target
 	next    *target
+
+	// Segment sets of target versions that some delegator's readable view still points at, on top
+	// of current and next. A delegator keeps serving the version it was last synced to until it is
+	// synced again, and QueryCoord must be able to tell what that version contained -- otherwise it
+	// cannot know whether a redundant segment is still being read. Versions are dropped once no
+	// delegator references them (see GCLiveVersions).
+	//
+	// Runtime only: after a restart the map is empty, and the release path falls back to
+	// "cannot prove it is unused, keep it" until the delegators are re-synced.
+	liveVersionsMut sync.RWMutex
+	liveVersions    map[int64]map[string]map[int64]typeutil.UniqueSet // collection -> channel -> version -> segment ids
 }
 
 func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 	return &TargetManager{
-		broker:  broker,
-		meta:    meta,
-		current: newTarget(),
-		next:    newTarget(),
+		broker:       broker,
+		meta:         meta,
+		current:      newTarget(),
+		next:         newTarget(),
+		liveVersions: make(map[int64]map[string]map[int64]typeutil.UniqueSet),
+	}
+}
+
+// UpdateChannelCurrentTarget promotes one channel: the channel's segments, dm channel and version
+// are taken from the next target into the current one, leaving every other channel untouched.
+// Channels advance independently, so a channel whose delegators cannot become ready no longer holds
+// the rest of the collection back.
+//
+// The version being replaced is kept alive (see rememberLiveVersion): a delegator that is still
+// synced to it keeps serving it, and coord must be able to say what it contained.
+func (mgr *TargetManager) UpdateChannelCurrentTarget(ctx context.Context, collectionID int64, channel string) bool {
+	log := mlog.With(mlog.FieldCollectionID(collectionID), mlog.String("channel", channel))
+
+	next := mgr.next.getCollectionTarget(collectionID)
+	if next == nil || next.IsEmpty() {
+		log.Info(ctx, "next target does not exist, skip promoting channel")
+		return false
+	}
+	if _, ok := next.dmChannels[channel]; !ok {
+		log.Info(ctx, "channel is not in the next target, skip promoting it")
+		return false
+	}
+
+	current := mgr.current.getCollectionTarget(collectionID)
+	base := current
+	if base == nil || base.IsEmpty() {
+		// First promote: publish only this channel, not the whole next -- a not-yet-ready channel's
+		// segments must not appear in current. (IsCurrentTargetExist(-1) still turns true here, so
+		// the partial-search sync for the other channels is skipped; making that per-channel is a
+		// follow-up.)
+		base = NewCollectionTarget(map[int64]*datapb.SegmentInfo{}, map[string]*DmChannel{}, nil)
+	} else {
+		mgr.rememberLiveVersion(collectionID, channel, current)
+	}
+	promoted := base.WithChannelFrom(next, channel)
+	mgr.current.replaceCollectionTarget(collectionID, promoted)
+
+	// per-channel checkpoint-lag metric: the collection-level UpdateCollectionCurrentTarget no longer
+	// runs in production, so this is the only place it is emitted now.
+	if dmChannel, ok := promoted.dmChannels[channel]; ok {
+		ts, _ := tsoutil.ParseTS(dmChannel.GetSeekPosition().GetTimestamp())
+		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.WithLabelValues(
+			paramtable.GetStringNodeID(),
+			channel,
+		).Set(float64(ts.Unix()))
+	}
+
+	// Drop next once every one of its channels has been promoted into current, so the next tick
+	// rebuilds it via !IsNextTargetExist instead of waiting out NextTargetSurviveTime. Without this
+	// next lives forever and compaction/flush/delete absorption is delayed up to the survive time.
+	if mgr.allChannelsPromoted(promoted, next) {
+		mgr.next.removeCollectionTarget(collectionID)
+	}
+
+	log.Debug(ctx, "promoted channel to the next target version",
+		mlog.Int64("version", promoted.GetChannelTargetVersion(channel)))
+	return true
+}
+
+// allChannelsPromoted reports whether current has caught up to next on every one of next's channels,
+// i.e. next has been fully absorbed and can be dropped.
+func (mgr *TargetManager) allChannelsPromoted(current, next *CollectionTarget) bool {
+	for channel := range next.GetAllDmChannels() {
+		if current.GetChannelTargetVersion(channel) != next.GetChannelTargetVersion(channel) {
+			return false
+		}
+	}
+	return true
+}
+
+// replaceNextTarget swaps the next target, retaining the segment sets of the version it replaces:
+// a delegator that was already synced to the outgoing version keeps serving it until it is synced
+// again, and the release path must be able to resolve what that version contained. Without this the
+// outgoing next is simply forgotten -- the orphan that the whole design exists to remove.
+func (mgr *TargetManager) replaceNextTarget(collectionID int64, newTarget *CollectionTarget) {
+	if old := mgr.next.getCollectionTarget(collectionID); old != nil && !old.IsEmpty() {
+		for channel := range old.GetAllDmChannels() {
+			mgr.rememberLiveVersion(collectionID, channel, old)
+		}
+	}
+	mgr.next.updateCollectionTarget(collectionID, newTarget)
+}
+
+// rememberLiveVersion records the segment set a channel's version had, so that a delegator still
+// synced to it can be reasoned about after the version stops being current or next.
+func (mgr *TargetManager) rememberLiveVersion(collectionID int64, channel string, target *CollectionTarget) {
+	version := target.GetChannelTargetVersion(channel)
+	if version == 0 {
+		return
+	}
+	segments := typeutil.NewUniqueSet()
+	for _, segment := range target.GetChannelSegments(channel) {
+		segments.Insert(segment.GetID())
+	}
+
+	mgr.liveVersionsMut.Lock()
+	defer mgr.liveVersionsMut.Unlock()
+	channels, ok := mgr.liveVersions[collectionID]
+	if !ok {
+		channels = make(map[string]map[int64]typeutil.UniqueSet)
+		mgr.liveVersions[collectionID] = channels
+	}
+	versions, ok := channels[channel]
+	if !ok {
+		versions = make(map[int64]typeutil.UniqueSet)
+		channels[channel] = versions
+	}
+	versions[version] = segments
+}
+
+// IsSegmentInLiveVersion reports whether a segment belongs to a retained (no longer current or next)
+// version of the channel that some delegator may still be reading, and whether coord holds that
+// version at all. A caller that gets (false, false) cannot prove anything about that version and
+// must keep the segment.
+func (mgr *TargetManager) IsSegmentInLiveVersion(collectionID int64, channel string, version int64, segmentID int64) (inVersion bool, known bool) {
+	mgr.liveVersionsMut.RLock()
+	defer mgr.liveVersionsMut.RUnlock()
+
+	versions, ok := mgr.liveVersions[collectionID][channel]
+	if !ok {
+		return false, false
+	}
+	segments, ok := versions[version]
+	if !ok {
+		return false, false
+	}
+	return segments.Contain(segmentID), true
+}
+
+// GCLiveVersions drops the retained versions of a channel that no delegator points at any more.
+// readableVersions are the target versions the channel's delegators currently serve.
+func (mgr *TargetManager) GCLiveVersions(collectionID int64, channel string, readableVersions typeutil.UniqueSet) {
+	mgr.liveVersionsMut.Lock()
+	defer mgr.liveVersionsMut.Unlock()
+
+	versions, ok := mgr.liveVersions[collectionID][channel]
+	if !ok {
+		return
+	}
+	// A version is a UnixNano timestamp of when it was built. A delegator that was just synced to a
+	// version has not necessarily reported it in dist yet, so it would be absent from readableVersions
+	// for one round; keep versions younger than the grace window regardless, to avoid dropping one
+	// that is about to be reported (dropping it does not lose safety -- servesSegment then keeps the
+	// segment -- but it stalls reclamation until the next sync).
+	graceThreshold := time.Now().Add(-liveVersionGCGrace).UnixNano()
+	for version := range versions {
+		if !readableVersions.Contain(version) && version < graceThreshold {
+			delete(versions, version)
+		}
+	}
+	if len(versions) == 0 {
+		delete(mgr.liveVersions[collectionID], channel)
+	}
+	if len(mgr.liveVersions[collectionID]) == 0 {
+		delete(mgr.liveVersions, collectionID)
 	}
 }
 
@@ -192,7 +369,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 
 	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
 
-	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
+	mgr.replaceNextTarget(collectionID, allocatedTarget)
 
 	mlog.Debug(ctx, "finish to update next targets for collection",
 		mlog.FieldCollectionID(collectionID),
@@ -242,6 +419,12 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 
 	mgr.current.removeCollectionTarget(collectionID)
 	mgr.next.removeCollectionTarget(collectionID)
+
+	// GC is driven by the channel's dist heartbeat, which stops arriving once the collection is
+	// released, so the retained versions would otherwise be pinned for the coordinator's lifetime.
+	mgr.liveVersionsMut.Lock()
+	delete(mgr.liveVersions, collectionID)
+	mgr.liveVersionsMut.Unlock()
 }
 
 // RemovePartition removes all segment in the given partition,
@@ -273,7 +456,7 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 	if oleNextTarget != nil {
 		newTarget := mgr.removePartitionFromCollectionTarget(oleNextTarget, partitionSet)
 		if newTarget != nil {
-			mgr.next.updateCollectionTarget(collectionID, newTarget)
+			mgr.replaceNextTarget(collectionID, newTarget)
 			log.Info(ctx, "finish to remove partition from next target for collection",
 				mlog.Int64s("segments", newTarget.GetAllSegmentIDs()),
 				mlog.Strings("channels", newTarget.GetAllDmChannelNames()))
@@ -298,7 +481,7 @@ func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, col
 	if oleNextTarget != nil {
 		newTarget := mgr.removePartitionFromCollectionTarget(oleNextTarget, partitionSet)
 		if newTarget != nil {
-			mgr.next.updateCollectionTarget(collectionID, newTarget)
+			mgr.replaceNextTarget(collectionID, newTarget)
 			log.Info(ctx, "finish to remove partition from next target for collection",
 				mlog.Int64s("segments", newTarget.GetAllSegmentIDs()),
 				mlog.Strings("channels", newTarget.GetAllDmChannelNames()))
@@ -519,6 +702,19 @@ func (mgr *TargetManager) GetCollectionTargetVersion(ctx context.Context, collec
 		}
 	}
 
+	return 0
+}
+
+// GetChannelTargetVersion returns the target version of one channel. Channels advance
+// independently, so this -- not the collection version -- is what a delegator's readable view for
+// that channel is compared against.
+func (mgr *TargetManager) GetChannelTargetVersion(ctx context.Context, collectionID int64, channel string, scope TargetScope) int64 {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, t := range targets {
+		if version := t.GetChannelTargetVersion(channel); version > 0 {
+			return version
+		}
+	}
 	return 0
 }
 

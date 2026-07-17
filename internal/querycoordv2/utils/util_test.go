@@ -334,6 +334,33 @@ func (suite *UtilTestSuite) TestCheckSegmentDataReady_ManifestComparison() {
 	})
 }
 
+// The per-channel gate must only inspect its own channel: an unloadable segment on channel B must
+// not make channel A's readiness check fail. This falsifies the collection-scoped gate that froze
+// every channel when any one segment was not ready.
+func (suite *UtilTestSuite) TestCheckChannelSegmentDataReadyIsChannelScoped() {
+	collectionID := int64(100)
+	const chA, chB = "channel-a", "channel-b"
+	readySeg, stuckSeg := int64(1), int64(2)
+
+	// dist has channel A's segment loaded; channel B's segment is absent (never loads)
+	dm := meta.NewDistributionManager(session.NewNodeManager())
+	dm.SegmentDistManager.Update(int64(1), &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{ID: readySeg, CollectionID: collectionID, InsertChannel: chA},
+		Node:        1,
+	})
+
+	m := meta.NewMockTargetManager(suite.T())
+	m.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, chA, mock.Anything).
+		Return(map[int64]*datapb.SegmentInfo{readySeg: {ID: readySeg, CollectionID: collectionID, InsertChannel: chA}}).Maybe()
+	m.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, chB, mock.Anything).
+		Return(map[int64]*datapb.SegmentInfo{stuckSeg: {ID: stuckSeg, CollectionID: collectionID, InsertChannel: chB}}).Maybe()
+
+	suite.NoError(CheckChannelSegmentDataReady(context.Background(), collectionID, chA, dm, m, meta.NextTarget),
+		"channel A is ready and must pass regardless of channel B")
+	suite.Error(CheckChannelSegmentDataReady(context.Background(), collectionID, chB, dm, m, meta.NextTarget),
+		"channel B is genuinely not ready")
+}
+
 func (suite *UtilTestSuite) TestCheckSegmentDataReady_DataVersion() {
 	basePath := "/data/insert_log/col/part/seg"
 	collectionID := int64(100)

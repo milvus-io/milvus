@@ -453,7 +453,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		return merr.Wrapf(err, "failed to get partitions for collection=%d", task.CollectionID())
 	}
 
-	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
+	// the version this delegator starts reading at is its own channel's, not the collection's
+	version := ex.targetMgr.GetChannelTargetVersion(ctx, task.CollectionID(), action.ChannelName(), meta.NextTargetFirst)
 
 	req := packSubChannelRequest(
 		task,
