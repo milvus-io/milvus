@@ -13,6 +13,7 @@
 
 #include <fmt/core.h>
 #include <stdint.h>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -83,11 +84,25 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         return false;
     }
 
+    // A skipped batch (conjunct short-circuit via SkipFollowingExprs) must
+    // still advance this expression's cursors, otherwise it desynchronizes
+    // from its sibling expressions and later batches evaluate the wrong rows.
+    // The base MoveCursor() covers every case except the growing interim-index
+    // path: MoveCursorForIndex() asserts sealed-only, while
+    // EvalForIndexSegment() on a growing segment advances the global index
+    // position together with the data cursor -- mirror that here.
     void
     MoveCursor() override {
-        if (segment_->type() == SegmentType::Sealed) {
-            SegmentExpr::MoveCursor();
+        if (has_offset_input_ || execute_all_at_once_) {
+            return;
         }
+        if (UseIndexCursor() && segment_->type() != SegmentType::Sealed) {
+            current_index_chunk_pos_ +=
+                std::min(active_count_ - current_index_chunk_pos_, batch_size_);
+            MoveCursorForData();
+            return;
+        }
+        SegmentExpr::MoveCursor();
     }
 
  private:
