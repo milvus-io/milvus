@@ -97,21 +97,48 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                             bitsetview,
                             output_scores);
     } else {
-        expr_set->Eval(0, 1, true, eval_ctx, results);
-
-        AssertInfo(!results.empty() && results[0] != nullptr,
-                   "ComputeScorerScores: filter expr returned null result, "
-                   "filter: {}",
-                   filter->ToString());
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-        AssertInfo(col_vec != nullptr,
-                   "ComputeScorerScores: failed to cast result to "
-                   "ColumnVector, filter: {}",
-                   filter->ToString());
+        // Without offset-input support each Eval only advances the expression
+        // by one internal batch (DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE rows), while
+        // `offsets` may reference any row of the segment. Accumulate every
+        // batch so the bitset covers all active rows.
+        auto active_count =
+            exec_context->get_query_context()->get_active_count();
         TargetBitmap bitset;
-        auto col_vec_size = col_vec->size();
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        bitset.append(view);
+        TargetBitmap valid_bitset;
+        while (static_cast<int64_t>(bitset.size()) < active_count) {
+            expr_set->Eval(0, 1, true, eval_ctx, results);
+
+            AssertInfo(!results.empty() && results[0] != nullptr,
+                       "ComputeScorerScores: filter expr returned null result, "
+                       "filter: {}",
+                       filter->ToString());
+            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+            AssertInfo(col_vec != nullptr,
+                       "ComputeScorerScores: failed to cast result to "
+                       "ColumnVector, filter: {}",
+                       filter->ToString());
+            auto col_vec_size = col_vec->size();
+            AssertInfo(col_vec_size > 0,
+                       "ComputeScorerScores: filter expr returned empty batch "
+                       "after {} of {} rows, filter: {}",
+                       bitset.size(),
+                       active_count,
+                       filter->ToString());
+            TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+            bitset.append(view);
+            TargetBitmapView valid_view(col_vec->GetValidRawData(),
+                                        col_vec_size);
+            valid_bitset.append(valid_view);
+        }
+        AssertInfo(static_cast<int64_t>(bitset.size()) == active_count,
+                   "ComputeScorerScores: filter bitset size {} must match "
+                   "active count {}, filter: {}",
+                   bitset.size(),
+                   active_count,
+                   filter->ToString());
+        // Fold UNKNOWN (NULL) into FALSE explicitly so null rows never
+        // receive a boost, matching PhyIterativeFilterNode's handling.
+        bitset.inplace_and(valid_bitset, bitset.size());
         scorer->batch_score(
             op_context, segment, function_mode, offsets, bitset, output_scores);
     }
