@@ -44,6 +44,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return merr.WrapErrParameterInvalidMsg("can not provide properties and deletekeys at the same time")
 	}
 
+	if err := validateReservedCollectionProperties(req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
 		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
 	}
@@ -212,6 +216,18 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	return nil
 }
 
+func validateReservedCollectionProperties(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == common.MaxFieldIDKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter reserved collection property %s", common.MaxFieldIDKey)
+		}
+	}
+	if funcutil.SliceContain(deleteKeys, common.MaxFieldIDKey) {
+		return merr.WrapErrParameterInvalidMsg("cannot delete reserved collection property %s", common.MaxFieldIDKey)
+	}
+	return nil
+}
+
 func validateNamespaceModeImmutable(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
 	for _, prop := range properties {
 		if prop.GetKey() == common.NamespaceModeKey {
@@ -293,6 +309,9 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	schema.Fields = append(schema.Fields, fieldSchema)
 	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
 	schema.Properties = properties
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -349,6 +368,9 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 	schema.EnableDynamicField = false
 	schema.Properties = properties
 	schema.Version = coll.SchemaVersion + 1
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())

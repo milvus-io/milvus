@@ -119,6 +119,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if err != nil {
 		return err
 	}
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 	if plan.HasFunction() {
 		if err := validator.ValidateFunction(schema, plan.Function.GetName(), true); err != nil {
 			return merr.Wrap(err, "invalid function schema")
@@ -376,6 +379,9 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		return merr.WrapErrParameterMissingMsg("drop request must specify field_name, field_id, or function_name")
 	}
 	if err != nil {
+		return err
+	}
+	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
 
