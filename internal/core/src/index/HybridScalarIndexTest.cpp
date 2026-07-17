@@ -53,11 +53,13 @@
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/PluginLoader.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/PlannerCipherPlugin.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -825,6 +827,29 @@ TYPED_TEST_P(HybridIndexTestInverted,
         max_task_overhead);
     EXPECT_EQ(
         budgeted_translator.meta()->loading_overhead->upper_bound.file_bytes,
+        0);
+
+    budget.SetCapacityBytes(0);
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.addPluginForTest(
+        std::make_shared<milvus::test::PlannerCipherPlugin>());
+    auto plugin_cleanup = folly::makeGuard(
+        [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
+    Config encrypted_config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator
+        encrypted_translator(index_info,
+                             &load_info,
+                             milvus::tracer::TraceContext{},
+                             ctx,
+                             std::move(encrypted_config));
+
+    auto encrypted_index_bound = storage::EntryStreamDataTransientBytes(
+        static_cast<size_t>(load_info.index_size), true);
+    EXPECT_EQ(
+        encrypted_translator.meta()->loading_overhead->upper_bound.memory_bytes,
+        milvus::segcore::LoadTransientPoolUpperBound(encrypted_index_bound));
+    EXPECT_EQ(
+        encrypted_translator.meta()->loading_overhead->upper_bound.file_bytes,
         0);
 }
 
