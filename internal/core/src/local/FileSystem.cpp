@@ -243,6 +243,11 @@ FileSystem::ResolveNativePath(const Path& path) const {
     return CheckedNativePath(path);
 }
 
+fs::path
+FileSystem::NativeRoot() const {
+    return ScopedRoot();
+}
+
 Path
 FileSystem::PathFromNativePath(fs::path native_path) const {
     if (native_path.empty() || !native_path.is_absolute()) {
@@ -298,6 +303,36 @@ FileSystem::FileSize(const Path& path) const {
             ErrorCode::FileReadFailed, "get size of", native_path, error);
     }
     return size;
+}
+
+uint64_t
+FileSystem::UsedSize() const {
+    uint64_t total = 0;
+    auto root = ScopedRoot();
+    std::error_code error;
+    fs::recursive_directory_iterator iterator(root, error);
+    if (error) {
+        ThrowFileSystemError(
+            ErrorCode::FileReadFailed, "list directory", root, error);
+    }
+    for (const auto& entry : iterator) {
+        if (!entry.is_regular_file(error)) {
+            if (error) {
+                ThrowFileSystemError(ErrorCode::FileReadFailed,
+                                     "inspect directory entry",
+                                     entry.path(),
+                                     error);
+            }
+            continue;
+        }
+        auto size = entry.file_size(error);
+        if (error) {
+            ThrowFileSystemError(
+                ErrorCode::FileReadFailed, "get size of", entry.path(), error);
+        }
+        total += size;
+    }
+    return total;
 }
 
 std::vector<Path>
@@ -401,6 +436,23 @@ FileSystem::RemoveAll(const Path& path) const {
     if (error) {
         ThrowFileSystemError(
             ErrorCode::FileWriteFailed, "remove subtree", native_path, error);
+    }
+}
+
+void
+FileSystem::Clear() const {
+    auto root = ScopedRoot();
+    std::error_code error;
+    for (fs::directory_iterator it(root, error), end; it != end && !error;
+         it.increment(error)) {
+        fs::remove_all(it->path(), error);
+        if (error) {
+            ThrowFileSystemError(
+                ErrorCode::FileWriteFailed, "clear", it->path(), error);
+        }
+    }
+    if (error) {
+        ThrowFileSystemError(ErrorCode::FileReadFailed, "list", root, error);
     }
 }
 

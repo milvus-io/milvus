@@ -27,8 +27,7 @@
 #include "pb/schema.pb.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentLoadInfo.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "local/LegacyLocalChunkFiles.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -153,10 +152,11 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
             ? field_meta.get_dim()
             : 1;
     load_index_info.dim = dim;
-    load_index_info.mmap_dir_path =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager()
-            ->GetRootPath();
+    auto local_files = local_files_.has_value()
+                           ? *local_files_
+                           : milvus::local::LegacyLocalChunkFiles();
+    load_index_info.mmap_dir_path = local_files.NativeRoot().string();
+    load_index_info.local_files = std::move(local_files);
     load_index_info.enable_mmap = use_mmap;
 
     return load_index_info;
@@ -254,7 +254,10 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
     info->set_enable_mmap(mmap_config.GetJsonStatsEnableMmap());
-    info->set_mmap_dir_path(mmap_config.GetJsonStatsMmapPath());
+    info->set_mmap_dir_path(storage::MmapManager::GetInstance()
+                                .GetJsonStatsFileSystem()
+                                .NativeRoot()
+                                .string());
 
     auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
         field_id, /*is_vector=*/false, /*is_index=*/false);

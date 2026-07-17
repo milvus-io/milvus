@@ -55,8 +55,7 @@
 #include "segcore/Utils.h"
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
 #include "storage/FileManager.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "local/LegacyLocalChunkFiles.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 
@@ -86,6 +85,24 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
         status.error_code = milvus::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
+    }
+}
+
+CStatus
+NewLoadIndexInfoWithLocalFileSystem(CLocalFileSystem filesystem,
+                                    CLoadIndexInfo* c_load_index_info) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(filesystem != nullptr, "local filesystem is null");
+        auto load_index_info =
+            std::make_unique<milvus::segcore::LoadIndexInfo>();
+        load_index_info->local_files =
+            *static_cast<milvus::local::FileSystem*>(filesystem);
+        *c_load_index_info = load_index_info.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -375,10 +392,10 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                     .GetRemoteChunkManager();
-            load_index_info->mmap_dir_path =
-                milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                    .GetChunkManager()
-                    ->GetRootPath();
+            auto local_files = load_index_info->local_files.has_value()
+                                   ? *load_index_info->local_files
+                                   : milvus::local::LegacyLocalChunkFiles();
+            load_index_info->mmap_dir_path = local_files.NativeRoot().string();
         }
         auto status = CStatus();
         status.error_code = milvus::Success;

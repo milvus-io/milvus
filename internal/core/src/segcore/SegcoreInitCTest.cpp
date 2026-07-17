@@ -11,6 +11,7 @@
 
 #include <stdlib.h>
 #include <exception>
+#include <filesystem>
 #include <string>
 
 #include "common/EasyAssert.h"
@@ -18,6 +19,7 @@
 #include "config/ConfigKnowhere.h"
 #include "gtest/gtest.h"
 #include "segcore/Collection.h"
+#include "segcore/collection_c.h"
 #include "segcore/segcore_init_c.h"
 
 TEST(Init, Naive) {
@@ -45,4 +47,51 @@ TEST(Init, KnowhereGPUMemoryPoolInit) {
 #ifdef MILVUS_GPU_VERSION
     ASSERT_NO_THROW(milvus::config::KnowhereInitGPUMemoryPool(0, 0));
 #endif
+}
+
+TEST(CollectionLocalFileSystem, CopiesIndependentRootedHandles) {
+    namespace fs = std::filesystem;
+    auto base = fs::temp_directory_path() / "milvus_collection_local_files";
+    auto first_root = base / "first";
+    auto second_root = base / "second";
+    fs::remove_all(base);
+
+    milvus::proto::schema::CollectionSchema schema;
+    schema.set_name("rooted_collection");
+    auto* field = schema.add_fields();
+    field->set_fieldid(100);
+    field->set_name("pk");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+    auto schema_blob = schema.SerializeAsString();
+
+    CLocalFileSystem first_files = nullptr;
+    CLocalFileSystem second_files = nullptr;
+    auto status = OpenLocalFileSystem(first_root.c_str(), &first_files);
+    ASSERT_EQ(status.error_code, milvus::Success);
+    status = OpenLocalFileSystem(second_root.c_str(), &second_files);
+    ASSERT_EQ(status.error_code, milvus::Success);
+
+    CCollection first = nullptr;
+    CCollection second = nullptr;
+    status = NewCollectionWithLocalFileSystem(
+        schema_blob.data(), schema_blob.size(), first_files, &first);
+    ASSERT_EQ(status.error_code, milvus::Success);
+    status = NewCollectionWithLocalFileSystem(
+        schema_blob.data(), schema_blob.size(), second_files, &second);
+    ASSERT_EQ(status.error_code, milvus::Success);
+
+    CloseLocalFileSystem(first_files);
+    CloseLocalFileSystem(second_files);
+
+    auto* first_collection = static_cast<milvus::segcore::Collection*>(first);
+    auto* second_collection = static_cast<milvus::segcore::Collection*>(second);
+    EXPECT_EQ(first_collection->get_local_files().NativeRoot(),
+              fs::weakly_canonical(first_root / "local_chunk"));
+    EXPECT_EQ(second_collection->get_local_files().NativeRoot(),
+              fs::weakly_canonical(second_root / "local_chunk"));
+
+    DeleteCollection(first);
+    DeleteCollection(second);
+    fs::remove_all(base);
 }

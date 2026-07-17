@@ -420,8 +420,13 @@ class SegmentLoadInfo {
      * @brief Construct from a protobuf SegmentLoadInfo (copy)
      * @param info The protobuf SegmentLoadInfo to wrap
      */
-    explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
-        : info_(info), schema_(std::move(schema)) {
+    explicit SegmentLoadInfo(
+        const ProtoType& info,
+        SchemaPtr schema,
+        std::optional<local::FileSystem> local_files = std::nullopt)
+        : info_(info),
+          schema_(std::move(schema)),
+          local_files_(std::move(local_files)) {
         BuildCache();
     }
 
@@ -429,8 +434,13 @@ class SegmentLoadInfo {
      * @brief Construct from a protobuf SegmentLoadInfo (move)
      * @param info The protobuf SegmentLoadInfo to wrap
      */
-    explicit SegmentLoadInfo(ProtoType&& info, SchemaPtr schema)
-        : info_(std::move(info)), schema_(std::move(schema)) {
+    explicit SegmentLoadInfo(
+        ProtoType&& info,
+        SchemaPtr schema,
+        std::optional<local::FileSystem> local_files = std::nullopt)
+        : info_(std::move(info)),
+          schema_(std::move(schema)),
+          local_files_(std::move(local_files)) {
         BuildCache();
     }
 
@@ -442,6 +452,7 @@ class SegmentLoadInfo {
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
+          local_files_(other.local_files_),
           converted_field_index_cache_(other.converted_field_index_cache_),
           field_index_id_cache_(other.field_index_id_cache_),
           json_index_path_cache_(other.json_index_path_cache_),
@@ -458,6 +469,7 @@ class SegmentLoadInfo {
     SegmentLoadInfo(SegmentLoadInfo&& other) noexcept
         : info_(std::move(other.info_)),
           schema_(std::move(other.schema_)),
+          local_files_(std::move(other.local_files_)),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
           field_index_id_cache_(std::move(other.field_index_id_cache_)),
@@ -480,6 +492,7 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = other.info_;
             schema_ = other.schema_;
+            local_files_ = other.local_files_;
             converted_field_index_cache_ = other.converted_field_index_cache_;
             field_index_id_cache_ = other.field_index_id_cache_;
             json_index_path_cache_ = other.json_index_path_cache_;
@@ -500,6 +513,7 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = std::move(other.info_);
             schema_ = std::move(other.schema_);
+            local_files_ = std::move(other.local_files_);
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
             field_index_id_cache_ = std::move(other.field_index_id_cache_);
@@ -1290,6 +1304,8 @@ class SegmentLoadInfo {
     ProtoType info_;
 
     SchemaPtr schema_;
+
+    std::optional<local::FileSystem> local_files_;
 
     // Cache for quick field -> converted LoadIndexInfo lookup
     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>

@@ -62,6 +62,9 @@ class FileSystem final {
     uint64_t
     FileSize(const Path& path) const;
 
+    uint64_t
+    UsedSize() const;
+
     std::vector<Path>
     List(const Path& directory, bool recursive) const;
 
@@ -73,6 +76,9 @@ class FileSystem final {
 
     void
     RemoveAll(const Path& path) const;
+
+    void
+    Clear() const;
 
     void
     Rename(const Path& from, const Path& to) const;
@@ -88,6 +94,9 @@ class FileSystem final {
 
     std::filesystem::path
     ResolveNativePath(const Path& path) const;
+
+    std::filesystem::path
+    NativeRoot() const;
 
     Path
     PathFromNativePath(std::filesystem::path native_path) const;

@@ -37,7 +37,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -174,12 +173,6 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	err := InitArrowReaderConfig(paramtable.Get())
 	if err != nil {
-		return err
-	}
-
-	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
-
-	if err := InitLocalChunkManager(localDataRootPath); err != nil {
 		return err
 	}
 

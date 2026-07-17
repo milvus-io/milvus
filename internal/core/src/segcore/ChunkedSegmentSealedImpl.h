@@ -82,6 +82,7 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
 #include "storage/MmapChunkManager.h"
+#include "local/FileSystem.h"
 #include "segcore/TextColumnCache.h"
 
 namespace milvus::segcore {
@@ -106,12 +107,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
  public:
     using ParquetStatistics = std::vector<std::shared_ptr<parquet::Statistics>>;
-    explicit ChunkedSegmentSealedImpl(SchemaPtr schema,
-                                      IndexMetaPtr index_meta,
-                                      const SegcoreConfig& segcore_config,
-                                      int64_t segment_id,
-                                      bool is_sorted_by_pk = false);
+    explicit ChunkedSegmentSealedImpl(
+        SchemaPtr schema,
+        IndexMetaPtr index_meta,
+        const SegcoreConfig& segcore_config,
+        int64_t segment_id,
+        bool is_sorted_by_pk = false,
+        std::optional<local::FileSystem> local_files = std::nullopt);
     ~ChunkedSegmentSealedImpl() override;
+
+ private:
+    local::FileSystem
+    LocalFiles() const;
+
+ public:
     void
     LoadIndex(LoadIndexInfo& info) override;
     void
@@ -2218,6 +2227,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // only useful in binlog
     IndexMetaPtr col_index_meta_;
     SegcoreConfig segcore_config_;
+    std::optional<local::FileSystem> local_files_;
 
     SegmentStats stats_{};
 
@@ -2572,9 +2582,14 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = empty_index_meta,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool is_sorted_by_pk = false) {
-    return std::make_unique<ChunkedSegmentSealedImpl>(
-        schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
+    bool is_sorted_by_pk = false,
+    std::optional<local::FileSystem> local_files = std::nullopt) {
+    return std::make_unique<ChunkedSegmentSealedImpl>(schema,
+                                                      index_meta,
+                                                      segcore_config,
+                                                      segment_id,
+                                                      is_sorted_by_pk,
+                                                      std::move(local_files));
 }
 
 using ParquetStatisticsByField =

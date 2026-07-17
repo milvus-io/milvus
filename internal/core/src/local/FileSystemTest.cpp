@@ -113,6 +113,31 @@ TEST_F(LocalFileSystemTest, CopiesAndSubtreesKeepIndependentRoots) {
     fs::remove_all(other_root);
 }
 
+TEST_F(LocalFileSystemTest, ReportsUsageAndClearsOnlyItsRoot) {
+    auto sibling_root =
+        root_.parent_path() / (root_.filename().string() + "_2");
+    fs::remove_all(sibling_root);
+    auto sibling = FileSystem::Open(sibling_root);
+
+    auto first = files_->OpenForWrite(
+        Path("nested/first"),
+        WriteOptions{.create = true, .create_parent = true});
+    std::array<std::byte, 7> first_bytes{};
+    first.Write(first_bytes);
+    auto second =
+        sibling.OpenForWrite(Path("second"), WriteOptions{.create = true});
+    std::array<std::byte, 11> second_bytes{};
+    second.Write(second_bytes);
+
+    EXPECT_EQ(files_->UsedSize(), first_bytes.size());
+    EXPECT_EQ(sibling.UsedSize(), second_bytes.size());
+    files_->Clear();
+    EXPECT_TRUE(fs::is_empty(root_));
+    EXPECT_FALSE(fs::is_empty(sibling_root));
+
+    fs::remove_all(sibling_root);
+}
+
 TEST_F(LocalFileSystemTest, OperationsDoNotDependOnCurrentWorkingDirectory) {
     CurrentPathGuard guard;
     auto subtree = files_->Subtree(Path("local_chunk"));
