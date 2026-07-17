@@ -211,6 +211,9 @@ FileSystem::ManageSubtree(const Path& path) const {
 
 fs::path
 FileSystem::ScopedRoot() const {
+    if (prefix_.empty()) {
+        return root_->root;
+    }
     return (root_->root / prefix_).lexically_normal();
 }
 

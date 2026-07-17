@@ -139,6 +139,14 @@ TEST_F(LocalFileSystemTest, OperationsDoNotDependOnCurrentWorkingDirectory) {
                   .lexically_normal());
 }
 
+TEST_F(LocalFileSystemTest, RecreatesDirectoriesAfterRootIsRemoved) {
+    fs::remove_all(root_);
+
+    files_->CreateDirectories(Path("tmp/marisa"));
+
+    EXPECT_TRUE(fs::is_directory(root_ / "tmp/marisa"));
+}
+
 TEST_F(LocalFileSystemTest, RejectsSymlinkEscapes) {
     auto outside =
         root_.parent_path() / (root_.filename().string() + "_outside");
