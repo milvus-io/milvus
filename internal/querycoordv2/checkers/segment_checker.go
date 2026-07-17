@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -333,19 +332,12 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		if !existInDist {
 			return false
 		}
-		// Trigger reopen when storage v2 data version is behind the target.
-		// DataVersion bumps on storage v2 binlog changes that don't necessarily
-		// move the manifest version.
-		// Skip when the QueryNode did not report DataVersion (nil pointer from
-		// proto3 optional): during a mixed-version rollout an old QueryNode has
-		// no way to advance DataVersion, so triggering Reopen would loop forever.
-		if segInDist.DataVersion != nil && *segInDist.DataVersion < segment.GetDataVersion() {
-			return true
-		}
-		// Trigger reopen when dist manifest is older than target manifest.
-		// If dist manifest is same or newer (e.g., loaded after L0 compaction updated DataCoord),
-		// the data is already up-to-date and no reopen is needed.
-		cmp, err := packed.CompareManifestPath(segInDist.ManifestPath, segment.GetManifestPath())
+		// Trigger reopen when the loaded segment is behind the target. The helper
+		// checks DataVersion before manifest readiness, so storage v2 binlog changes
+		// still trigger Reopen when manifest paths are not comparable. A nil
+		// DataVersion from an old QueryNode is treated as compatible to avoid an
+		// endless Reopen loop, while Storage v3 relies on manifest readiness only.
+		ready, err := utils.IsSegmentDataReadyForTarget(segInDist, segment)
 		if err != nil {
 			mlog.RatedWarn(ctx, rate.Limit(10), "manifest path not comparable, skip reopen",
 				mlog.FieldSegmentID(segment.GetID()),
@@ -354,7 +346,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 				mlog.Err(err))
 			return false
 		}
-		return cmp < 0
+		return !ready
 	}
 
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
@@ -463,17 +455,39 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 			continue
 		}
 
-		stillInUseByDelegator := false
-		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
-		for _, delegator := range delegatorList {
-			// Notice: if syncTargetVersion stuck, segment on delegator won't be released
-			readableVersionNotUpdate := delegator.View.TargetVersion != initialTargetVersion && delegator.View.TargetVersion < currentTargetVersion
-			if partition != nil && readableVersionNotUpdate {
-				// leader view version hasn't been updated, segment maybe still in use
-				stillInUseByDelegator = true
-				break
-			}
-		}
+		// Release a sealed segment only after every delegator with a synced target
+		// has converged to the current target version. A delegator on another target
+		// may still serve an older or orphaned readable snapshot that references the
+		// segment. The initial target version means no target has been synced yet and
+		// does not block release.
+		//
+		// This conservative safety barrier has two liveness risks:
+		//
+		//  1. Obsolete segments are retained while target convergence is in progress,
+		//     increasing QueryNode memory usage. If the retained data leaves
+		//     insufficient capacity to load the next target, current-target promotion
+		//     and segment release can stall each other. Increase QueryNode capacity to
+		//     allow the next target to finish loading.
+		//
+		//  2. Replacing the next target while a target transition is in progress can
+		//     cause permanent convergence starvation. For example, current may remain
+		//     at V1 while different delegators are serving V2 and V3. If next is
+		//     replaced from V4 to V5 before all delegators reach V4, and this keeps
+		//     happening, no target generation can be fully synchronized and promoted
+		//     to current. Because release requires every synced delegator to match
+		//     current, obsolete segments will then remain blocked indefinitely.
+		//
+		//     Progress-aware automatic refreshes therefore retain a healthy next target
+		//     while replica-scoped segment and channel readiness keeps advancing. A
+		//     stale target or an explicit manual refresh may intentionally replace the
+		//     selected target and restart the transition.
+		//
+		// Do not bypass this barrier to recover from either condition, since doing so
+		// may release segments still referenced by a readable snapshot.
+		stillInUseByDelegator := partition != nil && lo.ContainsBy(delegatorList, func(delegator *meta.DmChannel) bool {
+			return delegator.View.TargetVersion != initialTargetVersion &&
+				delegator.View.TargetVersion != currentTargetVersion
+		})
 
 		if !stillInUseByDelegator {
 			notUsed = append(notUsed, s)
