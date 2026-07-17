@@ -607,11 +607,11 @@ class SegmentExpr : public Expr {
         if (need_size == 0)
             return 0;  //do not go empty-loop at the bound of the chunk
 
-        auto& skip_index = segment_->GetSkipIndex();
+        auto skip_index = segment_->GetSkipIndex();
         auto pw = segment_->get_batch_views<T>(
             op_ctx_, field_id_, 0, current_data_chunk_pos_, need_size);
         auto views_info = pw.get();
-        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+        if (!skip_func || !skip_func(*skip_index, field_id_, 0)) {
             // first is the raw data, second is valid_data
             // use valid_data to see if raw data is null
             if constexpr (NeedSegmentOffsets) {
@@ -662,11 +662,11 @@ class SegmentExpr : public Expr {
         // For non_chunked sealed segment, only single chunk
         Assert(num_data_chunk_ == 1);
 
-        auto& skip_index = segment_->GetSkipIndex();
+        auto skip_index = segment_->GetSkipIndex();
         auto pw =
             segment_->get_views_by_offsets<T>(op_ctx_, field_id_, 0, *input);
         auto [data_vec, valid_data] = pw.get();
-        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+        if (!skip_func || !skip_func(*skip_index, field_id_, 0)) {
             func(data_vec.data(),
                  valid_data.data(),
                  nullptr,
@@ -719,7 +719,7 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
-        auto& skip_index = segment_->GetSkipIndex();
+        auto skip_index = segment_->GetSkipIndex();
 
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -730,7 +730,7 @@ class SegmentExpr : public Expr {
         const bool all_valid = cached_index_all_valid_;
         auto batch_size = input->size();
 
-        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+        if (!skip_func || !skip_func(*skip_index, field_id_, 0)) {
             for (auto i = 0; i < batch_size; ++i) {
                 auto offset = (*input)[i];
                 auto raw = index_ptr->Reverse_Lookup(offset);
@@ -786,7 +786,7 @@ class SegmentExpr : public Expr {
             }
         }
 
-        auto& skip_index = segment_->GetSkipIndex();
+        auto skip_index = segment_->GetSkipIndex();
 
         if constexpr (std::is_same_v<T, VectorArrayView>) {
             for (size_t i = 0; i < input->size(); ++i) {
@@ -802,7 +802,8 @@ class SegmentExpr : public Expr {
                     chunk_id,
                     std::make_pair(chunk_offset, int64_t{1}));
                 const auto& [data_vec, valid_data] = pw.get();
-                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
+                if (!skip_func ||
+                    !skip_func(*skip_index, field_id_, chunk_id)) {
                     func.template operator()<FilterType::random>(
                         data_vec.data(),
                         valid_data.data(),
@@ -838,7 +839,7 @@ class SegmentExpr : public Expr {
                             {int32_t(chunk_offset)});
                         auto [data_vec, valid_data] = pw.get();
                         if (!skip_func ||
-                            !skip_func(skip_index, field_id_, chunk_id)) {
+                            !skip_func(*skip_index, field_id_, chunk_id)) {
                             func.template operator()<FilterType::random>(
                                 data_vec.data(),
                                 valid_data.data(),
@@ -870,7 +871,7 @@ class SegmentExpr : public Expr {
                         valid_data += chunk_offset;
                     }
                     if (!skip_func ||
-                        !skip_func(skip_index, field_id_, chunk_id)) {
+                        !skip_func(*skip_index, field_id_, chunk_id)) {
                         func.template operator()<FilterType::random>(
                             data,
                             valid_data,
@@ -899,7 +900,7 @@ class SegmentExpr : public Expr {
                 auto chunk = pw.get();
                 const T* data = chunk.data();
                 const bool* valid_data = chunk.valid_data();
-                if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+                if (!skip_func || !skip_func(*skip_index, field_id_, 0)) {
                     func.template operator()<FilterType::random>(data,
                                                                  valid_data,
                                                                  input->data(),
@@ -925,7 +926,8 @@ class SegmentExpr : public Expr {
                 if (valid_data != nullptr) {
                     valid_data += chunk_offset;
                 }
-                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
+                if (!skip_func ||
+                    !skip_func(*skip_index, field_id_, chunk_id)) {
                     func.template operator()<FilterType::random>(
                         data,
                         valid_data,
@@ -958,7 +960,7 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
-        auto& skip_index = segment_->GetSkipIndex();
+        auto skip_index = segment_->GetSkipIndex();
         if (segment_->type() == SegmentType::Sealed) {
             AssertInfo(
                 segment_->is_chunked(),
@@ -1024,7 +1026,7 @@ class SegmentExpr : public Expr {
                     size_t result_idx = batch_start + j;
 
                     if (!skip_func ||
-                        !skip_func(skip_index, field_id_, chunk_id)) {
+                        !skip_func(*skip_index, field_id_, chunk_id)) {
                         // Extract element from ArrayView
                         auto value =
                             array_vec[j].template get_data<ElementType>(
@@ -1058,7 +1060,7 @@ class SegmentExpr : public Expr {
                           field_id_.get());
             }
 
-            auto& skip_index = segment_->GetSkipIndex();
+            auto skip_index = segment_->GetSkipIndex();
             size_t processed_size = 0;
 
             for (size_t i = 0; i < element_ids->size(); i++) {
@@ -1081,7 +1083,8 @@ class SegmentExpr : public Expr {
                     valid_data += chunk_offset;
                 }
 
-                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
+                if (!skip_func ||
+                    !skip_func(*skip_index, field_id_, chunk_id)) {
                     // Extract element from Array
                     auto value = array_ptr->get_data<ElementType>(elem_idx);
                     bool is_valid = !valid_data || valid_data[0];
@@ -1156,8 +1159,8 @@ class SegmentExpr : public Expr {
                 continue;
             }
 
-            auto& skip_index = segment_->GetSkipIndex();
-            if ((!skip_func || !skip_func(skip_index, field_id_, i))) {
+            auto skip_index = segment_->GetSkipIndex();
+            if ((!skip_func || !skip_func(*skip_index, field_id_, i))) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<ArrayView>(
                         op_ctx_, field_id_, i, data_pos, size);
@@ -1401,9 +1404,10 @@ class SegmentExpr : public Expr {
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
 
-            auto& skip_index = segment_->GetSkipIndex();
+            auto skip_index = segment_->GetSkipIndex();
             auto process_chunk = [&](const T* data, const bool* valid_data) {
-                auto skipped = skip_func && skip_func(skip_index, field_id_, i);
+                auto skipped =
+                    skip_func && skip_func(*skip_index, field_id_, i);
                 if (!skipped) {
                     if constexpr (NeedSegmentOffsets) {
                         // For GIS functions: construct segment offsets array
@@ -1536,8 +1540,8 @@ class SegmentExpr : public Expr {
                 int64_t offset = start_offset + j;
                 segment_offsets_array[j] = static_cast<int32_t>(offset);
             }
-            auto& skip_index = segment_->GetSkipIndex();
-            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
+            auto skip_index = segment_->GetSkipIndex();
+            if (!skip_func || !skip_func(*skip_index, field_id_, i)) {
                 bool is_seal = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||

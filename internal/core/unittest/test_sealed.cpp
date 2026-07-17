@@ -1951,37 +1951,37 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                     {pk_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index = segment->GetSkipIndex();
     bool equal_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
     bool equal_12_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
     bool equal_10_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
     ASSERT_FALSE(equal_5_skip);
     ASSERT_TRUE(equal_12_skip);
     ASSERT_FALSE(equal_10_skip);
     bool less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
     bool less_than_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5);
     ASSERT_TRUE(less_than_1_skip);
     ASSERT_FALSE(less_than_5_skip);
     bool less_equal_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessEqual, 1);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessEqual, 1);
     bool less_equal_than_15_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
+        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
     ASSERT_FALSE(less_equal_than_1_skip);
     ASSERT_FALSE(less_equal_than_15_skip);
-    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, 10);
-    bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterThan, 5);
     ASSERT_TRUE(greater_than_10_skip);
     ASSERT_FALSE(greater_than_5_skip);
-    bool greater_equal_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_equal_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterEqual, 10);
-    bool greater_equal_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+    bool greater_equal_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
         pk_fid, 0, OpType::GreaterEqual, 5);
     ASSERT_FALSE(greater_equal_than_10_skip);
     ASSERT_FALSE(greater_equal_than_5_skip);
@@ -1998,8 +1998,9 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int32_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
+    skip_index = segment->GetSkipIndex();
     less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
+        skip_index->CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
     ASSERT_TRUE(less_than_1_skip);
 
     //test for int16
@@ -2014,8 +2015,9 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int16_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    bool less_than_12_skip =
-        skip_index.CanSkipUnaryRange<int16_t>(i16_fid, 0, OpType::LessThan, 12);
+    skip_index = segment->GetSkipIndex();
+    bool less_than_12_skip = skip_index->CanSkipUnaryRange<int16_t>(
+        i16_fid, 0, OpType::LessThan, 12);
     ASSERT_FALSE(less_than_12_skip);
 
     //test for int8
@@ -2030,7 +2032,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int8_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
+    skip_index = segment->GetSkipIndex();
+    bool greater_than_12_skip = skip_index->CanSkipUnaryRange<int8_t>(
         i8_fid, 0, OpType::GreaterThan, 12);
     ASSERT_TRUE(greater_than_12_skip);
 
@@ -2047,7 +2050,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {float_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
+    skip_index = segment->GetSkipIndex();
+    greater_than_10_skip = skip_index->CanSkipUnaryRange<float>(
         float_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
 
@@ -2064,7 +2068,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {double_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    greater_than_10_skip = skip_index.CanSkipUnaryRange<double>(
+    skip_index = segment->GetSkipIndex();
+    greater_than_10_skip = skip_index->CanSkipUnaryRange<double>(
         double_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
 }
@@ -2094,7 +2099,8 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
                                                     {pk_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, true));
     ASSERT_TRUE(
@@ -2137,7 +2143,8 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
                                                     {int64s_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     bool equal_5_skip =
         skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 5);
     bool equal_4_skip =
@@ -2207,7 +2214,8 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
                                                     {int64s_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));
     ASSERT_TRUE(
@@ -2249,7 +2257,8 @@ TEST(Sealed, SkipIndexSkipStringRange) {
                                                     {string_field_data},
                                                     cm);
     segment->LoadFieldData(load_info);
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
         string_fid, 0, OpType::Equal, "w"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
@@ -4173,6 +4182,57 @@ TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
 
     EXPECT_TRUE(
         sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text_fid));
+}
+
+TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto payload = schema->AddDebugVarcharField(FieldName("payload"),
+                                                DataType::VARCHAR,
+                                                1024,
+                                                /*nullable=*/false,
+                                                /*enable_match=*/false,
+                                                /*enable_analyzer=*/false,
+                                                analyzer_params,
+                                                std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 8;
+    auto dataset = DataGen(schema, row_count);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_state->runtime, nullptr);
+    ASSERT_NE(old_state->runtime->skip_index, nullptr);
+    EXPECT_EQ(old_state->runtime->row_count, row_count);
+    EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
+    ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
+    auto old_avg_size =
+        old_state->runtime->variable_fields_avg_size.at(payload).second;
+
+    auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    ASSERT_NE(next_runtime->skip_index, old_state->runtime->skip_index);
+    next_runtime->row_count = row_count + 1;
+    next_runtime->mmap_field_ids.insert(payload);
+    next_runtime->variable_fields_avg_size[payload] = {row_count + 1, 123};
+    next_runtime->skip_index->Erase(payload);
+    sealed->TestPublishRuntimeResourceState(std::move(next_runtime));
+
+    auto new_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_state->runtime, nullptr);
+    EXPECT_EQ(new_state->runtime->row_count, row_count + 1);
+    EXPECT_EQ(new_state->runtime->mmap_field_ids.count(payload), 1);
+    EXPECT_EQ(new_state->runtime->variable_fields_avg_size.at(payload).second,
+              123);
+
+    EXPECT_EQ(old_state->runtime->row_count, row_count);
+    EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
+    EXPECT_EQ(old_state->runtime->variable_fields_avg_size.at(payload).second,
+              old_avg_size);
+    EXPECT_NE(old_state->runtime->skip_index, new_state->runtime->skip_index);
 }
 
 TEST(SealedSegmentCowState, StagedTextIndexIsInvisibleBeforePublish) {
