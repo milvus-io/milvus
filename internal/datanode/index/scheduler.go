@@ -21,6 +21,7 @@ import (
 	"context"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -246,26 +247,30 @@ func (sched *TaskScheduler) processTask(t Task) {
 	var (
 		indexTask  *indexBuildTask
 		costCPUNum int64
-		startMs    int64
+		execStart  time.Time
 	)
 	if ibt, ok := t.(*indexBuildTask); ok {
 		indexTask = ibt
 		costCPUNum = taskcost.EstimateIndexBuildCPUNum(indexTask.IsVectorIndex())
-		startMs = taskcost.NowMs()
-		indexTask.manager.StoreIndexTaskExecutionStart(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), startMs, costCPUNum)
+		// execStart carries a monotonic clock reading; CostTimeMs derived from
+		// it is immune to wall-clock steps. ExecStartMs/ExecEndMs stay wall-clock
+		// timestamps for external exposure.
+		execStart = time.Now()
+		indexTask.manager.StoreIndexTaskExecutionStart(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), taskcost.NowMs(), costCPUNum)
+		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()), mlog.Int64("costCPUNum", costCPUNum))
+	} else {
+		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()))
 	}
 
-	mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()), mlog.Int64("costCPUNum", costCPUNum))
 	pipelines := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
 			if indexTask != nil {
-				endMs := taskcost.NowMs()
-				costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
+				costTimeMs := taskcost.ElapsedMs(execStart)
 				// End bookkeeping and final state must land in one critical
 				// section, so a concurrent QueryTask never sees a final cost
 				// paired with an in-progress state.
-				indexTask.SetStateWithCost(getStateFromError(err), err.Error(), endMs, costTimeMs)
+				indexTask.SetStateWithCost(getStateFromError(err), err.Error(), taskcost.NowMs(), costTimeMs)
 				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
 			} else {
 				t.SetState(getStateFromError(err), err.Error())
@@ -275,9 +280,8 @@ func (sched *TaskScheduler) processTask(t Task) {
 		}
 	}
 	if indexTask != nil {
-		endMs := taskcost.NowMs()
-		costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
-		indexTask.SetStateWithCost(indexpb.JobState_JobStateFinished, "", endMs, costTimeMs)
+		costTimeMs := taskcost.ElapsedMs(execStart)
+		indexTask.SetStateWithCost(indexpb.JobState_JobStateFinished, "", taskcost.NowMs(), costTimeMs)
 		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
 	} else {
 		t.SetState(indexpb.JobState_JobStateFinished, "")
