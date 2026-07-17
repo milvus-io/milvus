@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/internal/merr"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type AliasSuite struct {

@@ -6,11 +6,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/internal/conc"
-	"github.com/milvus-io/milvus/client/v2/internal/merr"
-	"github.com/milvus-io/milvus/client/v2/internal/retry"
-	"github.com/milvus-io/milvus/client/v2/internal/typeutil"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/conc"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
+	"github.com/milvus-io/milvus/client/v3/internal/retry"
+	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 )
 
 // CollectionCache stores the cached collection schema information.

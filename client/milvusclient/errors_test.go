@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/client/v2/internal/merr"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 func TestRPCErrorPublicAPI(t *testing.T) {

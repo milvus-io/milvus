@@ -16,7 +16,7 @@
 
 package milvusclient
 
-import "github.com/milvus-io/milvus/client/v2/internal/merr"
+import "github.com/milvus-io/milvus/client/v3/internal/merr"
 
 // RPCError is the structured error returned for a failed Milvus RPC.
 type RPCError = merr.RPCError
