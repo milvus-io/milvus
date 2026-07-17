@@ -34,21 +34,23 @@ const (
 	RetryLabel    = "retry"
 	RejectedLabel = "rejected"
 
-	// Fine-grained hard-failure labels (composite status values, not a new
-	// dimension label, to keep Prometheus cardinality additive rather than
-	// multiplicative). They split the coarse "fail"/"rejected" into the
-	// responsible party so monitoring/alerting can tell a user-input error
-	// (the caller must fix the request) apart from an internal system error
-	// (operators must intervene). MIGRATION: old queries on status="fail" must
-	// move to status=~"fail_.*" (fail_input/fail_system), and old queries on
-	// status="rejected" must move to status=~"rejected_.*" (rejected_user for
-	// caller-side auth/privilege/bad-arg rejections, rejected_system otherwise).
-	// Dashboards still matching the bare "fail"/"rejected" values return nothing
-	// after this split.
-	FailInputLabel      = "fail_input"
-	FailSystemLabel     = "fail_system"
-	RejectedSystemLabel = "rejected_system"
-	RejectedUserLabel   = "rejected_user"
+	// Values of the "cause" label, a dimension orthogonal to "status" that names
+	// the responsible party for a failed request, so monitoring can tell a
+	// user-input error (the caller must fix the request) apart from an internal
+	// system error (operators must intervene). It is a separate label rather
+	// than extra "status" values on purpose: the coarse status stays a valid
+	// query on its own ("fail" is still every hard failure, aggregated over
+	// cause by Prometheus), so dashboards written against it keep working.
+	// Cause is functionally dependent on the outcome, so the realized
+	// (status, cause) pairs are additive, not the product of both domains.
+	CauseUser   = "user"   // the request itself is at fault: bad arguments, missing auth, no such collection
+	CauseSystem = "system" // Milvus is at fault: component failure, IO error, internal bug
+	CauseCancel = "cancel" // neither party: the client gave up before the request completed
+	// CauseNA is the empty string on purpose: Prometheus treats an empty label
+	// value as equivalent to the label being absent, so success/total/retry/
+	// abandon series carry no meaningful cause and stay byte-identical to what
+	// pre-2.6.19 emitted -- only fail/rejected actually carry user/system/cancel.
+	CauseNA = "" // no cause applies: the request did not hard-fail
 
 	HybridSearchLabel = "hybrid_search"
 
@@ -123,6 +125,7 @@ const (
 	nodeIDLabelName                = "node_id"
 	nodeHostLabelName              = "node_host"
 	statusLabelName                = "status"
+	causeLabelName                 = "cause"
 	indexTaskStatusLabelName       = "index_task_status"
 	msgTypeLabelName               = "msg_type"
 	collectionIDLabelName          = "collection_id"
