@@ -132,7 +132,9 @@ func TestFlushMsgHandler_HandleCreateSegment(t *testing.T) {
 
 	t.Run("growing-source collection creates WriteBuffer shell", func(t *testing.T) {
 		wbMgr := writebuffer.NewMockBufferManager(t)
-		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, int64(10), int64(1001), mock.Anything).Return(nil)
+		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, mock.MatchedBy(func(info writebuffer.CreateGrowingSegmentInfo) bool {
+			return info.PartitionID == 10 && info.SegmentID == 1001 && info.StorageVersion == 0
+		})).Return(nil)
 
 		handler := newMsgHandler(wbMgr)
 		err := handler.HandleCreateSegment(context.Background(), im)
@@ -141,7 +143,9 @@ func TestFlushMsgHandler_HandleCreateSegment(t *testing.T) {
 
 	t.Run("non-growing-source collection calls CreateNewGrowingSegment", func(t *testing.T) {
 		wbMgr := writebuffer.NewMockBufferManager(t)
-		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, int64(10), int64(1001), mock.Anything).Return(nil)
+		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, mock.MatchedBy(func(info writebuffer.CreateGrowingSegmentInfo) bool {
+			return info.PartitionID == 10 && info.SegmentID == 1001 && info.StorageVersion == 0
+		})).Return(nil)
 
 		handler := newMsgHandler(wbMgr)
 		err := handler.HandleCreateSegment(context.Background(), im)

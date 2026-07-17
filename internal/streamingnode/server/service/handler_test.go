@@ -101,7 +101,7 @@ func TestReleaseManualFlushPreparer(t *testing.T) {
 	manager.EXPECT().GetAvailableWAL(mock.Anything).Return(wal, nil)
 
 	wbManager := writebuffer.NewMockBufferManager(t)
-	wbManager.EXPECT().UseGrowingSourceFlush("vchannel").Return(true)
+	wbManager.EXPECT().AllowGrowingSourceFlush("vchannel").Return(true)
 	wbManager.EXPECT().
 		GetGrowingFlushProgress(mock.Anything, "vchannel", []int64{1001, 1002}, uint64(200)).
 		Return([]writebuffer.GrowingFlushSegmentProgress{
@@ -140,7 +140,7 @@ func TestReleaseManualFlushPreparerNoGrowingProgress(t *testing.T) {
 	manager.EXPECT().GetAvailableWAL(mock.Anything).Return(wal, nil)
 
 	wbManager := writebuffer.NewMockBufferManager(t)
-	wbManager.EXPECT().UseGrowingSourceFlush("vchannel").Return(true)
+	wbManager.EXPECT().AllowGrowingSourceFlush("vchannel").Return(true)
 	wbManager.EXPECT().
 		GetGrowingFlushProgress(mock.Anything, "vchannel", releaseSegmentIDs, uint64(200)).
 		Return([]writebuffer.GrowingFlushSegmentProgress{
@@ -169,7 +169,7 @@ func TestReleaseManualFlushPreparerSkipsManualFlushWhenCurrentSegmentsDoNotNeedH
 		MockBufferManager: writebuffer.NewMockBufferManager(t),
 		needManualFlush:   false,
 	}
-	wbManager.EXPECT().UseGrowingSourceFlush("vchannel").Return(true)
+	wbManager.EXPECT().AllowGrowingSourceFlush("vchannel").Return(true)
 	wbManager.EXPECT().
 		GetGrowingFlushProgress(mock.Anything, "vchannel", releaseSegmentIDs, uint64(0)).
 		Return([]writebuffer.GrowingFlushSegmentProgress{
@@ -198,7 +198,7 @@ func TestReleaseManualFlushPreparerPreparesExistingProgressWithoutManualFlush(t 
 		MockBufferManager: writebuffer.NewMockBufferManager(t),
 		needManualFlush:   false,
 	}
-	wbManager.EXPECT().UseGrowingSourceFlush("vchannel").Return(true)
+	wbManager.EXPECT().AllowGrowingSourceFlush("vchannel").Return(true)
 	wbManager.EXPECT().
 		GetGrowingFlushProgress(mock.Anything, "vchannel", releaseSegmentIDs, uint64(0)).
 		Return([]writebuffer.GrowingFlushSegmentProgress{
@@ -227,7 +227,7 @@ func TestReleaseManualFlushPreparerSkipsManualFlushForEmptyInitialSegments(t *te
 		MockBufferManager: writebuffer.NewMockBufferManager(t),
 		needManualFlush:   false,
 	}
-	wbManager.EXPECT().UseGrowingSourceFlush("vchannel").Return(true)
+	wbManager.EXPECT().AllowGrowingSourceFlush("vchannel").Return(true)
 	wbManager.EXPECT().
 		GetGrowingFlushProgress(mock.Anything, "vchannel", []int64(nil), uint64(0)).
 		Return(nil, nil)
@@ -259,7 +259,7 @@ func TestReleaseManualFlushPreparerFencesEmptyInitialSegments(t *testing.T) {
 	manager.EXPECT().GetAvailableWAL(mock.Anything).Return(wal, nil)
 
 	wbManager := writebuffer.NewMockBufferManager(t)
-	wbManager.EXPECT().UseGrowingSourceFlush("vchannel").Return(true)
+	wbManager.EXPECT().AllowGrowingSourceFlush("vchannel").Return(true)
 	wbManager.EXPECT().
 		GetGrowingFlushProgress(mock.Anything, "vchannel", affectedSegmentIDs, uint64(200)).
 		Return([]writebuffer.GrowingFlushSegmentProgress{
@@ -283,7 +283,7 @@ func TestReleaseManualFlushPreparerFencesEmptyInitialSegments(t *testing.T) {
 func TestReleaseManualFlushPreparerSkipNonGrowingSource(t *testing.T) {
 	ctx := context.Background()
 	wbManager := writebuffer.NewMockBufferManager(t)
-	wbManager.EXPECT().UseGrowingSourceFlush("vchannel").Return(false)
+	wbManager.EXPECT().AllowGrowingSourceFlush("vchannel").Return(false)
 
 	preparer := NewReleaseManualFlushPreparer(mock_walmanager.NewMockManager(t), wbManager)
 	prepared, err := preparer.PrepareReleaseManualFlush(ctx, types.PChannelInfo{Name: "pchannel", Term: 1}, 10, "vchannel", []int64{1001})

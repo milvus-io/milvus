@@ -823,6 +823,10 @@ func (t *GrowingSourceSyncTask) schemaBasedPattern(columnGroups []storagecommon.
 }
 
 func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo, columnGroups []storagecommon.ColumnGroup) (*GrowingFlushConfig, error) {
+	if segment.GetStorageVersion() != storage.StorageV3 {
+		return nil, merr.WrapErrDataIntegrityMsg("growing source flush requires StorageV3 segment, segmentID=%d storageVersion=%d",
+			t.segmentID, segment.GetStorageVersion())
+	}
 	segmentBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
 		metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID))
 	partitionBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
