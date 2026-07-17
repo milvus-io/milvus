@@ -18,11 +18,14 @@
 #include <utility>
 #include <vector>
 
+#include "common/Geometry.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
+#include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
+#include "geos_c.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -402,4 +405,70 @@ TEST(BoostScoreRunnerTest, ComputeScorerScoresNonNativeFilterCoversAllBatches) {
     EXPECT_FALSE(scores[3].has_value());  // 9001: "swimming pool"
     ASSERT_TRUE(scores[4].has_value());   // 9998: "football match"
     EXPECT_FLOAT_EQ(scores[4].value(), 2.0F);
+}
+
+// Same regression through a GIS filter. GIS gained SupportOffsetInput() ==
+// false in the offset-input contract fix, which routes it into the same
+// non-native fallback as text match; a boosted offset past the first
+// expression batch must still be scored.
+TEST(BoostScoreRunnerTest, ComputeScorerScoresGISFilterCoversAllBatches) {
+    const int64_t N = 10000;  // more than one expression batch (8192)
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto geo_fid = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto raw_data = segcore::DataGen(schema, N);
+    proto::schema::FieldData* geo_field_data = nullptr;
+    for (auto& fd : *raw_data.raw_->mutable_fields_data()) {
+        if (fd.field_id() == geo_fid.get()) {
+            geo_field_data = &fd;
+            break;
+        }
+    }
+    ASSERT_NE(geo_field_data, nullptr);
+    // Even rows sit inside the query polygon, odd rows far outside.
+    auto* geo_col = geo_field_data->mutable_scalars()->mutable_geometry_data();
+    geo_col->clear_data();
+    auto ctx = GEOS_init_r();
+    for (int64_t i = 0; i < N; i++) {
+        const char* wkt =
+            (i % 2 == 0) ? "POINT (0.5 0.5)" : "POINT (100.0 100.0)";
+        Geometry geom(ctx, wkt);
+        geo_col->add_data(geom.to_wkb_string());
+    }
+    GEOS_finish_r(ctx);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    auto filter = std::make_shared<expr::GISFunctionFilterExpr>(
+        expr::ColumnInfo(geo_fid, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_Within,
+        "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))");
+    auto scorer = std::make_shared<WeightScorer>(filter, 3.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_scorer_gis_multi_batch", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    FixedVector<int32_t> offsets = {
+        0, 1, 9000, 9001, static_cast<int32_t>(N - 2)};
+    std::vector<std::optional<float>> scores(offsets.size(), std::nullopt);
+    ComputeScorerScores(
+        &exec_context, &op_context, segment.get(), scorer, offsets, scores);
+
+    // First batch behaves as before.
+    ASSERT_TRUE(scores[0].has_value());  // 0: inside the polygon
+    EXPECT_FLOAT_EQ(scores[0].value(), 3.0F);
+    EXPECT_FALSE(scores[1].has_value());  // 1: outside the polygon
+
+    // Offsets beyond the first expression batch must still be scored.
+    ASSERT_TRUE(scores[2].has_value());  // 9000: inside the polygon
+    EXPECT_FLOAT_EQ(scores[2].value(), 3.0F);
+    EXPECT_FALSE(scores[3].has_value());  // 9001: outside the polygon
+    ASSERT_TRUE(scores[4].has_value());   // 9998: inside the polygon
+    EXPECT_FLOAT_EQ(scores[4].value(), 3.0F);
 }
