@@ -822,17 +822,17 @@ func (_c *MockCache_RemoveCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// RemoveCollectionsByID provides a mock function with given fields: ctx, collectionID, version, removeVersion
-func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, collectionID int64, version uint64, removeVersion bool) []string {
-	ret := _m.Called(ctx, collectionID, version, removeVersion)
+// RemoveCollectionsByID provides a mock function with given fields: ctx, collectionID, version
+func (_m *MockCache) RemoveCollectionsByID(ctx context.Context, collectionID int64, version uint64) []string {
+	ret := _m.Called(ctx, collectionID, version)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoveCollectionsByID")
 	}
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64, bool) []string); ok {
-		r0 = rf(ctx, collectionID, version, removeVersion)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) []string); ok {
+		r0 = rf(ctx, collectionID, version)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -851,14 +851,13 @@ type MockCache_RemoveCollectionsByID_Call struct {
 //   - ctx context.Context
 //   - collectionID int64
 //   - version uint64
-//   - removeVersion bool
-func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}, version interface{}, removeVersion interface{}) *MockCache_RemoveCollectionsByID_Call {
-	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID, version, removeVersion)}
+func (_e *MockCache_Expecter) RemoveCollectionsByID(ctx interface{}, collectionID interface{}, version interface{}) *MockCache_RemoveCollectionsByID_Call {
+	return &MockCache_RemoveCollectionsByID_Call{Call: _e.mock.On("RemoveCollectionsByID", ctx, collectionID, version)}
 }
 
-func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, collectionID int64, version uint64, removeVersion bool)) *MockCache_RemoveCollectionsByID_Call {
+func (_c *MockCache_RemoveCollectionsByID_Call) Run(run func(ctx context.Context, collectionID int64, version uint64)) *MockCache_RemoveCollectionsByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(uint64), args[3].(bool))
+		run(args[0].(context.Context), args[1].(int64), args[2].(uint64))
 	})
 	return _c
 }
@@ -868,14 +867,14 @@ func (_c *MockCache_RemoveCollectionsByID_Call) Return(_a0 []string) *MockCache_
 	return _c
 }
 
-func (_c *MockCache_RemoveCollectionsByID_Call) RunAndReturn(run func(context.Context, int64, uint64, bool) []string) *MockCache_RemoveCollectionsByID_Call {
+func (_c *MockCache_RemoveCollectionsByID_Call) RunAndReturn(run func(context.Context, int64, uint64) []string) *MockCache_RemoveCollectionsByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// RemoveDatabase provides a mock function with given fields: ctx, database
-func (_m *MockCache) RemoveDatabase(ctx context.Context, database string) {
-	_m.Called(ctx, database)
+// RemoveDatabase provides a mock function with given fields: ctx, database, version
+func (_m *MockCache) RemoveDatabase(ctx context.Context, database string, version uint64) {
+	_m.Called(ctx, database, version)
 }
 
 // MockCache_RemoveDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDatabase'
@@ -886,13 +885,14 @@ type MockCache_RemoveDatabase_Call struct {
 // RemoveDatabase is a helper method to define mock.On call
 //   - ctx context.Context
 //   - database string
-func (_e *MockCache_Expecter) RemoveDatabase(ctx interface{}, database interface{}) *MockCache_RemoveDatabase_Call {
-	return &MockCache_RemoveDatabase_Call{Call: _e.mock.On("RemoveDatabase", ctx, database)}
+//   - version uint64
+func (_e *MockCache_Expecter) RemoveDatabase(ctx interface{}, database interface{}, version interface{}) *MockCache_RemoveDatabase_Call {
+	return &MockCache_RemoveDatabase_Call{Call: _e.mock.On("RemoveDatabase", ctx, database, version)}
 }
 
-func (_c *MockCache_RemoveDatabase_Call) Run(run func(ctx context.Context, database string)) *MockCache_RemoveDatabase_Call {
+func (_c *MockCache_RemoveDatabase_Call) Run(run func(ctx context.Context, database string, version uint64)) *MockCache_RemoveDatabase_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64))
 	})
 	return _c
 }
@@ -902,7 +902,7 @@ func (_c *MockCache_RemoveDatabase_Call) Return() *MockCache_RemoveDatabase_Call
 	return _c
 }
 
-func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, string)) *MockCache_RemoveDatabase_Call {
+func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, string, uint64)) *MockCache_RemoveDatabase_Call {
 	_c.Run(run)
 	return _c
 }

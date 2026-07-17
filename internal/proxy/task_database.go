@@ -149,7 +149,10 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 
 	err = merr.CheckRPCCall(ddt.result, err)
 	if err == nil {
-		globalMetaCache.RemoveDatabase(ctx, ddt.DbName)
+		// Local best-effort cleanup on the issuing proxy; the authoritative,
+		// version-guarded eviction is the DropDatabase broadcast handled in
+		// InvalidateCollectionMetaCache.
+		globalMetaCache.RemoveDatabase(ctx, ddt.DbName, 0)
 	}
 	return err
 }

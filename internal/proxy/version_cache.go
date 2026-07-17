@@ -186,6 +186,21 @@ func (c *VersionCache[K, V]) StaleIf(predicate func(K) bool, version uint64) {
 	}
 }
 
+// PruneIf erases all unreferenced entries whose key matches the predicate,
+// regardless of state. Used by the background GC to reclaim entries that became
+// unreachable (their owner is gone from the primary store) without ever being
+// staled explicitly.
+func (c *VersionCache[K, V]) PruneIf(predicate func(K) bool) {
+	c.Lock()
+	defer c.Unlock()
+	for key := range c.table.entries {
+		if c.refs.Count(key) == 0 && predicate(key) {
+			c.table.Erase(key)
+			c.refs.Erase(key)
+		}
+	}
+}
+
 // Prune erases all entries that are stale and have reference count 0.
 // Users should call this function if they care about memory usage.
 func (c *VersionCache[K, V]) Prune() {

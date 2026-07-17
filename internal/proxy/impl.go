@@ -149,7 +149,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp())
 				for _, name := range aliasName {
 					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
@@ -164,7 +164,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0)
 				for _, name := range aliasName {
 					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
@@ -181,10 +181,10 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			node.shardMgr.RemoveDatabase(request.GetDbName())
 			fallthrough
 		case commonpb.MsgType_AlterDatabase:
-			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+			globalMetaCache.RemoveDatabase(ctx, request.GetDbName(), request.GetBase().GetTimestamp())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0)
 				for _, name := range aliasName {
 					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
@@ -196,7 +196,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		default:
 			mlog.Warn(context.TODO(), "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp())
 				for _, name := range aliasName {
 					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
