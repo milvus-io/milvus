@@ -158,8 +158,11 @@ func (hc *handlerClientImpl) PrepareReleaseManualFlushIfLocal(ctx context.Contex
 
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 	assign := hc.watcher.Get(ctx, pchannel)
-	if assign == nil {
-		return false, ErrClientAssignmentNotReady
+	for assign == nil {
+		if err := hc.watcher.Watch(ctx, pchannel, nil); err != nil {
+			return false, err
+		}
+		assign = hc.watcher.Get(ctx, pchannel)
 	}
 
 	w, err := registry.GetLocalAvailableWAL(assign.Channel)

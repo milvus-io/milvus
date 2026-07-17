@@ -320,14 +320,13 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsLocalWALShutdown(t
 	assert.False(t, prepared)
 }
 
-func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsAssignmentNotReady(t *testing.T) {
+func TestHandlerClient_PrepareReleaseManualFlushIfLocalWaitsForAssignmentReady(t *testing.T) {
 	vchannel := "pchannel_100v0"
 	releaseSegmentIDs := []int64{1001}
 
 	w := mock_assignment.NewMockWatcher(t)
 	w.EXPECT().Get(mock.Anything, "pchannel").Return(nil)
-	// Watch is intentionally not expected: local-only prepare follows the MVCC
-	// local path and returns the current assignment error directly.
+	w.EXPECT().Watch(mock.Anything, "pchannel", (*types.PChannelInfoAssigned)(nil)).Return(context.Canceled)
 
 	handler := &handlerClientImpl{
 		lifetime: typeutil.NewLifetime(),
@@ -335,7 +334,7 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsAssignmentNotReady
 	}
 
 	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
-	assert.ErrorIs(t, err, ErrClientAssignmentNotReady)
+	assert.ErrorIs(t, err, context.Canceled)
 	assert.False(t, prepared)
 }
 
