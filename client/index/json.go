@@ -17,7 +17,7 @@
 package index
 
 import (
-	"github.com/milvus-io/milvus/client/v2/common"
+	"github.com/milvus-io/milvus/client/v3/common"
 )
 
 var _ Index = &JSONPathIndex{}

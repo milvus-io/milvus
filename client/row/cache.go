@@ -19,7 +19,7 @@ package row
 import (
 	"reflect"
 
-	"github.com/milvus-io/milvus/client/v2/internal/typeutil"
+	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 )
 
 var cachedCandidates *typeutil.ConcurrentMap[reflect.Type, *ReceiverCandidate]

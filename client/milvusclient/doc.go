@@ -14,5 +14,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package milvusclient implements the official Go Milvus client for v2.
+// Package milvusclient implements the official Go Milvus client for v3.
 package milvusclient
