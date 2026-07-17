@@ -37,7 +37,7 @@ func (p *releaseManualFlushPreparer) PrepareReleaseManualFlush(ctx context.Conte
 	if collectionID == 0 {
 		return false, status.NewInvalidArgument("collection id is empty")
 	}
-	if !p.writeBufferManager.UseGrowingSourceFlush(vchannel) {
+	if !p.writeBufferManager.AllowGrowingSourceFlush(vchannel) {
 		mlog.Info(ctx, "skip release manual flush prepare because channel does not use growing-source flush",
 			mlog.String("vchannel", vchannel),
 			mlog.Int64("collectionID", collectionID),

@@ -336,7 +336,7 @@ func TestValidateTextRequiresStorageV3(t *testing.T) {
 	assert.NoError(t, ValidateTextRequiresStorageV3(textSchema, true))
 }
 
-func TestUseGrowingSourceFlush(t *testing.T) {
+func TestAllowGrowingSourceFlush(t *testing.T) {
 	ordinarySchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, DataType: schemapb.DataType_Int64},
@@ -349,13 +349,16 @@ func TestUseGrowingSourceFlush(t *testing.T) {
 		},
 	}
 
-	assert.False(t, UseGrowingSourceFlush(ordinarySchema, false, true))
-	assert.False(t, UseGrowingSourceFlush(textSchema, false, true))
-	assert.False(t, UseGrowingSourceFlush(ordinarySchema, true, false))
-	assert.True(t, UseGrowingSourceFlush(ordinarySchema, true, true))
-	assert.True(t, UseGrowingSourceFlush(textSchema, true, false))
-	assert.False(t, UseGrowingSourceFlush(nil, true, false))
-	assert.True(t, UseGrowingSourceFlush(nil, true, true))
+	assert.False(t, AllowGrowingSourceFlush(ordinarySchema, false, true))
+	assert.False(t, AllowGrowingSourceFlush(textSchema, false, true))
+	assert.False(t, AllowGrowingSourceFlush(ordinarySchema, true, false))
+	assert.True(t, AllowGrowingSourceFlush(ordinarySchema, true, true))
+	assert.True(t, AllowGrowingSourceFlush(textSchema, true, false))
+	assert.False(t, AllowGrowingSourceFlush(nil, true, false))
+	assert.True(t, AllowGrowingSourceFlush(nil, true, true))
+	assert.Equal(t,
+		AllowGrowingSourceFlush(textSchema, true, false),
+		UseGrowingSourceFlush(textSchema, true, false))
 }
 
 func TestSchema_GetVectorFieldSchemas(t *testing.T) {
