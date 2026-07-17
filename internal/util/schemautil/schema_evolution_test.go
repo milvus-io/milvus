@@ -68,6 +68,18 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 		{name: "grow max capacity", mutate: func(schema *schemapb.CollectionSchema) {
 			setEvolutionTypeParam(evolutionFieldByID(schema, 105), common.MaxCapacityKey, "128")
 		}},
+		{name: "add function output field with producer", mutate: func(schema *schemapb.CollectionSchema) {
+			output := evolutionField(106, "func_output", schemapb.DataType_SparseFloatVector, false)
+			output.IsFunctionOutput = true
+			schema.Fields = append(schema.Fields, output)
+			schema.Functions = append(schema.Functions, &schemapb.FunctionSchema{
+				Name:             "bm25",
+				Type:             schemapb.FunctionType_BM25,
+				OutputFieldNames: []string{"func_output"},
+				OutputFieldIds:   []int64{106},
+			})
+			setMaxFieldID(schema, 106)
+		}},
 		{name: "enable dynamic field", mutate: func(schema *schemapb.CollectionSchema) {
 			schema.EnableDynamicField = true
 			field := evolutionField(106, common.MetaFieldName, schemapb.DataType_JSON, true)
@@ -209,6 +221,9 @@ func TestValidateSchemaEvolutionRejectsNonMonotonicBounds(t *testing.T) {
 	}{
 		{name: "remove max length", field: 104, key: common.MaxLengthKey, remove: true},
 		{name: "remove max capacity", field: 105, key: common.MaxCapacityKey, remove: true},
+		{name: "zero max length", field: 104, key: common.MaxLengthKey, value: "0"},
+		{name: "negative max length", field: 104, key: common.MaxLengthKey, value: "-8"},
+		{name: "zero max capacity", field: 105, key: common.MaxCapacityKey, value: "0"},
 	}
 
 	for _, test := range tests {
@@ -277,6 +292,11 @@ func TestValidateSchemaEvolutionRejectsUnsafeAddedFields(t *testing.T) {
 		field *schemapb.FieldSchema
 	}{
 		{name: "non-nullable field without default", field: evolutionField(106, "required", schemapb.DataType_Int64, false)},
+		{name: "orphan function output", field: func() *schemapb.FieldSchema {
+			field := evolutionField(106, "orphan_output", schemapb.DataType_SparseFloatVector, false)
+			field.IsFunctionOutput = true
+			return field
+		}()},
 		{name: "primary key", field: func() *schemapb.FieldSchema {
 			field := evolutionField(106, "new_pk", schemapb.DataType_Int64, true)
 			field.IsPrimaryKey = true

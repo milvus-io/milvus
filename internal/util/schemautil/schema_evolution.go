@@ -222,7 +222,7 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 			}
 			continue
 		}
-		if err := validateAddedEvolutionField(field, newSchema.GetEnableDynamicField()); err != nil {
+		if err := validateAddedEvolutionField(field, newSchema); err != nil {
 			return err
 		}
 	}
@@ -243,8 +243,9 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 	return nil
 }
 
-func validateAddedEvolutionField(field *schemapb.FieldSchema, dynamicEnabled bool) error {
+func validateAddedEvolutionField(field *schemapb.FieldSchema, newSchema *schemapb.CollectionSchema) error {
 	name := field.GetName()
+	dynamicEnabled := newSchema.GetEnableDynamicField()
 	if field.GetIsPrimaryKey() {
 		return merr.WrapErrParameterInvalidMsg("cannot add primary key field %q online", name)
 	}
@@ -260,7 +261,17 @@ func validateAddedEvolutionField(field *schemapb.FieldSchema, dynamicEnabled boo
 	if isReservedEvolutionFieldName(name) && (!dynamicEnabled || !field.GetIsDynamic() || name != common.MetaFieldName) {
 		return merr.WrapErrParameterInvalidMsg("cannot add system field %q online", name)
 	}
-	if field.GetIsFunctionOutput() || field.GetIsDynamic() {
+	if field.GetIsFunctionOutput() {
+		// A function-output field is only legitimate when a function in the new
+		// schema actually produces it. Ordinary AddField does not run the function
+		// graph validator, so without this check a request could persist an orphan
+		// output field with no owning function (later index creation then fails).
+		if !evolutionFieldHasFunctionProducer(newSchema, field) {
+			return merr.WrapErrParameterInvalidMsg("cannot add field %q marked as a function output with no producing function", name)
+		}
+		return nil
+	}
+	if field.GetIsDynamic() {
 		return nil
 	}
 	if !field.GetNullable() && field.GetDefaultValue() == nil {
@@ -369,8 +380,12 @@ func validateNumericBoundsEvolution(fieldName string, oldParams, newParams []*co
 		if !existed {
 			continue
 		}
-		if _, kept, err := evolutionNumericValue(newParams, key); err != nil || !kept {
+		newValue, kept, err := evolutionNumericValue(newParams, key)
+		if err != nil || !kept {
 			return merr.WrapErrParameterInvalidMsg("cannot remove or invalidate %s of field %q", key, fieldName)
+		}
+		if newValue <= 0 {
+			return merr.WrapErrParameterInvalidMsg("%s of field %q must be a positive integer, got %d", key, fieldName, newValue)
 		}
 	}
 
@@ -494,6 +509,25 @@ func evolutionFunctionReferencing(schema *schemapb.CollectionSchema, fieldID int
 		}
 	}
 	return ""
+}
+
+// evolutionFieldHasFunctionProducer reports whether some function in the schema
+// produces the given field as an output. Field id and name are matched because
+// they are populated at different stages of the add-function-field flow.
+func evolutionFieldHasFunctionProducer(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	for _, function := range schema.GetFunctions() {
+		for _, outputID := range function.GetOutputFieldIds() {
+			if outputID == field.GetFieldID() {
+				return true
+			}
+		}
+		for _, outputName := range function.GetOutputFieldNames() {
+			if outputName == field.GetName() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func evolutionHasVectorField(schema *schemapb.CollectionSchema) bool {
