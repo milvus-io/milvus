@@ -776,6 +776,32 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
         search_result.distances_.data(),
         distances,
         total_num * sizeof(*search_result.distances_.data()));
+
+    // knowhere's contract is that every slot is either a genuine row
+    // offset in [0, index_.Count()) or the INVALID_SEG_OFFSET sentinel; this
+    // is not otherwise validated above, so guard against out-of-range values
+    // (e.g. a future knowhere index type leaving a slot uninitialized)
+    // corrupting downstream bulk_subscript access. This cannot detect an
+    // in-range value that is itself a stale/uninitialized sentinel.
+    // Count() itself is not const (it overrides Index's non-const pure
+    // virtual), so query the underlying knowhere index directly here rather
+    // than through the virtual dispatch.
+    const auto row_count = index_.Count();
+    int64_t sanitized_count = 0;
+    for (auto& offset : search_result.seg_offsets_) {
+        if (offset != INVALID_SEG_OFFSET &&
+            (offset < 0 || offset >= row_count)) {
+            offset = INVALID_SEG_OFFSET;
+            sanitized_count++;
+        }
+    }
+    if (sanitized_count > 0) {
+        LOG_WARN(
+            "VectorDiskAnnIndex::Query: sanitized {} out-of-range offset(s) "
+            "from knowhere search result, row_count={}",
+            sanitized_count,
+            row_count);
+    }
 }
 
 template <typename T>

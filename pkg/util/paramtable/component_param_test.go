@@ -188,6 +188,18 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 
+		assert.Equal(t, uint(15), params.CommonCfg.InconsistentRequeryMaxAttempts.GetAsUint())
+		params.Save("common.requery.inconsistentRequeryMaxAttempts", "30")
+		assert.Equal(t, uint(30), params.CommonCfg.InconsistentRequeryMaxAttempts.GetAsUint())
+		params.Reset("common.requery.inconsistentRequeryMaxAttempts")
+		assert.Equal(t, uint(15), params.CommonCfg.InconsistentRequeryMaxAttempts.GetAsUint())
+
+		assert.Equal(t, 20*time.Second, params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.GetAsDuration(time.Second))
+		params.Save("common.requery.inconsistentRequeryMaxSleepTimeSeconds", "45")
+		assert.Equal(t, 45*time.Second, params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.GetAsDuration(time.Second))
+		params.Reset("common.requery.inconsistentRequeryMaxSleepTimeSeconds")
+		assert.Equal(t, 20*time.Second, params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.GetAsDuration(time.Second))
+
 		assert.Equal(t, 0, params.CommonCfg.ClusterID.GetAsInt())
 		params.Save("common.clusterID", "32")
 		assert.Panics(t, func() {

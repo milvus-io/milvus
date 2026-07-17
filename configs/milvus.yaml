@@ -1138,6 +1138,15 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+  requery:
+    # the max number of retry attempts for search/hybrid_search when the requery result
+    # is inconsistent with the ANN search result (error code 2200), which can happen when the
+    # segment set observed by the two RPCs of a two-phase query drifts (e.g. due to a concurrent
+    # L0 compaction). This is independent of the generic RPC-level retry count.
+    inconsistentRequeryMaxAttempts: 15
+    # the max backoff sleep time in seconds between retries for the
+    # common.requery.inconsistentRequeryMaxAttempts retry budget above.
+    inconsistentRequeryMaxSleepTimeSeconds: 20
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 

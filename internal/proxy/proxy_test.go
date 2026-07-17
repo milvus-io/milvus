@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/prometheus/client_golang/prometheus"
@@ -2035,6 +2036,53 @@ func TestProxy(t *testing.T) {
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 			Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 		}
+	})
+
+	t.Run("search retries on inconsistent requery then succeeds", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.InconsistentRequeryMaxAttempts.Key, "3")
+		Params.Save(Params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.Key, "0")
+		defer Params.Reset(Params.CommonCfg.InconsistentRequeryMaxAttempts.Key)
+		defer Params.Reset(Params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.Key)
+
+		var callCount int
+		mockey.Mock((*Proxy).search).To(func(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			callCount++
+			if callCount < 3 {
+				return &milvuspb.SearchResults{
+					Status: merr.Status(merr.WrapErrInconsistentRequery("missing id")),
+				}, false, false, false, nil
+			}
+			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
+		}).Build()
+		defer mockey.UnPatchAll()
+
+		req := constructTestSearchRequest(dbName, collectionName, floatVecField, expr, nq, nprobe, topk, roundDecimal, dim)
+		resp, err := proxy.Search(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 3, callCount)
+	})
+
+	t.Run("search exhausts retry budget on persistent inconsistent requery", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.InconsistentRequeryMaxAttempts.Key, "2")
+		Params.Save(Params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.Key, "0")
+		defer Params.Reset(Params.CommonCfg.InconsistentRequeryMaxAttempts.Key)
+		defer Params.Reset(Params.CommonCfg.InconsistentRequeryMaxSleepTimeSeconds.Key)
+
+		var callCount int
+		mockey.Mock((*Proxy).search).To(func(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			callCount++
+			return &milvuspb.SearchResults{
+				Status: merr.Status(merr.WrapErrInconsistentRequery("missing id")),
+			}, false, false, false, nil
+		}).Build()
+		defer mockey.UnPatchAll()
+
+		req := constructTestSearchRequest(dbName, collectionName, floatVecField, expr, nq, nprobe, topk, roundDecimal, dim)
+		resp, err := proxy.Search(ctx, req)
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrInconsistentRequery))
+		assert.Equal(t, 2, callCount)
 	})
 
 	t.Run("advanced search", func(t *testing.T) {
