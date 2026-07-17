@@ -45,8 +45,7 @@ type insertNode struct {
 	functionStore *function.FunctionRunnerLocalStore
 }
 
-func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
-	schema := collection.Schema()
+func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, schema *schemapb.CollectionSchema) {
 	insertRecord, skippedFields, err := storage.TransferInsertMsgToInsertRecord(schema, msg)
 	if err != nil {
 		err = merr.Wrap(err, "failed to get primary keys")
@@ -131,25 +130,26 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 			mlog.Error(context.TODO(), "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
 			panic("insertNode with collection not exist")
 		}
-		schema := collection.Schema()
-		functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
-		if err != nil {
-			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
-			panic(err)
-		}
-
-		insertDatas := make(map[UniqueID]*delegator.InsertData)
-		for _, msg := range nodeMsg.insertMsgs {
-			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
-				if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
-					mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
-					panic(err)
-				}
+		collection.WithInsertSchemaTransition(func(schema *schemapb.CollectionSchema) {
+			functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
+			if err != nil {
+				mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
+				panic(err)
 			}
-			iNode.addInsertData(insertDatas, msg, collection)
-		}
 
-		iNode.delegator.ProcessInsert(insertDatas)
+			insertDatas := make(map[UniqueID]*delegator.InsertData)
+			for _, msg := range nodeMsg.insertMsgs {
+				if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
+					if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
+						mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
+						panic(err)
+					}
+				}
+				iNode.addInsertData(insertDatas, msg, schema)
+			}
+
+			iNode.delegator.ProcessInsert(insertDatas)
+		})
 	}
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).Inc()
 
