@@ -22,15 +22,21 @@
 #include <memory>
 #include <vector>
 
+#include "local/FileHandle.h"
 #include "local/Path.h"
-#include "local/io/File.h"
 #include "local/io/MappedRegion.h"
 
 namespace milvus::local {
 
 class ManagedSubtree;
 
-struct WriteOptions {
+enum class OpenMode {
+    ReadOnly,
+    ReadWrite,
+};
+
+struct OpenOptions {
+    OpenMode mode{OpenMode::ReadOnly};
     bool create{false};
     bool truncate{false};
     bool create_parent{false};
@@ -77,11 +83,8 @@ class FileSystem final {
     void
     Rename(const Path& from, const Path& to) const;
 
-    io::RandomAccessFile
-    OpenForRead(const Path& path) const;
-
-    io::WritableFile
-    OpenForWrite(const Path& path, const WriteOptions& options) const;
+    FileHandle
+    Open(const Path& path, const OpenOptions& options) const;
 
     io::MappedRegion
     OpenMappedRegion(const Path& path, const MapOptions& options) const;

@@ -15,11 +15,15 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <span>
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstddef>
 #include <filesystem>
 #include <optional>
@@ -37,9 +41,18 @@ namespace fs = std::filesystem;
 
 static_assert(std::is_copy_constructible_v<FileSystem>);
 static_assert(std::is_copy_assignable_v<FileSystem>);
-static_assert(!std::is_copy_constructible_v<io::RandomAccessFile>);
-static_assert(!std::is_copy_constructible_v<io::WritableFile>);
+static_assert(!std::is_copy_constructible_v<FileHandle>);
+static_assert(std::is_move_constructible_v<FileHandle>);
 static_assert(!std::is_copy_constructible_v<io::MappedRegion>);
+
+template <typename T>
+concept HasOpenForRead = requires { &T::OpenForRead; };
+
+template <typename T>
+concept HasOpenForWrite = requires { &T::OpenForWrite; };
+
+static_assert(!HasOpenForRead<FileSystem>);
+static_assert(!HasOpenForWrite<FileSystem>);
 
 class CurrentPathGuard {
  public:
@@ -133,10 +146,12 @@ TEST_F(LocalFileSystemTest, RejectsSymlinkEscapes) {
     fs::create_directories(outside);
     {
         auto outside_files = FileSystem::Open(fs::weakly_canonical(outside));
-        auto output = outside_files.OpenForWrite(
-            Path("data"), WriteOptions{.create = true, .truncate = true});
+        auto output = outside_files.Open(
+            Path("data"),
+            OpenOptions{
+                .mode = OpenMode::ReadWrite, .create = true, .truncate = true});
         constexpr std::array<std::byte, 1> data = {std::byte{42}};
-        output.Write(data);
+        ASSERT_EQ(write(output.Get(), data.data(), data.size()), data.size());
     }
     fs::create_directory_symlink(outside, root_ / "escape");
 
@@ -147,7 +162,54 @@ TEST_F(LocalFileSystemTest, RejectsSymlinkEscapes) {
     fs::remove_all(outside);
 }
 
-TEST_F(LocalFileSystemTest, OpensCapabilitySpecificFileHandles) {
+TEST_F(LocalFileSystemTest, OpensFileHandleWithExplicitOptions) {
+    auto handle = files_->Open(Path("nested/data"),
+                               OpenOptions{.mode = OpenMode::ReadWrite,
+                                           .create = true,
+                                           .truncate = true,
+                                           .create_parent = true});
+
+    EXPECT_NE(handle.Get(), -1);
+    EXPECT_EQ(handle.DebugPath(), root_ / "nested/data");
+    EXPECT_FALSE(handle.DirectIOEnabled());
+    EXPECT_TRUE(fs::exists(root_ / "nested/data"));
+}
+
+TEST_F(LocalFileSystemTest, FileHandleOwnsAndTransfersTheDescriptor) {
+    int closed_fd = -1;
+    {
+        auto handle = files_->Open(
+            Path("close_on_destroy"),
+            OpenOptions{.mode = OpenMode::ReadWrite, .create = true});
+        closed_fd = handle.Get();
+    }
+    errno = 0;
+    EXPECT_EQ(fcntl(closed_fd, F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+
+    auto handle =
+        files_->Open(Path("release"),
+                     OpenOptions{.mode = OpenMode::ReadWrite, .create = true});
+    auto moved = std::move(handle);
+    EXPECT_EQ(handle.Get(), -1);
+    auto released_fd = moved.Release();
+    EXPECT_EQ(moved.Get(), -1);
+    EXPECT_NE(fcntl(released_fd, F_GETFD), -1);
+    EXPECT_EQ(close(released_fd), 0);
+}
+
+TEST_F(LocalFileSystemTest, RejectsWriteSideEffectsForReadOnlyHandle) {
+    try {
+        static_cast<void>(files_->Open(
+            Path("invalid"),
+            OpenOptions{.mode = OpenMode::ReadOnly, .create = true}));
+        FAIL() << "expected read-only create options to fail";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
+}
+
+TEST_F(LocalFileSystemTest, UsesFileHandleWithConsumerOwnedOperations) {
     constexpr std::array<std::byte, 8> expected = {
         std::byte{1},
         std::byte{2},
@@ -161,26 +223,41 @@ TEST_F(LocalFileSystemTest, OpensCapabilitySpecificFileHandles) {
     auto path = Path("index/field/data");
 
     {
-        auto output = files_->OpenForWrite(
-            path,
-            WriteOptions{
-                .create = true, .truncate = true, .create_parent = true});
-        EXPECT_EQ(output.Write(std::span(expected).first<3>()), 3);
-        EXPECT_EQ(output.WriteAt(3, std::span(expected).subspan<3>()), 5);
-        output.Sync();
-        EXPECT_EQ(output.Size(), expected.size());
-        output.Truncate(6);
-        EXPECT_EQ(output.Size(), 6);
-        output.Truncate(expected.size());
-        EXPECT_EQ(output.WriteAt(6, std::span(expected).last<2>()), 2);
+        auto output = files_->Open(path,
+                                   OpenOptions{.mode = OpenMode::ReadWrite,
+                                               .create = true,
+                                               .truncate = true,
+                                               .create_parent = true});
+        auto first = std::span(expected).first<3>();
+        ASSERT_EQ(write(output.Get(), first.data(), first.size()),
+                  first.size());
+        auto rest = std::span(expected).subspan<3>();
+        ASSERT_EQ(pwrite(output.Get(), rest.data(), rest.size(), 3),
+                  rest.size());
+        ASSERT_EQ(fsync(output.Get()), 0);
+
+        struct stat status {};
+        ASSERT_EQ(fstat(output.Get(), &status), 0);
+        EXPECT_EQ(status.st_size, expected.size());
+        ASSERT_EQ(ftruncate(output.Get(), 6), 0);
+        ASSERT_EQ(fstat(output.Get(), &status), 0);
+        EXPECT_EQ(status.st_size, 6);
+        ASSERT_EQ(ftruncate(output.Get(), expected.size()), 0);
+        auto tail = std::span(expected).last<2>();
+        ASSERT_EQ(pwrite(output.Get(), tail.data(), tail.size(), 6),
+                  tail.size());
     }
 
-    auto input = files_->OpenForRead(path);
+    auto input = files_->Open(path, OpenOptions{.mode = OpenMode::ReadOnly});
     std::array<std::byte, 8> actual{};
-    EXPECT_EQ(input.ReadAt(0, actual), actual.size());
+    EXPECT_EQ(pread(input.Get(), actual.data(), actual.size(), 0),
+              actual.size());
     EXPECT_EQ(actual, expected);
-    EXPECT_EQ(input.Size(), expected.size());
-    EXPECT_EQ(input.ReadAt(expected.size(), actual), 0);
+    struct stat status {};
+    ASSERT_EQ(fstat(input.Get(), &status), 0);
+    EXPECT_EQ(status.st_size, expected.size());
+    EXPECT_EQ(pread(input.Get(), actual.data(), actual.size(), expected.size()),
+              0);
 }
 
 TEST_F(LocalFileSystemTest, ManagesDirectoriesFilesAndRenameWithinRoot) {
@@ -188,10 +265,12 @@ TEST_F(LocalFileSystemTest, ManagesDirectoriesFilesAndRenameWithinRoot) {
     auto original = Path("nested/a/data");
     auto renamed = Path("nested/b/data");
 
-    auto output = files_->OpenForWrite(
-        original,
-        WriteOptions{.create = true, .truncate = true, .create_parent = true});
-    output.Write(data);
+    auto output = files_->Open(original,
+                               OpenOptions{.mode = OpenMode::ReadWrite,
+                                           .create = true,
+                                           .truncate = true,
+                                           .create_parent = true});
+    ASSERT_EQ(write(output.Get(), data.data(), data.size()), data.size());
 
     EXPECT_TRUE(files_->Exists(original));
     EXPECT_EQ(files_->FileSize(original), data.size());
@@ -226,11 +305,12 @@ TEST_F(LocalFileSystemTest, MapsUnalignedRangesAndOwnsTheMapping) {
     };
     auto path = Path("mmap/data");
     {
-        auto output = files_->OpenForWrite(
-            path,
-            WriteOptions{
-                .create = true, .truncate = true, .create_parent = true});
-        output.Write(data);
+        auto output = files_->Open(path,
+                                   OpenOptions{.mode = OpenMode::ReadWrite,
+                                               .create = true,
+                                               .truncate = true,
+                                               .create_parent = true});
+        ASSERT_EQ(write(output.Get(), data.data(), data.size()), data.size());
     }
 
     auto region = files_->OpenMappedRegion(
@@ -258,17 +338,20 @@ TEST_F(LocalFileSystemTest, MapsUnalignedRangesAndOwnsTheMapping) {
 
 TEST_F(LocalFileSystemTest, PreservesFileAndMappingErrorCategories) {
     try {
-        static_cast<void>(files_->OpenForRead(Path("missing")));
+        static_cast<void>(files_->Open(
+            Path("missing"), OpenOptions{.mode = OpenMode::ReadOnly}));
         FAIL() << "expected opening a missing file to fail";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FileOpenFailed);
     }
 
     auto path = Path("mmap/empty");
-    auto output = files_->OpenForWrite(
-        path,
-        WriteOptions{.create = true, .truncate = true, .create_parent = true});
-    output.Truncate(4);
+    auto output = files_->Open(path,
+                               OpenOptions{.mode = OpenMode::ReadWrite,
+                                           .create = true,
+                                           .truncate = true,
+                                           .create_parent = true});
+    ASSERT_EQ(ftruncate(output.Get(), 4), 0);
 
     try {
         static_cast<void>(files_->OpenMappedRegion(
