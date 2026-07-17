@@ -74,18 +74,32 @@ namespace {
 uint64_t
 ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
                                 int32_t scalar_version,
-                                bool encrypted) {
+                                bool encrypted,
+                                bool file_stream) {
     if (index_size_in_bytes == 0) {
         return 0;
     }
     if (scalar_version < 3) {
         return index_size_in_bytes;
     }
-    auto stream_data_bound = milvus::storage::EntryStreamDataTransientBytes(
-        index_size_in_bytes, encrypted);
+    if (encrypted) {
+        auto stream_data_bound = milvus::storage::EntryStreamDataTransientBytes(
+            index_size_in_bytes, true);
+        return std::min<uint64_t>(
+            stream_data_bound,
+            milvus::storage::EntryStreamMaxTransientBytes(true));
+    }
+    if (file_stream) {
+        auto stream_data_bound =
+            milvus::storage::PlainEntryFileStreamTransientBytes(
+                index_size_in_bytes);
+        return std::min<uint64_t>(
+            stream_data_bound,
+            milvus::storage::PlainEntryFileStreamMaxTransientBytes());
+    }
     return std::min<uint64_t>(
-        stream_data_bound,
-        milvus::storage::EntryStreamMaxTransientBytes(encrypted));
+        index_size_in_bytes,
+        milvus::storage::EntryStreamMaxTransientBytes(false));
 }
 
 uint64_t
@@ -579,8 +593,11 @@ IndexFactory::ScalarIndexLoadResource(
         scalar_version >= 3 &&
         milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
             nullptr;
+    auto file_stream = index_type == milvus::index::INVERTED_INDEX_TYPE ||
+                       index_type == milvus::index::NGRAM_INDEX_TYPE ||
+                       index_type == milvus::index::RTREE_INDEX_TYPE;
     auto stream_memory_overhead = ScalarIndexStreamMemoryOverhead(
-        index_size_in_bytes, scalar_version, encrypted_stream);
+        index_size_in_bytes, scalar_version, encrypted_stream, file_stream);
 
     LoadResourceRequest request{};
     request.has_raw_data = false;

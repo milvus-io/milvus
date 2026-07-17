@@ -979,7 +979,7 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                 PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
             size_t src_offset = pm.offset + output_offset;
             auto budget_guard = std::make_shared<TransientBudgetGuard>(
-                len,
+                PlainEntryFileStreamTransientBytes(len),
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 

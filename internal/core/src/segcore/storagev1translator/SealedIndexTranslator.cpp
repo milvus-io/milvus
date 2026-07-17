@@ -100,8 +100,7 @@ SealedIndexTranslator::SealedIndexTranslator(
         auto max_task_overhead =
             encrypted_stream
                 ? milvus::storage::EncryptedEntryStreamTaskTransientBytes()
-                : milvus::storage::DefaultStreamSliceSize() +
-                      milvus::storage::kTailMergeGrace;
+                : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
         auto encrypted_stream_upper_bound = [&]() {
             auto index_size = static_cast<size_t>(
                 std::max<int64_t>(0, index_load_info_.index_size));
@@ -117,10 +116,11 @@ SealedIndexTranslator::SealedIndexTranslator(
                                      encrypted_stream_upper_bound())
                                : milvus::segcore::LoadTransientPoolUpperBound(
                                      max_task_overhead);
-        auto upper_bound =
-            milvus::cachinglayer::ResourceUsage{memory_upper_bound, int64_t{0}};
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
-            upper_bound, milvus::segcore::kLoadTransientOverheadGroup};
+            milvus::cachinglayer::LoadingOverheadDimensionConfig{
+                memory_upper_bound,
+                milvus::segcore::kLoadTransientOverheadGroup},
+            std::nullopt};
     }
 }
 

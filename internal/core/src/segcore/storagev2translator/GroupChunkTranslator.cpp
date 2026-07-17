@@ -226,8 +226,16 @@ GroupChunkTranslator::GroupChunkTranslator(
         // Keep MCL reservation aligned with the process-wide transient load
         // budget rather than multiplying it by translator type.
         auto group = milvus::segcore::kLoadTransientOverheadGroup;
-        meta_.loading_overhead =
-            milvus::cachinglayer::LoadingOverheadConfig{upper_bound, group};
+        meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
+            milvus::cachinglayer::LoadingOverheadDimensionConfig{
+                upper_bound.memory_bytes, group},
+            use_mmap_
+                ? std::optional<
+                      milvus::cachinglayer::
+                          LoadingOverheadDimensionConfig>{{upper_bound
+                                                               .file_bytes,
+                                                           group}}
+                : std::nullopt};
     }
 }
 

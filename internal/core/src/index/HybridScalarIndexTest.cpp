@@ -725,8 +725,9 @@ TYPED_TEST_P(HybridIndexTestInverted,
     } else {
         index_size += 1024;
     }
-    auto stream_overhead = static_cast<uint64_t>(
-        std::min<size_t>(index_size, storage::EntryStreamMaxTransientBytes()));
+    auto stream_overhead = static_cast<uint64_t>(std::min<size_t>(
+        storage::PlainEntryFileStreamTransientBytes(index_size),
+        storage::PlainEntryFileStreamMaxTransientBytes()));
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
@@ -780,6 +781,12 @@ TYPED_TEST_P(HybridIndexTestInverted,
     load_info.index_size = 1024;
     load_info.num_rows = this->nb_;
     load_info.dim = 0;
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/2048,
+                            /*max_disk_cost=*/512,
+                            /*final_memory_cost=*/1024,
+                            /*final_disk_cost=*/128,
+                            /*has_raw_data=*/true};
 
     index::CreateIndexInfo index_info{};
     index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
@@ -799,18 +806,24 @@ TYPED_TEST_P(HybridIndexTestInverted,
         std::move(config));
 
     ASSERT_TRUE(translator.meta()->loading_overhead.has_value());
-    EXPECT_EQ(translator.meta()->loading_overhead->group,
+    ASSERT_TRUE(translator.meta()->loading_overhead->memory.has_value());
+    EXPECT_FALSE(translator.meta()->loading_overhead->file.has_value());
+    EXPECT_EQ(translator.meta()->loading_overhead->memory->group,
               milvus::segcore::kLoadTransientOverheadGroup);
     auto max_load_tasks =
         milvus::ComputeThreadPoolMaxThreads(
             milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()) +
         milvus::ComputeThreadPoolMaxThreads(
             milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load());
-    auto max_task_overhead =
-        storage::DefaultStreamSliceSize() + storage::kTailMergeGrace;
-    EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.memory_bytes,
+    auto max_task_overhead = storage::PlainEntryFileStreamTaskTransientBytes();
+    EXPECT_EQ(translator.meta()->loading_overhead->memory->upper_bound,
               max_load_tasks * max_task_overhead);
-    EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
+    auto [loaded_resource, loading_overhead] =
+        translator.estimated_byte_size_of_cell(0);
+    EXPECT_EQ(loaded_resource,
+              (milvus::cachinglayer::ResourceUsage{1024, 128}));
+    EXPECT_EQ(loading_overhead,
+              (milvus::cachinglayer::ResourceUsage{1024, 896}));
 
     budget.SetCapacityBytes(storage::kTailMergeGrace);
     Config budgeted_config = index_params;
@@ -822,12 +835,12 @@ TYPED_TEST_P(HybridIndexTestInverted,
                             std::move(budgeted_config));
 
     ASSERT_TRUE(budgeted_translator.meta()->loading_overhead.has_value());
-    EXPECT_EQ(
-        budgeted_translator.meta()->loading_overhead->upper_bound.memory_bytes,
-        max_task_overhead);
-    EXPECT_EQ(
-        budgeted_translator.meta()->loading_overhead->upper_bound.file_bytes,
-        0);
+    ASSERT_TRUE(
+        budgeted_translator.meta()->loading_overhead->memory.has_value());
+    EXPECT_FALSE(
+        budgeted_translator.meta()->loading_overhead->file.has_value());
+    EXPECT_EQ(budgeted_translator.meta()->loading_overhead->memory->upper_bound,
+              max_task_overhead);
 
     budget.SetCapacityBytes(0);
     auto& plugin_loader = storage::PluginLoader::GetInstance();
@@ -845,12 +858,13 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
     auto encrypted_index_bound = storage::EntryStreamDataTransientBytes(
         static_cast<size_t>(load_info.index_size), true);
+    ASSERT_TRUE(
+        encrypted_translator.meta()->loading_overhead->memory.has_value());
+    EXPECT_FALSE(
+        encrypted_translator.meta()->loading_overhead->file.has_value());
     EXPECT_EQ(
-        encrypted_translator.meta()->loading_overhead->upper_bound.memory_bytes,
+        encrypted_translator.meta()->loading_overhead->memory->upper_bound,
         milvus::segcore::LoadTransientPoolUpperBound(encrypted_index_bound));
-    EXPECT_EQ(
-        encrypted_translator.meta()->loading_overhead->upper_bound.file_bytes,
-        0);
 }
 
 template <typename T>

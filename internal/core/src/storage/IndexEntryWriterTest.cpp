@@ -1279,6 +1279,19 @@ TEST_F(IndexEntryWriterV3Test, EncryptedEntryStreamAccountsForPlaintextCopies) {
 }
 
 TEST_F(IndexEntryWriterV3Test,
+       PlainEntryFileStreamAccountsForAlignedWriteCopy) {
+    constexpr size_t stream_bytes = 8 * 1024 * 1024;
+
+    EXPECT_EQ(PlainEntryFileStreamTransientBytes(stream_bytes),
+              2 * stream_bytes);
+    EXPECT_EQ(PlainEntryFileStreamTaskTransientBytes(),
+              2 * (DefaultStreamSliceSize() + kTailMergeGrace));
+    EXPECT_EQ(
+        PlainEntryFileStreamTransientBytes(std::numeric_limits<size_t>::max()),
+        std::numeric_limits<size_t>::max());
+}
+
+TEST_F(IndexEntryWriterV3Test,
        EncryptedEntryStreamIncludesOversizedSingleTask) {
     IndexEntryStreamConfigGuard guard;
     const auto slice_size = DefaultStreamSliceSize();
@@ -1502,7 +1515,7 @@ TEST_F(IndexEntryWriterV3Test,
 
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
-    budget.SetCapacityBytes(entry_size);
+    budget.SetCapacityBytes(2 * entry_size);
     budget.Acquire(entry_size);
     bool budget_held = true;
     auto budget_cleanup = folly::makeGuard([&]() {
