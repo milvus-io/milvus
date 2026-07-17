@@ -59,7 +59,8 @@
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "local/FileSystem.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -154,8 +155,7 @@ class LocalDirOwningIndex : public milvus::index::IndexBase {
 milvus::storage::FileManagerContext
 MakeFileManagerContext(const milvus::segcore::LoadIndexInfo& load_index_info) {
     auto local_chunk_manager =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager();
+        std::make_shared<milvus::storage::LocalChunkManager>(TestLocalPath);
 
     milvus::proto::schema::FieldSchema field_schema;
     field_schema.set_fieldid(load_index_info.field_id);
@@ -176,7 +176,11 @@ MakeFileManagerContext(const milvus::segcore::LoadIndexInfo& load_index_info) {
                                           DIM,
                                           false};
     return milvus::storage::FileManagerContext(
-        field_meta, index_meta, local_chunk_manager, nullptr);
+        field_meta,
+        index_meta,
+        local_chunk_manager,
+        nullptr,
+        milvus::local::FileSystem::Open(TestLocalPath));
 }
 
 std::pair<std::unique_ptr<LocalDirOwningIndex>, std::string>
@@ -184,11 +188,11 @@ CreateLocalDirOwningIndexFile(
     const milvus::storage::FileManagerContext& file_manager_context,
     const std::string& file_name) {
     auto local_chunk_manager =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager();
+        std::make_shared<milvus::storage::LocalChunkManager>(TestLocalPath);
     auto index = std::make_unique<LocalDirOwningIndex>(file_manager_context);
     auto local_file = index->LocalIndexPrefix() + file_name;
-    local_chunk_manager->CreateFile(local_file);
+    uint8_t empty = 0;
+    local_chunk_manager->Write(local_file, &empty, 0);
     EXPECT_TRUE(local_chunk_manager->Exist(local_file));
     return {std::move(index), local_file};
 }
@@ -296,6 +300,8 @@ TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
     ASSERT_TRUE(proto.SerializeToString(&serialized));
 
     milvus::segcore::LoadIndexInfo load_index_info;
+    load_index_info.local_files =
+        milvus::local::FileSystem::Open(TestLocalPath);
     auto status =
         FinishLoadIndexInfo(static_cast<CLoadIndexInfo>(&load_index_info),
                             reinterpret_cast<const uint8_t*>(serialized.data()),
@@ -309,8 +315,7 @@ TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
 
 TEST(LoadIndexCTest, CleanLoadedIndexDoesNotRemoveSiblingGeneration) {
     auto local_chunk_manager =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager();
+        std::make_shared<milvus::storage::LocalChunkManager>(TestLocalPath);
 
     milvus::segcore::LoadIndexInfo load_index_info;
     load_index_info.collection_id = 100;

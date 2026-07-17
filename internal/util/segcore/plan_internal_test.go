@@ -24,6 +24,9 @@ import (
 
 func TestNewSearchRequestSkipsPlaceholderCleanupOnMetricMismatch(t *testing.T) {
 	paramtable.Init()
+	localFiles, err := NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
 
 	const dim = 128
 	schema := &schemapb.CollectionSchema{
@@ -66,6 +69,7 @@ func TestNewSearchRequestSkipsPlaceholderCleanupOnMetricMismatch(t *testing.T) {
 		CollectionID: 100,
 		Schema:       schema,
 		IndexMeta:    indexMeta,
+		LocalFiles:   localFiles,
 	})
 	require.NoError(t, err)
 	defer collection.Release()

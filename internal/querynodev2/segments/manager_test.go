@@ -2,7 +2,6 @@ package segments
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/samber/lo"
@@ -12,10 +11,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ManagerSuite struct {
@@ -30,7 +29,8 @@ type ManagerSuite struct {
 	segments      []Segment
 	levels        []datapb.SegmentLevel
 
-	mgr *segmentManager
+	mgr        *segmentManager
+	localFiles *segcore.LocalFileSystem
 }
 
 func (s *ManagerSuite) SetupSuite() {
@@ -41,21 +41,23 @@ func (s *ManagerSuite) SetupSuite() {
 	s.channels = []string{"by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_200v0", "by-dev-rootcoord-dml_2_300v0", "by-dev-rootcoord-dml_3_400v0"}
 	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed, SegmentTypeSealed}
 	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
 }
 
 func (s *ManagerSuite) SetupTest() {
+	var err error
+	s.localFiles, err = segcore.NewLocalFileSystem(s.T().TempDir())
+	s.Require().NoError(err)
+	s.T().Cleanup(s.localFiles.Close)
 	s.mgr = NewSegmentManager()
 	s.segments = nil
 
 	for i, id := range s.segmentIDs {
 		schema := mock_segcore.GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
-		collection, err := NewCollection(s.collectionIDs[i], schema, mock_segcore.GenTestIndexMeta(s.collectionIDs[i], schema), &querypb.LoadMetaInfo{
+		collection, err := newCollection(s.collectionIDs[i], schema, mock_segcore.GenTestIndexMeta(s.collectionIDs[i], schema), &querypb.LoadMetaInfo{
 			LoadType: querypb.LoadType_LoadCollection,
-		})
+		}, s.localFiles)
 		s.Require().NoError(err)
 		segment, err := NewSegment(
 			context.Background(),

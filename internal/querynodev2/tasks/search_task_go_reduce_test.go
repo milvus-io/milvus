@@ -19,7 +19,6 @@ package tasks
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"testing"
@@ -161,8 +160,9 @@ func setupTestSegments(t *testing.T, numSegments int, msgLength int, opts setupO
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
 
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
 	if err := initcore.InitMmapManager(paramtable.Get(), 1); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func setupTestSegments(t *testing.T, numSegments int, msgLength int, opts setupO
 	}
 	indexMeta := mock_segcore.GenTestIndexMeta(collectionID, schema)
 
-	manager := segments.NewManager()
+	manager := segments.NewManager(localFiles)
 	manager.Collection.PutOrRef(collectionID, schema, indexMeta, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: collectionID,
@@ -260,7 +260,6 @@ func setupTestSegments(t *testing.T, numSegments int, msgLength int, opts setupO
 	}
 
 	var searchReq *segcore.SearchRequest
-	var err error
 	switch {
 	case opts.FilterOnly:
 		searchReq, err = mock_segcore.GenSearchPlanAndRequestsFilterOnly(
@@ -851,7 +850,10 @@ func TestExecuteEmptySearchReturnsNQEmptyResult(t *testing.T) {
 	paramtable.Init()
 	schema := mock_segcore.GenTestCollectionSchema("test-empty-search", schemapb.DataType_Int64, true)
 	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
-	manager := segments.NewManager()
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
+	manager := segments.NewManager(localFiles)
 	manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: testCollectionID,
@@ -1080,7 +1082,10 @@ func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) 
 
 	schema := mock_segcore.GenTestCollectionSchema("test-reduced-plan-topk", schemapb.DataType_Int64, true)
 	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
-	manager := segments.NewManager()
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
+	manager := segments.NewManager(localFiles)
 	require.NoError(t, manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: testCollectionID,

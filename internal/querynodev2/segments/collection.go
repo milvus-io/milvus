@@ -74,11 +74,7 @@ type collectionSchemaUpdatePlan struct {
 	segcoreSchemaVersion uint64
 }
 
-func NewCollectionManager() *collectionManager {
-	return NewCollectionManagerWithLocalFileSystem(nil)
-}
-
-func NewCollectionManagerWithLocalFileSystem(localFiles *segcore.LocalFileSystem) *collectionManager {
+func NewCollectionManager(localFiles *segcore.LocalFileSystem) *collectionManager {
 	return &collectionManager{
 		collections: make(map[int64]*Collection),
 		localFiles:  localFiles,
@@ -517,16 +513,11 @@ func (c *Collection) Unref(count uint32) uint32 {
 }
 
 // newCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) (*Collection, error) {
-	return newCollection(collectionID, schema, indexMeta, loadMetaInfo, nil)
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo, localFiles *segcore.LocalFileSystem) (*Collection, error) {
+	return newCollection(collectionID, schema, indexMeta, loadMetaInfo, localFiles)
 }
 
 func newCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo, localFiles *segcore.LocalFileSystem) (*Collection, error) {
-	/*
-		CCollection
-		NewCollection(const char* schema_proto_blob);
-	*/
-
 	var loadFieldIDs typeutil.Set[int64]
 	loadSchema := typeutil.Clone(schema)
 	// if load fields is specified, do filtering logic

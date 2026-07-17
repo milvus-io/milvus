@@ -16,7 +16,6 @@
 
 set(LOCAL_SOURCE_FILES
     FileSystem.cpp
-    LegacyLocalChunkFiles.cpp
     ManagedSubtree.cpp
     io/File.cpp
     io/MappedRegion.cpp

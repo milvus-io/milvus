@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -56,6 +57,7 @@ type bumpSchemaVersionCompactionTask struct {
 	logIDAlloc       allocator.Interface
 	chunkManager     storage.ChunkManager
 	currentTime      time.Time
+	localFiles       *segcore.LocalFileSystem
 	// lobContext holds LOB (TEXT) compaction strategy decisions for the full-rewrite
 	// path. A schema bump is 1->1 and never changes existing TEXT LOB data, so it
 	// always uses REUSE_ALL: the existing LOB files are unchanged and only their
@@ -611,7 +613,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 
 	if totalRows > 0 {
 		// Text stats are built explicitly, matching sort compaction.
-		textStatsLogs, err := createTextIndex(t.ctx, t.chunkManager, t.plan, t.compactionParams, segment.GetStorageVersion(), collectionID, segment.GetPartitionID(), newSegmentID, t.plan.GetPlanID(), resultSegment)
+		textStatsLogs, err := createTextIndex(t.ctx, t.chunkManager, t.plan, t.compactionParams, segment.GetStorageVersion(), collectionID, segment.GetPartitionID(), newSegmentID, t.plan.GetPlanID(), resultSegment, t.localFiles)
 		if err != nil {
 			return nil, err
 		}
@@ -1190,7 +1192,7 @@ func (t *bumpSchemaVersionCompactionTask) GetStorageConfig() *indexpb.StorageCon
 
 var _ Compactor = (*bumpSchemaVersionCompactionTask)(nil)
 
-func NewBumpSchemaVersionCompactionTask(ctx context.Context, cm storage.ChunkManager, plan *datapb.CompactionPlan, compactionParams compaction.Params) *bumpSchemaVersionCompactionTask {
+func NewBumpSchemaVersionCompactionTask(ctx context.Context, cm storage.ChunkManager, plan *datapb.CompactionPlan, compactionParams compaction.Params, localFiles *segcore.LocalFileSystem) *bumpSchemaVersionCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	return &bumpSchemaVersionCompactionTask{
 		ctx:              ctx,
@@ -1201,5 +1203,6 @@ func NewBumpSchemaVersionCompactionTask(ctx context.Context, cm storage.ChunkMan
 		logIDAlloc:       allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd()),
 		chunkManager:     cm,
 		currentTime:      time.Now(),
+		localFiles:       localFiles,
 	}
 }

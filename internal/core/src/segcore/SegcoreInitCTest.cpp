@@ -74,10 +74,10 @@ TEST(CollectionLocalFileSystem, CopiesIndependentRootedHandles) {
 
     CCollection first = nullptr;
     CCollection second = nullptr;
-    status = NewCollectionWithLocalFileSystem(
+    status = NewCollection(
         schema_blob.data(), schema_blob.size(), first_files, &first);
     ASSERT_EQ(status.error_code, milvus::Success);
-    status = NewCollectionWithLocalFileSystem(
+    status = NewCollection(
         schema_blob.data(), schema_blob.size(), second_files, &second);
     ASSERT_EQ(status.error_code, milvus::Success);
 
@@ -94,4 +94,22 @@ TEST(CollectionLocalFileSystem, CopiesIndependentRootedHandles) {
     DeleteCollection(first);
     DeleteCollection(second);
     fs::remove_all(base);
+}
+
+TEST(CollectionLocalFileSystem, RejectsNullHandle) {
+    milvus::proto::schema::CollectionSchema schema;
+    schema.set_name("rooted_collection");
+    auto* field = schema.add_fields();
+    field->set_fieldid(100);
+    field->set_name("pk");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+    auto schema_blob = schema.SerializeAsString();
+
+    CCollection collection = nullptr;
+    auto status = NewCollection(
+        schema_blob.data(), schema_blob.size(), nullptr, &collection);
+    EXPECT_NE(status.error_code, milvus::Success);
+    EXPECT_EQ(collection, nullptr);
+    free(const_cast<char*>(static_cast<const char*>(status.error_msg)));
 }

@@ -50,7 +50,6 @@
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "local/LegacyLocalChunkFiles.h"
 
 namespace milvus::segcore {
 using std::unique_ptr;
@@ -617,9 +616,9 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             index_meta.index_non_encoding = false;
 
             // Create FileManagerContext with all required components
-            auto local_files = local_files_.has_value()
-                                   ? *local_files_
-                                   : milvus::local::LegacyLocalChunkFiles();
+            AssertInfo(local_files_.has_value(),
+                       "field indexing has no local filesystem");
+            auto local_files = *local_files_;
             storage::FileManagerContext ctx(field_data_meta,
                                             index_meta,
                                             chunk_manager,

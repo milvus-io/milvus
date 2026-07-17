@@ -106,7 +106,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	return index, nil
 }
 
-func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (CodecIndex, error) {
+func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo, localFiles *segcore.LocalFileSystem) (CodecIndex, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal buildIndexInfo failed",
@@ -116,7 +116,12 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 		return nil, err
 	}
 	var indexPtr C.CIndex
-	status := C.CreateIndex(&indexPtr, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
+	status := C.CreateIndex(
+		&indexPtr,
+		(*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])),
+		(C.uint64_t)(len(buildIndexInfoBlob)),
+		C.CLocalFileSystem(localFiles.RawPointer()),
+	)
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}
@@ -142,7 +147,7 @@ type JSONKeyStatsResult struct {
 	Files map[string]int64
 }
 
-func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (*JSONKeyStatsResult, error) {
+func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo, localFiles *segcore.LocalFileSystem) (*JSONKeyStatsResult, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal buildIndexInfo failed",
@@ -153,7 +158,12 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 	}
 	result := C.CreateProtoLayout()
 	defer C.ReleaseProtoLayout(result)
-	status := C.BuildJsonKeyIndex(result, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
+	status := C.BuildJsonKeyIndex(
+		result,
+		(*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])),
+		(C.uint64_t)(len(buildIndexInfoBlob)),
+		C.CLocalFileSystem(localFiles.RawPointer()),
+	)
 	if err := HandleCStatus(&status, "failed to build json key index"); err != nil {
 		return nil, err
 	}

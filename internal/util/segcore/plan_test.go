@@ -46,10 +46,15 @@ func (suite *PlanSuite) SetupTest() {
 	suite.partitionID = 10
 	suite.segmentID = 1
 	schema := mock_segcore.GenTestCollectionSchema("plan-suite", schemapb.DataType_Int64, true)
-	var err error
+	localFiles, err := segcore.NewLocalFileSystem(suite.T().TempDir())
+	if err != nil {
+		panic(err)
+	}
+	suite.T().Cleanup(localFiles.Close)
 	suite.collection, err = segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
-		Schema:    schema,
-		IndexMeta: mock_segcore.GenTestIndexMeta(suite.collectionID, schema),
+		Schema:     schema,
+		IndexMeta:  mock_segcore.GenTestIndexMeta(suite.collectionID, schema),
+		LocalFiles: localFiles,
 	})
 	if err != nil {
 		panic(err)

@@ -24,14 +24,9 @@ typedef void* CCollection;
 
 CStatus
 NewCollection(const void* schema_proto_blob,
-              const int64_t length,
+              int64_t length,
+              CLocalFileSystem filesystem,
               CCollection* collection);
-
-CStatus
-NewCollectionWithLocalFileSystem(const void* schema_proto_blob,
-                                 int64_t length,
-                                 CLocalFileSystem filesystem,
-                                 CCollection* collection);
 
 CStatus
 UpdateSchema(CCollection collection,

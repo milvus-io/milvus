@@ -720,7 +720,7 @@ func (suite *ServiceSuite) TestLoadSegments_VarChar() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 	}
-	suite.node.manager.Collection = segments.NewCollectionManager()
+	suite.node.manager.Collection = segments.NewCollectionManager(suite.node.localFiles)
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
 
 	infos := suite.genSegmentLoadInfos(schema, nil)
@@ -757,7 +757,7 @@ func (suite *ServiceSuite) TestLoadSegments_BadIndexMeta() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 	}
-	suite.node.manager.Collection = segments.NewCollectionManager()
+	suite.node.manager.Collection = segments.NewCollectionManager(suite.node.localFiles)
 	// suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
 
 	infos := suite.genSegmentLoadInfos(schema, nil)

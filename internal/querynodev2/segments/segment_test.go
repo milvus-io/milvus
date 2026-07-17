@@ -3,7 +3,6 @@ package segments
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,6 +30,7 @@ type SegmentSuite struct {
 	suite.Suite
 	rootPath     string
 	chunkManager storage.ChunkManager
+	localFiles   *segcore.LocalFileSystem
 
 	// Data
 	manager      *Manager
@@ -55,8 +55,9 @@ func (suite *SegmentSuite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	suite.localFiles, err = segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(suite.localFiles.Close)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
 
@@ -64,7 +65,7 @@ func (suite *SegmentSuite) SetupTest() {
 	suite.partitionID = 10
 	suite.segmentID = 1
 
-	suite.manager = NewManager()
+	suite.manager = NewManager(suite.localFiles)
 	schema := mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
 	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,

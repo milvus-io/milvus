@@ -49,6 +49,7 @@ type RetrieveSuite struct {
 	// Dependencies
 	rootPath     string
 	chunkManager storage.ChunkManager
+	localFiles   *segcore.LocalFileSystem
 
 	// Data
 	manager      *Manager
@@ -73,7 +74,9 @@ func (suite *RetrieveSuite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(suite.ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
-	initcore.InitLocalChunkManager(suite.rootPath)
+	suite.localFiles, err = segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(suite.localFiles.Close)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
 
@@ -81,7 +84,7 @@ func (suite *RetrieveSuite) SetupTest() {
 	suite.partitionID = 10
 	suite.segmentID = 100
 
-	suite.manager = NewManager()
+	suite.manager = NewManager(suite.localFiles)
 	suite.schema = mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
 	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,

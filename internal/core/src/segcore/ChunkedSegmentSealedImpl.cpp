@@ -136,7 +136,6 @@
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPool.h"
@@ -4550,10 +4549,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 
 local::FileSystem
 ChunkedSegmentSealedImpl::LocalFiles() const {
-    if (local_files_.has_value()) {
-        return *local_files_;
-    }
-    return local::LegacyLocalChunkFiles();
+    AssertInfo(local_files_.has_value(),
+               "sealed segment has no local filesystem");
+    return *local_files_;
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {

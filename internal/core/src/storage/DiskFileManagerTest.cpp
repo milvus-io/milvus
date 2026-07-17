@@ -25,6 +25,8 @@
 #include <cstdint>
 #include <exception>
 #include <future>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <iostream>
 #include <limits>
@@ -67,7 +69,6 @@
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPool.h"
 #include "storage/Types.h"
@@ -95,6 +96,17 @@ using namespace milvus;
 using namespace milvus::storage;
 using namespace knowhere;
 
+namespace {
+
+void
+CreateEmptyFile(const std::string& path) {
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    std::ofstream(path, std::ios::binary).close();
+}
+
+}  // namespace
+
 class DiskAnnFileManagerTest : public testing::Test {
  public:
     DiskAnnFileManagerTest() {
@@ -115,13 +127,13 @@ class DiskAnnFileManagerTest : public testing::Test {
 };
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
     std::string indexFilePath =
         TestLocalPath + "diskann/index_files/1000/index";
     auto exist = lcm->Exist(indexFilePath);
     EXPECT_EQ(exist, false);
     uint64_t index_size = 50 << 20;
-    lcm->CreateFile(indexFilePath);
+    CreateEmptyFile(indexFilePath);
     std::vector<uint8_t> data(index_size);
     lcm->Write(indexFilePath, data.data(), index_size);
 
@@ -132,7 +144,11 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 
     int64_t slice_size = milvus::FILE_SLICE_SIZE;
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(filed_data_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs_,
+                                    local::FileSystem::Open(TestLocalPath)));
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
 
@@ -179,7 +195,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     EXPECT_TRUE(result.ok());
     auto fs = result.ValueOrDie();
 
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
     std::string small_index_file_path =
         TestLocalPath + "diskann/index_files/1000/1/2/3/small_index_file";
     std::string large_index_file_path =
@@ -193,7 +209,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
 
     EXPECT_EQ(exist, false);
     uint64_t large_index_size = 50 << 20;
-    lcm->CreateFile(large_index_file_path);
+    CreateEmptyFile(large_index_file_path);
     std::vector<uint8_t> large_data(large_index_size);
     for (size_t i = 0; i < large_index_size; i++) {
         large_data[i] = i % 255;
@@ -201,7 +217,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Write(large_index_file_path, large_data.data(), large_index_size);
 
     uint64_t small_index_size = 10 << 20;
-    lcm->CreateFile(small_index_file_path);
+    CreateEmptyFile(small_index_file_path);
     std::vector<uint8_t> small_data(small_index_size);
     for (size_t i = 0; i < small_index_size; i++) {
         small_data[i] = i % 255;
@@ -214,7 +230,11 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs));
+        storage::FileManagerContext(filed_data_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs,
+                                    local::FileSystem::Open(TestLocalPath)));
 
     auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
     size_t write_offset = 0;
@@ -257,7 +277,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     EXPECT_EQ(is->Tell(), read_offset);
     std::string small_index_file_path_read =
         TestLocalPath + "diskann/index_files/1000/1/2/3/small_index_file_read";
-    lcm->CreateFile(small_index_file_path_read);
+    CreateEmptyFile(small_index_file_path_read);
     int fd_read = open(small_index_file_path_read.c_str(), O_WRONLY);
     ASSERT_NE(fd_read, -1);
     is->Read(fd_read, small_index_size);
@@ -302,7 +322,11 @@ TEST_F(DiskAnnFileManagerTest, OpenInputStreamUsesBasenameForIndexPath) {
         IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
 
     auto fm = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(field_meta, index_meta, cm_, fs));
+        storage::FileManagerContext(field_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs,
+                                    local::FileSystem::Open(TestLocalPath)));
 
     const std::string local_path =
         fm->GetLocalIndexObjectPrefix() + "index_data";
@@ -343,7 +367,11 @@ TEST_F(DiskAnnFileManagerTest, OpenInputStreamDoesNotUseRemoteParentPath) {
         IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
 
     auto fm = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(field_meta, index_meta, cm_, fs));
+        storage::FileManagerContext(field_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs,
+                                    local::FileSystem::Open(TestLocalPath)));
 
     const std::string local_path =
         fm->GetLocalIndexObjectPrefix() + "index_data";
@@ -376,7 +404,11 @@ TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V0BuildRooted) {
         IndexStorePathVersion::INDEX_STORE_PATH_VERSION_BUILD_ROOTED;
 
     auto fm = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(field_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs_,
+                                    local::FileSystem::Open(TestLocalPath)));
 
     auto prefix = fm->GetRemoteIndexObjectPrefix();
     EXPECT_TRUE(prefix.find("/index_files/1000/1/20/30") != std::string::npos)
@@ -401,7 +433,11 @@ TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
         IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
 
     auto fm = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(field_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs_,
+                                    local::FileSystem::Open(TestLocalPath)));
 
     auto prefix = fm->GetRemoteIndexObjectPrefix();
     EXPECT_TRUE(prefix.find("/index_v1/100/20/30/1000/1") != std::string::npos)
@@ -564,8 +600,12 @@ CreateFileManager(const ChunkManagerPtr& cm,
     // field_id: 100, index_build_id: 1000, index_version: 1
     IndexMeta index_meta = {
         3, 100, 1000, 1, "opt_fields", "field_name", DataType::VECTOR_FLOAT, 1};
-    return std::make_shared<DiskFileManagerImpl>(storage::FileManagerContext(
-        kOptVecFieldDataMeta, index_meta, cm, std::move(fs)));
+    return std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(kOptVecFieldDataMeta,
+                                    index_meta,
+                                    cm,
+                                    std::move(fs),
+                                    local::FileSystem::Open(TestLocalPath)));
 }
 
 template <typename T>
@@ -711,17 +751,17 @@ TEST_F(DiskAnnFileManagerTest, FilterValidDataDiskFileSlices) {
 TEST_F(DiskAnnFileManagerTest, CacheValidDataDiskFileSlices) {
     auto file_manager = CreateFileManager(cm_, fs_);
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
     if (local_chunk_manager->Exist(local_index_prefix)) {
-        local_chunk_manager->RemoveDir(local_index_prefix);
+        std::filesystem::remove_all(local_index_prefix);
     }
-    local_chunk_manager->CreateDir(local_index_prefix);
+    std::filesystem::create_directories(local_index_prefix);
 
     auto valid_data_path =
         local_index_prefix + "/" + milvus::index::VALID_DATA_KEY;
     std::vector<uint8_t> payload = {1, 2, 3, 4, 5, 6, 7, 8, 9};
-    local_chunk_manager->CreateFile(valid_data_path);
+    CreateEmptyFile(valid_data_path);
     local_chunk_manager->Write(valid_data_path, payload.data(), payload.size());
 
     ASSERT_TRUE(file_manager->AddFile(valid_data_path));
@@ -760,12 +800,12 @@ TEST_F(DiskAnnFileManagerTest, CacheValidDataMultipleDiskFileSlices) {
 
     auto file_manager = CreateFileManager(cm_, fs_);
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
     if (local_chunk_manager->Exist(local_index_prefix)) {
-        local_chunk_manager->RemoveDir(local_index_prefix);
+        std::filesystem::remove_all(local_index_prefix);
     }
-    local_chunk_manager->CreateDir(local_index_prefix);
+    std::filesystem::create_directories(local_index_prefix);
 
     auto valid_data_path =
         local_index_prefix + "/" + milvus::index::VALID_DATA_KEY;
@@ -773,7 +813,7 @@ TEST_F(DiskAnnFileManagerTest, CacheValidDataMultipleDiskFileSlices) {
     for (size_t i = 0; i < payload.size(); ++i) {
         payload[i] = static_cast<uint8_t>(i);
     }
-    local_chunk_manager->CreateFile(valid_data_path);
+    CreateEmptyFile(valid_data_path);
     local_chunk_manager->Write(valid_data_path, payload.data(), payload.size());
 
     ASSERT_TRUE(file_manager->AddFile(valid_data_path));
@@ -825,13 +865,13 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
     auto file_manager =
         std::make_shared<DiskFileManagerImpl>(file_manager_context);
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
 
     if (local_chunk_manager->Exist(local_index_prefix)) {
-        local_chunk_manager->RemoveDir(local_index_prefix);
+        std::filesystem::remove_all(local_index_prefix);
     }
-    local_chunk_manager->CreateDir(local_index_prefix);
+    std::filesystem::create_directories(local_index_prefix);
 
     auto valid_data_path =
         local_index_prefix + "/" + milvus::index::VALID_DATA_KEY;
@@ -844,7 +884,7 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
             valid_data[sizeof(uint64_t) + i / 8] |= (1 << (i % 8));
         }
     }
-    local_chunk_manager->CreateFile(valid_data_path);
+    CreateEmptyFile(valid_data_path);
     local_chunk_manager->Write(
         valid_data_path, valid_data.data(), valid_data.size());
 
@@ -1151,7 +1191,11 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNullableVector) {
                                         dim};
                 auto file_manager = std::make_shared<DiskFileManagerImpl>(
                     storage::FileManagerContext(
-                        field_data_meta, index_meta, cm_, fs_));
+                        field_data_meta,
+                        index_meta,
+                        cm_,
+                        fs_,
+                        local::FileSystem::Open(TestLocalPath)));
 
                 milvus::Config config;
                 config[INSERT_FILES_KEY] =
@@ -1182,7 +1226,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNullableVector) {
                     << " with null_percent=" << null_percent;
 
                 auto local_chunk_manager =
-                    LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+                    std::make_shared<LocalChunkManager>(TestLocalPath);
                 uint32_t read_num_rows = 0;
                 uint32_t read_dim = 0;
                 local_chunk_manager->Read(
@@ -1311,7 +1355,7 @@ TEST_F(DiskAnnFileManagerTest, LocalPathsUseInjectedIndependentRoots) {
 
 TEST_F(DiskAnnFileManagerTest, LocalPathGenerationUsesLeafFolderName) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto file_manager = CreateFileManager(cm_, fs_);
     auto generated_prefix = file_manager->GetLocalIndexObjectPrefix();
     auto legacy_prefix = GenIndexPathPrefix(local_chunk_manager,
@@ -1333,19 +1377,19 @@ TEST_F(DiskAnnFileManagerTest, LocalPathGenerationUsesLeafFolderName) {
 
     auto legacy_file = legacy_prefix + "old_generation/index_data";
     auto generated_file = generated_prefix + "index_data";
-    local_chunk_manager->CreateFile(legacy_file);
-    local_chunk_manager->CreateFile(generated_file);
+    CreateEmptyFile(legacy_file);
+    CreateEmptyFile(generated_file);
     ASSERT_TRUE(local_chunk_manager->Exist(legacy_file));
     ASSERT_TRUE(local_chunk_manager->Exist(generated_file));
 
-    local_chunk_manager->RemoveDir(legacy_prefix);
+    std::filesystem::remove_all(legacy_prefix);
     EXPECT_FALSE(local_chunk_manager->Exist(legacy_file));
     EXPECT_TRUE(local_chunk_manager->Exist(generated_file));
 }
 
 TEST_F(DiskAnnFileManagerTest, FileCleanupKeepsOtherGeneration) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
 
     std::string fm1_file;
     std::string fm2_file;
@@ -1355,8 +1399,8 @@ TEST_F(DiskAnnFileManagerTest, FileCleanupKeepsOtherGeneration) {
         fm1_file = fm1->GetLocalIndexObjectPrefix() + "index_data";
         fm2_file = fm2->GetLocalIndexObjectPrefix() + "index_data";
 
-        local_chunk_manager->CreateFile(fm1_file);
-        local_chunk_manager->CreateFile(fm2_file);
+        CreateEmptyFile(fm1_file);
+        CreateEmptyFile(fm2_file);
         EXPECT_TRUE(local_chunk_manager->Exist(fm1_file));
         EXPECT_TRUE(local_chunk_manager->Exist(fm2_file));
 
@@ -1371,7 +1415,7 @@ TEST_F(DiskAnnFileManagerTest, FileCleanupKeepsOtherGeneration) {
 TEST_F(DiskAnnFileManagerTest,
        FileCleanupKeepsOtherGenerationAcrossAllLocalPrefixes) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
 
     std::vector<std::string> fm2_files;
     {
@@ -1402,8 +1446,8 @@ TEST_F(DiskAnnFileManagerTest,
         };
 
         for (const auto& [fm1_file, fm2_file] : fm1_files) {
-            local_chunk_manager->CreateFile(fm1_file);
-            local_chunk_manager->CreateFile(fm2_file);
+            CreateEmptyFile(fm1_file);
+            CreateEmptyFile(fm2_file);
             ASSERT_TRUE(local_chunk_manager->Exist(fm1_file));
             ASSERT_TRUE(local_chunk_manager->Exist(fm2_file));
             fm2_files.push_back(fm2_file);
@@ -1423,7 +1467,7 @@ TEST_F(DiskAnnFileManagerTest,
 
 TEST_F(DiskAnnFileManagerTest, DirectoryLeaseDefersCleanupUntilRelease) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto file_manager = CreateFileManager(cm_, fs_);
     auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
     auto local_index_file = local_index_prefix + "index_data";
@@ -1432,7 +1476,7 @@ TEST_F(DiskAnnFileManagerTest, DirectoryLeaseDefersCleanupUntilRelease) {
         auto lease =
             file_manager->AcquireLocalDirWriteLease(local_index_prefix);
         ASSERT_TRUE(lease);
-        local_chunk_manager->CreateFile(local_index_file);
+        CreateEmptyFile(local_index_file);
         ASSERT_TRUE(local_chunk_manager->Exist(local_index_file));
 
         file_manager->RemoveIndexFiles();
@@ -1445,13 +1489,13 @@ TEST_F(DiskAnnFileManagerTest, DirectoryLeaseDefersCleanupUntilRelease) {
 TEST_F(DiskAnnFileManagerTest,
        FileManagerDestructionDefersCleanupUntilLeaseRelease) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto file_manager = CreateFileManager(cm_, fs_);
     auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
     auto local_index_file = local_index_prefix + "index_data";
     auto lease = file_manager->AcquireLocalDirWriteLease(local_index_prefix);
 
-    local_chunk_manager->CreateFile(local_index_file);
+    CreateEmptyFile(local_index_file);
     ASSERT_TRUE(local_chunk_manager->Exist(local_index_file));
 
     file_manager.reset();
@@ -1463,7 +1507,7 @@ TEST_F(DiskAnnFileManagerTest,
 
 TEST_F(DiskAnnFileManagerTest, RawDataDirectoryLeaseDefersCleanupUntilRelease) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto file_manager = CreateFileManager(cm_, fs_);
     auto local_raw_data_prefix = file_manager->GetLocalRawDataObjectPrefix();
     auto local_raw_data_file = local_raw_data_prefix + "raw_data";
@@ -1472,7 +1516,7 @@ TEST_F(DiskAnnFileManagerTest, RawDataDirectoryLeaseDefersCleanupUntilRelease) {
         auto lease =
             file_manager->AcquireLocalDirWriteLease(local_raw_data_prefix);
         ASSERT_TRUE(lease);
-        local_chunk_manager->CreateFile(local_raw_data_file);
+        CreateEmptyFile(local_raw_data_file);
         ASSERT_TRUE(local_chunk_manager->Exist(local_raw_data_file));
 
         file_manager->RemoveRawDataFiles();
@@ -1484,7 +1528,7 @@ TEST_F(DiskAnnFileManagerTest, RawDataDirectoryLeaseDefersCleanupUntilRelease) {
 
 TEST_F(DiskAnnFileManagerTest, DirectoryLeaseRejectsNewWritersAfterCleanup) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto file_manager = CreateFileManager(cm_, fs_);
     auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
     auto local_index_file = local_index_prefix + "index_data";
@@ -1493,7 +1537,7 @@ TEST_F(DiskAnnFileManagerTest, DirectoryLeaseRejectsNewWritersAfterCleanup) {
         auto lease =
             file_manager->AcquireLocalDirWriteLease(local_index_prefix);
         ASSERT_TRUE(lease);
-        local_chunk_manager->CreateFile(local_index_file);
+        CreateEmptyFile(local_index_file);
         ASSERT_TRUE(local_chunk_manager->Exist(local_index_file));
 
         file_manager->RemoveIndexFiles();
@@ -1519,7 +1563,7 @@ TEST_F(DiskAnnFileManagerTest, DirectoryLeaseRejectsNewWritersAfterCleanup) {
 TEST_F(DiskAnnFileManagerTest,
        RawDataDirectoryLeaseRejectsNewWritersAfterCleanup) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
     auto file_manager = CreateFileManager(cm_, fs_);
     auto local_raw_data_prefix = file_manager->GetLocalRawDataObjectPrefix();
     auto local_raw_data_file = local_raw_data_prefix + "raw_data";
@@ -1528,7 +1572,7 @@ TEST_F(DiskAnnFileManagerTest,
         auto lease =
             file_manager->AcquireLocalDirWriteLease(local_raw_data_prefix);
         ASSERT_TRUE(lease);
-        local_chunk_manager->CreateFile(local_raw_data_file);
+        CreateEmptyFile(local_raw_data_file);
         ASSERT_TRUE(local_chunk_manager->Exist(local_raw_data_file));
 
         file_manager->RemoveRawDataFiles();
@@ -1557,7 +1601,7 @@ TEST_F(DiskAnnFileManagerTest, FileCleanup) {
     std::string local_json_stats_file_path;
 
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
 
     {
         auto file_manager = CreateFileManager(cm_, fs_);
@@ -1570,9 +1614,9 @@ TEST_F(DiskAnnFileManagerTest, FileCleanup) {
         local_json_stats_file_path =
             file_manager->GetLocalJsonStatsPrefix() + random_file_suffix;
 
-        local_chunk_manager->CreateFile(local_text_index_file_path);
-        local_chunk_manager->CreateFile(local_index_file_path);
-        local_chunk_manager->CreateFile(local_json_stats_file_path);
+        CreateEmptyFile(local_text_index_file_path);
+        CreateEmptyFile(local_index_file_path);
+        CreateEmptyFile(local_json_stats_file_path);
 
         // verify these files exist
         EXPECT_TRUE(
@@ -1645,7 +1689,11 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
                             DataType::VECTOR_FLOAT,
                             dim};
     auto file_manager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(field_data_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs_,
+                                    local::FileSystem::Open(TestLocalPath)));
 
     std::string valid_data_path =
         TestLocalPath + "diskann/valid_data_test_output";
@@ -1659,7 +1707,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
     ASSERT_FALSE(local_data_path.empty());
 
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
 
     ASSERT_TRUE(local_chunk_manager->Exist(valid_data_path))
         << "valid_data file should be created for nullable field";
@@ -2078,7 +2126,11 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
                             DataType::VECTOR_FLOAT,
                             dim};
     auto file_manager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(field_data_meta,
+                                    index_meta,
+                                    cm_,
+                                    fs_,
+                                    local::FileSystem::Open(TestLocalPath)));
 
     std::string valid_data_path =
         TestLocalPath + "diskann/non_nullable_valid_data";
@@ -2092,7 +2144,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
     ASSERT_FALSE(local_data_path.empty());
 
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        std::make_shared<LocalChunkManager>(TestLocalPath);
 
     EXPECT_FALSE(local_chunk_manager->Exist(valid_data_path))
         << "valid_data file should NOT be created for non-nullable field";

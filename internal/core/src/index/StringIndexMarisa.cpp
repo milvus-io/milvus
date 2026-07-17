@@ -53,7 +53,6 @@
 #include "marisa/base.h"
 #include "marisa/key.h"
 #include "marisa/keyset.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "storage/IndexEntryReader.h"
@@ -72,10 +71,9 @@ constexpr const char* MARISA_CSR_FORMAT_VERSION_META =
 
 local::FileSystem
 ResolveLocalFiles(const storage::FileManagerContext& context) {
-    if (context.local_files.has_value()) {
-        return *context.local_files;
-    }
-    return local::LegacyLocalChunkFiles();
+    AssertInfo(context.local_files.has_value(),
+               "string index has no local filesystem");
+    return *context.local_files;
 }
 
 }  // namespace

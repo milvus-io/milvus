@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -37,8 +38,8 @@ func (c *NamespaceCompactor) Compact() (*datapb.CompactionPlanResult, error) {
 	return res, nil
 }
 
-func NewNamespaceCompactor(ctx context.Context, plan *datapb.CompactionPlan, binlogIO io.BinlogIO, cm storage.ChunkManager, compactionParams compaction.Params, sortByFieldIDs []int64) *NamespaceCompactor {
+func NewNamespaceCompactor(ctx context.Context, plan *datapb.CompactionPlan, binlogIO io.BinlogIO, cm storage.ChunkManager, compactionParams compaction.Params, sortByFieldIDs []int64, localFiles *segcore.LocalFileSystem) *NamespaceCompactor {
 	return &NamespaceCompactor{
-		mixCompactionTask: NewMixCompactionTask(ctx, binlogIO, cm, plan, compactionParams, sortByFieldIDs),
+		mixCompactionTask: NewMixCompactionTask(ctx, binlogIO, cm, plan, compactionParams, sortByFieldIDs, localFiles),
 	}
 }

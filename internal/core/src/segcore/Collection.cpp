@@ -15,7 +15,6 @@
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
 #include "log/Log.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Collection.h"
@@ -68,10 +67,8 @@ Collection::Collection(const void* schema_proto,
 
 local::FileSystem
 Collection::get_local_files() const {
-    if (local_files_.has_value()) {
-        return *local_files_;
-    }
-    return local::LegacyLocalChunkFiles();
+    AssertInfo(local_files_.has_value(), "collection has no local filesystem");
+    return *local_files_;
 }
 
 void

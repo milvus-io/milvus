@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -69,11 +70,12 @@ type statsTask struct {
 	cancel context.CancelFunc
 	req    *workerpb.CreateStatsRequest
 
-	tr       *timerecord.TimeRecorder
-	queueDur time.Duration
-	manager  *TaskManager
-	binlogIO io.BinlogIO
-	cm       storage.ChunkManager
+	tr         *timerecord.TimeRecorder
+	queueDur   time.Duration
+	manager    *TaskManager
+	binlogIO   io.BinlogIO
+	cm         storage.ChunkManager
+	localFiles *segcore.LocalFileSystem
 
 	logIDOffset  int64
 	currentTime  time.Time
@@ -92,6 +94,7 @@ func NewStatsTask(ctx context.Context,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
 	cm storage.ChunkManager,
+	localFiles *segcore.LocalFileSystem,
 ) *statsTask {
 	return &statsTask{
 		ident:       fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -101,6 +104,7 @@ func NewStatsTask(ctx context.Context,
 		manager:     manager,
 		binlogIO:    io.NewBinlogIO(cm),
 		cm:          cm,
+		localFiles:  localFiles,
 		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		currentTime: tsoutil.PhysicalTime(req.GetCurrentTs()),
 		logIDOffset: 0,
@@ -428,6 +432,7 @@ func (st *statsTask) Reset() {
 	st.cancel = nil
 	st.tr = nil
 	st.manager = nil
+	st.localFiles = nil
 }
 
 func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compactor.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
@@ -574,7 +579,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
 			}
 
-			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams)
+			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams, st.localFiles)
 			if err != nil {
 				return err
 			}
@@ -748,7 +753,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			}
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, statsBasePath)
 
-			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams)
+			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams, st.localFiles)
 			if err != nil {
 				return err
 			}

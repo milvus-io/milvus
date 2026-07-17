@@ -53,7 +53,6 @@
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "knowhere/sparse_utils.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
@@ -76,10 +75,9 @@ std::atomic<uint64_t> g_file_path_generation{0};
 
 local::FileSystem
 ResolveLocalFiles(const FileManagerContext& context) {
-    if (context.local_files.has_value()) {
-        return *context.local_files;
-    }
-    return local::LegacyLocalChunkFiles();
+    AssertInfo(context.local_files.has_value(),
+               "disk file manager has no local filesystem");
+    return *context.local_files;
 }
 
 void

@@ -1924,7 +1924,7 @@ func (loader *segmentLoader) checkLoadingResource(
 // the result is the final resource usage of the segment inevictable part plus the final usage of evictable part with cache ratio applied
 // TODO: the inevictable part is not correct, since we cannot know the final resource usage of interim index and default-value column before loading,
 // current they are ignored, but we should consider them in the future
-func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor, localFiles ...*segcore.LocalFileSystem) (usage *ResourceUsage, err error) {
+func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor, localFiles *segcore.LocalFileSystem) (usage *ResourceUsage, err error) {
 	var segmentInevictableMemorySize, segmentInevictableDiskSize uint64
 	var segmentEvictableMemorySize, segmentEvictableDiskSize uint64
 
@@ -1957,7 +1957,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					return nil, nil
 				}).Await()
 				return nil
-			}, localFiles...)
+			}, localFiles)
 			if err != nil {
 				return nil, merr.Wrapf(err, "failed to estimate logical resource usage of index, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
@@ -2118,7 +2118,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 //   - when tiered eviction is enabled, the result is the max resource usage of the segment that cannot be managed by caching layer,
 //     which should be a subset of the segment inevictable part
 //   - when tiered eviction is disabled, the result is the max resource usage of both the segment evictable and inevictable part
-func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor, localFiles ...*segcore.LocalFileSystem) (usage *ResourceUsage, err error) {
+func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor, localFiles *segcore.LocalFileSystem) (usage *ResourceUsage, err error) {
 	var segMemoryLoadingSize, segDiskLoadingSize uint64
 	var indexMemorySize uint64
 	var mmapFieldCount int
@@ -2158,7 +2158,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					return nil, nil
 				}).Await()
 				return nil
-			}, localFiles...)
+			}, localFiles)
 			if err != nil {
 				return nil, merr.Wrapf(err, "failed to estimate loading resource usage of index, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),

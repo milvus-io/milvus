@@ -78,7 +78,7 @@ func (s *StreamingForwardSuite) SetupTest() {
 	s.vchannelName = "rootcoord-dml_1000_v0"
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = newTestSegmentManager(s.T())
 	s.loader = &segments.MockLoader{}
 	s.loader.EXPECT().
 		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
@@ -317,7 +317,7 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 	s.vchannelName = "rootcoord-dml_1000v0"
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = newTestSegmentManager(s.T())
 	s.loader = &segments.MockLoader{}
 	s.loader.EXPECT().
 		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).

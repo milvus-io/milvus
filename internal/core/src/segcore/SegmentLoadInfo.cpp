@@ -27,7 +27,6 @@
 #include "pb/schema.pb.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentLoadInfo.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -152,9 +151,9 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
             ? field_meta.get_dim()
             : 1;
     load_index_info.dim = dim;
-    auto local_files = local_files_.has_value()
-                           ? *local_files_
-                           : milvus::local::LegacyLocalChunkFiles();
+    AssertInfo(local_files_.has_value(),
+               "segment load info has no local filesystem");
+    auto local_files = *local_files_;
     load_index_info.mmap_dir_path = local_files.NativeRoot().string();
     load_index_info.local_files = std::move(local_files);
     load_index_info.enable_mmap = use_mmap;

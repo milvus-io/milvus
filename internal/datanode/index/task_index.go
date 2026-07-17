@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -56,6 +57,7 @@ type indexBuildTask struct {
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
 	manager        *TaskManager
+	localFiles     *segcore.LocalFileSystem
 
 	pluginContext *indexcgopb.StoragePluginContext
 }
@@ -66,6 +68,7 @@ func NewIndexBuildTask(ctx context.Context,
 	cm storage.ChunkManager,
 	manager *TaskManager,
 	pluginContext *indexcgopb.StoragePluginContext,
+	localFiles *segcore.LocalFileSystem,
 ) *indexBuildTask {
 	t := &indexBuildTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
@@ -76,6 +79,7 @@ func NewIndexBuildTask(ctx context.Context,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
 		manager:       manager,
 		pluginContext: pluginContext,
+		localFiles:    localFiles,
 	}
 
 	t.parseParams()
@@ -104,6 +108,7 @@ func (it *indexBuildTask) Reset() {
 	it.newIndexParams = nil
 	it.tr = nil
 	it.manager = nil
+	it.localFiles = nil
 }
 
 // Ctx is the context of index tasks.
@@ -334,7 +339,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	var err error
-	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
+	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams, it.localFiles)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
 			log.Warn(ctx, "failed to clean cached data on disk after build index failed")

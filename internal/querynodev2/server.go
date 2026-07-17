@@ -411,7 +411,7 @@ func (node *QueryNode) Init() error {
 			initError = err
 			return
 		}
-		node.manager = segments.NewManagerWithLocalFileSystem(node.localFiles)
+		node.manager = segments.NewManager(node.localFiles)
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())

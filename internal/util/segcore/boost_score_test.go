@@ -18,7 +18,6 @@ package segcore_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestComputeScorerScoresOnChunkedOffsetsValidation(t *testing.T) {
@@ -153,6 +151,9 @@ func TestAsyncComputeScorerScoresOnChunkedOffsets(t *testing.T) {
 func newBoostScoreTestContext(t *testing.T) (*segcore.CCollection, segcore.CSegment, *segcore.SearchRequest) {
 	t.Helper()
 	initBoostScoreTestEnv(t)
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
 
 	const (
 		collectionID = int64(100)
@@ -165,6 +166,7 @@ func newBoostScoreTestContext(t *testing.T) (*segcore.CCollection, segcore.CSegm
 		CollectionID: collectionID,
 		Schema:       schema,
 		IndexMeta:    mock_segcore.GenTestIndexMeta(collectionID, schema),
+		LocalFiles:   localFiles,
 	})
 	require.NoError(t, err)
 
@@ -198,8 +200,6 @@ func initBoostScoreTestEnv(t *testing.T) {
 	t.Helper()
 	paramtable.Init()
 	initcore.InitExecExpressionFunctionFactory()
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	require.NoError(t, initcore.InitLocalChunkManager(localDataRootPath))
 	require.NoError(t, initcore.InitMmapManager(paramtable.Get(), 1))
 	initcore.InitTieredStorage(paramtable.Get())
 }

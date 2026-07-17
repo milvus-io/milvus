@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -29,11 +30,20 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func newTestLocalFileSystem(t testing.TB) *segcore.LocalFileSystem {
+	t.Helper()
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
+	return localFiles
+}
 
 type PipelineTestSuite struct {
 	suite.Suite
@@ -102,7 +112,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, newTestLocalFileSystem(suite.T()))
 	suite.Require().NoError(err)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 

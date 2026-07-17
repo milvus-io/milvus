@@ -101,7 +101,7 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	suite.indexMeta = mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
 	collection, err := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, suite.node.localFiles)
 	suite.NoError(err)
 	loadMata := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,

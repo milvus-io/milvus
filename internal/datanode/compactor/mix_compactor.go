@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -70,6 +71,7 @@ type mixCompactionTask struct {
 
 	compactionParams compaction.Params
 	sortByFieldIDs   []int64
+	localFiles       *segcore.LocalFileSystem
 
 	ttlFieldID int64
 
@@ -91,6 +93,7 @@ func NewMixCompactionTask(
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
 	sortByFieldIDs []int64,
+	localFiles *segcore.LocalFileSystem,
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
@@ -104,6 +107,7 @@ func NewMixCompactionTask(
 		done:             make(chan struct{}, 1),
 		compactionParams: compactionParams,
 		sortByFieldIDs:   sortByFieldIDs,
+		localFiles:       localFiles,
 	}
 }
 
@@ -629,7 +633,7 @@ func (t *mixCompactionTask) createTextIndex(ctx context.Context,
 	segment *datapb.CompactionSegment,
 ) (map[int64]*datapb.TextIndexStats, error) {
 	return createTextIndex(ctx, t.cm, t.plan, t.compactionParams, segment.GetStorageVersion(),
-		t.collectionID, t.partitionID, segment.GetSegmentID(), t.GetPlanID(), segment)
+		t.collectionID, t.partitionID, segment.GetSegmentID(), t.GetPlanID(), segment, t.localFiles)
 }
 
 // NOTE: SetSegmentRowStats() must be called during compaction iteration to track deleted rows per segment.

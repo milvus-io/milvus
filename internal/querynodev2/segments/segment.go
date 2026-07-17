@@ -1167,10 +1167,10 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo *querypb.FieldIndexInfo,
 	f func(c *LoadIndexInfo) error,
-	localFiles ...*segcore.LocalFileSystem,
+	localFiles *segcore.LocalFileSystem,
 ) error {
 	// 1.
-	loadIndexInfo, err := newLoadIndexInfo(ctx, localFiles...)
+	loadIndexInfo, err := newLoadIndexInfo(ctx, localFiles)
 	if err != nil {
 		return err
 	}

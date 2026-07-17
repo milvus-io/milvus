@@ -65,7 +65,7 @@ func (suite *InsertNodeSuite) TestBasic() {
 
 	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, newTestLocalFileSystem(suite.T()))
 	suite.NoError(err)
 	collection.AddPartition(suite.partitionID)
 
@@ -103,7 +103,7 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 
 	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, newTestLocalFileSystem(suite.T()))
 	suite.NoError(err)
 	collection.AddPartition(suite.partitionID)
 

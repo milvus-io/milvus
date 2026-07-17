@@ -124,7 +124,7 @@ func (s *SortCompactionTaskSuite) setupTest() {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	s.task = NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()}, nil)
 	s.task.binlogIO = s.mockBinlogIO
 }
 
@@ -154,7 +154,7 @@ func (s *SortCompactionTaskSuite) TestNewSortCompactionTask() {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	task := NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	task := NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()}, nil)
 
 	s.NotNil(task)
 	s.Equal(plan.GetPlanID(), task.GetPlanID())
@@ -349,7 +349,7 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	s.task = NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()}, nil)
 	s.task.binlogIO = s.mockBinlogIO
 }
 
@@ -486,7 +486,7 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	assert.NoError(t, err)
 
-	task := NewSortCompactionTask(ctx, mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	task := NewSortCompactionTask(ctx, mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()}, nil)
 
 	assert.NotNil(t, task)
 	assert.Equal(t, int64(123), task.GetPlanID())

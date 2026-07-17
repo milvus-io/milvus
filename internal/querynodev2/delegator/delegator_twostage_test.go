@@ -69,7 +69,7 @@ func (s *TwoStageSearchSuite) SetupTest() {
 	s.vchannelName = "rootcoord-dml_1000_v0"
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = newTestSegmentManager(s.T())
 	s.loader = &segments.MockLoader{}
 	s.rootPath = "delegator_twostage_test"
 

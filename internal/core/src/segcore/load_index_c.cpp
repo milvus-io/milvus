@@ -55,7 +55,6 @@
 #include "segcore/Utils.h"
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
 #include "storage/FileManager.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 
@@ -68,29 +67,8 @@ IsLoadWithDisk(const char* index_type, int index_engine_version) {
 }
 
 CStatus
-NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            std::make_unique<milvus::segcore::LoadIndexInfo>();
-
-        *c_load_index_info = load_index_info.release();
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-NewLoadIndexInfoWithLocalFileSystem(CLocalFileSystem filesystem,
-                                    CLoadIndexInfo* c_load_index_info) {
+NewLoadIndexInfo(CLocalFileSystem filesystem,
+                 CLoadIndexInfo* c_load_index_info) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -392,9 +370,9 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                     .GetRemoteChunkManager();
-            auto local_files = load_index_info->local_files.has_value()
-                                   ? *load_index_info->local_files
-                                   : milvus::local::LegacyLocalChunkFiles();
+            AssertInfo(load_index_info->local_files.has_value(),
+                       "load index info has no local filesystem");
+            auto local_files = *load_index_info->local_files;
             load_index_info->mmap_dir_path = local_files.NativeRoot().string();
         }
         auto status = CStatus();

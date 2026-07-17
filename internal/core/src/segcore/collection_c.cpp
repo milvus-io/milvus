@@ -25,24 +25,8 @@
 CStatus
 NewCollection(const void* schema_proto_blob,
               const int64_t length,
-              CCollection* newCollection) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto collection = std::make_unique<milvus::segcore::Collection>(
-            schema_proto_blob, length);
-        *newCollection = collection.release();
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-NewCollectionWithLocalFileSystem(const void* schema_proto_blob,
-                                 const int64_t length,
-                                 CLocalFileSystem filesystem,
-                                 CCollection* new_collection) {
+              CLocalFileSystem filesystem,
+              CCollection* new_collection) {
     SCOPE_CGO_CALL_METRIC();
 
     try {

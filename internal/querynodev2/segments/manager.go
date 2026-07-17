@@ -74,14 +74,10 @@ type Manager struct {
 	Loader     Loader
 }
 
-func NewManager() *Manager {
-	return NewManagerWithLocalFileSystem(nil)
-}
-
-func NewManagerWithLocalFileSystem(localFiles *segcore.LocalFileSystem) *Manager {
+func NewManager(localFiles *segcore.LocalFileSystem) *Manager {
 	segMgr := NewSegmentManager()
 	manager := &Manager{
-		Collection: NewCollectionManagerWithLocalFileSystem(localFiles),
+		Collection: NewCollectionManager(localFiles),
 		Segment:    segMgr,
 	}
 

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -59,6 +60,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func newTestSegmentManager(t testing.TB) *segments.Manager {
+	t.Helper()
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
+	return segments.NewManager(localFiles)
+}
 
 func TestMain(m *testing.M) {
 	streaming.SetupNoopWALForTest()
@@ -103,7 +112,7 @@ func (s *DelegatorSuite) SetupTest() {
 	s.vchannelName = "rootcoord-dml_1000_v0"
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = newTestSegmentManager(s.T())
 	s.loader = &segments.MockLoader{}
 	s.loader.EXPECT().
 		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
@@ -199,7 +208,7 @@ func (s *DelegatorSuite) TearDownTest() {
 
 func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 	s.Run("init function failed", func() {
-		manager := segments.NewManager()
+		manager := newTestSegmentManager(s.T())
 		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Name: "TestCollection",
 			Fields: []*schemapb.FieldSchema{
@@ -228,7 +237,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 	})
 
 	s.Run("init function failed", func() {
-		manager := segments.NewManager()
+		manager := newTestSegmentManager(s.T())
 		manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Name: "TestCollection",
 			Fields: []*schemapb.FieldSchema{
@@ -2475,7 +2484,7 @@ func TestUpdateSchemaInitializesIDFOracleWhenBM25Added(t *testing.T) {
 func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
-	manager := segments.NewManager()
+	manager := newTestSegmentManager(t)
 	oldSchema := newFunctionRuntimeTestSchema()
 	require.NoError(t, manager.Collection.PutOrRef(1000, oldSchema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 1}))
 	defer manager.Collection.Unref(1000, 1)
@@ -3177,7 +3186,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 	}
 
 	s.Run("alloc function failed", func() {
-		manager := segments.NewManager()
+		manager := newTestSegmentManager(s.T())
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
 		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
@@ -3207,7 +3216,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 
 	s.Run("init function ", func() {
 		minHashFunctionSchema.OutputFieldIds = []int64{101}
-		manager := segments.NewManager()
+		manager := newTestSegmentManager(s.T())
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now())})
 
 		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)

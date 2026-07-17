@@ -41,16 +41,12 @@ type LoadIndexInfo struct {
 }
 
 // newLoadIndexInfo returns a new LoadIndexInfo and error
-func newLoadIndexInfo(ctx context.Context, localFiles ...*segcore.LocalFileSystem) (*LoadIndexInfo, error) {
+func newLoadIndexInfo(ctx context.Context, localFiles *segcore.LocalFileSystem) (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
-		if len(localFiles) > 0 && localFiles[0] != nil {
-			status = C.NewLoadIndexInfoWithLocalFileSystem(C.CLocalFileSystem(localFiles[0].RawPointer()), &cLoadIndexInfo)
-		} else {
-			status = C.NewLoadIndexInfo(&cLoadIndexInfo)
-		}
+		status = C.NewLoadIndexInfo(C.CLocalFileSystem(localFiles.RawPointer()), &cLoadIndexInfo)
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(ctx, &status, "NewLoadIndexInfo failed"); err != nil {

@@ -30,7 +30,6 @@
 #include "index/Meta.h"
 #include "filemanager/FileManager.h"
 #include "local/FileSystem.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
@@ -367,9 +366,8 @@ class FileManagerImpl : public milvus::FileManager {
 
     const local::FileSystem&
     GetLocalFiles() {
-        if (!local_files_.has_value()) {
-            local_files_.emplace(local::LegacyLocalChunkFiles());
-        }
+        AssertInfo(local_files_.has_value(),
+                   "file manager has no local filesystem");
         return *local_files_;
     }
 

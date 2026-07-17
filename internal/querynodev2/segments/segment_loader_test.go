@@ -27,6 +27,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -57,6 +59,7 @@ type SegmentLoaderSuite struct {
 	manager      *Manager
 	rootPath     string
 	chunkManager storage.ChunkManager
+	localFiles   *segcore.LocalFileSystem
 
 	// Data
 	collectionID int64
@@ -110,8 +113,11 @@ func TestLoadDeltalogsExternalRealPKManifestReadsSourceDeltas(t *testing.T) {
 	schema := milvusTableCollectionSchema(false)
 	schema.ExternalSource = "s3://source-bucket/snapshots/100/metadata/200.json"
 
-	manager := NewManager()
-	err := manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
+	manager := NewManager(localFiles)
+	err = manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: collectionID,
 	})
@@ -168,8 +174,11 @@ func TestLoadDeltalogsExternalRealPKManifestRejectsTargetDeltas(t *testing.T) {
 	schema := milvusTableCollectionSchema(false)
 	schema.ExternalSource = "s3://source-bucket/snapshots/100/metadata/200.json"
 
-	manager := NewManager()
-	err := manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(localFiles.Close)
+	manager := NewManager(localFiles)
+	err = manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: collectionID,
 	})
@@ -226,6 +235,10 @@ func (suite *SegmentLoaderSuite) SetupSuite() {
 
 func (suite *SegmentLoaderSuite) SetupTest() {
 	ctx := context.Background()
+	var err error
+	suite.localFiles, err = segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(suite.localFiles.Close)
 
 	// TODO:: cpp chunk manager not support local chunk manager
 	// suite.chunkManager = storage.NewLocalChunkManager(storage.RootPath(
@@ -234,10 +247,9 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 
 	// Dependencies
-	suite.manager = NewManager()
+	suite.manager = NewManager(suite.localFiles)
 	suite.loader = NewLoader(ctx, suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
-	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
 	initcore.InitLocalArrowFileSystem(suite.rootPath)
@@ -1526,6 +1538,7 @@ type SegmentLoaderDetailSuite struct {
 
 	rootPath     string
 	chunkManager storage.ChunkManager
+	localFiles   *segcore.LocalFileSystem
 
 	// Data
 	collectionID int64
@@ -1547,7 +1560,11 @@ func (suite *SegmentLoaderDetailSuite) SetupSuite() {
 
 func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	// Dependencies
-	suite.manager = NewManager()
+	var err error
+	suite.localFiles, err = segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(suite.localFiles.Close)
+	suite.manager = NewManager(suite.localFiles)
 
 	ctx := context.Background()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
@@ -2004,11 +2021,16 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentGpuMemSizeWithBatchedEsti
 // accounted for in both physical loading and logical resource estimates.
 type SegmentLoaderTextIndexEstimateSuite struct {
 	suite.Suite
-	schema *schemapb.CollectionSchema
+	schema     *schemapb.CollectionSchema
+	localFiles *segcore.LocalFileSystem
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) SetupSuite() {
 	paramtable.Init()
+	var err error
+	suite.localFiles, err = segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(suite.localFiles.Close)
 	// Minimal schema: just a PK field + one VarChar field; no need for full schema
 	// since text stats estimation only iterates loadInfo.GetTextStatsLogs() directly.
 	suite.schema = &schemapb.CollectionSchema{
@@ -2047,7 +2069,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_No
 		deltaDataExpansionFactor:    2.0,
 		jsonKeyStatsExpansionFactor: 1.0,
 	}
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be counted in memory")
 	suite.EqualValues(0, usage.DiskSize, "non-mmap text index must not be counted in disk")
@@ -2068,7 +2090,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_NoTie
 		deltaDataExpansionFactor:    2.0,
 		jsonKeyStatsExpansionFactor: 1.0,
 	}
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be counted in memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be counted in disk")
@@ -2090,7 +2112,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvic
 		textIndexExpansionFactor: 1.0,
 		deltaDataExpansionFactor: 2.0,
 	}
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "text index must be skipped when tiered eviction is enabled")
 	suite.EqualValues(0, usage.DiskSize)
@@ -2112,7 +2134,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTe
 		textIndexExpansionFactor: 1.0,
 		deltaDataExpansionFactor: 2.0,
 	}
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed")
 }
@@ -2132,7 +2154,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_ExpansionF
 		textIndexExpansionFactor: expansionFactor,
 		deltaDataExpansionFactor: 2.0,
 	}
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	expected := uint64(float64(textIndexSize) * expansionFactor)
 	suite.EqualValues(expected, usage.MemorySize, "expansion factor must be applied to text index size")
@@ -2148,7 +2170,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_EmptyTextS
 		textIndexExpansionFactor: 1.0,
 		deltaDataExpansionFactor: 2.0,
 	}
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize)
 	suite.EqualValues(0, usage.DiskSize)
@@ -2170,7 +2192,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_Tiere
 		textIndexExpansionFactor: 1.0,
 		deltaDataExpansionFactor: 2.0,
 	}
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "text index must be skipped when tiered eviction is enabled (mmap)")
 	suite.EqualValues(0, usage.DiskSize, "text index must be skipped when tiered eviction is enabled (mmap)")
@@ -2194,7 +2216,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonMmap_Ev
 		TieredEvictableMemoryCacheRatio: 1.0, // 100% of evictable memory is counted
 		TieredEvictableDiskCacheRatio:   1.0,
 	}
-	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be in evictable memory")
 	suite.EqualValues(0, usage.DiskSize)
@@ -2216,7 +2238,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_Mmap_Evict
 		TieredEvictableMemoryCacheRatio: 1.0,
 		TieredEvictableDiskCacheRatio:   1.0,
 	}
-	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be in evictable disk")
@@ -2240,7 +2262,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_CacheRatio
 		TieredEvictableMemoryCacheRatio: cacheRatio,
 		TieredEvictableDiskCacheRatio:   1.0,
 	}
-	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	expected := uint64(float64(textIndexSize) * cacheRatio)
 	suite.EqualValues(expected, usage.MemorySize, "cache ratio must be applied to evictable text index memory")
@@ -2258,7 +2280,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_EmptyTextS
 		TieredEvictableMemoryCacheRatio: 1.0,
 		TieredEvictableDiskCacheRatio:   1.0,
 	}
-	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize)
 	suite.EqualValues(0, usage.DiskSize)
@@ -2282,7 +2304,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_MultipleTe
 		TieredEvictableMemoryCacheRatio: 1.0,
 		TieredEvictableDiskCacheRatio:   1.0,
 	}
-	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed in logical estimate")
 }
@@ -2305,7 +2327,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_DiskCacheR
 		TieredEvictableMemoryCacheRatio: 1.0,
 		TieredEvictableDiskCacheRatio:   diskCacheRatio,
 	}
-	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
 	expected := uint64(float64(textIndexSize) * diskCacheRatio)
@@ -2329,7 +2351,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 		TieredEvictableMemoryCacheRatio: 1.0,
 		TieredEvictableDiskCacheRatio:   1.0,
 	}
-	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	expected := uint64(float64(textIndexSize) * expansionFactor)
 	suite.EqualValues(expected, usage.MemorySize)
@@ -2422,11 +2444,16 @@ func TestSeparateLoadInfoV2_MixedExternalAndNormalFields(t *testing.T) {
 // with fake binlogs (pre-computed MemorySize from DataNode Take sampling).
 type ExternalSegmentEstimateSuite struct {
 	suite.Suite
-	schema *schemapb.CollectionSchema
+	schema     *schemapb.CollectionSchema
+	localFiles *segcore.LocalFileSystem
 }
 
 func (suite *ExternalSegmentEstimateSuite) SetupSuite() {
 	paramtable.Init()
+	var err error
+	suite.localFiles, err = segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(suite.localFiles.Close)
 	suite.schema = &schemapb.CollectionSchema{
 		Name:           "test_external_estimate",
 		ExternalSource: "s3://bucket/data/",
@@ -2465,7 +2492,7 @@ func (suite *ExternalSegmentEstimateSuite) TestEstimatedBytesPerRow() {
 	loadInfo := suite.externalLoadInfo(1000, 576000) // 576 bytes/row
 	factor := resourceEstimateFactor{externalRawDataFactor: 1.0}
 
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	suite.NotNil(usage)
 	suite.Equal(int64(576), loadInfo.EstimatedBytesPerRow)
@@ -2475,7 +2502,7 @@ func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor() {
 	loadInfo := suite.externalLoadInfo(1000, 100000)
 	factor := resourceEstimateFactor{externalRawDataFactor: 1.5}
 
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	// PART 2 adds binlogSize (100000) to memory
 	// PART 2.5 adds extra = 100000 * (1.5 - 1.0) = 50000
@@ -2486,7 +2513,7 @@ func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor_NoExtraWhen
 	loadInfo := suite.externalLoadInfo(1000, 100000)
 	factor := resourceEstimateFactor{externalRawDataFactor: 0.8}
 
-	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 	// factor <= 1.0, no extra memory added by PART 2.5
 	suite.True(usage.MemorySize >= 100000, "should include base binlog size")
@@ -2528,10 +2555,10 @@ func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {
 	// With lazy load, memory estimate should be less than or equal to
 	// the non-lazy-load case (which is at least binlogSize=100000).
 	// The exact value depends on PART 2's mmap/tiered logic.
-	nonLazyUsage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	nonLazyUsage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 
-	lazyUsage, err := estimateLoadingResourceUsageOfSegment(lazySchema, loadInfo, factor)
+	lazyUsage, err := estimateLoadingResourceUsageOfSegment(lazySchema, loadInfo, factor, suite.localFiles)
 	suite.NoError(err)
 
 	suite.True(lazyUsage.MemorySize <= nonLazyUsage.MemorySize,
@@ -2623,6 +2650,9 @@ func TestGpuIndexRequiresGpu(t *testing.T) {
 
 func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
 	paramtable.Init()
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	assert.NoError(t, err)
+	t.Cleanup(localFiles.Close)
 
 	// Schema only has fieldID=100 and 101; fieldID=999 is "dropped" (not in schema)
 	schema := &schemapb.CollectionSchema{
@@ -2647,7 +2677,7 @@ func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
 			},
 		}
 		factor := resourceEstimateFactor{}
-		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor, localFiles)
 		assert.NoError(t, err)
 		assert.NotNil(t, usage)
 	})
@@ -2668,7 +2698,7 @@ func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {
 			},
 		}
 		factor := resourceEstimateFactor{}
-		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor)
+		usage, err := estimateLoadingResourceUsageOfSegment(schema, loadInfo, factor, localFiles)
 		assert.NoError(t, err)
 		assert.NotNil(t, usage)
 	})

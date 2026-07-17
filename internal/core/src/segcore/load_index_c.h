@@ -28,11 +28,8 @@ bool
 IsLoadWithDisk(const char* index_type, int index_engine_version);
 
 CStatus
-NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
-
-CStatus
-NewLoadIndexInfoWithLocalFileSystem(CLocalFileSystem filesystem,
-                                    CLoadIndexInfo* c_load_index_info);
+NewLoadIndexInfo(CLocalFileSystem filesystem,
+                 CLoadIndexInfo* c_load_index_info);
 
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);

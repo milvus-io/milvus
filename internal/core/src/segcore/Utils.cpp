@@ -61,7 +61,6 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
-#include "local/LegacyLocalChunkFiles.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -1570,9 +1569,9 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             .GetRemoteChunkManager();
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     AssertInfo(fs != nullptr, "arrow file system is nullptr");
-    auto local_files = load_index_info->local_files.has_value()
-                           ? *load_index_info->local_files
-                           : milvus::local::LegacyLocalChunkFiles();
+    AssertInfo(load_index_info->local_files.has_value(),
+               "load index info has no local filesystem");
+    auto local_files = *load_index_info->local_files;
     milvus::storage::FileManagerContext file_manager_context(
         field_meta,
         index_meta,

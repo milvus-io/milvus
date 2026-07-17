@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -104,6 +105,7 @@ type DelegatorDataSuite struct {
 	delegator    *shardDelegator
 	rootPath     string
 	chunkManager storage.ChunkManager
+	localFiles   *segcore.LocalFileSystem
 }
 
 func (s *DelegatorDataSuite) getIDFOracleForTest() *idfOracle {
@@ -116,8 +118,9 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	var err error
+	s.localFiles, err = segcore.NewLocalFileSystem(s.T().TempDir())
+	s.Require().NoError(err)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
 
@@ -125,13 +128,13 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	s.replicaID = 65535
 	s.vchannelName = "rootcoord-dml_1000v0"
 	s.version = 2000
-	var err error
 	s.mapper = metautil.NewDynChannelMapper()
 	s.channel, err = metautil.ParseChannel(s.vchannelName, s.mapper)
 	s.Require().NoError(err)
 }
 
 func (s *DelegatorDataSuite) TearDownSuite() {
+	s.localFiles.Close()
 	paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key)
 }
 
@@ -273,7 +276,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 	})
 
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = segments.NewManager(s.localFiles)
 	s.loader = &segments.MockLoader{}
 
 	// init schema
@@ -1736,7 +1739,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 	ctx := context.Background()
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = segments.NewManager(s.localFiles)
 	s.loader = &segments.MockLoader{}
 	s.genTextCollection()
 	s.enableGrowingSourceFlush()
@@ -1811,7 +1814,7 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterFencePreparedHandoff() {
 	ctx := context.Background()
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = segments.NewManager(s.localFiles)
 	s.loader = &segments.MockLoader{}
 	s.genTextCollection()
 	s.enableGrowingSourceFlush()
@@ -1865,7 +1868,7 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterFencePreparedHandoff()
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterNoRetainPreparedHandoff() {
 	ctx := context.Background()
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = segments.NewManager(s.localFiles)
 	s.loader = &segments.MockLoader{}
 	s.genTextCollection()
 	s.enableGrowingSourceFlush()
@@ -1920,7 +1923,7 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterNoRetainPreparedHandof
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceWithoutPreparedHandoff() {
 	ctx := context.Background()
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = segments.NewManager(s.localFiles)
 	s.loader = &segments.MockLoader{}
 	s.genTextCollection()
 	s.enableGrowingSourceFlush()
@@ -1970,7 +1973,7 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceWithoutPreparedHandoff() {
 func (s *DelegatorDataSuite) TestReleaseGrowingSourceDroppedChannelWithoutPreparedHandoff() {
 	ctx := context.Background()
 	s.workerManager = &cluster.MockManager{}
-	s.manager = segments.NewManager()
+	s.manager = segments.NewManager(s.localFiles)
 	s.loader = &segments.MockLoader{}
 	s.genTextCollection()
 	s.enableGrowingSourceFlush()
@@ -2135,7 +2138,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	schema := mock_segcore.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
 	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, s.localFiles)
 	s.NoError(err)
 
 	l0, _ := segments.NewL0Segment(collection, segments.SegmentTypeSealed, 1, &querypb.SegmentLoadInfo{

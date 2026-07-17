@@ -26,7 +26,6 @@
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -59,18 +58,6 @@ GetLocalUsedSize(const char* c_dir, int64_t* size) {
     try {
         auto local_files = milvus::local::FileSystem::Open(c_dir);
         *size = local_files.UsedSize();
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-InitLocalChunkManagerSingleton(const char* c_path) {
-    try {
-        std::string path(c_path);
-        milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(path);
-
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

@@ -50,13 +50,6 @@ func InitExecExpressionFunctionFactory() {
 	C.InitExecExpressionFunctionFactory()
 }
 
-func InitLocalChunkManager(path string) error {
-	CLocalRootPath := C.CString(path)
-	defer C.free(unsafe.Pointer(CLocalRootPath))
-	status := C.InitLocalChunkManagerSingleton(CLocalRootPath)
-	return HandleCStatus(&status, "InitLocalChunkManagerSingleton failed")
-}
-
 func InitTraceConfig(params *paramtable.ComponentParam) {
 	sampleFraction := C.float(params.TraceCfg.SampleFraction.GetAsFloat())
 	nodeID := C.int(paramtable.GetNodeID())

@@ -72,6 +72,27 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, 1, len(ex.taskCh))
 	})
 
+	t.Run("Test_Stop_WaitsForExecutingTasks", func(t *testing.T) {
+		ex := NewExecutor()
+		stopped := make(chan struct{})
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().Stop().Run(func() {
+			close(stopped)
+		}).Return()
+		ex.tasks[1] = &taskState{
+			compactor: mockC,
+			state:     datapb.CompactionTaskState_executing,
+		}
+
+		ex.Stop()
+
+		select {
+		case <-stopped:
+		default:
+			t.Fatal("executor returned before stopping the executing task")
+		}
+	})
+
 	t.Run("Test_Slots_NotBlocked_WhenEnqueueWaitsOnFullQueue", func(t *testing.T) {
 		ex := NewExecutor()
 		for i := 0; i < cap(ex.taskCh); i++ {

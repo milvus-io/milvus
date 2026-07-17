@@ -42,9 +42,15 @@ func (f *LocalFileSystem) Close() {
 }
 
 func (f *LocalFileSystem) rawPointer() C.CLocalFileSystem {
+	if f == nil {
+		return nil
+	}
 	return f.ptr
 }
 
 func (f *LocalFileSystem) RawPointer() unsafe.Pointer {
+	if f == nil {
+		return nil
+	}
 	return unsafe.Pointer(f.ptr)
 }
