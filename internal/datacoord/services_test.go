@@ -1428,7 +1428,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.EqualValues(t, binlogReq.SegmentID, resp.GetSegments()[0].GetID())
 		assert.EqualValues(t, 0, len(resp.GetSegments()[0].GetBinlogs()))
 	})
-	t.Run("test data version propagated to querycoord", func(t *testing.T) {
+	t.Run("test data and storage versions propagated to querycoord", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
@@ -1438,10 +1438,14 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		const expectedDataVersion int32 = 7
+		const (
+			expectedDataVersion    int32 = 7
+			expectedStorageVersion       = storage.StorageV2
+		)
 		binlogReq := &datapb.SaveBinlogPathsRequest{
-			SegmentID:    20087,
-			CollectionID: 0,
+			SegmentID:      20087,
+			CollectionID:   0,
+			StorageVersion: expectedStorageVersion,
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
@@ -1456,6 +1460,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		segment.DataVersion = expectedDataVersion
+		segment.StorageVersion = expectedStorageVersion
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
@@ -1495,8 +1500,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, merr.Error(resp.Status))
 		assert.EqualValues(t, 1, len(resp.GetSegments()))
 		assert.EqualValues(t, binlogReq.SegmentID, resp.GetSegments()[0].GetID())
-		// Regression: DataVersion must be propagated to the QueryCoord response.
+		// Regression: data and storage versions must be propagated to QueryCoord.
 		assert.EqualValues(t, expectedDataVersion, resp.GetSegments()[0].GetDataVersion())
+		assert.EqualValues(t, expectedStorageVersion, resp.GetSegments()[0].GetStorageVersion())
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
 		svr := newTestServer(t)

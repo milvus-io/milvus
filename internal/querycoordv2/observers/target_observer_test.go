@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -36,6 +37,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -64,6 +66,107 @@ type TargetObserverSuite struct {
 	nextTargetSegments []*datapb.SegmentInfo
 	nextTargetChannels []*datapb.VchannelInfo
 	ctx                context.Context
+}
+
+type mockeyTargetManager struct{ meta.TargetManagerInterface }
+
+func TestInitSerializesTargetRefresh(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	collectionMgr := meta.NewCollectionManager(nil)
+	assert.NoError(t, collectionMgr.PutCollectionWithoutSave(ctx, utils.CreateTestCollection(collectionID, 1)))
+	metaInstance := &meta.Meta{
+		CollectionManager: collectionMgr,
+		ReplicaManager:    meta.NewReplicaManager(nil, nil),
+	}
+
+	updateEntered := make(chan struct{})
+	allowUpdateReturn := make(chan struct{})
+	nextTargetExists := false
+	nextTargetVersion := int64(0)
+	targetMgr := &mockeyTargetManager{}
+	mockNextTargetExists := mockey.Mock((*mockeyTargetManager).IsNextTargetExist).
+		To(func(_ *mockeyTargetManager, _ context.Context, _ int64) bool {
+			return nextTargetExists
+		}).
+		Build()
+	defer mockNextTargetExists.UnPatch()
+	mockUpdateNextTarget := mockey.Mock((*mockeyTargetManager).UpdateCollectionNextTarget).
+		To(func(_ *mockeyTargetManager, _ context.Context, _ int64) error {
+			close(updateEntered)
+			<-allowUpdateReturn
+			nextTargetExists = true
+			nextTargetVersion = 1
+			return nil
+		}).
+		Build()
+	defer mockUpdateNextTarget.UnPatch()
+	mockNextTargetVersion := mockey.Mock((*mockeyTargetManager).GetCollectionTargetVersion).
+		To(func(_ *mockeyTargetManager, _ context.Context, _ int64, _ meta.TargetScope) int64 {
+			return nextTargetVersion
+		}).
+		Build()
+	defer mockNextTargetVersion.UnPatch()
+	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).
+		Return(map[int64]*datapb.SegmentInfo{}).
+		Build()
+	defer mockNextTargetSegments.UnPatch()
+	mockNextTargetChannels := mockey.Mock((*mockeyTargetManager).GetDmChannelsByCollection).
+		Return(map[string]*meta.DmChannel{}).
+		Build()
+	defer mockNextTargetChannels.UnPatch()
+
+	nodeMgr := session.NewNodeManager()
+	observer := NewTargetObserver(
+		metaInstance,
+		targetMgr,
+		meta.NewDistributionManager(nodeMgr),
+		nil,
+		nil,
+		nodeMgr,
+	)
+
+	initDone := make(chan struct{})
+	go func() {
+		defer close(initDone)
+		observer.init(ctx, collectionID)
+	}()
+
+	select {
+	case <-updateEntered:
+	case <-time.After(5 * time.Second):
+		close(allowUpdateReturn)
+		t.Fatal("target refresh did not start")
+	}
+	lockAcquiredDuringRefresh := observer.keylocks.TryLock(collectionID)
+	if lockAcquiredDuringRefresh {
+		observer.keylocks.Unlock(collectionID)
+	}
+	close(allowUpdateReturn)
+
+	select {
+	case <-initDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("target observer init did not finish")
+	}
+	assert.False(t, lockAcquiredDuringRefresh)
+}
+
+func setNextTargetProgressLastUpdated(
+	t *testing.T,
+	observer *TargetObserver,
+	collectionID int64,
+	lastUpdated time.Time,
+) {
+	t.Helper()
+	progress, ok := observer.nextTargetProgresses.Get(collectionID)
+	if !assert.True(t, ok) {
+		return
+	}
+	progress.lastUpdated = lastUpdated
+	observer.nextTargetProgresses.Insert(collectionID, progress)
 }
 
 func (suite *TargetObserverSuite) SetupSuite() {
@@ -605,7 +708,7 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 
 // TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced verifies that only ready delegators
 // are included in the sync operation. This test specifically validates the fix for the bug where
-// all delegators (including non-ready ones) were being added to readyDelegatorsInReplica.
+// non-ready delegators were included in the collection-wide sync list.
 func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -733,11 +836,347 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	assert.True(t, result)
 
 	// Verify that ONLY node 1 received SyncDistribution call
-	// This is the key assertion: if the bug existed (using delegatorList instead of readyDelegatorsInChannel),
+	// This is the key assertion: if the unfiltered delegator list were used,
 	// node 2 would also receive a SyncDistribution call
 	assert.Equal(t, 1, len(syncedNodes), "Expected only 1 SyncDistribution call for the ready delegator")
 	assert.Contains(t, syncedNodes, int64(1), "Expected node 1 (ready delegator) to receive SyncDistribution")
 	assert.NotContains(t, syncedNodes, int64(2), "Node 2 (not ready delegator) should NOT receive SyncDistribution")
+}
+
+func TestShouldUpdateNextTarget_TracksSegmentReplicaProgress(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.NextTargetSurviveTime.Key)
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	nextVersion := int64(100)
+	segment1 := &datapb.SegmentInfo{ID: 1, CollectionID: collectionID}
+	segment2 := &datapb.SegmentInfo{ID: 2, CollectionID: collectionID}
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2}))
+	replica1 := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, Nodes: []int64{1}})
+	replica2 := meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: collectionID, Nodes: []int64{2}})
+	replicaMgr := meta.NewReplicaManager(nil, nil)
+	mockReplicas := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica1, replica2}).Build()
+	defer mockReplicas.UnPatch()
+	metaInstance := &meta.Meta{ReplicaManager: replicaMgr}
+
+	targetMgr := &mockeyTargetManager{}
+	nextTargetSegments := map[int64]*datapb.SegmentInfo{
+		segment1.GetID(): segment1,
+		segment2.GetID(): segment2,
+	}
+	mockNextTargetExists := mockey.Mock((*mockeyTargetManager).IsNextTargetExist).Return(true).Build()
+	defer mockNextTargetExists.UnPatch()
+	mockNextTargetVersion := mockey.Mock((*mockeyTargetManager).GetCollectionTargetVersion).Return(nextVersion).Build()
+	defer mockNextTargetVersion.UnPatch()
+	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).Return(nextTargetSegments).Build()
+	defer mockNextTargetSegments.UnPatch()
+	mockNextTargetChannels := mockey.Mock((*mockeyTargetManager).GetDmChannelsByCollection).Return(map[string]*meta.DmChannel{}).Build()
+	defer mockNextTargetChannels.UnPatch()
+
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, nil, nil, nodeMgr)
+
+	distMgr.SegmentDistManager.Update(1, meta.SegmentFromInfo(segment1), meta.SegmentFromInfo(segment2))
+	distMgr.SegmentDistManager.Update(2, meta.SegmentFromInfo(segment1))
+	observer.recordNextTargetProgress(collectionID, observer.sampleNextTargetProgress(ctx, collectionID, nextVersion))
+	setNextTargetProgressLastUpdated(t, observer, collectionID, time.Now().Add(-time.Hour))
+
+	assert.True(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+
+	distMgr.SegmentDistManager.Update(2, meta.SegmentFromInfo(segment1), meta.SegmentFromInfo(segment2))
+	setNextTargetProgressLastUpdated(t, observer, collectionID, time.Now().Add(-time.Hour))
+
+	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+	progress, ok := observer.nextTargetProgresses.Get(collectionID)
+	assert.True(t, ok)
+	assert.Equal(t, nextVersion, progress.targetVersion)
+	assert.Equal(t, 4, progress.readySegmentReplicas)
+	assert.Equal(t, 0, progress.readyReplicaChannels)
+	assert.WithinDuration(t, time.Now(), progress.lastUpdated, time.Second)
+}
+
+func TestShouldUpdateNextTarget_TracksDataVersionProgress(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.NextTargetSurviveTime.Key)
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	nextVersion := int64(100)
+	targetSegment := &datapb.SegmentInfo{
+		ID:             1,
+		CollectionID:   collectionID,
+		DataVersion:    2,
+		StorageVersion: storage.StorageV2,
+	}
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2}))
+	replica1 := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, Nodes: []int64{1, 2}})
+	replicaMgr := meta.NewReplicaManager(nil, nil)
+	mockReplicas := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica1}).Build()
+	defer mockReplicas.UnPatch()
+	metaInstance := &meta.Meta{ReplicaManager: replicaMgr}
+
+	targetMgr := &mockeyTargetManager{}
+	mockNextTargetExists := mockey.Mock((*mockeyTargetManager).IsNextTargetExist).Return(true).Build()
+	defer mockNextTargetExists.UnPatch()
+	mockNextTargetVersion := mockey.Mock((*mockeyTargetManager).GetCollectionTargetVersion).Return(nextVersion).Build()
+	defer mockNextTargetVersion.UnPatch()
+	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).
+		Return(map[int64]*datapb.SegmentInfo{targetSegment.GetID(): targetSegment}).Build()
+	defer mockNextTargetSegments.UnPatch()
+	mockNextTargetChannels := mockey.Mock((*mockeyTargetManager).GetDmChannelsByCollection).Return(map[string]*meta.DmChannel{}).Build()
+	defer mockNextTargetChannels.UnPatch()
+
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	oldDataVersion := int32(1)
+	distMgr.SegmentDistManager.Update(2, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             targetSegment.GetID(),
+			CollectionID:   collectionID,
+			StorageVersion: storage.StorageV2,
+		},
+		DataVersion: &oldDataVersion,
+	})
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, nil, nil, nodeMgr)
+	observer.recordNextTargetProgress(collectionID, observer.sampleNextTargetProgress(ctx, collectionID, nextVersion))
+	setNextTargetProgressLastUpdated(t, observer, collectionID, time.Now().Add(-time.Hour))
+
+	assert.True(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+
+	newDataVersion := int32(2)
+	distMgr.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             targetSegment.GetID(),
+			CollectionID:   collectionID,
+			StorageVersion: storage.StorageV2,
+		},
+		DataVersion: &newDataVersion,
+	})
+	setNextTargetProgressLastUpdated(t, observer, collectionID, time.Now().Add(-time.Hour))
+
+	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+	progress, ok := observer.nextTargetProgresses.Get(collectionID)
+	assert.True(t, ok)
+	assert.Equal(t, 1, progress.readySegmentReplicas)
+}
+
+func TestShouldUpdateNextTarget_TracksReplicaChannelProgress(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.NextTargetSurviveTime.Key)
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	nextVersion := int64(100)
+	channelName := "channel-1"
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2}))
+	replica1 := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, Nodes: []int64{1}})
+	replica2 := meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: collectionID, Nodes: []int64{2}})
+	replicaMgr := meta.NewReplicaManager(nil, nil)
+	mockReplicas := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica1, replica2}).Build()
+	defer mockReplicas.UnPatch()
+	metaInstance := &meta.Meta{ReplicaManager: replicaMgr}
+
+	targetMgr := &mockeyTargetManager{}
+	mockNextTargetExists := mockey.Mock((*mockeyTargetManager).IsNextTargetExist).Return(true).Build()
+	defer mockNextTargetExists.UnPatch()
+	mockNextTargetVersion := mockey.Mock((*mockeyTargetManager).GetCollectionTargetVersion).Return(nextVersion).Build()
+	defer mockNextTargetVersion.UnPatch()
+	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).Return(map[int64]*datapb.SegmentInfo{}).Build()
+	defer mockNextTargetSegments.UnPatch()
+	mockNextTargetChannels := mockey.Mock((*mockeyTargetManager).GetDmChannelsByCollection).
+		Return(map[string]*meta.DmChannel{channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}}}).Build()
+	defer mockNextTargetChannels.UnPatch()
+	mockChannelSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByChannel).Return(map[int64]*datapb.SegmentInfo{}).Build()
+	defer mockChannelSegments.UnPatch()
+
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+		Node:         1,
+		View: &meta.LeaderView{
+			ID:            1,
+			CollectionID:  collectionID,
+			Channel:       channelName,
+			TargetVersion: 0,
+			Status:        &querypb.LeaderViewStatus{Serviceable: false},
+		},
+	})
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, nil, nil, nodeMgr)
+	observer.recordNextTargetProgress(collectionID, nextTargetProgress{
+		targetVersion:        nextVersion,
+		readySegmentReplicas: 1,
+	})
+
+	distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+		Node:         2,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  collectionID,
+			Channel:       channelName,
+			TargetVersion: nextVersion,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable:             true,
+				CatchingUpStreamingData: true,
+			},
+		},
+	})
+	setNextTargetProgressLastUpdated(t, observer, collectionID, time.Now().Add(-time.Hour))
+	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+	progress, ok := observer.nextTargetProgresses.Get(collectionID)
+	assert.True(t, ok)
+	assert.Equal(t, 1, progress.readySegmentReplicas)
+	assert.Equal(t, 2, progress.readyReplicaChannels)
+}
+
+func TestShouldUpdateNextTarget_ResetsProgressForNewVersion(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	segment := &datapb.SegmentInfo{ID: 1, CollectionID: collectionID}
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	replica := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, Nodes: []int64{1}})
+	replicaMgr := meta.NewReplicaManager(nil, nil)
+	mockReplicas := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+	defer mockReplicas.UnPatch()
+	targetMgr := &mockeyTargetManager{}
+	nextTargetSegments := map[int64]*datapb.SegmentInfo{
+		segment.GetID(): segment,
+	}
+	mockNextTargetExists := mockey.Mock((*mockeyTargetManager).IsNextTargetExist).Return(true).Build()
+	defer mockNextTargetExists.UnPatch()
+	mockNextTargetVersion := mockey.Mock((*mockeyTargetManager).GetCollectionTargetVersion).Return(int64(101)).Build()
+	defer mockNextTargetVersion.UnPatch()
+	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).Return(nextTargetSegments).Build()
+	defer mockNextTargetSegments.UnPatch()
+	mockNextTargetChannels := mockey.Mock((*mockeyTargetManager).GetDmChannelsByCollection).Return(map[string]*meta.DmChannel{}).Build()
+	defer mockNextTargetChannels.UnPatch()
+
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	distMgr.SegmentDistManager.Update(1, meta.SegmentFromInfo(segment))
+	metaInstance := &meta.Meta{ReplicaManager: replicaMgr}
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, nil, nil, nodeMgr)
+	observer.recordNextTargetProgress(collectionID, nextTargetProgress{
+		targetVersion:        100,
+		readySegmentReplicas: 5,
+		readyReplicaChannels: 5,
+	})
+
+	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+	progress, ok := observer.nextTargetProgresses.Get(collectionID)
+	assert.True(t, ok)
+	assert.Equal(t, int64(101), progress.targetVersion)
+	assert.Equal(t, 1, progress.readySegmentReplicas)
+	assert.Equal(t, 0, progress.readyReplicaChannels)
+	assert.WithinDuration(t, time.Now(), progress.lastUpdated, time.Second)
+}
+
+func TestNextTargetStale_RefreshLifecycle(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	segment := &datapb.SegmentInfo{ID: 1, CollectionID: collectionID}
+	nextTargetVersion := int64(100)
+	var updateNextTargetErr error
+	advanceTargetVersion := false
+	markDuringUpdate := false
+	targetContainsSegment := true
+
+	nodeMgr := session.NewNodeManager()
+	targetMgr := &mockeyTargetManager{}
+	var observer *TargetObserver
+	nextTargetSegments := map[int64]*datapb.SegmentInfo{
+		segment.GetID(): segment,
+	}
+	mockUpdateNextTarget := mockey.Mock((*mockeyTargetManager).UpdateCollectionNextTarget).
+		To(func(_ *mockeyTargetManager, _ context.Context, _ int64) error {
+			if updateNextTargetErr != nil {
+				return updateNextTargetErr
+			}
+			if markDuringUpdate {
+				observer.MarkNextTargetStale(collectionID, segment.GetID())
+			}
+			if advanceTargetVersion {
+				nextTargetVersion++
+			}
+			return nil
+		}).
+		Build()
+	defer mockUpdateNextTarget.UnPatch()
+	mockNextTargetVersion := mockey.Mock((*mockeyTargetManager).GetCollectionTargetVersion).
+		To(func(_ *mockeyTargetManager, _ context.Context, _ int64, _ meta.TargetScope) int64 {
+			return nextTargetVersion
+		}).
+		Build()
+	defer mockNextTargetVersion.UnPatch()
+	mockNextTargetSegments := mockey.Mock((*mockeyTargetManager).GetSealedSegmentsByCollection).Return(nextTargetSegments).Build()
+	defer mockNextTargetSegments.UnPatch()
+	mockNextTargetChannels := mockey.Mock((*mockeyTargetManager).GetDmChannelsByCollection).Return(map[string]*meta.DmChannel{}).Build()
+	defer mockNextTargetChannels.UnPatch()
+	mockNextTargetExists := mockey.Mock((*mockeyTargetManager).IsNextTargetExist).Return(true).Build()
+	defer mockNextTargetExists.UnPatch()
+	mockNextTargetSegment := mockey.Mock((*mockeyTargetManager).GetSealedSegment).
+		To(func(_ *mockeyTargetManager, _ context.Context, _ int64, segmentID int64, _ meta.TargetScope) *datapb.SegmentInfo {
+			if targetContainsSegment && segmentID == segment.GetID() {
+				return segment
+			}
+			return nil
+		}).
+		Build()
+	defer mockNextTargetSegment.UnPatch()
+
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	metaInstance := &meta.Meta{ReplicaManager: meta.NewReplicaManager(nil, nil)}
+	observer = NewTargetObserver(metaInstance, targetMgr, distMgr, nil, nil, nodeMgr)
+	observer.recordNextTargetProgress(collectionID, nextTargetProgress{
+		targetVersion: nextTargetVersion,
+	})
+
+	observer.MarkNextTargetStale(collectionID, segment.GetID())
+	assert.False(t, observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	assert.True(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+
+	updateNextTargetErr = assert.AnError
+	assert.ErrorIs(t, observer.updateNextTarget(ctx, collectionID), assert.AnError)
+	assert.True(t, observer.nextTargetStale.Contain(collectionID))
+
+	updateNextTargetErr = nil
+	previousProgress, ok := observer.nextTargetProgresses.Get(collectionID)
+	assert.True(t, ok)
+	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
+	assert.True(t, observer.nextTargetStale.Contain(collectionID))
+	currentProgress, ok := observer.nextTargetProgresses.Get(collectionID)
+	assert.True(t, ok)
+	assert.Equal(t, previousProgress, currentProgress)
+
+	advanceTargetVersion = true
+	markDuringUpdate = true
+	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
+	assert.True(t, observer.nextTargetStale.Contain(collectionID))
+
+	markDuringUpdate = false
+	assert.NoError(t, observer.updateNextTarget(ctx, collectionID))
+	assert.False(t, observer.nextTargetStale.Contain(collectionID))
+
+	targetContainsSegment = false
+	observer.MarkNextTargetStale(collectionID, segment.GetID())
+	assert.False(t, observer.nextTargetStale.Contain(collectionID))
 }
 
 // TestShouldUpdateCurrentTarget_AllChannelsSynced tests that shouldUpdateCurrentTarget returns true
