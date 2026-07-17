@@ -471,6 +471,12 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     auto prefer_field_data =
         SegcoreConfig::default_config()
             .get_prefer_field_data_when_index_has_raw_data();
+    // The primary key column is never skipped, even when its index carries raw
+    // data: sorted segments navigate rows through the pk column
+    // (num_rows_until_chunk / get_chunk_by_offset), and a pk scalar index is not
+    // registered in scalar_indexings for expression index-reads, so the pk raw
+    // column must stay resident.
+    auto pk_field_id = new_info.schema_->get_primary_field_id();
     auto cur_column_group = GetColumnGroups();
     auto new_column_group = new_info.GetColumnGroups();
 
@@ -548,16 +554,22 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             bool is_replace_field = was_default_filled || files_changed;
             bool index_has_raw_data =
                 new_info.field_index_has_raw_data_.count(fid) > 0;
-            // When the vector index already carries the raw data, the separate
+            bool is_pk_field =
+                pk_field_id.has_value() && pk_field_id.value() == fid;
+            // When a field's index already carries the raw data, the separate
             // raw column is redundant and must NOT be made resident — neither
             // eager nor "lazy" (the loon lazy path still materializes a
             // ProxyChunkColumn and sets field_data_ready, so it stays on disk on
             // top of the index, doubling the footprint). Mirror the binlog path
             // (ChunkedSegmentSealedImpl: "skip fielddata because index has raw
-            // data"): drop it from the load set entirely. prefer_field_data is
-            // the explicit opt-in to keep both resident; system fields always load.
-            if (field_id >= START_USER_FIELDID && index_has_raw_data &&
-                !prefer_field_data) {
+            // data"): drop it from the load set entirely. This covers vector
+            // fields and other indexed scalars (retrieve/filter read the raw
+            // value from the index), but NOT the primary key — its raw column
+            // is still needed resident for row navigation, so the pk always
+            // loads regardless of its index. prefer_field_data keeps both
+            // resident; system fields always load.
+            if (field_id >= START_USER_FIELDID && !is_pk_field &&
+                index_has_raw_data && !prefer_field_data) {
                 // Only the no-raw-index -> raw-index reopen transition can
                 // leave a stale resident copy: current had no raw-data index,
                 // so the raw column was loaded, and now the index carries it.
