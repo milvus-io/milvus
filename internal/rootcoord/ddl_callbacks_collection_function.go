@@ -42,10 +42,10 @@ func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema)
 	return nil
 }
 
-func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, dbName string, collectionName string) error {
+func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, oldColl *model.Collection, newColl *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
-	schema := coll.ToCollectionSchemaPB()
-	schema.Version = coll.SchemaVersion + 1
+	schema := newColl.ToCollectionSchemaPB()
+	schema.Version = newColl.SchemaVersion + 1
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
 	}
@@ -56,8 +56,8 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 	}
 
 	header := &messagespb.AlterCollectionMessageHeader{
-		DbId:         coll.DBID,
-		CollectionId: coll.CollectionID,
+		DbId:         newColl.DBID,
+		CollectionId: newColl.CollectionID,
 		UpdateMask: &fieldmaskpb.FieldMask{
 			Paths: []string{message.FieldMaskCollectionSchema},
 		},
@@ -69,15 +69,21 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 		},
 	}
 
-	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, oldColl, schema)
+	if err != nil {
+		return err
+	}
+
+	channels := make([]string, 0, len(newColl.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.VirtualChannelNames...)
+	channels = append(channels, newColl.VirtualChannelNames...)
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(body).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, newColl.CollectionID, addedFileResourceIds, err)
 		return err
 	}
 	return nil
@@ -168,7 +174,7 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 		return err
 	}
 
-	return callAlterCollection(ctx, c, broadcaster, newColl, req.GetDbName(), req.GetCollectionName())
+	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }
 
 func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req *milvuspb.DropCollectionFunctionRequest) error {
@@ -218,7 +224,7 @@ func (c *Core) broadcastAlterCollectionForDropFunction(ctx context.Context, req 
 		}
 		field.IsFunctionOutput = false
 	}
-	return callAlterCollection(ctx, c, broadcaster, newColl, req.GetDbName(), req.GetCollectionName())
+	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }
 
 func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *milvuspb.AddCollectionFunctionRequest) error {
@@ -278,5 +284,5 @@ func (c *Core) broadcastAlterCollectionForAddFunction(ctx context.Context, req *
 	}
 	newFunc := model.UnmarshalFunctionModel(fSchema)
 	newColl.Functions = append(newColl.Functions, newFunc)
-	return callAlterCollection(ctx, c, broadcaster, newColl, req.GetDbName(), req.GetCollectionName())
+	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }
