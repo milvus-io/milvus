@@ -616,7 +616,8 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
 
                 for (auto field_id : plan_->target_entries_) {
                     auto& field_meta = plan_->schema_->operator[](field_id);
-                    if (field_meta.is_vector() && field_meta.is_nullable()) {
+                    if (field_meta.is_vector() && field_meta.is_nullable() &&
+                        field_meta.get_data_type() != DataType::VECTOR_ARRAY) {
                         auto it =
                             search_result->output_fields_data_.find(field_id);
                         if (it != search_result->output_fields_data_.end()) {

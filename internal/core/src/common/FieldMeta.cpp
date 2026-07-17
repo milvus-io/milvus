@@ -164,8 +164,13 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         AssertInfo(type_map.count("dim"), "dim not found");
         dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
 
-        return FieldMeta{
-            name, field_id, data_type, element_type, dim, std::nullopt};
+        return FieldMeta{name,
+                         field_id,
+                         data_type,
+                         element_type,
+                         dim,
+                         std::nullopt,
+                         nullable};
     }
 
     if (IsVectorDataType(data_type)) {

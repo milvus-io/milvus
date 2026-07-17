@@ -98,8 +98,10 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
  public:
     explicit FieldData(int64_t dim,
                        DataType element_type,
+                       bool nullable = false,
                        int64_t buffered_num_rows = 0)
-        : FieldDataVectorArrayImpl(DataType::VECTOR_ARRAY, buffered_num_rows),
+        : FieldDataVectorArrayImpl(
+              DataType::VECTOR_ARRAY, nullable, buffered_num_rows),
           dim_(dim),
           element_type_(element_type) {
         AssertInfo(element_type != DataType::NONE,
@@ -123,9 +125,7 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
 
     const VectorArray*
     value_at(ssize_t offset) const {
-        AssertInfo(offset < get_num_rows(),
-                   "field data subscript out of range");
-        AssertInfo(offset < length(),
+        AssertInfo(offset < get_valid_rows(),
                    "subscript position don't has valid value");
         return &data_[offset];
     }
@@ -445,5 +445,13 @@ using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows);
+
+FieldDataPtr
+InitScalarFieldDataWithLength(const DataType& type, int64_t length);
+
+void
+ResizeScalarFieldData(const DataType& type,
+                      int64_t new_size,
+                      FieldDataPtr& field_data);
 
 }  // namespace milvus

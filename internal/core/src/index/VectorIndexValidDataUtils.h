@@ -85,8 +85,7 @@ ContainsOnlyValidData(const BinarySet& binary_set) {
 
 inline bool
 IsAllNullNullable(const OffsetMapping& offset_mapping) {
-    return offset_mapping.IsEnabled() && offset_mapping.GetTotalCount() > 0 &&
-           offset_mapping.GetValidCount() == 0;
+    return offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0;
 }
 
 inline size_t

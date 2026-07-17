@@ -135,11 +135,12 @@ class FieldMeta {
               DataType type,
               DataType element_type,
               int64_t dim,
-              std::optional<knowhere::MetricType> metric_type)
+              std::optional<knowhere::MetricType> metric_type,
+              bool nullable = false)
         : name_(std::move(name)),
           id_(id),
           type_(type),
-          nullable_(false),
+          nullable_(nullable),
           element_type_(element_type),
           vector_info_(VectorInfo{dim, std::move(metric_type)}) {
         Assert(type_ == DataType::VECTOR_ARRAY);

@@ -1035,6 +1035,22 @@ func TestAddFieldTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 
+		fSchema = &schemapb.FieldSchema{
+			Name:        "array_struct",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Struct,
+			Nullable:    true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "4"},
+			},
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "element type Struct is not supported")
+
 		// not support system field
 		fSchema = &schemapb.FieldSchema{
 			Name: common.TimeStampFieldName,

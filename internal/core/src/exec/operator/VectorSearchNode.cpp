@@ -101,6 +101,11 @@ PhyVectorSearchNode::GetOutput() {
                 array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
             data_cnt = element_bitset.size();
             query_context_->set_active_element_count(data_cnt);
+            if (element_bitset.empty()) {
+                query_context_->set_search_result(
+                    empty_search_result(num_queries, true));
+                return input_;
+            }
 
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(

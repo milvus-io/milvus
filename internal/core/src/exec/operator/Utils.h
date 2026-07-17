@@ -90,7 +90,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                         "inside, terminate {} operation",
                         operator_type));
             }
-            search_result.total_nq_ = dataset->GetRows();
+            search_result.total_nq_ = nq;
             search_result.unity_topK_ = search_info.topk_;
         } catch (const std::runtime_error& e) {
             std::string operator_type = "";
