@@ -180,6 +180,115 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_CreateTasks() {
 	s.Equal([]int{1, 2}, mappingCounts, "should have one task with 1 mapping and one with 2 mappings")
 }
 
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_ResumesPartialTaskCreation() {
+	// Simulate a previous round that persisted only the first task before
+	// failing (etcd hiccup / DataCoord restart): checkPendingJob must create
+	// tasks for the remaining uncovered segments and move the job to Executing
+	// instead of returning early and leaving the job Pending forever.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.alloc.EXPECT().AllocID(mock.Anything).Return(int64(1002), nil).Times(1)
+
+	idMappings := []*datapb.CopySegmentIDMapping{
+		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
+		{SourceSegmentId: 3, TargetSegmentId: 103, PartitionId: 10},
+	}
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings:   idMappings,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// Pre-existing task from the failed round covers the first two mappings.
+	partialTask := &copySegmentTask{
+		tr:    timerecord.NewTimeRecorder("test task"),
+		times: taskcommon.NewTimes(),
+	}
+	partialTask.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		NodeId:       NullNodeID,
+		TaskSlot:     1,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		IdMappings:   idMappings[:2],
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), partialTask))
+
+	Params.DataCoordCfg.MaxSegmentsPerCopyTask.SwapTempValue("2")
+	defer Params.DataCoordCfg.MaxSegmentsPerCopyTask.SwapTempValue("10")
+
+	s.checker.checkPendingJob(job)
+
+	// Job must reach Executing.
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
+
+	// The uncovered mapping (source segment 3) must now have a task.
+	tasks := s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID)
+	s.Len(tasks, 2)
+	coveredSources := make(map[int64]int)
+	for _, task := range tasks {
+		for _, mapping := range task.GetIdMappings() {
+			coveredSources[mapping.GetSourceSegmentId()]++
+		}
+	}
+	s.Equal(map[int64]int{1: 1, 2: 1, 3: 1}, coveredSources,
+		"each source segment must be covered exactly once")
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_AllTasksExistTransitionsToExecuting() {
+	// Simulate a previous round that created all tasks but failed to persist
+	// the Pending→Executing transition: checkPendingJob must not create any
+	// new task (no AllocID expectation) and must retry the transition.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	idMappings := []*datapb.CopySegmentIDMapping{
+		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
+	}
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings:   idMappings,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	fullTask := &copySegmentTask{
+		tr:    timerecord.NewTimeRecorder("test task"),
+		times: taskcommon.NewTimes(),
+	}
+	fullTask.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		NodeId:       NullNodeID,
+		TaskSlot:     1,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		IdMappings:   idMappings,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), fullTask))
+
+	s.checker.checkPendingJob(job)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
+	s.Len(s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID), 1)
+}
+
 func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_UpdateProgress() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)

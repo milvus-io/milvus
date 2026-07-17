@@ -286,19 +286,18 @@ func (c *copySegmentChecker) LogTaskStats() {
 //   - Full segment metadata (binlogs, indexes) is fetched by DataNode when executing
 //   - Keeps task metadata small and efficient to persist
 //
-// Idempotency:
-//   - Safe to call multiple times - only creates tasks on first call
-//   - Subsequent calls return early if tasks already exist
+// Idempotency and crash recovery:
+//   - Task creation is a multi-step sequence (per-group AllocID + AddTask, then
+//     the Executing transition), each step persisted individually. A failure
+//     mid-way (etcd hiccup, DataCoord restart) leaves the job Pending with only
+//     a subset of tasks persisted.
+//   - To be resume-safe, each round creates tasks only for source segments not
+//     yet covered by persisted tasks, then (re-)applies the idempotent
+//     Pending → Executing transition.
 func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 
-	// Step 1: Check if tasks already created (idempotent operation)
-	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
-	if len(tasks) > 0 {
-		return
-	}
-
-	// Step 2: Validate job has segment mappings
+	// Step 1: Validate job has segment mappings
 	idMappings := job.GetIdMappings()
 	if len(idMappings) == 0 {
 		log.Warn(c.ctx, "no id mappings to copy, mark job as completed")
@@ -310,9 +309,23 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		return
 	}
 
-	// Step 3: Split mappings into groups (max segments per task)
+	// Step 2: Compute source segments already covered by persisted tasks,
+	// so a partially created job resumes instead of duplicating tasks.
+	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
+	coveredSourceIDs := make(map[int64]struct{})
+	for _, task := range tasks {
+		for _, mapping := range task.GetIdMappings() {
+			coveredSourceIDs[mapping.GetSourceSegmentId()] = struct{}{}
+		}
+	}
+	pendingMappings := lo.Filter(idMappings, func(mapping *datapb.CopySegmentIDMapping, _ int) bool {
+		_, covered := coveredSourceIDs[mapping.GetSourceSegmentId()]
+		return !covered
+	})
+
+	// Step 3: Split uncovered mappings into groups (max segments per task)
 	maxSegmentsPerTask := Params.DataCoordCfg.MaxSegmentsPerCopyTask.GetAsInt()
-	groups := lo.Chunk(idMappings, maxSegmentsPerTask)
+	groups := lo.Chunk(pendingMappings, maxSegmentsPerTask)
 
 	// Step 4: Create task for each group
 	for i, group := range groups {
@@ -357,7 +370,9 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 			mlog.Int("segmentCount", len(group)))
 	}
 
-	// Step 5: Update job state to Executing
+	// Step 5: Update job state to Executing. This also runs when all segments
+	// were already covered (groups is empty), retrying a transition that a
+	// previous round failed to persist.
 	err := c.copyMeta.UpdateJob(c.ctx, job.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting),
 		UpdateCopyJobProgress(0, int64(len(idMappings))))
@@ -366,7 +381,8 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		return
 	}
 	log.Info(c.ctx, "copy segment job started",
-		mlog.Int("taskCount", len(groups)),
+		mlog.Int("newTaskCount", len(groups)),
+		mlog.Int("resumedTaskCount", len(tasks)),
 		mlog.Int("totalSegments", len(idMappings)))
 }
 
