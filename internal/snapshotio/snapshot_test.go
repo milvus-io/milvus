@@ -17,6 +17,7 @@
 package snapshotio
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -45,6 +46,8 @@ func TestManifestSchemaByVersion(t *testing.T) {
 	assert.Contains(t, AvroSchemaV3(), "commit_timestamp")
 	assert.NotContains(t, AvroSchemaV3(), "child_fields")
 	assert.Contains(t, AvroSchemaV4(), "child_fields")
+	assert.NotContains(t, AvroSchemaV4(), "is_nested_index")
+	assert.Contains(t, AvroSchemaV5(), "is_nested_index")
 
 	currentSchema, err := ManifestSchemaByVersion(SnapshotFormatVersion)
 	require.NoError(t, err)
@@ -66,7 +69,7 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":4}`))
+	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(fmt.Sprintf(`{"format_version":%d}`, SnapshotFormatVersion)))
 	require.NoError(t, err)
 	assert.Equal(t, int32(SnapshotFormatVersion), metadata.GetFormatVersion())
 
@@ -118,6 +121,7 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 				CurrentScalarIndexVersion: 8,
 				MemSize:                   8192,
 				IndexStorePathVersion:     indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IsNestedIndex:             true,
 			},
 		},
 		TextIndexFiles: map[int64]*datapb.TextIndexStats{
@@ -171,6 +175,10 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 	assert.Equal(t, segment.GetDeltalogs()[0].GetBinlogs()[0].GetLogID(), parsed.GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
 	require.Len(t, parsed.GetIndexFiles(), 1)
 	assert.Equal(t, segment.GetIndexFiles()[0].GetIndexStorePathVersion(), parsed.GetIndexFiles()[0].GetIndexStorePathVersion())
+	// The nested-array-index marker must survive the manifest round-trip:
+	// losing it makes a restored nested ARRAY index load as a legacy composite
+	// index, and HYBRID/AUTOINDEX then fails on the missing INDEX_TYPE entry.
+	assert.True(t, parsed.GetIndexFiles()[0].GetIsNestedIndex())
 	assert.Equal(t, segment.GetStartPosition().GetTimestamp(), parsed.GetStartPosition().GetTimestamp())
 	assert.Equal(t, segment.GetDmlPosition().GetMsgGroup(), parsed.GetDmlPosition().GetMsgGroup())
 	assert.Equal(t, segment.GetTextIndexFiles()[101].GetFiles(), parsed.GetTextIndexFiles()[101].GetFiles())
@@ -199,6 +207,34 @@ func TestParseSegmentManifestV2DefaultsCommitTimestamp(t *testing.T) {
 	parsed, err := ParseSegmentManifest(data, 2)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), parsed.GetCommitTimestamp())
+}
+
+// TestParseSegmentManifestV4DefaultsIsNestedIndex verifies that a manifest
+// written by a pre-v5 (no is_nested_index) release still parses and defaults
+// the marker to false — the legacy row-level interpretation.
+func TestParseSegmentManifestV4DefaultsIsNestedIndex(t *testing.T) {
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				SegmentID: 1001,
+				FieldID:   101,
+				IndexID:   201,
+				// Set on the write side, but a v4 schema cannot carry it.
+				IsNestedIndex: true,
+			},
+		},
+	}
+	schema, err := ManifestSchemaV4()
+	require.NoError(t, err)
+	data, err := avro.Marshal(schema, SegmentToManifestEntry(segment))
+	require.NoError(t, err)
+
+	parsed, err := ParseSegmentManifest(data, 4)
+	require.NoError(t, err)
+	require.Len(t, parsed.GetIndexFiles(), 1)
+	assert.False(t, parsed.GetIndexFiles()[0].GetIsNestedIndex())
 }
 
 func TestMarshalSegmentManifestErrors(t *testing.T) {

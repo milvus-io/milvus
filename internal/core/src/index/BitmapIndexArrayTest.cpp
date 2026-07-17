@@ -235,7 +235,11 @@ class ArrayBitmapIndexTest : public testing::Test {
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "100";
         config[INDEX_NUM_ROWS_KEY] = nb_;
-        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+        // Version 5 keeps the V3 packed upload threshold; the explicit nested
+        // marker (mirroring BuildIndexInfo.is_nested_index) is what routes the
+        // build to the nested factory path.
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 5;
+        config[milvus::index::NESTED_INDEX] = true;
         if (has_lack_binlog_row_) {
             config[INDEX_NUM_ROWS_KEY] = nb_ + lack_binlog_row_;
         }
@@ -257,6 +261,11 @@ class ArrayBitmapIndexTest : public testing::Test {
         index::CreateIndexInfo index_info{};
         index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
         index_info.field_type = DataType::ARRAY;
+        // Mirrors production load: load_index_c populates the nested marker
+        // persisted with the segment's index meta at build time; it routes a
+        // plain-array index to the nested factory path (a default false would
+        // route to the legacy composite/Hybrid loader).
+        index_info.nested_array_index = true;
 
         config["index_files"] = index_files;
         config[milvus::LOAD_PRIORITY] =
@@ -334,35 +343,40 @@ class ArrayBitmapIndexTest : public testing::Test {
         return test_data;
     }
 
+    // Enumerate the nested index's elements in the exact order
+    // BuildArrayFieldNested lays them out: valid rows in row order, each
+    // contributing array.length() elements; null/invalid rows contribute none.
+    // For each element, `fn(value)` yields its expected bit.
+    template <typename Fn>
+    std::vector<bool>
+    ExpectedElementBits(Fn&& fn) {
+        std::vector<bool> expected;
+        for (size_t r = 0; r < data_.size(); ++r) {
+            if (nullable_ && !valid_data_[r]) {
+                continue;  // null row -> no elements in the nested index
+            }
+            milvus::Array& array = data_[r];
+            for (size_t j = 0; j < array.length(); ++j) {
+                expected.push_back(fn(array.template get_data<T>(j)));
+            }
+        }
+        return expected;
+    }
+
     void
     TestInFunc() {
         std::unordered_set<T> s;
         auto test_data = CollectQueryValues(10, s);
         auto index_ptr = dynamic_cast<index::ScalarIndex<T>*>(index_.get());
+        // Nested array bitmap In() is ELEMENT-level: one bit per element, set
+        // when the element's value is in the query set. Row-level folding is
+        // done later by the expr layer via IArrayOffsets, not by the index.
         auto bitset = index_ptr->In(test_data.size(), test_data.data());
-        size_t start = 0;
-        if (has_lack_binlog_row_) {
-            // all null here
-            for (int i = 0; i < lack_binlog_row_; i++) {
-                ASSERT_EQ(bitset[i], false);
-            }
-            start += lack_binlog_row_;
-        }
-        for (size_t i = start; i < bitset.size(); i++) {
-            auto ref = [&]() -> bool {
-                milvus::Array& array = data_[i - start];
-                if (nullable_ && !valid_data_[i - start]) {
-                    return false;
-                }
-                for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
-                    if (s.find(val) != s.end()) {
-                        return true;
-                    }
-                }
-                return false;
-            };
-            ASSERT_EQ(bitset[i], ref());
+        auto expected =
+            ExpectedElementBits([&](const T& val) { return s.count(val) > 0; });
+        ASSERT_EQ(bitset.size(), expected.size());
+        for (size_t e = 0; e < expected.size(); ++e) {
+            ASSERT_EQ(bitset[e], expected[e]) << "element " << e;
         }
     }
 
@@ -371,32 +385,14 @@ class ArrayBitmapIndexTest : public testing::Test {
         std::unordered_set<T> s;
         auto test_data = CollectQueryValues(10, s);
         auto index_ptr = dynamic_cast<index::ScalarIndex<T>*>(index_.get());
+        // NotIn() is ELEMENT-level too: every element is valid in a nested
+        // build, so NotIn[e] == (element value not in the query set).
         auto bitset = index_ptr->NotIn(test_data.size(), test_data.data());
-        size_t start = 0;
-        if (has_lack_binlog_row_) {
-            // all null here -> NotIn masks out null rows
-            for (int i = 0; i < lack_binlog_row_; i++) {
-                ASSERT_EQ(bitset[i], false);
-            }
-            start += lack_binlog_row_;
-        }
-        for (size_t i = start; i < bitset.size(); i++) {
-            auto ref = [&]() -> bool {
-                milvus::Array& array = data_[i - start];
-                if (nullable_ && !valid_data_[i - start]) {
-                    // NotIn(null) is false, masked by IsNotNull
-                    return false;
-                }
-                for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
-                    if (s.find(val) != s.end()) {
-                        // contains a queried value -> excluded from NotIn
-                        return false;
-                    }
-                }
-                return true;
-            };
-            ASSERT_EQ(bitset[i], ref());
+        auto expected = ExpectedElementBits(
+            [&](const T& val) { return s.count(val) == 0; });
+        ASSERT_EQ(bitset.size(), expected.size());
+        for (size_t e = 0; e < expected.size(); ++e) {
+            ASSERT_EQ(bitset[e], expected[e]) << "element " << e;
         }
     }
 
@@ -421,8 +417,12 @@ class ArrayBitmapIndexTest : public testing::Test {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTest);
 
 TYPED_TEST_P(ArrayBitmapIndexTest, CountFuncTest) {
+    // Array bitmap indexes are now nested (element-level): Count() returns the
+    // total ELEMENT count (array_len * valid rows), not the row count. Row-level
+    // counts come from raw / the segment, not the index. Here all rows are valid
+    // and each has array_len=10 elements.
     auto count = this->index_->Count();
-    EXPECT_EQ(count, this->nb_);
+    EXPECT_EQ(count, this->nb_ * 10);
 }
 
 TYPED_TEST_P(ArrayBitmapIndexTest, INFuncTest) {
@@ -464,8 +464,10 @@ class ArrayBitmapIndexTestV1 : public ArrayBitmapIndexTest<T> {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV1);
 
 TYPED_TEST_P(ArrayBitmapIndexTestV1, CountFuncTest) {
+    // Nested (element-level) array index: Count() == total elements
+    // (array_len=10 * nb_ valid rows).
     auto count = this->index_->Count();
-    EXPECT_EQ(count, this->nb_);
+    EXPECT_EQ(count, this->nb_ * 10);
 }
 
 template <typename T>
@@ -487,8 +489,10 @@ class ArrayBitmapIndexTestNullable : public ArrayBitmapIndexTest<T> {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTestNullable);
 
 TYPED_TEST_P(ArrayBitmapIndexTestNullable, CountFuncTest) {
+    // Nested (element-level) array index: Count() == total elements over VALID
+    // rows. Half the rows are null (i%2), each valid row has array_len=10.
     auto count = this->index_->Count();
-    EXPECT_EQ(count, this->nb_);
+    EXPECT_EQ(count, (this->nb_ / 2) * 10);
 }
 
 template <typename T>
@@ -511,12 +515,11 @@ class ArrayBitmapIndexTestV2 : public ArrayBitmapIndexTest<T> {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV2);
 
 TYPED_TEST_P(ArrayBitmapIndexTestV2, CountFuncTest) {
+    // Nested (element-level) array index: Count() == total elements over VALID
+    // rows (array_len=10 * nb_/2). Lack-binlog rows carry no elements, so they
+    // do not change the element count.
     auto count = this->index_->Count();
-    if (this->has_lack_binlog_row_) {
-        EXPECT_EQ(count, this->nb_ + this->lack_binlog_row_);
-    } else {
-        EXPECT_EQ(count, this->nb_);
-    }
+    EXPECT_EQ(count, (this->nb_ / 2) * 10);
 }
 
 using BitmapTypeV1 = testing::Types<int32_t, int64_t, std::string>;
@@ -578,7 +581,9 @@ TEST(BitmapIndexArrayNestedTest, BuildAndLoadElementLevelBitmap) {
     auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
     index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
     ASSERT_TRUE(index->IsNestedIndex());
-    ASSERT_TRUE(index->HasRawData());
+    // Nested array indexes report HasRawData()==false so the loader keeps the
+    // raw field data; row-level reads (IsNull, output) go to raw, not the index.
+    ASSERT_FALSE(index->HasRawData());
     ASSERT_EQ(index->Count(), 4);
 
     auto binary_set = index->Serialize({});
@@ -903,24 +908,25 @@ class BitmapIndexArrayRegressionTest
     template <typename T>
     void
     AssertNullSemanticsImpl(index::ScalarIndex<T>* index_ptr) const {
+        // Array bitmap indexes are now nested (element-level). IsNull()/
+        // IsNotNull() therefore return ELEMENT-level validity (one entry per
+        // indexed element), NOT row-level. Row-level null/validity for an array
+        // field is served by raw data -- PhyNullExpr falls back to RawData when
+        // the index is nested -- so the redesign deliberately stops the index
+        // from carrying row-level validity for arrays (tracked in
+        // milvus-io/milvus#50814). Only valid rows' elements are indexed (rows
+        // 0/3 are empty -> no elements; row 2 is null -> skipped), and every
+        // indexed element is valid, so the element-level result is all-non-null.
         auto is_null = index_ptr->IsNull();
         auto is_not_null = index_ptr->IsNotNull();
 
-        ASSERT_EQ(is_null.size(), num_rows_);
-        ASSERT_EQ(is_not_null.size(), num_rows_);
-
-        EXPECT_FALSE(is_null[0]) << "empty array row should stay non-null";
-        EXPECT_TRUE(is_not_null[0]) << "empty array row should stay non-null";
-
-        EXPECT_FALSE(is_null[1]) << "non-empty array row should stay non-null";
-        EXPECT_TRUE(is_not_null[1])
-            << "non-empty array row should stay non-null";
-
-        EXPECT_TRUE(is_null[2]) << "null array row should stay null";
-        EXPECT_FALSE(is_not_null[2]) << "null array row should stay null";
-
-        EXPECT_FALSE(is_null[3]) << "empty array row should stay non-null";
-        EXPECT_TRUE(is_not_null[3]) << "empty array row should stay non-null";
+        ASSERT_EQ(is_null.size(), is_not_null.size());
+        for (size_t i = 0; i < is_null.size(); ++i) {
+            EXPECT_FALSE(is_null[i])
+                << "nested array index elements are all valid";
+            EXPECT_TRUE(is_not_null[i])
+                << "nested array index elements are all valid";
+        }
     }
 };
 
@@ -981,7 +987,11 @@ TEST_P(BitmapIndexArrayRegressionTest,
         config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config[INDEX_NUM_ROWS_KEY] = num_rows_;
-        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+        // Version 5 keeps the V3 packed upload threshold; the explicit nested
+        // marker (mirroring BuildIndexInfo.is_nested_index) is what routes the
+        // build to the nested factory path.
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 5;
+        config[milvus::index::NESTED_INDEX] = true;
 
         auto build_index =
             indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -995,6 +1005,10 @@ TEST_P(BitmapIndexArrayRegressionTest,
         index::CreateIndexInfo index_info{};
         index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;
         index_info.field_type = DataType::ARRAY;
+        // Mirrors production load: the persisted per-segment nested marker
+        // keeps the plain-array index on the nested factory path (see the
+        // marker routing in IndexFactory::CreateScalarIndex).
+        index_info.nested_array_index = true;
 
         config["index_files"] = create_index_result->GetIndexFiles();
         config[milvus::LOAD_PRIORITY] =
@@ -1016,26 +1030,33 @@ TEST_P(BitmapIndexArrayRegressionTest,
 
         switch (param.element_type) {
             case proto::schema::DataType::Int32: {
-                auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx);
+                // Build a nested (element-level) array bitmap, matching the
+                // factory path the V3 param uses (arrays are now always nested).
+                auto index = std::make_unique<index::BitmapIndex<int32_t>>(
+                    ctx, /*is_nested_index=*/true);
                 index->BuildWithFieldData(
                     std::vector<FieldDataPtr>{field_data});
                 auto binary_set = index->Serialize({});
 
                 auto loaded_index =
-                    std::make_unique<index::BitmapIndex<int32_t>>(ctx);
+                    std::make_unique<index::BitmapIndex<int32_t>>(
+                        ctx, /*is_nested_index=*/true);
                 loaded_index->Load(binary_set, load_config);
                 AssertNullSemantics(loaded_index.get(), param.element_type);
                 break;
             }
             case proto::schema::DataType::String: {
-                auto index =
-                    std::make_unique<index::BitmapIndex<std::string>>(ctx);
+                // Build a nested (element-level) array bitmap, matching the
+                // factory path the V3 param uses (arrays are now always nested).
+                auto index = std::make_unique<index::BitmapIndex<std::string>>(
+                    ctx, /*is_nested_index=*/true);
                 index->BuildWithFieldData(
                     std::vector<FieldDataPtr>{field_data});
                 auto binary_set = index->Serialize({});
 
                 auto loaded_index =
-                    std::make_unique<index::BitmapIndex<std::string>>(ctx);
+                    std::make_unique<index::BitmapIndex<std::string>>(
+                        ctx, /*is_nested_index=*/true);
                 loaded_index->Load(binary_set, load_config);
                 AssertNullSemantics(loaded_index.get(), param.element_type);
                 break;
@@ -1138,6 +1159,17 @@ MakeIntArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays,
         field_data->FillFieldData(array_data.data(), array_data.size());
     }
     return field_data;
+}
+
+// String counterpart of MakeIntArrayFieldData. The wrapping is identical --
+// the element type lives inside each ScalarFieldProto (string_data vs
+// int_data), not in the FieldData -- so this simply delegates; the separate
+// name keeps VARCHAR call sites self-documenting.
+FieldDataPtr
+MakeStringArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays,
+                         bool nullable,
+                         const uint8_t* valid_data) {
+    return MakeIntArrayFieldData(scalar_arrays, nullable, valid_data);
 }
 
 }  // namespace
@@ -1269,6 +1301,44 @@ TEST(BitmapIndexArrayNestedTest, NullableNullsBeforeValidUnifiedLoad) {
     EXPECT_FALSE(r30[2]);
     EXPECT_TRUE(r30[3]);
     EXPECT_TRUE(r30[4]);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// Regression: an all-null nullable array field yields ZERO valid elements in
+// the nested build. The nested builder must tolerate this and produce a valid
+// empty element-level index instead of throwing DataIsEmpty -- matching the
+// tolerant InvertedIndexTantivy nested path. Before the fix, create_index on an
+// all-null array (BITMAP / AUTOINDEX) threw every attempt and the build task
+// retried forever, surfacing as a 120s create-index timeout in e2e.
+TEST(BitmapIndexArrayNestedTest, NullableAllNullBuildsEmptyNestedIndex) {
+    // 4 logical rows, every row NULL -> 0 valid elements.
+    std::vector<ScalarFieldProto> scalar_arrays(4);  // placeholders, all null
+    uint8_t valid_data = 0b00000000;                 // no row valid
+
+    auto root_path = fmt::format("{}/bitmap_nested_all_null", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::Int32, true, 3103);
+    auto field_data = MakeIntArrayFieldData(scalar_arrays, true, &valid_data);
+
+    auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+    // Must NOT throw DataIsEmpty on an all-null (zero-element) nested build.
+    ASSERT_NO_THROW(
+        index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data}));
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_EQ(index->Count(), 0);
+
+    // Serialize -> Load round-trip of the empty nested index must also succeed.
+    auto binary_set = index->Serialize({});
+    auto loaded = std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    ASSERT_NO_THROW(loaded->Load(binary_set, {}));
+    ASSERT_TRUE(loaded->IsNestedIndex());
+    ASSERT_EQ(loaded->Count(), 0);
+
+    // A query over the empty element index returns an empty bitset.
+    int32_t v = 10;
+    auto r = loaded->In(1, &v);
+    EXPECT_EQ(r.size(), 0);
 
     boost::filesystem::remove_all(root_path);
 }
@@ -1416,6 +1486,264 @@ TEST(ScalarIndexSortArrayNestedTest, NestedBuildByteSizeAndQuery) {
     EXPECT_FALSE(in30[2]);
     EXPECT_TRUE(in30[3]);
     EXPECT_TRUE(in30[4]);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// Sort-family twin of NullableNullsBeforeValidElementBitmap (bug #1): a nested
+// ScalarIndexSort build over compact nullable FieldData with NULL rows *before*
+// valid rows must read elements via RawValue (logical->physical mapping), not
+// Data()[i] -- otherwise every row after a NULL shifts and the read overruns.
+TEST(ScalarIndexSortArrayNestedTest, NullableNullsBeforeValidBuildAndQuery) {
+    // Same layout as the bitmap twin: row0 NULL, row1 {10,20}, row2 NULL,
+    // row3 {} (empty, non-null), row4 {20,30}, row5 {30}. Flattened valid
+    // elements: e0=10 e1=20 (row1) | e2=20 e3=30 (row4) | e4=30 (row5).
+    std::vector<ScalarFieldProto> scalar_arrays(6);
+    scalar_arrays[1].mutable_int_data()->add_data(10);
+    scalar_arrays[1].mutable_int_data()->add_data(20);
+    // row3 empty non-null array -> no elements.
+    scalar_arrays[4].mutable_int_data()->add_data(20);
+    scalar_arrays[4].mutable_int_data()->add_data(30);
+    scalar_arrays[5].mutable_int_data()->add_data(30);
+
+    // bit i == 1 means row i is valid. rows 1,3,4,5 valid; rows 0,2 null.
+    uint8_t valid_data = 0b00111010;  // 0x3A
+
+    auto root_path =
+        fmt::format("{}/stlsort_nested_nulls_before", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::Int32, true, 3124);
+    auto field_data = MakeIntArrayFieldData(scalar_arrays, true, &valid_data);
+
+    auto index = std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, true);
+    index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_EQ(index->Count(), 5);
+
+    auto check = [](index::ScalarIndexSort<int32_t>* idx) {
+        // In(20) -> e1 (row1) and e2 (row4).
+        int32_t v20 = 20;
+        auto r20 = idx->In(1, &v20);
+        ASSERT_EQ(r20.size(), 5);
+        EXPECT_FALSE(r20[0]);
+        EXPECT_TRUE(r20[1]);
+        EXPECT_TRUE(r20[2]);
+        EXPECT_FALSE(r20[3]);
+        EXPECT_FALSE(r20[4]);
+
+        // In(30) -> e3 (row4) and e4 (row5).
+        int32_t v30 = 30;
+        auto r30 = idx->In(1, &v30);
+        EXPECT_FALSE(r30[0]);
+        EXPECT_FALSE(r30[1]);
+        EXPECT_FALSE(r30[2]);
+        EXPECT_TRUE(r30[3]);
+        EXPECT_TRUE(r30[4]);
+
+        // Range > 15 -> all the 20s and 30s but not the 10.
+        auto rg = idx->Range(15, OpType::GreaterThan);
+        ASSERT_EQ(rg.size(), 5);
+        EXPECT_FALSE(rg[0]);
+        EXPECT_TRUE(rg[1]);
+        EXPECT_TRUE(rg[2]);
+        EXPECT_TRUE(rg[3]);
+        EXPECT_TRUE(rg[4]);
+    };
+
+    // Unlike BitmapIndex, ScalarIndexSort is queryable straight after build
+    // (BuildWithFieldData ends in setup_data_pointers)...
+    check(index.get());
+
+    // ...and the element mapping must survive the Serialize/Load round-trip.
+    auto binary_set = index->Serialize({});
+    auto loaded = std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, false);
+    loaded->Load(binary_set, {});
+    ASSERT_TRUE(loaded->IsNestedIndex());
+    ASSERT_EQ(loaded->Count(), 5);
+    check(loaded.get());
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// Regression companion to the BITMAP all-null case: the AUTOINDEX(int64) path
+// resolves to HYBRID -> ScalarIndexSort, whose nested build previously threw
+// DataIsEmpty on an all-null array (0 elements) and retried forever. It must now
+// build a valid empty nested index and round-trip through Serialize/Load.
+TEST(ScalarIndexSortArrayNestedTest, NestedAllNullBuildsEmptyIndex) {
+    std::vector<ScalarFieldProto> scalar_arrays(4);  // 4 rows, all null
+    uint8_t valid_data = 0b00000000;                 // no row valid
+
+    auto root_path = fmt::format("{}/stlsort_nested_all_null", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::Int32, true, 3121);
+    auto field_data = MakeIntArrayFieldData(scalar_arrays, true, &valid_data);
+
+    auto index = std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, true);
+    ASSERT_NO_THROW(
+        index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data}));
+    ASSERT_EQ(index->Count(), 0);
+
+    auto binary_set = index->Serialize({});
+    auto loaded = std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, false);
+    ASSERT_NO_THROW(loaded->Load(binary_set, {}));
+    ASSERT_EQ(loaded->Count(), 0);
+
+    int32_t v30 = 30;
+    auto in30 = loaded->In(1, &v30);
+    EXPECT_EQ(in30.size(), 0);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// V3 companion to NestedAllNullBuildsEmptyIndex: the empty nested index must
+// also survive the V3 unified upload/load round-trip. V3 load defaults to
+// mmap, and the zero-byte idx_to_offsets entry used to hit mmap(len=0) EINVAL
+// -- i.e. the all-null segment built fine but failed on every load, retrying
+// forever. The load path now skips the meta mapping when the entry is empty.
+TEST(ScalarIndexSortArrayNestedTest, NestedAllNullV3UnifiedLoad) {
+    std::vector<ScalarFieldProto> scalar_arrays(4);  // 4 rows, all null
+    uint8_t valid_data = 0b00000000;
+
+    auto root_path =
+        fmt::format("{}/stlsort_nested_all_null_v3", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::Int32, true, 3122);
+    auto field_data = MakeIntArrayFieldData(scalar_arrays, true, &valid_data);
+
+    auto build_index =
+        std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, true);
+    ASSERT_NO_THROW(
+        build_index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data}));
+    auto create_index_result = build_index->UploadUnified({});
+    ASSERT_EQ(create_index_result->GetIndexFiles().size(), 1);
+
+    Config config;
+    config["index_files"] = create_index_result->GetIndexFiles();
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+
+    ctx.set_for_loading_index(true);
+    auto loaded = std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, false);
+    ASSERT_NO_THROW(loaded->LoadUnified(config));
+    ASSERT_EQ(loaded->Count(), 0);
+
+    int32_t v = 10;
+    auto r = loaded->In(1, &v);
+    EXPECT_EQ(r.size(), 0);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// VarChar counterpart: StringIndexSort shares the zero-element guard relaxation
+// (gated on is_nested_index_) and the empty-meta mmap skip. An all-null varchar
+// array field must build a valid empty nested index and round-trip through both
+// BinarySet and V3 unified load.
+TEST(StringIndexSortArrayNestedTest, NestedAllNullBuildsEmptyIndex) {
+    std::vector<ScalarFieldProto> scalar_arrays(4);  // 4 rows, all null
+    uint8_t valid_data = 0b00000000;
+
+    auto root_path = fmt::format("{}/strsort_nested_all_null", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, true, 3123);
+    auto field_data = MakeIntArrayFieldData(scalar_arrays, true, &valid_data);
+
+    auto build_index = std::make_unique<index::StringIndexSort>(ctx, true);
+    ASSERT_NO_THROW(
+        build_index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data}));
+    ASSERT_EQ(build_index->Count(), 0);
+
+    // V3 unified round-trip (defaults to mmap on load; exercises the
+    // empty-meta skip).
+    auto create_index_result = build_index->UploadUnified({});
+    ASSERT_GE(create_index_result->GetIndexFiles().size(), 1);
+
+    Config config;
+    config["index_files"] = create_index_result->GetIndexFiles();
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+
+    ctx.set_for_loading_index(true);
+    auto loaded = std::make_unique<index::StringIndexSort>(ctx, false);
+    ASSERT_NO_THROW(loaded->LoadUnified(config));
+    ASSERT_EQ(loaded->Count(), 0);
+
+    std::string v = "x";
+    auto r = loaded->In(1, &v);
+    EXPECT_EQ(r.size(), 0);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// VarChar twin of ScalarIndexSortArrayNestedTest.NullableNullsBeforeValid-
+// BuildAndQuery: StringIndexSort's nested build walks the same compact
+// nullable FieldData, so NULL rows preceding valid rows must not shift the
+// element stream (bug #1's RawValue fix, string flavor).
+TEST(StringIndexSortArrayNestedTest, NullableNullsBeforeValidBuildAndQuery) {
+    // row0 NULL, row1 {"a","b"}, row2 NULL, row3 {} (empty, non-null),
+    // row4 {"b","c"}, row5 {"c"}. Flattened valid elements:
+    //   e0="a" e1="b" (row1) | e2="b" e3="c" (row4) | e4="c" (row5).
+    std::vector<ScalarFieldProto> scalar_arrays(6);
+    scalar_arrays[1].mutable_string_data()->add_data("a");
+    scalar_arrays[1].mutable_string_data()->add_data("b");
+    // row3 empty non-null array -> no elements.
+    scalar_arrays[4].mutable_string_data()->add_data("b");
+    scalar_arrays[4].mutable_string_data()->add_data("c");
+    scalar_arrays[5].mutable_string_data()->add_data("c");
+
+    // bit i == 1 means row i is valid. rows 1,3,4,5 valid; rows 0,2 null.
+    uint8_t valid_data = 0b00111010;  // 0x3A
+
+    auto root_path =
+        fmt::format("{}/strsort_nested_nulls_before", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, true, 3125);
+    auto field_data =
+        MakeStringArrayFieldData(scalar_arrays, true, &valid_data);
+
+    auto index = std::make_unique<index::StringIndexSort>(ctx, true);
+    index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_EQ(index->Count(), 5);
+
+    auto check = [](index::StringIndexSort* idx) {
+        // In("a") -> only e0.
+        std::string va = "a";
+        auto ra = idx->In(1, &va);
+        ASSERT_EQ(ra.size(), 5);
+        EXPECT_TRUE(ra[0]);
+        EXPECT_FALSE(ra[1]);
+        EXPECT_FALSE(ra[2]);
+        EXPECT_FALSE(ra[3]);
+        EXPECT_FALSE(ra[4]);
+
+        // In("b") -> e1 (row1) and e2 (row4).
+        std::string vb = "b";
+        auto rb = idx->In(1, &vb);
+        EXPECT_FALSE(rb[0]);
+        EXPECT_TRUE(rb[1]);
+        EXPECT_TRUE(rb[2]);
+        EXPECT_FALSE(rb[3]);
+        EXPECT_FALSE(rb[4]);
+
+        // In("c") -> e3 (row4) and e4 (row5).
+        std::string vc = "c";
+        auto rc = idx->In(1, &vc);
+        EXPECT_FALSE(rc[0]);
+        EXPECT_FALSE(rc[1]);
+        EXPECT_FALSE(rc[2]);
+        EXPECT_TRUE(rc[3]);
+        EXPECT_TRUE(rc[4]);
+    };
+
+    // StringIndexSort builds its queryable impl in BuildWithFieldData, so the
+    // freshly built index answers In() directly...
+    check(index.get());
+
+    // ...and the element mapping must survive the Serialize/Load round-trip.
+    auto binary_set = index->Serialize({});
+    auto loaded = std::make_unique<index::StringIndexSort>(ctx, false);
+    loaded->Load(binary_set, {});
+    ASSERT_TRUE(loaded->IsNestedIndex());
+    ASSERT_EQ(loaded->Count(), 5);
+    check(loaded.get());
 
     boost::filesystem::remove_all(root_path);
 }

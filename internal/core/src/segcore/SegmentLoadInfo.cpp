@@ -147,6 +147,11 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
             .index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
             std::to_string(scalar_version);
     }
+    // Inject the persisted per-segment nested marker: this ARRAY-field scalar
+    // index was built as a nested (element-level) index.
+    if (field_index_info->is_nested_index()) {
+        load_index_info.index_params[milvus::index::NESTED_INDEX] = "true";
+    }
     size_t dim =
         IsVectorDataType(field_meta.get_data_type()) &&
                 !IsSparseFloatVectorDataType(field_meta.get_data_type())

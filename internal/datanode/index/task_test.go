@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -237,4 +238,49 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 
 func TestAnalyzeTaskSuite(t *testing.T) {
 	suite.Run(t, new(AnalyzeTaskSuite))
+}
+
+// The worker re-derives the nested-array marker from the field schema and the
+// post-clamp scalar index version rather than trusting the request bit, so the
+// invariant "scalar index version >= 5 on a plain ARRAY field <=> nested"
+// holds even when the requesting datacoord is older (its proto has no nested
+// field but it can still resolve version 5 from upgraded querynodes).
+func TestNormalizeNestedIndexMarker(t *testing.T) {
+	arrayField := &schemapb.FieldSchema{
+		FieldID: 101, Name: "scores",
+		DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+	}
+	structSubField := &schemapb.FieldSchema{
+		FieldID: 102, Name: "profile[score]",
+		DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+	}
+	int64Field := &schemapb.FieldSchema{
+		FieldID: 103, Name: "num", DataType: schemapb.DataType_Int64,
+	}
+
+	cases := []struct {
+		name     string
+		field    *schemapb.FieldSchema
+		version  int32
+		echoed   bool
+		expected bool
+	}{
+		{"array v5 dropped bit is restored (old datacoord request)", arrayField, 5, false, true},
+		{"array v5 explicit bit kept", arrayField, 5, true, true},
+		{"array below v5 cleared (clamped node builds row-level)", arrayField, 4, true, false},
+		{"non-array never nested", int64Field, 5, true, false},
+		{"struct sub-field never carries the marker", structSubField, 5, true, false},
+		{"nil field never nested", nil, 5, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &workerpb.CreateJobRequest{
+				Field:                     tc.field,
+				CurrentScalarIndexVersion: tc.version,
+				IsNestedIndex:             tc.echoed,
+			}
+			normalizeNestedIndexMarker(req)
+			assert.Equal(t, tc.expected, req.GetIsNestedIndex())
+		})
+	}
 }

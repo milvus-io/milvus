@@ -399,6 +399,153 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     ASSERT_TRUE(request.has_raw_data);
 }
 
+// A NESTED (element-level) ARRAY bitmap allocates its resident validity bitset
+// by ELEMENT count, not row count, so BitsetBytes(num_rows) under-counts it by
+// the array fan-out -- here a tiny 1025-row segment whose (element-sized) index
+// is 1 GiB. The estimator has no element count, but the serialized index file
+// already holds the element-sized validity bitset, so a NESTED ARRAY bitmap
+// resident estimate is floored to index_size, preventing catastrophic
+// over-admission / OOM. A LEGACY (row-level) ARRAY bitmap -- marker absent, as
+// on every existing index during a rolling upgrade -- and a scalar-field bitmap
+// are unaffected (stay row-count sized), so a large legacy mmap index is not
+// over-counted and wrongly rejected.
+TEST(IndexLoadTest, BitmapArrayMmapEstimateFlooredByIndexSize) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;  // 1 GiB
+    constexpr int64_t kNumRows = 1025;                     // tiny row count
+    constexpr uint64_t kValidBitsetBytes = (kNumRows + 7) / 8;  // => 129 bytes
+
+    auto makeInfo = [&](milvus::DataType field_type,
+                        milvus::DataType element_type,
+                        bool nested) {
+        milvus::segcore::LoadIndexInfo info;
+        info.collection_id = 1;
+        info.partition_id = 2;
+        info.segment_id = 3;
+        info.field_id = 4;
+        info.field_type = field_type;
+        info.element_type = element_type;
+        info.enable_mmap = true;
+        info.index_id = 5;
+        info.index_build_id = 6;
+        info.index_version = 1;
+        info.index_params = {
+            {"index_type", "BITMAP"},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "5"},
+        };
+        // The nested marker travels via index_params (injected on load); its
+        // presence is what distinguishes an element-level index from a legacy
+        // row-level one for resource estimation.
+        if (nested) {
+            info.index_params[milvus::index::NESTED_INDEX] = "true";
+        }
+        info.index_files = {"/tmp/index/1"};
+        info.index = nullptr;
+        info.cache_index = nullptr;
+        info.uri = "";
+        info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        info.index_size = kIndexSize;
+        info.num_rows = kNumRows;
+        return info;
+    };
+
+    // NESTED ARRAY field: resident validity is element-sized -> floored to
+    // index_size, not the tiny row-count-sized BitsetBytes(num_rows).
+    auto nested_info = makeInfo(
+        milvus::DataType::ARRAY, milvus::DataType::INT64, /*nested=*/true);
+    auto nested_req = EstimateLoadIndexResource(&nested_info);
+    ASSERT_EQ(nested_req.final_memory_cost, kIndexSize);
+    ASSERT_GT(nested_req.final_memory_cost, kValidBitsetBytes);
+    ASSERT_GE(nested_req.max_memory_cost, nested_req.final_memory_cost);
+
+    // LEGACY (non-nested) ARRAY bitmap: row-level like a scalar field, so the
+    // resident estimate stays BitsetBytes(num_rows) and is NOT floored to the
+    // 1 GiB file size -- otherwise a large legacy mmap index would be grossly
+    // over-counted and rejected on rolling upgrade.
+    auto legacy_info = makeInfo(
+        milvus::DataType::ARRAY, milvus::DataType::INT64, /*nested=*/false);
+    auto legacy_req = EstimateLoadIndexResource(&legacy_info);
+    ASSERT_EQ(legacy_req.final_memory_cost, kValidBitsetBytes);
+
+    // Scalar (INT64) field bitmap: unchanged, resident == BitsetBytes(num_rows).
+    auto scalar_info = makeInfo(
+        milvus::DataType::INT64, milvus::DataType::NONE, /*nested=*/false);
+    auto scalar_req = EstimateLoadIndexResource(&scalar_info);
+    ASSERT_EQ(scalar_req.final_memory_cost, kValidBitsetBytes);
+}
+
+// Sort-family analog of BitmapArrayMmapEstimateFlooredByIndexSize: a NESTED
+// (element-level) ARRAY sort index keeps its validity bitset heap-resident
+// sized by ELEMENT count (ScalarIndexSort/StringIndexSort::LoadEntries), so
+// the row-sized SortLegacyAuxBytes(num_rows) estimate under-counts it by the
+// array fan-out. The mmap estimate is floored to index_size, gated on the
+// NESTED_INDEX marker; legacy row-level ARRAY and scalar-field sort indexes
+// keep the row-sized estimate so large legacy mmap files are not wrongly
+// rejected on rolling upgrade.
+TEST(IndexLoadTest, SortArrayMmapEstimateFlooredByIndexSize) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;  // 1 GiB
+    constexpr int64_t kNumRows = 1025;                     // tiny row count
+    constexpr uint64_t kValidBitsetBytes = (kNumRows + 7) / 8;
+    constexpr uint64_t kLegacyAuxBytes =
+        static_cast<uint64_t>(kNumRows) * sizeof(int32_t) + kValidBitsetBytes;
+
+    auto makeInfo = [&](milvus::DataType field_type,
+                        milvus::DataType element_type,
+                        bool nested) {
+        milvus::segcore::LoadIndexInfo info;
+        info.collection_id = 1;
+        info.partition_id = 2;
+        info.segment_id = 3;
+        info.field_id = 4;
+        info.field_type = field_type;
+        info.element_type = element_type;
+        info.enable_mmap = true;
+        info.index_id = 5;
+        info.index_build_id = 6;
+        info.index_version = 1;
+        info.index_params = {
+            {"index_type", "STL_SORT"},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "5"},
+        };
+        if (nested) {
+            info.index_params[milvus::index::NESTED_INDEX] = "true";
+        }
+        info.index_files = {"/tmp/index/1"};
+        info.index = nullptr;
+        info.cache_index = nullptr;
+        info.uri = "";
+        info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        info.index_size = kIndexSize;
+        info.num_rows = kNumRows;
+        return info;
+    };
+
+    // NESTED ARRAY sort index: resident validity bitset is element-sized ->
+    // floored to index_size, not the tiny row-sized legacy-aux estimate.
+    auto nested_info = makeInfo(
+        milvus::DataType::ARRAY, milvus::DataType::INT64, /*nested=*/true);
+    auto nested_req = EstimateLoadIndexResource(&nested_info);
+    ASSERT_EQ(nested_req.final_memory_cost, kIndexSize);
+    ASSERT_GT(nested_req.final_memory_cost, kLegacyAuxBytes);
+    ASSERT_GE(nested_req.max_memory_cost, nested_req.final_memory_cost);
+    ASSERT_EQ(nested_req.final_disk_cost, kIndexSize);
+
+    // LEGACY (non-nested) ARRAY sort index: row-level, so the resident
+    // estimate stays SortLegacyAuxBytes(num_rows) and is NOT floored to the
+    // 1 GiB file size.
+    auto legacy_info = makeInfo(
+        milvus::DataType::ARRAY, milvus::DataType::INT64, /*nested=*/false);
+    auto legacy_req = EstimateLoadIndexResource(&legacy_info);
+    ASSERT_EQ(legacy_req.final_memory_cost, kLegacyAuxBytes);
+
+    // Scalar (INT64) field sort index: unchanged, row-sized estimate.
+    auto scalar_info = makeInfo(
+        milvus::DataType::INT64, milvus::DataType::NONE, /*nested=*/false);
+    auto scalar_req = EstimateLoadIndexResource(&scalar_info);
+    ASSERT_EQ(scalar_req.final_memory_cost, kLegacyAuxBytes);
+}
+
 TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;

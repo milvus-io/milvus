@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <set>
@@ -36,7 +37,9 @@
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/Meta.h"
+#include "index/BitmapIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/operands.h"
@@ -684,6 +687,118 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
             ASSERT_EQ(mapped_idx, elem_idx)
                 << "Element " << elem_id << " should have index " << elem_idx;
         }
+    }
+}
+
+// Regression: a growing segment recovering a NULLABLE VECTOR_ARRAY field from
+// binlog must build a correct element-offset table even when NULL rows precede
+// valid ones. VECTOR_ARRAY FieldData is stored COMPACTLY
+// (FieldDataVectorArrayImpl packs only valid rows), so
+// ExtractArrayLengthsFromFieldData reads valid rows by physical index -- the
+// OPPOSITE convention from a scalar ARRAY (stored densely, read by logical
+// index). This guards the VECTOR_ARRAY (compact) branch, the symmetric
+// counterpart of the scalar-array growing-recovery path.
+TEST(ElementFilter, GrowingNullableVectorArrayBinlogRecovery) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t N = 5;
+    // row0=NULL, row1=2 vecs, row2=NULL, row3=3 vecs, row4=1 vec. The leading
+    // and interior NULLs are what break a (wrong) logical-index read of the
+    // compact buffer.
+    const std::vector<int> vec_counts = {0, 2, 0, 3, 1};
+    const std::vector<bool> valid = {false, true, false, true, true};
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    // Bracket name -> the field is a struct representative and so gets an
+    // ArrayOffsets table built during load.
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::MAX_SIM,
+                                                    /*nullable=*/true);
+
+    // Build the COMPACT nullable VECTOR_ARRAY FieldData: only valid rows are
+    // stored (packed), while the valid bitmap is sized by the logical row count
+    // N. This mirrors how the storage/arrow layer materializes a nullable
+    // vector array, so the growing load path sees the real compact buffer.
+    std::vector<milvus::VectorArray> compact;
+    std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+    for (int64_t i = 0; i < N; ++i) {
+        if (!valid[i]) {
+            continue;
+        }
+        valid_bitmap[i >> 3] |= (1 << (i & 0x07));
+        VectorFieldProto vf;
+        vf.set_dim(dim);
+        for (int v = 0; v < vec_counts[i]; ++v) {
+            for (int d = 0; d < dim; ++d) {
+                vf.mutable_float_vector()->add_data(
+                    static_cast<float>(i * 100 + v * 10 + d));
+            }
+        }
+        compact.emplace_back(vf);
+    }
+    auto vec_fd = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, /*nullable=*/true, dim);
+    vec_fd->FillFieldData(compact.data(), valid_bitmap.data(), N, 0);
+
+    // Assemble ONE LoadFieldDataInfo carrying RowID + Timestamp + pk (from
+    // PrepareInsertBinlog) plus the nullable vector-array field, then load it
+    // through the growing binlog recovery path in a single batch -- exactly what
+    // SegmentGrowingImpl::Load does in production (load_field_data_internal
+    // asserts the system + pk fields are present together).
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto proto = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_arr =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    proto->mutable_fields_data()->AddAllocated(id_arr.release());
+    proto->set_num_rows(N);
+    GeneratedData gen;
+    gen.schema_ = schema;
+    gen.raw_ = proto.release();
+    for (int64_t i = 0; i < N; ++i) {
+        gen.row_ids_.push_back(i);
+        gen.timestamps_.push_back(i);
+    }
+    auto load_info =
+        PrepareInsertBinlog(kCollectionID, kPartitionID, kSegmentID, gen, cm);
+    auto vec_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, vec_fid.get(), {vec_fd}, cm);
+    for (auto& [fid, info] : vec_info.field_infos) {
+        load_info.field_infos.emplace(fid, info);
+    }
+
+    auto loaded = CreateGrowingSegment(schema, empty_index_meta);
+    auto status = LoadFieldData(loaded.get(), &load_info);
+    ASSERT_EQ(status.error_code, milvus::Success);
+
+    auto growing = dynamic_cast<SegmentGrowingImpl*>(loaded.get());
+    ASSERT_NE(growing, nullptr);
+
+    // The element-offset table must reflect the per-row vector counts: NULL rows
+    // contribute 0, valid rows their actual count. A logical-index read of the
+    // compact buffer would shift these once a NULL precedes a valid row.
+    auto offsets = growing->GetArrayOffsets(vec_fid);
+    ASSERT_NE(offsets, nullptr);
+    ASSERT_EQ(offsets->GetRowCount(), N);
+    ASSERT_EQ(offsets->GetTotalElementCount(), 0 + 2 + 0 + 3 + 1);
+    for (int64_t i = 0; i < N; ++i) {
+        auto [start, end] = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(end - start, vec_counts[i])
+            << "row " << i << " element count mismatch";
+    }
+
+    // NULL rows (recorded via the -1 length sentinel) must be reported
+    // row-invalid; real rows stay valid.
+    milvus::TargetBitmap probe(N, true);
+    offsets->AndRowValidBitmap(probe.view(), 0, N);
+    for (int64_t i = 0; i < N; ++i) {
+        EXPECT_EQ(bool(probe[i]), bool(valid[i]))
+            << "row " << i << " validity mismatch";
     }
 }
 
@@ -4512,4 +4627,51 @@ TEST(ElementVectorSearch, SealedBruteForce_IteratorV2_MultiBatch) {
     ASSERT_GE(seen.size(), static_cast<size_t>(kElemTopK))
         << "multi-batch iterator should accumulate strictly more results "
         << "than a single batch";
+}
+
+// A nested (array-element) scalar index must report HasRawData()==false so the
+// segment loader keeps the raw array data. A nested index stores only flattened
+// element values -- no row boundaries, no null/empty rows -- so it cannot
+// reconstruct the per-row array structure that IArrayOffsets needs. If such an
+// index reported HasRawData()==true, the loader could load the index alone and
+// skip the raw data, leaving MATCH_*/element_filter with no offsets to abort on
+// ("Array offsets not available"). Non-nested scalar indexes are unaffected.
+TEST(NestedArrayIndexRawData, NestedIndexesReportNoRawData) {
+    // STL_SORT (ScalarIndexSort): nested -> false (the guard), non-nested -> true.
+    auto stl_nested = std::make_unique<index::ScalarIndexSort<int32_t>>(
+        storage::FileManagerContext(), /*is_nested_index=*/true);
+    EXPECT_FALSE(stl_nested->HasRawData());
+
+    auto stl_plain = std::make_unique<index::ScalarIndexSort<int32_t>>(
+        storage::FileManagerContext(), /*is_nested_index=*/false);
+    EXPECT_TRUE(stl_plain->HasRawData());
+
+    // BITMAP: any Array bitmap index (nested or not) -> false; non-array -> true.
+    {
+        storage::FileManagerContext ctx;
+        ctx.fieldDataMeta.field_schema.set_data_type(
+            proto::schema::DataType::Array);
+        auto bitmap_nested = std::make_unique<index::BitmapIndex<int32_t>>(
+            ctx, /*is_nested_index=*/true);
+        EXPECT_FALSE(bitmap_nested->HasRawData());
+        auto bitmap_array = std::make_unique<index::BitmapIndex<int32_t>>(
+            ctx, /*is_nested_index=*/false);
+        EXPECT_FALSE(bitmap_array->HasRawData());
+    }
+    {
+        storage::FileManagerContext ctx;
+        ctx.fieldDataMeta.field_schema.set_data_type(
+            proto::schema::DataType::Int32);
+        auto bitmap_scalar = std::make_unique<index::BitmapIndex<int32_t>>(ctx);
+        EXPECT_TRUE(bitmap_scalar->HasRawData());
+    }
+
+    // STL_SORT for VarChar (StringIndexSort): nested -> false, non-nested -> true.
+    auto str_nested = std::make_unique<index::StringIndexSort>(
+        storage::FileManagerContext(), /*is_nested_index=*/true);
+    EXPECT_FALSE(str_nested->HasRawData());
+
+    auto str_plain = std::make_unique<index::StringIndexSort>(
+        storage::FileManagerContext(), /*is_nested_index=*/false);
+    EXPECT_TRUE(str_plain->HasRawData());
 }

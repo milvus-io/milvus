@@ -758,7 +758,10 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
 	}
 	im := createTestIndexMeta(s.T(), collectionID, indexes)
-	m := &meta{indexMeta: im}
+	m := &meta{
+		indexMeta:   im,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 
 	result := &datapb.CopySegmentResult{
 		SegmentId:    segmentID,
@@ -795,7 +798,10 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePa
 		301: {CollectionID: collectionID, FieldID: 102, IndexID: 301, IndexName: "idx_v1"},
 	}
 	im := createTestIndexMeta(s.T(), collectionID, indexes)
-	m := &meta{indexMeta: im}
+	m := &meta{
+		indexMeta:   im,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 
 	result := &datapb.CopySegmentResult{
 		SegmentId:    segmentID,
@@ -833,6 +839,145 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePa
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, segIdxV1.IndexStorePathVersion)
 }
 
+// The is_nested_index marker persisted by the copy path must be re-derived
+// from the target field schema + scalar index version (the exact build-time
+// decision, typeutil.IsNestedArrayIndex), not trusted from the copy worker's
+// echo: an old (pre-nested) copy worker rebuilds VectorScalarIndexInfo
+// field-by-field and silently drops the bit while still echoing scalar index
+// version 5. Only when the field cannot be resolved (collection cache not yet
+// loaded / schema drift) does the echoed bit win.
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_RederivesNestedMarker() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "arr_idx"},
+		301: {CollectionID: collectionID, FieldID: 102, IndexID: 301, IndexName: "num_idx"},
+		302: {CollectionID: collectionID, FieldID: 103, IndexID: 302, IndexName: "orphan_idx"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes)
+	m := &meta{
+		indexMeta:   im,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	// Field 103 is deliberately absent from the schema (drift) to exercise the
+	// echoed-bit fallback.
+	m.collections.Insert(collectionID, &collectionInfo{
+		ID: collectionID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "num", DataType: schemapb.DataType_Int64},
+			},
+		},
+	})
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			// Plain ARRAY field at v5 whose echoed bit was dropped by an old
+			// copy worker: re-derivation must restore true.
+			7001: {
+				FieldId:                   101,
+				IndexId:                   200,
+				BuildId:                   7001,
+				IndexName:                 "arr_idx",
+				IndexFilePaths:            []string{"f1"},
+				CurrentScalarIndexVersion: 5,
+				IsNestedIndex:             false,
+			},
+			// Non-ARRAY field with a bogus echoed true: re-derivation must
+			// clear it.
+			7002: {
+				FieldId:                   102,
+				IndexId:                   201,
+				BuildId:                   7002,
+				IndexName:                 "num_idx",
+				IndexFilePaths:            []string{"f2"},
+				CurrentScalarIndexVersion: 5,
+				IsNestedIndex:             true,
+			},
+			// Field unresolvable in the target schema: the echoed bit is the
+			// only information available and wins.
+			7003: {
+				FieldId:                   103,
+				IndexId:                   202,
+				BuildId:                   7003,
+				IndexName:                 "orphan_idx",
+				IndexFilePaths:            []string{"f3"},
+				CurrentScalarIndexVersion: 5,
+				IsNestedIndex:             true,
+			},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	s.NoError(err)
+
+	arrIdx, ok := im.segmentBuildInfo.Get(7001)
+	s.True(ok)
+	s.True(arrIdx.IsNestedIndex, "dropped echo on a v5 plain-ARRAY index must be re-derived to true")
+	s.Equal(int32(5), arrIdx.CurrentScalarIndexVersion)
+
+	numIdx, ok := im.segmentBuildInfo.Get(7002)
+	s.True(ok)
+	s.False(numIdx.IsNestedIndex, "bogus echoed true on a non-ARRAY field must be cleared")
+
+	orphanIdx, ok := im.segmentBuildInfo.Get(7003)
+	s.True(ok)
+	s.True(orphanIdx.IsNestedIndex, "unresolvable field falls back to the echoed bit")
+}
+
+// Same re-derivation, ARRAY field below the nested version gate: version 4
+// indexes are legacy row-level regardless of what the worker echoed.
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_NestedMarkerClearedBelowV5() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "arr_idx"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes)
+	m := &meta{
+		indexMeta:   im,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	m.collections.Insert(collectionID, &collectionInfo{
+		ID: collectionID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			},
+		},
+	})
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			7001: {
+				FieldId:                   101,
+				IndexId:                   200,
+				BuildId:                   7001,
+				IndexName:                 "arr_idx",
+				IndexFilePaths:            []string{"f1"},
+				CurrentScalarIndexVersion: 4,
+				IsNestedIndex:             true, // bogus echo
+			},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	s.NoError(err)
+
+	arrIdx, ok := im.segmentBuildInfo.Get(7001)
+	s.True(ok)
+	s.False(arrIdx.IsNestedIndex, "v4 ARRAY index is legacy row-level; echoed true must be cleared")
+}
+
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerField() {
 	collectionID := int64(1)
 	segmentID := int64(100)
@@ -844,7 +989,10 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerFie
 		302: {CollectionID: collectionID, FieldID: 102, IndexID: 302, IndexName: "vec_idx"},
 	}
 	im := createTestIndexMeta(s.T(), collectionID, indexes)
-	m := &meta{indexMeta: im}
+	m := &meta{
+		indexMeta:   im,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 
 	// Result keyed by buildID (not fieldID), with IndexName for matching
 	result := &datapb.CopySegmentResult{
@@ -899,7 +1047,10 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_IndexNameNotFound() {
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
 	}
 	im := createTestIndexMeta(s.T(), collectionID, indexes)
-	m := &meta{indexMeta: im}
+	m := &meta{
+		indexMeta:   im,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 
 	// Source has an index name that doesn't exist in target -> should skip
 	result := &datapb.CopySegmentResult{
@@ -935,7 +1086,10 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
 	}
 	im := createTestIndexMeta(s.T(), collectionID, indexes, errCatalog)
-	m := &meta{indexMeta: im}
+	m := &meta{
+		indexMeta:   im,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 
 	result := &datapb.CopySegmentResult{
 		SegmentId:    segmentID,

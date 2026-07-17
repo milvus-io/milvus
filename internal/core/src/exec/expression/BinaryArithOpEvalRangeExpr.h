@@ -651,6 +651,14 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
             return;
         }
 
+        // MATCH_*/element_filter arithmetic ($ predicate) is element-level and
+        // can only use a nested index. Use the non-reentrant
+        // PinnedIndexIsNested() — we are inside DetermineExecPath().
+        if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
+            FallbackToRawDataExecPath();
+            return;
+        }
+
         auto data_type = expr_->column_.data_type_;
         if (expr_->column_.element_level_) {
             data_type = expr_->column_.element_type_;
@@ -659,7 +667,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         // JSON, ARRAY and VECTOR_ARRAY types cannot use index for arith ops.
         if (data_type == DataType::JSON || data_type == DataType::ARRAY ||
             data_type == DataType::VECTOR_ARRAY) {
-            exec_path_ = ExprExecPath::RawData;
+            FallbackToRawDataExecPath();
             return;
         }
 
@@ -691,7 +699,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
                 has_raw = false;
         }
         if (!has_raw) {
-            exec_path_ = ExprExecPath::RawData;
+            FallbackToRawDataExecPath();
         }
     }
 

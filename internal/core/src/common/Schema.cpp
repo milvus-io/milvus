@@ -535,9 +535,42 @@ Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
         return fields_.at(cache_it->second);
     }
 
-    ThrowInfo(ErrorCode::UnexpectedError,
+    // Input error: the expression references a field/struct name that is not a
+    // resolvable array target (e.g. a typo or a non-array field). Use ExprInvalid
+    // so it is classified as a terminal client error, not a retriable system error.
+    ThrowInfo(ErrorCode::ExprInvalid,
               "No array field found in struct: {}",
               struct_name);
+}
+
+const FieldMeta&
+Schema::ResolveArrayElementField(const std::string& name) const {
+    auto name_it = name_ids_.find(FieldName(name));
+    if (name_it != name_ids_.end()) {
+        const auto& field_meta = fields_.at(name_it->second);
+        auto data_type = field_meta.get_data_type();
+        // Only a scalar ARRAY is a valid *top-level* MATCH_*/element_filter
+        // target. A top-level VECTOR_ARRAY is rejected here: its elements are
+        // vectors (no scalar predicate / quantified comparison applies), and no
+        // offset machinery is built for a top-level VECTOR_ARRAY, so accepting
+        // it would later abort on the "Array offsets not available" assert.
+        // (A VECTOR_ARRAY that is a struct sub-field is still reachable via the
+        // GetFirstArrayFieldInStruct fallback below, which keeps element-level
+        // vector search on struct arrays working.)
+        if (data_type == DataType::ARRAY) {
+            return field_meta;
+        }
+        // Input error: the user named a field that exists but cannot be used as a
+        // MATCH_*/element_filter target. Classify as ExprInvalid (terminal client
+        // error), consistent with other expression-shape errors, not UnexpectedError.
+        ThrowInfo(ErrorCode::ExprInvalid,
+                  "field '{}' (data type {}) does not support "
+                  "MATCH_*/element_filter; expected a scalar array or struct "
+                  "array field",
+                  name,
+                  data_type);
+    }
+    return GetFirstArrayFieldInStruct(name);
 }
 
 std::pair<bool, std::string>

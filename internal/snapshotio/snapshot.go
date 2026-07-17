@@ -34,7 +34,8 @@ import (
 
 const (
 	// SnapshotFormatVersion is the current snapshot metadata and manifest format.
-	SnapshotFormatVersion = 4
+	// v5: adds is_nested_index to index file entries (nested array index marker).
+	SnapshotFormatVersion = 5
 )
 
 var (
@@ -53,11 +54,15 @@ var (
 	manifestSchemaV4Once sync.Once
 	manifestSchemaV4     avro.Schema
 	manifestSchemaV4Err  error
+
+	manifestSchemaV5Once sync.Once
+	manifestSchemaV5     avro.Schema
+	manifestSchemaV5Err  error
 )
 
 // ManifestSchema returns the current Avro schema for snapshot segment manifests.
 func ManifestSchema() (avro.Schema, error) {
-	return ManifestSchemaV4()
+	return ManifestSchemaV5()
 }
 
 // ManifestSchemaV1 returns the Avro schema used by legacy snapshot manifests.
@@ -84,12 +89,20 @@ func ManifestSchemaV3() (avro.Schema, error) {
 	return manifestSchemaV3, manifestSchemaV3Err
 }
 
-// ManifestSchemaV4 returns the Avro schema used by current snapshot manifests.
+// ManifestSchemaV4 returns the Avro schema used by version-4 snapshot manifests.
 func ManifestSchemaV4() (avro.Schema, error) {
 	manifestSchemaV4Once.Do(func() {
 		manifestSchemaV4, manifestSchemaV4Err = avro.Parse(AvroSchemaV4())
 	})
 	return manifestSchemaV4, manifestSchemaV4Err
+}
+
+// ManifestSchemaV5 returns the Avro schema used by current snapshot manifests.
+func ManifestSchemaV5() (avro.Schema, error) {
+	manifestSchemaV5Once.Do(func() {
+		manifestSchemaV5, manifestSchemaV5Err = avro.Parse(AvroSchemaV5())
+	})
+	return manifestSchemaV5, manifestSchemaV5Err
 }
 
 // ManifestSchemaByVersion returns the Avro schema for a snapshot format version.
@@ -103,6 +116,8 @@ func ManifestSchemaByVersion(version int) (avro.Schema, error) {
 		return ManifestSchemaV3()
 	case 4:
 		return ManifestSchemaV4()
+	case 5:
+		return ManifestSchemaV5()
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported manifest schema version: %d", version)
 	}
@@ -200,6 +215,11 @@ type AvroIndexFilePathInfo struct {
 	CurrentScalarIndexVersion int32              `avro:"current_scalar_index_version"`
 	MemSize                   int64              `avro:"mem_size"`
 	IndexStorePathVersion     int32              `avro:"index_store_path_version"`
+	// IsNestedIndex mirrors indexpb.IndexFilePathInfo.is_nested_index. Losing
+	// it on the snapshot round-trip makes a nested-built ARRAY index load as a
+	// legacy composite index after restore — HYBRID/AUTOINDEX then fails hard
+	// because the nested files carry no INDEX_TYPE entry.
+	IsNestedIndex bool `avro:"is_nested_index"`
 }
 
 // AvroKeyValuePair represents commonpb.KeyValuePair in Avro-compatible format.
@@ -419,6 +439,7 @@ func IndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFilePathI
 		CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
 		MemSize:                   int64(info.GetMemSize()),
 		IndexStorePathVersion:     int32(info.GetIndexStorePathVersion()),
+		IsNestedIndex:             info.GetIsNestedIndex(),
 		IndexParams:               make([]AvroKeyValuePair, len(info.GetIndexParams())),
 	}
 	for i, param := range info.GetIndexParams() {
@@ -446,6 +467,7 @@ func AvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.IndexFileP
 		CurrentScalarIndexVersion: avroInfo.CurrentScalarIndexVersion,
 		MemSize:                   uint64(avroInfo.MemSize),
 		IndexStorePathVersion:     indexpb.IndexStorePathVersion(avroInfo.IndexStorePathVersion),
+		IsNestedIndex:             avroInfo.IsNestedIndex,
 	}
 	for _, param := range avroInfo.IndexParams {
 		info.IndexParams = append(info.IndexParams, &commonpb.KeyValuePair{
@@ -814,5 +836,17 @@ func AvroSchemaV4() string {
 								{"name": "format", "type": "string", "default": ""},
 								{
 									"name": "binlogs",`,
+		1)
+}
+
+// AvroSchemaV5 returns the schema with the per-segment nested-array-index
+// marker on index files. Without it a restored nested ARRAY index loads as a
+// legacy composite index and HYBRID/AUTOINDEX fails on the missing INDEX_TYPE
+// entry.
+func AvroSchemaV5() string {
+	return strings.Replace(AvroSchemaV4(),
+		`{"name": "index_store_path_version", "type": "int", "default": 0}`,
+		`{"name": "index_store_path_version", "type": "int", "default": 0},
+								{"name": "is_nested_index", "type": "boolean", "default": false}`,
 		1)
 }

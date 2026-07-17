@@ -125,6 +125,10 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
             milvus::index::GetValueFromConfig<int32_t>(
                 config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
                 .value_or(1);
+        // Persisted per-segment marker; missing/false = legacy row-level index.
+        index_info.nested_array_index = milvus::index::GetValueFromConfig<bool>(
+                                            config, milvus::index::NESTED_INDEX)
+                                            .value_or(false);
 
         index_info.tantivy_index_version =
             index_info.scalar_index_engine_version <= 1
@@ -348,6 +352,12 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                 load_index_info
                     ->index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
                     std::to_string(scalar_version);
+            }
+            // Inject the persisted per-segment nested marker: this ARRAY-field
+            // scalar index was built as a nested (element-level) index.
+            if (info_proto->is_nested_index()) {
+                load_index_info->index_params[milvus::index::NESTED_INDEX] =
+                    "true";
             }
             load_index_info->schema = info_proto->field();
             load_index_info->index_size = info_proto->index_file_size();

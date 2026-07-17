@@ -103,7 +103,7 @@ PhyIterativeElementFilterNode::GetOutput() {
 
     auto segment = query_context_->get_segment();
     auto& field_meta =
-        segment->get_schema().GetFirstArrayFieldInStruct(struct_name_);
+        segment->get_schema().ResolveArrayElementField(struct_name_);
     auto field_id = field_meta.get_id();
     auto array_offsets = segment->GetArrayOffsets(field_id);
     if (array_offsets == nullptr) {
@@ -182,6 +182,18 @@ PhyIterativeElementFilterNode::CollectResults(
     search_result.distances_.resize(nq * topk, 0.0f);
     search_result.element_indices_.resize(nq * topk, -1);
 
+    // Resolve element_id -> (doc_id, elem_idx) once per run of ids that
+    // land in the same row: iterator output is distance-ordered, but ids
+    // from one row still arrive in clusters. Cache the last resolved
+    // row's element range [first, last) and answer in-range ids without
+    // the virtual binary-search lookup; any other id falls back to the
+    // per-element lookup, so correctness never depends on the output
+    // order. A resolved row's range is immutable, so the cache stays
+    // valid across iterators.
+    int32_t cached_doc_id = 0;
+    int32_t cached_first_elem = 0;
+    int32_t cached_last_elem = 0;  // empty range: first lookup always misses
+
     for (int64_t q = 0; q < nq; ++q) {
         auto& iterator = iterators[q];
         int64_t count = 0;
@@ -194,8 +206,23 @@ PhyIterativeElementFilterNode::CollectResults(
             }
 
             auto [element_id, distance] = result.value();
-            auto [doc_id, elem_idx] =
-                array_offsets->ElementIDToRowID(element_id);
+            int32_t doc_id;
+            int32_t elem_idx;
+            if (element_id >= cached_first_elem &&
+                element_id < cached_last_elem) {
+                doc_id = cached_doc_id;
+                elem_idx = static_cast<int32_t>(element_id) -
+                           cached_first_elem;
+            } else {
+                const auto row = array_offsets->ElementIDToRowID(element_id);
+                doc_id = row.first;
+                elem_idx = row.second;
+                cached_doc_id = doc_id;
+                cached_first_elem =
+                    static_cast<int32_t>(element_id) - elem_idx;
+                cached_last_elem =
+                    array_offsets->ElementIDRangeOfRow(doc_id).second;
+            }
 
             // Find insert position using binary search
             size_t pos =

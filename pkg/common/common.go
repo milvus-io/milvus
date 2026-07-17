@@ -124,9 +124,33 @@ const (
 	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
 	//   the existing INVERTED / NGRAM)
 	// - On-disk file format is unchanged from v3
+	//
+	// Scalar index engine version 5:
+	// - Plain-ARRAY scalar indexes build as NESTED (element-level) indexes so
+	//   MATCH_*/element_filter can consume them directly. The version gate
+	//   MUST be 5 (not 3/4): versions 3 and 4 were already reported and
+	//   persisted by releases without nested-array support, so keying nested
+	//   builds or nested load-routing off <=4 would (a) let a mixed cluster
+	//   hand element-level postings to an old querynode and (b) route legacy
+	//   array indexes persisted with version 3/4 into the nested loader.
+	// - On-disk file format is unchanged from v3
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(4)
-	MaximumScalarIndexEngineVersion = int32(4)
+	CurrentScalarIndexEngineVersion = int32(5)
+	MaximumScalarIndexEngineVersion = int32(5)
+
+	// MinScalarIndexVersionForNestedArrayIndex is the minimum scalar index
+	// engine version at which datacoord decides a NEW plain-ARRAY scalar
+	// index build is nested (element-level); the decision is frozen into the
+	// per-segment is_nested_index marker. Load routing never consults the
+	// version: IndexFactory::CreateScalarIndex (C++) routes purely by the
+	// marker persisted with the segment index.
+	MinScalarIndexVersionForNestedArrayIndex = int32(5)
+
+	// NestedIndexKey is the internal build/load config key carrying the
+	// nested-array index marker into segcore (C++ milvus::index::NESTED_INDEX).
+	// It is decided by datacoord and echoed by the index worker — never
+	// user-settable; CreateIndex rejects it as a reserved index param.
+	NestedIndexKey = "nested_index"
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.

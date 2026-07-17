@@ -819,6 +819,22 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		indexNameToTargetID[index.IndexName] = index.IndexID
 	}
 
+	// Resolve the target collection's fields so the is_nested_index marker can
+	// be re-derived authoritatively (see below), rather than trusting the bit
+	// echoed by the copy worker. A pre-nested (old) DataNode copy worker rebuilds
+	// VectorScalarIndexInfo field-by-field and silently drops the new
+	// is_nested_index field (defaults false) while still echoing scalar index
+	// version 5; persisting that false for a genuinely nested index would defeat
+	// the snapshot-restore version guard (snapshot_manager.go) with no self-heal.
+	var fieldByID map[int64]*schemapb.FieldSchema
+	if coll := meta.GetCollection(task.GetCollectionId()); coll != nil && coll.Schema != nil {
+		allFields := typeutil.GetAllFieldSchemas(coll.Schema)
+		fieldByID = make(map[int64]*schemapb.FieldSchema, len(allFields))
+		for _, f := range allFields {
+			fieldByID[f.GetFieldID()] = f
+		}
+	}
+
 	// Find partition ID from task's ID mappings
 	var partitionID int64
 	for _, mapping := range task.GetIdMappings() {
@@ -842,6 +858,21 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			continue
 		}
 
+		// Authoritative marker: re-derive from the target field schema + scalar
+		// index version (the exact build-time decision, see isNestedArrayIndex),
+		// immune to an old copy worker dropping the echoed bit. Fall back to the
+		// worker's bit only if the field cannot be resolved (schema drift).
+		isNestedIndex := indexInfo.GetIsNestedIndex()
+		if field, ok := fieldByID[indexInfo.GetFieldId()]; ok {
+			isNestedIndex = isNestedArrayIndex(field, indexInfo.GetCurrentScalarIndexVersion())
+		} else {
+			mlog.Warn(ctx, "copy segment index: field not found in target schema, "+
+				"falling back to worker-reported is_nested_index marker",
+				WrapCopySegmentTaskLog(task,
+					mlog.String("indexName", indexInfo.GetIndexName()),
+					mlog.FieldFieldID(indexInfo.GetFieldId()))...)
+		}
+
 		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{
 			SegmentID:                 result.GetSegmentId(),
@@ -856,6 +887,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			IndexVersion:              indexInfo.GetVersion(),
 			CurrentIndexVersion:       indexInfo.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
+			IsNestedIndex:             isNestedIndex,
 			CreatedUTCTime:            uint64(now),
 			FinishedUTCTime:           uint64(now),
 			NumRows:                   result.GetImportedRows(),

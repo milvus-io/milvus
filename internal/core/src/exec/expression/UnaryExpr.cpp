@@ -131,6 +131,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
     switch (expr_->op_type_) {
         case proto::plan::Equal:
         case proto::plan::NotEqual: {
+            // A NESTED array index stores ELEMENT offsets; the legacy
+            // ExecArrayEqualForIndex below treats index offsets as ROW
+            // offsets, so it must not run on a nested index. Equality is
+            // instead computed exactly from element bitsets + row->element
+            // offsets (positional AND).
+            if (PinnedIndexIsNested()) {
+                return ExecArrayEqualForNestedIndex(
+                    context, expr_->op_type_ == proto::plan::NotEqual);
+            }
             switch (expr_->column_.element_type_) {
                 case DataType::BOOL: {
                     return ExecArrayEqualForIndex<bool>(
@@ -799,6 +808,281 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                real_batch_size);
 
     // return the result.
+    return batch_res;
+}
+
+// Decide ONCE (from DetermineExecPath) whether ExecArrayEqualForNestedIndex
+// can serve this expression exactly; anything it cannot serve keeps the
+// stable RawData fallback. The decision must be made here rather than per
+// batch: a per-batch fallback from an index-path function would advance the
+// data cursors while GetNextBatchSize keeps reading the (never advancing)
+// index cursors, desyncing multi-batch execution.
+bool
+PhyUnaryRangeFilterExpr::CanServeNestedArrayEquality() const {
+    if ((expr_->op_type_ != proto::plan::Equal &&
+         expr_->op_type_ != proto::plan::NotEqual) ||
+        expr_->val_.val_case() !=
+            proto::plan::GenericValue::ValCase::kArrayVal) {
+        // Other whole-array ops (e.g. `arr > [..]`) are not computable from
+        // per-value element bitsets.
+        return false;
+    }
+    // Element hits can only be mapped back to rows through the row->element
+    // offsets, which are built from the raw field data (absent under
+    // index-only load).
+    if (segment_->GetArrayOffsets(field_id_) == nullptr) {
+        return false;
+    }
+    // ProcessIndexChunksWithRowLevel (the caching machinery this path rides
+    // on) supports exactly one index chunk.
+    if (num_index_chunk_ != 1) {
+        return false;
+    }
+    // Only targets whose element protos match the column's element type are
+    // served: for any other shape ArrayView::is_same_array compares against
+    // the proto's unset-field defaults, and that quirk stays on brute force.
+    proto::plan::GenericValue::ValCase expected;
+    switch (expr_->column_.element_type_) {
+        case DataType::BOOL:
+            expected = proto::plan::GenericValue::ValCase::kBoolVal;
+            break;
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            expected = proto::plan::GenericValue::ValCase::kInt64Val;
+            break;
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            expected = proto::plan::GenericValue::ValCase::kStringVal;
+            break;
+        default:
+            // FLOAT/DOUBLE equality via an index is not exact; anything else
+            // is unsupported. Keep brute force.
+            return false;
+    }
+    for (const auto& element : expr_->val_.array_val().array()) {
+        if (element.val_case() != expected) {
+            return false;
+        }
+    }
+    return true;
+}
+
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecArrayEqualForNestedIndex(EvalCtx& context,
+                                                      bool reverse) {
+    switch (expr_->column_.element_type_) {
+        case DataType::BOOL:
+            return ExecArrayEqualForNestedIndexImpl<bool>(context, reverse);
+        case DataType::INT8:
+            return ExecArrayEqualForNestedIndexImpl<int8_t>(context, reverse);
+        case DataType::INT16:
+            return ExecArrayEqualForNestedIndexImpl<int16_t>(context, reverse);
+        case DataType::INT32:
+            return ExecArrayEqualForNestedIndexImpl<int32_t>(context, reverse);
+        case DataType::INT64:
+            return ExecArrayEqualForNestedIndexImpl<int64_t>(context, reverse);
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            // Not exact on floating point. DetermineExecPath already keeps
+            // float/double arrays on the raw-data path (CanUseIndexForArray
+            // returns false), so this is belt-and-braces only.
+            return ExecRangeVisitorImplArray<proto::plan::Array>(context);
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            if (segment_->type() == SegmentType::Growing) {
+                return ExecArrayEqualForNestedIndexImpl<std::string>(context,
+                                                                     reverse);
+            }
+            return ExecArrayEqualForNestedIndexImpl<std::string_view>(context,
+                                                                      reverse);
+        }
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported element type when execute array "
+                      "equal for nested index: {}",
+                      expr_->column_.element_type_);
+    }
+}
+
+// Whole-array equality via a NESTED (element-space) scalar index, computed
+// EXACTLY (no post-verification against raw data needed):
+//   arr == [v0..v_{k-1}]  for row r with element range [s, e)
+//     match  <=>  (e - s == k)  &&  for all i < k: B_{v_i}[s + i]
+// where B_v = index->In(1, &v) is v's ELEMENT-space bitset. Order matters
+// (each position tests its own value's bitset), duplicates in the target
+// share one In() query. NULL rows are recovered from ArrayOffsets' row-valid
+// bitmap -- a nested index cannot distinguish a NULL row from an empty
+// array -- and are excluded from both Equal and NotEqual, exactly like the
+// brute-force path (`is_same_array(val) ^ reverse` + NULL masking).
+// The value-conversion semantics mirror ArrayView::is_same_array: a target
+// that is not same_type() matches nothing, and an integer target value
+// outside the element type's domain can never equal a stored element.
+template <typename T>
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecArrayEqualForNestedIndexImpl(EvalCtx& context,
+                                                          bool reverse) {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto array_offsets = segment_->GetArrayOffsets(field_id_);
+    if (array_offsets == nullptr) {
+        // No row->element mapping available (e.g. index-only load): element
+        // hits cannot be translated to rows. Keep the brute-force behavior.
+        return ExecRangeVisitorImplArray<proto::plan::Array>(context);
+    }
+
+    auto val = GetValueFromProto<proto::plan::Array>(expr_->val_);
+    const int64_t target_len = val.array_size();
+
+    // Mirror ArrayView::is_same_array's type gate: a target whose elements
+    // are not all of one proto type matches NO row.
+    bool match_impossible = !val.same_type();
+
+    constexpr proto::plan::GenericValue::ValCase expected_case =
+        std::is_same_v<IndexInnerType, bool>
+            ? proto::plan::GenericValue::ValCase::kBoolVal
+            : (std::is_integral_v<IndexInnerType>
+                   ? proto::plan::GenericValue::ValCase::kInt64Val
+                   : proto::plan::GenericValue::ValCase::kStringVal);
+
+    std::vector<IndexInnerType> target_values;
+    if (!match_impossible) {
+        target_values.reserve(target_len);
+        for (const auto& element : val.array()) {
+            if (element.val_case() != expected_case) {
+                // Element/proto type mismatch (planner-rejected shape). The
+                // brute path compares against the proto's unset-field default
+                // here; keep behavior identical by staying on brute force.
+                return ExecRangeVisitorImplArray<proto::plan::Array>(context);
+            }
+            bool overflowed = false;
+            target_values.push_back(
+                GetValueFromProtoWithOverflow<IndexInnerType>(element,
+                                                              overflowed));
+            if (overflowed) {
+                // A value not representable in the element type can never
+                // equal a stored element (is_same_array compares in the
+                // wider domain), so the whole positional AND matches nothing.
+                match_impossible = true;
+                break;
+            }
+        }
+    }
+
+    // Dedup: query each DISTINCT value once, but keep the per-position
+    // mapping so each position tests its own value's bitset (order matters).
+    boost::container::vector<IndexInnerType> distinct_values;
+    std::vector<size_t> pos_to_distinct;
+    if (!match_impossible) {
+        pos_to_distinct.resize(target_len);
+        for (int64_t p = 0; p < target_len; ++p) {
+            auto it = std::find(distinct_values.begin(),
+                                distinct_values.end(),
+                                target_values[p]);
+            if (it == distinct_values.end()) {
+                pos_to_distinct[p] = distinct_values.size();
+                distinct_values.push_back(target_values[p]);
+            } else {
+                pos_to_distinct[p] =
+                    static_cast<size_t>(it - distinct_values.begin());
+            }
+        }
+    }
+
+    // Row-level func: the index is queried once per segment (result cached
+    // by ProcessIndexChunksWithRowLevel via ExprCacheHelper); per batch the
+    // framework only slices rows. func_returns_row_level also makes the
+    // framework recover per-row NULL info via AndRowValidBitmap for the
+    // valid bitset -- res additionally clears NULL rows below to mirror the
+    // brute path bit-for-bit.
+    auto execute_sub_batch = [this,
+                              &array_offsets,
+                              &distinct_values,
+                              &pos_to_distinct,
+                              target_len,
+                              match_impossible,
+                              reverse](Index* index_ptr) -> TargetBitmap {
+        TargetBitmap row_match(active_count_);
+        if (!match_impossible) {
+            std::vector<TargetBitmap> value_bitsets;
+            value_bitsets.reserve(distinct_values.size());
+            for (const auto& v : distinct_values) {
+                // In() returns a const prvalue; materialize locally
+                // (guaranteed elision) before moving into the vector.
+                TargetBitmap value_hits = index_ptr->In(1, &v);
+                value_bitsets.push_back(std::move(value_hits));
+            }
+            if (target_len > 0) {
+                // Every element bit we may touch is s + i < e <= the element
+                // end of the last active row; assert the index covers it
+                // (growing clamps not-yet-committed rows to the committed
+                // total, which then read as empty and touch no bits).
+                int32_t active_elem_end = 0;
+                array_offsets->CopyRowElementStarts(
+                    active_count_, 0, &active_elem_end);
+                AssertInfo(
+                    active_elem_end <=
+                        static_cast<int64_t>(value_bitsets[0].size()),
+                    "nested array index element count {} does not cover the "
+                    "segment's active element range {}",
+                    value_bitsets[0].size(),
+                    active_elem_end);
+            }
+
+            constexpr int64_t kRowBatch = 8192;
+            FixedVector<int32_t> starts(kRowBatch + 1);
+            for (int64_t row_start = 0; row_start < active_count_;
+                 row_start += kRowBatch) {
+                const int64_t n =
+                    std::min(kRowBatch, active_count_ - row_start);
+                array_offsets->CopyRowElementStarts(
+                    row_start, n, starts.data());
+                for (int64_t r = 0; r < n; ++r) {
+                    const int64_t s = starts[r];
+                    const int64_t e = starts[r + 1];
+                    if (e - s != target_len) {
+                        continue;
+                    }
+                    bool match = true;
+                    for (int64_t p = 0; p < target_len; ++p) {
+                        if (!value_bitsets[pos_to_distinct[p]][s + p]) {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) {
+                        row_match[row_start + r] = true;
+                    }
+                }
+            }
+        }
+        if (reverse) {
+            row_match.flip();
+        }
+        // NULL rows can match neither Equal nor NotEqual (3VL): clear them
+        // from res exactly like the brute path's NULL masking. The framework
+        // additionally marks them invalid via AndRowValidBitmap.
+        TargetBitmap row_valid(active_count_, true);
+        array_offsets->AndRowValidBitmap(row_valid.view(), 0, active_count_);
+        row_match &= row_valid;
+        return row_match;
+    };
+
+    auto batch_res = ProcessIndexChunksWithRowLevel<T>(
+        execute_sub_batch, IndexValidityMode::Default);
+    AssertInfo(batch_res->size() == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               batch_res->size(),
+               real_batch_size);
     return batch_res;
 }
 
@@ -1998,6 +2282,31 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     }
 
     SegmentExpr::DetermineExecPath();
+    // MATCH_*/element_filter child ($ predicate) is element-level: it can only
+    // use a nested index.
+    if (expr_->column_.element_level_ &&
+        exec_path_ == ExprExecPath::ScalarIndex && !PinnedIndexIsNested()) {
+        FallbackToRawDataExecPath();
+    }
+    // Whole-array (row-level) ops such as `arr == [1,2]` dispatch to
+    // ExecArrayEqualForIndex, which treats the pinned index's offsets as ROW
+    // offsets. A nested array index stores ELEMENT offsets, so those two spaces
+    // disagree -- feeding element offsets in as row offsets yields wrong results
+    // / out-of-range asserts. Since IndexFactory now forces every ARRAY scalar
+    // index to build nested, fall back for non-element-level ARRAY ops whenever
+    // the pinned index is nested -- EXCEPT whole-array Equal/NotEqual, which is
+    // exactly computable from element bitsets + row->element offsets and is
+    // served by ExecArrayEqualForNestedIndex (see the dispatch in
+    // ExecRangeVisitorImplArrayForIndex). Other whole-array ops (e.g.
+    // `arr > [..]` lexicographic comparisons) still cannot be served by a
+    // nested index. Use the non-reentrant PinnedIndexIsNested() -- we are
+    // inside DetermineExecPath().
+    if (!expr_->column_.element_level_ &&
+        expr_->column_.data_type_ == DataType::ARRAY &&
+        exec_path_ == ExprExecPath::ScalarIndex && PinnedIndexIsNested() &&
+        !CanServeNestedArrayEquality()) {
+        FallbackToRawDataExecPath();
+    }
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
     }
@@ -2068,7 +2377,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = false;
     }
     if (!can_use) {
-        exec_path_ = ExprExecPath::RawData;
+        FallbackToRawDataExecPath();
     }
 }
 
