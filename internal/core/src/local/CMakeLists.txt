@@ -15,9 +15,9 @@
 # limitations under the License.
 
 set(LOCAL_SOURCE_FILES
+    FileHandle.cpp
     FileSystem.cpp
     ManagedSubtree.cpp
-    io/File.cpp
     io/MappedRegion.cpp
 )
 

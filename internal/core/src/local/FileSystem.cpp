@@ -419,15 +419,15 @@ FileSystem::Rename(const Path& from, const Path& to) const {
     }
 }
 
-io::RandomAccessFile
-FileSystem::OpenForRead(const Path& path) const {
-    auto native_path = CheckedNativePath(path);
-    auto fd = OpenFile(native_path, O_RDONLY, ErrorCode::FileOpenFailed);
-    return io::RandomAccessFile(fd.Release(), std::move(native_path));
-}
+FileHandle
+FileSystem::Open(const Path& path, const OpenOptions& options) const {
+    if (options.mode == OpenMode::ReadOnly &&
+        (options.create || options.truncate || options.create_parent)) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "read-only local file open cannot create or truncate {}",
+                  path.String());
+    }
 
-io::WritableFile
-FileSystem::OpenForWrite(const Path& path, const WriteOptions& options) const {
     auto native_path = CheckedNativePath(path);
     if (options.create_parent) {
         std::error_code error;
@@ -440,7 +440,7 @@ FileSystem::OpenForWrite(const Path& path, const WriteOptions& options) const {
         }
     }
 
-    auto flags = O_RDWR;
+    auto flags = options.mode == OpenMode::ReadOnly ? O_RDONLY : O_RDWR;
     if (options.create) {
         flags |= O_CREAT;
     }
@@ -466,8 +466,7 @@ FileSystem::OpenForWrite(const Path& path, const WriteOptions& options) const {
                   strerror(direct_io_error));
     }
 #endif
-    return io::WritableFile(
-        fd.Release(), std::move(native_path), options.direct_io);
+    return FileHandle(fd.Release(), std::move(native_path), options.direct_io);
 }
 
 io::MappedRegion

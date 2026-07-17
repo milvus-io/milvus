@@ -25,8 +25,11 @@ milvus::storage
 milvus::local::FileSystem
     a rooted capability for one local filesystem namespace
 
-milvus::local::io
-    RAII handles for opened files and mapped regions
+milvus::local::FileHandle
+    move-only ownership of one opened native file
+
+milvus::local::io::MappedRegion
+    RAII ownership of one mapped region
 
 milvus::cachinglayer
     cache loading, pinning, accounting, and eviction policy
@@ -125,13 +128,15 @@ different disk or mount.
 ```text
 internal/core/src/local/
 ├── Path.h
+├── FileHandle.h
+├── FileHandle.cpp
 ├── FileSystem.h
 ├── FileSystem.cpp
 ├── ManagedSubtree.h
 ├── ManagedSubtree.cpp
 └── io/
-    ├── File.h
-    ├── File.cpp
+    ├── FileWriter.h
+    ├── FileWriter.cpp
     ├── MappedRegion.h
     └── MappedRegion.cpp
 ```
@@ -139,13 +144,14 @@ internal/core/src/local/
 ```cpp
 namespace milvus::local {
 class Path;
+class FileHandle;
 class FileSystem;
 class ManagedSubtree;
 }
 
 namespace milvus::local::io {
-class RandomAccessFile;
-class WritableFile;
+class FileWriter;
+class PositionedFileWriter;
 class MappedRegion;
 }
 ```
@@ -204,9 +210,7 @@ class FileSystem final {
     void RemoveAll(const Path& path) const;
     void Rename(const Path& from, const Path& to) const;
 
-    io::RandomAccessFile OpenForRead(const Path& path) const;
-    io::WritableFile OpenForWrite(const Path& path,
-                                  const WriteOptions& options) const;
+    FileHandle Open(const Path& path, const OpenOptions& options) const;
     io::MappedRegion OpenMappedRegion(const Path& path,
                                       const MapOptions& options) const;
 
@@ -228,7 +232,9 @@ Consumers receive a handle through construction context.
 auto node_cache = FileSystem::Open("/var/lib/milvus/data/cache/1001");
 auto local_chunk = node_cache.Subtree(Path("local_chunk"));
 
-local_chunk.OpenForRead(Path("index_files/10/index"));
+auto file = local_chunk.Open(
+    Path("index_files/10/index"),
+    OpenOptions{.mode = OpenMode::ReadOnly});
 ```
 
 The resolved native path is:
@@ -251,35 +257,43 @@ only a validated relative `Path` and produces a path below the scoped root.
 Milvus-owned I/O should prefer opened handles. Native paths should remain at
 third-party boundaries.
 
-## 7. Opened File I/O
+## 7. Opened File Handles
 
-`RandomAccessFile` and `WritableFile` are move-only RAII wrappers. Their
-destructors close the native descriptor.
+`FileHandle` is a small move-only RAII owner for one native descriptor. Its
+destructor closes the descriptor. It deliberately does not define read, write,
+truncate, sync, buffering, rate limiting, or completion policy.
 
 ```cpp
-class RandomAccessFile final {
+struct FileHandle final {
  public:
-    size_t ReadAt(uint64_t offset, std::span<std::byte> output) const;
-    uint64_t Size() const;
-};
-
-class WritableFile final {
- public:
-    size_t Write(std::span<const std::byte> data);
-    size_t WriteAt(uint64_t offset, std::span<const std::byte> data);
-    uint64_t Size() const;
-    void Truncate(uint64_t size);
-    void Sync();
+    int Get() const noexcept;
+    int Release() noexcept;
+    const std::filesystem::path& DebugPath() const noexcept;
+    bool DirectIOEnabled() const noexcept;
 };
 ```
 
-A read-only handle does not expose writes. `ReadAt()` does not mutate shared
-file position and can be used concurrently while the handle remains alive.
-`WritableFile` does not serialize writes; callers own ordering and must not
-issue overlapping writes.
+`FileSystem::Open()` accepts typed options rather than exposing POSIX flags:
+
+```cpp
+enum class OpenMode { ReadOnly, ReadWrite };
+
+struct OpenOptions {
+    OpenMode mode{OpenMode::ReadOnly};
+    bool create{false};
+    bool truncate{false};
+    bool create_parent{false};
+    bool direct_io{false};
+};
+```
+
+The handle records ownership and open metadata. The receiving reader, writer,
+or native-library adapter performs I/O appropriate to its own contract. Small
+internal helpers may centralize partial-transfer and `EINTR` handling, but they
+are not methods on `FileHandle`.
 
 Higher-level writer policy such as buffering, direct I/O alignment, priority,
-rate limiting, and completion remains above `WritableFile`.
+rate limiting, and completion remains in `milvus::local::io::FileWriter`.
 
 ## 8. Mapped Regions
 
@@ -294,10 +308,9 @@ auto region = files.OpenMappedRegion(
 auto bytes = region.Data();
 ```
 
-Mapping is a filesystem operation rather than a method on
-`RandomAccessFile`. This keeps positional reads and OS mapping as separate
-capabilities. Higher-level chunk and segment layout remains outside
-`milvus::local::io`.
+Mapping is a filesystem operation rather than a method on `FileHandle`. This
+keeps descriptor ownership and OS mapping lifetime as separate mechanisms.
+Higher-level chunk and segment layout remains outside `milvus::local::io`.
 
 Unlinking a mapped file is valid on supported POSIX systems: the mapping keeps
 the inode alive until `munmap`. Components that require path-level cleanup
@@ -320,8 +333,9 @@ auto directory = files.ManageSubtree(Path("index_files/10"));
 
 {
     auto lease = directory->AcquireWriter();
-    auto output = directory->Files().OpenForWrite(
-        Path("index"), WriteOptions{.create = true});
+    auto output = directory->Files().Open(
+        Path("index"),
+        OpenOptions{.mode = OpenMode::ReadWrite, .create = true});
     // Materialize the artifact.
 }
 
@@ -404,8 +418,8 @@ erase an existing error category at the CGo boundary.
 Thread-safety contracts are explicit:
 
 - copied `FileSystem` handles are safe for concurrent use;
-- `RandomAccessFile::ReadAt()` supports concurrent positional reads;
-- `WritableFile` does not serialize overlapping writes;
+- `FileHandle` is move-only and does not serialize operations on its fd;
+- receiving readers and writers define their own concurrency contracts;
 - `MappedRegion` and write leases are move-only;
 - `ManagedSubtree` serializes lifecycle transitions.
 
@@ -427,7 +441,7 @@ added.
 
 ## 13. Migration
 
-1. Introduce `Path`, `FileSystem`, opened-file handles,
+1. Introduce `Path`, `FileSystem`, `FileHandle`,
    `MappedRegion`, and `ManagedSubtree` without changing production
    callers.
 2. Move local writers, readers, and file managers onto rooted handles.
@@ -506,7 +520,7 @@ Only directories with an actual writer/cleanup race use `ManagedSubtree`.
 Rejected because `milvus::cachinglayer` already owns cache policy. The local
 filesystem layer provides mechanisms and composes with it.
 
-### Require `RandomAccessFile::Map()`
+### Require `FileHandle::Map()`
 
 Rejected because positional reads and path-rooted OS mapping are distinct
 capabilities.
