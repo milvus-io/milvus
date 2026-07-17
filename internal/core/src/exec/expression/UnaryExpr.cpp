@@ -2043,10 +2043,8 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             switch (val_type) {
                 case DataType::STRING:
                 case DataType::VARCHAR:
-                    can_use =
-                        expr_->op_type_ != proto::plan::OpType::Match &&
-                        expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
-                        expr_->op_type_ != proto::plan::OpType::InnerMatch;
+                    can_use = SegmentExpr::CanUseIndexForOp<std::string>(
+                        expr_->op_type_);
                     break;
                 default:
                     can_use = true;
