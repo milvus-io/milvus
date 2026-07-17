@@ -403,8 +403,9 @@ class SegmentExpr : public Expr {
 
     void
     MoveCursorForIndex() {
-        AssertInfo(segment_->type() == SegmentType::Sealed,
-                   "index mode only for sealed segment");
+        // The index cursor is a global row position. This holds for sealed
+        // segments and for growing segments with a segment-level scalar
+        // index (the geometry interim R-Tree, see issue #51237).
         auto size =
             std::min(active_count_ - current_index_chunk_pos_, batch_size_);
 
@@ -2205,13 +2206,28 @@ class SegmentExpr : public Expr {
             cached_index_chunk_id_ = 0;
         }
 
-        // Process current batch
+        // Process current batch.
+        //
+        // The cached bitmap is segment-global (a scalar index always has
+        // exactly one chunk), so slice it by the rows visible to this query
+        // (active_count_). Bounding by size_per_chunk_ would be wrong on a
+        // growing segment, where size_per_chunk_ is the raw-data chunk
+        // granularity (segcore.chunkRows) and unrelated to the index bitmap.
+        // A growing segment reaches this path through the geometry interim
+        // R-Tree index; its bitmap may also run ahead of active_count_ under
+        // concurrent inserts, so active_count_ -- not the bitmap size --
+        // decides how many rows to emit. See issue #51237.
         TargetBitmap valid_result;
         valid_result.set();
 
         auto data_pos = current_index_chunk_pos_;
-        auto size = std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                             int64_t(cached_index_chunk_valid_res_->size()));
+        auto size = std::min(active_count_ - data_pos, batch_size_);
+        AssertInfo(
+            int64_t(cached_index_chunk_valid_res_->size()) >= data_pos + size,
+            "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+            cached_index_chunk_valid_res_->size(),
+            data_pos,
+            data_pos + size);
 
         valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
 

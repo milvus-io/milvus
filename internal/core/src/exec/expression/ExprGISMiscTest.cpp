@@ -30,6 +30,7 @@
 #include "ExprTestBase.h"
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/Exception.h"
 #include "common/Geometry.h"
@@ -1070,4 +1071,153 @@ TEST(ExprTest, GISFilterGrowingConjunctSkipKeepsCursorInSync) {
 // data cursor and MoveCursor() must do the same on a skipped batch.
 TEST(ExprTest, GISFilterGrowingIndexConjunctSkipKeepsCursorInSync) {
     RunGrowingConjunctSkipTest(true);
+}
+// Regression test for issue #51237.
+//
+// A growing segment carries a segment-level RTree index for a geometry field
+// as soon as the collection has an RTREE index on it. That makes geometry the
+// only field type whose expressions take the ScalarIndex path on a growing
+// segment, where size_per_chunk() is segcore.chunkRows (128 by default) rather
+// than the whole row count. The index result bitmap is global -- it must not be
+// sliced by the data chunk size.
+TEST_P(ExprTest, TestGeometryNullExprOnGrowingWithRTreeIndex) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    // Force a small evaluation batch so the batched conjunction cases below
+    // iterate multiple times and advance current_index_chunk_pos_ past 0.
+    // This is what exercises the non-zero data_pos slicing in
+    // ProcessIndexChunksForValid() and the MoveCursorForIndex() relaxation;
+    // with the 8192 default and N below it, everything collapses into a
+    // single batch and the cursor never moves. Restore on scope exit.
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } batch_guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(128);
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_fid = schema->AddDebugField(
+        "geometry", DataType::GEOMETRY, true /*nullable*/);
+    schema->set_primary_field_id(int64_fid);
+
+    // An RTREE index on the geometry field makes IndexingRecord build the
+    // growing interim RTree index for it.
+    std::map<std::string, std::string> index_params = {{"index_type", "RTREE"}};
+    std::map<std::string, std::string> type_params = {};
+    FieldIndexMeta geo_index_meta(
+        geo_fid, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_index_metas = {
+        {geo_fid, geo_index_meta}};
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        100000, std::move(field_index_metas));
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(128);
+    // SegmentGrowingImpl::Insert only feeds the growing interim index (the
+    // geometry R-Tree included) when interim segment index is enabled.
+    config.set_enable_interim_segment_index(true);
+    auto seg = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto seg_impl = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // More rows than a single chunk, so a bitmap truncated to size_per_chunk()
+    // is detectably short.
+    const int64_t N = 1000;
+    auto dataset =
+        DataGen(schema, N, 42, 0, 1, 10, 1, false, true, true /*random_valid*/);
+    auto offset = seg_impl->PreInsert(N);
+    seg_impl->Insert(offset,
+                     N,
+                     dataset.row_ids_.data(),
+                     dataset.timestamps_.data(),
+                     dataset.raw_);
+    ASSERT_TRUE(seg_impl->HasIndex(geo_fid));
+
+    auto valid_data = dataset.get_col_valid(geo_fid);
+
+    // Single expression: FilterBitsNode takes the execute-all-at-once path.
+    {
+        auto expr = std::make_shared<expr::NullExpr>(
+            expr::ColumnInfo(geo_fid, DataType::GEOMETRY, {}, true),
+            proto::plan::NullExpr_NullOp_IsNotNull);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        for (int64_t i = 0; i < N; i++) {
+            ASSERT_EQ(final[i], valid_data[i]) << "row " << i;
+        }
+    }
+
+    {
+        auto expr = std::make_shared<expr::NullExpr>(
+            expr::ColumnInfo(geo_fid, DataType::GEOMETRY, {}, true),
+            proto::plan::NullExpr_NullOp_IsNull);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        for (int64_t i = 0; i < N; i++) {
+            ASSERT_EQ(final[i], !valid_data[i]) << "row " << i;
+        }
+    }
+
+    // Conjunction with a raw-data expression: the geometry side keeps the
+    // ScalarIndex path but FilterBitsNode now runs the batched loop, which
+    // moves the index cursor.
+    {
+        proto::plan::GenericValue lower;
+        lower.set_int64_val(0);
+        auto int_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(int64_fid, DataType::INT64),
+            proto::plan::OpType::GreaterEqual,
+            lower,
+            std::vector<proto::plan::GenericValue>{});
+        auto null_expr = std::make_shared<expr::NullExpr>(
+            expr::ColumnInfo(geo_fid, DataType::GEOMETRY, {}, true),
+            proto::plan::NullExpr_NullOp_IsNotNull);
+        auto expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, null_expr, int_expr);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        for (int64_t i = 0; i < N; i++) {
+            ASSERT_EQ(final[i], valid_data[i]) << "row " << i;
+        }
+    }
+
+    // Conjunction whose numeric side is all-false: the conjunction
+    // short-circuits and skips the geometry expression via MoveCursor(),
+    // which must advance the growing segment's global index cursor
+    // (MoveCursorForIndex used to assert sealed-only here).
+    {
+        proto::plan::GenericValue upper;
+        upper.set_int64_val(0);
+        auto int_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(int64_fid, DataType::INT64),
+            proto::plan::OpType::LessThan,
+            upper,
+            std::vector<proto::plan::GenericValue>{});
+        auto null_expr = std::make_shared<expr::NullExpr>(
+            expr::ColumnInfo(geo_fid, DataType::GEOMETRY, {}, true),
+            proto::plan::NullExpr_NullOp_IsNotNull);
+        // int_expr first so the all-false numeric side short-circuits the
+        // geometry side regardless of whether expression reordering is on.
+        auto expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, int_expr, null_expr);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        for (int64_t i = 0; i < N; i++) {
+            ASSERT_FALSE(final[i]) << "row " << i;
+        }
+    }
 }
