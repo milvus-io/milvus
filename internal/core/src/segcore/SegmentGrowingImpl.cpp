@@ -392,15 +392,6 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
-    if (retain_insert_record_chunks_for_flush_) {
-        // StorageV3 TEXT and growing-source flush persist growing segments
-        // through milvus-storage. Interim indexes may also contain raw vector
-        // data, but FlushGrowingSegmentData reads directly from insert_record_
-        // chunks. Keep raw chunks until the flush path can reliably export from
-        // indexes too.
-        return;
-    }
-
     //remove the chunk data to reduce memory consumption
     auto& field_meta = schema_->operator[](fieldId);
     auto data_type = field_meta.get_data_type();
@@ -1882,20 +1873,20 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     milvus::proto::schema::SparseFloatArray* output) const {
     AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
 
-    // if index has finished building, grab from index without any
-    // synchronization operations.
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
+    // If the index has finished building and keeps raw data, grab from index
+    // without any synchronization operations.
+    if (indexing_record_.HasRawData(field_id)) {
         indexing_record_.GetDataFromIndex(
             field_id, seg_offsets, count, 0, output);
         return;
     }
     {
         std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
-        // check again after lock to make sure: if index has finished building
-        // after the above check but before we grabbed the lock, we should grab
-        // from index as the data in chunk may have been removed in
-        // try_remove_chunks.
-        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+        // Check again after lock to make sure: if index has finished building
+        // and can provide raw data after the above check but before we grabbed
+        // the lock, we should grab from index as the data in chunk may have
+        // been removed in try_remove_chunks.
+        if (!indexing_record_.HasRawData(field_id)) {
             // copy from raw data
             SparseRowsToProto(
                 [&](size_t i) {

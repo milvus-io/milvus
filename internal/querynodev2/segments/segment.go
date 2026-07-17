@@ -1484,6 +1484,81 @@ func (s *LocalSegment) MaterializedFieldIDs(ctx context.Context) ([]int64, error
 	return ids, nil
 }
 
+func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+	if s.Type() != SegmentTypeGrowing {
+		return nil, merr.WrapErrServiceInternalMsg("unexpected segmentType for PrimaryKeys, segmentType = %s", s.segmentType.String())
+	}
+	if startOffset < 0 || endOffset < startOffset {
+		return nil, merr.WrapErrServiceInternalMsg("invalid primary key offsets: start=%d end=%d", startOffset, endOffset)
+	}
+	if startOffset == endOffset {
+		return nil, nil
+	}
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	var cResult C.CPrimaryKeysResult
+	var status C.CStatus
+	GetDynamicPool().Submit(func() (any, error) {
+		status = C.GetGrowingSegmentPrimaryKeys(
+			s.ptr,
+			C.int64_t(startOffset),
+			C.int64_t(endOffset),
+			&cResult,
+		)
+		return nil, nil
+	}).Await()
+	defer C.FreePrimaryKeysResult(&cResult)
+	if err := HandleCStatus(ctx, &status, "GetGrowingSegmentPrimaryKeys"); err != nil {
+		return nil, err
+	}
+	if int64(cResult.num_primary_keys) != endOffset-startOffset {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"growing source primary key count mismatch, expected=%d actual=%d",
+			endOffset-startOffset, cResult.num_primary_keys)
+	}
+
+	pks := make([]storage.PrimaryKey, 0, int(cResult.num_primary_keys))
+	switch schemapb.DataType(cResult.pk_data_type) {
+	case schemapb.DataType_Int64:
+		if cResult.int64_primary_keys == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("growing source int64 primary key data is nil")
+		}
+		values := unsafe.Slice(cResult.int64_primary_keys, int(cResult.num_primary_keys))
+		for _, value := range values {
+			pks = append(pks, storage.NewInt64PrimaryKey(int64(value)))
+		}
+	case schemapb.DataType_VarChar:
+		if cResult.varchar_primary_key_offsets == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("growing source varchar primary key offsets are nil")
+		}
+		offsets := unsafe.Slice(cResult.varchar_primary_key_offsets, int(cResult.num_primary_keys)+1)
+		var data []byte
+		if cResult.varchar_primary_keys_size > 0 {
+			if cResult.varchar_primary_keys == nil {
+				return nil, merr.WrapErrDataIntegrityMsg("growing source varchar primary key data is nil")
+			}
+			data = unsafe.Slice((*byte)(unsafe.Pointer(cResult.varchar_primary_keys)), int(cResult.varchar_primary_keys_size))
+		}
+		for i := 0; i < int(cResult.num_primary_keys); i++ {
+			start := int(offsets[i])
+			end := int(offsets[i+1])
+			if start < 0 || end < start || end > len(data) {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"growing source varchar primary key offset out of range, index=%d start=%d end=%d size=%d",
+					i, start, end, len(data))
+			}
+			pks = append(pks, storage.NewVarCharPrimaryKey(string(data[start:end])))
+		}
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported growing source primary key data type %s",
+			schemapb.DataType(cResult.pk_data_type).String())
+	}
+	return pks, nil
+}
+
 // FlushData flushes data from the growing segment directly to storage via C++ milvus-storage.
 // This is a unified interface that combines data extraction from segcore and writing to storage.
 // The C++ side handles: extracting raw field data from ConcurrentVector, converting to Arrow,
@@ -1649,6 +1724,20 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		cConfig.num_bm25_fields = 0
 	}
 	cConfig.write_merged_bm25_stats = C.bool(config.WriteMergedBM25Stats)
+	if len(config.PKStatsBlob) > 0 {
+		cPKStatsBlob := C.CBytes(config.PKStatsBlob)
+		defer C.free(cPKStatsBlob)
+		cConfig.pk_stats_field_id = C.int64_t(config.PKStatsFieldID)
+		cConfig.pk_stats_log_id = C.int64_t(config.PKStatsLogID)
+		cConfig.pk_stats_blob = (*C.uint8_t)(cPKStatsBlob)
+		cConfig.pk_stats_blob_size = C.size_t(len(config.PKStatsBlob))
+	}
+	if len(config.MergedPKStatsBlob) > 0 {
+		cMergedPKStatsBlob := C.CBytes(config.MergedPKStatsBlob)
+		defer C.free(cMergedPKStatsBlob)
+		cConfig.merged_pk_stats_blob = (*C.uint8_t)(cMergedPKStatsBlob)
+		cConfig.merged_pk_stats_blob_size = C.size_t(len(config.MergedPKStatsBlob))
+	}
 
 	// call C FFI
 	var cResult C.CFlushResult
@@ -1722,7 +1811,6 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 			bm25Stats[int64(fieldIDs[i])] = stats
 		}
 	}
-
 	return &FlushResult{
 		ManifestPath:           manifestPath,
 		NumRows:                int64(cResult.num_rows),

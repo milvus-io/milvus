@@ -308,6 +308,12 @@ typedef struct CFlushConfig {
     int64_t* bm25_stats_log_ids;   // array of BM25 stats log IDs
     size_t num_bm25_fields;        // number of BM25 output fields
     bool write_merged_bm25_stats;  // whether to write compound BM25 stats
+    int64_t pk_stats_field_id;     // primary key field ID for BF stat
+    int64_t pk_stats_log_id;       // log ID for BF stat file
+    const uint8_t* pk_stats_blob;  // serialized Go PrimaryKeyStats blob
+    size_t pk_stats_blob_size;     // byte length of pk_stats_blob
+    const uint8_t* merged_pk_stats_blob;  // serialized Go compound BF stat blob
+    size_t merged_pk_stats_blob_size;     // byte length of merged_pk_stats_blob
 } CFlushConfig;
 
 /**
@@ -335,6 +341,19 @@ typedef struct CFlushResult {
     size_t* bm25_stats_sizes;       // serialized BM25 stats sizes
     size_t num_bm25_stats;          // number of BM25 stats entries
 } CFlushResult;
+
+/**
+ * @brief Result of reading primary keys from a growing segment.
+ */
+typedef struct CPrimaryKeysResult {
+    int64_t pk_field_id;            // primary key field id
+    int64_t pk_data_type;           // primary key data type
+    int64_t* int64_primary_keys;    // int64 primary keys
+    uint8_t* varchar_primary_keys;  // concatenated varchar primary key bytes
+    int64_t* varchar_primary_key_offsets;  // offsets into varchar_primary_keys
+    size_t varchar_primary_keys_size;  // total bytes in varchar_primary_keys
+    size_t num_primary_keys;           // number of primary keys
+} CPrimaryKeysResult;
 
 /**
  * @brief Flush data from a growing segment directly to storage.
@@ -370,11 +389,20 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                         const CFlushConfig* config,
                         CFlushResult* result);
 
+CStatus
+GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
+                             int64_t start_offset,
+                             int64_t end_offset,
+                             CPrimaryKeysResult* result);
+
 /**
  * @brief Free the manifest_path in CFlushResult.
  */
 void
 FreeFlushResult(CFlushResult* result);
+
+void
+FreePrimaryKeysResult(CPrimaryKeysResult* result);
 
 CStatus
 SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts);
