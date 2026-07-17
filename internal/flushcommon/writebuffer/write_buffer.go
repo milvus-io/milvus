@@ -942,32 +942,25 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 				wb.mut.Lock()
 				if progress, exists := wb.growingSourceProgress[growingSourceTask.SegmentID()]; exists {
 					if err != nil {
-						if wb.closed && errors.Is(err, merr.ErrChannelNotFound) {
-							wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
-							wb.resetGrowingSourceSyncFailureMetric(growingSourceTask.SegmentID())
-							delete(wb.growingSourceProgress, growingSourceTask.SegmentID())
-							err = nil
+						if growingSourceTask.HasCommittedFlush() && growingSourceTask.CommittedManifestPath() != "" {
+							progress.pendingCommitted = &growingSourcePendingCommittedFlush{
+								targetOffset:  growingSourceTask.TargetOffset(),
+								manifestPath:  growingSourceTask.CommittedManifestPath(),
+								bm25Stats:     cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
+								insertBinlogs: growingSourceTask.CommittedInsertBinlogs(),
+							}
+						}
+						progress.failSync(err)
+						wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
+						wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
+						if isGrowingSourceLayoutMismatch(err) {
+							progress.markNonRetryableFailure()
+							mlog.Error(ctx, "growing-source source sync failed with non-retryable layout mismatch",
+								mlog.Int64("segmentID", growingSourceTask.SegmentID()),
+								mlog.Int64("targetOffset", progress.targetOffset),
+								mlog.String("lastFailure", progress.lastFailure))
 						} else {
-							if growingSourceTask.HasCommittedFlush() && growingSourceTask.CommittedManifestPath() != "" {
-								progress.pendingCommitted = &growingSourcePendingCommittedFlush{
-									targetOffset:  growingSourceTask.TargetOffset(),
-									manifestPath:  growingSourceTask.CommittedManifestPath(),
-									bm25Stats:     cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
-									insertBinlogs: growingSourceTask.CommittedInsertBinlogs(),
-								}
-							}
-							progress.failSync(err)
-							wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
-							wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
-							if isGrowingSourceLayoutMismatch(err) {
-								progress.markNonRetryableFailure()
-								mlog.Error(ctx, "growing-source source sync failed with non-retryable layout mismatch",
-									mlog.Int64("segmentID", growingSourceTask.SegmentID()),
-									mlog.Int64("targetOffset", progress.targetOffset),
-									mlog.String("lastFailure", progress.lastFailure))
-							} else {
-								wb.scheduleGrowingSourceRetryLocked()
-							}
+							wb.scheduleGrowingSourceRetryLocked()
 						}
 					} else {
 						if growingSourceTask.IsFlush() {
