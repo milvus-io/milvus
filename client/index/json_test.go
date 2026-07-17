@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/client/v2/common"
 )
 
 func TestJsonPathIndex(t *testing.T) {
