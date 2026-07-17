@@ -136,13 +136,29 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     if (expr_->vals_.empty()) {
-        auto real_batch_size = has_offset_input_
-                                   ? context.get_offset_input()->size()
-                                   : GetNextBatchSize();
+        auto real_batch_size =
+            has_offset_input_ ? input->size() : GetNextBatchSize();
         if (real_batch_size == 0) {
             result = nullptr;
             return;
         }
+
+        if (expr_->column_.data_type_ == DataType::ARRAY &&
+            expr_->column_.nullable_) {
+            auto valid_result =
+                has_offset_input_
+                    ? ProcessChunksForValidByOffsets<ArrayView>(false, *input)
+                    : ProcessDataChunksForValid<ArrayView>();
+
+            const bool empty_matches =
+                expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
+            TargetBitmap value_result(real_batch_size, empty_matches);
+            value_result &= valid_result;
+            result = std::make_shared<ColumnVector>(std::move(value_result),
+                                                    std::move(valid_result));
+            return;
+        }
+
         if (expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
             result = std::make_shared<ColumnVector>(
                 TargetBitmap(real_batch_size, true),
