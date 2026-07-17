@@ -31,6 +31,7 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/IndexFactory.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
@@ -3814,3 +3815,141 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogsDroppedField) {
 // but it cannot be unit-tested because GetColumnGroups() requires Loon FFI
 // (real manifest file access). The filter uses the same pattern
 // (new_info.schema_->has_field()) as ComputeDiffBinlogs tested above.
+
+// ==================== storage-v3 raw-index skip / reload ====================
+// Regression tests for the DiskANN double-footprint fix (PR #51541): on
+// storage-v3, a field whose index carries raw data has its raw column dropped
+// from the load set (the index serves the raw at retrieve), EXCEPT the primary
+// key, whose column stays resident for sorted-segment row navigation.
+// JSON/ARRAY are excluded upstream in CanUseIndexRawDataForField so they are
+// never marked as index-has-raw-data and never dropped.
+
+namespace {
+
+// True if `field_id` appears in any (group_index, fields) entry.
+bool
+ColumnGroupFieldPresent(
+    const std::vector<std::pair<int, std::vector<FieldId>>>& groups,
+    int64_t field_id) {
+    for (const auto& [group_index, fields] : groups) {
+        for (const auto& f : fields) {
+            if (f.get() == field_id) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Attach a scalar index (index_type) to a field so BuildCache populates
+// field_index_has_raw_data_ (ASCENDING_SORT/STL_SORT => has raw data,
+// INVERTED => no raw data).
+void
+AddScalarIndex(proto::segcore::SegmentLoadInfo& proto,
+               int64_t field_id,
+               int64_t index_id,
+               const std::string& index_type) {
+    auto* idx = proto.add_index_infos();
+    idx->set_fieldid(field_id);
+    idx->set_indexid(index_id);
+    idx->add_index_file_paths("/idx/" + std::to_string(field_id));
+    auto* param = idx->add_index_params();
+    param->set_key("index_type");
+    param->set_value(index_type);
+}
+
+}  // namespace
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffColumnGroupSkipsRawDataIndexField) {
+    // A non-pk field (108, INT64) whose index carries raw data (STL_SORT) is
+    // dropped from the storage-v3 load set entirely: not eager, not lazy, not
+    // replace. Its index still loads; retrieve reconstructs raw from the index.
+    auto new_proto = MakeManifestProto("/manifest/new");
+    AddScalarIndex(new_proto, 108, 6001, milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(MakeColumnGroups({}));
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{108}, {"/cg/108.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_FALSE(ColumnGroupFieldPresent(diff.column_groups_to_load, 108))
+        << "raw-data-index field must not be eager loaded";
+    EXPECT_FALSE(ColumnGroupFieldPresent(diff.column_groups_to_lazyload, 108))
+        << "raw-data-index field must not be lazy loaded (double footprint)";
+    EXPECT_FALSE(ColumnGroupFieldPresent(diff.column_groups_to_replace, 108));
+    EXPECT_GT(diff.indexes_to_load.count(FieldId(108)), 0u)
+        << "the index itself must still load";
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffColumnGroupNeverSkipsPrimaryKey) {
+    // The pk (field 100) column must stay resident even when its index carries
+    // raw data: sorted-segment row navigation (num_rows_until_chunk /
+    // get_chunk_by_offset) reads the pk column directly, and a pk scalar index
+    // is not registered for expression index-reads.
+    auto new_proto = MakeManifestProto("/manifest/new");
+    AddScalarIndex(new_proto, 100, 6002, milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(MakeColumnGroups({}));
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{100}, {"/cg/100.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // pk must NOT be skipped: it lands in a load list (lazy, since its index
+    // reports raw data, but still resident).
+    bool pk_loaded =
+        ColumnGroupFieldPresent(diff.column_groups_to_load, 100) ||
+        ColumnGroupFieldPresent(diff.column_groups_to_lazyload, 100);
+    EXPECT_TRUE(pk_loaded)
+        << "primary key column must load even when its index has raw data";
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupReloadsWhenIndexLosesRawData) {
+    // A field skipped because its index had raw data must be RELOADED when the
+    // index no longer has raw data (STL_SORT -> INVERTED), restoring the column
+    // so retrieve/filter have it again.
+    auto cur_proto = MakeManifestProto("/manifest/old");
+    AddScalarIndex(cur_proto, 108, 7001, milvus::index::ASCENDING_SORT);
+    auto new_proto = MakeManifestProto("/manifest/new");
+    AddScalarIndex(new_proto, 108, 7002, milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo current_info(cur_proto, schema_);
+    current_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{108}, {"/cg/108.parquet"}}}));
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{108}, {"/cg/108.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(ColumnGroupFieldPresent(diff.column_groups_to_replace, 108))
+        << "column must be reloaded when its index loses raw data";
+}
+
+TEST(IndexFactoryRawDataTest, CanUseIndexRawDataForFieldExcludesJsonAndArray) {
+    // JSON and ARRAY indexes only index a projection (a JSON path / array
+    // elements) and cannot reconstruct the whole value, so their index never
+    // substitutes for the raw column, regardless of the index's own has_raw_data.
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::JSON, true));
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::ARRAY, true));
+    // Other field types pass the index's has_raw_data through unchanged.
+    EXPECT_TRUE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::INT64, true));
+    EXPECT_TRUE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::VECTOR_FLOAT, true));
+    EXPECT_TRUE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::VARCHAR, true));
+    // has_raw_data == false is always false.
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::INT64, false));
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::JSON, false));
+}
