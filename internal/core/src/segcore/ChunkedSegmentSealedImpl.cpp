@@ -7898,6 +7898,11 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
             field_id.get(),
             geometry_cache->Size());
 
+    } catch (const SegcoreError&) {
+        // Already typed (e.g. a retriable MemAllocateFailed from a transient
+        // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
+        // the code into a non-retriable UnexpectedError.
+        throw;
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to load geometry cache for segment {} field {}: {}",

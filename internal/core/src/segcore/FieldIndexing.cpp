@@ -767,12 +767,21 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
             for (int64_t i = 0; i < size; ++i) {
                 int64_t global_offset = reserved_offset + i;
 
-                // Use the accessor to get geometry data and validity
+                // Use the accessor to get geometry data and validity.
+                // is_valid MUST reach AddGeometry: it is the only signal that
+                // distinguishes a genuinely null row from a valid row with an
+                // empty payload (see RTreeIndex::AddGeometry).
                 auto [wkb_data, is_valid] = accessor(i);
 
                 try {
-                    rtree_index->AddGeometry(wkb_data, global_offset);
+                    rtree_index->AddGeometry(wkb_data, global_offset, is_valid);
                     added_count++;
+                } catch (const SegcoreError&) {
+                    // Already typed (e.g. a retriable MemAllocateFailed from a
+                    // transient GEOS allocation failure) -- rethrow as-is;
+                    // re-wrapping would collapse the code into a non-retriable
+                    // UnexpectedError.
+                    throw;
                 } catch (std::exception& error) {
                     ThrowInfo(UnexpectedError,
                               "Failed to add geometry at offset {}: {}",

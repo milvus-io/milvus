@@ -83,15 +83,24 @@ class Geometry {
         geometry_ = geom;
     }
 
-    // Non-throwing WKB parse into this instance. On failure (reader allocation
-    // or unparseable WKB) it leaves this invalid (IsValid() == false) and
-    // returns false, instead of the throwing WKB constructor's AssertInfo.
-    // Mirrors the geometry cache's GetByOffsetUnsafe() == nullptr contract so
-    // exact refinement can `continue` past a corrupt/placeholder row in every
-    // configuration (geometry cache on or off) rather than throwing and failing
-    // the whole query. See PR #50951 review.
+    // WKB parse into this instance that returns false ONLY for bad data
+    // (unparseable WKB), leaving this invalid (IsValid() == false), instead of
+    // the throwing WKB constructor's AssertInfo. Mirrors the geometry cache's
+    // GetByOffsetUnsafe() == nullptr contract so exact refinement can
+    // `continue` past a corrupt/placeholder row in every configuration
+    // (geometry cache on or off) rather than throwing and failing the whole
+    // query. See PR #50951 review.
+    //
+    // A transient resource failure (null context / reader allocation) is NOT
+    // bad data: collapsing it into `false` would silently filter out a
+    // perfectly valid row (a silent false negative). Those cases throw a
+    // retriable system error instead, matching RTreeIndexWrapper::add_geometry.
     bool
     TryParseFromWkb(GEOSContextHandle_t ctx, const void* wkb, size_t size) {
+        if (ctx == nullptr) {
+            ThrowInfo(ErrorCode::MemAllocateFailed,
+                      "null GEOS context while parsing WKB");
+        }
         if (geometry_ != nullptr) {
             GEOSGeom_destroy_r(ctx_, geometry_);
             geometry_ = nullptr;
@@ -99,7 +108,8 @@ class Geometry {
         ctx_ = ctx;
         GEOSWKBReader* reader = GEOSWKBReader_create_r(ctx);
         if (reader == nullptr) {
-            return false;
+            ThrowInfo(ErrorCode::MemAllocateFailed,
+                      "failed to create GEOS WKB reader");
         }
         geometry_ = GEOSWKBReader_read_r(
             ctx, reader, static_cast<const unsigned char*>(wkb), size);

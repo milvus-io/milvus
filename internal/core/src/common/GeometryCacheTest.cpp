@@ -120,6 +120,41 @@ TEST(GeometryCacheLifetime, ConcurrentGetAndRemove) {
     mgr.RemoveSegmentCaches(nullptr, seg_id);
 }
 
+// Regression for PR #50951 review (GeometryCache.h AppendData): a corrupt
+// (unparseable, non-empty) WKB row must be cached as an INVALID placeholder
+// entry -- readers see nullptr and skip it -- instead of throwing. Before the
+// fix AppendData rethrew UnexpectedError, so with the geometry cache enabled a
+// single corrupt row failed the entire segment load (LoadFieldData ->
+// LoadGeometryCache), the exact row shape the placeholder-MBR write paths
+// deliberately keep. Offsets of later rows must stay aligned.
+TEST(GeometryCacheLifetime, CorruptWkbCachedAsInvalidPlaceholder) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000005;
+    const FieldId field_id(13);
+    const std::string good = MakePointWkb(4.0, 4.0);
+    std::string corrupt = good;
+    corrupt.resize(corrupt.size() / 2);  // truncate -> unparseable
+
+    auto cache = mgr.GetOrCreateCache(seg_id, field_id);
+    ASSERT_NO_THROW({
+        cache->AppendData(good.data(), good.size());
+        cache->AppendData(corrupt.data(), corrupt.size());
+        cache->AppendData(good.data(), good.size());
+    });
+    // The corrupt row occupies its offset (no shift of later rows).
+    ASSERT_EQ(cache->Size(), 3u);
+    {
+        auto lock = cache->AcquireReadLock();
+        EXPECT_NE(cache->GetByOffsetUnsafe(0), nullptr);
+        // Corrupt row -> invalid entry -> nullptr, same contract as null rows;
+        // every reader skips it.
+        EXPECT_EQ(cache->GetByOffsetUnsafe(1), nullptr);
+        EXPECT_NE(cache->GetByOffsetUnsafe(2), nullptr);
+    }
+
+    mgr.RemoveSegmentCaches(nullptr, seg_id);
+}
+
 // Regression for the shared cache-context concurrency defect: cache-owned
 // Geometry instances all carry the cache's single GEOS context, which is not
 // thread-safe. The GIS filter path evaluates predicates on those shared

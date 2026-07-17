@@ -650,7 +650,9 @@ RTreeIndex<T>::BuildWithStrings(const std::vector<std::string>& geometries) {
 
 template <typename T>
 void
-RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
+RTreeIndex<T>::AddGeometry(const std::string& wkb_data,
+                           int64_t row_offset,
+                           bool is_valid) {
     // Snapshot wrapper_ under the lock; lazily (and idempotently) initialize it
     // if this is the first insert. Production serializes inserts per growing
     // segment (see InitForBuildIndex), but AddGeometry races concurrent
@@ -667,7 +669,10 @@ RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
         wrapper = wrapper_;
     }
 
-    if (!wkb_data.empty()) {
+    // Nullness is decided by is_valid alone, never by the payload: a valid row
+    // with an empty/unparseable WKB gets a placeholder MBR from add_geometry,
+    // keeping growing consistent with the sealed bulk_load classification.
+    if (is_valid) {
         const uint8_t* data_ptr =
             reinterpret_cast<const uint8_t*>(wkb_data.data());
         wrapper->add_geometry(data_ptr, wkb_data.size(), row_offset);

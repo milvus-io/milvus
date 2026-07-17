@@ -3110,6 +3110,11 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
             get_segment_id(),
             field_id.get());
 
+    } catch (const SegcoreError&) {
+        // Already typed (e.g. a retriable MemAllocateFailed from a transient
+        // GEOS allocation failure) -- rethrow as-is; re-wrapping would collapse
+        // the code into a non-retriable UnexpectedError.
+        throw;
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "
@@ -3160,6 +3165,10 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
             get_segment_id(),
             field_id.get());
 
+    } catch (const SegcoreError&) {
+        // Already typed -- rethrow as-is to keep the code (see the insert-path
+        // catch above).
+        throw;
     } catch (const std::exception& e) {
         ThrowInfo(UnexpectedError,
                   "Failed to build geometry cache for growing segment {} field "
