@@ -911,6 +911,13 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
+	// Search iterator v2 uses the final result score as the ANN continuation
+	// bound. Function rerank rewrites that score, so the next iterator request
+	// would interpret a rerank score in the ANN metric domain.
+	if queryInfo.GetSearchIteratorV2Info() != nil && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
+		return merr.WrapErrParameterInvalidMsg("function rerank is not supported with search iterator v2")
+	}
+
 	// order_by and function rerank cannot be used together
 	if len(t.orderByFields) > 0 && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
 		return merr.WrapErrParameterInvalidMsg("order_by and function rerank cannot be used together: they specify conflicting sort criteria")

@@ -289,6 +289,19 @@ var (
 			reduceType,
 		})
 
+	QueryNodeFunctionChainLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "function_chain_latency",
+			Help:      "query-level function chain execution latency in milliseconds",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			chainLevelLabelName,
+			statusLabelName,
+		})
+
 	QueryNodeLoadSegmentLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -1005,6 +1018,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQSegmentLatency)
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
+	registry.MustRegister(QueryNodeFunctionChainLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
 	registry.MustRegister(QueryNodeReadTaskReadyNQ)
