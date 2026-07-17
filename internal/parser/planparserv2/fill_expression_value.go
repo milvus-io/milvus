@@ -47,6 +47,8 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 			return FillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
 		}
 		return nil
+	case *planpb.Expr_MatchExpr:
+		return FillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
 	default:
 		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	}
