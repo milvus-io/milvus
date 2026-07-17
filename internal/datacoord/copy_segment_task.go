@@ -388,7 +388,10 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 //  3. Update task state accordingly
 //
 // Failure handling:
-// - RPC errors and worker failure responses trigger immediate failure
+// - A query RPC error is transient (network blip) or means the assigned node is gone (DataNode restart/replacement, NodeNotFound)
+// - Either way, reset the task to Pending so the scheduler re-dispatches it to a live node, mirroring the import pipeline
+// - This is the only way a node restart gets retried: the scheduler only re-dispatches Pending(Init) tasks, never ones left InProgress
+// - Worker failure responses trigger immediate failure
 // - Task failure immediately marks parent job as failed (fail-fast)
 // - Enables quick feedback to user without waiting for timeout
 //
@@ -408,9 +411,23 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskID: t.GetTaskId(),
 	}
 	resp, err := cluster.QueryCopySegment(nodeID, req)
-	// Handle RPC error separately to avoid nil resp dereference
+	// Handle RPC error separately to avoid nil resp dereference.
+	// A query error is transient (network blip) or means the assigned node is
+	// gone (DataNode restart/replacement -> NodeNotFound). Either way, failing
+	// the whole restore is wrong: reset the task to Pending so the scheduler
+	// re-dispatches it to a live node, matching the import pipeline. Leaving it
+	// InProgress would make the scheduler poll the same (possibly dead) node
+	// forever, since only Pending tasks are re-dispatched.
 	if err != nil {
-		t.markTaskAndJobFailed(fmt.Sprintf("query copy segment RPC failed: %v", err))
+		if resetErr := t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
+			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+			UpdateCopyTaskNodeID(NullNodeID)); resetErr != nil {
+			mlog.Warn(context.TODO(), "failed to reset copy segment task to pending after query error",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resetErr))...)
+			return
+		}
+		mlog.Info(context.TODO(), "reset copy segment task to pending due to query error, will re-dispatch",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
 

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -495,7 +496,10 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NotCompletedKeepsTaskInProg
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
 }
 
-func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_MarksFailedOnRPCError() {
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_RPCErrorResetsToPending() {
+	// A transient RPC error (network blip) must NOT fail the task or its parent
+	// job. The task is reset to Pending so the scheduler re-dispatches it (to a
+	// healthy node), mirroring the import pipeline's retry-on-query-error.
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
 		nil,
@@ -504,12 +508,40 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_MarksFailedOnRPCError() {
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	// A parent job in Executing state must remain untouched by the retry.
+	s.NoError(copyMeta.AddJob(context.Background(), newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
 	task.QueryTaskOnWorker(cluster)
 
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
-	s.Contains(updatedTask.GetReason(), "rpc failed")
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
+	s.Empty(updatedTask.GetReason())
+	// The parent job must NOT be failed - the task retries instead.
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		copyMeta.GetJob(context.Background(), 100).GetState())
+}
+
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NodeGoneResetsToPending() {
+	// When the assigned DataNode is gone (restarted / replaced), the node
+	// manager returns NodeNotFound, surfaced as a query error. The task must be
+	// reset to Pending so the scheduler re-dispatches it to a live node rather
+	// than polling the dead node until the job-level timeout.
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		nil,
+		merr.WrapErrNodeNotFound(10),
+	)
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.AddJob(context.Background(), newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+
+	task.QueryTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		copyMeta.GetJob(context.Background(), 100).GetState())
 }
 
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_MarksFailedOnWorkerFailure() {
@@ -719,6 +751,17 @@ func createTestCopyTask(collectionID int64, segmentID int64) CopySegmentTask {
 		},
 	})
 	return task
+}
+
+func newTestCopyJob(jobID int64, state datapb.CopySegmentJobState) CopySegmentJob {
+	return &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: 100,
+			State:        state,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
 }
 
 func newCopySegmentTaskTestMeta(t *testing.T, task *copySegmentTask) (CopySegmentMeta, *meta) {
