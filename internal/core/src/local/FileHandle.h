@@ -23,6 +23,11 @@ namespace milvus::local {
 class FileSystem;
 
 struct FileHandle final {
+    static FileHandle
+    Adopt(int fd,
+          std::filesystem::path debug_path,
+          bool direct_io = false) noexcept;
+
     FileHandle(const FileHandle&) = delete;
     FileHandle&
     operator=(const FileHandle&) = delete;
