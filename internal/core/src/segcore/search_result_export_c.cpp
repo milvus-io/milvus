@@ -948,6 +948,16 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 milvus::ThreadPoolPriority::MIDDLE);
             std::vector<std::future<void>> futures;
             futures.reserve(seg_results.size());
+            auto futures_guard = folly::makeGuard([&futures]() {
+                for (auto& f : futures) {
+                    if (f.valid()) {
+                        try {
+                            f.get();
+                        } catch (...) {
+                        }
+                    }
+                }
+            });
             for (auto& [seg_idx, seg_res] : seg_results) {
                 auto sr = static_cast<SearchResult*>(search_results[seg_idx]);
                 auto segment =
@@ -960,16 +970,6 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                             plan, seg_res_ptr->temp_result, &op_ctx);
                     }));
             }
-            auto futures_guard = folly::makeGuard([&futures]() {
-                for (auto& f : futures) {
-                    if (f.valid()) {
-                        try {
-                            f.get();
-                        } catch (...) {
-                        }
-                    }
-                }
-            });
             for (auto& future : futures) {
                 future.get();
             }

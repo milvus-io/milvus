@@ -336,6 +336,13 @@ func lateMaterializeOutputFields(
 	sources [][]segmentSource,
 	searchResultData *schemapb.SearchResultData,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !plan.HasTargetEntries() {
+		return nil
+	}
+
 	totalRows := 0
 	for _, chunk := range sources {
 		totalRows += len(chunk)
