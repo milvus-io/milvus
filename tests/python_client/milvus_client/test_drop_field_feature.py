@@ -301,7 +301,8 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "BM25 function must be dropped with its output field in drop_function_field interface: "
+                    "detaching a function without dropping its output field is not supported; "
+                    "drop_function always removes the function together with its output field: "
                     "bm25: invalid parameter"
                 ),
             },
@@ -1250,7 +1251,8 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "BM25 function must be dropped with its output field in drop_function_field interface: "
+                    "detaching a function without dropping its output field is not supported; "
+                    "drop_function always removes the function together with its output field: "
                     "bm25: invalid parameter"
                 ),
             },
@@ -1327,9 +1329,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         """
         TC-L1-07a: Drop Function detach vs cascade semantics for MinHash.
 
-        target: verify MinHash supports both detach-only and cascade-output-field drop paths
-        method: drop_collection_function keeps output field/index; drop_function_field removes output field/index
-        expected: detach removes only the function; cascade removes function, output field, and output index
+        target: verify MinHash detach-only drop is rejected and cascade-output-field drop works
+        method: drop_collection_function (detach) is rejected; drop_function_field removes function + output field/index
+        expected: detach rejected (function/field unchanged); cascade removes function, output field, and output index
         """
         client = self._client()
         detach_collection_name = f"{cf.gen_collection_name_by_testcase_name()}_detach"
@@ -1393,29 +1395,30 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             assert len(search_res[0]) > 0
             assert "doc" in search_res[0][0]["entity"]
 
-        # Step 1: Detach-only MinHash drop removes the function but keeps output field/index.
+        # Step 1: Detach-only MinHash drop is rejected; the function keeps its output field.
         create_minhash_collection(detach_collection_name)
-        client.drop_collection_function(detach_collection_name, "text_to_minhash")
+        self.drop_collection_function(
+            client,
+            detach_collection_name,
+            "text_to_minhash",
+            check_task=ct.CheckTasks.err_res,
+            check_items={
+                ct.err_code: 1100,
+                ct.err_msg: (
+                    "detaching a function without dropping its output field is not supported; "
+                    "drop_function always removes the function together with its output field: "
+                    "text_to_minhash: invalid parameter"
+                ),
+            },
+        )
 
         desc = client.describe_collection(detach_collection_name)
         field_names = [field["name"] for field in desc["fields"]]
         function_names = [func["name"] for func in desc.get("functions", [])]
-        assert "text_to_minhash" not in function_names
+        assert "text_to_minhash" in function_names
         assert "mh" in field_names
         assert "vec" in field_names
         assert "mh" in client.list_indexes(detach_collection_name)
-
-        # Once detached, mh is a normal field and new writes must provide it or fail clearly.
-        self.insert(
-            client,
-            collection_name=detach_collection_name,
-            data=[{"id": 100, "doc": "after detach", "vec": [1.0, 0.0, 0.0, 0.0]}],
-            check_task=ct.CheckTasks.err_res,
-            check_items={
-                ct.err_code: 1,
-                ct.err_msg: "Insert missed an field `mh` to collection without set nullable==true or set default_value",
-            },
-        )
 
         # Step 2: Cascade MinHash drop removes the function, output field, and output index.
         create_minhash_collection(cascade_collection_name)

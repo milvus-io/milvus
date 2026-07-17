@@ -76,6 +76,8 @@ const (
 	AddFunctionAction               = "add_function"
 	AlterFunctionAction             = "alter_function"
 	DropFunctionAction              = "drop_function"
+	AddFunctionFieldAction          = "add_function_field"
+	DropFunctionFieldAction         = "drop_function_field"
 	AddAction                       = `add`
 	DropPropertiesAction            = "drop_properties"
 	CompactAction                   = "compact"
