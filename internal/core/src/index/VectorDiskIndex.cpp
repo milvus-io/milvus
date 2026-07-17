@@ -24,6 +24,7 @@
 #include <exception>
 #include <iosfwd>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -52,8 +53,7 @@
 #include "opentelemetry/trace/span.h"
 #include "opentelemetry/trace/tracer.h"
 #include "pb/common.pb.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "local/FileSystem.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -94,36 +94,37 @@ class DiskEmptyVectorIterator : public knowhere::IndexNode::iterator {
     }
 };
 
-template <typename LocalChunkManagerPtr>
 std::optional<std::vector<size_t>>
-ReadDiskEmbListOffsets(const LocalChunkManagerPtr& local_chunk_manager,
-                       const std::string& offsets_path) {
-    if (!local_chunk_manager->Exist(offsets_path)) {
+ReadDiskEmbListOffsets(const local::FileSystem& files,
+                       const local::Path& offsets_path) {
+    if (!files.Exists(offsets_path)) {
         return std::nullopt;
     }
 
-    auto file_size = local_chunk_manager->Size(offsets_path);
+    auto file = files.OpenForRead(offsets_path);
+    auto file_size = file.Size();
     AssertInfo(file_size >= sizeof(size_t),
                "embedding list offsets file is too small");
     size_t num_offsets = 0;
-    local_chunk_manager->Read(offsets_path, 0, &num_offsets, sizeof(size_t));
+    auto count_bytes = std::as_writable_bytes(std::span(&num_offsets, 1));
+    AssertInfo(file.ReadAt(0, count_bytes) == count_bytes.size(),
+               "short read of embedding list offsets count");
     AssertInfo(num_offsets > 0, "embedding list offsets count is invalid");
     AssertInfo(file_size >= sizeof(size_t) + num_offsets * sizeof(size_t),
                "embedding list offsets file payload is too small");
 
     std::vector<size_t> offsets(num_offsets);
-    local_chunk_manager->Read(offsets_path,
-                              sizeof(size_t),
-                              offsets.data(),
-                              num_offsets * sizeof(size_t));
+    auto offsets_bytes = std::as_writable_bytes(std::span(offsets));
+    AssertInfo(
+        file.ReadAt(sizeof(size_t), offsets_bytes) == offsets_bytes.size(),
+        "short read of embedding list offsets payload");
     AssertInfo(offsets.front() == 0, "embedding list offsets must start at 0");
     return offsets;
 }
 
-template <typename LocalChunkManagerPtr>
 void
-WriteDiskEmptyEmbListOffsets(const LocalChunkManagerPtr& local_chunk_manager,
-                             const std::string& empty_offsets_path,
+WriteDiskEmptyEmbListOffsets(const local::FileSystem& files,
+                             const local::Path& empty_offsets_path,
                              int64_t dim,
                              const std::vector<size_t>& offsets) {
     AssertInfo(dim > 0, "empty emb_list dim is invalid");
@@ -132,45 +133,45 @@ WriteDiskEmptyEmbListOffsets(const LocalChunkManagerPtr& local_chunk_manager,
     AssertInfo(offsets.back() == 0,
                "empty emb_list offsets must have no flattened vectors");
 
-    if (!local_chunk_manager->Exist(empty_offsets_path)) {
-        local_chunk_manager->CreateFile(empty_offsets_path);
-    }
-
+    auto file = files.OpenForWrite(
+        empty_offsets_path,
+        local::WriteOptions{.create = true, .truncate = true});
     auto count = ToValidDataCount(offsets.size());
-    int64_t write_pos = 0;
-    local_chunk_manager->Write(
-        empty_offsets_path, write_pos, &dim, sizeof(int64_t));
-    write_pos += sizeof(int64_t);
-    local_chunk_manager->Write(
-        empty_offsets_path, write_pos, &count, sizeof(uint64_t));
-    write_pos += sizeof(uint64_t);
-    local_chunk_manager->Write(empty_offsets_path,
-                               write_pos,
-                               const_cast<size_t*>(offsets.data()),
-                               offsets.size() * sizeof(size_t));
+    auto dim_bytes = std::as_bytes(std::span(&dim, 1));
+    auto count_bytes = std::as_bytes(std::span(&count, 1));
+    auto offsets_bytes = std::as_bytes(std::span(offsets));
+    AssertInfo(file.WriteAt(0, dim_bytes) == dim_bytes.size(),
+               "short write of empty embedding list dimension");
+    AssertInfo(file.WriteAt(sizeof(int64_t), count_bytes) == count_bytes.size(),
+               "short write of empty embedding list offsets count");
+    AssertInfo(file.WriteAt(sizeof(int64_t) + sizeof(uint64_t),
+                            offsets_bytes) == offsets_bytes.size(),
+               "short write of empty embedding list offsets payload");
 }
 
-template <typename LocalChunkManagerPtr>
 std::optional<EmptyEmbListState>
-ReadDiskEmptyEmbListOffsets(const LocalChunkManagerPtr& local_chunk_manager,
-                            const std::string& empty_offsets_path) {
-    if (!local_chunk_manager->Exist(empty_offsets_path)) {
+ReadDiskEmptyEmbListOffsets(const local::FileSystem& files,
+                            const local::Path& empty_offsets_path) {
+    if (!files.Exists(empty_offsets_path)) {
         return std::nullopt;
     }
 
-    auto file_size = local_chunk_manager->Size(empty_offsets_path);
+    auto file = files.OpenForRead(empty_offsets_path);
+    auto file_size = file.Size();
     AssertInfo(file_size >= sizeof(int64_t) + sizeof(uint64_t),
                "empty emb_list offsets file is too small");
 
-    int64_t read_pos = 0;
+    uint64_t read_pos = 0;
     int64_t dim = 0;
-    local_chunk_manager->Read(
-        empty_offsets_path, read_pos, &dim, sizeof(int64_t));
+    auto dim_bytes = std::as_writable_bytes(std::span(&dim, 1));
+    AssertInfo(file.ReadAt(read_pos, dim_bytes) == dim_bytes.size(),
+               "short read of empty embedding list dimension");
     read_pos += sizeof(int64_t);
 
     uint64_t wire_count = 0;
-    local_chunk_manager->Read(
-        empty_offsets_path, read_pos, &wire_count, sizeof(uint64_t));
+    auto count_bytes = std::as_writable_bytes(std::span(&wire_count, 1));
+    AssertInfo(file.ReadAt(read_pos, count_bytes) == count_bytes.size(),
+               "short read of empty embedding list offsets count");
     read_pos += sizeof(uint64_t);
 
     auto count = FromValidDataCount(wire_count);
@@ -179,8 +180,9 @@ ReadDiskEmptyEmbListOffsets(const LocalChunkManagerPtr& local_chunk_manager,
                "empty emb_list offsets payload is too small");
 
     std::vector<size_t> offsets(count);
-    local_chunk_manager->Read(
-        empty_offsets_path, read_pos, offsets.data(), count * sizeof(size_t));
+    auto offsets_bytes = std::as_writable_bytes(std::span(offsets));
+    AssertInfo(file.ReadAt(read_pos, offsets_bytes) == offsets_bytes.size(),
+               "short read of empty embedding list offsets payload");
     AssertInfo(offsets.front() == 0, "empty emb_list offsets must start at 0");
     AssertInfo(offsets.back() == 0,
                "empty emb_list offsets must have no flattened vectors");
@@ -202,55 +204,56 @@ GetEmbListNumOffsets(const DatasetPtr& dataset,
     return static_cast<size_t>(num_queries) + 1;
 }
 
-template <typename LocalChunkManagerPtr>
 DiskValidData
-ReadDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
-                  const std::string& valid_data_path) {
+ReadDiskValidData(const local::FileSystem& files,
+                  const local::Path& valid_data_path) {
     DiskValidData valid_data;
-    if (!local_chunk_manager->Exist(valid_data_path)) {
+    if (!files.Exists(valid_data_path)) {
         return valid_data;
     }
 
     valid_data.found = true;
-    auto file_size = local_chunk_manager->Size(valid_data_path);
+    auto file = files.OpenForRead(valid_data_path);
+    auto file_size = file.Size();
     AssertInfo(file_size >= sizeof(uint64_t),
                "nullable vector disk valid_data file is too small");
     uint64_t wire_count = 0;
-    local_chunk_manager->Read(
-        valid_data_path, 0, &wire_count, sizeof(uint64_t));
+    auto count_bytes = std::as_writable_bytes(std::span(&wire_count, 1));
+    AssertInfo(file.ReadAt(0, count_bytes) == count_bytes.size(),
+               "short read of nullable vector count");
     valid_data.total_count = FromValidDataCount(wire_count);
     valid_data.bitmap.resize(GetValidDataBitmapSize(valid_data.total_count));
     AssertInfo(file_size >= sizeof(uint64_t) + valid_data.bitmap.size(),
                "nullable vector disk valid_data bitmap file is too small");
     if (!valid_data.bitmap.empty()) {
-        local_chunk_manager->Read(valid_data_path,
-                                  sizeof(uint64_t),
-                                  valid_data.bitmap.data(),
-                                  valid_data.bitmap.size());
+        auto bitmap_bytes =
+            std::as_writable_bytes(std::span(valid_data.bitmap));
+        AssertInfo(
+            file.ReadAt(sizeof(uint64_t), bitmap_bytes) == bitmap_bytes.size(),
+            "short read of nullable vector bitmap");
     }
     valid_data.valid_count =
         CountValidDataBitmap(valid_data.total_count, valid_data.bitmap.data());
     return valid_data;
 }
 
-template <typename LocalChunkManagerPtr>
 void
-WriteDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
-                   const std::string& valid_data_path,
+WriteDiskValidData(const local::FileSystem& files,
+                   const local::Path& valid_data_path,
                    const OffsetMapping& offset_mapping) {
     auto total_count = static_cast<size_t>(offset_mapping.GetTotalCount());
     auto wire_count = ToValidDataCount(total_count);
     auto packed_data = PackValidDataBitmap(offset_mapping);
-    if (!local_chunk_manager->Exist(valid_data_path)) {
-        local_chunk_manager->CreateFile(valid_data_path);
-    }
-    local_chunk_manager->Write(
-        valid_data_path, 0, &wire_count, sizeof(uint64_t));
+    auto file = files.OpenForWrite(
+        valid_data_path, local::WriteOptions{.create = true, .truncate = true});
+    auto count_bytes = std::as_bytes(std::span(&wire_count, 1));
+    AssertInfo(file.WriteAt(0, count_bytes) == count_bytes.size(),
+               "short write of nullable vector count");
     if (!packed_data.empty()) {
-        local_chunk_manager->Write(valid_data_path,
-                                   sizeof(uint64_t),
-                                   packed_data.data(),
-                                   packed_data.size());
+        auto bitmap_bytes = std::as_bytes(std::span(packed_data));
+        AssertInfo(
+            file.WriteAt(sizeof(uint64_t), bitmap_bytes) == bitmap_bytes.size(),
+            "short write of nullable vector bitmap");
     }
 }
 
@@ -268,18 +271,21 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     file_manager_ =
         std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);
     AssertInfo(file_manager_ != nullptr, "create file manager failed!");
-    auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto& local_files = file_manager_->GetLocalFiles();
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+    auto local_index_path =
+        local_files.PathFromNativePath(local_index_path_prefix);
+    auto index_lease =
+        file_manager_->AcquireLocalDirWriteLease(local_index_path_prefix);
 
     // As we have guarded dup-load in QueryNode,
     // this assertion failed only if the Milvus rebooted in the same pod,
     // need to remove these files then re-load the segment
-    if (local_chunk_manager->Exist(local_index_path_prefix)) {
-        local_chunk_manager->RemoveDir(local_index_path_prefix);
+    if (local_files.Exists(local_index_path)) {
+        local_files.RemoveAll(local_index_path);
     }
     CheckCompatible(version);
-    local_chunk_manager->CreateDir(local_index_path_prefix);
+    local_files.CreateDirectories(local_index_path);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<milvus::FileManager>(file_manager_));
     auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
@@ -332,19 +338,19 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         read_file_span->End();
     }
 
-    auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto& local_files = file_manager_->GetLocalFiles();
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
 
     auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-    auto disk_valid_data =
-        ReadDiskValidData(local_chunk_manager, valid_data_path);
+    auto disk_valid_data = ReadDiskValidData(
+        local_files, local_files.PathFromNativePath(valid_data_path));
     bool all_null_nullable = disk_valid_data.found &&
                              disk_valid_data.total_count > 0 &&
                              disk_valid_data.valid_count == 0;
     auto empty_emb_list_state = ReadDiskEmptyEmbListOffsets(
-        local_chunk_manager,
-        local_index_path_prefix + "/" + EMPTY_EMB_LIST_OFFSET_KEY);
+        local_files,
+        local_files.PathFromNativePath(local_index_path_prefix + "/" +
+                                       EMPTY_EMB_LIST_OFFSET_KEY));
     if (!all_null_nullable && !empty_emb_list_state.has_value()) {
         // start engine load index span
         auto span_load_engine =
@@ -401,8 +407,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     LOG_INFO("start build disk index, build_id: {}",
              config.value("build_id", "unknown"));
 
-    auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto& local_files = file_manager_->GetLocalFiles();
     knowhere::Json build_config;
     build_config.update(config);
 
@@ -431,8 +436,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         file_manager_->CacheRawDataToDisk<T>(config_with_emb_list);
     build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
 
-    auto disk_valid_data =
-        ReadDiskValidData(local_chunk_manager, valid_data_path);
+    auto disk_valid_data = ReadDiskValidData(
+        local_files, local_files.PathFromNativePath(valid_data_path));
     if (disk_valid_data.found) {
         BuildValidDataFromBitmap(
             this, disk_valid_data.total_count, disk_valid_data.bitmap.data());
@@ -451,8 +456,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     // For VECTOR_ARRAY, verify offsets file exists and pass its path to build_config
     if (is_embedding_list) {
-        auto offsets =
-            ReadDiskEmbListOffsets(local_chunk_manager, offsets_path);
+        auto offsets = ReadDiskEmbListOffsets(
+            local_files, local_files.PathFromNativePath(offsets_path));
         if (!offsets.has_value()) {
             ThrowInfo(ErrorCode::UnexpectedError,
                       fmt::format("Embedding list offsets file not found: {}",
@@ -466,12 +471,14 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
             auto empty_offsets_path =
                 local_index_path_prefix + "/" + EMPTY_EMB_LIST_OFFSET_KEY;
-            WriteDiskEmptyEmbListOffsets(local_chunk_manager,
-                                         empty_offsets_path,
-                                         GetDim(),
-                                         offsets.value());
+            WriteDiskEmptyEmbListOffsets(
+                local_files,
+                local_files.PathFromNativePath(empty_offsets_path),
+                GetDim(),
+                offsets.value());
             file_manager_->AddFile(empty_offsets_path);
-            if (local_chunk_manager->Exist(valid_data_path)) {
+            if (local_files.Exists(
+                    local_files.PathFromNativePath(valid_data_path))) {
                 file_manager_->AddFile(valid_data_path);
             }
             file_manager_->RemoveRawDataFiles();
@@ -516,7 +523,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                   KnowhereStatusString(stat));
 
     // Add valid_data file to index if it was created (nullable vector field)
-    if (local_chunk_manager->Exist(valid_data_path)) {
+    if (local_files.Exists(local_files.PathFromNativePath(valid_data_path))) {
         file_manager_->AddFile(valid_data_path);
     }
 
@@ -530,8 +537,7 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                                         const Config& config) {
-    auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto& local_files = file_manager_->GetLocalFiles();
     knowhere::Json build_config;
     build_config.update(config);
 
@@ -554,8 +560,9 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (HasValidData() && GetValidCount() == 0 &&
         offset_mapping.GetTotalCount() > 0) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-        WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping);
+        WriteDiskValidData(local_files,
+                           local_files.PathFromNativePath(valid_data_path),
+                           offset_mapping);
         file_manager_->AddFile(valid_data_path);
         auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
         if (dim.has_value()) {
@@ -577,10 +584,11 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
             std::vector<size_t>(offsets, offsets + num_offsets);
         auto empty_offsets_path =
             local_index_path_prefix + "/" + EMPTY_EMB_LIST_OFFSET_KEY;
-        WriteDiskEmptyEmbListOffsets(local_chunk_manager,
-                                     empty_offsets_path,
-                                     dataset->GetDim(),
-                                     empty_offsets);
+        WriteDiskEmptyEmbListOffsets(
+            local_files,
+            local_files.PathFromNativePath(empty_offsets_path),
+            dataset->GetDim(),
+            empty_offsets);
         file_manager_->AddFile(empty_offsets_path);
         SetDim(dataset->GetDim());
         empty_emb_list_offsets_ = std::move(empty_offsets);
@@ -597,22 +605,28 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         build_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
     }
-    if (!local_chunk_manager->Exist(local_data_path)) {
-        local_chunk_manager->CreateFile(local_data_path);
-    }
-
-    int64_t offset = 0;
+    auto local_data_file = local_files.OpenForWrite(
+        local_files.PathFromNativePath(local_data_path),
+        local::WriteOptions{.create = true, .truncate = true});
+    uint64_t offset = 0;
     auto num = uint32_t(milvus::GetDatasetRows(dataset));
-    local_chunk_manager->Write(local_data_path, offset, &num, sizeof(num));
+    auto num_bytes = std::as_bytes(std::span(&num, 1));
+    AssertInfo(local_data_file.WriteAt(offset, num_bytes) == num_bytes.size(),
+               "short write of disk index row count");
     offset += sizeof(num);
 
     auto dim = uint32_t(milvus::GetDatasetDim(dataset));
-    local_chunk_manager->Write(local_data_path, offset, &dim, sizeof(dim));
+    auto dim_bytes = std::as_bytes(std::span(&dim, 1));
+    AssertInfo(local_data_file.WriteAt(offset, dim_bytes) == dim_bytes.size(),
+               "short write of disk index dimension");
     offset += sizeof(dim);
 
     size_t data_size = static_cast<size_t>(num) * milvus::GetVecRowSize<T>(dim);
-    auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
-    local_chunk_manager->Write(local_data_path, offset, raw_data, data_size);
+    auto raw_data =
+        static_cast<const std::byte*>(milvus::GetDatasetTensor(dataset));
+    auto data_bytes = std::span(raw_data, data_size);
+    AssertInfo(local_data_file.WriteAt(offset, data_bytes) == data_bytes.size(),
+               "short write of disk index vector data");
 
     // For VECTOR_ARRAY, write offsets to a separate file and pass the path to knowhere
     if (elem_type_ != DataType::NONE) {
@@ -625,7 +639,9 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
         // Write offsets to disk file (use same path convention as Build method)
         std::string offsets_path = local_raw_data_prefix + "offset";
-        local_chunk_manager->CreateFile(offsets_path);
+        auto offsets_file = local_files.OpenForWrite(
+            local_files.PathFromNativePath(offsets_path),
+            local::WriteOptions{.create = true, .truncate = true});
 
         size_t total_vectors =
             static_cast<size_t>(milvus::GetDatasetRows(dataset));
@@ -634,16 +650,17 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
         // Write offsets to file
         // Format: [num_offsets (size_t)][offsets_data (size_t array)]
-        int64_t write_pos = 0;
-        local_chunk_manager->Write(
-            offsets_path, write_pos, &num_offsets, sizeof(size_t));
+        uint64_t write_pos = 0;
+        auto count_bytes = std::as_bytes(std::span(&num_offsets, 1));
+        AssertInfo(
+            offsets_file.WriteAt(write_pos, count_bytes) == count_bytes.size(),
+            "short write of embedding list offsets count");
         write_pos += sizeof(size_t);
 
-        local_chunk_manager->Write(
-            offsets_path,
-            write_pos,
-            const_cast<void*>(static_cast<const void*>(offsets)),
-            num_offsets * sizeof(size_t));
+        auto offsets_bytes = std::as_bytes(std::span(offsets, num_offsets));
+        AssertInfo(offsets_file.WriteAt(write_pos, offsets_bytes) ==
+                       offsets_bytes.size(),
+                   "short write of embedding list offsets payload");
 
         build_config[EMB_LIST_OFFSETS_PATH] = offsets_path;
     }
@@ -656,8 +673,9 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
     if (HasValidData()) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-        WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping);
+        WriteDiskValidData(local_files,
+                           local_files.PathFromNativePath(valid_data_path),
+                           offset_mapping);
         file_manager_->AddFile(valid_data_path);
     }
 

@@ -27,6 +27,7 @@
 #include <iosfwd>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
@@ -52,6 +53,7 @@
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "knowhere/sparse_utils.h"
+#include "local/LegacyLocalChunkFiles.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
@@ -61,8 +63,6 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/FileWriter.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteOutputStream.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -73,72 +73,36 @@ namespace milvus::storage {
 
 namespace {
 std::atomic<uint64_t> g_file_path_generation{0};
-}
 
-struct DiskFileManagerImpl::LocalDirState {
-    explicit LocalDirState(std::string dir) : dir(std::move(dir)) {
+local::FileSystem
+ResolveLocalFiles(const FileManagerContext& context) {
+    if (context.local_files.has_value()) {
+        return *context.local_files;
     }
-
-    std::string dir;
-    std::mutex mutex;
-    bool closed = false;
-    bool delete_on_zero = false;
-    uint64_t active_writers = 0;
-};
-
-DiskFileManagerImpl::LocalDirWriteLease::LocalDirWriteLease(
-    std::shared_ptr<LocalDirState> state)
-    : state_(std::move(state)) {
-}
-
-DiskFileManagerImpl::LocalDirWriteLease&
-DiskFileManagerImpl::LocalDirWriteLease::operator=(
-    LocalDirWriteLease&& other) noexcept {
-    if (this != &other) {
-        Release();
-        state_ = std::move(other.state_);
-    }
-    return *this;
-}
-
-DiskFileManagerImpl::LocalDirWriteLease::~LocalDirWriteLease() {
-    Release();
+    return local::LegacyLocalChunkFiles();
 }
 
 void
-DiskFileManagerImpl::LocalDirWriteLease::Release() noexcept {
-    auto state = std::exchange(state_, nullptr);
-    if (state == nullptr) {
-        return;
-    }
-
-    bool remove_dir = false;
-    std::string dir;
-    {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (state->active_writers == 0) {
-            LOG_WARN(
-                "local dir write lease released with no active writers, "
-                "dir: {}",
-                state->dir);
-            return;
-        }
-        --state->active_writers;
-        if (state->active_writers == 0 && state->delete_on_zero) {
-            remove_dir = true;
-            dir = state->dir;
-        }
-    }
-
-    if (remove_dir) {
-        DiskFileManagerImpl::RemoveLocalDirBestEffort(dir);
-    }
+WriteBytesAt(local::io::WritableFile& file,
+             uint64_t offset,
+             const void* data,
+             size_t size) {
+    auto bytes = std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(data), size);
+    auto bytes_written = file.WriteAt(offset, bytes);
+    AssertInfo(bytes_written == size,
+               "short write to local file {}, expected {}, got {}",
+               file.DebugPath().string(),
+               size,
+               bytes_written);
 }
+}  // namespace
 
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta),
+                      fileManagerContext.indexMeta,
+                      ResolveLocalFiles(fileManagerContext)),
       file_path_generation_(
           g_file_path_generation.fetch_add(1, std::memory_order_relaxed)) {
     rcm_ = fileManagerContext.chunkManagerPtr;
@@ -151,9 +115,12 @@ DiskFileManagerImpl::DiskFileManagerImpl(
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
     RemoveIndexFiles();
+    CloseAndRemoveLocalDir(LocalIndexObjectPath(true));
     RemoveTextLogFiles();
     RemoveJsonStatsFiles();
+    CloseAndRemoveLocalDir(LocalJsonStatsPath(true));
     RemoveNgramIndexFiles();
+    CloseAndRemoveLocalDir(LocalNgramIndexPath(true));
     RemoveRawDataFiles();
 }
 
@@ -214,92 +181,120 @@ DiskFileManagerImpl::GetLocalJsonStatsMetaPrefix() {
 }
 
 std::string
-DiskFileManagerImpl::AppendLocalPathGeneration(
-    const std::string& prefix) const {
+DiskFileManagerImpl::ResolveLocalPrefix(const local::Path& path) const {
     namespace fs = std::filesystem;
-    auto base = prefix;
-    auto is_path_separator = [](char c) { return c == '/' || c == '\\'; };
-    while (!base.empty() && is_path_separator(base.back())) {
-        base.pop_back();
-    }
-
-    auto path = fs::path(base);
-    auto leaf = path.filename().string();
-    auto result =
-        leaf.empty()
-            ? (fs::path(prefix) / std::to_string(file_path_generation_))
-                  .string()
-            : (path.parent_path() /
-               fmt::format("{}_{}", leaf, file_path_generation_))
-                  .string();
+    auto result = local_files_->ResolveNativePath(path).string();
     if (!result.empty() && result.back() != fs::path::preferred_separator) {
         result += fs::path::preferred_separator;
     }
     return result;
 }
 
-void
-DiskFileManagerImpl::RemoveLocalDirBestEffort(const std::string& dir) noexcept {
-    try {
-        auto local_chunk_manager =
-            LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-        if (local_chunk_manager != nullptr) {
-            local_chunk_manager->RemoveDir(dir);
-        }
-    } catch (const std::exception& e) {
-        LOG_WARN("failed to remove local dir {}, error: {}", dir, e.what());
-    } catch (...) {
-        LOG_WARN("failed to remove local dir {}, unknown error", dir);
-    }
+local::Path
+DiskFileManagerImpl::LocalIndexObjectPath(bool temporary) const {
+    auto prefix = temporary ? std::filesystem::path("tmp") / INDEX_ROOT_PATH
+                            : std::filesystem::path(INDEX_ROOT_PATH);
+    return local::Path((prefix / fmt::format("{}_{}_{}_{}_{}",
+                                             index_meta_.build_id,
+                                             index_meta_.index_version,
+                                             index_meta_.segment_id,
+                                             index_meta_.field_id,
+                                             file_path_generation_))
+                           .generic_string());
 }
 
-std::shared_ptr<DiskFileManagerImpl::LocalDirState>
-DiskFileManagerImpl::GetOrCreateLocalDirState(const std::string& dir) {
-    std::lock_guard<std::mutex> lock(local_dir_states_mutex_);
-    auto it = local_dir_states_.find(dir);
-    if (it != local_dir_states_.end()) {
+local::Path
+DiskFileManagerImpl::LocalTextIndexPath(bool temporary) const {
+    if (temporary) {
+        return LocalIndexObjectPath(true);
+    }
+    return local::Path((std::filesystem::path(TEXT_LOG_ROOT_PATH) /
+                        fmt::format("{}_{}_{}_{}_{}",
+                                    index_meta_.build_id,
+                                    index_meta_.index_version,
+                                    field_meta_.segment_id,
+                                    field_meta_.field_id,
+                                    file_path_generation_))
+                           .generic_string());
+}
+
+local::Path
+DiskFileManagerImpl::LocalJsonStatsPath(bool temporary) const {
+    auto prefix = temporary
+                      ? std::filesystem::path("tmp") / JSON_STATS_ROOT_PATH
+                      : std::filesystem::path(JSON_STATS_ROOT_PATH);
+    return local::Path((prefix / fmt::format("{}_{}_{}_{}_{}",
+                                             index_meta_.build_id,
+                                             index_meta_.index_version,
+                                             field_meta_.segment_id,
+                                             field_meta_.field_id,
+                                             file_path_generation_))
+                           .generic_string());
+}
+
+local::Path
+DiskFileManagerImpl::LocalNgramIndexPath(bool temporary) const {
+    auto prefix = temporary ? std::filesystem::path("tmp") / NGRAM_LOG_ROOT_PATH
+                            : std::filesystem::path(NGRAM_LOG_ROOT_PATH);
+    return local::Path((prefix / fmt::format("{}_{}_{}_{}_{}",
+                                             index_meta_.build_id,
+                                             index_meta_.index_version,
+                                             field_meta_.segment_id,
+                                             field_meta_.field_id,
+                                             file_path_generation_))
+                           .generic_string());
+}
+
+local::Path
+DiskFileManagerImpl::LocalRawDataPath() const {
+    return local::Path((std::filesystem::path(RAWDATA_ROOT_PATH) /
+                        fmt::format("{}_{}_{}",
+                                    field_meta_.segment_id,
+                                    field_meta_.field_id,
+                                    file_path_generation_))
+                           .generic_string());
+}
+
+std::shared_ptr<local::ManagedSubtree>
+DiskFileManagerImpl::GetOrCreateManagedSubtree(const local::Path& path) {
+    auto key = std::string(path.String());
+    std::lock_guard<std::mutex> lock(managed_subtrees_mutex_);
+    auto it = managed_subtrees_.find(key);
+    if (it != managed_subtrees_.end()) {
         return it->second;
     }
 
-    auto state = std::make_shared<LocalDirState>(dir);
-    local_dir_states_.emplace(dir, state);
-    return state;
+    auto subtree = local_files_->ManageSubtree(path);
+    managed_subtrees_.emplace(std::move(key), subtree);
+    return subtree;
+}
+
+local::Path
+DiskFileManagerImpl::LocalPathForResolvedPrefix(const std::string& dir) const {
+    return local_files_->PathFromNativePath(dir);
 }
 
 DiskFileManagerImpl::LocalDirWriteLease
 DiskFileManagerImpl::AcquireLocalDirWriteLease(const std::string& dir) {
-    auto state = GetOrCreateLocalDirState(dir);
-    std::lock_guard<std::mutex> lock(state->mutex);
-    if (state->closed) {
-        ThrowInfo(FileWriteFailed,
-                  fmt::format("local dir {} is closed for cleanup", dir));
-    }
-    ++state->active_writers;
-    return LocalDirWriteLease(std::move(state));
+    return AcquireLocalDirWriteLease(LocalPathForResolvedPrefix(dir));
+}
+
+DiskFileManagerImpl::LocalDirWriteLease
+DiskFileManagerImpl::AcquireLocalDirWriteLease(const local::Path& path) {
+    return GetOrCreateManagedSubtree(path)->AcquireWriter();
 }
 
 void
-DiskFileManagerImpl::CloseAndRemoveLocalDir(const std::string& dir) noexcept {
+DiskFileManagerImpl::CloseAndRemoveLocalDir(const local::Path& path) noexcept {
     try {
-        auto state = GetOrCreateLocalDirState(dir);
-        bool remove_dir = false;
-        {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            state->closed = true;
-            if (state->active_writers == 0) {
-                remove_dir = true;
-            } else {
-                state->delete_on_zero = true;
-            }
-        }
-
-        if (remove_dir) {
-            RemoveLocalDirBestEffort(dir);
-        }
-    } catch (const std::exception& e) {
-        LOG_WARN("failed to close local dir {}, error: {}", dir, e.what());
+        GetOrCreateManagedSubtree(path)->RemoveWhenIdle();
+    } catch (const std::exception& error) {
+        LOG_WARN("failed to close local subtree {}, error: {}",
+                 path.String(),
+                 error.what());
     } catch (...) {
-        LOG_WARN("failed to close local dir {}, unknown error", dir);
+        LOG_WARN("failed to close local subtree {}, unknown error",
+                 path.String());
     }
 }
 
@@ -308,10 +303,9 @@ DiskFileManagerImpl::AddFileInternal(
     const std::string& file,
     const std::function<std::string(const std::string&, int)>&
         get_remote_path) noexcept {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     FILEMANAGER_TRY
-    if (!local_chunk_manager->Exist(file)) {
+    auto local_path = local_files_->PathFromNativePath(file);
+    if (!local_files_->Exists(local_path)) {
         LOG_ERROR("local file {} not exists", file);
         return false;
     }
@@ -320,7 +314,7 @@ DiskFileManagerImpl::AddFileInternal(
     local_paths_.emplace_back(file);
 
     auto fileName = GetFileName(file);
-    auto fileSize = local_chunk_manager->Size(file);
+    auto fileSize = local_files_->FileSize(local_path);
     added_total_file_size_ += fileSize;
 
     std::vector<std::string> batch_remote_files;
@@ -385,23 +379,27 @@ DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) noexcept {
 
 bool
 DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     FILEMANAGER_TRY
-    if (!local_chunk_manager->Exist(file)) {
+    auto local_path = local_files_->PathFromNativePath(file);
+    if (!local_files_->Exists(local_path)) {
         LOG_ERROR("local meta file {} not exists", file);
         return false;
     }
 
     local_paths_.emplace_back(file);
     auto fileName = GetFileName(file);
-    auto fileSize = local_chunk_manager->Size(file);
+    auto local_file = local_files_->OpenForRead(local_path);
+    auto fileSize = local_file.Size();
     added_total_file_size_ += fileSize;
 
     // Meta file is small, upload directly without slicing
     auto remote_path = GetRemoteJsonStatsMetaPath(fileName);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-    local_chunk_manager->Read(file, buf.get(), fileSize);
+    auto bytes =
+        std::span<std::byte>(reinterpret_cast<std::byte*>(buf.get()), fileSize);
+    AssertInfo(local_file.ReadAt(0, bytes) == fileSize,
+               "failed to read complete local meta file {}",
+               file);
     rcm_->Write(remote_path, buf.get(), fileSize);
 
     remote_paths_to_size_[remote_path] = fileSize;
@@ -429,8 +427,9 @@ DiskFileManagerImpl::AddBatchIndexFiles(
     const std::vector<int64_t>& local_file_offsets,
     const std::vector<std::string>& remote_files,
     const std::vector<int64_t>& remote_file_sizes) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_path = local_files_->PathFromNativePath(local_file_name);
+    auto local_file = std::make_shared<local::io::RandomAccessFile>(
+        local_files_->OpenForRead(local_path));
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
 
     std::vector<std::future<std::shared_ptr<uint8_t[]>>> futures;
@@ -442,15 +441,19 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 
     for (int64_t i = 0; i < remote_files.size(); ++i) {
         futures.push_back(pool.Submit(
-            [local_chunk_manager](
-                const std::string& file,
-                const int64_t offset,
-                const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+            [local_file](const int64_t offset, const int64_t data_size)
+                -> std::shared_ptr<uint8_t[]> {
                 auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
-                local_chunk_manager->Read(file, offset, buf.get(), data_size);
+                auto bytes = std::span<std::byte>(
+                    reinterpret_cast<std::byte*>(buf.get()), data_size);
+                auto bytes_read = local_file->ReadAt(offset, bytes);
+                AssertInfo(
+                    bytes_read == data_size,
+                    "short read from local index file, expected {}, got {}",
+                    data_size,
+                    bytes_read);
                 return buf;
             },
-            local_file_name,
             local_file_offsets[i],
             remote_file_sizes[i]));
     }
@@ -483,9 +486,6 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
     const std::vector<std::string>& remote_files,
     const std::string& local_index_prefix,
     milvus::proto::common::LoadPriority priority) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-
     std::map<std::string, std::vector<int>> index_slices;
     for (auto& file_path : remote_files) {
         auto pos = file_path.find_last_of('_');
@@ -514,7 +514,8 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         auto prefix = slices.first;
         auto local_index_file_name =
             local_index_prefix + prefix.substr(prefix.find_last_of('/') + 1);
-        local_chunk_manager->CreateFile(local_index_file_name);
+        auto local_path =
+            local_files_->PathFromNativePath(local_index_file_name);
 
         // Get the remote files
         std::vector<std::string> batch_remote_files;
@@ -524,8 +525,12 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
             uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
 
         {
+            auto local_file = local_files_->OpenForWrite(
+                local_path,
+                local::WriteOptions{
+                    .create = true, .truncate = true, .create_parent = true});
             auto file_writer = storage::FileWriter(
-                local_index_file_name,
+                std::move(local_file),
                 storage::io::GetPriorityFromLoadPriority(priority));
             auto appendIndexFiles = [&]() {
                 auto index_chunks_futures =
@@ -566,7 +571,7 @@ DiskFileManagerImpl::CacheIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
     auto local_prefix = GetLocalIndexObjectPrefix();
-    auto lease = AcquireLocalDirWriteLease(local_prefix);
+    auto lease = AcquireLocalDirWriteLease(LocalIndexObjectPath(false));
     CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
@@ -575,7 +580,7 @@ DiskFileManagerImpl::CacheTextLogToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
     auto local_prefix = GetLocalTextIndexPrefix();
-    auto lease = AcquireLocalDirWriteLease(local_prefix);
+    auto lease = AcquireLocalDirWriteLease(LocalTextIndexPath(false));
     CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
@@ -584,7 +589,7 @@ DiskFileManagerImpl::CacheNgramIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
     auto local_prefix = GetLocalNgramIndexPrefix();
-    auto lease = AcquireLocalDirWriteLease(local_prefix);
+    auto lease = AcquireLocalDirWriteLease(LocalNgramIndexPath(false));
     CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
@@ -593,7 +598,7 @@ DiskFileManagerImpl::CacheJsonStatsSharedIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
     auto local_prefix = GetLocalJsonStatsSharedIndexPrefix();
-    auto lease = AcquireLocalDirWriteLease(GetLocalJsonStatsPrefix());
+    auto lease = AcquireLocalDirWriteLease(LocalJsonStatsPath(false));
     CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
@@ -601,25 +606,27 @@ std::string
 DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
     const std::string& remote_file,
     milvus::proto::common::LoadPriority priority) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_prefix = GetLocalJsonStatsMetaPrefix();
-    auto lease = AcquireLocalDirWriteLease(GetLocalJsonStatsPrefix());
+    auto lease = AcquireLocalDirWriteLease(LocalJsonStatsPath(false));
 
     auto file_name = remote_file.substr(remote_file.find_last_of('/') + 1);
     auto local_file =
         (std::filesystem::path(local_prefix) / file_name).string();
 
-    auto parent_path = std::filesystem::path(local_file).parent_path();
-    if (!local_chunk_manager->Exist(parent_path.string())) {
-        local_chunk_manager->CreateDir(parent_path.string());
-    }
-
     // remote_file is an absolute remote path (basePath already prepended by caller)
     auto file_size = rcm_->Size(remote_file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[file_size]);
     rcm_->Read(remote_file, buf.get(), file_size);
-    local_chunk_manager->Write(local_file, buf.get(), file_size);
+    auto local_path = local_files_->PathFromNativePath(local_file);
+    auto output = local_files_->OpenForWrite(
+        local_path,
+        local::WriteOptions{
+            .create = true, .truncate = true, .create_parent = true});
+    auto bytes = std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(buf.get()), file_size);
+    AssertInfo(output.Write(bytes) == file_size,
+               "failed to write complete json stats meta file {}",
+               local_file);
 
     LOG_INFO("Cached json stats meta file from {} to {}, size: {}",
              remote_file,
@@ -632,14 +639,13 @@ DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
 template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
-    auto raw_data_lease =
-        AcquireLocalDirWriteLease(GetLocalRawDataObjectPrefix());
+    auto raw_data_lease = AcquireLocalDirWriteLease(LocalRawDataPath());
     std::optional<LocalDirWriteLease> valid_data_lease;
     if (index::GetValueFromConfig<std::string>(config,
                                                index::VALID_DATA_PATH_KEY)
             .has_value()) {
         valid_data_lease.emplace(
-            AcquireLocalDirWriteLease(GetLocalIndexObjectPrefix()));
+            AcquireLocalDirWriteLease(LocalIndexObjectPath(false)));
     }
 
     auto storage_version =
@@ -661,10 +667,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     auto remote_files = insert_files.value();
     SortByPath(remote_files);
 
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string local_data_path;
-    bool file_created = false;
+    std::optional<local::io::WritableFile> local_file;
 
     // Check if we're dealing with embedding list (VECTOR_ARRAY)
     auto is_embedding_list =
@@ -718,9 +722,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
                 cache_raw_data_to_disk_common<DataType>(
                     field_data,
-                    local_chunk_manager,
+                    local_file,
                     local_data_path,
-                    file_created,
                     dim,
                     write_offset,
                     is_vector_array ? &offsets : nullptr);
@@ -750,11 +753,9 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     // write num_rows and dim value to file header
     write_offset = 0;
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &num_rows, sizeof(num_rows));
+    WriteBytesAt(*local_file, write_offset, &num_rows, sizeof(num_rows));
     write_offset += sizeof(num_rows);
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &dim, sizeof(dim));
+    WriteBytesAt(*local_file, write_offset, &dim, sizeof(dim));
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
@@ -773,27 +774,28 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
             auto offsets_path = index::GetValueFromConfig<std::string>(
                                     config, index::EMB_LIST_OFFSETS_PATH)
                                     .value();
-            local_chunk_manager->CreateFile(offsets_path);
+            auto offsets_file = local_files_->OpenForWrite(
+                local_files_->PathFromNativePath(offsets_path),
+                local::WriteOptions{
+                    .create = true, .truncate = true, .create_parent = true});
 
             size_t num_offsets = offsets.size();
             int64_t offsets_write_pos = 0;
 
-            local_chunk_manager->Write(
-                offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+            WriteBytesAt(
+                offsets_file, offsets_write_pos, &num_offsets, sizeof(size_t));
             offsets_write_pos += sizeof(size_t);
 
-            local_chunk_manager->Write(offsets_path,
-                                       offsets_write_pos,
-                                       offsets.data(),
-                                       offsets.size() * sizeof(size_t));
+            WriteBytesAt(offsets_file,
+                         offsets_write_pos,
+                         offsets.data(),
+                         offsets.size() * sizeof(size_t));
         }
     }
 
     if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
-        write_valid_data_file(local_chunk_manager,
-                              valid_data_path.value(),
-                              valid_bitmap,
-                              total_num_rows);
+        write_valid_data_file(
+            valid_data_path.value(), valid_bitmap, total_num_rows);
     }
 
     return local_data_path;
@@ -803,23 +805,27 @@ template <typename DataType>
 void
 DiskFileManagerImpl::cache_raw_data_to_disk_common(
     const FieldDataPtr& field_data,
-    const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
+    std::optional<local::io::WritableFile>& local_file,
     std::string& local_data_path,
-    bool& file_created,
     uint32_t& dim,
     int64_t& write_offset,
     std::vector<size_t>* offsets) {
     auto data_type = field_data->get_data_type();
-    if (!file_created) {
+    if (!local_file.has_value()) {
         auto init_file_info = [&](milvus::DataType dt) {
-            local_data_path = GetLocalRawDataObjectPrefix() + "raw_data";
+            auto relative_path =
+                std::string(LocalRawDataPath().String()) + "/raw_data";
             if (dt == milvus::DataType::VECTOR_SPARSE_U32_F32) {
-                local_data_path += ".sparse_u32_f32";
+                relative_path += ".sparse_u32_f32";
             }
-            local_chunk_manager->CreateFile(local_data_path);
+            auto path = local::Path(std::move(relative_path));
+            local_data_path = local_files_->ResolveNativePath(path).string();
+            local_file.emplace(local_files_->OpenForWrite(
+                path,
+                local::WriteOptions{
+                    .create = true, .truncate = true, .create_parent = true}));
         };
         init_file_info(data_type);
-        file_created = true;
     }
     if (data_type == milvus::DataType::VECTOR_SPARSE_U32_F32) {
         dim =
@@ -833,13 +839,9 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             auto row = sparse_rows[i];
             auto row_byte_size = row.data_byte_size();
             uint32_t nnz = row.size();
-            local_chunk_manager->Write(local_data_path,
-                                       write_offset,
-                                       const_cast<uint32_t*>(&nnz),
-                                       sizeof(nnz));
+            WriteBytesAt(*local_file, write_offset, &nnz, sizeof(nnz));
             write_offset += sizeof(nnz);
-            local_chunk_manager->Write(
-                local_data_path, write_offset, row.data(), row_byte_size);
+            WriteBytesAt(*local_file, write_offset, row.data(), row_byte_size);
             write_offset += row_byte_size;
         }
     } else if (data_type == milvus::DataType::VECTOR_ARRAY) {
@@ -887,38 +889,33 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         }
 
         // Write flattened data to disk
-        local_chunk_manager->Write(
-            local_data_path, write_offset, buf.get(), total_size);
+        WriteBytesAt(*local_file, write_offset, buf.get(), total_size);
         write_offset += total_size;
     } else {
         dim = field_data->get_dim();
         auto data_size =
             field_data->get_valid_rows() * milvus::GetVecRowSize<DataType>(dim);
-        local_chunk_manager->Write(local_data_path,
-                                   write_offset,
-                                   const_cast<void*>(field_data->Data()),
-                                   data_size);
+        WriteBytesAt(*local_file, write_offset, field_data->Data(), data_size);
         write_offset += data_size;
     }
 }
 
 void
-DiskFileManagerImpl::write_valid_data_file(
-    const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
-    const std::string& valid_data_path,
-    std::vector<uint8_t>& valid_bitmap,
-    uint64_t total_num_rows) {
-    local_chunk_manager->CreateFile(valid_data_path);
+DiskFileManagerImpl::write_valid_data_file(const std::string& valid_data_path,
+                                           std::vector<uint8_t>& valid_bitmap,
+                                           uint64_t total_num_rows) {
+    auto valid_file = local_files_->OpenForWrite(
+        local_files_->PathFromNativePath(valid_data_path),
+        local::WriteOptions{
+            .create = true, .truncate = true, .create_parent = true});
     int64_t valid_write_pos = 0;
 
-    local_chunk_manager->Write(
-        valid_data_path, valid_write_pos, &total_num_rows, sizeof(uint64_t));
+    WriteBytesAt(
+        valid_file, valid_write_pos, &total_num_rows, sizeof(uint64_t));
     valid_write_pos += sizeof(uint64_t);
 
-    local_chunk_manager->Write(valid_data_path,
-                               valid_write_pos,
-                               valid_bitmap.data(),
-                               valid_bitmap.size());
+    WriteBytesAt(
+        valid_file, valid_write_pos, valid_bitmap.data(), valid_bitmap.size());
 }
 
 template <typename T>
@@ -941,10 +938,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         SortByPath(remote_files);
     }
 
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string local_data_path;
-    bool file_created = false;
+    std::optional<local::io::WritableFile> local_file;
 
     // Check if we're dealing with embedding list (VECTOR_ARRAY)
     auto is_embedding_list =
@@ -1020,9 +1015,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         }
 
         cache_raw_data_to_disk_common<T>(field_data,
-                                         local_chunk_manager,
+                                         local_file,
                                          local_data_path,
-                                         file_created,
                                          var_dim,
                                          write_offset,
                                          is_vector_array ? &offsets : nullptr);
@@ -1036,11 +1030,9 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
     // write num_rows and dim value to file header
     write_offset = 0;
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &num_rows, sizeof(num_rows));
+    WriteBytesAt(*local_file, write_offset, &num_rows, sizeof(num_rows));
     write_offset += sizeof(num_rows);
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &var_dim, sizeof(var_dim));
+    WriteBytesAt(*local_file, write_offset, &var_dim, sizeof(var_dim));
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
@@ -1060,27 +1052,28 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                     config, index::EMB_LIST_OFFSETS_PATH)
                                     .value();
 
-            local_chunk_manager->CreateFile(offsets_path);
+            auto offsets_file = local_files_->OpenForWrite(
+                local_files_->PathFromNativePath(offsets_path),
+                local::WriteOptions{
+                    .create = true, .truncate = true, .create_parent = true});
 
             size_t num_offsets = offsets.size();
             int64_t offsets_write_pos = 0;
 
-            local_chunk_manager->Write(
-                offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+            WriteBytesAt(
+                offsets_file, offsets_write_pos, &num_offsets, sizeof(size_t));
             offsets_write_pos += sizeof(size_t);
 
-            local_chunk_manager->Write(offsets_path,
-                                       offsets_write_pos,
-                                       offsets.data(),
-                                       offsets.size() * sizeof(size_t));
+            WriteBytesAt(offsets_file,
+                         offsets_write_pos,
+                         offsets.data(),
+                         offsets.size() * sizeof(size_t));
         }
     }
 
     if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
-        write_valid_data_file(local_chunk_manager,
-                              valid_data_path.value(),
-                              valid_bitmap,
-                              total_num_rows);
+        write_valid_data_file(
+            valid_data_path.value(), valid_bitmap, total_num_rows);
     }
 
     return local_data_path;
@@ -1088,42 +1081,40 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
 void
 DiskFileManagerImpl::RemoveIndexFiles() {
-    CloseAndRemoveLocalDir(GetLocalIndexObjectPrefix());
+    CloseAndRemoveLocalDir(LocalIndexObjectPath(false));
 }
 
 void
 DiskFileManagerImpl::RemoveTextLogFiles() {
-    CloseAndRemoveLocalDir(GetLocalTextIndexPrefix());
+    CloseAndRemoveLocalDir(LocalTextIndexPath(false));
 }
 
 void
 DiskFileManagerImpl::RemoveJsonStatsSharedIndexFiles() {
-    CloseAndRemoveLocalDir(GetLocalJsonStatsPrefix());
+    CloseAndRemoveLocalDir(LocalJsonStatsPath(false));
 }
 
 void
 DiskFileManagerImpl::RemoveJsonStatsFiles() {
-    CloseAndRemoveLocalDir(GetLocalJsonStatsPrefix());
+    CloseAndRemoveLocalDir(LocalJsonStatsPath(false));
 }
 
 void
 DiskFileManagerImpl::RemoveNgramIndexFiles() {
-    CloseAndRemoveLocalDir(GetLocalNgramIndexPrefix());
+    CloseAndRemoveLocalDir(LocalNgramIndexPath(false));
 }
 
 void
 DiskFileManagerImpl::RemoveRawDataFiles() {
-    CloseAndRemoveLocalDir(GetLocalRawDataObjectPrefix());
+    CloseAndRemoveLocalDir(LocalRawDataPath());
 }
 
 template <DataType T>
 bool
-WriteOptFieldIvfDataImpl(
-    const int64_t field_id,
-    const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
-    const std::string& local_data_path,
-    const std::vector<FieldDataPtr>& field_datas,
-    uint64_t& write_offset) {
+WriteOptFieldIvfDataImpl(const int64_t field_id,
+                         local::io::WritableFile& local_file,
+                         const std::vector<FieldDataPtr>& field_datas,
+                         uint64_t& write_offset) {
     using FieldDataT = DataTypeNativeOrVoid<T>;
     using OffsetT = uint32_t;
     std::unordered_map<FieldDataT, std::vector<OffsetT>> mp;
@@ -1143,48 +1134,35 @@ WriteOptFieldIvfDataImpl(
     }
 
     LOG_INFO("Get opt fields with {} categories", mp.size());
-    local_chunk_manager->Write(local_data_path,
-                               write_offset,
-                               const_cast<int64_t*>(&field_id),
-                               sizeof(field_id));
+    WriteBytesAt(local_file, write_offset, &field_id, sizeof(field_id));
     write_offset += sizeof(field_id);
     const uint32_t num_of_unique_field_data = mp.size();
-    local_chunk_manager->Write(local_data_path,
-                               write_offset,
-                               const_cast<uint32_t*>(&num_of_unique_field_data),
-                               sizeof(num_of_unique_field_data));
+    WriteBytesAt(local_file,
+                 write_offset,
+                 &num_of_unique_field_data,
+                 sizeof(num_of_unique_field_data));
     write_offset += sizeof(num_of_unique_field_data);
     for (const auto& [val, offsets] : mp) {
         const uint32_t offsets_cnt = offsets.size();
-        local_chunk_manager->Write(local_data_path,
-                                   write_offset,
-                                   const_cast<uint32_t*>(&offsets_cnt),
-                                   sizeof(offsets_cnt));
+        WriteBytesAt(
+            local_file, write_offset, &offsets_cnt, sizeof(offsets_cnt));
         write_offset += sizeof(offsets_cnt);
         const size_t data_size = offsets_cnt * sizeof(OffsetT);
-        local_chunk_manager->Write(local_data_path,
-                                   write_offset,
-                                   const_cast<OffsetT*>(offsets.data()),
-                                   data_size);
+        WriteBytesAt(local_file, write_offset, offsets.data(), data_size);
         write_offset += data_size;
     }
     return true;
 }
 
-#define GENERATE_OPT_FIELD_IVF_IMPL(DT)               \
-    WriteOptFieldIvfDataImpl<DT>(field_id,            \
-                                 local_chunk_manager, \
-                                 local_data_path,     \
-                                 field_datas,         \
-                                 write_offset)
+#define GENERATE_OPT_FIELD_IVF_IMPL(DT) \
+    WriteOptFieldIvfDataImpl<DT>(       \
+        field_id, local_file, field_datas, write_offset)
 bool
-WriteOptFieldIvfData(
-    const DataType& dt,
-    const int64_t field_id,
-    const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
-    const std::string& local_data_path,
-    const std::vector<FieldDataPtr>& field_datas,
-    uint64_t& write_offset) {
+WriteOptFieldIvfData(const DataType& dt,
+                     const int64_t field_id,
+                     local::io::WritableFile& local_file,
+                     const std::vector<FieldDataPtr>& field_datas,
+                     uint64_t& write_offset) {
     switch (dt) {
         case DataType::BOOL:
             return GENERATE_OPT_FIELD_IVF_IMPL(DataType::BOOL);
@@ -1215,21 +1193,14 @@ WriteOptFieldIvfData(
 #undef GENERATE_OPT_FIELD_IVF_IMPL
 
 void
-WriteOptFieldsIvfMeta(
-    const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
-    const std::string& local_data_path,
-    const uint32_t num_of_fields,
-    uint64_t& write_offset) {
+WriteOptFieldsIvfMeta(local::io::WritableFile& local_file,
+                      const uint32_t num_of_fields,
+                      uint64_t& write_offset) {
     const uint8_t kVersion = 0;
-    local_chunk_manager->Write(local_data_path,
-                               write_offset,
-                               const_cast<uint8_t*>(&kVersion),
-                               sizeof(kVersion));
+    WriteBytesAt(local_file, write_offset, &kVersion, sizeof(kVersion));
     write_offset += sizeof(kVersion);
-    local_chunk_manager->Write(local_data_path,
-                               write_offset,
-                               const_cast<uint32_t*>(&num_of_fields),
-                               sizeof(num_of_fields));
+    WriteBytesAt(
+        local_file, write_offset, &num_of_fields, sizeof(num_of_fields));
     write_offset += sizeof(num_of_fields);
 }
 
@@ -1240,7 +1211,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     if (!opt_fields.has_value() || opt_fields->empty()) {
         return "";
     }
-    auto lease = AcquireLocalDirWriteLease(GetLocalRawDataObjectPrefix());
+    auto lease = AcquireLocalDirWriteLease(LocalRawDataPath());
 
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
@@ -1261,14 +1232,14 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
             "vector index build with multiple fields is not supported yet");
     }
 
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_data_path =
         GetLocalRawDataObjectPrefix() + std::string(VEC_OPT_FIELDS);
-    local_chunk_manager->CreateFile(local_data_path);
+    auto local_file = local_files_->OpenForWrite(
+        local_files_->PathFromNativePath(local_data_path),
+        local::WriteOptions{
+            .create = true, .truncate = true, .create_parent = true});
     uint64_t write_offset = 0;
-    WriteOptFieldsIvfMeta(
-        local_chunk_manager, local_data_path, num_of_fields, write_offset);
+    WriteOptFieldsIvfMeta(local_file, num_of_fields, write_offset);
 
     std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
@@ -1284,22 +1255,16 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
         std::vector<FieldDataPtr> field_datas =
             FetchFieldData(rcm_.get(), field_paths);
 
-        if (WriteOptFieldIvfData(field_type,
-                                 field_id,
-                                 local_chunk_manager,
-                                 local_data_path,
-                                 field_datas,
-                                 write_offset)) {
+        if (WriteOptFieldIvfData(
+                field_type, field_id, local_file, field_datas, write_offset)) {
             actual_field_ids.insert(field_id);
         }
     }
 
     if (actual_field_ids.size() != num_of_fields) {
         write_offset = 0;
-        WriteOptFieldsIvfMeta(local_chunk_manager,
-                              local_data_path,
-                              actual_field_ids.size(),
-                              write_offset);
+        WriteOptFieldsIvfMeta(
+            local_file, actual_field_ids.size(), write_offset);
         if (actual_field_ids.empty()) {
             return "";
         }
@@ -1337,14 +1302,14 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
             "vector index build with multiple fields is not supported yet");
     }
 
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_data_path =
         GetLocalRawDataObjectPrefix() + std::string(VEC_OPT_FIELDS);
-    local_chunk_manager->CreateFile(local_data_path);
+    auto local_file = local_files_->OpenForWrite(
+        local_files_->PathFromNativePath(local_data_path),
+        local::WriteOptions{
+            .create = true, .truncate = true, .create_parent = true});
     uint64_t write_offset = 0;
-    WriteOptFieldsIvfMeta(
-        local_chunk_manager, local_data_path, num_of_fields, write_offset);
+    WriteOptFieldsIvfMeta(local_file, num_of_fields, write_offset);
 
     std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
@@ -1358,22 +1323,16 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
                                                       1,
                                                       fs_);
 
-        if (WriteOptFieldIvfData(field_type,
-                                 field_id,
-                                 local_chunk_manager,
-                                 local_data_path,
-                                 field_datas,
-                                 write_offset)) {
+        if (WriteOptFieldIvfData(
+                field_type, field_id, local_file, field_datas, write_offset)) {
             actual_field_ids.insert(field_id);
         }
     }
 
     if (actual_field_ids.size() != num_of_fields) {
         write_offset = 0;
-        WriteOptFieldsIvfMeta(local_chunk_manager,
-                              local_data_path,
-                              actual_field_ids.size(),
-                              write_offset);
+        WriteOptFieldsIvfMeta(
+            local_file, actual_field_ids.size(), write_offset);
         if (actual_field_ids.empty()) {
             return "";
         }
@@ -1408,14 +1367,14 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
                "[StorageV3] loon ffi properties is null when build index "
                "with manifest");
 
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_data_path =
         GetLocalRawDataObjectPrefix() + std::string(VEC_OPT_FIELDS);
-    local_chunk_manager->CreateFile(local_data_path);
+    auto local_file = local_files_->OpenForWrite(
+        local_files_->PathFromNativePath(local_data_path),
+        local::WriteOptions{
+            .create = true, .truncate = true, .create_parent = true});
     uint64_t write_offset = 0;
-    WriteOptFieldsIvfMeta(
-        local_chunk_manager, local_data_path, num_of_fields, write_offset);
+    WriteOptFieldsIvfMeta(local_file, num_of_fields, write_offset);
 
     std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
@@ -1440,22 +1399,16 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
                                       element_type,
                                       GetStorageColumnMapping(field_id));
 
-        if (WriteOptFieldIvfData(field_type,
-                                 field_id,
-                                 local_chunk_manager,
-                                 local_data_path,
-                                 field_datas,
-                                 write_offset)) {
+        if (WriteOptFieldIvfData(
+                field_type, field_id, local_file, field_datas, write_offset)) {
             actual_field_ids.insert(field_id);
         }
     }
 
     if (actual_field_ids.size() != num_of_fields) {
         write_offset = 0;
-        WriteOptFieldsIvfMeta(local_chunk_manager,
-                              local_data_path,
-                              actual_field_ids.size(),
-                              write_offset);
+        WriteOptFieldsIvfMeta(
+            local_file, actual_field_ids.size(), write_offset);
         if (actual_field_ids.empty()) {
             return "";
         }
@@ -1481,83 +1434,35 @@ DiskFileManagerImpl::GetIndexIdentifier() {
 // path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenIndexPathPrefix(local_chunk_manager,
-                           index_meta_.build_id,
-                           index_meta_.index_version,
-                           index_meta_.segment_id,
-                           index_meta_.field_id,
-                           false));
+    return ResolveLocalPrefix(LocalIndexObjectPath(false));
 }
 
 // temporary path used during index building
 std::string
 DiskFileManagerImpl::GetLocalTempIndexObjectPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenIndexPathPrefix(local_chunk_manager,
-                           index_meta_.build_id,
-                           index_meta_.index_version,
-                           index_meta_.segment_id,
-                           index_meta_.field_id,
-                           true));
+    return ResolveLocalPrefix(LocalIndexObjectPath(true));
 }
 
 // path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalTextIndexPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenTextIndexPathPrefix(local_chunk_manager,
-                               index_meta_.build_id,
-                               index_meta_.index_version,
-                               field_meta_.segment_id,
-                               field_meta_.field_id,
-                               false));
+    return ResolveLocalPrefix(LocalTextIndexPath(false));
 }
 
 // temporary path used during index building
 std::string
 DiskFileManagerImpl::GetLocalTempTextIndexPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenIndexPathPrefix(local_chunk_manager,
-                           index_meta_.build_id,
-                           index_meta_.index_version,
-                           field_meta_.segment_id,
-                           field_meta_.field_id,
-                           true));
+    return ResolveLocalPrefix(LocalTextIndexPath(true));
 }
 
 std::string
 DiskFileManagerImpl::GetLocalJsonStatsPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenJsonStatsPathPrefix(local_chunk_manager,
-                               index_meta_.build_id,
-                               index_meta_.index_version,
-                               field_meta_.segment_id,
-                               field_meta_.field_id,
-                               false));
+    return ResolveLocalPrefix(LocalJsonStatsPath(false));
 }
 
 std::string
 DiskFileManagerImpl::GetLocalTempJsonStatsPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenJsonStatsPathPrefix(local_chunk_manager,
-                               index_meta_.build_id,
-                               index_meta_.index_version,
-                               field_meta_.segment_id,
-                               field_meta_.field_id,
-                               true));
+    return ResolveLocalPrefix(LocalJsonStatsPath(true));
 }
 
 std::string
@@ -1592,28 +1497,12 @@ DiskFileManagerImpl::GetLocalJsonStatsShreddingPath(
 
 std::string
 DiskFileManagerImpl::GetLocalNgramIndexPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenNgramIndexPrefix(local_chunk_manager,
-                            index_meta_.build_id,
-                            index_meta_.index_version,
-                            field_meta_.segment_id,
-                            field_meta_.field_id,
-                            false));
+    return ResolveLocalPrefix(LocalNgramIndexPath(false));
 }
 
 std::string
 DiskFileManagerImpl::GetLocalTempNgramIndexPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(
-        GenNgramIndexPrefix(local_chunk_manager,
-                            index_meta_.build_id,
-                            index_meta_.index_version,
-                            field_meta_.segment_id,
-                            field_meta_.field_id,
-                            true));
+    return ResolveLocalPrefix(LocalNgramIndexPath(true));
 }
 
 std::string
@@ -1632,10 +1521,7 @@ DiskFileManagerImpl::GetRemoteJsonStatsLogPrefix() {
 
 std::string
 DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return AppendLocalPathGeneration(GenFieldRawDataPathPrefix(
-        local_chunk_manager, field_meta_.segment_id, field_meta_.field_id));
+    return ResolveLocalPrefix(LocalRawDataPath());
 }
 
 bool
@@ -1646,16 +1532,12 @@ DiskFileManagerImpl::RemoveFile(const std::string& file) noexcept {
 
 std::optional<bool>
 DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
-    bool isExist = false;
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     try {
-        isExist = local_chunk_manager->Exist(file);
+        return local_files_->Exists(local_files_->PathFromNativePath(file));
     } catch (std::exception& e) {
         // LOG_DEBUG("Exception:{}", e).what();
         return std::nullopt;
     }
-    return isExist;
 }
 
 template std::string

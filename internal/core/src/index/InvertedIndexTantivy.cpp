@@ -19,9 +19,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <list>
 #include <map>
 #include <optional>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -51,8 +53,6 @@
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
 #include "storage/IndexEntryWriter.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -75,7 +75,9 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
     auto field =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
     path_ = disk_file_manager_->GetLocalTempIndexObjectPrefix();
-    boost::filesystem::create_directories(path_);
+    auto path = disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+    auto lease = disk_file_manager_->AcquireLocalDirWriteLease(path_);
+    disk_file_manager_->GetLocalFiles().CreateDirectories(path);
     d_type_ = get_tantivy_data_type(schema_);
     if (tantivy_index_exist(path_.c_str())) {
         ThrowInfo(IndexBuildError,
@@ -117,15 +119,21 @@ template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
     if (wrapper_) {
         wrapper_->free();
+        wrapper_.reset();
     }
     if (path_.empty()) {
         return;
     }
-    auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto prefix = path_;
-    LOG_INFO("inverted index remove path:{}", path_);
-    local_chunk_manager->RemoveDir(prefix);
+    if (disk_file_manager_) {
+        try {
+            (void)disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+            return;  // Rooted paths are owned by the disk file manager.
+        } catch (const SegcoreError&) {
+            // BuildWithRawDataForUT uses an independent temporary path.
+        }
+    }
+    std::error_code error;
+    std::filesystem::remove_all(path_, error);
 }
 
 template <typename T>
@@ -925,7 +933,9 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
     bool has_null = reader.GetMeta<bool>("has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
-    boost::filesystem::create_directories(path_);
+    auto path = disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+    auto lease = disk_file_manager_->AcquireLocalDirWriteLease(path_);
+    disk_file_manager_->GetLocalFiles().CreateDirectories(path);
 
     std::vector<std::pair<std::string, std::string>> pairs;
     for (const auto& fn : file_names) {

@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <iosfwd>
+#include <span>
 #include <unordered_set>
 #include <variant>
 #include "segcore/default_fs.h"
@@ -44,6 +45,7 @@
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/bson_builder.h"
 #include "index/json_stats/parquet_writer.h"
+#include "local/FileSystem.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
@@ -63,8 +65,6 @@
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MmapManager.h"
 #include "storage/Util.h"
@@ -223,17 +223,23 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
         LOG_INFO("init local shared bson index with path: {} for segment {}",
                  shared_key_index_path,
                  segment_id_);
-        boost::filesystem::create_directories(shared_key_index_path);
+        auto shared_key_path =
+            disk_file_manager_->GetLocalFiles().PathFromNativePath(
+                shared_key_index_path);
+        disk_file_manager_->GetLocalFiles().CreateDirectories(shared_key_path);
         bson_inverted_index_ = std::make_shared<BsonInvertedIndex>(
             shared_key_index_path, field_id_, ctx, tantivy_index_version);
     }
+
+    auto lease = disk_file_manager_->AcquireLocalDirWriteLease(path_);
+    auto local_path =
+        disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+    disk_file_manager_->GetLocalFiles().CreateDirectories(local_path);
 }
 
 JsonKeyStats::~JsonKeyStats() {
     bson_inverted_index_.reset();
     bson_index_cache_slot_.reset();
-    boost::filesystem::remove_all(path_);
-    LOG_INFO("remove json key stats with path: {}", path_);
 }
 
 void
@@ -767,11 +773,13 @@ JsonKeyStats::WriteMetaFile() {
     auto meta_content = json_stats_meta_.Serialize();
     auto meta_file_path = GetMetaFilePath();
 
-    auto local_chunk_manager =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager();
-    local_chunk_manager->Write(
-        meta_file_path, meta_content.data(), meta_content.size());
+    const auto& local_files = disk_file_manager_->GetLocalFiles();
+    auto meta_file = local_files.OpenForWrite(
+        local_files.PathFromNativePath(meta_file_path),
+        local::WriteOptions{.create = true, .truncate = true});
+    auto meta_bytes = std::as_bytes(std::span(meta_content));
+    AssertInfo(meta_file.Write(meta_bytes) == meta_bytes.size(),
+               "short write of json stats meta file");
 
     meta_file_size_ = meta_content.size();
     LOG_INFO("write meta file: {} with size {} for segment {} for field {}",
@@ -788,14 +796,15 @@ JsonKeyStats::LoadMetaFile(const std::string& local_meta_file_path) {
              segment_id_,
              field_id_);
 
-    auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-
-    auto file_size = local_chunk_manager->Size(local_meta_file_path);
+    const auto& local_files = disk_file_manager_->GetLocalFiles();
+    auto file = local_files.OpenForRead(
+        local_files.PathFromNativePath(local_meta_file_path));
+    auto file_size = file.Size();
     std::string meta_content;
     meta_content.resize(file_size);
-    local_chunk_manager->Read(
-        local_meta_file_path, meta_content.data(), file_size);
+    auto meta_bytes = std::as_writable_bytes(std::span(meta_content));
+    AssertInfo(file.ReadAt(0, meta_bytes) == meta_bytes.size(),
+               "short read of json stats meta file");
 
     key_field_map_ = JsonStatsMeta::DeserializeToKeyFieldMap(meta_content);
 
@@ -1334,10 +1343,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     auto enable_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(false);
     if (enable_mmap) {
-        mmap_filepath_ =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager()
-                ->GetRootPath();
+        mmap_filepath_ = path_;
         LOG_INFO("load json stats for segment {} with mmap local file path: {}",
                  segment_id_,
                  mmap_filepath_);

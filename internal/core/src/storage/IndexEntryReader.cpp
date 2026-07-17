@@ -123,6 +123,22 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
 
 constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
 
+size_t
+CheckedEntryStreamSliceSize() {
+    auto slice_size = DefaultEntryStreamSliceSize();
+    AssertInfo(slice_size >= kMinStreamSliceSize,
+               "ReadEntriesStreamToFiles slice_size must be at least {} bytes, "
+               "got {}",
+               kMinStreamSliceSize,
+               slice_size);
+    AssertInfo(IsStreamSliceSizeAligned(slice_size),
+               "ReadEntriesStreamToFiles slice_size must be {}-byte aligned, "
+               "got {}",
+               kStreamSliceAlignment,
+               slice_size);
+    return slice_size;
+}
+
 void
 DrainFutures(std::vector<std::future<void>>& futures,
              std::exception_ptr& first_error) {
@@ -867,17 +883,7 @@ IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
                                              const EntryMeta& meta,
                                              io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::PrepareEntryStreamDownload");
-    auto slice_size = DefaultEntryStreamSliceSize();
-    AssertInfo(slice_size >= kMinStreamSliceSize,
-               "ReadEntriesStreamToFiles slice_size must be at least {} bytes, "
-               "got {}",
-               kMinStreamSliceSize,
-               slice_size);
-    AssertInfo(IsStreamSliceSizeAligned(slice_size),
-               "ReadEntriesStreamToFiles slice_size must be {}-byte aligned, "
-               "got {}",
-               kStreamSliceAlignment,
-               slice_size);
+    auto slice_size = CheckedEntryStreamSliceSize();
 
     EntryStreamDownloadState state;
     state.name = name;
@@ -892,6 +898,31 @@ IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
             PlainStreamSliceCount(meta.plain.size, slice_size));
         state.writer = std::make_unique<PositionedFileWriter>(
             local_path, meta.plain.size, write_priority);
+    }
+    return state;
+}
+
+IndexEntryReader::EntryStreamDownloadState
+IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
+                                             local::io::WritableFile output,
+                                             const EntryMeta& meta,
+                                             io::Priority write_priority) {
+    CheckCancelled("IndexEntryReader::PrepareEntryStreamDownload");
+    auto slice_size = CheckedEntryStreamSliceSize();
+
+    EntryStreamDownloadState state;
+    state.name = name;
+    if (meta.encrypted) {
+        state.expected_crc = meta.enc.crc32;
+        state.range_crcs.resize(meta.enc.slices.size());
+        state.writer = std::make_unique<PositionedFileWriter>(
+            std::move(output), meta.enc.original_size, write_priority);
+    } else {
+        state.expected_crc = meta.plain.crc32;
+        state.range_crcs.resize(
+            PlainStreamSliceCount(meta.plain.size, slice_size));
+        state.writer = std::make_unique<PositionedFileWriter>(
+            std::move(output), meta.plain.size, write_priority);
     }
     return state;
 }
@@ -1133,32 +1164,27 @@ IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
 }
 
 void
-IndexEntryReader::ReadEntriesStreamToFiles(
-    const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
-    io::Priority write_priority) {
-    CheckCancelled("IndexEntryReader::ReadEntriesStreamToFiles");
-    if (name_path_pairs.empty()) {
-        return;
-    }
+IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
+                                        local::io::WritableFile output,
+                                        io::Priority write_priority) {
+    CheckCancelled("IndexEntryReader::ReadEntryStreamToFile");
+    AssertInfo(HasEntry(name), "Entry not found: {}", name);
+    auto writer = FileWriter(std::move(output), write_priority);
+    ReadEntryStream(name, [&writer](const uint8_t* data, size_t len) {
+        writer.Write(data, len);
+    });
+    writer.Finish();
+}
 
-    std::vector<EntryStreamDownloadState> states;
-    states.reserve(name_path_pairs.size());
+void
+IndexEntryReader::CompleteEntryStreamDownloads(
+    std::vector<EntryStreamDownloadState>& states, size_t total_task_count) {
     std::vector<std::future<void>> all_futures;
-
     try {
-        size_t total_task_count = 0;
-        for (const auto& [name, path] : name_path_pairs) {
-            auto it = entry_index_.find(name);
-            AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
-            states.push_back(PrepareEntryStreamDownload(
-                name, path, it->second, write_priority));
-            total_task_count += StreamDownloadTaskCount(it->second);
-        }
-
         all_futures.reserve(total_task_count);
-        for (size_t i = 0; i < name_path_pairs.size(); i++) {
-            const auto& meta = entry_index_.at(name_path_pairs[i].first);
-            SubmitEntryStreamDownloadTasks(meta, states[i], all_futures);
+        for (auto& state : states) {
+            SubmitEntryStreamDownloadTasks(
+                entry_index_.at(state.name), state, all_futures);
         }
 
         std::exception_ptr first_error = nullptr;
@@ -1178,6 +1204,50 @@ IndexEntryReader::ReadEntriesStreamToFiles(
         }
         std::rethrow_exception(first_error);
     }
+}
+
+void
+IndexEntryReader::ReadEntriesStreamToFiles(
+    const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
+    io::Priority write_priority) {
+    CheckCancelled("IndexEntryReader::ReadEntriesStreamToFiles");
+    if (name_path_pairs.empty()) {
+        return;
+    }
+
+    std::vector<EntryStreamDownloadState> states;
+    states.reserve(name_path_pairs.size());
+    size_t total_task_count = 0;
+    for (const auto& [name, path] : name_path_pairs) {
+        auto it = entry_index_.find(name);
+        AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+        states.push_back(
+            PrepareEntryStreamDownload(name, path, it->second, write_priority));
+        total_task_count += StreamDownloadTaskCount(it->second);
+    }
+    CompleteEntryStreamDownloads(states, total_task_count);
+}
+
+void
+IndexEntryReader::ReadEntriesStreamToFiles(
+    std::vector<std::pair<std::string, local::io::WritableFile>> named_outputs,
+    io::Priority write_priority) {
+    CheckCancelled("IndexEntryReader::ReadEntriesStreamToFiles");
+    if (named_outputs.empty()) {
+        return;
+    }
+
+    std::vector<EntryStreamDownloadState> states;
+    states.reserve(named_outputs.size());
+    size_t total_task_count = 0;
+    for (auto& [name, output] : named_outputs) {
+        auto it = entry_index_.find(name);
+        AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+        states.push_back(PrepareEntryStreamDownload(
+            name, std::move(output), it->second, write_priority));
+        total_task_count += StreamDownloadTaskCount(it->second);
+    }
+    CompleteEntryStreamDownloads(states, total_task_count);
 }
 
 size_t
