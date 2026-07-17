@@ -2407,6 +2407,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_expression_rows_match_source(actual_rows, source_by_id)
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51381", strict=True)
     def test_create_scalar_struct_array_field_nullable_match_family_null_semantics(self):
         """
         target: test MATCH family null/empty semantics for a nullable scalar Struct Array
