@@ -535,9 +535,9 @@ TEST(Indexing, Iterator) {
     ASSERT_TRUE(kw_iterators.has_value());
     ASSERT_EQ(kw_iterators.value().size(), 1);
     auto iterator = kw_iterators.value()[0];
-    ASSERT_TRUE(iterator->HasNext());
-    while (iterator->HasNext()) {
-        auto [off, dis] = iterator->Next();
+    ASSERT_TRUE(iterator->HasNext().value());
+    while (iterator->HasNext().value()) {
+        auto [off, dis] = iterator->Next().value();
         ASSERT_TRUE(off >= 0);
         ASSERT_TRUE(dis >= 0);
     }
@@ -940,8 +940,8 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
         iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 2);
-    EXPECT_FALSE(iterators.value()[0]->HasNext());
-    EXPECT_FALSE(iterators.value()[1]->HasNext());
+    EXPECT_FALSE(iterators.value()[0]->HasNext().value());
+    EXPECT_FALSE(iterators.value()[1]->HasNext().value());
 
     std::vector<float> emb_list_iterator_queries(3 * dim, 0.1F);
     auto emb_list_iterator_dataset =
@@ -955,9 +955,10 @@ TEST(Indexing, HnswEmbListBuildAllNullNullableFromBinlog) {
         emb_list_iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(emb_list_iterators.has_value()) << emb_list_iterators.what();
     ASSERT_EQ(emb_list_iterators.value().size(), 4);
-    EXPECT_TRUE(std::all_of(emb_list_iterators.value().begin(),
-                            emb_list_iterators.value().end(),
-                            [](const auto& iter) { return !iter->HasNext(); }));
+    EXPECT_TRUE(
+        std::all_of(emb_list_iterators.value().begin(),
+                    emb_list_iterators.value().end(),
+                    [](const auto& iter) { return !iter->HasNext().value(); }));
 
     milvus::SearchInfo iterator_search_info;
     iterator_search_info.topk_ = 3;
@@ -1117,8 +1118,8 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
         iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 2);
-    EXPECT_FALSE(iterators.value()[0]->HasNext());
-    EXPECT_FALSE(iterators.value()[1]->HasNext());
+    EXPECT_FALSE(iterators.value()[0]->HasNext().value());
+    EXPECT_FALSE(iterators.value()[1]->HasNext().value());
 
     std::vector<int64_t> ids = {0, 3, 7};
     auto ids_ds = GenIdsDataset(ids.size(), ids.data());
@@ -1143,9 +1144,10 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
         emb_list_iterator_dataset, emb_list_iterator_conf, nullptr);
     ASSERT_TRUE(emb_list_iterators.has_value()) << emb_list_iterators.what();
     ASSERT_EQ(emb_list_iterators.value().size(), 4);
-    EXPECT_TRUE(std::all_of(emb_list_iterators.value().begin(),
-                            emb_list_iterators.value().end(),
-                            [](const auto& iter) { return !iter->HasNext(); }));
+    EXPECT_TRUE(
+        std::all_of(emb_list_iterators.value().begin(),
+                    emb_list_iterators.value().end(),
+                    [](const auto& iter) { return !iter->HasNext().value(); }));
 
     std::vector<float> query(dim, 0.1F);
     auto xq_dataset = knowhere::GenDataSet(1, dim, query.data());
@@ -1834,8 +1836,8 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
         iterator_dataset, iterator_conf, nullptr);
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 2);
-    EXPECT_FALSE(iterators.value()[0]->HasNext());
-    EXPECT_FALSE(iterators.value()[1]->HasNext());
+    EXPECT_FALSE(iterators.value()[0]->HasNext().value());
+    EXPECT_FALSE(iterators.value()[1]->HasNext().value());
 
     milvus::SearchInfo search_info;
     search_info.topk_ = 3;
