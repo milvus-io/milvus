@@ -650,7 +650,19 @@ func (c *importChecker) checkGC(job ImportJob) {
 				// collection was dropped — itself a replicated DDL, so the peer fails its own
 				// job independently) falls through to GC, since retrying it forever would leak
 				// the job's metadata.
-				if err := c.hooks.rollbackImport(c.ctx, job); err != nil && !isPermanentRollbackErr(err) {
+				//
+				// Bound the broadcast like the replication check above: it blocks in
+				// BlockUntilDone until every vchannel append succeeds, and under the
+				// server-lifetime c.ctx an unavailable streamingnode would park this
+				// goroutine until shutdown, freezing the shared checker loop (ticker1's
+				// state machine included). A timeout is just another transient status —
+				// keep the job and retry on the next GC tick. (The resource-key lock on
+				// the broadcast path is still ctx-insensitive; making it fail-fast is a
+				// follow-up.)
+				rollbackCtx, rollbackCancel := context.WithTimeout(c.ctx, 10*time.Second)
+				err := c.hooks.rollbackImport(rollbackCtx, job)
+				rollbackCancel()
+				if err != nil && !isPermanentRollbackErr(err) {
 					log.Warn(c.ctx, "failed to broadcast rollback before GC of failed replicate import job, will retry", mlog.Err(err))
 					return
 				}
@@ -677,5 +689,8 @@ func isPermanentRollbackErr(err error) bool {
 	// ErrCollectionNotFound: the collection was dropped. DropCollection is itself a
 	// replicated DDL, so the peer marks its own import job Failed independently — there is
 	// no peer left to release, and the broadcast can never succeed.
-	return errors.Is(err, broadcaster.ErrNotPrimary) || errors.Is(err, merr.ErrCollectionNotFound)
+	// errRollbackImportNoVchannels: the job carries no vchannels (fixed at creation), so
+	// the broadcast has no peer to address and can never succeed.
+	return errors.Is(err, broadcaster.ErrNotPrimary) || errors.Is(err, merr.ErrCollectionNotFound) ||
+		errors.Is(err, errRollbackImportNoVchannels)
 }
