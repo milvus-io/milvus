@@ -63,7 +63,7 @@ class TransientBudgetGuard {
                 slice_transient_bytes_, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
-            ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
+            ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
         }
     }
 

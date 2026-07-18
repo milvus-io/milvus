@@ -89,20 +89,13 @@ int64_t
 LoadTransientPoolUpperBound(size_t max_task_overhead_bytes) {
     // Load work can run concurrently in both pools because PriorityForLoad
     // maps foreground loads to HIGH and background loads to LOW.
-    auto configured_high =
-        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
-            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
-    auto configured_low =
-        static_cast<size_t>(milvus::ComputeThreadPoolMaxThreads(
-            milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
-    auto live_high =
+    auto max_high =
         milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH)
-            .GetThreadNum();
-    auto live_low =
+            .GetMaxThreadNum();
+    auto max_low =
         milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW)
-            .GetThreadNum();
-    auto max_load_tasks = std::max(configured_high, live_high) +
-                          std::max(configured_low, live_low);
+            .GetMaxThreadNum();
+    auto max_load_tasks = max_high + max_low;
     auto max_int64 = static_cast<size_t>(std::numeric_limits<int64_t>::max());
     if (max_task_overhead_bytes > max_int64 / max_load_tasks) {
         return std::numeric_limits<int64_t>::max();
