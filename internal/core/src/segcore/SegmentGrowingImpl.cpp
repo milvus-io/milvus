@@ -3045,16 +3045,10 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
                row_count,
                field_meta.get_id().get());
     if (current_row_count < row_count) {
-        constexpr int64_t kEmptyBatchSize = 4096;
-        std::vector<int32_t> empty_lengths(
-            std::min(row_count - current_row_count, kEmptyBatchSize), 0);
-        while (current_row_count < row_count) {
-            auto count = std::min(row_count - current_row_count,
-                                  static_cast<int64_t>(empty_lengths.size()));
-            array_offsets->Insert(
-                current_row_count, empty_lengths.data(), count);
-            current_row_count += count;
-        }
+        auto missing_row_count = row_count - current_row_count;
+        std::vector<int32_t> empty_lengths(missing_row_count, 0);
+        array_offsets->Insert(
+            current_row_count, empty_lengths.data(), missing_row_count);
     }
 
     array_offsets_map_[field_meta.get_id()] = array_offsets;
