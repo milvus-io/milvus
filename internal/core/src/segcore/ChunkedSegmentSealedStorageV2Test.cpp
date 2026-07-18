@@ -58,6 +58,7 @@
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -185,7 +186,115 @@ class StorageV2CellTargetGuard {
  private:
     int64_t old_bytes_;
 };
+
+class StorageV2TempDirGuard {
+ public:
+    StorageV2TempDirGuard(milvus_storage::ArrowFileSystemPtr fs,
+                          std::string path)
+        : fs_(std::move(fs)), path_(std::move(path)) {
+        static_cast<void>(fs_->DeleteDir(path_));
+    }
+
+    ~StorageV2TempDirGuard() {
+        static_cast<void>(fs_->DeleteDir(path_));
+    }
+
+ private:
+    milvus_storage::ArrowFileSystemPtr fs_;
+    std::string path_;
+};
+
+void
+AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
+                  const std::string& key,
+                  const std::string& value) {
+    auto* prop = schema_proto.add_properties();
+    prop->set_key(key);
+    prop->set_value(value);
+}
 }  // namespace
+
+TEST(ChunkedSegmentSealedStorageV2,
+     DirectLoadFieldDataUsesVectorIndexWarmupForNoIndexVector) {
+    constexpr int64_t kPkFieldId = START_USER_FIELDID;
+    constexpr int64_t kVectorFieldId = START_USER_FIELDID + 1;
+    constexpr int64_t kDim = 4;
+    constexpr int64_t kRowCount = 4;
+
+    milvus::proto::schema::CollectionSchema schema_proto;
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(kPkFieldId);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* vector_field = schema_proto.add_fields();
+    vector_field->set_fieldid(kVectorFieldId);
+    vector_field->set_name("vec");
+    vector_field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = vector_field->add_type_params();
+    dim->set_key("dim");
+    dim->set_value(std::to_string(kDim));
+
+    AddWarmupProperty(schema_proto, "warmup.vectorField", "disable");
+    AddWarmupProperty(schema_proto, "warmup.vectorIndex", "sync");
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    const std::string dir = "test_data/storage_v2_direct_warmup";
+    StorageV2TempDirGuard dir_guard(fs, dir);
+    const std::string path = dir + "/vec.parquet";
+    ASSERT_TRUE(fs->CreateDir(dir).ok());
+
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    std::vector<std::string> paths{path};
+    auto storage_config = milvus_storage::StorageConfig();
+    std::vector<std::vector<int>> column_groups{{1}};
+    auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        paths,
+        arrow_schema,
+        storage_config,
+        column_groups,
+        16 * 1024 * 1024,
+        ::parquet::default_writer_properties());
+    ASSERT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    auto writer = writer_result.ValueOrDie();
+    auto dataset = DataGen(schema, kRowCount);
+    auto record_batch = ConvertToArrowRecordBatch(dataset, kDim, arrow_schema);
+    ASSERT_NE(record_batch, nullptr);
+    ASSERT_TRUE(writer->Write(record_batch).ok());
+    ASSERT_TRUE(writer->Close().ok());
+
+    LoadFieldDataInfo load_info;
+    load_info.storage_version = 2;
+    FieldBinlogInfo field_info{
+        kVectorFieldId,
+        kRowCount,
+        std::vector<int64_t>{kRowCount},
+        std::vector<int64_t>{kRowCount * kDim *
+                             static_cast<int64_t>(sizeof(float))},
+        false,
+        "disable",
+        std::vector<std::string>{path},
+        std::vector<int64_t>{kVectorFieldId}};
+    load_info.field_infos.emplace(kVectorFieldId, std::move(field_info));
+
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    segment->LoadFieldData(load_info);
+
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    auto field = runtime->fields.find(FieldId(kVectorFieldId));
+    ASSERT_NE(field, runtime->fields.end());
+    auto proxy_column =
+        std::dynamic_pointer_cast<ProxyChunkColumn>(field->second);
+    ASSERT_NE(proxy_column, nullptr);
+    EXPECT_EQ(proxy_column->TestCacheWarmupPolicy(),
+              CacheWarmupPolicy::CacheWarmupPolicy_Sync);
+}
 
 class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:

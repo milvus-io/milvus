@@ -1371,10 +1371,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     fill_empty_field(const FieldMeta& field_meta,
                      const SchemaPtr& schema_snapshot,
+                     const SegmentLoadInfo& segment_load_info,
                      RuntimeResourceState& runtime);
 
-    void
-    fill_empty_field(const FieldMeta& field_meta);
+    std::string
+    resolve_field_data_warmup_policy(
+        FieldId field_id,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        const std::string& explicit_warmup_policy = "") const;
+
+    std::string
+    resolve_field_data_group_warmup_policy(
+        const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        const std::string& explicit_warmup_policy = "") const;
 
     SchemaPtr
     CaptureSchemaSnapshot() const;
@@ -1811,12 +1823,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids,
+                           const SegmentLoadInfo& segment_load_info,
                            const SchemaPtr& schema_snapshot,
                            RuntimeResourceState* runtime = nullptr,
                            PublishedSegmentState* staged_state = nullptr);
 
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids,
+                           const SegmentLoadInfo& segment_load_info,
                            const SchemaPtr& schema_snapshot,
                            StagedStateCommitter& committer);
 
@@ -2277,6 +2291,67 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<const PublishedSegmentState>
     TestGetPublishedStateSnapshot() const {
         return CapturePublishedState();
+    }
+
+    std::string
+    TestResolveFieldDataWarmupPolicy(
+        FieldId field_id,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        const std::string& explicit_warmup_policy = "") const {
+        return resolve_field_data_warmup_policy(field_id,
+                                                segment_load_info,
+                                                schema_snapshot,
+                                                explicit_warmup_policy);
+    }
+
+    std::string
+    TestResolveFieldDataGroupWarmupPolicy(
+        const std::vector<FieldId>& field_ids,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot) const {
+        return resolve_field_data_group_warmup_policy(
+            schema_snapshot->get_field_metas(field_ids),
+            segment_load_info,
+            schema_snapshot);
+    }
+
+    std::shared_ptr<ChunkedColumnInterface>
+    TestStageLoadColumnGroupWithReader(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        int64_t index,
+        const std::vector<FieldId>& field_ids,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        std::shared_ptr<milvus_storage::api::Reader> reader,
+        bool eager_load = true) {
+        auto current = CapturePublishedState();
+        auto runtime = CloneMutableRuntimeResourceState();
+        runtime->reader = std::move(reader);
+        auto staged = ClonePublishedState(current);
+        staged->schema = schema_snapshot;
+        staged->load_info =
+            std::make_shared<const SegmentLoadInfo>(segment_load_info);
+        staged->runtime = ToConstRuntimeState(runtime);
+        staged->commit_ts = current->commit_ts;
+        NormalizePublishedState(*staged);
+
+        StagedStateCommitter committer(*this, runtime.get(), staged.get());
+        LoadColumnGroup(column_groups,
+                        properties,
+                        index,
+                        field_ids,
+                        segment_load_info,
+                        schema_snapshot,
+                        eager_load,
+                        nullptr,
+                        false,
+                        committer);
+
+        auto it = runtime->fields.find(field_ids.front());
+        AssertInfo(it != runtime->fields.end(), "test field was not loaded");
+        return it->second;
     }
 
     void
