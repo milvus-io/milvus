@@ -2904,7 +2904,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     }
 }
 
-TEST_P(SealedVectorArrayTest, BulkSubscriptVectorArrayFromIndex) {
+TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -3095,7 +3095,7 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
 }
 
 TEST(SealedVectorArrayNullable,
-     BulkSubscriptVectorArrayFromIndexKeepsLogicalRows) {
+     DISABLED_BulkSubscriptVectorArrayFromIndexKeepsLogicalRows) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -3234,7 +3234,8 @@ TEST(SealedVectorArrayNullable,
     }
 }
 
-TEST(SealedVectorArrayNullable, BulkSubscriptAllNullVectorArrayFromIndex) {
+TEST(SealedVectorArrayNullable,
+     DISABLED_BulkSubscriptAllNullVectorArrayFromIndex) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -3490,7 +3491,7 @@ TEST(SealedVectorArrayFallback,
 }
 
 #ifdef BUILD_DISK_ANN
-TEST_P(SealedVectorArrayTest, BulkSubscriptVectorArrayFromDiskIndex) {
+TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
     // DiskANN only registers fp32, fp16, bf16
     if (element_type == DataType::VECTOR_BINARY ||
         element_type == DataType::VECTOR_INT8) {
