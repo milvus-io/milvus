@@ -151,6 +151,10 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if err != nil {
 		return err
 	}
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, coll, schema)
+	if err != nil {
+		return err
+	}
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -174,6 +178,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}
 	return nil
@@ -389,6 +394,10 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	if err != nil {
 		return err
 	}
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, coll, schema)
+	if err != nil {
+		return err
+	}
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -412,6 +421,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}
 	return nil

@@ -217,6 +217,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
+			c.FileResourceIds = updates.Schema.GetFileResourceIds()
 			c.ExternalSource = updates.Schema.ExternalSource
 			c.ExternalSpec = updates.Schema.ExternalSpec
 		case message.FieldMaskCollectionExternalSpec:

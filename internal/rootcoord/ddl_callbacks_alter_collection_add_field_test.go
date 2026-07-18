@@ -20,11 +20,17 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -104,6 +110,64 @@ func TestDDLCallbacksAlterCollectionAddField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, "field1", "key1", "value1")
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field3", 102)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+}
+
+func TestDDLCallbacksAlterCollectionAddFieldAnalyzerFileResourceRefs(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	fieldName := "text_with_dict"
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	meta := core.meta.(*MetaTable)
+	resourceID := int64(10001)
+	meta.fileResourceName2Meta = map[string]*internalpb.FileResourceInfo{
+		"dict": {Id: resourceID, Name: "dict", Path: "dict.txt"},
+	}
+	meta.fileResourceID2Meta = map[int64]*internalpb.FileResourceInfo{
+		resourceID: {Id: resourceID, Name: "dict", Path: "dict.txt"},
+	}
+	meta.fileResourceRefCnt = map[int64]int{}
+
+	mixCoord := core.mixCoord.(*mocks.MixCoord)
+	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
+		infos := req.GetAnalyzerInfos()
+		return len(infos) == 1 &&
+			infos[0].GetField() == fieldName &&
+			infos[0].GetParams() == `{"tokenizer":"standard"}`
+	})).Return(&querypb.ValidateAnalyzerResponse{
+		Status:      merr.Success(),
+		ResourceIds: []int64{resourceID},
+	}, nil).Once()
+
+	fieldSchema := &schemapb.FieldSchema{
+		Name:     fieldName,
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "128"},
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+		},
+	}
+	schemaBytes, err := proto.Marshal(fieldSchema)
+	require.NoError(t, err)
+
+	resp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []int64{resourceID}, coll.FileResourceIds)
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+	assertFieldExists(t, ctx, core, dbName, collectionName, fieldName, 101)
 }
 
 func TestDDLCallbacksAlterCollectionAddTextField(t *testing.T) {

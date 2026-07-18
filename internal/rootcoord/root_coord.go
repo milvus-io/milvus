@@ -557,10 +557,10 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
-		// Recover file resource refCnt for pending CreateCollection broadcast tasks
+		// Recover file resource refCnt for pending schema broadcast tasks
 		// before registering DDL callbacks, so ack callbacks won't race with recovery.
 		// See #48612.
-		pending := broadcast.GetPendingCreateCollectionResources()
+		pending := broadcast.GetPendingSchemaFileResources()
 		if len(pending) > 0 {
 			c.meta.RecoverFileResourceRefCnt(pending)
 			mlog.Info(context.TODO(), "recovered file resource refCnt from pending broadcast tasks", mlog.Int("count", len(pending)))
