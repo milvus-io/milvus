@@ -289,14 +289,22 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     }
     path_ = base_path;
 
-    // 5. Instantiate wrapper and load.
-    wrapper_ =
+    // 5. Instantiate wrapper and load it fully BEFORE publishing, then
+    // publish every member under the same lock the readers take (Count /
+    // QueryCandidates / ComputeByteSize snapshot wrapper_ under mutex_):
+    // the no-torn-read invariant only holds if every writer participates,
+    // exactly as the growing publish in InitForBuildIndex does.
+    auto wrapper =
         std::make_shared<RTreeIndexWrapper>(path_, /*is_build_mode=*/false);
-    wrapper_->load();
+    wrapper->load();
 
-    total_num_rows_ =
-        wrapper_->count() + static_cast<int64_t>(null_offset_.size());
-    is_built_ = true;
+    {
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper_ = wrapper;
+        total_num_rows_ =
+            wrapper->count() + static_cast<int64_t>(null_offset_.size());
+        is_built_ = true;
+    }
     ComputeByteSize();
 
     LOG_INFO(
@@ -784,6 +792,7 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                    "multiple of {}",
                    null_entry.data.size(),
                    sizeof(size_t));
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
         null_offset_.resize(null_entry.data.size() / sizeof(size_t));
         milvus::fastmem::FastMemcpy(null_offset_.data(),
                                     null_entry.data.data(),
@@ -813,13 +822,19 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                "RTreeIndex LoadEntries: cannot determine base path from files");
     path_ = base_path;
 
-    wrapper_ =
+    // Load the wrapper fully BEFORE publishing, then publish under the
+    // readers' lock -- same discipline as Load() above.
+    auto wrapper =
         std::make_shared<RTreeIndexWrapper>(path_, /*is_build_mode=*/false);
-    wrapper_->load();
+    wrapper->load();
 
-    total_num_rows_ =
-        wrapper_->count() + static_cast<int64_t>(null_offset_.size());
-    is_built_ = true;
+    {
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper_ = wrapper;
+        total_num_rows_ =
+            wrapper->count() + static_cast<int64_t>(null_offset_.size());
+        is_built_ = true;
+    }
     ComputeByteSize();
     LOG_INFO(
         "LoadEntries RTreeIndex done, file_count: {}, has_null: {}, "

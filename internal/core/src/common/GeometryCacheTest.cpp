@@ -101,7 +101,10 @@ TEST(GeometryCacheLifetime, ConcurrentGetAndRemove) {
             auto c = mgr.GetCache(seg_id, field_id);
             if (c) {
                 auto lock = c->AcquireReadLock();
-                if (c->Size() > 0) {
+                // Size() would re-acquire the shared_mutex this thread already
+                // holds via the read lock -- recursive shared locking is UB
+                // and deadlocks against the concurrently queued writer.
+                if (c->SizeUnsafe() > 0) {
                     const Geometry* g = c->GetByOffsetUnsafe(0);
                     (void)g;
                 }
