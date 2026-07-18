@@ -1686,21 +1686,13 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
             return milvus::FailureCStatus(milvus::UnexpectedError,
                                           "segment is not a growing segment");
         }
-        auto ids = growing_segment->get_insert_record().get_data_field_ids();
-        std::unordered_set<int64_t> seen(ids.begin(), ids.end());
-        const auto& schema = growing_segment->get_schema();
-        for (const auto& field_id : schema.get_field_ids()) {
-            auto raw_field_id = field_id.get();
-            if (seen.find(raw_field_id) != seen.end()) {
-                continue;
-            }
-            const auto& field_meta = schema[field_id];
-            if (milvus::IsVectorDataType(field_meta.get_data_type()) &&
-                growing_segment->CanReadRawVectorFromIndex(field_id)) {
-                ids.push_back(raw_field_id);
-                seen.insert(raw_field_id);
-            }
-        }
+        // Snapshot under sch_mutex_: Reopen may swap the segment schema
+        // concurrently. Interim-index raw data is only populated after
+        // set_data_raw (which marks the column), so a materialized column set
+        // already covers every index-readable vector field.
+        auto schema_snapshot = growing_segment->get_schema_snapshot();
+        auto ids = growing_segment->get_insert_record().get_data_field_ids(
+            *schema_snapshot);
         if (!ids.empty()) {
             auto* buf =
                 static_cast<int64_t*>(malloc(sizeof(int64_t) * ids.size()));
@@ -1984,6 +1976,10 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto flush_schema =
             ParseFlushSchema(config->schema_blob, config->schema_length);
         const auto& schema = *flush_schema;
+        // One runtime-schema snapshot for the whole flush: keeps the Schema
+        // alive across a concurrent Reopen swap and pins every dropped-field
+        // check below to a single schema version.
+        auto runtime_schema = growing_segment->get_schema_snapshot();
         auto& insert_record = growing_segment->get_insert_record();
 
         int64_t total_rows = end_offset - start_offset;
@@ -2021,20 +2017,15 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
 
             // System fields are stored outside the regular field data map.
             const milvus::segcore::VectorBase* vec_base;
-            bool can_read_from_index = false;
             if (field_id == RowFieldID) {
                 vec_base = &insert_record.row_ids_;
             } else if (field_id == TimestampFieldID) {
                 vec_base = &insert_record.timestamps_;
             } else {
-                can_read_from_index =
-                    milvus::IsVectorDataType(data_type) &&
-                    growing_segment->CanReadRawVectorFromIndex(field_id);
-                // HasFieldData, not is_data_exist: a column the ctor
-                // allocated but replayed older-era inserts never filled is
-                // not materialized either.
-                if (!growing_segment->HasFieldData(field_id) &&
-                    !can_read_from_index) {
+                // In the layout iff materialized (see VectorBase::materialized);
+                // this covers interim-index vector fields too, since their raw
+                // data lands in the index only after set_data_raw marked them.
+                if (!insert_record.materialized(field_id)) {
                     // Legally absent: the field is gone from the segment's
                     // own schema (dropped; the flush schema is a staler
                     // snapshot), or it is a function output the segment
@@ -2042,7 +2033,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                     // compaction). The Go layer normally trims such columns
                     // from the layout already — this is the defense for
                     // stale layouts.
-                    if (!growing_segment->get_schema().has_field(field_id)) {
+                    if (!runtime_schema->has_field(field_id)) {
                         LOG_INFO(
                             "skip dropped field {} when flushing growing "
                             "segment {}",
@@ -2060,9 +2051,10 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                         skipped_columns.insert(field_id.get());
                         continue;
                     }
-                    // A regular field of the segment's own schema is
-                    // materialized by the ctor/Reopen by construction;
-                    // reaching here is real data loss.
+                    // A non-function-output field of the segment's own schema
+                    // is materialized by Insert/Load once the segment has rows
+                    // (the ctor only allocates its column); reaching here is
+                    // real data loss.
                     return milvus::FailureCStatus(
                         milvus::UnexpectedError,
                         fmt::format("field {} has no field data in growing "
