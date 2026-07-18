@@ -815,49 +815,19 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
     ******************************************************************
     """
 
-    # ==================== add_collection_function positive tests ====================
+    # ============ deprecated add/drop_collection_function RPCs (rejected) ============
+    # A function is coupled to its output field: BM25/MinHash are added via
+    # add_function_field, TextEmbedding is defined at collection creation, and a
+    # function is always dropped together with its output field (drop_function_field).
+    # The legacy attach (add_collection_function) / detach (drop_collection_function)
+    # RPCs are therefore rejected.
 
-    def test_add_collection_function_text_embedding(self, tei_endpoint):
+    def test_add_collection_function_rejected(self, tei_endpoint):
         """
-        target: test add text embedding function to existing collection
-        method: create collection without function, then add function via API
-        expected: function added successfully, describe shows 1 function
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-
-        # Verify no functions initially
-        res, _ = collection_w.describe()
-        assert len(res.get("functions", [])) == 0
-
-        # Create and add function
-        embedding_function = Function(
-            name="text_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        self.client.add_collection_function(collection_name=c_name, function=embedding_function)
-
-        # Verify function is added
-        res, _ = collection_w.describe()
-        assert len(res["functions"]) == 1
-        assert res["functions"][0]["name"] == "text_embedding"
-
-    def test_add_collection_function_then_crud(self, tei_endpoint):
-        """
-        target: test that added function works for all CRUD operations
-        method: create collection without function, add function, then verify insert/query/search/upsert/delete
-        expected: all CRUD operations work correctly with dynamically added function
+        target: add_collection_function (legacy attach RPC) is rejected
+        method: create a collection, then call add_collection_function
+        expected: rejected - no longer supported (use add_function_field, or define
+                  a TextEmbedding function at collection creation)
         """
         self._connect()
         dim = 768
@@ -868,178 +838,56 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        self.init_collection_wrap(name=c_name, schema=schema)
 
-        # Add function
         embedding_function = Function(
-            name="text_embedding",
+            name="tei",
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
             params={"provider": "TEI", "endpoint": tei_endpoint},
         )
-        self.client.add_collection_function(collection_name=c_name, function=embedding_function)
+        try:
+            self.client.add_collection_function(collection_name=c_name, function=embedding_function)
+            assert False, "Expected exception: add_collection_function is no longer supported"
+        except Exception as e:
+            log.info(f"Expected error: {e}")
+            assert "no longer supported" in str(e)
 
-        # === INSERT ===
-        nb = 10
-        data = [{"id": i, "document": f"This is document number {i}"} for i in range(nb)]
-        collection_w.insert(data)
-        assert collection_w.num_entities == nb
-
-        # Create index and load
-        index_params = {
-            "index_type": "AUTOINDEX",
-            "metric_type": "COSINE",
-            "params": {},
-        }
-        collection_w.create_index("dense", index_params)
-        collection_w.load()
-
-        # === QUERY ===
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["dense", "document"])
-        assert len(res) == nb
-        for row in res:
-            assert len(row["dense"]) == dim
-
-        # === SEARCH with text ===
-        search_params = {"metric_type": "COSINE", "params": {}}
-        res, _ = collection_w.search(
-            data=["document number 5"],
-            anns_field="dense",
-            param=search_params,
-            limit=5,
-            output_fields=["document"],
-        )
-        assert len(res) == 1
-        assert len(res[0]) == 5
-
-        # === UPSERT - update existing record ===
-        old_res, _ = collection_w.query(expr="id == 0", output_fields=["dense"])
-        old_embedding = old_res[0]["dense"]
-
-        upsert_data = [{"id": 0, "document": "This is a completely different updated text"}]
-        collection_w.upsert(upsert_data)
-
-        new_res, _ = collection_w.query(expr="id == 0", output_fields=["dense"])
-        new_embedding = new_res[0]["dense"]
-
-        # Verify embedding changed after upsert
-        assert not np.allclose(old_embedding, new_embedding)
-
-        # === UPSERT - insert new record ===
-        upsert_new_data = [{"id": 100, "document": "This is a brand new document"}]
-        collection_w.upsert(upsert_new_data)
-        count_res, _ = collection_w.query(expr="", output_fields=["count(*)"])
-        assert count_res[0]["count(*)"] == nb + 1
-
-        # Verify new record has vector
-        res, _ = collection_w.query(expr="id == 100", output_fields=["dense"])
-        assert len(res) == 1
-        assert len(res[0]["dense"]) == dim
-
-        # === DELETE ===
-        collection_w.delete("id in [1, 2, 3]")
-
-        # Verify deleted records are not searchable
-        res, _ = collection_w.search(
-            data=["document number 1"],
-            anns_field="dense",
-            param=search_params,
-            limit=10,
-            output_fields=["id"],
-        )
-        deleted_ids = {1, 2, 3}
-        for hit in res[0]:
-            assert hit.entity.get("id") not in deleted_ids
-
-        # Verify count decreased
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["id"])
-        assert len(res) == nb + 1 - 3  # original + 1 upserted - 3 deleted
-
-    def test_add_collection_function_multiple_text_embedding(self, tei_endpoint):
+    def test_drop_collection_function_rejected(self, tei_endpoint):
         """
-        target: test add multiple text embedding functions to different output fields
-        method: create collection with two vector fields, add text_embedding function to each
-        expected: both functions added successfully
+        target: drop_collection_function (legacy detach RPC) is rejected
+        method: create a collection with a TextEmbedding function, call drop_collection_function
+        expected: rejected - detaching a function without dropping its output field is
+                  not supported (use drop_function_field)
         """
         self._connect()
         dim = 768
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="title_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
-            FieldSchema(name="content_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
+        text_embedding_function = Function(
+            name="tei",
+            function_type=FunctionType.TEXTEMBEDDING,
+            input_field_names=["document"],
+            output_field_names="dense",
+            params={"provider": "TEI", "endpoint": tei_endpoint},
+        )
+        schema.add_function(text_embedding_function)
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        self.init_collection_wrap(name=c_name, schema=schema)
 
-        # Add text embedding function for title
-        title_embedding_function = Function(
-            name="title_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["title"],
-            output_field_names="title_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        self.client.add_collection_function(collection_name=c_name, function=title_embedding_function)
+        try:
+            self.client.drop_collection_function(collection_name=c_name, function_name="tei")
+            assert False, "Expected exception: drop_collection_function is no longer supported"
+        except Exception as e:
+            log.info(f"Expected error: {e}")
+            assert "not supported" in str(e)
 
-        # Add text embedding function for content
-        content_embedding_function = Function(
-            name="content_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["content"],
-            output_field_names="content_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        self.client.add_collection_function(collection_name=c_name, function=content_embedding_function)
-
-        # Verify both functions are added
-        res, _ = collection_w.describe()
-        assert len(res["functions"]) == 2
-        function_names = [f["name"] for f in res["functions"]]
-        assert "title_embedding" in function_names
-        assert "content_embedding" in function_names
-
-        # Verify CRUD works with both functions
-        # Insert
-        nb = 5
-        data = [{"id": i, "title": fake_en.sentence(), "content": fake_en.text()} for i in range(nb)]
-        collection_w.insert(data)
-        assert collection_w.num_entities == nb
-
-        # Create index and load
-        index_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE", "params": {}}
-        collection_w.create_index("title_vector", index_params)
-        collection_w.create_index("content_vector", index_params)
-        collection_w.load()
-
-        # Query - verify vectors are generated
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["title_vector", "content_vector"])
-        for row in res:
-            assert len(row["title_vector"]) == dim
-            assert len(row["content_vector"]) == dim
-
-        # Search on both vector fields
-        search_params = {"metric_type": "COSINE", "params": {}}
-        res, _ = collection_w.search(
-            data=[fake_en.sentence()],
-            anns_field="title_vector",
-            param=search_params,
-            limit=3,
-        )
-        assert len(res[0]) == 3
-
-        res, _ = collection_w.search(
-            data=[fake_en.text()],
-            anns_field="content_vector",
-            param=search_params,
-            limit=3,
-        )
-        assert len(res[0]) == 3
-
-    # ==================== alter_collection_function positive tests ====================
+    # ==================== alter_collection_function tests ====================
 
     def test_alter_collection_function_change_endpoint(self, tei_endpoint):
         """
@@ -1088,9 +936,11 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
 
     def test_alter_collection_function_change_params(self, tei_endpoint):
         """
-        target: test alter function parameters (truncate settings)
-        method: create collection with function, alter truncate params
-        expected: params changed successfully
+        target: test altering semantic params (truncate/truncation_direction) is rejected
+        method: create collection with function, try to alter truncate params
+        expected: rejected - truncate/truncation_direction change the embedding of
+                  over-length inputs, so they are immutable (altering them would mix
+                  vector semantics in the same output field)
         """
         self._connect()
         dim = 768
@@ -1113,7 +963,8 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
 
-        # Alter function with new truncate params
+        # truncate / truncation_direction are semantic params (immutable): altering them
+        # is rejected.
         new_function = Function(
             name="tei",
             function_type=FunctionType.TEXTEMBEDDING,
@@ -1121,24 +972,24 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             output_field_names="dense",
             params={"provider": "TEI", "endpoint": tei_endpoint, "truncate": True, "truncation_direction": "Left"},
         )
-        self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
+        try:
+            self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
+            assert False, "Expected exception: truncate/truncation_direction are immutable"
+        except Exception as e:
+            log.info(f"Expected error: {e}")
+            assert "cannot be altered" in str(e)
 
-        # Verify function params are updated correctly
+        # function params unchanged
         res, _ = collection_w.describe()
-        assert len(res["functions"]) == 1
         func = res["functions"][0]
-        assert func["name"] == "tei"
-        assert func["params"]["provider"] == "TEI"
-        assert func["params"]["endpoint"] == tei_endpoint
-        # Note: params values are returned as strings
-        assert func["params"]["truncate"] == "True"
-        assert func["params"]["truncation_direction"] == "Left"
+        assert "truncate" not in func["params"]
 
     def test_alter_collection_function_verify_crud(self, tei_endpoint):
         """
-        target: test altered function works correctly for all CRUD operations
-        method: create collection with function, insert data, alter function, verify all CRUD operations
-        expected: all CRUD operations continue to work after function alteration
+        target: test the function keeps serving all CRUD after a rejected immutable-param alter
+        method: create collection with function, insert data, attempt an immutable-param
+                (truncate) alter which is rejected, then verify all CRUD operations
+        expected: alter is rejected and the intact function keeps serving CRUD
         """
         self._connect()
         dim = 768
@@ -1178,7 +1029,8 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         res_before, _ = collection_w.query(expr="id == 0", output_fields=["dense"])
         embedding_before_alter = res_before[0]["dense"]
 
-        # === ALTER FUNCTION ===
+        # === ALTER FUNCTION: truncate is a semantic param (immutable) -> rejected;
+        # the function stays intact and CRUD keeps working below ===
         new_function = Function(
             name="tei",
             function_type=FunctionType.TEXTEMBEDDING,
@@ -1186,7 +1038,12 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             output_field_names="dense",
             params={"provider": "TEI", "endpoint": tei_endpoint, "truncate": True},
         )
-        self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
+        try:
+            self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
+            assert False, "Expected exception: truncate is immutable"
+        except Exception as e:
+            log.info(f"Expected error: {e}")
+            assert "cannot be altered" in str(e)
 
         # === INSERT after alter ===
         data2 = [{"id": i + 5, "document": f"Document after alter {i}"} for i in range(5)]
@@ -1252,9 +1109,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     def test_alter_collection_function_change_to_different_endpoint(self, tei_endpoint, tei_endpoint_2):
         """
-        target: test alter function to use a different valid endpoint
-        method: create collection with function using endpoint1, alter to endpoint2, verify CRUD
-        expected: function works with new endpoint after alteration
+        target: test altering to a different endpoint is rejected (endpoint immutable)
+        method: create with endpoint1, insert, attempt to alter to endpoint2 (rejected)
+        expected: rejected; the function keeps using endpoint1 and serving CRUD
         """
         self._connect()
         dim = 768
@@ -1286,7 +1143,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         collection_w.create_index("dense", index_params)
         collection_w.load()
 
-        # Alter to use different endpoint
+        # endpoint is immutable: altering to a different endpoint is rejected.
         new_function = Function(
             name="tei",
             function_type=FunctionType.TEXTEMBEDDING,
@@ -1294,30 +1151,17 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             output_field_names="dense",
             params={"provider": "TEI", "endpoint": tei_endpoint_2},
         )
-        self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
+        try:
+            self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
+            assert False, "Expected exception: endpoint is immutable"
+        except Exception as e:
+            log.info(f"Expected error: {e}")
+            assert "cannot be altered" in str(e)
 
-        # Insert data with new endpoint
-        data2 = [{"id": i + 10, "document": f"Document with endpoint2 {i}"} for i in range(3)]
+        # function still uses the original endpoint and keeps serving CRUD
+        data2 = [{"id": i + 10, "document": f"Document with endpoint1 again {i}"} for i in range(3)]
         collection_w.insert(data2)
         assert collection_w.num_entities == 6
-
-        # Search should work
-        search_params = {"metric_type": "COSINE", "params": {}}
-        res, _ = collection_w.search(
-            data=["Document with endpoint2"],
-            anns_field="dense",
-            param=search_params,
-            limit=6,
-            output_fields=["document"],
-        )
-        assert len(res[0]) == 6
-
-        # Upsert should work with new endpoint
-        upsert_data = [{"id": 0, "document": "Updated document with new endpoint"}]
-        collection_w.upsert(upsert_data)
-
-        res, _ = collection_w.query(expr="id == 0", output_fields=["document"])
-        assert "Updated document" in res[0]["document"]
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_alter_function_when_other_function_is_invalid(self, host):
@@ -1396,25 +1240,25 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             mock_server_1.set_error_mode(enabled=True, status_code=400, message="Model integration is not active")
 
             # Now title_embedding function is invalid, but we should still be able to
-            # alter content_embedding function (PR #46984 fix)
+            # alter content_embedding. Alter a whitelisted connection param (timeout_ms),
+            # since semantic params (truncate/endpoint/...) are immutable.
             new_content_embedding = Function(
                 name="content_embedding",
                 function_type=FunctionType.TEXTEMBEDDING,
                 input_field_names=["content"],
                 output_field_names="content_vector",
-                params={"provider": "TEI", "endpoint": endpoint_2, "truncate": True},
+                params={"provider": "TEI", "endpoint": endpoint_2, "timeout_ms": "30000"},
             )
 
-            # This should succeed after PR #46984 fix
-            # Before the fix, this would fail because it validated ALL functions
+            # This should succeed: altering the target function must not be blocked by
+            # the other function being invalid (validate only the target function).
             self.client.alter_collection_function(
                 collection_name=c_name, function_name="content_embedding", function=new_content_embedding
             )
 
-            # Verify function params are updated
+            # alter succeeded (did not raise) and both functions are still present
             res, _ = collection_w.describe()
-            content_func = next(f for f in res["functions"] if f["name"] == "content_embedding")
-            assert content_func["params"]["truncate"] == str(True)
+            assert len(res["functions"]) == 2
 
             log.info("Successfully altered content_embedding function while title_embedding is invalid")
 
@@ -1425,14 +1269,15 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     def test_alter_invalid_function_to_valid_endpoint(self, host):
         """
-        target: test user can fix an invalid function by altering it to a valid endpoint
+        target: test that repointing a broken function to a new endpoint is rejected
         method:
             1. create collection with function using mock TEI server
             2. make mock server return errors (function becomes invalid)
-            3. start a new valid server and alter function to use it
-        expected: alter should succeed, allowing user to fix the broken function
+            3. try to alter the function to a new valid endpoint
+        expected: rejected - endpoint is the TEI model identity and immutable. This
+                  supersedes the earlier #46984 repoint flow; a broken endpoint must be
+                  fixed at the infra level, or the function dropped and re-added.
         issue: https://github.com/milvus-io/milvus/issues/46949
-        pr: https://github.com/milvus-io/milvus/pull/46984
 
         NOTE: This test requires the Milvus server to be able to access the local mock TEI server.
         - localhost/127.0.0.1: uses host.docker.internal for Docker containers
@@ -1490,8 +1335,8 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             # Simulate the original endpoint becoming unavailable
             mock_server.set_error_mode(enabled=True, status_code=400, message="Model integration is not active")
 
-            # User wants to fix the function by switching to backup endpoint
-            # This is the exact scenario from issue #46949
+            # endpoint is immutable: repointing to a different endpoint is rejected,
+            # even to recover a broken function (supersedes #46984).
             new_function = Function(
                 name="tei",
                 function_type=FunctionType.TEXTEMBEDDING,
@@ -1499,491 +1344,22 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
                 output_field_names="dense",
                 params={"provider": "TEI", "endpoint": backup_endpoint},
             )
+            try:
+                self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
+                assert False, "Expected exception: endpoint is immutable"
+            except Exception as e:
+                log.info(f"Expected error: {e}")
+                assert "cannot be altered" in str(e)
 
-            # After PR #46984, this should succeed
-            self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
-
-            # Verify function is updated
+            # function still points at the original endpoint (unchanged)
             res, _ = collection_w.describe()
             func = res["functions"][0]
-            assert func["params"]["endpoint"] == backup_endpoint
-
-            # Verify the function works with new endpoint
-            new_data = [{"id": 10, "document": "New document after fix"}]
-            collection_w.insert(new_data)
-            assert collection_w.num_entities == 4
-
-            # Search should work
-            search_params = {"metric_type": "COSINE", "params": {}}
-            res, _ = collection_w.search(
-                data=["New document"],
-                anns_field="dense",
-                param=search_params,
-                limit=4,
-            )
-            assert len(res[0]) == 4
-
-            log.info("Successfully fixed invalid function by altering to valid endpoint")
+            assert func["params"]["endpoint"] == endpoint
 
         finally:
             mock_server.stop()
             backup_server.stop()
 
-    # ==================== drop_collection_function positive tests ====================
-
-    def test_drop_collection_function_verify_crud(self, tei_endpoint):
-        """
-        target: test CRUD behavior changes after dropping function
-        method: create collection with function, insert data, drop function, verify CRUD behavior
-        expected: after drop, insert requires manual vector, existing data still queryable/searchable
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-
-        text_embedding_function = Function(
-            name="tei",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        schema.add_function(text_embedding_function)
-
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-
-        # === INSERT with function (auto-generate vector) ===
-        data_with_func = [{"id": i, "document": f"Document with function {i}"} for i in range(5)]
-        collection_w.insert(data_with_func)
-        assert collection_w.num_entities == 5
-
-        # Create index and load
-        index_params = {
-            "index_type": "AUTOINDEX",
-            "metric_type": "COSINE",
-            "params": {},
-        }
-        collection_w.create_index("dense", index_params)
-        collection_w.load()
-
-        # Verify vectors are generated
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["dense"])
-        for row in res:
-            assert len(row["dense"]) == dim
-
-        # === DROP FUNCTION ===
-        self.client.drop_collection_function(collection_name=c_name, function_name="tei")
-
-        # Verify function is removed
-        res, _ = collection_w.describe()
-        assert len(res.get("functions", [])) == 0
-
-        # === QUERY - existing data still accessible ===
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["dense", "document"])
-        assert len(res) == 5
-        for row in res:
-            assert len(row["dense"]) == dim
-
-        # === SEARCH - existing data still searchable with vector ===
-        search_params = {"metric_type": "COSINE", "params": {}}
-        search_vector = [[random.random() for _ in range(dim)]]
-        res, _ = collection_w.search(
-            data=search_vector,
-            anns_field="dense",
-            param=search_params,
-            limit=5,
-            output_fields=["document"],
-        )
-        assert len(res[0]) == 5
-
-        # === INSERT after drop - must provide vector manually ===
-        manual_vector = [random.random() for _ in range(dim)]
-        data_manual = [{"id": 10, "document": "Manual vector document", "dense": manual_vector}]
-        collection_w.insert(data_manual)
-        assert collection_w.num_entities == 6
-
-        # Verify manual insert succeeded
-        res, _ = collection_w.query(expr="id == 10", output_fields=["dense"])
-        assert len(res) == 1
-        assert len(res[0]["dense"]) == dim
-
-        # === INSERT after drop without vector - should fail ===
-        data_no_vector = [{"id": 11, "document": "No vector document"}]
-        collection_w.insert(
-            data_no_vector,
-            check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": ""},
-        )
-
-        # === UPSERT after drop - must provide vector manually ===
-        upsert_vector = [random.random() for _ in range(dim)]
-        upsert_data = [{"id": 0, "document": "Updated via upsert", "dense": upsert_vector}]
-        collection_w.upsert(upsert_data)
-
-        res, _ = collection_w.query(expr="id == 0", output_fields=["dense"])
-        # Verify vector is updated to manual one
-        assert np.allclose(res[0]["dense"], upsert_vector, rtol=1e-5)
-
-        # === DELETE after drop - still works ===
-        collection_w.delete("id in [1, 2]")
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["id"])
-        assert len(res) == 4  # 6 - 2
-
-    def test_drop_collection_function_one_of_multiple(self, tei_endpoint):
-        """
-        target: test drop one function when multiple text embedding functions exist
-        method: create collection with two text_embedding functions, drop one, verify CRUD
-        expected: only specified function is dropped, other still works for CRUD
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="title_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
-            FieldSchema(name="content_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-
-        # Add two text embedding functions
-        title_embedding = Function(
-            name="title_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["title"],
-            output_field_names="title_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        schema.add_function(title_embedding)
-
-        content_embedding = Function(
-            name="content_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["content"],
-            output_field_names="content_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        schema.add_function(content_embedding)
-
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-
-        # Verify both functions exist
-        res, _ = collection_w.describe()
-        assert len(res["functions"]) == 2
-
-        # === INSERT with both functions ===
-        data = [{"id": i, "title": f"Title {i}", "content": f"Content {i}"} for i in range(3)]
-        collection_w.insert(data)
-        assert collection_w.num_entities == 3
-
-        # Create indexes and load
-        index_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE", "params": {}}
-        collection_w.create_index("title_vector", index_params)
-        collection_w.create_index("content_vector", index_params)
-        collection_w.load()
-
-        # Verify both vectors generated
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["title_vector", "content_vector"])
-        for row in res:
-            assert len(row["title_vector"]) == dim
-            assert len(row["content_vector"]) == dim
-
-        # === DROP one function (title_embedding) ===
-        self.client.drop_collection_function(collection_name=c_name, function_name="title_embedding")
-
-        # Verify only content_embedding remains
-        res, _ = collection_w.describe()
-        assert len(res["functions"]) == 1
-        assert res["functions"][0]["name"] == "content_embedding"
-
-        # === INSERT after drop - content_vector auto-generated, title_vector manual ===
-        manual_title_vector = [random.random() for _ in range(dim)]
-        data_after_drop = [
-            {"id": 10, "title": "New title", "content": "New content", "title_vector": manual_title_vector}
-        ]
-        collection_w.insert(data_after_drop)
-        assert collection_w.num_entities == 4
-
-        # Verify vectors
-        res, _ = collection_w.query(expr="id == 10", output_fields=["title_vector", "content_vector"])
-        assert np.allclose(res[0]["title_vector"], manual_title_vector, rtol=1e-5)
-        assert len(res[0]["content_vector"]) == dim
-
-        # === SEARCH on both fields still works ===
-        search_params = {"metric_type": "COSINE", "params": {}}
-        # Search title_vector with manual vector
-        res, _ = collection_w.search(
-            data=[manual_title_vector],
-            anns_field="title_vector",
-            param=search_params,
-            limit=4,
-        )
-        assert len(res[0]) == 4
-
-        # Search content_vector with text (function still active)
-        res, _ = collection_w.search(
-            data=["New content"],
-            anns_field="content_vector",
-            param=search_params,
-            limit=4,
-        )
-        assert len(res[0]) == 4
-
-        # === UPSERT - content function still works ===
-        upsert_title_vector = [random.random() for _ in range(dim)]
-        upsert_data = [
-            {"id": 0, "title": "Updated title", "content": "Updated content", "title_vector": upsert_title_vector}
-        ]
-        collection_w.upsert(upsert_data)
-
-        res, _ = collection_w.query(expr="id == 0", output_fields=["title_vector", "content_vector"])
-        assert np.allclose(res[0]["title_vector"], upsert_title_vector, rtol=1e-5)
-
-        # === DELETE still works ===
-        collection_w.delete("id == 1")
-        res, _ = collection_w.query(expr="id >= 0", output_fields=["id"])
-        assert len(res) == 3
-
-    def test_drop_collection_function_then_add_again(self, tei_endpoint):
-        """
-        target: test can re-add function after dropping
-        method: create collection with function, drop it, add function again
-        expected: function can be re-added after drop
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-
-        text_embedding_function = Function(
-            name="tei",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        schema.add_function(text_embedding_function)
-
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-
-        # Drop function
-        self.client.drop_collection_function(collection_name=c_name, function_name="tei")
-
-        # Verify function is removed
-        res, _ = collection_w.describe()
-        assert len(res.get("functions", [])) == 0
-
-        # Add function again
-        new_function = Function(
-            name="text_embedding_v2",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        self.client.add_collection_function(collection_name=c_name, function=new_function)
-
-        # Verify function is added
-        res, _ = collection_w.describe()
-        assert len(res["functions"]) == 1
-        assert res["functions"][0]["name"] == "text_embedding_v2"
-
-
-@pytest.mark.tags(CaseLabel.L2)
-class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
-    """
-    ******************************************************************
-      The following cases are negative tests for add/alter/drop collection function APIs
-    ******************************************************************
-    """
-
-    # ==================== add_collection_function negative tests ====================
-
-    def test_add_collection_function_nonexistent_collection(self, tei_endpoint):
-        """
-        target: test add function to nonexistent collection
-        method: call add_collection_function on collection that doesn't exist
-        expected: error with collection not found (code=100)
-        """
-        self._connect()
-        embedding_function = Function(
-            name="text_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-
-        try:
-            self.client.add_collection_function(
-                collection_name="nonexistent_collection_12345", function=embedding_function
-            )
-            assert False, "Expected exception for nonexistent collection"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 100
-            assert "collection not found" in str(e)
-
-    def test_add_collection_function_duplicate_name(self, tei_endpoint):
-        """
-        target: test add function with duplicate name
-        method: create collection with function, try to add another function with same name
-        expected: error indicating duplicate function name (code=1100)
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-
-        # Add function to schema first
-        text_embedding_function = Function(
-            name="tei",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-        schema.add_function(text_embedding_function)
-
-        c_name = cf.gen_unique_str(prefix)
-        self.init_collection_wrap(name=c_name, schema=schema)
-
-        # Try to add another function with same name
-        duplicate_function = Function(
-            name="tei",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-
-        try:
-            self.client.add_collection_function(collection_name=c_name, function=duplicate_function)
-            assert False, "Expected exception for duplicate function name"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 1100
-            assert "duplicate function name" in str(e)
-
-    def test_add_collection_function_missing_input_field(self, tei_endpoint):
-        """
-        target: test add function with input field that doesn't exist
-        method: add function referencing non-existent input field
-        expected: error indicating input field not found (code=1100)
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-        c_name = cf.gen_unique_str(prefix)
-        self.init_collection_wrap(name=c_name, schema=schema)
-
-        # Create function with non-existent input field
-        embedding_function = Function(
-            name="text_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["nonexistent_field"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-
-        try:
-            self.client.add_collection_function(collection_name=c_name, function=embedding_function)
-            assert False, "Expected exception for missing input field"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 1100
-            assert "function input field not found" in str(e)
-
-    def test_add_collection_function_missing_output_field(self, tei_endpoint):
-        """
-        target: test add function with output field that doesn't exist
-        method: add function referencing non-existent output field
-        expected: error indicating output field not found (code=1100)
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-        c_name = cf.gen_unique_str(prefix)
-        self.init_collection_wrap(name=c_name, schema=schema)
-
-        # Create function with non-existent output field
-        embedding_function = Function(
-            name="text_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="nonexistent_vector_field",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-
-        try:
-            self.client.add_collection_function(collection_name=c_name, function=embedding_function)
-            assert False, "Expected exception for missing output field"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 1100
-            assert "function output field not found" in str(e)
-
-    def test_add_collection_function_dim_mismatch(self, tei_endpoint):
-        """
-        target: test add function with dimension mismatch
-        method: create collection with vector field dim=512, add function for model that outputs dim=768
-        expected: error indicating dimension mismatch (code=2400)
-        """
-        self._connect()
-        dim = 512  # Mismatched dimension (TEI model outputs 768)
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-        c_name = cf.gen_unique_str(prefix)
-        self.init_collection_wrap(name=c_name, schema=schema)
-
-        # Create function (model outputs 768 dim, but field is 512)
-        embedding_function = Function(
-            name="text_embedding",
-            function_type=FunctionType.TEXTEMBEDDING,
-            input_field_names=["document"],
-            output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint},
-        )
-
-        try:
-            self.client.add_collection_function(collection_name=c_name, function=embedding_function)
-            assert False, "Expected exception for dimension mismatch"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 2400
-            assert "embedding dim" in str(e)
-
-    # ==================== alter_collection_function negative tests ====================
 
     def test_alter_collection_function_nonexistent_collection(self, tei_endpoint):
         """
@@ -2047,10 +1423,10 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
     def test_alter_collection_function_invalid_new_endpoint(self, tei_endpoint):
         """
-        target: test alter function with invalid endpoint
-        method: create collection with valid function, alter to use invalid endpoint
-        expected: error indicating endpoint unreachable (code=2, ServiceUnavailable:
-                  a transport/connect failure to the model backend is retryable)
+        target: test altering the endpoint is rejected (endpoint is immutable)
+        method: create collection with valid function, try to alter to a different endpoint
+        expected: rejected before any connect attempt - for TEI the endpoint is the
+                  model's identity, so it is immutable
         """
         self._connect()
         dim = 768
@@ -2073,7 +1449,8 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         self.init_collection_wrap(name=c_name, schema=schema)
 
-        # Try to alter with invalid endpoint
+        # endpoint is immutable, so altering it (even to an invalid one) is rejected
+        # before any connect attempt.
         new_function = Function(
             name="tei",
             function_type=FunctionType.TEXTEMBEDDING,
@@ -2084,78 +1461,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
         try:
             self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
-            assert False, "Expected exception for invalid endpoint"
+            assert False, "Expected exception: endpoint is immutable"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            # transport/connect failure to the model backend is now classified as
-            # ServiceUnavailable (2, retryable) rather than FunctionFailed (2400)
-            assert e.code == 2
-            assert "invalid_endpoint_12345" in str(e).lower()
-
-    # ==================== drop_collection_function negative tests ====================
-
-    def test_drop_collection_function_nonexistent_collection(self):
-        """
-        target: test drop function from nonexistent collection
-        method: call drop_collection_function on collection that doesn't exist
-        expected: error with collection not found (code=100)
-        """
-        self._connect()
-
-        try:
-            self.client.drop_collection_function(collection_name="nonexistent_collection_12345", function_name="tei")
-            assert False, "Expected exception for nonexistent collection"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 100
-            assert "can't find collection[database=default][collection=nonexistent_collection_12345]" in str(e)
-
-    def test_drop_collection_function_nonexistent_function(self):
-        """
-        target: test drop function that doesn't exist
-        method: create collection without function, try to drop non-existent function
-        expected: error with function not found (code=1100)
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-        c_name = cf.gen_unique_str(prefix)
-        self.init_collection_wrap(name=c_name, schema=schema)
-
-        try:
-            self.client.drop_collection_function(collection_name=c_name, function_name="nonexistent_function")
-            assert False, "Expected exception for nonexistent function"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 1100
-            assert "function not found: nonexistent_function" in str(e)
-
-    def test_drop_collection_function_empty_name(self):
-        """
-        target: test drop function with empty name
-        method: call drop_collection_function with function_name=""
-        expected: param error with invalid drop identifier (code=1)
-        """
-        self._connect()
-        dim = 768
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
-        ]
-        schema = CollectionSchema(fields=fields, description="test collection")
-        c_name = cf.gen_unique_str(prefix)
-        self.init_collection_wrap(name=c_name, schema=schema)
-
-        try:
-            self.client.drop_collection_function(collection_name=c_name, function_name="")
-            assert False, "Expected exception for empty function name"
-        except Exception as e:
-            log.info(f"Expected error: {e}")
-            assert e.code == 1
-            assert "Must specify exactly one valid Drop identifier" in str(e)
+            assert "cannot be altered" in str(e)

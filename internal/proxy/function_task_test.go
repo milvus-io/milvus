@@ -97,34 +97,6 @@ func (f *FunctionTaskSuite) TestValidateAddFunctionInputNotText() {
 
 func (f *FunctionTaskSuite) TestFunctionOnType() {
 	{
-		task := &addCollectionFunctionTask{
-			AddCollectionFunctionRequest: &milvuspb.AddCollectionFunctionRequest{},
-		}
-		err := task.OnEnqueue()
-		f.NoError(err)
-		f.Equal(commonpb.MsgType_AddCollectionFunction, task.Type())
-		f.Equal(task.TraceCtx(), task.ctx)
-		task.SetID(1)
-		f.Equal(task.ID(), int64(1))
-		task.SetTs(2)
-		f.Equal(task.EndTs(), uint64(2))
-		f.Equal(task.Name(), AddCollectionFunctionTask)
-	}
-	{
-		task := &dropCollectionFunctionTask{
-			DropCollectionFunctionRequest: &milvuspb.DropCollectionFunctionRequest{},
-		}
-		err := task.OnEnqueue()
-		f.NoError(err)
-		f.Equal(commonpb.MsgType_DropCollectionFunction, task.Type())
-		f.Equal(task.TraceCtx(), task.ctx)
-		task.SetID(1)
-		f.Equal(task.ID(), int64(1))
-		task.SetTs(2)
-		f.Equal(task.EndTs(), uint64(2))
-		f.Equal(task.Name(), DropCollectionFunctionTask)
-	}
-	{
 		task := &alterCollectionFunctionTask{
 			AlterCollectionFunctionRequest: &milvuspb.AlterCollectionFunctionRequest{},
 		}
@@ -137,136 +109,6 @@ func (f *FunctionTaskSuite) TestFunctionOnType() {
 		task.SetTs(2)
 		f.Equal(task.EndTs(), uint64(2))
 		f.Equal(task.Name(), AlterCollectionFunctionTask)
-	}
-}
-
-func (f *FunctionTaskSuite) TestAddCollectionFunctionTaskPreExecute() {
-	ctx := context.Background()
-	// Adding a function requires StorageV3 + schema-bump/storage-version compaction enabled
-	// (see validateAddFunctionRequiresStorageV3). storageVersion.enabled defaults true;
-	// bumpSchemaVersion.enabled defaults false, so it must be set explicitly.
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key)
-	{
-		mixc := mocks.NewMockMixCoordClient(f.T())
-		req := &milvuspb.AddCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_AddCollectionFunction,
-			},
-			DbName:         "db",
-			CollectionName: "NotExist",
-			CollectionID:   1,
-			FunctionSchema: &schemapb.FunctionSchema{},
-		}
-
-		task := &addCollectionFunctionTask{
-			Condition:                    NewTaskCondition(ctx),
-			AddCollectionFunctionRequest: req,
-			mixCoord:                     mixc,
-		}
-		cache := NewMockCache(f.T())
-		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(0, fmt.Errorf("Mock Error")).Maybe()
-		globalMetaCache = cache
-
-		err := task.PreExecute(ctx)
-		f.ErrorContains(err, "Mock Error")
-	}
-	{
-		// Test with invalid function schema
-		mixc := mocks.NewMockMixCoordClient(f.T())
-		req := &milvuspb.AddCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_AddCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionSchema: &schemapb.FunctionSchema{},
-		}
-
-		task := &addCollectionFunctionTask{
-			Condition:                    NewTaskCondition(ctx),
-			AddCollectionFunctionRequest: req,
-			mixCoord:                     mixc,
-		}
-
-		cache := NewMockCache(f.T())
-		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
-		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, fmt.Errorf("Mock info error")).Maybe()
-		globalMetaCache = cache
-
-		err := task.PreExecute(ctx)
-		f.ErrorContains(err, "Mock info error")
-	}
-
-	{
-		// Test with valid request
-		functionSchema := &schemapb.FunctionSchema{
-			Name:             "test_function",
-			Type:             schemapb.FunctionType_BM25,
-			InputFieldNames:  []string{"text_field"},
-			OutputFieldNames: []string{"sparse_field"},
-			Params:           []*commonpb.KeyValuePair{},
-		}
-
-		req := &milvuspb.AddCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_AddCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionSchema: functionSchema,
-		}
-
-		task := &addCollectionFunctionTask{
-			Condition:                    NewTaskCondition(ctx),
-			AddCollectionFunctionRequest: req,
-		}
-		cache := NewMockCache(f.T())
-		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
-		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, nil).Maybe()
-		globalMetaCache = cache
-		err := task.PreExecute(ctx)
-		f.ErrorContains(err, "not support adding BM25")
-	}
-	{
-		functionSchema := &schemapb.FunctionSchema{
-			Name:             "test_function",
-			Type:             schemapb.FunctionType_TextEmbedding,
-			InputFieldNames:  []string{"text"},
-			OutputFieldNames: []string{"vec"},
-			Params:           []*commonpb.KeyValuePair{},
-		}
-
-		req := &milvuspb.AddCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_AddCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionSchema: functionSchema,
-		}
-
-		task := &addCollectionFunctionTask{
-			Condition:                    NewTaskCondition(ctx),
-			AddCollectionFunctionRequest: req,
-		}
-		coll := &collectionInfo{
-			schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Functions: []*schemapb.FunctionSchema{},
-				},
-			},
-		}
-		cache := NewMockCache(f.T())
-		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
-		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		m := mockey.Mock(validator.ValidateFunction).Return(nil).Build()
-		defer m.UnPatch()
-		globalMetaCache = cache
-		err := task.PreExecute(ctx)
-		f.NoError(err)
 	}
 }
 
@@ -496,7 +338,8 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
-						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding},
+						// identity matches the request; a valid alter changes only params
+						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
 						{Name: "f2", Type: schemapb.FunctionType_TextEmbedding},
 					},
 				},
@@ -511,130 +354,39 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		err := task.PreExecute(ctx)
 		f.NoError(err)
 	}
-}
-
-func (f *FunctionTaskSuite) TestDropCollectionFunctionTaskPreExecute() {
-	ctx := context.Background()
 	{
-		// Test with valid request
-		req := &milvuspb.DropCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropCollectionFunction,
-			},
+		// Altering the output field is rejected: function identity is immutable.
+		req := &milvuspb.AlterCollectionFunctionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionFunction},
 			CollectionName: "test_collection",
+			CollectionID:   1,
 			FunctionName:   "test_function",
-		}
-
-		task := &dropCollectionFunctionTask{
-			Condition:                     NewTaskCondition(ctx),
-			DropCollectionFunctionRequest: req,
-		}
-
-		cache := NewMockCache(f.T())
-		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
-		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, fmt.Errorf("mock error")).Maybe()
-		globalMetaCache = cache
-
-		err := task.PreExecute(ctx)
-		f.ErrorContains(err, "mock error")
-	}
-	{
-		req := &milvuspb.DropCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			FunctionName:   "test_function",
-		}
-
-		task := &dropCollectionFunctionTask{
-			Condition:                     NewTaskCondition(ctx),
-			DropCollectionFunctionRequest: req,
-		}
-
-		coll := &collectionInfo{
-			schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Functions: []*schemapb.FunctionSchema{},
-				},
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{"text"},
+				OutputFieldNames: []string{"other_vec"},
 			},
 		}
-
-		cache := NewMockCache(f.T())
-		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
-		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		globalMetaCache = cache
-
-		err := task.PreExecute(ctx)
-		f.NoError(err)
-	}
-	{
-		req := &milvuspb.DropCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			FunctionName:   "test_function",
+		task := &alterCollectionFunctionTask{
+			Condition:                      NewTaskCondition(ctx),
+			AlterCollectionFunctionRequest: req,
 		}
-
-		task := &dropCollectionFunctionTask{
-			Condition:                     NewTaskCondition(ctx),
-			DropCollectionFunctionRequest: req,
-		}
-
 		coll := &collectionInfo{
 			schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
-						{Name: req.FunctionName},
+						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
 					},
 				},
 			},
 		}
-
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
 		globalMetaCache = cache
-
 		err := task.PreExecute(ctx)
-		f.NoError(err)
-	}
-	{
-		req := &milvuspb.DropCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			FunctionName:   "test_function",
-		}
-
-		task := &dropCollectionFunctionTask{
-			Condition:                     NewTaskCondition(ctx),
-			DropCollectionFunctionRequest: req,
-		}
-
-		coll := &collectionInfo{
-			schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
-						{Name: "vec", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
-					},
-					Functions: []*schemapb.FunctionSchema{
-						{Name: req.FunctionName},
-					},
-				},
-			},
-		}
-
-		cache := NewMockCache(f.T())
-		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
-		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		globalMetaCache = cache
-
-		err := task.PreExecute(ctx)
-		f.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
+		f.ErrorContains(err, "output fields cannot be altered")
 	}
 }
 
@@ -732,162 +484,24 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskExecute() {
 	}
 }
 
-func (f *FunctionTaskSuite) TestAddCollectionFunctionTaskExecute() {
+func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskExecuteRPCError() {
 	ctx := context.Background()
-
-	{
-		mockRootCoord := mocks.NewMockMixCoordClient(f.T())
-
-		functionSchema := &schemapb.FunctionSchema{
-			Name:             "test_function",
-			Type:             schemapb.FunctionType_BM25,
-			InputFieldNames:  []string{"text_field"},
-			OutputFieldNames: []string{"sparse_field"},
-			Params:           []*commonpb.KeyValuePair{},
-		}
-
-		req := &milvuspb.AddCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_AddCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionSchema: functionSchema,
-		}
-
-		mockRootCoord.EXPECT().AddCollectionFunction(mock.Anything, req).Return(&commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil)
-
-		task := &addCollectionFunctionTask{
-			Condition:                    NewTaskCondition(ctx),
-			AddCollectionFunctionRequest: req,
-			mixCoord:                     mockRootCoord,
-		}
-
-		err := task.Execute(ctx)
-		f.NoError(err)
+	mockRootCoord := mocks.NewMockMixCoordClient(f.T())
+	req := &milvuspb.AlterCollectionFunctionRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionFunction},
+		CollectionName: "test_collection",
+		FunctionName:   "test_function",
+		FunctionSchema: &schemapb.FunctionSchema{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding},
 	}
-
-	{
-		mockRootCoord := mocks.NewMockMixCoordClient(f.T())
-
-		functionSchema := &schemapb.FunctionSchema{
-			Name:             "test_function",
-			Type:             schemapb.FunctionType_BM25,
-			InputFieldNames:  []string{"text_field"},
-			OutputFieldNames: []string{"sparse_field"},
-			Params:           []*commonpb.KeyValuePair{},
-		}
-
-		req := &milvuspb.AddCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_AddCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionSchema: functionSchema,
-		}
-
-		mockRootCoord.EXPECT().AddCollectionFunction(mock.Anything, req).Return(&commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "test error",
-		}, nil)
-
-		task := &addCollectionFunctionTask{
-			Condition:                    NewTaskCondition(ctx),
-			AddCollectionFunctionRequest: req,
-			mixCoord:                     mockRootCoord,
-		}
-		err := task.Execute(ctx)
-		f.Error(err)
+	mockRootCoord.EXPECT().AlterCollectionFunction(mock.Anything, req).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "test error",
+	}, nil)
+	task := &alterCollectionFunctionTask{
+		Condition:                      NewTaskCondition(ctx),
+		AlterCollectionFunctionRequest: req,
+		mixCoord:                       mockRootCoord,
 	}
-}
-
-func (f *FunctionTaskSuite) TestDropCollectionFunctionTaskExecute() {
-	ctx := context.Background()
-
-	{
-		mockRootCoord := mocks.NewMockMixCoordClient(f.T())
-
-		req := &milvuspb.DropCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionName:   "test_function",
-		}
-
-		mockRootCoord.EXPECT().DropCollectionFunction(mock.Anything, req).Return(&commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil)
-
-		task := &dropCollectionFunctionTask{
-			Condition:                     NewTaskCondition(ctx),
-			DropCollectionFunctionRequest: req,
-			mixCoord:                      mockRootCoord,
-			fSchema: &schemapb.FunctionSchema{
-				Type: schemapb.FunctionType_TextEmbedding,
-			},
-		}
-
-		err := task.Execute(ctx)
-		f.NoError(err)
-	}
-
-	{
-		mockRootCoord := mocks.NewMockMixCoordClient(f.T())
-
-		req := &milvuspb.DropCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionName:   "test_function",
-		}
-
-		mockRootCoord.EXPECT().DropCollectionFunction(mock.Anything, req).Return(&commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "test error",
-		}, nil)
-
-		task := &dropCollectionFunctionTask{
-			Condition:                     NewTaskCondition(ctx),
-			DropCollectionFunctionRequest: req,
-			mixCoord:                      mockRootCoord,
-			fSchema: &schemapb.FunctionSchema{
-				Type: schemapb.FunctionType_TextEmbedding,
-			},
-		}
-
-		err := task.Execute(ctx)
-		f.Error(err)
-	}
-
-	{
-		mockRootCoord := mocks.NewMockMixCoordClient(f.T())
-
-		req := &milvuspb.DropCollectionFunctionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropCollectionFunction,
-			},
-			CollectionName: "test_collection",
-			CollectionID:   1,
-			FunctionName:   "test_function",
-		}
-
-		task := &dropCollectionFunctionTask{
-			Condition:                     NewTaskCondition(ctx),
-			DropCollectionFunctionRequest: req,
-			mixCoord:                      mockRootCoord,
-			fSchema: &schemapb.FunctionSchema{
-				Type: schemapb.FunctionType_BM25,
-			},
-		}
-
-		err := task.Execute(ctx)
-		f.ErrorContains(err, "currently does not support droping BM25 function")
-	}
+	err := task.Execute(ctx)
+	f.Error(err)
 }

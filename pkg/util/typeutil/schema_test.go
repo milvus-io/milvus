@@ -5060,6 +5060,45 @@ func TestIsBm25FunctionInputField(t *testing.T) {
 	assert.False(t, IsBm25FunctionInputField(nilSchema, nilSchema.Fields[0]))
 }
 
+func TestIsMinHashFunctionInputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 101, Name: "sig", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true},
+			{FieldID: 102, Name: "bm25_in", DataType: schemapb.DataType_VarChar},
+			{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name: "minhash_func", Type: schemapb.FunctionType_MinHash,
+				InputFieldIds: []int64{100}, InputFieldNames: []string{"text"},
+				OutputFieldIds: []int64{101}, OutputFieldNames: []string{"sig"},
+			},
+			{
+				Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+				InputFieldIds: []int64{102}, InputFieldNames: []string{"bm25_in"},
+				OutputFieldIds: []int64{103}, OutputFieldNames: []string{"sparse"},
+			},
+		},
+	}
+	// each helper matches only its own function type's input field
+	assert.True(t, IsMinHashFunctionInputField(schema, schema.Fields[0])) // text -> minhash input
+	assert.False(t, IsBm25FunctionInputField(schema, schema.Fields[0]))
+	assert.True(t, IsBm25FunctionInputField(schema, schema.Fields[2])) // bm25_in -> bm25 input
+	assert.False(t, IsMinHashFunctionInputField(schema, schema.Fields[2]))
+	assert.False(t, IsMinHashFunctionInputField(schema, schema.Fields[1])) // output field
+
+	// name fallback (no field ids assigned yet) + nil safety
+	schemaNoIDs := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{Name: "text", DataType: schemapb.DataType_VarChar}},
+		Functions: []*schemapb.FunctionSchema{
+			{Name: "mh", Type: schemapb.FunctionType_MinHash, InputFieldNames: []string{"text"}},
+		},
+	}
+	assert.True(t, IsMinHashFunctionInputField(schemaNoIDs, schemaNoIDs.Fields[0]))
+	assert.False(t, IsMinHashFunctionInputField(nil, schemaNoIDs.Fields[0]))
+}
+
 func TestIsMinHashFunctionOutputField(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
