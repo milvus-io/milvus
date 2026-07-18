@@ -2406,6 +2406,17 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     std::vector<
         std::tuple<std::string, std::function<bool(int, bool)>, DataType>>
         testcases = {
+            // NOT over a nullable, scalar-index-only field: a NULL row must be
+            // excluded (3VL: NOT(unknown)=unknown). Exercises
+            // ProcessIndexLookupByOffsets' null path — the pre-fix code left
+            // valid_res=true for a Reverse_Lookup==nullopt row, so NOT flipped
+            // it to a (wrong) match.
+            {"not (age8 + 4 == 8)",
+             [](int8_t v, bool valid) { return valid && !((v + 4) == 8); },
+             DataType::INT8},
+            {"not (age641 / 2 == 1000)",
+             [](int64_t v, bool valid) { return valid && !((v / 2) == 1000); },
+             DataType::INT64},
             // EQ tests
             {"age8 + 4 == 8",
              [](int8_t v, bool valid) { return valid && (v + 4) == 8; },
@@ -2664,5 +2675,66 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
                 ASSERT_EQ(view[i], ref) << clause << "@" << i;
             }
         }
+    }
+}
+
+// INDEX-ONLY nullable field: the field's raw data is excluded from the load so
+// the offset path takes ProcessIndexLookupByOffsets (Reverse_Lookup) — the
+// exact branch this PR fixes. Under NOT, a NULL row (valid=false) must be
+// excluded (3VL); the pre-fix code left valid_res=true so NOT wrongly matched
+// it. Also covers the SkipIndex-skip polarity via the same path.
+TEST_P(ExprTest, TestNotOverScalarIndexOnlyNullable) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto age_fid = schema->AddDebugField("age64n", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    // Exclude age64n's raw data -> index-only once its scalar index is loaded.
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), false, {age_fid.get()});
+
+    auto age_valid = raw_data.get_col_valid(age_fid);
+    auto age_col = raw_data.get_col<int64_t>(age_fid);
+    age_col[0] = 4;
+    auto index = milvus::index::CreateScalarIndexSort<int64_t>();
+    index->Build(N, age_col.data(), age_valid.data());
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = age_fid.get();
+    load_index_info.field_type = DataType::INT64;
+    load_index_info.index_params = GenIndexParams(index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(index));
+    seg->LoadIndex(load_index_info);
+
+    auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
+    SetSchema(schema);
+
+    auto clause = std::string(R"(not (age64n == 4))");
+    auto plan_str = create_search_plan_from_expr(clause);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    auto plannode = plan->plan_node_->plannodes_->sources()[0]->sources()[0];
+
+    BitsetType final =
+        ExecuteQueryExpr(plannode, seg_promote, N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.size(), N);
+
+    milvus::exec::OffsetVector offsets;
+    for (auto i = 0; i < N; ++i) {
+        offsets.emplace_back(i);
+    }
+    auto col_vec = milvus::test::gen_filter_res(
+        plannode.get(), seg_promote, N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    ASSERT_EQ(view.size(), N);
+
+    for (int i = 0; i < N; ++i) {
+        // NOT(age64n == 4): NULL row -> UNKNOWN -> excluded (false).
+        bool ref = age_valid[i] && !(age_col[i] == 4);
+        ASSERT_EQ(view[i], ref) << "offset(index-only) @" << i;
+        ASSERT_EQ(final[i], ref) << "sequential @" << i;
     }
 }
