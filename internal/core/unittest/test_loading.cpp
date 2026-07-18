@@ -356,6 +356,39 @@ TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
     ASSERT_TRUE(loadIndexInfo.load_resource_request.has_value());
 }
 
+TEST(IndexLoadTest, SegmentAdmissionEstimateDoesNotOpenScalarV3File) {
+    constexpr uint64_t kIndexSize = 1024UL * 1024;
+
+    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    loadIndexInfo.collection_id = 1;
+    loadIndexInfo.partition_id = 2;
+    loadIndexInfo.segment_id = 3;
+    loadIndexInfo.field_id = 4;
+    loadIndexInfo.field_type = milvus::DataType::INT64;
+    loadIndexInfo.element_type = milvus::DataType::NONE;
+    loadIndexInfo.enable_mmap = false;
+    loadIndexInfo.index_id = 5;
+    loadIndexInfo.index_build_id = 6;
+    loadIndexInfo.index_version = 1;
+    loadIndexInfo.index_params = {
+        {"index_type", milvus::index::BITMAP_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+    };
+    loadIndexInfo.index_files = {"/path/that/must/not/be-opened"};
+    loadIndexInfo.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    loadIndexInfo.index_size = kIndexSize;
+    loadIndexInfo.num_rows = 1024;
+    loadIndexInfo.schema.set_fieldid(loadIndexInfo.field_id);
+    loadIndexInfo.schema.set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+
+    EXPECT_EQ(request.final_memory_cost, kIndexSize);
+    EXPECT_EQ(request.final_disk_cost, 0);
+    EXPECT_TRUE(request.max_memory_cost >= request.final_memory_cost);
+}
+
 TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     constexpr int64_t kNumRows = 1025;

@@ -827,9 +827,25 @@ TYPED_TEST_P(HybridIndexTestInverted,
              ScalarIndexLoadingOverheadUsesPoolAndSingleTaskBounds) {
     auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
-    auto cleanup = folly::makeGuard(
-        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto old_high_max = high_pool.GetMaxThreadNum();
+    auto old_low_max = low_pool.GetMaxThreadNum();
+    auto cleanup = folly::makeGuard([&budget,
+                                     old_capacity,
+                                     &high_pool,
+                                     &low_pool,
+                                     old_high_max,
+                                     old_low_max]() {
+        budget.SetCapacityBytes(old_capacity);
+        high_pool.Resize(old_high_max);
+        low_pool.Resize(old_low_max);
+    });
     budget.SetCapacityBytes(0);
+    high_pool.Resize(2);
+    low_pool.Resize(3);
 
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
@@ -880,11 +896,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
     EXPECT_FALSE(translator.meta()->loading_overhead->file.has_value());
     EXPECT_EQ(translator.meta()->loading_overhead->memory->group,
               milvus::segcore::kLoadTransientOverheadGroup);
-    auto max_load_tasks =
-        milvus::ComputeThreadPoolMaxThreads(
-            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()) +
-        milvus::ComputeThreadPoolMaxThreads(
-            milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+    constexpr int64_t max_load_tasks = 5;
     auto max_task_overhead = storage::PlainEntryFileStreamTaskTransientBytes();
     EXPECT_EQ(translator.meta()->loading_overhead->memory->upper_bound,
               max_load_tasks * max_task_overhead);

@@ -218,20 +218,30 @@ TEST(FieldDataLoadingOverheadUpperBound, UsesPoolBoundWhenBudgetDisabled) {
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     auto old_batch_target = FieldDataLoadBatchTargetBytes();
-    auto cleanup =
-        folly::makeGuard([&budget, old_capacity, old_batch_target]() {
-            budget.SetCapacityBytes(old_capacity);
-            SetFieldDataLoadBatchTargetBytes(old_batch_target);
-        });
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto old_high_max = high_pool.GetMaxThreadNum();
+    auto old_low_max = low_pool.GetMaxThreadNum();
+    auto cleanup = folly::makeGuard([&budget,
+                                     old_capacity,
+                                     old_batch_target,
+                                     &high_pool,
+                                     &low_pool,
+                                     old_high_max,
+                                     old_low_max]() {
+        budget.SetCapacityBytes(old_capacity);
+        SetFieldDataLoadBatchTargetBytes(old_batch_target);
+        high_pool.Resize(old_high_max);
+        low_pool.Resize(old_low_max);
+    });
 
     budget.SetCapacityBytes(0);
     SetFieldDataLoadBatchTargetBytes(64);
-
-    auto max_load_tasks =
-        milvus::ComputeThreadPoolMaxThreads(
-            milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()) +
-        milvus::ComputeThreadPoolMaxThreads(
-            milvus::LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+    high_pool.Resize(2);
+    low_pool.Resize(3);
+    constexpr int64_t max_load_tasks = 5;
 
     auto upper_bound =
         FieldDataLoadingOverheadUpperBound(/*max_memory_overhead=*/128);
