@@ -2089,6 +2089,7 @@ func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interfa
 						FieldId:     field.FieldID,
 						DataType:    field.DataType,
 						ElementType: field.GetElementType(),
+						Nullable:    field.GetNullable(),
 					},
 				},
 			},

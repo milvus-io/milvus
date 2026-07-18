@@ -2551,6 +2551,43 @@ func Test_JSONContainsAll(t *testing.T) {
 	}
 }
 
+func Test_JSONContainsStructFieldUsesSubFieldNullable(t *testing.T) {
+	for _, testcase := range []struct {
+		name           string
+		parentNullable bool
+		childNullable  bool
+		wantNullable   bool
+	}{
+		{name: "child nullable", childNullable: true, wantNullable: true},
+		{name: "parent nullable only", parentNullable: true, wantNullable: false},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			schema := newTestSchema(true)
+			schema.StructArrayFields[0].Nullable = testcase.parentNullable
+			schema.StructArrayFields[0].Fields[1].Nullable = testcase.childNullable
+			helper, err := typeutil.CreateSchemaHelper(schema)
+			require.NoError(t, err)
+
+			plan, err := CreateSearchPlan(helper, `json_contains_all(struct_array[sub_int], [])`, "FloatVectorField", &planpb.QueryInfo{
+				Topk:         0,
+				MetricType:   "",
+				SearchParams: "",
+				RoundDecimal: 0,
+			}, nil, nil)
+			require.NoError(t, err)
+
+			jsonContainsExpr := plan.GetVectorAnns().GetPredicates().GetJsonContainsExpr()
+			require.NotNil(t, jsonContainsExpr)
+			columnInfo := jsonContainsExpr.GetColumnInfo()
+			require.NotNil(t, columnInfo)
+			assert.Equal(t, int64(134), columnInfo.GetFieldId())
+			assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+			assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
+			assert.Equal(t, testcase.wantNullable, columnInfo.GetNullable())
+		})
+	}
+}
+
 func Test_JSONContainsAny(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 	expr := ""
