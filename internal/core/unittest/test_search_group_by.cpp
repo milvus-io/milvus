@@ -897,3 +897,54 @@ TEST(GroupBY, GrowingIndex) {
         }
     }
 }
+
+// Group-by on a NULLABLE scalar field must not crash and must preserve NULL
+// rows as a distinct null group. Guards SealedDataGetter's null handling; the
+// index-only Reverse_Lookup==nullopt branch (which previously threw
+// "field data not found") is additionally exercised on CI.
+TEST(GroupBY, SealedNullableGroupByField) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    int dim = 64;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto i64_null_fid =
+        schema->AddDebugField("int64_null", DataType::INT64, true);
+    schema->set_primary_field_id(str_fid);
+    size_t N = 100;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, 1, false, false);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    auto vector_data = raw_data.get_col<float>(vec_fid);
+    auto indexing = GenVecIndexing(
+        N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
+    segment->LoadIndex(load_index_info);
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseGroupBySearch(
+        "", "fakevec", 20, "L2", "{\"ef\": 10}", i64_null_fid.get(), 3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    ASSERT_NO_THROW({
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+        ASSERT_NE(search_result, nullptr);
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
+        ASSERT_FALSE(group_by_values.empty());
+    });
+}
