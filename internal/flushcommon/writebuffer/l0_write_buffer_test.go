@@ -60,6 +60,14 @@ func (s fakeGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int
 	return []int64{0, 1, 100, 101, 102}, nil
 }
 
+func (s fakeGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
+	for i := startOffset; i < endOffset; i++ {
+		pks = append(pks, storage.NewInt64PrimaryKey(i))
+	}
+	return pks, nil
+}
+
 func (s fakeGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 	if s.flushFunc != nil {
 		return s.flushFunc(ctx, startOffset, endOffset, config)
