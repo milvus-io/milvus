@@ -1733,21 +1733,30 @@ class InsertRecordGrowing {
         return data_.find(field_id) != data_.end();
     }
 
-    // Field ids that have materialized columns. The exact set the flush
-    // layout must be trimmed to: non-materialized function outputs are
-    // absent here.
+    // True once set_data_raw has run on the field's column (see
+    // VectorBase::materialized).
+    bool
+    materialized(FieldId field_id) const {
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        auto it = data_.find(field_id);
+        return it != data_.end() && it->second && it->second->materialized();
+    }
+
+    // Field ids in the flush layout: columns the segment has materialized
+    // (see VectorBase::materialized) that are still present in `schema`.
+    // `schema` MUST be the segment's own runtime schema, NOT the staler flush
+    // snapshot — else a dropped field would be wrongly kept. Dropped fields and
+    // never-materialized function outputs (backfilled later by bump-schema
+    // compaction) stay out.
     std::vector<int64_t>
-    get_data_field_ids() const {
+    get_data_field_ids(const Schema& schema) const {
         std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
         std::vector<int64_t> ids;
         ids.reserve(data_.size());
         for (const auto& [field_id, entry] : data_) {
-            // An allocated-but-empty column (e.g. a function output the
-            // replayed older-era inserts never filled) is not materialized.
-            if (!entry || entry->empty()) {
-                continue;
+            if (entry && schema.has_field(field_id) && entry->materialized()) {
+                ids.push_back(field_id.get());
             }
-            ids.push_back(field_id.get());
         }
         return ids;
     }

@@ -218,6 +218,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return *schema_;
     }
 
+    // Reopen swaps schema_ under sch_mutex_; a bare get_schema() reference can
+    // dangle if the swap frees the old Schema mid-use. Snapshot under the lock
+    // (shared_ptr copy keeps the referent alive). Mirrors Collection::get_schema.
+    SchemaPtr
+    get_schema_snapshot() {
+        std::shared_lock<std::shared_mutex> lock(sch_mutex_);
+        return schema_;
+    }
+
     FieldId
     get_primary_key_field_id() const {
         return primary_key_field_id_;

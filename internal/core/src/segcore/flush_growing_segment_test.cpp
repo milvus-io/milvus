@@ -1684,6 +1684,7 @@ TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
     ASSERT_NE(status.error_msg, nullptr);
     EXPECT_NE(std::string(status.error_msg).find("exceeds growing segment"),
               std::string::npos);
+    free(const_cast<char*>(status.error_msg));
 
     FreeFlushResult(&result);
 }
