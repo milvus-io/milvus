@@ -181,7 +181,10 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = false;
+                // Column-null row: three-valued logic requires marking it
+                // invalid too, else a wrapping NOT flips res=false to true and
+                // wrongly matches the null row.
+                res[i] = valid_res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {

@@ -197,36 +197,16 @@ PhyIterativeElementFilterNode::CollectResults(
             auto [doc_id, elem_idx] =
                 array_offsets->ElementIDToRowID(element_id);
 
-            // Find insert position using binary search
-            size_t pos =
-                large_is_better
-                    ? find_binsert_position<true>(search_result.distances_,
-                                                  base_idx,
-                                                  base_idx + count,
-                                                  distance)
-                    : find_binsert_position<false>(search_result.distances_,
-                                                   base_idx,
-                                                   base_idx + count,
-                                                   distance);
-
-            // Shift elements to make room for insertion
-            if (count > 0 && pos < base_idx + count) {
-                std::memmove(&search_result.distances_[pos + 1],
-                             &search_result.distances_[pos],
-                             (base_idx + count - pos) * sizeof(float));
-                std::memmove(&search_result.seg_offsets_[pos + 1],
-                             &search_result.seg_offsets_[pos],
-                             (base_idx + count - pos) * sizeof(int64_t));
-                std::memmove(&search_result.element_indices_[pos + 1],
-                             &search_result.element_indices_[pos],
-                             (base_idx + count - pos) * sizeof(int32_t));
-            }
-
-            // Insert the new result
-            search_result.seg_offsets_[pos] = doc_id;
-            search_result.element_indices_[pos] = elem_idx;
-            search_result.distances_[pos] = distance;
-            ++count;
+            // Insert into the per-query window [base_idx, base_idx + count),
+            // keeping it sorted best-first. Shared single owner with the
+            // iterative filter node so the two insertion paths cannot drift.
+            topk_binsert(search_result,
+                         base_idx,
+                         count,
+                         large_is_better,
+                         distance,
+                         doc_id,
+                         elem_idx);
         }
     }
 

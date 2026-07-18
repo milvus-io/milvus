@@ -735,7 +735,20 @@ class SegmentExpr : public Expr {
                 auto offset = (*input)[i];
                 auto raw = index_ptr->Reverse_Lookup(offset);
                 if (!raw.has_value()) {
-                    res[i] = false;
+                    // Null/absent row: three-valued logic requires res=false
+                    // AND valid=false (else a wrapping NOT matches the null
+                    // row). Still drive the callback on a null batch so
+                    // cursor-tracking callbacks keep processed_cursor aligned
+                    // — otherwise later candidates read the wrong bitmap_input
+                    // bit under iterative-filter AND.
+                    res[i] = valid_res[i] = false;
+                    func.template operator()<FilterType::random>(nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 1,
+                                                                 res + i,
+                                                                 valid_res + i,
+                                                                 values...);
                     continue;
                 }
                 T raw_data = raw.value();
@@ -748,17 +761,24 @@ class SegmentExpr : public Expr {
                                                              valid_res + i,
                                                              values...);
             }
-        } else if (all_valid) {
-            res.set(0, batch_size);
-            valid_res.set(0, batch_size);
         } else {
+            // SkipIndex pruned the whole chunk: no row can match, so res must
+            // stay FALSE (the pre-fix code wrongly set res=true here). Set
+            // validity from the index bitmap for correct 3VL under NOT, and
+            // drive the callback on a null batch per row so cursor-tracking
+            // callbacks keep processed_cursor aligned (mirrors the
+            // ProcessDataByOffsets skip branches).
             for (auto i = 0; i < batch_size; ++i) {
                 auto offset = (*input)[i];
-                // materialize the bool once: chaining proxies would read
-                // back the word just stored into valid_res
-                const bool valid = valid_result[offset];
-                valid_res[i] = valid;
-                res[i] = valid;
+                res[i] = false;
+                valid_res[i] = all_valid || valid_result[offset];
+                func.template operator()<FilterType::random>(nullptr,
+                                                             nullptr,
+                                                             nullptr,
+                                                             1,
+                                                             res + i,
+                                                             valid_res + i,
+                                                             values...);
             }
         }
 
@@ -1040,10 +1060,21 @@ class SegmentExpr : public Expr {
                             valid_res + result_idx,
                             values...);
                     } else {
-                        // Chunk is skipped - handle exactly like ProcessDataByOffsets
+                        // Chunk skipped by SkipIndex: mark null rows invalid,
+                        // then drive the callback on a null batch so cursor-
+                        // tracking callbacks keep processed_cursor aligned
+                        // (mirrors the ProcessDataByOffsets skip branches).
                         if (valid_data.size() > j && !valid_data[j]) {
                             res[result_idx] = valid_res[result_idx] = false;
                         }
+                        func.template operator()<FilterType::random>(
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            1,
+                            res + result_idx,
+                            valid_res + result_idx,
+                            values...);
                     }
 
                     processed_size++;
@@ -1095,10 +1126,21 @@ class SegmentExpr : public Expr {
                         valid_res + processed_size,
                         values...);
                 } else {
-                    // Chunk is skipped
+                    // Chunk skipped by SkipIndex: mark null rows invalid, then
+                    // drive the callback on a null batch so cursor-tracking
+                    // callbacks keep processed_cursor aligned (mirrors the
+                    // ProcessDataByOffsets skip branches).
                     if (valid_data && !valid_data[0]) {
                         res[processed_size] = valid_res[processed_size] = false;
                     }
+                    func.template operator()<FilterType::random>(
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        1,
+                        res + processed_size,
+                        valid_res + processed_size,
+                        values...);
                 }
 
                 processed_size++;
@@ -1334,6 +1376,16 @@ class SegmentExpr : public Expr {
                             res[processed_elems + k] =
                                 valid_res[processed_elems + k] = false;
                         }
+                        // Drive the callback on a null batch so cursor-tracking
+                        // callbacks keep processed_cursor aligned with the
+                        // non-skip path (which advances by elem_count per row).
+                        func(nullptr,
+                             nullptr,
+                             nullptr,
+                             elem_count,
+                             res + processed_elems,
+                             valid_res + processed_elems,
+                             values...);
                         processed_elems += elem_count;
                     }
                 } else {
@@ -1348,6 +1400,16 @@ class SegmentExpr : public Expr {
                             res[processed_elems + k] =
                                 valid_res[processed_elems + k] = false;
                         }
+                        // Drive the callback on a null batch so cursor-tracking
+                        // callbacks keep processed_cursor aligned with the
+                        // non-skip path (which advances by elem_count per row).
+                        func(nullptr,
+                             nullptr,
+                             nullptr,
+                             elem_count,
+                             res + processed_elems,
+                             valid_res + processed_elems,
+                             values...);
                         processed_elems += elem_count;
                     }
                 }
