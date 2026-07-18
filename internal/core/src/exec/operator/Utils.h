@@ -17,6 +17,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstring>
+#include <optional>
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
@@ -45,6 +47,58 @@ find_binsert_position(const std::vector<float>& distances,
                   ? std::upper_bound(first, last, dist, std::greater<float>{})
                   : std::upper_bound(first, last, dist);
     return static_cast<size_t>(it - distances.begin());
+}
+
+// Insert one (distance, seg_offset[, elem_idx]) into the per-query result
+// window [base_idx, base_idx + count) of search_result, keeping that window
+// sorted best-first for the metric. Advances count. elem_idx == std::nullopt
+// means non-element-level (element_indices_ is left untouched).
+//
+// Single owner of the top-k insertion invariant, shared by the iterative
+// filter and iterative element filter nodes so the two cannot drift apart.
+inline void
+topk_binsert(SearchResult& search_result,
+             size_t base_idx,
+             int64_t& count,
+             bool large_is_better,
+             float distance,
+             int64_t seg_offset,
+             std::optional<int32_t> elem_idx) {
+    size_t pos = large_is_better
+                     ? find_binsert_position<true>(search_result.distances_,
+                                                   base_idx,
+                                                   base_idx + count,
+                                                   distance)
+                     : find_binsert_position<false>(search_result.distances_,
+                                                    base_idx,
+                                                    base_idx + count,
+                                                    distance);
+
+    // The window is [base_idx, base_idx + count); shift only when inserting
+    // before its current end. Guard/size with the ABSOLUTE window end
+    // (base_idx + count), not the relative count — otherwise for nq_index >= 1
+    // (base_idx > 0) the shift is wrongly skipped and out-of-order insertions
+    // overwrite existing top-k entries.
+    if (count > 0 && pos < base_idx + count) {
+        size_t n = base_idx + count - pos;
+        std::memmove(&search_result.distances_[pos + 1],
+                     &search_result.distances_[pos],
+                     n * sizeof(float));
+        std::memmove(&search_result.seg_offsets_[pos + 1],
+                     &search_result.seg_offsets_[pos],
+                     n * sizeof(int64_t));
+        if (elem_idx.has_value()) {
+            std::memmove(&search_result.element_indices_[pos + 1],
+                         &search_result.element_indices_[pos],
+                         n * sizeof(int32_t));
+        }
+    }
+    search_result.seg_offsets_[pos] = seg_offset;
+    if (elem_idx.has_value()) {
+        search_result.element_indices_[pos] = elem_idx.value();
+    }
+    search_result.distances_[pos] = distance;
+    ++count;
 }
 
 [[maybe_unused]] static bool
