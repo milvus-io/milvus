@@ -215,7 +215,8 @@ ResolveHybridInternalIndexType(
 bool
 IndexFactory::CanUseIndexRawDataForField(DataType field_type,
                                          bool has_raw_data) {
-    return has_raw_data && field_type != DataType::ARRAY;
+    return has_raw_data && field_type != DataType::ARRAY &&
+           field_type != DataType::VECTOR_ARRAY;
 }
 
 template <typename T>
@@ -535,7 +536,7 @@ IndexFactory::VecIndexLoadResource(
     LoadResourceRequest request{};
     const auto& res = resource.value();
 
-    request.has_raw_data = has_raw_data;
+    request.has_raw_data = CanUseIndexRawDataForField(field_type, has_raw_data);
     request.final_disk_cost = res.diskCost;
     request.final_memory_cost = res.memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {

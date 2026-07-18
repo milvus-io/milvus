@@ -267,7 +267,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
          false}),
-    // VECTOR_ARRAY + HNSW (FLAT): has_raw_data = true
+    // VECTOR_ARRAY + HNSW (FLAT): keep field data resident for struct offsets
+    // and row validity even when the index carries raw payloads.
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "HNSW"},
          {"metric_type", "MAX_SIM"},
@@ -276,7 +277,7 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"mmap", "false"},
          {"field_type", "vector_array"},
          {"element_type", "vector_float"}},
-        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, true}),
+        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
     // VECTOR_ARRAY + HNSW_SQ (SQ8, fp32): has_raw_data = false (lossy)
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "HNSW_SQ"},
