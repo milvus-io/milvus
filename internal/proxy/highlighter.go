@@ -576,7 +576,10 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, text field not in output field %d", fieldID)
 		}
-		texts := fieldDatas.GetScalars().GetStringData().GetData()
+		texts, err := rowAlignedStringFieldData(fieldDatas, searchResultHitCount(resultData))
+		if err != nil {
+			return nil, err
+		}
 		fieldName := op.highlight.GetFieldName(fieldID)
 
 		highlightResult, err := op.processFieldHighlight(ctx, fieldName, texts, topks)
