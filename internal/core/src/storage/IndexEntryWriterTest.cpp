@@ -265,6 +265,63 @@ class DelayedFailingInputStream : public milvus::InputStream {
     std::vector<Rule> rules_;
 };
 
+class RecordingInputStream : public milvus::InputStream {
+ public:
+    struct ReadRange {
+        size_t offset;
+        size_t size;
+    };
+
+    explicit RecordingInputStream(std::shared_ptr<milvus::InputStream> base)
+        : base_(std::move(base)) {
+    }
+
+    const std::vector<ReadRange>&
+    ReadRanges() const {
+        return read_ranges_;
+    }
+
+    size_t
+    Size() const override {
+        return base_->Size();
+    }
+
+    bool
+    Seek(int64_t offset) override {
+        return base_->Seek(offset);
+    }
+
+    size_t
+    Tell() const override {
+        return base_->Tell();
+    }
+
+    bool
+    Eof() const override {
+        return base_->Eof();
+    }
+
+    size_t
+    Read(void* ptr, size_t size) override {
+        return base_->Read(ptr, size);
+    }
+
+    size_t
+    ReadAt(void* ptr, size_t offset, size_t size) override {
+        read_ranges_.push_back({offset, size});
+        return base_->ReadAt(ptr, offset, size);
+    }
+
+    size_t
+    Read(int fd, size_t size) override {
+        return base_->Read(fd, size);
+    }
+
+ private:
+    std::shared_ptr<milvus::InputStream> base_;
+    std::vector<ReadRange> read_ranges_;
+};
+
 class TrackingDelayedInputStream : public milvus::InputStream {
  public:
     TrackingDelayedInputStream(std::shared_ptr<milvus::InputStream> base,
@@ -906,15 +963,63 @@ TEST_F(IndexEntryWriterV3Test, LargeDirectoryTableNeedsSecondIO) {
     VerifyPattern(entry_last.data, 64);
 }
 
-TEST_F(IndexEntryWriterV3Test, DirectoryFitsButMetaDoesNotFitFirstIO) {
-    // Directory table fits in first 64KB, but meta entry is large enough
-    // that dir_size + meta_entry_size > 64KB - 32
-    // This tests the boundary where we need second IO for meta only
+TEST_F(IndexEntryWriterV3Test, InspectStreamLoadInfoReadsOnlyFileTail) {
+    const std::string file_path = kV3FilePath + "_inspect_tail_only";
+    auto data = GeneratePattern(1024);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input =
+        std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
+    auto file_size = input->Size();
+    auto info = IndexEntryReader::InspectStreamLoadInfo(input, file_size);
+
+    EXPECT_FALSE(info.encrypted);
+    ASSERT_EQ(input->ReadRanges().size(), 1);
+    auto tail_size = std::min<size_t>(file_size, 64 * 1024);
+    EXPECT_EQ(input->ReadRanges()[0].offset, file_size - tail_size);
+    EXPECT_EQ(input->ReadRanges()[0].size, tail_size);
+}
+
+TEST_F(IndexEntryWriterV3Test, InspectStreamLoadInfoDoesNotPrefetchLargeMeta) {
+    const std::string file_path = kV3FilePath + "_inspect_large_meta";
+    auto data = GeneratePattern(1024);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.PutMeta("large_field", std::string(70 * 1024, 'X'));
+        writer.Finish();
+    }
+
+    auto input =
+        std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
+    auto file_size = input->Size();
+    auto info = IndexEntryReader::InspectStreamLoadInfo(input, file_size);
+
+    EXPECT_FALSE(info.encrypted);
+    auto non_magic_reads = std::count_if(
+        input->ReadRanges().begin(),
+        input->ReadRanges().end(),
+        [](const RecordingInputStream::ReadRange& range) {
+            return range.offset != 0 || range.size != MILVUS_V3_MAGIC_SIZE;
+        });
+    EXPECT_EQ(non_magic_reads, 1);
+}
+
+TEST_F(IndexEntryWriterV3Test, LargeMetaLoadsSeparatelyFromDirectory) {
+    // Directory table fits in the first 64KB. The large meta entry is read
+    // separately by ReadEntry instead of being prefetched with the directory.
     const std::string file_path = kV3FilePath + "_largemetasmalldir";
 
-    // Create a large meta JSON
-    // We need meta_entry_size to be large (> ~60KB)
-    // but directory table should be small (< 64KB - 32 - meta_size)
+    // Keep the directory small while making the meta larger than the initial
+    // tail read.
     auto data = GeneratePattern(1024);
 
     {

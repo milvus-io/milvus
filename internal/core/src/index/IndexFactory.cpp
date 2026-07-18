@@ -194,7 +194,11 @@ HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
 std::optional<ScalarIndexType>
 ResolveHybridInternalIndexType(
     const std::vector<std::string>& index_files,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr) {
+    if (stream_load_info != nullptr) {
+        stream_load_info->reset();
+    }
     if (index_files.empty() || !file_manager_context.Valid()) {
         return std::nullopt;
     }
@@ -228,6 +232,9 @@ ResolveHybridInternalIndexType(
         auto reader = storage::IndexEntryReader::Open(input, input->Size());
         AssertInfo(reader != nullptr,
                    "failed to create IndexEntryReader for hybrid index file");
+        if (stream_load_info != nullptr) {
+            *stream_load_info = reader->GetStreamLoadInfo();
+        }
         if (reader->HasMeta(INDEX_TYPE)) {
             return static_cast<ScalarIndexType>(
                 reader->GetMeta<uint8_t>(INDEX_TYPE));
@@ -770,7 +777,23 @@ IndexFactory::ScalarIndexLoadResource(
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    if (scalar_version >= 3) {
+    std::optional<ScalarIndexType> internal_index_type;
+    if (index_type_it->second == milvus::index::HYBRID_INDEX_TYPE) {
+        try {
+            internal_index_type = ResolveHybridInternalIndexType(
+                index_files, file_manager_context, &inspected_stream_load_info);
+        } catch (std::exception& e) {
+            if (scalar_version >= 3 &&
+                !inspected_stream_load_info.has_value()) {
+                inspected_stream_load_info = InspectScalarIndexStreamLoadInfo(
+                    index_files, file_manager_context);
+            }
+            LOG_WARN(
+                "failed to resolve hybrid scalar internal index type, "
+                "fallback to hybrid estimate: {}",
+                e.what());
+        }
+    } else if (scalar_version >= 3) {
         inspected_stream_load_info =
             InspectScalarIndexStreamLoadInfo(index_files, file_manager_context);
     }
@@ -779,26 +802,15 @@ IndexFactory::ScalarIndexLoadResource(
     }
 
     auto resolved_params = index_params;
-    if (index_type_it->second == milvus::index::HYBRID_INDEX_TYPE) {
-        try {
-            auto internal_index_type = ResolveHybridInternalIndexType(
-                index_files, file_manager_context);
-            if (internal_index_type.has_value()) {
-                auto resolved_index_type = HybridInternalIndexTypeToIndexType(
-                    internal_index_type.value());
-                if (!resolved_index_type.empty()) {
-                    resolved_params["index_type"] = resolved_index_type;
-                    LOG_INFO(
-                        "estimate hybrid scalar index load resource by "
-                        "internal index type: {}",
-                        resolved_index_type);
-                }
-            }
-        } catch (std::exception& e) {
-            LOG_WARN(
-                "failed to resolve hybrid scalar internal index type, "
-                "fallback to hybrid estimate: {}",
-                e.what());
+    if (internal_index_type.has_value()) {
+        auto resolved_index_type =
+            HybridInternalIndexTypeToIndexType(internal_index_type.value());
+        if (!resolved_index_type.empty()) {
+            resolved_params["index_type"] = resolved_index_type;
+            LOG_INFO(
+                "estimate hybrid scalar index load resource by internal index "
+                "type: {}",
+                resolved_index_type);
         }
     }
 

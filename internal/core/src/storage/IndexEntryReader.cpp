@@ -348,7 +348,8 @@ IndexEntryReader::InspectStreamLoadInfo(
     reader->file_size_ = file_size;
     reader->cancellation_token_ = cancellation_token;
     reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
-    reader->ValidateMagic();
+    // The caller has already selected the V3 path. Actual loading validates
+    // the magic; inspection avoids a separate range read at offset zero.
     reader->ReadFooterAndDirectory();
     reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
     return reader->stream_load_info_;
@@ -448,13 +449,12 @@ IndexEntryReader::ReadFooterAndDirectory() {
                    static_cast<size_t>(file_size_),
                "Directory table + meta entry + footer size exceeds file size");
 
-    // Check if we need a second read
-    size_t needed =
-        static_cast<size_t>(dir_size) + meta_entry_size + MILVUS_V3_FOOTER_SIZE;
+    // Check if the directory itself needs a second read. The meta entry is
+    // loaded separately by Open() and is not needed for directory parsing.
+    size_t needed = static_cast<size_t>(dir_size) + MILVUS_V3_FOOTER_SIZE;
     size_t available_before_footer = tail_size - MILVUS_V3_FOOTER_SIZE;
 
-    if (static_cast<size_t>(dir_size) + meta_entry_size >
-        available_before_footer) {
+    if (static_cast<size_t>(dir_size) > available_before_footer) {
         size_t new_tail_size = needed;
         size_t new_tail_offset = file_size_ - new_tail_size;
 
