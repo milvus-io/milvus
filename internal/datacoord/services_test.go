@@ -5825,12 +5825,24 @@ func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
 
 	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
-	bm := mockey.Mock((*Server).broadcastRollbackImportMessage).Return(nil).Build()
+	// The broadcast is the assertion of record: a regression that short-circuits
+	// AbortImport on a Failed job (returning success without running the action)
+	// would skip the rollback and strand the peer, so success alone is not enough.
+	rollbackCalls := 0
+	var rollbackJobID int64
+	bm := mockey.Mock((*Server).broadcastRollbackImportMessage).To(
+		func(s *Server, ctx context.Context, job ImportJob) error {
+			rollbackCalls++
+			rollbackJobID = job.GetJobID()
+			return nil
+		}).Build()
 	defer bm.UnPatch()
 
 	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2101})
 	assert.NoError(t, err)
 	assert.True(t, merr.Ok(resp))
+	assert.Equal(t, 1, rollbackCalls)
+	assert.Equal(t, int64(2101), rollbackJobID)
 }
 
 func TestAbortImport_CompletedRejected(t *testing.T) {
