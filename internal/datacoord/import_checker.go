@@ -97,20 +97,29 @@ func NewImportChecker(ctx context.Context,
 	}
 }
 
+// Start runs the checker loops until Close. The state-machine loop and the
+// timeout/GC loop deliberately run on separate goroutines: checkGC's rollback
+// broadcast can park on the ctx-insensitive resource-key lock (see checkGC), and
+// isolating it guarantees the state machine keeps making progress no matter how
+// long GC blocks. All state shared by the two loops lives behind importMeta's
+// mutex (which already serves concurrent RPC and ack-callback goroutines), and
+// UpdateJob refuses transitions out of Completed/Failed, so the loops cannot
+// resurrect or regress each other's terminal states.
 func (c *importChecker) Start() {
 	mlog.Info(c.ctx, "start import checker")
-	var (
-		ticker1 = time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalHigh.GetAsDuration(time.Second)) // 2s
-		ticker2 = time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalLow.GetAsDuration(time.Second))  // 2min
-	)
-	defer ticker1.Stop()
-	defer ticker2.Stop()
+	go c.runGCLoop()
+	c.runStateMachineLoop()
+}
+
+func (c *importChecker) runStateMachineLoop() {
+	ticker := time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalHigh.GetAsDuration(time.Second)) // 2s
+	defer ticker.Stop()
 	for {
 		select {
 		case <-c.closeChan:
-			mlog.Info(c.ctx, "import checker exited")
+			mlog.Info(c.ctx, "import checker state-machine loop exited")
 			return
-		case <-ticker1.C:
+		case <-ticker.C:
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
 				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
@@ -140,7 +149,19 @@ func (c *importChecker) Start() {
 					c.checkFailedJob(job)
 				}
 			}
-		case <-ticker2.C:
+		}
+	}
+}
+
+func (c *importChecker) runGCLoop() {
+	ticker := time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalLow.GetAsDuration(time.Second)) // 2min
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.closeChan:
+			mlog.Info(c.ctx, "import checker gc loop exited")
+			return
+		case <-ticker.C:
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
 				c.tryTimeoutJob(job)
@@ -629,7 +650,7 @@ func (c *importChecker) checkGC(job ImportJob) {
 			job.GetState() == internalpb.ImportJobState_Failed && !job.GetAutoCommit() {
 			// The check reaches the streaming balancer future, which blocks until the
 			// balancer is registered — under the server-lifetime c.ctx that would park
-			// the whole checker loop during the window before streamingcoord registers
+			// the GC loop during the window before streamingcoord registers
 			// it (e.g. a restart recovering a job already past retention). Bound it like
 			// checkCollection does; a timeout is just another indeterminate status.
 			replicateCheckCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
@@ -654,11 +675,12 @@ func (c *importChecker) checkGC(job ImportJob) {
 				// Bound the broadcast like the replication check above: it blocks in
 				// BlockUntilDone until every vchannel append succeeds, and under the
 				// server-lifetime c.ctx an unavailable streamingnode would park this
-				// goroutine until shutdown, freezing the shared checker loop (ticker1's
-				// state machine included). A timeout is just another transient status —
-				// keep the job and retry on the next GC tick. (The resource-key lock on
-				// the broadcast path is still ctx-insensitive; making it fail-fast is a
-				// follow-up.)
+				// loop until shutdown. A timeout is just another transient status —
+				// keep the job and retry on the next GC tick. The resource-key lock on
+				// the broadcast path is still ctx-insensitive (making it fail-fast is a
+				// follow-up), which is one reason this GC loop runs on its own
+				// goroutine (see Start): even an unbounded park here can only delay
+				// GC, never the import state machine.
 				rollbackCtx, rollbackCancel := context.WithTimeout(c.ctx, 10*time.Second)
 				err := c.hooks.rollbackImport(rollbackCtx, job)
 				rollbackCancel()
