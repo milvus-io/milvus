@@ -2406,6 +2406,17 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     std::vector<
         std::tuple<std::string, std::function<bool(int, bool)>, DataType>>
         testcases = {
+            // NOT over a nullable, scalar-index-only field: a NULL row must be
+            // excluded (3VL: NOT(unknown)=unknown). Exercises
+            // ProcessIndexLookupByOffsets' null path — the pre-fix code left
+            // valid_res=true for a Reverse_Lookup==nullopt row, so NOT flipped
+            // it to a (wrong) match.
+            {"not (age8 + 4 == 8)",
+             [](int8_t v, bool valid) { return valid && !((v + 4) == 8); },
+             DataType::INT8},
+            {"not (age641 / 2 == 1000)",
+             [](int64_t v, bool valid) { return valid && !((v / 2) == 1000); },
+             DataType::INT64},
             // EQ tests
             {"age8 + 4 == 8",
              [](int8_t v, bool valid) { return valid && (v + 4) == 8; },

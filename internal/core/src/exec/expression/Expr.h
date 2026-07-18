@@ -735,7 +735,20 @@ class SegmentExpr : public Expr {
                 auto offset = (*input)[i];
                 auto raw = index_ptr->Reverse_Lookup(offset);
                 if (!raw.has_value()) {
-                    res[i] = false;
+                    // Null/absent row: three-valued logic requires res=false
+                    // AND valid=false (else a wrapping NOT matches the null
+                    // row). Still drive the callback on a null batch so
+                    // cursor-tracking callbacks keep processed_cursor aligned
+                    // — otherwise later candidates read the wrong bitmap_input
+                    // bit under iterative-filter AND.
+                    res[i] = valid_res[i] = false;
+                    func.template operator()<FilterType::random>(nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 1,
+                                                                 res + i,
+                                                                 valid_res + i,
+                                                                 values...);
                     continue;
                 }
                 T raw_data = raw.value();
@@ -748,17 +761,24 @@ class SegmentExpr : public Expr {
                                                              valid_res + i,
                                                              values...);
             }
-        } else if (all_valid) {
-            res.set(0, batch_size);
-            valid_res.set(0, batch_size);
         } else {
+            // SkipIndex pruned the whole chunk: no row can match, so res must
+            // stay FALSE (the pre-fix code wrongly set res=true here). Set
+            // validity from the index bitmap for correct 3VL under NOT, and
+            // drive the callback on a null batch per row so cursor-tracking
+            // callbacks keep processed_cursor aligned (mirrors the
+            // ProcessDataByOffsets skip branches).
             for (auto i = 0; i < batch_size; ++i) {
                 auto offset = (*input)[i];
-                // materialize the bool once: chaining proxies would read
-                // back the word just stored into valid_res
-                const bool valid = valid_result[offset];
-                valid_res[i] = valid;
-                res[i] = valid;
+                res[i] = false;
+                valid_res[i] = all_valid || valid_result[offset];
+                func.template operator()<FilterType::random>(nullptr,
+                                                             nullptr,
+                                                             nullptr,
+                                                             1,
+                                                             res + i,
+                                                             valid_res + i,
+                                                             values...);
             }
         }
 
