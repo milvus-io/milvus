@@ -1796,6 +1796,41 @@ class TestSearchAggregationTextAndBM25(TestMilvusClientV2Base):
             assert hit.fields[self.topic_field] == "database"
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_text_match_fuzzy_filter_with_search_aggregation(self):
+        """
+        target: verify text_match_fuzzy filter supports search_aggregation
+        method: dense vector search with a one-edit typo filter and aggregate matching rows by topic
+        expected: fuzzy matches populate only the database bucket with consistent counts and top hits
+        """
+        client = self._client(alias=self.shared_alias)
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=[self.vectors[0]],
+            anns_field=self.vector_field,
+            search_params={"metric_type": "L2"},
+            limit=20,
+            filter=f'text_match_fuzzy({self.text_field}, "databse", max_edit_distance=1)',
+            output_fields=[self.text_field, self.topic_field],
+            search_aggregation=SearchAggregation(
+                fields=[self.topic_field],
+                size=2,
+                metrics={"doc_count": {"count": "*"}},
+                top_hits=TopHits(size=3, sort=[{"_score": "asc"}]),
+            ),
+        )
+
+        assert len(res.agg_buckets) == 1
+        assert len(res.agg_buckets[0]) == 1
+        bucket = res.agg_buckets[0][0]
+        assert bucket.key[0]["value"] == "database"
+        assert bucket.metrics["doc_count"] == bucket.count
+        assert bucket.count > 0
+        for hit in bucket.hits:
+            assert "database" in hit.fields[self.text_field]
+            assert hit.fields[self.topic_field] == "database"
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_bm25_search_with_search_aggregation(self):
         """
         target: verify single-field BM25 search supports search_aggregation.
