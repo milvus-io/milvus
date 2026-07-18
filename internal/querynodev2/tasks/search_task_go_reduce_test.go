@@ -484,8 +484,110 @@ func TestLateMaterializeOutputFields_NoOutputFields(t *testing.T) {
 	assert.Empty(t, searchResultData.FieldsData)
 }
 
+func TestLateMaterializeOutputFields_NoOutputFieldsCanceled(t *testing.T) {
+	ts := setupTestSegments(t, 1, 100, setupOpts{NQ: 1, TopK: 5})
+	defer ts.cleanup()
+
+	plan := ts.searchReq.Plan()
+	require.False(t, plan.HasTargetEntries())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := lateMaterializeOutputFields(
+		ctx,
+		ts.searchResults,
+		plan,
+		nil,
+		&schemapb.SearchResultData{},
+	)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestLateMaterializeOutputFields_OnlyPrimaryKey(t *testing.T) {
+	const primaryKeyFieldID int64 = 109
+
+	ts := setupTestSegments(t, 1, 100, setupOpts{
+		NQ:             1,
+		TopK:           5,
+		OutputFieldIDs: []int64{primaryKeyFieldID},
+	})
+	defer ts.cleanup()
+
+	reduceResult, segDFs := runGoReducePipeline(t, ts)
+	defer func() {
+		reduceResult.DF.Release()
+		for _, df := range segDFs {
+			df.Release()
+		}
+	}()
+
+	searchResultData, err := marshalReduceResult(reduceResult)
+	require.NoError(t, err)
+
+	plan := ts.searchReq.Plan()
+	require.True(t, plan.HasTargetEntries())
+	require.NoError(t, lateMaterializeOutputFields(
+		context.Background(),
+		ts.searchResults,
+		plan,
+		reduceResult.Sources,
+		searchResultData,
+	))
+
+	require.Len(t, searchResultData.FieldsData, 1)
+	assert.Equal(t, primaryKeyFieldID, searchResultData.FieldsData[0].GetFieldId())
+	pkData := searchResultData.FieldsData[0].GetScalars().GetLongData().GetData()
+	require.NotNil(t, searchResultData.GetIds().GetIntId())
+	assert.Equal(t, searchResultData.GetIds().GetIntId().GetData(), pkData)
+}
+
+func TestLateMaterializeOutputFields_PreservesPrimaryKeyWithOtherFields(t *testing.T) {
+	const (
+		primaryKeyFieldID int64 = 109
+		scalarFieldID     int64 = 103
+	)
+
+	outputFieldIDs := []int64{primaryKeyFieldID, scalarFieldID}
+	ts := setupTestSegments(t, 1, 100, setupOpts{
+		NQ:             1,
+		TopK:           5,
+		OutputFieldIDs: outputFieldIDs,
+	})
+	defer ts.cleanup()
+
+	reduceResult, segDFs := runGoReducePipeline(t, ts)
+	defer func() {
+		reduceResult.DF.Release()
+		for _, df := range segDFs {
+			df.Release()
+		}
+	}()
+
+	searchResultData, err := marshalReduceResult(reduceResult)
+	require.NoError(t, err)
+
+	plan := ts.searchReq.Plan()
+	require.True(t, plan.HasTargetEntries())
+	require.NoError(t, lateMaterializeOutputFields(
+		context.Background(),
+		ts.searchResults,
+		plan,
+		reduceResult.Sources,
+		searchResultData,
+	))
+
+	require.Len(t, searchResultData.FieldsData, 2)
+	assert.Equal(t, primaryKeyFieldID, searchResultData.FieldsData[0].GetFieldId())
+	assert.Equal(t, scalarFieldID, searchResultData.FieldsData[1].GetFieldId())
+
+	pkData := searchResultData.FieldsData[0].GetScalars().GetLongData().GetData()
+	require.NotNil(t, searchResultData.GetIds().GetIntId())
+	assert.Equal(t, searchResultData.GetIds().GetIntId().GetData(), pkData)
+}
+
 func TestLateMaterializeOutputFields_EmptySources(t *testing.T) {
-	outputFieldIDs := []int64{103, 104}
+	outputFieldIDs := []int64{109, 103, 104}
 	ts := setupTestSegments(t, 1, 100, setupOpts{NQ: 1, TopK: 5, OutputFieldIDs: outputFieldIDs})
 	defer ts.cleanup()
 

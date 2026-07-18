@@ -1150,7 +1150,9 @@ TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
     auto plan = milvus::query::CreateSearchPlanByExpr(
         schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_.push_back(pk_fid);
     plan->target_entries_.push_back(output_fid);
+    EXPECT_TRUE(HasTargetEntries(reinterpret_cast<CSearchPlan>(plan.get())));
 
     SearchResult sr;
     sr.segment_ = segment.get();
@@ -1175,11 +1177,31 @@ TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     milvus::proto::schema::SearchResultData result_data;
     ASSERT_TRUE(
         result_data.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
-    ASSERT_EQ(result_data.fields_data_size(), 1);
-    EXPECT_EQ(result_data.fields_data(0).field_id(), output_fid.get());
+    ASSERT_EQ(result_data.fields_data_size(), 2);
+    EXPECT_EQ(result_data.fields_data(0).field_id(), pk_fid.get());
     EXPECT_EQ(result_data.fields_data(0).scalars().long_data().data_size(), 2);
+    EXPECT_EQ(result_data.fields_data(1).field_id(), output_fid.get());
+    EXPECT_EQ(result_data.fields_data(1).scalars().long_data().data_size(), 2);
 
     free(const_cast<void*>(c_proto.proto_blob));
+}
+
+TEST(SearchResultExport, HasTargetEntries) {
+    using namespace milvus;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    EXPECT_FALSE(HasTargetEntries(reinterpret_cast<CSearchPlan>(plan.get())));
+
+    plan->target_entries_.push_back(pk_fid);
+    EXPECT_TRUE(HasTargetEntries(reinterpret_cast<CSearchPlan>(plan.get())));
 }
 
 TEST(SearchResultExport,
@@ -1200,6 +1222,7 @@ TEST(SearchResultExport,
     auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
     auto plan = milvus::query::CreateSearchPlanByExpr(
         schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_.push_back(pk_fid);
     plan->target_entries_.push_back(scalar_fid);
     plan->target_entries_.push_back(vec_fid);
     plan->target_entries_.push_back(array_fid);
@@ -1221,22 +1244,28 @@ TEST(SearchResultExport,
     milvus::proto::schema::SearchResultData result_data;
     ASSERT_TRUE(
         result_data.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
-    ASSERT_EQ(result_data.fields_data_size(), 4);
+    ASSERT_EQ(result_data.fields_data_size(), 5);
 
-    const auto& scalar_field = result_data.fields_data(0);
+    const auto& pk_field = result_data.fields_data(0);
+    EXPECT_EQ(pk_field.field_id(), pk_fid.get());
+    EXPECT_EQ(pk_field.type(), milvus::proto::schema::DataType::Int64);
+    EXPECT_TRUE(pk_field.has_scalars());
+    EXPECT_TRUE(pk_field.scalars().has_long_data());
+
+    const auto& scalar_field = result_data.fields_data(1);
     EXPECT_EQ(scalar_field.field_id(), scalar_fid.get());
     EXPECT_EQ(scalar_field.type(), milvus::proto::schema::DataType::Int64);
     EXPECT_TRUE(scalar_field.has_scalars());
     EXPECT_TRUE(scalar_field.scalars().has_long_data());
 
-    const auto& vector_field = result_data.fields_data(1);
+    const auto& vector_field = result_data.fields_data(2);
     EXPECT_EQ(vector_field.field_id(), vec_fid.get());
     EXPECT_EQ(vector_field.type(),
               milvus::proto::schema::DataType::FloatVector);
     EXPECT_TRUE(vector_field.has_vectors());
     EXPECT_TRUE(vector_field.vectors().has_float_vector());
 
-    const auto& array_field = result_data.fields_data(2);
+    const auto& array_field = result_data.fields_data(3);
     EXPECT_EQ(array_field.field_id(), array_fid.get());
     EXPECT_EQ(array_field.type(), milvus::proto::schema::DataType::Array);
     EXPECT_TRUE(array_field.has_scalars());
@@ -1244,7 +1273,7 @@ TEST(SearchResultExport,
     EXPECT_EQ(array_field.scalars().array_data().element_type(),
               milvus::proto::schema::DataType::Int64);
 
-    const auto& vector_array_field = result_data.fields_data(3);
+    const auto& vector_array_field = result_data.fields_data(4);
     EXPECT_EQ(vector_array_field.field_id(), vector_array_fid.get());
     EXPECT_EQ(vector_array_field.type(),
               milvus::proto::schema::DataType::ArrayOfVector);
