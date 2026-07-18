@@ -1609,6 +1609,73 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 	s.Equal([]string{"<em>highlighted</em> text 3"}, highlightResult.Datas[2].Fragments)
 }
 
+func (s *SearchPipelineSuite) TestSemanticHighlightOpNullableStringAlignsRows() {
+	ctx := context.Background()
+
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			s.Equal([]int64{3}, topks)
+			s.Equal([]string{"text 1", "", "text 3"}, texts)
+			return [][]string{
+					{"highlighted text 1"},
+					{},
+					{"highlighted text 3"},
+				}, [][]float32{
+					{0.9},
+					{},
+					{0.7},
+				}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).Return(testVarCharField).Build()
+	defer mockGetFieldName.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					ValidData: []bool{true, false, true},
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"text 1", "text 3"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.Require().Len(results, 1)
+
+	result := results[0].(*milvuspb.SearchResults)
+	s.Require().Len(result.GetResults().GetHighlightResults(), 1)
+	highlightResult := result.GetResults().GetHighlightResults()[0]
+	s.Require().Len(highlightResult.GetDatas(), 3)
+	s.Equal([]string{}, highlightResult.GetDatas()[1].GetFragments())
+	s.Equal([]float32{}, highlightResult.GetDatas()[1].GetScores())
+}
+
 func (s *SearchPipelineSuite) TestSemanticHighlightOpMissingField() {
 	ctx := context.Background()
 
