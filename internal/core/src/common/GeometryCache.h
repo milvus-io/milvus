@@ -133,6 +133,15 @@ class SimpleGeometryCache {
         return geometries_.size();
     }
 
+    // Get total number of loaded geometries without locking (use with
+    // AcquireReadLock). Calling Size() while already holding the read lock
+    // would recursively acquire the non-reentrant shared_mutex -- UB, and a
+    // real deadlock once a writer is queued on this writer-preferring mutex.
+    size_t
+    SizeUnsafe() const {
+        return geometries_.size();
+    }
+
     // Check if cache is loaded
     bool
     IsLoaded() const {

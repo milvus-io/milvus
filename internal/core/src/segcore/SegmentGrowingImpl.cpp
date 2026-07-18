@@ -3026,8 +3026,17 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
         const auto& valid_data = data_array->valid_data();
 
         for (int64_t i = 0; i < num_rows; ++i) {
-            if (valid_data.empty() ||
-                (i < valid_data.size() && valid_data[i])) {
+            // Mirror the index-side accessor (FieldIndexing.cpp
+            // AppendSegmentIndex): a nullable DataArray may carry fewer
+            // payload entries than num_rows, and protobuf's Get(i) only
+            // DCHECKs in release builds, so an unchecked data(i) is an
+            // out-of-bounds read. Rows beyond either bound are classified
+            // NULL here exactly as the accessor returns {"", false}, keeping
+            // the cache and the R-Tree index verdicts identical for the
+            // same input.
+            bool is_valid =
+                valid_data.empty() || (i < valid_data.size() && valid_data[i]);
+            if (is_valid && i < geometry_data.data_size()) {
                 // Valid geometry data
                 const auto& wkb_data = geometry_data.data(i);
                 geometry_cache->AppendData(wkb_data.data(), wkb_data.size());

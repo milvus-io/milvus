@@ -7351,7 +7351,14 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
 
             // Add each string view to the geometry cache
             for (size_t i = 0; i < string_views.size(); ++i) {
-                if (valid_data.empty() || valid_data[i]) {
+                // Guard valid_data[i] like FieldIndexing.cpp's accessor does:
+                // nothing here establishes that valid_data spans every view,
+                // so an unchecked index is an out-of-bounds read that would
+                // desynchronize the cache's nullness from the segment. Rows
+                // beyond the span are classified NULL, matching the index
+                // side.
+                if (valid_data.empty() ||
+                    (i < valid_data.size() && valid_data[i])) {
                     // Valid geometry data
                     const auto& wkb_data = string_views[i];
                     geometry_cache->AppendData(wkb_data.data(),
