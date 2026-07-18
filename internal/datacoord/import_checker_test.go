@@ -707,6 +707,80 @@ func (s *ImportCheckerSuite) TestCheckGCReplicateNoVchannelsRollbackErrRemovesJo
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
 
+// The GC loop and the state-machine loop must run on separate goroutines: a
+// rollback broadcast parked on the ctx-insensitive resource-key lock (or any
+// other stall inside checkGC) must delay only GC, never the import state
+// machine. This test parks checkGC's rollback forever and asserts the state
+// machine still processes another job meanwhile.
+func (s *ImportCheckerSuite) TestStateMachineProgressesWhileGCRollbackParked() {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.ImportCheckIntervalHigh.Key, "0.05")
+	params.Save(params.DataCoordCfg.ImportCheckIntervalLow.Key, "0.05")
+	defer params.Reset(params.DataCoordCfg.ImportCheckIntervalHigh.Key)
+	defer params.Reset(params.DataCoordCfg.ImportCheckIntervalLow.Key)
+
+	s.setupGCReadyFailedJob()
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// Teardown releases the parked rollback, letting the in-flight checkGC run to
+	// completion (RemoveJob, then checkCollection) while the loops shut down.
+	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.checker.broker.(*broker2.MockBroker).EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
+
+	rollbackEntered := make(chan struct{}, 1)
+	rollbackRelease := make(chan struct{})
+	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+		select {
+		case rollbackEntered <- struct{}{}:
+		default:
+		}
+		// Park forever, ignoring ctx — simulates the ctx-insensitive lock.
+		<-rollbackRelease
+		return nil
+	}
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) { return true, nil }
+
+	go s.checker.Start()
+	defer s.checker.Close()
+	defer close(rollbackRelease)
+
+	// Wait until the GC loop is parked inside the rollback broadcast.
+	select {
+	case <-rollbackEntered:
+	case <-time.After(10 * time.Second):
+		s.FailNow("GC loop never reached the rollback broadcast")
+	}
+
+	// Feed the state machine a Failed job with a live task; only the
+	// state-machine loop (checkFailedJob → tryFailingTasks) can fail the task.
+	jobB := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:          s.jobID + 100,
+			CollectionID:   1,
+			Vchannels:      []string{"ch1"},
+			ReadyVchannels: []string{"ch1"},
+			State:          internalpb.ImportJobState_Failed,
+			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(24 * time.Hour)), // never GC-ready
+		},
+		tr: timerecord.NewTimeRecorder("import job"),
+	}
+	s.NoError(s.importMeta.AddJob(context.TODO(), jobB))
+	taskProto := &datapb.ImportTaskV2{
+		JobID:  jobB.GetJobID(),
+		TaskID: 999,
+		State:  datapb.ImportTaskStateV2_Pending,
+		NodeID: NullNodeID,
+	}
+	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
+	task.task.Store(taskProto)
+	s.NoError(s.importMeta.AddTask(context.TODO(), task))
+
+	s.Eventually(func() bool {
+		tasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(jobB.GetJobID()))
+		return len(tasks) == 1 && tasks[0].GetState() == datapb.ImportTaskStateV2_Failed
+	}, 10*time.Second, 20*time.Millisecond)
+}
+
 func (s *ImportCheckerSuite) TestCheckCollection() {
 	mockErr := errors.New("mock err")
 
