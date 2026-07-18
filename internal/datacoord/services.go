@@ -2864,12 +2864,20 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	return err
 }
 
+// errRollbackImportNoVchannels marks a rollback that can never be delivered: the job
+// carries no vchannels, so there is no peer to address. A job's Vchannels are fixed at
+// creation, so retrying can never succeed — isPermanentRollbackErr classifies this as
+// permanent so GC proceeds instead of retaining the job forever. A plain sentinel
+// attached via errors.Mark, NOT a merr error: merr's errors.Is matches by error code,
+// which would make every ImportSysFailed error (mostly transient) match it.
+var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
+
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
 // Targets the job's data vchannels, matching the CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
+		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
 
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())

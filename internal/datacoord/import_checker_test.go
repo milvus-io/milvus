@@ -662,6 +662,51 @@ func (s *ImportCheckerSuite) TestCheckGCReplicatePermanentRollbackErrRemovesJob(
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
 
+// The rollback broadcast can block until every vchannel append succeeds (or forever on
+// an unavailable streamingnode) under the server-lifetime c.ctx; checkGC must pass a
+// deadline-bounded ctx so a stuck broadcast cannot park the whole checker loop.
+func (s *ImportCheckerSuite) TestCheckGCReplicateRollbackCtxIsBounded() {
+	s.setupGCReadyFailedJob()
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	hasDeadline := false
+	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+		_, hasDeadline = ctx.Deadline()
+		return nil
+	}
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) { return true, nil }
+
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.True(hasDeadline)
+	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
+}
+
+// A job without vchannels can never deliver its rollback (Vchannels are fixed at
+// creation), so the error must be classified permanent and the job GC'd — while a
+// generic ImportSysFailed error must stay transient.
+func (s *ImportCheckerSuite) TestCheckGCReplicateNoVchannelsRollbackErrRemovesJob() {
+	server := &Server{}
+	err := server.broadcastRollbackImportMessage(context.TODO(), &importJob{ImportJob: &datapb.ImportJob{JobID: 1}})
+	s.Error(err)
+	s.True(isPermanentRollbackErr(err))
+	s.False(isPermanentRollbackErr(merr.WrapErrImportSysFailedMsg("some transient failure")))
+
+	s.setupGCReadyFailedJob()
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+		return server.broadcastRollbackImportMessage(ctx, &importJob{ImportJob: &datapb.ImportJob{JobID: job.GetJobID()}})
+	}
+	s.checker.hooks.isReplicatingCluster = func(ctx context.Context) (bool, error) { return true, nil }
+
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
+}
+
 func (s *ImportCheckerSuite) TestCheckCollection() {
 	mockErr := errors.New("mock err")
 
