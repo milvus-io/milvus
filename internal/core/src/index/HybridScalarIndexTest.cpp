@@ -68,6 +68,28 @@ using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
 
+class CountingOpenFileSystem : public arrow::fs::SubTreeFileSystem {
+ public:
+    explicit CountingOpenFileSystem(
+        std::shared_ptr<arrow::fs::FileSystem> base_fs)
+        : arrow::fs::SubTreeFileSystem("", std::move(base_fs)) {
+    }
+
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string& path) override {
+        ++open_input_file_count_;
+        return arrow::fs::SubTreeFileSystem::OpenInputFile(path);
+    }
+
+    size_t
+    OpenInputFileCount() const {
+        return open_input_file_count_;
+    }
+
+ private:
+    size_t open_input_file_count_{0};
+};
+
 TEST(HybridScalarIndexPlannerPolicy, ShouldUseOpDelegatesToInternalIndex) {
     HybridScalarIndex<int64_t> int_index(7);
     std::vector<int64_t> int_data{1, 2, 3, 4};
@@ -776,8 +798,11 @@ TYPED_TEST_P(HybridIndexTestInverted,
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
 
-    storage::FileManagerContext ctx(
-        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    auto counting_fs = std::make_shared<CountingOpenFileSystem>(this->fs_);
+    storage::FileManagerContext ctx(this->field_meta_,
+                                    this->index_meta_,
+                                    this->chunk_manager_,
+                                    counting_fs);
     ctx.set_for_loading_index(true);
 
     auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -795,6 +820,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
     EXPECT_EQ(request.max_memory_cost, stream_overhead);
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
+    EXPECT_EQ(counting_fs->OpenInputFileCount(), 1);
 }
 
 TYPED_TEST_P(HybridIndexTestInverted,

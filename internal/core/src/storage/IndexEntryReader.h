@@ -67,6 +67,11 @@ class IndexEntryReader {
          folly::CancellationToken cancellation_token =
              folly::CancellationToken());
 
+    const EntryStreamLoadInfo&
+    GetStreamLoadInfo() const {
+        return stream_load_info_;
+    }
+
     std::vector<std::string>
     GetEntryNames() const;
 
