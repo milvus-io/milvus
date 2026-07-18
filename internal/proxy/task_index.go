@@ -346,6 +346,8 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					return Params.AutoIndexConfig.ScalarFloatIndexType.GetValue()
 				} else if typeutil.IsTimestamptzType(dataType) {
 					return Params.AutoIndexConfig.ScalarTimestampTzIndexType.GetValue()
+				} else if typeutil.IsDecimalType(dataType) {
+					return Params.AutoIndexConfig.ScalarDecimalIndexType.GetValue()
 				}
 				return Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
 			}
