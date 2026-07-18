@@ -75,8 +75,8 @@ import (
     "context"
     "log"
 
-    "github.com/milvus-io/milvus/client/v2"
-    "github.com/milvus-io/milvus/client/v2/entity"
+    "github.com/milvus-io/milvus/client/v3"
+    "github.com/milvus-io/milvus/client/v3/entity"
 )
 
 func main() {
@@ -503,9 +503,9 @@ import (
     "fmt"
     "log"
 
-    "github.com/milvus-io/milvus/client/v2"
-    "github.com/milvus-io/milvus/client/v2/entity"
-    "github.com/milvus-io/milvus/client/v2/index"
+    "github.com/milvus-io/milvus/client/v3"
+    "github.com/milvus-io/milvus/client/v3/entity"
+    "github.com/milvus-io/milvus/client/v3/index"
 )
 
 func main() {

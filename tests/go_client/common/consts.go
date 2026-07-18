@@ -1,6 +1,6 @@
 package common
 
-import "github.com/milvus-io/milvus/client/v2/index"
+import "github.com/milvus-io/milvus/client/v3/index"
 
 // cost default field name
 const (
