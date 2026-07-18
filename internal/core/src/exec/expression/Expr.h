@@ -1079,12 +1079,22 @@ class SegmentExpr : public Expr {
                                 valid_res + result_idx,
                                 values...);
                         } else {
-                            // Chunk is skipped - handle exactly like
-                            // ProcessDataByOffsets
+                            // Chunk skipped by SkipIndex: mark null rows
+                            // invalid, then drive the callback on a null batch
+                            // so cursor-tracking callbacks keep processed_cursor
+                            // aligned (mirrors the ProcessDataByOffsets skip
+                            // branches).
                             if (valid_data.size() > j && !valid_data[j]) {
-                                res[result_idx] = valid_res[result_idx] =
-                                    false;
+                                res[result_idx] = valid_res[result_idx] = false;
                             }
+                            func.template operator()<FilterType::random>(
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                1,
+                                res + result_idx,
+                                valid_res + result_idx,
+                                values...);
                         }
 
                         processed_size++;
@@ -1159,11 +1169,22 @@ class SegmentExpr : public Expr {
                             valid_res + processed_size,
                             values...);
                     } else {
-                        // Chunk is skipped
+                        // Chunk skipped by SkipIndex: mark null rows invalid,
+                        // then drive the callback on a null batch so cursor-
+                        // tracking callbacks keep processed_cursor aligned
+                        // (mirrors the ProcessDataByOffsets skip branches).
                         if (valid_data && !valid_data[0]) {
                             res[processed_size] = valid_res[processed_size] =
                                 false;
                         }
+                        func.template operator()<FilterType::random>(
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
                     }
 
                     processed_size++;
