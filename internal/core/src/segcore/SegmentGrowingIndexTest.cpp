@@ -369,7 +369,7 @@ TEST_P(GrowingIndexTest, Correctness) {
     }
 }
 
-TEST(GrowingIndex, RetainInsertRecordChunksForFlushIsSegmentSticky) {
+TEST(GrowingIndex, GrowingSourceFlushDoesNotRetainIndexedVectorChunks) {
     constexpr int64_t dim = 4;
     constexpr int64_t row_count = 100;
 
@@ -407,13 +407,6 @@ TEST(GrowingIndex, RetainInsertRecordChunksForFlushIsSegmentSticky) {
     config.set_storage_v3_enabled(true);
     config.set_enable_growing_source_flush(true);
 
-    auto retained_segment = CreateGrowingSegment(schema, meta, 1, config);
-    auto* retained_impl =
-        dynamic_cast<SegmentGrowingImpl*>(retained_segment.get());
-    ASSERT_NE(retained_impl, nullptr);
-
-    config.set_enable_growing_source_flush(false);
-
     auto insert = [&](SegmentGrowing* segment) {
         auto dataset = DataGen(schema, row_count);
         auto offset = segment->PreInsert(row_count);
@@ -424,18 +417,14 @@ TEST(GrowingIndex, RetainInsertRecordChunksForFlushIsSegmentSticky) {
                         dataset.raw_);
     };
 
-    insert(retained_segment.get());
-    EXPECT_GT(
-        retained_impl->get_insert_record().get_data_base(vec)->num_chunk(), 0);
+    auto segment = CreateGrowingSegment(schema, meta, 1, config);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
 
-    auto non_retained_segment = CreateGrowingSegment(schema, meta, 2, config);
-    auto* non_retained_impl =
-        dynamic_cast<SegmentGrowingImpl*>(non_retained_segment.get());
-    ASSERT_NE(non_retained_impl, nullptr);
-    insert(non_retained_segment.get());
-    EXPECT_EQ(
-        non_retained_impl->get_insert_record().get_data_base(vec)->num_chunk(),
-        0);
+    insert(segment.get());
+    EXPECT_EQ(segment_impl->get_insert_record().get_data_base(vec)->num_chunk(),
+              0);
+    EXPECT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec));
 }
 
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
