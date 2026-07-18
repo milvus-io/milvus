@@ -16,7 +16,9 @@
 
 #include "ExistsExpr.h"
 
+#include <numeric>
 #include <set>
+#include <vector>
 
 #include "bitset/bitset.h"
 #include "exec/expression/ExprCacheHelper.h"
@@ -118,7 +120,21 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     auto* mutable_index = const_cast<index::IndexBase*>(index);
                     res = mutable_index->Exists();
                 }
+                // Column-level validity (three-valued logic): a NULL-JSON row
+                // is UNKNOWN for exists, so its valid bit must be false — else
+                // a wrapping NOT exists() wrongly matches it. The index only
+                // reports whether the PATH exists, not whether the COLUMN is
+                // null, so apply the field's null bitmap over the whole
+                // segment (the raw-data path does the equivalent per row).
                 TargetBitmap valid(res.size(), true);
+                std::vector<int64_t> all_offsets(res.size());
+                std::iota(all_offsets.begin(), all_offsets.end(), 0);
+                segment_->ApplyFieldValidDataByOffsets(
+                    op_ctx_,
+                    expr_->column_.field_id_,
+                    all_offsets.data(),
+                    static_cast<int64_t>(res.size()),
+                    TargetBitmapView(valid));
                 return {std::move(res), std::move(valid)};
             });
         cached_index_chunk_res_ = cached.result;
@@ -273,7 +289,19 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         });
                 }
 
+                // Column-level validity (three-valued logic): a NULL-JSON row
+                // is UNKNOWN for exists, so its valid bit must be false — else
+                // a wrapping NOT exists() wrongly matches it. JSON stats report
+                // path existence, not column null, so apply the field's null
+                // bitmap over the whole segment.
                 TargetBitmap valid(active_count_, true);
+                std::vector<int64_t> all_offsets(active_count_);
+                std::iota(all_offsets.begin(), all_offsets.end(), 0);
+                segment_->ApplyFieldValidDataByOffsets(op_ctx_,
+                                                       field_id,
+                                                       all_offsets.data(),
+                                                       active_count_,
+                                                       TargetBitmapView(valid));
                 return {std::move(res), std::move(valid)};
             });
         cached_index_chunk_res_ = cached.result;
