@@ -269,6 +269,10 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     fn(true, i);
                 }
             }
+            // Non-nullable is fully handled above; without this return the
+            // control falls through into the nullable block and invokes fn a
+            // second time per row.
+            return;
         }
         // nullable:
         if (count == 0) {
