@@ -570,14 +570,21 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             // resident; system fields always load.
             if (field_id >= START_USER_FIELDID && !is_pk_field &&
                 index_has_raw_data && !prefer_field_data) {
-                // Only the no-raw-index -> raw-index reopen transition can
-                // leave a stale resident copy: current had no raw-data index,
-                // so the raw column was loaded, and now the index carries it.
-                // Drop it in that case. In steady state the column was already
-                // skipped (never resident), so there is nothing to free and no
-                // diff to emit.
-                if (cur_iter != cur_field_to_files.end() &&
-                    field_index_has_raw_data_.count(fid) == 0) {
+                // Free any stale resident copy of the raw column before the
+                // early continue (which bypasses the replace path below):
+                //  - default-filled: FillDefaultValueFields put a resident
+                //    column in runtime that is not in the current manifest
+                //    (cur_iter == end); the new manifest now backs it with a
+                //    raw-data index, so the default column must be dropped or it
+                //    leaks (and the default-filled flag is cleared on reopen, so
+                //    no later pass can clean it).
+                //  - no-raw-index -> raw-index transition: the raw column was
+                //    resident because the current index had no raw data; drop it
+                //    now that the index carries it.
+                // Steady state (already skipped, never resident) drops nothing.
+                if (was_default_filled ||
+                    (cur_iter != cur_field_to_files.end() &&
+                     field_index_has_raw_data_.count(fid) == 0)) {
                     diff.field_data_to_drop.emplace(field_id);
                 }
                 continue;
