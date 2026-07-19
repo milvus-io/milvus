@@ -3825,7 +3825,8 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogsDroppedField) {
 // The vector skip + retrieve-from-index correctness is exercised end-to-end by
 // the storage-v3 e2e / go-sdk suites; these unit tests pin the LoadDiff
 // classification, in particular that scalars are NOT skipped.
-// CanUseIndexRawDataForField additionally excludes JSON/ARRAY at the source.
+// CanUseIndexRawDataForField additionally excludes JSON/ARRAY/VECTOR_ARRAY at
+// the source.
 
 namespace {
 
@@ -3913,14 +3914,18 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffColumnGroupNeverSkipsPrimaryKey) {
         << "primary key column must load even when its index has raw data";
 }
 
-TEST(IndexFactoryRawDataTest, CanUseIndexRawDataForFieldExcludesJsonAndArray) {
+TEST(IndexFactoryRawDataTest,
+     CanUseIndexRawDataForFieldExcludesNonSubstitutableTypes) {
     // JSON and ARRAY indexes only index a projection (a JSON path / array
-    // elements) and cannot reconstruct the whole value, so their index never
-    // substitutes for the raw column, regardless of the index's own has_raw_data.
+    // elements). VECTOR_ARRAY currently keeps its field column for struct
+    // offsets and parent-row validity. None of them may substitute for the raw
+    // column, regardless of the index's own has_raw_data flag.
     EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::JSON, true));
     EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::ARRAY, true));
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::VECTOR_ARRAY, true));
     // Other field types pass the index's has_raw_data through unchanged.
     EXPECT_TRUE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::INT64, true));
