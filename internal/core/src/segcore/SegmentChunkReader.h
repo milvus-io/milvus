@@ -99,7 +99,7 @@ class SegmentChunkReader {
                        int64_t active_count)
         : segment_(segment),
           active_count_(active_count),
-          size_per_chunk_(segment->size_per_chunk()),
+          size_per_chunk_(segment->size_per_chunk(op_ctx)),
           op_ctx_(op_ctx) {
     }
 
@@ -122,7 +122,7 @@ class SegmentChunkReader {
                                const FieldId field_id,
                                const int64_t num_chunk,
                                const int64_t batch_size) const {
-        int64_t segment_row_count = segment_->get_row_count();
+        int64_t segment_row_count = segment_->get_row_count(op_ctx_);
         int64_t current_offset = segment_->num_rows_until_chunk(
                                      field_id, current_chunk_id, op_ctx_) +
                                  current_chunk_pos;

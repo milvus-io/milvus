@@ -253,7 +253,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    size_per_chunk() const final {
+    size_per_chunk(milvus::OpContext* op_ctx = nullptr) const final {
         return segcore_config_.get_chunk_rows();
     }
 
@@ -310,7 +310,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    get_row_count() const override {
+    get_row_count(milvus::OpContext* op_ctx = nullptr) const override {
         return insert_record_.ack_responder_.GetAck();
     }
 
@@ -320,7 +320,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    get_active_count(Timestamp ts) const override;
+    get_active_count(Timestamp ts,
+                     milvus::OpContext* op_ctx = nullptr) const override;
 
     // for scalar vectors
     template <typename S, typename T = S>
@@ -505,7 +506,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
                          Timestamp timestamp,
-                         Timestamp ttl = 0) const override;
+                         Timestamp ttl = 0,
+                         milvus::OpContext* op_ctx = nullptr) const override;
 
     void
     vector_search(SearchInfo& search_info,
@@ -528,7 +530,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      Timestamp timestamp) const override;
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
     HasIndex(FieldId field_id,
@@ -617,22 +621,25 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_n(int64_t limit, const BitsetTypeView& bitset) const override {
+    find_first_n(int64_t limit,
+                 const BitsetTypeView& bitset,
+                 milvus::OpContext* op_ctx = nullptr) const override {
         return insert_record_.pk2offset_->find_first_n(limit, bitset);
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element(
-        int64_t limit,
-        const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
-        const std::optional<QueryIteratorCursor>& cursor) const override {
+    find_first_n_element(int64_t limit,
+                         const BitsetTypeView& element_bitset,
+                         const IArrayOffsets* array_offsets,
+                         const std::optional<QueryIteratorCursor>& cursor,
+                         milvus::OpContext* op_ctx = nullptr) const override {
         return insert_record_.pk2offset_->find_first_n_element(
             limit, element_bitset, array_offsets, cursor);
     }
 
     bool
-    is_mmap_field(FieldId id) const override {
+    is_mmap_field(FieldId id,
+                  milvus::OpContext* op_ctx = nullptr) const override {
         return false;
     }
 

@@ -383,6 +383,13 @@ struct RetrieveResult {
     // record the storage usage in retrieve
     StorageCost retrieve_storage_cost_;
 
+    // Carry the sealed segment's operation snapshot from the execution
+    // visitor into the later size-check / materialization phases.  The state
+    // is type-erased for the same reason as OpContext: common code must not
+    // depend on segcore's PublishedSegmentState type.
+    std::shared_ptr<const void> pinned_segment_state_;
+    const void* pinned_state_owner_{nullptr};
+
     // Element-level query support
     // When element_level_ is true:
     //   - result_offsets_ contains unique doc_ids (no duplicates)

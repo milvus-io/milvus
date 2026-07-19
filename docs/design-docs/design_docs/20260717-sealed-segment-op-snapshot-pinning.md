@@ -1,14 +1,15 @@
 # Sealed-Segment Per-Operation Snapshot Pinning
 
-- Status: Draft
+- Status: Implemented on PR #51602
 - Date: 2026-07-17
-- Related: PR #51441 (stats skip index cell alignment), PR #51395 (PK state in runtime snapshot), master commit 158b1dc38a (text-index runtime-state migration)
+- Related: PR #51602 (operation snapshot pinning), PR #51531 (misc runtime-state migration), PR #51441 (stats skip index cell alignment), PR #51395 (PK state in runtime snapshot), master commit 158b1dc38a (text-index runtime-state migration)
 
 ## Motivation
 
 `ChunkedSegmentSealedImpl` publishes all query-visible resources as one immutable
 `PublishedSegmentState` (schema, load info, `RuntimeResourceState` with the column map,
-indexes, skip-index metrics, readiness bitsets), swapped atomically by load / `Reopen` /
+indexes, skip-index metrics, readiness bitsets, row count, mmap-field markers, and
+variable-field average-size estimates), swapped atomically by load / `Reopen` /
 staged-commit publishers. Readers are lock-free: every accessor independently calls
 `CapturePublishedState()` and works on whatever snapshot is current *at that call*.
 
@@ -81,19 +82,34 @@ This requires a milvus-common PR and a version bump in milvus; the slot is gener
 // ChunkedSegmentSealedImpl
 void PinOpSnapshot(milvus::OpContext* op_ctx) const {
     if (op_ctx == nullptr) return;
+    if (op_ctx->pinned_state_owner == this &&
+        op_ctx->pinned_segment_state != nullptr) return;
     auto state = CapturePublishedState();          // one atomic load
     op_ctx->pinned_segment_state = state;          // shared_ptr<const void>
     op_ctx->pinned_state_owner = this;
 }
 ```
 
-Called at the top of `ChunkedSegmentSealedImpl::Search()` and `::Retrieve()` — i.e.
-**after** `LazyCheckSchema` (which may itself Reopen and republish; pinning before it
-would freeze the pre-upgrade schema the operation was just upgraded to see). Writers
-never pin. If a writer that shares an op_ctx with a subsequent read path ever publishes
-(`LazyCheckSchema` today), it must clear the pin (`pinned_segment_state.reset()`)
-so the read path re-pins the post-publish state; with eager pinning at Search/Retrieve
-entry this is automatic, and the clear is only a defensive invariant.
+The query visitor creates the per-segment `OpContext` and calls `PinOpSnapshot()`
+before deriving `active_count` or constructing the plan fragment. This is after schema
+preparation at the C API / segment entry and before any layout-derived expression
+state is created. Once the `QueryContext` exists, it is the exec/query layer's single
+source of the operation context: operators and expressions obtain
+`query_context->get_op_context()` and pass only the resulting `OpContext*` across the
+lower-level segcore accessor boundary.
+Offset-driven `RetrieveByOffsets` is a separate sealed-segment read operation and pins
+at its own entry.
+
+Ordinary Retrieve has two internal phases: plan execution computes offsets, then the
+caller performs output-size estimation and materializes target fields (including
+deferred ORDER BY fields). The visitor therefore copies its pin into `RetrieveResult`,
+and `SegmentInternalInterface::Retrieve()` reconstructs the fill `OpContext` from that
+exact pin. **Re-pinning between these phases is forbidden**: filter coordinates from
+snapshot A must never be applied to columns or schema from snapshot B.
+
+Writers never pin. If a writer that shares an op_ctx with a subsequent read path ever
+publishes, it must clear the pin (`pinned_segment_state.reset()`) before that later read
+selects its operation snapshot.
 
 Eager (not pin-on-first-capture) because it makes the snapshot's birthline auditable —
 "the operation sees the world as of Search() entry" — and avoids ordering surprises
@@ -131,12 +147,15 @@ Accessors that read published state but have no op_ctx today gain
 | Accessor | Used by |
 | --- | --- |
 | `num_chunk_data`, `num_chunk` | `SegmentExpr::InitSegmentExpr`, `CompareExpr` ctor |
-| `chunk_size` | every `ProcessDataChunks` batch loop |
+| `chunk_size`, `size_per_chunk` | every `ProcessDataChunks` batch loop and chunk-reader cursor |
 | `num_rows_until_chunk`, `get_chunk_by_offset` | scan offsets, `SegmentChunkReader::MoveCursor*` |
 | `GetSkipIndex` | `GetChunkSkipDecisions`, `PrefetchRawData` |
 | `HasFieldData`, `HasIndex`, `HasJsonIndex`, `IndexHasRawData`, `HasRawData` | exec-path selection |
 | `get_schema`, `is_nullable`, `is_field_exist`, `GetFieldDataType` | expression init |
 | `GetArrayOffsets`, `get_max_timestamp` | struct-array exprs, ts pruning |
+| `get_active_count`, `get_row_count` | query range and chunk-reader cursor bounds |
+| `get_field_avg_size`, `is_mmap_field` | Retrieve size guard and field-state probes |
+| `find_first_n`, `find_first_n_element` | bitmap-to-offset conversion and PK ordering |
 
 Call-site sweep: `SegmentExpr` (`Expr.h`), the four `PrefetchRawData` overrides,
 `SegmentChunkReader`, `CompareExpr`, and the query paths under `query/` that mix
@@ -161,14 +180,15 @@ that live inside `PublishedSegmentState`, because the preceding migrations
 deliberately moved them there: the schema itself (`PublishedSegmentState::schema`),
 columns (`runtime->fields`), scalar/vector/text/json/ngram indexes
 (158b1dc38a), readiness bitsets, PK index and offset maps (#51395), timestamps
-and their index, skip metrics (#51441), and the load info. Pinning the root
-pointer therefore freezes all of them as one version — there is no second
-carrier to add to OpContext.
+and their index, skip metrics (#51441), row count, mmap-field markers,
+variable-field average-size estimates, and the load info. Pinning the root pointer
+therefore freezes all of them as one version — there is no second carrier to add to
+OpContext.
 
 Deliberately outside the snapshot, and correctly so: `deleted_record_` (deletes
 are monotonic and timestamp-filtered; they must keep applying to in-flight
 reads), growing-segment mutable records (growing has no Reopen), and
-non-query-semantic bookkeeping (mmap field set, load progress).
+non-query-semantic load progress / statistics bookkeeping.
 
 ### Write-side proof
 
@@ -181,14 +201,13 @@ writes no segment member. The members that reads reach directly (bypassing
 
 | Member | Only write site | Touched by add/drop-field? |
 | --- | --- | --- |
-| `num_rows_` | set-once at load (ChunkedSegmentSealedImpl.cpp:2843, guarded by an equality assert that any reload matches); cleared only in `ClearData()` (full teardown, needs in-flight ops drained) | No — add/drop-field changes fields, not row count; the assert enforces reload equality |
 | `col_index_meta_` | ctor init-list only (:4501), zero reassignment | No — immutable |
 | `is_sorted_by_pk_` | ctor init-list only (:4502), zero reassignment | No — immutable |
 | `schema_` | no raw member; schema lives in `PublishedSegmentState` | In the snapshot |
 
 So pinning one pointer captures 100% of what a schema-change Reopen can alter;
-everything read outside the snapshot is written once and never touched by
-Reopen. These immutable members get an immutability comment (so a future edit
+everything query-semantic read outside the snapshot is written once and never touched
+by Reopen. These immutable members get an immutability comment (so a future edit
 that adds a Reopen write to them cannot silently break the pin) but need no
 migration.
 
@@ -230,6 +249,11 @@ snapshot-isolation intuition.
 3. **Unpinned compatibility**: null op_ctx keeps today's behavior (existing suites).
 4. **Owner guard**: an op_ctx pinned by segment X, passed to segment Y, must not
    return X's state.
+5. **#51594 raw-index transition**: pin while vector output routes to the raw
+   column, publish a state that advertises index raw data and removes the column,
+   then verify `bulk_subscript` still returns exact vectors from the pinned column.
+   The reverse raw-index to raw-column transition is covered by the same invariant:
+   `IndexHasRawData`, `get_vector`, and `get_raw_data` all resolve the same pin.
 
 ## Alternatives considered
 
@@ -249,7 +273,7 @@ snapshot-isolation intuition.
 
 1. milvus-common: add the two OpContext fields (independent, backward compatible).
 2. milvus: bump milvus-common; add `PinOpSnapshot` + op_ctx-aware `Capture*`; pin in
-   `Search`/`Retrieve`.
+   the per-segment query visitor and offset-driven Retrieve entry.
 3. milvus: mechanical op_ctx sweep through the accessor table above and the exec
    call sites; add the tests.
 
@@ -281,7 +305,9 @@ remains a product decision (does not gate correctness):
         calls `CapturePublishedState(op_ctx)`, and `FillTargetEntry`'s slow-path
         `local_ctx` copies the pin fields (`pinned_segment_state` +
         `pinned_state_owner`) so its `bulk_subscript` / `is_field_exist` reads
-        resolve the pin. The main `Retrieve` fill phase now pins too.
+        resolve the pin. The main `Retrieve` passes the visitor's original pin
+        through `RetrieveResult` into size estimation and materialization; it
+        never re-pins between filter and fill.
      b. `CompareExpr::CanUseBothDataFastPath` — `num_chunk_data` /
         `num_rows_until_chunk` now pass `op_ctx_`.
      c. `MatchExpr::Eval` — `get_schema(op_ctx_)`.
@@ -304,12 +330,20 @@ remains a product decision (does not gate correctness):
    reduce+export paths (`search_result_export_c.cpp`, `Reduce.cpp`) — their
    op_ctx is shared across segments so the owner guard rejects any pin, matching
    the "each operation pins independently" non-goal; `GetJsonFlatIndexNestedPath`
-   (pre-pin exec-path metadata probe, boolean decision only); PK-lookup /
-   delete / timestamp-mask accessors (`Contain`, `search_pks`, `find_first_n`,
-   `mask_with_timestamps`) that have no op_ctx param and are off the pinned
-   search/retrieve read path; and the four load-immutable member reads
-   (`num_rows_`, `col_index_meta_`, `is_sorted_by_pk_`, and load/publish/reopen
-   internals) which never pin by design.
+   (pre-pin exec-path metadata probe, boolean decision only); standalone PK-lookup /
+   delete accessors (`Contain` and delete ingestion) that are off the pinned
+   search/retrieve read path; and the load-immutable member reads
+   (`col_index_meta_`, `is_sorted_by_pk_`, and load/publish/reopen internals)
+   which never pin by design.
+
+3. **The useful sealed-state consolidation from #51531 is absorbed** — row count,
+   mmap-field markers, and variable-field average-size estimates now live in
+   `RuntimeResourceState` and follow the same clone/freeze/publish COW lifecycle as
+   columns and indexes. The duplicated live sealed-segment containers were removed.
+   Dropping raw field data clears its mmap marker but preserves its average-size
+   estimate while the schema still contains the field, because an index with raw data
+   may continue to serve Retrieve after raw-column reclamation. The estimate is erased
+   only when the field is actually removed from the schema.
 
 Regression test: `test_sealed.cpp` adds `SealedSegmentOpSnapshotPin.*` —
 `PinnedScanSurvivesMidScanFieldDrop` (load scalar F, pin, read F, `Reopen` to a
@@ -320,6 +354,10 @@ the fault-injection witness is `num_chunk_data(F, nullptr)==0` vs
 `PinIdentityAcrossConcurrentPublish` (every `Capture*` on one op_ctx returns the
 same snapshot pointer across a concurrent publish), and `OwnerGuardRejectsForeignPin`
 (segment X's pin, consulted by segment Y, returns Y's live state).
+`PinnedVectorRetrieveSurvivesRawIndexTransition` directly exercises #51594's
+no-raw-index to raw-index transition: the live state drops the vector column and
+advertises index raw data after the operation pins, while pinned `bulk_subscript`
+continues to return the exact vectors from its original column snapshot.
 
 milvus-common with the two OpContext fields is landed and `conanfile.py` is
 bumped to `milvus-common/1.0.0-6b16d93`. Note: the package bump also changed

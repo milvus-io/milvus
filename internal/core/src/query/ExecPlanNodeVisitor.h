@@ -172,7 +172,6 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     void
     setupRetrieveResult(
         const RowVectorPtr& result,
-        const OpContext& op_context,
         const RetrievePlanNode& node,
         RetrieveResult& tmp_retrieve_result,
         const segcore::SegmentInternalInterface* segment,

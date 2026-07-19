@@ -76,6 +76,8 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
         local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.pinned_segment_state = op_ctx->pinned_segment_state;
+        local_ctx.pinned_state_owner = op_ctx->pinned_state_owner;
     }
     auto field_data = bulk_subscript(
         &local_ctx, pk_field_id, results.seg_offsets_.data(), size);
@@ -105,6 +107,8 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
         local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.pinned_segment_state = op_ctx->pinned_segment_state;
+        local_ctx.pinned_state_owner = op_ctx->pinned_state_owner;
     }
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
@@ -220,6 +224,11 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        entity_ttl_physical_time_us);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
+    milvus::OpContext fte_op_ctx;
+    fte_op_ctx.cancellation_token = cancel_token;
+    fte_op_ctx.pinned_segment_state = retrieve_results.pinned_segment_state_;
+    fte_op_ctx.pinned_state_owner = retrieve_results.pinned_state_owner_;
+
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
     results->set_scanned_remote_bytes(
@@ -230,7 +239,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
     for (auto field_id : plan->field_ids_) {
-        output_data_size += get_field_avg_size(field_id) * result_rows;
+        output_data_size +=
+            get_field_avg_size(field_id, &fte_op_ctx) * result_rows;
     }
     if (output_data_size > limit_size) {
         ThrowInfo(
@@ -255,15 +265,9 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
         std::chrono::high_resolution_clock::now();
-    // Carry the upstream cancel_token down into FillTargetEntry so the
-    // take()/Arrow-convert path can short-circuit on abort.
-    milvus::OpContext fte_op_ctx;
-    fte_op_ctx.cancellation_token = cancel_token;
-    // Pin one published-state snapshot for the fill phase so its column reads
-    // stay layout-consistent even if a concurrent Reopen republishes between
-    // the scan (already pinned inside the visitor) and this fill. No-op for
-    // growing segments.
-    PinOpSnapshot(&fte_op_ctx);
+    // Reuse the visitor's operation snapshot for materialization.  Re-pinning
+    // here would allow filter coordinates from snapshot A to be applied to
+    // fields from a newer snapshot B.
     if (retrieve_results.field_data_.empty()) {
         FillTargetEntry(trace_ctx,
                         plan,
@@ -283,7 +287,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         //
         // Aggregation + ORDER BY does NOT set pipeline_field_ids_ and produces
         // final columns directly, falling through to FillTargetEntryDirectly.
-        FillOrderByResult(plan, results, retrieve_results);
+        FillOrderByResult(plan, results, retrieve_results, &fte_op_ctx);
     } else {
         FillTargetEntryDirectly(trace_ctx, results, retrieve_results);
     }
@@ -316,7 +320,8 @@ void
 SegmentInternalInterface::FillOrderByResult(
     const query::RetrievePlan* plan,
     const std::unique_ptr<proto::segcore::RetrieveResults>& results,
-    RetrieveResult& retrieveResult) const {
+    RetrieveResult& retrieveResult,
+    milvus::OpContext* op_ctx) const {
     auto fields_data = results->mutable_fields_data();
     auto& deferred = plan->plan_node_->deferred_field_ids_;
 
@@ -393,7 +398,13 @@ SegmentInternalInterface::FillOrderByResult(
         }
     }
 
-    milvus::OpContext op_ctx;
+    milvus::OpContext local_ctx;
+    if (op_ctx != nullptr) {
+        local_ctx.cancellation_token = op_ctx->cancellation_token;
+        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.pinned_segment_state = op_ctx->pinned_segment_state;
+        local_ctx.pinned_state_owner = op_ctx->pinned_state_owner;
+    }
 
     // Two-project mode: bulk-fetch deferred fields using segment offsets.
     if (!deferred.empty()) {
@@ -404,18 +415,18 @@ SegmentInternalInterface::FillOrderByResult(
                 dynamic_field_id.value() == field_id &&
                 !plan->target_dynamic_fields_.empty()) {
                 // Dynamic subfield projection.
-                col = bulk_subscript(&op_ctx,
+                col = bulk_subscript(&local_ctx,
                                      field_id,
                                      offset_data.data(),
                                      topk_count,
                                      plan->target_dynamic_fields_);
-            } else if (!is_field_exist(field_id)) {
+            } else if (!is_field_exist(field_id, &local_ctx)) {
                 // Field absent in this segment (schema evolution).
                 auto& field_meta = plan->schema_->operator[](field_id);
                 col = bulk_subscript_not_exist_field(field_meta, topk_count);
             } else {
                 col = bulk_subscript(
-                    &op_ctx, field_id, offset_data.data(), topk_count);
+                    &local_ctx, field_id, offset_data.data(), topk_count);
             }
             auto& field_meta = plan->schema_->operator[](field_id);
             if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -436,7 +447,7 @@ SegmentInternalInterface::FillOrderByResult(
         auto system_type =
             SystemProperty::Instance().GetSystemFieldType(field_id);
         FixedVector<int64_t> output(topk_count);
-        bulk_subscript(&op_ctx,
+        bulk_subscript(&local_ctx,
                        system_type,
                        offset_data.data(),
                        topk_count,
@@ -457,10 +468,10 @@ SegmentInternalInterface::FillOrderByResult(
     // Write back IO statistics from deferred bulk_subscript calls.
     results->set_scanned_remote_bytes(
         results->scanned_remote_bytes() +
-        op_ctx.storage_usage.scanned_cold_bytes.load());
+        local_ctx.storage_usage.scanned_cold_bytes.load());
     results->set_scanned_total_bytes(
         results->scanned_total_bytes() +
-        op_ctx.storage_usage.scanned_total_bytes.load());
+        local_ctx.storage_usage.scanned_total_bytes.load());
 
     // Populate IDs from PK column (position 0) for proxy ReduceByPK.
     if (results->fields_data_size() > 0) {
@@ -729,7 +740,8 @@ SegmentInternalInterface::get_real_count() const {
 }
 
 int64_t
-SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
+SegmentInternalInterface::get_field_avg_size(FieldId field_id,
+                                             milvus::OpContext* op_ctx) const {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
     if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -740,7 +752,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto& schema = get_schema();
+    auto& schema = get_schema(op_ctx);
     auto& field_meta = schema[field_id];
     auto data_type = field_meta.get_data_type();
 

@@ -2242,7 +2242,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
 void
 SegmentGrowingImpl::search_ids(BitsetType& bitset,
-                               const IdArray& id_array) const {
+                               const IdArray& id_array,
+                               milvus::OpContext* op_ctx) const {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -2259,8 +2260,9 @@ SegmentGrowingImpl::search_ids(BitsetType& bitset,
 }
 
 int64_t
-SegmentGrowingImpl::get_active_count(Timestamp ts) const {
-    auto row_count = this->get_row_count();
+SegmentGrowingImpl::get_active_count(Timestamp ts,
+                                     milvus::OpContext* op_ctx) const {
+    auto row_count = this->get_row_count(op_ctx);
     auto& ts_vec = this->get_insert_record().timestamps_;
     auto iter = std::upper_bound(
         boost::make_counting_iterator(static_cast<int64_t>(0)),
@@ -2273,7 +2275,8 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 void
 SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                                          Timestamp timestamp,
-                                         Timestamp collection_ttl) const {
+                                         Timestamp collection_ttl,
+                                         milvus::OpContext* op_ctx) const {
     if (collection_ttl > 0) {
         auto& timestamps = get_timestamps();
         auto size = bitset_chunk.size();

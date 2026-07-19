@@ -98,7 +98,8 @@ PhyMvccNode::GetOutput() {
     // get_deleted_count() check.
     if (is_source_node_ && segment_->type() == SegmentType::Sealed &&
         collection_ttl_timestamp_ == 0 &&
-        query_timestamp_ >= segment_->get_max_timestamp()) {
+        query_timestamp_ >=
+            segment_->get_max_timestamp(query_context->get_op_context())) {
         auto col_input = std::make_shared<ColumnVector>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
         TargetBitmapView data(col_input->GetRawData(), col_input->size());
@@ -121,8 +122,10 @@ PhyMvccNode::GetOutput() {
                                      : GetColumnVector(input_);
 
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
-    segment_->mask_with_timestamps(
-        data, query_timestamp_, collection_ttl_timestamp_);
+    segment_->mask_with_timestamps(data,
+                                   query_timestamp_,
+                                   collection_ttl_timestamp_,
+                                   query_context->get_op_context());
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
     is_finished_ = true;
 

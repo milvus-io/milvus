@@ -46,8 +46,8 @@ SelectOffsets(const TargetBitmapView& raw_data_view,
               QueryContext* query_context,
               const segcore::SegmentInternalInterface* segment) {
     if (!query_context->bitset_is_element_level()) {
-        auto result_pair =
-            segment->find_first_n(segcore::Unlimited, raw_data_view);
+        auto result_pair = segment->find_first_n(
+            segcore::Unlimited, raw_data_view, query_context->get_op_context());
         return {std::move(result_pair.first), {}};
     }
 
@@ -59,7 +59,8 @@ SelectOffsets(const TargetBitmapView& raw_data_view,
         segment->find_first_n_element(segcore::Unlimited,
                                       raw_data_view,
                                       array_offsets.get(),
-                                      std::nullopt);
+                                      std::nullopt,
+                                      query_context->get_op_context());
 
     size_t selected_count = 0;
     for (const auto& element_indices : element_indices_by_doc) {

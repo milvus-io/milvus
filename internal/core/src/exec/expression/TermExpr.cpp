@@ -234,7 +234,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
     }
 
     cached_bits_.resize(active_count_, false);
-    segment_->search_ids(cached_bits_, *id_array);
+    segment_->search_ids(cached_bits_, *id_array, op_ctx_);
     cached_bits_inited_ = true;
 }
 

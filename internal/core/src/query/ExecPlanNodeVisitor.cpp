@@ -275,7 +275,11 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     RetrieveResult retrieve_result;
     retrieve_result.total_data_cnt_ = 0;
 
-    auto active_count = segment->get_active_count(timestamp_);
+    // Select the operation snapshot before deriving active_count or any other
+    // layout coordinate from the segment.
+    auto op_context = milvus::OpContext(cancel_token_);
+    segment->PinOpSnapshot(&op_context);
+    auto active_count = segment->get_active_count(timestamp_, &op_context);
 
     // Get plan
     auto plan = plan::PlanFragment(node.plannodes_);
@@ -296,28 +300,30 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         entity_ttl_physical_time_us_);
 
     // Set op context to query context
-    auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
-
-    // Pin one published-state snapshot for the whole retrieve on this segment,
-    // so every accessor reading through this op_context sees a consistent
-    // layout even if a concurrent Reopen republishes. No-op for growing.
-    segment->PinOpSnapshot(&op_context);
 
     // Do task execution
     auto result = ExecuteTask(plan, query_context);
-    setupRetrieveResult(
-        result, op_context, node, retrieve_result, segment, query_context);
+    setupRetrieveResult(result, node, retrieve_result, segment, query_context);
 }
 
 void
 ExecPlanNodeVisitor::setupRetrieveResult(
     const milvus::RowVectorPtr& result,
-    const OpContext& op_context,
     const RetrievePlanNode& node,
     RetrieveResult& tmp_retrieve_result,
     const segcore::SegmentInternalInterface* segment,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
+    auto* op_context = query_context->get_op_context();
+    AssertInfo(op_context != nullptr, "QueryContext has no OpContext");
+
+    // Preserve the exact operation snapshot selected before execution so the
+    // caller's later size-check and materialization phases cannot re-pin a
+    // newer published state.
+    tmp_retrieve_result.pinned_segment_state_ =
+        op_context->pinned_segment_state;
+    tmp_retrieve_result.pinned_state_owner_ = op_context->pinned_state_owner;
+
     if (result == nullptr) {
         // Return empty field_data arrays with correct schema (0 rows, N columns)
         // to ensure result structure matches the expected output type.
@@ -355,13 +361,15 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 segment->find_first_n_element(node.limit_,
                                               view,
                                               array_offsets.get(),
-                                              node.query_iterator_cursor_);
+                                              node.query_iterator_cursor_,
+                                              op_context);
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
             tmp_retrieve_result.has_more_result = has_more;
         } else {
             tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
-            auto results_pair = segment->find_first_n(node.limit_, view);
+            auto results_pair =
+                segment->find_first_n(node.limit_, view, op_context);
             tmp_retrieve_result.result_offsets_ = std::move(results_pair.first);
             tmp_retrieve_result.has_more_result = results_pair.second;
         }
@@ -392,9 +400,9 @@ ExecPlanNodeVisitor::setupRetrieveResult(
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
     }
     retrieve_result_opt_->retrieve_storage_cost_.scanned_remote_bytes =
-        op_context.storage_usage.scanned_cold_bytes.load();
+        op_context->storage_usage.scanned_cold_bytes.load();
     retrieve_result_opt_->retrieve_storage_cost_.scanned_total_bytes =
-        op_context.storage_usage.scanned_total_bytes.load();
+        op_context->storage_usage.scanned_total_bytes.load();
 }
 
 void
@@ -404,7 +412,12 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
 
-    auto active_count = segment->get_active_count(timestamp_);
+    // Select the operation snapshot before deriving active_count or any other
+    // layout coordinate from the segment.
+    auto op_context = milvus::OpContext(cancel_token_);
+    op_context.trace_span = trace_span_;
+    segment->PinOpSnapshot(&op_context);
+    auto active_count = segment->get_active_count(timestamp_, &op_context);
 
     // Handle filter-only mode: execute only the filter and return valid_count
     if (filter_only_) {
@@ -455,12 +468,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                 query_context->set_enable_sub_expr_cache_write(false);
             }
 
-            auto op_context = milvus::OpContext(cancel_token_);
-            op_context.trace_span = trace_span_;
             query_context->set_op_context(&op_context);
-
-            // Pin one published-state snapshot for this filter-only pass.
-            segment->PinOpSnapshot(&op_context);
 
             auto result = ExecuteTask(plan_fragment, query_context);
 
@@ -518,22 +526,19 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     }
 
     // Set op context to query context
-    auto op_context = milvus::OpContext(cancel_token_);
-    op_context.trace_span = trace_span_;
     query_context->set_op_context(&op_context);
-
-    // Pin one published-state snapshot for the whole search on this segment.
-    segment->PinOpSnapshot(&op_context);
 
     // Do plan fragment task work
     auto result = ExecuteTask(plan, query_context);
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());
+    auto* query_op_context = query_context->get_op_context();
+    AssertInfo(query_op_context != nullptr, "QueryContext has no OpContext");
     search_result_opt_->search_storage_cost_.scanned_remote_bytes =
-        op_context.storage_usage.scanned_cold_bytes.load();
+        query_op_context->storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =
-        op_context.storage_usage.scanned_total_bytes.load();
+        query_op_context->storage_usage.scanned_total_bytes.load();
 }
 
 }  // namespace milvus::query

@@ -250,12 +250,13 @@ TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
 // V2/V3 column-group fixture
 //
 // On v2/v3 import segments the raw timestamp column (original row_ts) is
-// emplaced into fields_ by load_field_data_common, while the timestamp index
+// published in RuntimeResourceState::fields by load_field_data_common, while
+// the timestamp index
 // is built from commit_ts via init_storage_v1_timestamp_index. The V1 fixture
 // above (CreateImportSegment / LoadGeneratedDataIntoSegment) never reproduces
 // this state because the V1 path stores timestamps in insert_record_ instead
-// of fields_. CommitTimestampV2TestAccess pokes the private fields_ map to
-// simulate exactly the v2/v3 shape, so we can verify that EffectiveCommitTs()
+// of the published runtime fields. CommitTimestampV2TestAccess publishes that
+// exact v2/v3 shape, so we can verify that EffectiveCommitTs()
 // short-circuits every timestamp reader regardless of which storage path
 // populated fields_.
 // ===========================================================================
@@ -302,7 +303,9 @@ class CommitTimestampV2TestAccess {
                 std::move(translator), nullptr);
         auto column =
             std::make_shared<ChunkedColumn>(std::move(slot), ts_field_meta);
-        segment->fields_.wlock()->insert_or_assign(TimestampFieldID, column);
+        auto runtime = segment->TestCloneMutableRuntimeResourceState();
+        runtime->fields.insert_or_assign(TimestampFieldID, column);
+        segment->TestPublishRuntimeResourceState(std::move(runtime));
     }
 };
 

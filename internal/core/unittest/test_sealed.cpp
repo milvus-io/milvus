@@ -5515,6 +5515,93 @@ TEST(SealedSegmentCowState, ExternalWrapperSynthesizeRequiresRuntime) {
     EXPECT_ANY_THROW(sealed->TestSynthesizeExternalSystemFields(nullptr));
 }
 
+TEST(SealedSegmentCowState, MiscRuntimeStateFollowsPinnedSnapshotLifetime) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto payload = schema->AddDebugVarcharField(FieldName("payload"),
+                                                DataType::VARCHAR,
+                                                1024,
+                                                /*nullable=*/false,
+                                                /*enable_match=*/false,
+                                                /*enable_analyzer=*/false,
+                                                analyzer_params,
+                                                std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 8;
+    auto dataset = DataGen(schema, row_count);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    milvus::OpContext pinned;
+    static_cast<SegmentInternalInterface*>(sealed)->PinOpSnapshot(&pinned);
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_state->runtime, nullptr);
+    ASSERT_EQ(old_state->runtime->row_count, row_count);
+    ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
+    auto old_avg_size = sealed->get_field_avg_size(payload, &pinned);
+    auto old_mmap = sealed->is_mmap_field(payload, &pinned);
+
+    auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    next_runtime->row_count = row_count + 1;
+    if (old_mmap) {
+        next_runtime->mmap_field_ids.erase(payload);
+    } else {
+        next_runtime->mmap_field_ids.insert(payload);
+    }
+    next_runtime->variable_fields_avg_size[payload] = {row_count + 1, 123};
+    sealed->TestPublishRuntimeResourceState(std::move(next_runtime));
+
+    EXPECT_EQ(sealed->get_row_count(), row_count + 1);
+    EXPECT_EQ(sealed->get_field_avg_size(payload), 123);
+    EXPECT_EQ(sealed->is_mmap_field(payload), !old_mmap);
+
+    EXPECT_EQ(sealed->get_row_count(&pinned), row_count);
+    EXPECT_EQ(sealed->get_field_avg_size(payload, &pinned), old_avg_size);
+    EXPECT_EQ(sealed->is_mmap_field(payload, &pinned), old_mmap);
+}
+
+TEST(SealedSegmentCowState,
+     DropFieldDataPreservesAvgSizeForSchemaRetainedField) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto payload = schema->AddDebugVarcharField(FieldName("payload"),
+                                                DataType::VARCHAR,
+                                                1024,
+                                                /*nullable=*/false,
+                                                /*enable_match=*/false,
+                                                /*enable_analyzer=*/false,
+                                                analyzer_params,
+                                                std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    auto dataset = DataGen(schema, 8);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->set_field_avg_size(payload, 1, 128);
+    auto old_state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(old_state->runtime->fields.count(payload), 1);
+    ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
+    auto old_avg_info =
+        old_state->runtime->variable_fields_avg_size.at(payload);
+
+    sealed->DropFieldData(payload);
+
+    auto new_state = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(new_state->runtime->fields.count(payload), 0);
+    ASSERT_EQ(new_state->runtime->variable_fields_avg_size.count(payload), 1);
+    EXPECT_EQ(new_state->runtime->variable_fields_avg_size.at(payload),
+              old_avg_info);
+    EXPECT_EQ(old_state->runtime->fields.count(payload), 1);
+    EXPECT_EQ(old_state->runtime->variable_fields_avg_size.at(payload),
+              old_avg_info);
+}
+
 // ==================== Per-Operation Snapshot Pinning Tests ====================
 //
 // These exercise the sealed-segment per-operation snapshot pin (see
@@ -5619,6 +5706,59 @@ TEST(SealedSegmentOpSnapshotPin, PinnedScanSurvivesMidScanFieldDrop) {
     //   that assert. The pin makes the whole operation observe S0 only.
 }
 
+// Regression for #51594's no-raw-index -> raw-index transition.  The
+// operation starts while vector output must use the raw column.  A concurrent
+// publish then advertises index raw data and removes that column.  The pinned
+// bulk_subscript must keep both its routing decision and its column lookup on
+// the pre-transition snapshot.
+TEST(SealedSegmentOpSnapshotPin,
+     PinnedVectorRetrieveSurvivesRawIndexTransition) {
+    constexpr int64_t N = 16;
+    constexpr int64_t DIM = 4;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+
+    auto dataset = DataGen(schema, N);
+    auto expected = dataset.get_col<float>(vec_id);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    milvus::OpContext op_ctx;
+    static_cast<SegmentInternalInterface*>(sealed)->PinOpSnapshot(&op_ctx);
+    ASSERT_TRUE(sealed->HasFieldData(vec_id, &op_ctx));
+    ASSERT_FALSE(sealed->IndexHasRawData(vec_id, &op_ctx));
+
+    // Publish the post-Reopen shape from the reported race: the live state no
+    // longer has the raw column and routes vector output to index raw data.
+    auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    next_runtime->fields.erase(vec_id);
+    next_runtime->mmap_field_ids.erase(vec_id);
+    sealed->TestPublishRuntimeResourceState(std::move(next_runtime));
+    sealed->TestPublishVectorIndexFacts(vec_id,
+                                        /*ready=*/true,
+                                        /*binlog_ready=*/false,
+                                        /*has_raw_data=*/true);
+    ASSERT_FALSE(sealed->HasFieldData(vec_id));
+    ASSERT_TRUE(sealed->IndexHasRawData(vec_id));
+
+    std::vector<int64_t> offsets = {0, 3, 7, 15};
+    auto result =
+        sealed->bulk_subscript(&op_ctx, vec_id, offsets.data(), offsets.size());
+    const auto& actual = result->vectors().float_vector().data();
+    ASSERT_EQ(actual.size(), offsets.size() * DIM);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        for (int64_t d = 0; d < DIM; ++d) {
+            EXPECT_FLOAT_EQ(actual[i * DIM + d],
+                            expected[offsets[i] * DIM + d]);
+        }
+    }
+}
+
 // Pin identity: within one op_ctx, every capture through the choke point
 // returns the exact same snapshot pointer, even while the writer publishes new
 // state. Mirrors the "one operation, one snapshot" guarantee.
@@ -5659,6 +5799,10 @@ TEST(SealedSegmentOpSnapshotPin, PinIdentityAcrossConcurrentPublish) {
     // Live state has advanced...
     auto live_after = sealed->TestGetPublishedStateSnapshot();
     EXPECT_NE(live_after.get(), pinned_state.get());
+
+    // Re-entering the pin API within the same operation is idempotent and must
+    // not replace S0 with the now-current S1.
+    segment->PinOpSnapshot(&op_ctx);
 
     // ...but every capture through the pinned op_ctx still returns S0.
     EXPECT_EQ(sealed->TestCapturePublishedState(&op_ctx).get(),

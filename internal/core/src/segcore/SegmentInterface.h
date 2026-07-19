@@ -165,7 +165,7 @@ class SegmentInterface {
     GetMemoryUsageInBytes() const = 0;
 
     virtual int64_t
-    get_row_count() const = 0;
+    get_row_count(milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual const Schema&
     get_schema(milvus::OpContext* op_ctx = nullptr) const = 0;
@@ -177,7 +177,8 @@ class SegmentInterface {
     get_real_count() const = 0;
 
     virtual int64_t
-    get_field_avg_size(FieldId field_id) const = 0;
+    get_field_avg_size(FieldId field_id,
+                       milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual void
     set_field_avg_size(FieldId field_id,
@@ -571,7 +572,8 @@ class SegmentInternalInterface : public SegmentInterface {
     get_real_count() const override;
 
     int64_t
-    get_field_avg_size(FieldId field_id) const override;
+    get_field_avg_size(FieldId field_id,
+                       milvus::OpContext* op_ctx = nullptr) const override;
 
     void
     set_field_avg_size(FieldId field_id,
@@ -658,7 +660,8 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
                          Timestamp timestamp,
-                         Timestamp collection_ttl) const = 0;
+                         Timestamp collection_ttl,
+                         milvus::OpContext* op_ctx = nullptr) const = 0;
 
     // count of chunks
     virtual int64_t
@@ -676,10 +679,11 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // element size in each chunk
     virtual int64_t
-    size_per_chunk() const = 0;
+    size_per_chunk(milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    get_active_count(Timestamp ts) const = 0;
+    get_active_count(Timestamp ts,
+                     milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual Timestamp
     get_max_timestamp(milvus::OpContext* op_ctx = nullptr) const = 0;
@@ -694,7 +698,9 @@ class SegmentInternalInterface : public SegmentInterface {
      * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
     virtual void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const = 0;
 
     /**
      * Sort all candidates in ascending order, and then return the limit smallest.
@@ -708,7 +714,9 @@ class SegmentInternalInterface : public SegmentInterface {
      * @return All candidates offsets.
      */
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_n(int64_t limit, const BitsetTypeView& bitset) const = 0;
+    find_first_n(int64_t limit,
+                 const BitsetTypeView& bitset,
+                 milvus::OpContext* op_ctx = nullptr) const = 0;
 
     /**
      * Element-level version of find_first_n.
@@ -724,11 +732,11 @@ class SegmentInternalInterface : public SegmentInterface {
      */
     virtual std::
         tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-        find_first_n_element(
-            int64_t limit,
-            const BitsetTypeView& element_bitset,
-            const IArrayOffsets* array_offsets,
-            const std::optional<QueryIteratorCursor>& cursor) const = 0;
+        find_first_n_element(int64_t limit,
+                             const BitsetTypeView& element_bitset,
+                             const IArrayOffsets* array_offsets,
+                             const std::optional<QueryIteratorCursor>& cursor,
+                             milvus::OpContext* op_ctx = nullptr) const = 0;
 
     void
     FillTargetEntryDirectly(
@@ -742,7 +750,8 @@ class SegmentInternalInterface : public SegmentInterface {
     FillOrderByResult(
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
-        RetrieveResult& retrieveResult) const;
+        RetrieveResult& retrieveResult,
+        milvus::OpContext* op_ctx) const;
 
     void
     FillTargetEntry(
@@ -757,7 +766,8 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // return whether field mmap or not
     virtual bool
-    is_mmap_field(FieldId field_id) const = 0;
+    is_mmap_field(FieldId field_id,
+                  milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual std::unique_ptr<DataArray>
     bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
