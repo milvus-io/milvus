@@ -471,12 +471,6 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     auto prefer_field_data =
         SegcoreConfig::default_config()
             .get_prefer_field_data_when_index_has_raw_data();
-    // The primary key column is never skipped, even when its index carries raw
-    // data: sorted segments navigate rows through the pk column
-    // (num_rows_until_chunk / get_chunk_by_offset), and a pk scalar index is not
-    // registered in scalar_indexings for expression index-reads, so the pk raw
-    // column must stay resident.
-    auto pk_field_id = new_info.schema_->get_primary_field_id();
     auto cur_column_group = GetColumnGroups();
     auto new_column_group = new_info.GetColumnGroups();
 
@@ -554,37 +548,28 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             bool is_replace_field = was_default_filled || files_changed;
             bool index_has_raw_data =
                 new_info.field_index_has_raw_data_.count(fid) > 0;
-            bool is_pk_field =
-                pk_field_id.has_value() && pk_field_id.value() == fid;
-            // When a field's index already carries the raw data, the separate
-            // raw column is redundant and must NOT be made resident — neither
-            // eager nor "lazy" (the loon lazy path still materializes a
+            bool is_vector_field = IsVectorDataType(
+                new_info.schema_->operator[](fid).get_data_type());
+            // When a VECTOR field's index already carries the raw data
+            // (IVF_FLAT / DiskANN / HNSW-with-raw), the separate raw vector
+            // column is redundant and must NOT be made resident — neither eager
+            // nor "lazy" (the loon lazy path still materializes a
             // ProxyChunkColumn and sets field_data_ready, so it stays on disk on
-            // top of the index, doubling the footprint). Mirror the binlog path
-            // (ChunkedSegmentSealedImpl: "skip fielddata because index has raw
-            // data"): drop it from the load set entirely. This covers vector
-            // fields and other indexed scalars (retrieve/filter read the raw
-            // value from the index), but NOT the primary key — its raw column
-            // is still needed resident for row navigation, so the pk always
-            // loads regardless of its index. prefer_field_data keeps both
-            // resident; system fields always load.
-            if (field_id >= START_USER_FIELDID && !is_pk_field &&
+            // top of the index, ~doubling the footprint). retrieve reconstructs
+            // the vector from the index (get_vector). Restricted to vector
+            // fields on purpose: scalar / JSON / ARRAY raw columns stay resident
+            // because their index-read paths do not cover every consumer
+            // (nullable Reverse_Lookup, column-scan-only exprs like TIMESTAMPTZ
+            // arith, etc.) — those are tracked separately. prefer_field_data is
+            // the explicit opt-in to keep both resident; system fields load.
+            if (field_id >= START_USER_FIELDID && is_vector_field &&
                 index_has_raw_data && !prefer_field_data) {
-                // Free any stale resident copy of the raw column before the
-                // early continue (which bypasses the replace path below):
-                //  - default-filled: FillDefaultValueFields put a resident
-                //    column in runtime that is not in the current manifest
-                //    (cur_iter == end); the new manifest now backs it with a
-                //    raw-data index, so the default column must be dropped or it
-                //    leaks (and the default-filled flag is cleared on reopen, so
-                //    no later pass can clean it).
-                //  - no-raw-index -> raw-index transition: the raw column was
-                //    resident because the current index had no raw data; drop it
-                //    now that the index carries it.
+                // Free a stale resident copy on the no-raw-index -> raw-index
+                // reopen transition (the raw column was loaded because the
+                // current index had no raw data; now the index carries it).
                 // Steady state (already skipped, never resident) drops nothing.
-                if (was_default_filled ||
-                    (cur_iter != cur_field_to_files.end() &&
-                     field_index_has_raw_data_.count(fid) == 0)) {
+                if (cur_iter != cur_field_to_files.end() &&
+                    field_index_has_raw_data_.count(fid) == 0) {
                     diff.field_data_to_drop.emplace(field_id);
                 }
                 continue;
