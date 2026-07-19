@@ -21,7 +21,6 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
-#include "storage/PluginLoader.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -92,28 +91,19 @@ SealedIndexTranslator::SealedIndexTranslator(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
+        AssertInfo(stream_load_info.has_value(),
+                   "missing stream load info for packed scalar V3 index");
         auto budget_capacity = static_cast<int64_t>(
             milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
                 .CapacityBytes());
-        auto encrypted_stream =
-            stream_load_info.has_value()
-                ? stream_load_info->encrypted
-                : milvus::storage::PluginLoader::GetInstance()
-                          .getCipherPlugin() != nullptr;
-        auto max_task_overhead =
-            encrypted_stream && stream_load_info.has_value()
-                ? stream_load_info->max_task_transient_bytes
-            : encrypted_stream
-                ? milvus::storage::EncryptedEntryStreamTaskTransientBytes()
-                : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
-        auto encrypted_stream_upper_bound = [&]() {
-            auto index_size = static_cast<size_t>(
-                std::max<int64_t>(0, index_load_info_.index_size));
-            return std::min(
-                milvus::storage::EntryStreamDataTransientBytes(index_size,
-                                                               true),
-                static_cast<size_t>(std::numeric_limits<int64_t>::max()));
-        };
+        auto encrypted_stream = stream_load_info->encrypted;
+
+        // The packed-file footer records exact encrypted slice sizes. They
+        // give encrypted loading two independent ceilings:
+        //   1. the sum of cipher_len + 2 * plain_len across all slices;
+        //   2. the largest such task multiplied by load-pool concurrency.
+        // A non-zero process-wide budget adds a third ceiling, but is floored
+        // at one task because oversized tasks are admitted exclusively.
         auto exact_encrypted_upper_bound = [&]() {
             auto total_transient_bytes = static_cast<int64_t>(std::min(
                 stream_load_info->total_transient_bytes,
@@ -131,15 +121,19 @@ SealedIndexTranslator::SealedIndexTranslator(
                                pool_upper_bound);
             return std::min(total_transient_bytes, budget_upper_bound);
         };
+
+        // Plaintext tasks have a fixed per-task bound: the read buffer plus
+        // the aligned-write copy. A configured budget bounds aggregate
+        // in-flight bytes but still permits one oversized task; budget=0 is
+        // unlimited, so pool concurrency supplies the aggregate bound.
+        auto plaintext_task_overhead =
+            milvus::storage::PlainEntryFileStreamTaskTransientBytes();
         auto memory_upper_bound =
-            encrypted_stream && stream_load_info.has_value()
-                ? exact_encrypted_upper_bound()
+            encrypted_stream ? exact_encrypted_upper_bound()
             : budget_capacity != 0
-                ? std::max<int64_t>(budget_capacity, max_task_overhead)
-            : encrypted_stream ? milvus::segcore::LoadTransientPoolUpperBound(
-                                     encrypted_stream_upper_bound())
-                               : milvus::segcore::LoadTransientPoolUpperBound(
-                                     max_task_overhead);
+                ? std::max<int64_t>(budget_capacity, plaintext_task_overhead)
+                : milvus::segcore::LoadTransientPoolUpperBound(
+                      plaintext_task_overhead);
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
             milvus::cachinglayer::LoadingOverheadDimensionConfig{
                 memory_upper_bound,
