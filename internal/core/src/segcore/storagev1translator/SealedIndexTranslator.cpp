@@ -92,29 +92,27 @@ SealedIndexTranslator::SealedIndexTranslator(
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
         AssertInfo(stream_load_info.has_value(),
                    "missing stream load info for packed scalar V3 index");
-        auto encrypted_stream = stream_load_info->encrypted;
-
-        // Plaintext tasks retain a read buffer and an aligned-write copy. A
-        // configured budget still permits one oversized task; budget=0 uses
-        // the aggregate load-pool concurrency bound.
-        auto plaintext_task_overhead =
-            milvus::storage::PlainEntryFileStreamTaskTransientBytes();
-        auto budget_capacity = static_cast<int64_t>(
+        auto budget_capacity =
             milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-                .CapacityBytes());
-        auto memory_upper_bound =
-            encrypted_stream
-                ? milvus::segcore::LoadTransientSharedOverheadUpperBound(
-                      stream_load_info->max_task_transient_bytes)
-            : budget_capacity != 0
-                ? std::max<int64_t>(budget_capacity, plaintext_task_overhead)
-                : milvus::segcore::LoadTransientPoolUpperBound(
-                      plaintext_task_overhead);
-        meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
-            milvus::cachinglayer::LoadingOverheadDimensionConfig{
-                memory_upper_bound,
-                milvus::segcore::kLoadTransientOverheadGroup},
-            std::nullopt};
+                .CapacityBytes();
+        // With no runtime budget there is no truthful process-wide stream
+        // buffer cap. Leave the group unregistered so MCL reserves each
+        // concurrently loading slot's estimated overhead independently.
+        if (budget_capacity != 0) {
+            auto max_task_overhead =
+                stream_load_info->encrypted
+                    ? stream_load_info->max_task_transient_bytes
+                    : milvus::storage::PlainEntryFileStreamTaskTransientBytes();
+            auto memory_upper_bound =
+                milvus::segcore::LoadTransientSharedOverheadUpperBound(
+                    max_task_overhead);
+            meta_.loading_overhead =
+                milvus::cachinglayer::LoadingOverheadConfig{
+                    milvus::cachinglayer::LoadingOverheadDimensionConfig{
+                        memory_upper_bound,
+                        milvus::segcore::kLoadTransientOverheadGroup},
+                    std::nullopt};
+        }
     }
 }
 

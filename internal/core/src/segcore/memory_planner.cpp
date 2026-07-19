@@ -89,14 +89,23 @@ int64_t
 LoadTransientPoolUpperBound(size_t max_task_overhead_bytes) {
     // Load work can run concurrently in both pools because PriorityForLoad
     // maps foreground loads to HIGH and background loads to LOW.
-    auto max_high =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH)
-            .GetMaxThreadNum();
-    auto max_low =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW)
-            .GetMaxThreadNum();
-    auto max_load_tasks = max_high + max_low;
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto high_workers =
+        std::max(high_pool.GetMaxThreadNum(), high_pool.GetThreadNum());
+    auto low_workers =
+        std::max(low_pool.GetMaxThreadNum(), low_pool.GetThreadNum());
     auto max_int64 = static_cast<size_t>(std::numeric_limits<int64_t>::max());
+
+    if (high_workers > max_int64 || low_workers > max_int64 - high_workers) {
+        return std::numeric_limits<int64_t>::max();
+    }
+    auto max_load_tasks = high_workers + low_workers;
+    if (max_load_tasks == 0 || max_task_overhead_bytes == 0) {
+        return 0;
+    }
     if (max_task_overhead_bytes > max_int64 / max_load_tasks) {
         return std::numeric_limits<int64_t>::max();
     }
@@ -105,22 +114,15 @@ LoadTransientPoolUpperBound(size_t max_task_overhead_bytes) {
 
 int64_t
 LoadTransientSharedOverheadUpperBound(size_t max_task_overhead_bytes) {
-    auto pool_upper_bound =
-        LoadTransientPoolUpperBound(max_task_overhead_bytes);
     auto budget_capacity =
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
             .CapacityBytes();
-    if (budget_capacity == 0) {
-        return pool_upper_bound;
-    }
-
     auto max_int64 = static_cast<size_t>(std::numeric_limits<int64_t>::max());
     auto task_overhead =
         static_cast<int64_t>(std::min(max_task_overhead_bytes, max_int64));
     auto budget_upper_bound =
         static_cast<int64_t>(std::min(budget_capacity, max_int64));
-    return std::min(std::max(budget_upper_bound, task_overhead),
-                    pool_upper_bound);
+    return std::max(budget_upper_bound, task_overhead);
 }
 
 void

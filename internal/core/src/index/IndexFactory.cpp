@@ -229,7 +229,10 @@ ResolveHybridInternalIndexType(
         AssertInfo(input != nullptr,
                    "failed to open packed hybrid index file: {}",
                    index_files[0]);
-        auto reader = storage::IndexEntryReader::Open(input, input->Size());
+        auto reader = storage::IndexEntryReader::Open(
+            input,
+            input->Size(),
+            file_manager_context.fieldDataMeta.collection_id);
         AssertInfo(reader != nullptr,
                    "failed to create IndexEntryReader for hybrid index file");
         if (stream_load_info != nullptr) {
