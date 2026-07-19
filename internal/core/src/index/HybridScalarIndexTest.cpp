@@ -947,6 +947,52 @@ TYPED_TEST_P(HybridIndexTestInverted,
         max_load_tasks * max_task_overhead);
 }
 
+TYPED_TEST_P(HybridIndexTestInverted, ScalarV3LoadingRequiresStreamLoadInfo) {
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.collection_id = 1;
+    load_info.partition_id = 2;
+    load_info.segment_id = 3;
+    load_info.field_id = 101;
+    load_info.field_type = this->type_;
+    load_info.element_type = DataType::NONE;
+    load_info.enable_mmap = false;
+    load_info.index_id = this->index_build_id_;
+    load_info.index_build_id = this->index_build_id_;
+    load_info.index_version = this->index_version_;
+    load_info.index_params = index_params;
+    load_info.index_engine_version = this->index_version_;
+    load_info.index_size = 1024;
+    load_info.num_rows = this->nb_;
+    load_info.dim = 0;
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/2048,
+                            /*max_disk_cost=*/512,
+                            /*final_memory_cost=*/1024,
+                            /*final_disk_cost=*/128,
+                            /*has_raw_data=*/true};
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    index_info.field_type = this->type_;
+    index_info.index_engine_version = this->index_version_;
+
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+
+    Config config = index_params;
+    EXPECT_THROW(milvus::segcore::storagev1translator::SealedIndexTranslator(
+                     index_info,
+                     &load_info,
+                     milvus::tracer::TraceContext{},
+                     ctx,
+                     std::move(config)),
+                 milvus::SegcoreError);
+}
+
 template <typename T>
 class HybridIndexTestNullable : public HybridIndexTestV1<T> {
  public:
@@ -1144,7 +1190,8 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
 REGISTER_TYPED_TEST_SUITE_P(
     HybridIndexTestInverted,
     ResourceEstimateUsesInternalInvertedIndexType,
-    ScalarIndexLoadingOverheadUsesPoolAndSingleTaskBounds);
+    ScalarIndexLoadingOverheadUsesPoolAndSingleTaskBounds,
+    ScalarV3LoadingRequiresStreamLoadInfo);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,
