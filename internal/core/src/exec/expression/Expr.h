@@ -273,7 +273,7 @@ class SegmentExpr : public Expr {
           consistency_level_(consistency_level),
           is_json_contains_(is_json_contains),
           plan_options_(plan_options) {
-        size_per_chunk_ = segment_->size_per_chunk();
+        size_per_chunk_ = segment_->size_per_chunk(op_ctx_);
         AssertInfo(
             batch_size_ > 0,
             fmt::format("expr batch size should greater than zero, but now: {}",
@@ -1788,9 +1788,10 @@ class SegmentExpr : public Expr {
         for (int64_t chunk_id = 0;
              chunk_id < num_data_chunk_ && processed_size < row_count;
              ++chunk_id) {
-            auto chunk_size = segment_->is_chunked()
-                                  ? segment_->chunk_size(field_id_, chunk_id)
-                                  : size_per_chunk_;
+            auto chunk_size =
+                segment_->is_chunked()
+                    ? segment_->chunk_size(field_id_, chunk_id, op_ctx_)
+                    : size_per_chunk_;
             auto size = std::min(chunk_size, row_count - processed_size);
             if (size == 0) {
                 continue;
@@ -2284,8 +2285,8 @@ class SegmentExpr : public Expr {
         }
 
         auto query_path = milvus::Json::pointer(nested_path_);
-        auto index_path =
-            segment_->GetJsonFlatIndexNestedPath(field_id_, query_path);
+        auto index_path = segment_->GetJsonFlatIndexNestedPath(
+            field_id_, query_path, op_ctx_);
         if (index_path.empty()) {
             // No JsonFlatIndex covers this path; nothing JSON-specific to
             // reject here. The caller will decide between ScalarIndex and

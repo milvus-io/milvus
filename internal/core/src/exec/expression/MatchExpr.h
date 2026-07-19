@@ -43,7 +43,7 @@ class PhyMatchFilterExpr : public Expr {
           segment_(segment),
           active_count_(active_count),
           batch_size_(batch_size) {
-        size_per_chunk_ = segment_->size_per_chunk();
+        size_per_chunk_ = segment_->size_per_chunk(op_ctx);
     }
 
     void

@@ -236,7 +236,8 @@ class SegmentInterface {
     // fetch when the decision is going to be RawData anyway.
     virtual std::string
     GetJsonFlatIndexNestedPath(FieldId field_id,
-                               std::string_view query_path) const {
+                               std::string_view query_path,
+                               milvus::OpContext* op_ctx = nullptr) const {
         return "";
     }
 
@@ -547,16 +548,24 @@ class SegmentInternalInterface : public SegmentInterface {
     HasIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) const = 0;
 
     bool
-    FieldAccessible(FieldId field_id) const {
-        return HasFieldData(field_id) || HasIndex(field_id);
+    FieldAccessible(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) const {
+        return HasFieldData(field_id, op_ctx) || HasIndex(field_id, op_ctx);
     }
 
     // Returns whether the segment's loaded manifest contains the storage
     // column. Non-manifest segment types default to true.
     virtual bool
-    HasColumnInLoadedManifest(const std::string&) const {
+    HasColumnInLoadedManifest(const std::string&,
+                              milvus::OpContext* op_ctx = nullptr) const {
         return true;
     }
+
+    void
+    ValidateExternalFieldsInLoadedManifest(
+        const std::vector<FieldId>& fields,
+        const std::vector<FieldId>& skipped_fields,
+        milvus::OpContext* op_ctx) const;
 
     // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
     // per-segment container from the scalar/vector/binlog index bitsets, so

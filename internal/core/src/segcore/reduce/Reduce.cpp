@@ -38,6 +38,25 @@
 
 namespace milvus::segcore {
 
+namespace {
+
+void
+InitSearchResultOpContext(const SearchResult& search_result,
+                          const milvus::OpContext* source,
+                          milvus::OpContext& target) {
+    if (source != nullptr) {
+        target.cancellation_token = source->cancellation_token;
+        target.runtime_load_priority = source->runtime_load_priority;
+        target.coload_fields = source->coload_fields;
+        target.trace_context = source->trace_context;
+        target.trace_span = source->trace_span;
+    }
+    target.pinned_segment_state = search_result.pinned_segment_state_;
+    target.pinned_state_owner = search_result.pinned_state_owner_;
+}
+
+}  // namespace
+
 void
 ReduceHelper::Initialize() {
     AssertInfo(search_results_.size() > 0, "empty search result");
@@ -114,8 +133,10 @@ ReduceHelper::IsSearchResultRefineEnabled(SearchResult* search_result) const {
         return false;
     }
     auto segment = static_cast<SegmentInterface*>(search_result->segment_);
+    milvus::OpContext result_op_ctx;
+    InitSearchResultOpContext(*search_result, op_ctx_, result_op_ctx);
     return segment->IsIndexRefineEnabled(
-        op_ctx_, plan_->plan_node_->search_info_.field_id_);
+        &result_op_ctx, plan_->plan_node_->search_info_.field_id_);
 }
 
 void
@@ -136,7 +157,9 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     auto& offsets = search_result->seg_offsets_;
     auto& distances = search_result->distances_;
 
-    int segment_row_count = segment->get_row_count();
+    milvus::OpContext result_op_ctx;
+    InitSearchResultOpContext(*search_result, op_ctx_, result_op_ctx);
+    int segment_row_count = segment->get_row_count(&result_op_ctx);
     //1. for sealed segment, segment_row_count will not change as delete records will take effect as bitset
     //2. for growing segment, segment_row_count is the minimum position acknowledged, which will only increase after
     //the time at which the search operation is executed, so it's safe here to keep this value inside stack
@@ -213,7 +236,10 @@ ReduceHelper::FillPrimaryKey() {
             auto future = pool.Submit([this, search_result] {
                 auto segment =
                     static_cast<SegmentInterface*>(search_result->segment_);
-                segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
+                milvus::OpContext result_op_ctx;
+                InitSearchResultOpContext(
+                    *search_result, op_ctx_, result_op_ctx);
+                segment->FillPrimaryKeys(plan_, *search_result, &result_op_ctx);
             });
             futures.emplace_back(std::move(future));
         }
@@ -233,7 +259,9 @@ ReduceHelper::FillPrimaryKey() {
     } else if (num_segments_ == 1) {
         auto segment =
             static_cast<SegmentInterface*>(search_results_[0]->segment_);
-        segment->FillPrimaryKeys(plan_, *search_results_[0], op_ctx_);
+        milvus::OpContext result_op_ctx;
+        InitSearchResultOpContext(*search_results_[0], op_ctx_, result_op_ctx);
+        segment->FillPrimaryKeys(plan_, *search_results_[0], &result_op_ctx);
     }
 }
 
@@ -370,6 +398,8 @@ ReduceHelper::RefineOneSegment(SearchResult* search_result,
                                int64_t element_size,
                                const char* dense_blob) {
     auto segment = static_cast<SegmentInterface*>(search_result->segment_);
+    milvus::OpContext result_op_ctx;
+    InitSearchResultOpContext(*search_result, op_ctx_, result_op_ctx);
     auto nq = search_result->total_nq_;
     std::vector<size_t> indices;
     std::vector<float> new_distances;
@@ -392,7 +422,7 @@ ReduceHelper::RefineOneSegment(SearchResult* search_result,
         auto result_count = static_cast<size_t>(count);
         auto* offsets = &search_result->seg_offsets_[nq_begin];
         new_distances.resize(result_count);
-        bool ok = segment->CalcDistByIDs(op_ctx_,
+        bool ok = segment->CalcDistByIDs(&result_op_ctx,
                                          field_id,
                                          query_dataset,
                                          offsets,

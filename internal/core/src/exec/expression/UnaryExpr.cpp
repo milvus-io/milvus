@@ -738,7 +738,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 return chunk.first[chunk_offset].is_same_array(val) ^ reverse;
             };
         } else {
-            auto size_per_chunk = segment_->size_per_chunk();
+            auto size_per_chunk = segment_->size_per_chunk(op_ctx_);
             is_same = [this, size_per_chunk, reverse](
                           milvus::proto::plan::Array& val,
                           int64_t offset) -> bool {

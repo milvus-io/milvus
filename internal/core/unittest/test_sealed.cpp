@@ -68,6 +68,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
 #include "query/Utils.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -77,6 +78,7 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -87,6 +89,7 @@
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -4981,6 +4984,88 @@ TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {
     EXPECT_EQ(current->runtime->pk_index_slot, old_pk_index_slot);
 }
 
+TEST(SealedSegmentCowState,
+     StagedRowCountDoesNotMutateDeleteStateBeforePublish) {
+    constexpr int64_t old_row_count = 8;
+    constexpr int64_t new_row_count = 13;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto value = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto old_dataset = DataGen(schema, old_row_count);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    ASSERT_EQ(sealed->get_row_count(), old_row_count);
+    ASSERT_EQ(sealed->TestDeletedRecordRowCount(), old_row_count);
+
+    auto replacement_dataset = DataGen(schema, new_row_count);
+    auto replacement_segment =
+        CreateSealedWithFieldDataLoaded(schema, replacement_dataset);
+    auto* replacement_sealed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(replacement_segment.get());
+    ASSERT_NE(replacement_sealed, nullptr);
+    auto replacement_column =
+        replacement_sealed->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            value);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto stage = [&](bool abort_before_publish) {
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        ChunkedSegmentSealedImpl::StateDelta initial_delta;
+        initial_delta.schema = current->schema;
+        initial_delta.load_info = current->load_info;
+        initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+        initial_delta.commit_ts = current->commit_ts;
+        auto staged =
+            sealed->TestBuildNextPublishedState(current, initial_delta);
+
+        ChunkedSegmentSealedImpl::StateDelta final_delta;
+        final_delta.schema = current->schema;
+        final_delta.load_info = current->load_info;
+        final_delta.commit_ts = current->commit_ts;
+
+        auto stage_and_publish = [&] {
+            sealed->TestStageLoadFieldDataThenPublish(
+                value,
+                replacement_column,
+                new_row_count,
+                DataType::INT64,
+                schema,
+                runtime,
+                staged.get(),
+                current,
+                final_delta,
+                [&] {
+                    EXPECT_EQ(runtime->row_count, new_row_count);
+                    EXPECT_EQ(sealed->get_row_count(), old_row_count);
+                    EXPECT_EQ(sealed->TestDeletedRecordRowCount(),
+                              old_row_count);
+                    if (abort_before_publish) {
+                        throw std::runtime_error(
+                            "abort staged row-count publish");
+                    }
+                });
+        };
+
+        if (abort_before_publish) {
+            EXPECT_THROW(stage_and_publish(), std::runtime_error);
+        } else {
+            EXPECT_NO_THROW(stage_and_publish());
+        }
+    };
+
+    stage(true);
+    EXPECT_EQ(sealed->get_row_count(), old_row_count);
+    EXPECT_EQ(sealed->TestDeletedRecordRowCount(), old_row_count);
+
+    stage(false);
+    EXPECT_EQ(sealed->get_row_count(), new_row_count);
+    EXPECT_EQ(sealed->TestDeletedRecordRowCount(), new_row_count);
+}
+
 TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -5724,12 +5809,34 @@ TEST(SealedSegmentOpSnapshotPin,
 
     auto dataset = DataGen(schema, N);
     auto expected = dataset.get_col<float>(vec_id);
+    auto pks = dataset.get_col<int64_t>(pk_id);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
 
+    std::vector<int64_t> requested_offsets = {0, 3, 7, 15};
+    std::vector<proto::plan::GenericValue> values;
+    for (auto offset : requested_offsets) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(pks[offset]);
+        values.push_back(std::move(value));
+    }
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(pk_id, DataType::INT64), values);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
+
+    query::ExecPlanNodeVisitor visitor(*sealed, MAX_TIMESTAMP);
+    auto retrieve_result = visitor.get_retrieve_result(*plan->plan_node_);
+    ASSERT_NE(retrieve_result.pinned_segment_state_, nullptr);
+    ASSERT_EQ(retrieve_result.pinned_state_owner_, sealed);
+    ASSERT_EQ(retrieve_result.result_offsets_, requested_offsets);
+
     milvus::OpContext op_ctx;
-    static_cast<SegmentInternalInterface*>(sealed)->PinOpSnapshot(&op_ctx);
+    op_ctx.pinned_segment_state = retrieve_result.pinned_segment_state_;
+    op_ctx.pinned_state_owner = retrieve_result.pinned_state_owner_;
     ASSERT_TRUE(sealed->HasFieldData(vec_id, &op_ctx));
     ASSERT_FALSE(sealed->IndexHasRawData(vec_id, &op_ctx));
 
@@ -5746,7 +5853,7 @@ TEST(SealedSegmentOpSnapshotPin,
     ASSERT_FALSE(sealed->HasFieldData(vec_id));
     ASSERT_TRUE(sealed->IndexHasRawData(vec_id));
 
-    std::vector<int64_t> offsets = {0, 3, 7, 15};
+    const auto& offsets = retrieve_result.result_offsets_;
     auto result =
         sealed->bulk_subscript(&op_ctx, vec_id, offsets.data(), offsets.size());
     const auto& actual = result->vectors().float_vector().data();
@@ -5755,6 +5862,96 @@ TEST(SealedSegmentOpSnapshotPin,
         for (int64_t d = 0; d < DIM; ++d) {
             EXPECT_FLOAT_EQ(actual[i * DIM + d],
                             expected[offsets[i] * DIM + d]);
+        }
+    }
+}
+
+TEST(SealedSegmentOpSnapshotPin,
+     SearchResultPinSurvivesRawIndexTransitionDuringOutputFill) {
+    constexpr int64_t N = 32;
+    constexpr int64_t DIM = 4;
+    constexpr int64_t TOPK = 4;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto dataset = DataGen(schema, N);
+    auto vectors = dataset.get_col<float>(vec_id);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    ASSERT_TRUE(sealed->HasFieldData(pk_id));
+    ASSERT_TRUE(sealed->HasFieldData(vec_id));
+    ASSERT_TRUE(sealed->FieldAccessible(vec_id));
+    ASSERT_EQ(sealed->get_row_count(), N);
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_bytes =
+        schema_handle.ParseSearch("", "vec", TOPK, "L2", R"({"nprobe": 10})");
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_ = {vec_id};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob(1, DIM, vectors.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result =
+        segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_EQ(search_result->total_data_cnt_, N);
+    ASSERT_EQ(search_result->seg_offsets_.size(), TOPK);
+    for (auto offset : search_result->seg_offsets_) {
+        ASSERT_GE(offset, 0);
+        ASSERT_LT(offset, N);
+    }
+    ASSERT_NE(search_result->pinned_segment_state_, nullptr);
+    ASSERT_EQ(search_result->pinned_state_owner_, sealed);
+
+    auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
+    next_runtime->fields.erase(pk_id);
+    next_runtime->fields.erase(vec_id);
+    next_runtime->mmap_field_ids.erase(vec_id);
+    sealed->TestPublishRuntimeResourceState(std::move(next_runtime));
+    sealed->TestPublishVectorIndexFacts(vec_id,
+                                        /*ready=*/true,
+                                        /*binlog_ready=*/false,
+                                        /*has_raw_data=*/true);
+    ASSERT_FALSE(sealed->HasFieldData(vec_id));
+    ASSERT_FALSE(sealed->HasFieldData(pk_id));
+    ASSERT_TRUE(sealed->IndexHasRawData(vec_id));
+
+    std::vector<SearchResult*> reduce_results{search_result.get()};
+    int64_t slice_nq = 1;
+    int64_t slice_topk = TOPK;
+    milvus::OpContext reduce_ctx;
+    ReduceHelper reduce_helper(reduce_results,
+                               plan.get(),
+                               ph_group.get(),
+                               &slice_nq,
+                               &slice_topk,
+                               1,
+                               nullptr,
+                               &reduce_ctx);
+    ASSERT_NO_THROW(reduce_helper.PreReduce());
+    ASSERT_EQ(search_result->primary_keys_.size(), TOPK);
+
+    milvus::OpContext fill_ctx;
+    fill_ctx.pinned_segment_state = search_result->pinned_segment_state_;
+    fill_ctx.pinned_state_owner = search_result->pinned_state_owner_;
+    static_cast<SegmentInternalInterface*>(sealed)->FillTargetEntry(
+        plan.get(), *search_result, &fill_ctx);
+
+    auto it = search_result->output_fields_data_.find(vec_id);
+    ASSERT_NE(it, search_result->output_fields_data_.end());
+    const auto& actual = it->second->vectors().float_vector().data();
+    ASSERT_EQ(actual.size(), TOPK * DIM);
+    for (int64_t i = 0; i < TOPK; ++i) {
+        auto offset = search_result->seg_offsets_[i];
+        for (int64_t d = 0; d < DIM; ++d) {
+            EXPECT_FLOAT_EQ(actual[i * DIM + d], vectors[offset * DIM + d]);
         }
     }
 }

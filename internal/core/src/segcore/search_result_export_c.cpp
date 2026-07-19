@@ -69,6 +69,21 @@ using CBufferPtr = std::unique_ptr<void, CFreeDeleter>;
 using ChunkSizesPtr = std::unique_ptr<int64_t, CFreeDeleter>;
 
 void
+InitSearchResultOpContext(const SearchResult& search_result,
+                          const milvus::OpContext* source,
+                          milvus::OpContext& target) {
+    if (source != nullptr) {
+        target.cancellation_token = source->cancellation_token;
+        target.runtime_load_priority = source->runtime_load_priority;
+        target.coload_fields = source->coload_fields;
+        target.trace_context = source->trace_context;
+        target.trace_span = source->trace_span;
+    }
+    target.pinned_segment_state = search_result.pinned_segment_state_;
+    target.pinned_state_owner = search_result.pinned_state_owner_;
+}
+
+void
 ReleaseArrowSchemaIfNeeded(ArrowSchema* schema) {
     if (schema != nullptr && schema->release != nullptr) {
         schema->release(schema);
@@ -774,18 +789,23 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
     if (num_extra_fields > 0 && extra_field_ids != nullptr &&
         search_result->get_total_result_count() > 0) {
         auto size = search_result->seg_offsets_.size();
-        milvus::OpContext op_ctx(cancel_token);
+        milvus::OpContext source_ctx(cancel_token);
+        milvus::OpContext result_op_ctx;
+        InitSearchResultOpContext(*search_result, &source_ctx, result_op_ctx);
         for (int64_t i = 0; i < num_extra_fields; i++) {
             milvus::futures::throwIfCancelled(cancel_token);
             auto field_id = milvus::FieldId(extra_field_ids[i]);
-            auto field_data = segment->bulk_subscript(
-                &op_ctx, field_id, search_result->seg_offsets_.data(), size);
+            auto field_data =
+                segment->bulk_subscript(&result_op_ctx,
+                                        field_id,
+                                        search_result->seg_offsets_.data(),
+                                        size);
             extra_fields[field_id] = std::move(field_data);
         }
         search_result->search_storage_cost_.scanned_remote_bytes +=
-            op_ctx.storage_usage.scanned_cold_bytes.load();
+            result_op_ctx.storage_usage.scanned_cold_bytes.load();
         search_result->search_storage_cost_.scanned_total_bytes +=
-            op_ctx.storage_usage.scanned_total_bytes.load();
+            result_op_ctx.storage_usage.scanned_total_bytes.load();
     }
 
     milvus::futures::throwIfCancelled(cancel_token);
@@ -934,6 +954,9 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
 
             auto& seg_res = seg_results[seg_idx];
             seg_res.temp_result.segment_ = sr->segment_;
+            seg_res.temp_result.pinned_segment_state_ =
+                sr->pinned_segment_state_;
+            seg_res.temp_result.pinned_state_owner_ = sr->pinned_state_owner_;
             seg_res.result_positions.reserve(pairs.size());
 
             for (auto& [pos, offset] : pairs) {
@@ -965,9 +988,11 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                         sr->segment_);
                 auto* seg_res_ptr = &seg_res;
                 futures.emplace_back(
-                    pool.Submit([segment, plan, seg_res_ptr, &op_ctx] {
+                    pool.Submit([segment, plan, sr, seg_res_ptr, &op_ctx] {
+                        milvus::OpContext result_op_ctx;
+                        InitSearchResultOpContext(*sr, &op_ctx, result_op_ctx);
                         segment->FillTargetEntry(
-                            plan, seg_res_ptr->temp_result, &op_ctx);
+                            plan, seg_res_ptr->temp_result, &result_op_ctx);
                     }));
             }
             for (auto& future : futures) {
@@ -979,7 +1004,9 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             auto segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     sr->segment_);
-            segment->FillTargetEntry(plan, seg_res.temp_result, &op_ctx);
+            milvus::OpContext result_op_ctx;
+            InitSearchResultOpContext(*sr, &op_ctx, result_op_ctx);
+            segment->FillTargetEntry(plan, seg_res.temp_result, &result_op_ctx);
         }
 
         // Write storage cost back to original search results

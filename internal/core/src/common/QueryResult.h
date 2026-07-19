@@ -348,6 +348,13 @@ struct SearchResult {
     // record the storage usage in search
     StorageCost search_storage_cost_;
 
+    // Carry the sealed segment's operation snapshot from query execution into
+    // the later reduce / output-fill phases.  SearchResult may outlive the
+    // QueryContext whose OpContext owns the original pin, so retain the
+    // type-erased state directly on the result.
+    std::shared_ptr<const void> pinned_segment_state_;
+    const void* pinned_state_owner_{nullptr};
+
     bool element_level_{false};
     std::vector<int32_t> element_indices_;
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>

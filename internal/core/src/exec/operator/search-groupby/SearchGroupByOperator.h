@@ -214,7 +214,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
                      std::optional<DataType> json_type,
                      bool strict_cast)
         : op_ctx_(op_ctx), segment_(segment), field_id_(field_id) {
-        from_data_ = segment_.HasFieldData(field_id_);
+        from_data_ = segment_.HasFieldData(field_id_, op_ctx_);
         if (!from_data_) {
             auto index = segment_.PinIndex(op_ctx_, field_id_);
             if (index.empty()) {
@@ -235,7 +235,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
     std::optional<OutputType>
     Get(int64_t idx) const {
         if (from_data_) {
-            auto id_offset_pair = segment_.get_chunk_by_offset(field_id_, idx);
+            auto id_offset_pair =
+                segment_.get_chunk_by_offset(field_id_, idx, op_ctx_);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<InnerRawType, std::string>) {

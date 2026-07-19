@@ -140,7 +140,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  milvus::OpContext* op_ctx = nullptr) const override;
     // Checks the loaded external manifest for a storage column.
     bool
-    HasColumnInLoadedManifest(const std::string& column_name) const override;
+    HasColumnInLoadedManifest(
+        const std::string& column_name,
+        milvus::OpContext* op_ctx = nullptr) const override;
 
     std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
     GetFieldDataIfExist(FieldId field_id) const;
@@ -177,8 +179,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  bool is_array) const override;
 
     std::string
-    GetJsonFlatIndexNestedPath(FieldId field_id,
-                               std::string_view query_path) const override;
+    GetJsonFlatIndexNestedPath(
+        FieldId field_id,
+        std::string_view query_path,
+        milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
     Contain(const PkType& pk) const override;
@@ -1309,7 +1313,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     update_row_count(RuntimeResourceState& runtime, int64_t row_count) {
         runtime.row_count = row_count;
-        deleted_record_.set_sealed_row_count(row_count);
+    }
+
+    void
+    SyncDeletedRecordRowCount(const RuntimeResourceState& runtime) {
+        deleted_record_.set_sealed_row_count(runtime.row_count);
     }
 
     void
@@ -1582,8 +1590,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             std::vector<index::CacheIndexBasePtr> retired_cache_indexings;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                segment_.PublishState(
-                    segment_.BuildNextPublishedState(current, delta));
+                auto next = segment_.BuildNextPublishedState(current, delta);
+                std::unique_lock segment_lock(segment_.mutex_);
+                segment_.SyncDeletedRecordRowCount(*next->runtime);
+                segment_.PublishState(std::move(next));
                 retired_indexings.swap(retired_vector_indexings_);
                 retired_cache_indexings.swap(retired_cache_indexings_);
             }
@@ -2288,6 +2298,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return FieldAccessible(field_id);
     }
 
+    int32_t
+    TestDeletedRecordRowCount() const {
+        std::shared_lock lck(mutex_);
+        return deleted_record_.sealed_row_count();
+    }
+
     std::shared_ptr<const IArrayOffsets>
     TestGetArrayOffsets(FieldId field_id) const {
         return GetArrayOffsets(field_id);
@@ -2386,6 +2402,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     TestPublishRuntimeResourceState(
         std::shared_ptr<RuntimeResourceState> runtime) {
         std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        std::unique_lock segment_lock(mutex_);
+        SyncDeletedRecordRowCount(*runtime);
         PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
     }
 

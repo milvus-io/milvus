@@ -301,6 +301,10 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Set op context to query context
     query_context->set_op_context(&op_context);
+    segment->ValidateExternalFieldsInLoadedManifest(
+        access_entries_,
+        skipped_access_entries_,
+        query_context->get_op_context());
 
     // Do task execution
     auto result = ExecuteTask(plan, query_context);
@@ -419,6 +423,40 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     segment->PinOpSnapshot(&op_context);
     auto active_count = segment->get_active_count(timestamp_, &op_context);
 
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment,
+        active_count,
+        timestamp_,
+        collection_ttl_timestamp_,
+        consistency_level_,
+        node.plan_options_,
+        std::make_shared<milvus::exec::QueryConfig>(),
+        nullptr,
+        std::unordered_map<std::string,
+                           std::shared_ptr<milvus::exec::BaseConfig>>(),
+        entity_ttl_physical_time_us_);
+    query_context->set_search_info(node.search_info_);
+    query_context->set_placeholder_group(placeholder_group_);
+    if (enable_expr_cache_) {
+        query_context->set_enable_expr_cache(true);
+        query_context->set_enable_sub_expr_cache_write(false);
+    }
+    query_context->set_op_context(&op_context);
+
+    segment->ValidateExternalFieldsInLoadedManifest(
+        access_entries_,
+        skipped_access_entries_,
+        query_context->get_op_context());
+
+    auto attach_snapshot = [&](SearchResult& result) {
+        auto* query_op_context = query_context->get_op_context();
+        AssertInfo(query_op_context != nullptr,
+                   "QueryContext has no OpContext");
+        result.pinned_segment_state_ = query_op_context->pinned_segment_state;
+        result.pinned_state_owner_ = query_op_context->pinned_state_owner;
+    };
+
     // Handle filter-only mode: execute only the filter and return valid_count
     if (filter_only_) {
         SearchResult filter_only_result;
@@ -431,6 +469,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
         if (active_count == 0) {
             filter_only_result.valid_count_ = 0;
+            attach_snapshot(filter_only_result);
             search_result_opt_ = std::move(filter_only_result);
             return;
         }
@@ -449,27 +488,6 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                 active_count);
         } else {
             auto plan_fragment = plan::PlanFragment(filter_only_plan);
-            auto query_context = std::make_shared<milvus::exec::QueryContext>(
-                DEAFULT_QUERY_ID,
-                segment,
-                active_count,
-                timestamp_,
-                collection_ttl_timestamp_,
-                consistency_level_,
-                node.plan_options_,
-                std::make_shared<milvus::exec::QueryConfig>(),
-                nullptr,
-                std::unordered_map<std::string,
-                                   std::shared_ptr<milvus::exec::BaseConfig>>(),
-                entity_ttl_physical_time_us_);
-
-            if (enable_expr_cache_) {
-                query_context->set_enable_expr_cache(true);
-                query_context->set_enable_sub_expr_cache_write(false);
-            }
-
-            query_context->set_op_context(&op_context);
-
             auto result = ExecuteTask(plan_fragment, query_context);
 
             if (result != nullptr && !result->childrens().empty()) {
@@ -488,45 +506,33 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                   valid_count,
                   active_count);
         filter_only_result.valid_count_ = valid_count;
+        attach_snapshot(filter_only_result);
         search_result_opt_ = std::move(filter_only_result);
+        return;
+    }
+
+    if (!segment->FieldAccessible(node.search_info_.field_id_,
+                                  query_context->get_op_context())) {
+        const auto& placeholder = placeholder_group_->at(0);
+        auto empty = empty_search_result(placeholder.num_of_queries_,
+                                         placeholder.element_level_);
+        attach_snapshot(empty);
+        search_result_opt_ = std::move(empty);
         return;
     }
 
     // PreExecute: skip all calculation
     if (active_count == 0) {
         const auto& placeholder = placeholder_group_->at(0);
-        search_result_opt_ = empty_search_result(placeholder.num_of_queries_,
-                                                 placeholder.element_level_);
+        auto empty = empty_search_result(placeholder.num_of_queries_,
+                                         placeholder.element_level_);
+        attach_snapshot(empty);
+        search_result_opt_ = std::move(empty);
         return;
     }
 
     // Construct plan fragment
     auto plan = plan::PlanFragment(node.plannodes_);
-
-    // Set query context
-    auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        DEAFULT_QUERY_ID,
-        segment,
-        active_count,
-        timestamp_,
-        collection_ttl_timestamp_,
-        consistency_level_,
-        node.plan_options_,
-        std::make_shared<milvus::exec::QueryConfig>(),
-        nullptr,
-        std::unordered_map<std::string,
-                           std::shared_ptr<milvus::exec::BaseConfig>>(),
-        entity_ttl_physical_time_us_);
-
-    query_context->set_search_info(node.search_info_);
-    query_context->set_placeholder_group(placeholder_group_);
-    if (enable_expr_cache_) {
-        query_context->set_enable_expr_cache(true);
-        query_context->set_enable_sub_expr_cache_write(false);
-    }
-
-    // Set op context to query context
-    query_context->set_op_context(&op_context);
 
     // Do plan fragment task work
     auto result = ExecuteTask(plan, query_context);
@@ -535,6 +541,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     search_result_opt_ = std::move(query_context->get_search_result());
     auto* query_op_context = query_context->get_op_context();
     AssertInfo(query_op_context != nullptr, "QueryContext has no OpContext");
+    attach_snapshot(*search_result_opt_);
     search_result_opt_->search_storage_cost_.scanned_remote_bytes =
         query_op_context->storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =

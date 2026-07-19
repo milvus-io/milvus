@@ -419,10 +419,11 @@ PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
         int64_t row_offset = current_pos_;
         while (processed < batch_rows) {
             auto [chunk_id, offset_in_chunk] =
-                segment_->get_chunk_by_offset(field_id, row_offset);
-            auto count = std::min(
-                batch_rows - processed,
-                segment_->chunk_size(field_id, chunk_id) - offset_in_chunk);
+                segment_->get_chunk_by_offset(field_id, row_offset, op_ctx_);
+            auto count =
+                std::min(batch_rows - processed,
+                         segment_->chunk_size(field_id, chunk_id, op_ctx_) -
+                             offset_in_chunk);
             AssertInfo(count > 0,
                        "invalid field validity range at row offset {} for "
                        "field {}",

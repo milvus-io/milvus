@@ -50,6 +50,40 @@
 namespace milvus::segcore {
 
 void
+SegmentInternalInterface::ValidateExternalFieldsInLoadedManifest(
+    const std::vector<FieldId>& fields,
+    const std::vector<FieldId>& skipped_fields,
+    milvus::OpContext* op_ctx) const {
+    const auto& schema = get_schema(op_ctx);
+    if (!schema.is_external_collection()) {
+        return;
+    }
+
+    for (auto field_id : fields) {
+        if (std::find(skipped_fields.begin(), skipped_fields.end(), field_id) !=
+                skipped_fields.end() ||
+            !schema.has_field(field_id) ||
+            !schema.IsExternalManifestStoredField(field_id)) {
+            continue;
+        }
+
+        const auto& field_meta = schema[field_id];
+        auto column_name = schema.GetPhysicalColumnName(field_id);
+        if (!HasColumnInLoadedManifest(column_name, op_ctx)) {
+            throw milvus::SegcoreError(
+                milvus::FieldNotLoaded,
+                fmt::format(
+                    "external field \"{}\" (storage column \"{}\") is not "
+                    "available in the current loaded external collection "
+                    "manifest; run RefreshExternalCollection and reload the "
+                    "collection before accessing this field",
+                    field_meta.get_name().get(),
+                    column_name));
+        }
+    }
+}
+
+void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
                                           SearchResult& results,
                                           milvus::OpContext* op_ctx) const {
@@ -61,11 +95,12 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     Assert(results.primary_keys_.size() == 0);
     results.primary_keys_.resize(size);
 
-    auto pk_field_id_opt = get_schema().get_primary_field_id();
+    const auto& schema = get_schema(op_ctx);
+    auto pk_field_id_opt = schema.get_primary_field_id();
     AssertInfo(pk_field_id_opt.has_value(),
                "Cannot get primary key offset from schema");
     auto pk_field_id = pk_field_id_opt.value();
-    AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
+    AssertInfo(IsPrimaryKeyDataType(schema[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
 
     segcore::CheckCancellation(op_ctx, get_segment_id(), "FillPrimaryKeys");
@@ -124,7 +159,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                         results.seg_offsets_.data(),
                                         size,
                                         target_dynamic_fields);
-        } else if (!is_field_exist(field_id)) {
+        } else if (!is_field_exist(field_id, &local_ctx)) {
             field_data = bulk_subscript_not_exist_field(field_meta, size);
         } else {
             field_data = bulk_subscript(
@@ -164,6 +199,16 @@ SegmentInternalInterface::Search(
                                        std::move(trace_span));
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
+    std::vector<FieldId> skipped_access_entries;
+    if (filter_only) {
+        skipped_access_entries.push_back(
+            plan->plan_node_->search_info_.field_id_);
+        skipped_access_entries.insert(skipped_access_entries.end(),
+                                      plan->target_entries_.begin(),
+                                      plan->target_entries_.end());
+    }
+    visitor.SetAccessEntries(plan->access_entries_,
+                             std::move(skipped_access_entries));
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -222,6 +267,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    visitor.SetAccessEntries(plan->access_entries_);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
     milvus::OpContext fte_op_ctx;
@@ -658,6 +704,8 @@ SegmentInternalInterface::Retrieve(
     // Pin one published-state snapshot for this offset-driven retrieve so the
     // FillTargetEntry read path stays layout-consistent. No-op for growing.
     PinOpSnapshot(&fte_op_ctx);
+    ValidateExternalFieldsInLoadedManifest(
+        Plan->access_entries_, {}, &fte_op_ctx);
     FillTargetEntry(
         trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
     std::chrono::high_resolution_clock::time_point get_target_entry_end =

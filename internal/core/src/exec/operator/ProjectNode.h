@@ -73,7 +73,6 @@ class PhyProjectNode : public Operator {
     bool is_finished_{false};
     const std::vector<FieldId> fields_to_project_;
     QueryContext* query_context_;
-    OpContext* op_context_;
 };
 }  // namespace exec
 }  // namespace milvus

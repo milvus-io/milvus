@@ -406,6 +406,11 @@ class DeletedRecord {
         deleted_mask_.resize(row_count);
     }
 
+    int32_t
+    sealed_row_count() const {
+        return sealed_row_count_;
+    }
+
     std::vector<std::pair<Timestamp, BitsetType>>
     get_snapshots() const {
         std::shared_lock<std::shared_mutex> lock(snap_lock_);
@@ -429,7 +434,7 @@ class DeletedRecord {
     std::shared_ptr<SortedDeleteList> deleted_lists_;
     // max timestamp of deleted records which replayed in load process
     Timestamp max_load_timestamp_{0};
-    int32_t sealed_row_count_;
+    int32_t sealed_row_count_{0};
     // used to remove duplicated deleted records for fast access
     BitsetType deleted_mask_;
 

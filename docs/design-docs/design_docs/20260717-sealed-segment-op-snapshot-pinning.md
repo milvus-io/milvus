@@ -54,11 +54,11 @@ Non-goals:
 
 ### Carrier: a type-erased slot on `milvus::OpContext`
 
-`OpContext` (milvus-common, `common/OpContext.h`) is already created one-per-operation
-per segment at the segcore C API boundary (`segment_c.cpp`: `AsyncSearch`,
-`AsyncRetrieve`, `SegmentLoad`, `AsyncReopenSegment`) and threaded through roughly half
-of the read accessors. It is the natural carrier for the pin. milvus-common must not
-know segcore types, so the slot is type-erased:
+`OpContext` (milvus-common, `common/OpContext.h`) is the existing operation-scoped
+carrier for cancellation, load priority, tracing, and storage accounting. Query
+execution creates its per-segment context in `ExecPlanNodeVisitor`; load/reopen paths
+create their own contexts at the segcore C API boundary. It is the natural carrier for
+the pin. milvus-common must not know segcore types, so the slot is type-erased:
 
 ```cpp
 // milvus-common: common/OpContext.h
@@ -94,9 +94,11 @@ The query visitor creates the per-segment `OpContext` and calls `PinOpSnapshot()
 before deriving `active_count` or constructing the plan fragment. This is after schema
 preparation at the C API / segment entry and before any layout-derived expression
 state is created. Once the `QueryContext` exists, it is the exec/query layer's single
-source of the operation context: operators and expressions obtain
-`query_context->get_op_context()` and pass only the resulting `OpContext*` across the
-lower-level segcore accessor boundary.
+source of the operation context: operators obtain
+`query_context->get_op_context()` at the point of use, while `CompileExpression`
+resolves the same pointer from `QueryContext` into the physical expression tree's
+pre-existing `op_ctx_` slot. Only the resulting `OpContext*` crosses the lower-level
+segcore accessor boundary; there is no second query-side propagation chain.
 Offset-driven `RetrieveByOffsets` is a separate sealed-segment read operation and pins
 at its own entry.
 
@@ -106,6 +108,13 @@ deferred ORDER BY fields). The visitor therefore copies its pin into `RetrieveRe
 and `SegmentInternalInterface::Retrieve()` reconstructs the fill `OpContext` from that
 exact pin. **Re-pinning between these phases is forbidden**: filter coordinates from
 snapshot A must never be applied to columns or schema from snapshot B.
+
+Search has the same lifetime split: the per-segment visitor returns before cross-segment
+reduce, PK fill, global-refine reads, extra-field export, and ordered target-field fill.
+Each `SearchResult` therefore carries its segment's type-erased pin. Reduce/export
+reconstructs a separate temporary `OpContext` for each result/segment; a shared
+cross-segment pin slot is forbidden because parallel segments must not overwrite or
+reuse one another's snapshot identity.
 
 Writers never pin. If a writer that shares an op_ctx with a subsequent read path ever
 publishes, it must clear the pin (`pinned_segment_state.reset()`) before that later read
@@ -170,8 +179,11 @@ mechanical parameter-passing with no behavior change when unpinned.
   "decisions from A applied to B's layout" scenario becomes unrepresentable.
 - Readers get *faster*: one atomic shared_ptr load per operation instead of one per
   accessor call.
-- Writers are untouched: publish/Reopen semantics, staged commit, rollback — all
-  unchanged. A mid-operation publish simply takes effect for the next operation.
+- Reopen's final staged publication synchronizes the live delete-state row-count
+  metadata and swaps the new published state under the segment mutex. Staged row-count
+  mutations touch only the staged `RuntimeResourceState`, so cancellation/failure
+  before publication cannot leak a future row count into `deleted_record_`.
+- A mid-operation publish simply takes effect for the next operation.
 
 ## Completeness: why one pointer is enough
 
@@ -189,6 +201,11 @@ Deliberately outside the snapshot, and correctly so: `deleted_record_` (deletes
 are monotonic and timestamp-filtered; they must keep applying to in-flight
 reads), growing-segment mutable records (growing has no Reopen), and
 non-query-semantic load progress / statistics bookkeeping.
+
+Although delete contents remain live, the sealed row-count used to size delete masks
+must advance atomically with the runtime publication. It is derived from
+`RuntimeResourceState::row_count` only at the final publish boundary; it is not an
+independent staged state container.
 
 ### Write-side proof
 
@@ -254,6 +271,12 @@ snapshot-isolation intuition.
    then verify `bulk_subscript` still returns exact vectors from the pinned column.
    The reverse raw-index to raw-column transition is covered by the same invariant:
    `IndexHasRawData`, `get_vector`, and `get_raw_data` all resolve the same pin.
+6. **Result handoff**: exercise QueryContext -> `RetrieveResult` and QueryContext ->
+   `SearchResult`, republish the raw-index transition, then run retrieve materialization
+   and search reduce/PK/target fill from the carried per-segment pins.
+7. **Staged row-count rollback**: stage a different runtime row count, abort before
+   publish, and assert both the published row count and delete-state row count remain
+   unchanged; then publish and assert they advance together.
 
 ## Alternatives considered
 
@@ -266,8 +289,12 @@ snapshot-isolation intuition.
   Rejected for auditability.
 - **Thread-local pin with RAII guard**: no signature changes, but segcore operations
   hop threads under folly executors; thread identity is not operation identity.
-- **Read locks around operations**: rejected outright — blocks Reopen behind slow
-  scans and violates the lock-free-reader rule this subsystem is built on.
+- **Extend segment read locks across the full logical operation**: the initial
+  `Search`/`Retrieve` call already takes the segment's shared mutex, but that lock ends
+  before cross-segment reduce, PK/target-field fill, and export. Holding it across
+  those later phases would couple segment lifetime to cross-component work and block
+  Reopen behind slow reduce/export. Snapshot pinning preserves the original view
+  without extending lock scope.
 
 ## Rollout
 
@@ -280,23 +307,21 @@ snapshot-isolation intuition.
 Steps 2–3 can be one PR; the behavior flips on with the `PinOpSnapshot` calls and is
 trivially revertible by removing them.
 
-## Implementation status (2026-07-18, gaps closed)
+## Implementation status (2026-07-19, gaps closed)
 
 The implementation lives on branch `feat/sealed-op-snapshot-pinning`. The five
 spec-review bypasses are fixed, a follow-up sweep closed the remaining read-path
-bypasses, and the Reopen-race regression test is in place. One open question
-remains a product decision (does not gate correctness):
+bypasses, and the Reopen-race regression tests are in place.
 
-1. **Is the race reachable in production?** The common Reopen (add/drop field)
-   carries existing columns over unchanged (`CloneRuntimeResourceState`:
-   `state->fields = current->fields`), so a query reading field F is unaffected
-   by schema changes to other fields — zero mismatch. The residual window only
-   opens when the *queried* field's column is replaced mid-query via
-   `fields_to_reload` (index raw-data transition), `column_groups_to_replace`,
-   or v3 manifest advance (compaction) — AND only if those paths are not already
-   drained against in-flight queries by the query scheduler. No reproduction has
-   been demonstrated; it is a logical-mismatch (wrong rows / OOB assert), NOT a
-   use-after-free (the read snapshot is held alive per accessor call).
+1. **The race is reachable at representation transitions.** Ordinary schema changes
+   that leave queried field F untouched carry its column forward, so they do not
+   create a layout mismatch for F. The concrete failure window is a transition of F
+   itself, such as no-raw vector index -> raw-data-capable vector index, where the new
+   published state drops the raw column while changing the accessor decision. The
+   retrieve and search regression tests below reproduce that transition between query
+   execution and output materialization. The failure is a cross-snapshot logical
+   mismatch/assertion, not a use-after-free: the old immutable state and its resources
+   remain alive through the operation pin.
 
 2. **The first implementation only partially achieved the pin** (spec review) —
    now RESOLVED. The five bypasses below have been fixed so every read path
@@ -326,13 +351,17 @@ remains a product decision (does not gate correctness):
    constructors `PhyColumnExpr` / `PhyUnaryRangeFilterExpr` plus
    `ReorderConjunctExpr` and `CreateTTLFieldFilterExpression`.
 
-   Intentionally left unpinned (documented): cross-segment / cross-operation
-   reduce+export paths (`search_result_export_c.cpp`, `Reduce.cpp`) — their
-   op_ctx is shared across segments so the owner guard rejects any pin, matching
-   the "each operation pins independently" non-goal; `GetJsonFlatIndexNestedPath`
-   (pre-pin exec-path metadata probe, boolean decision only); standalone PK-lookup /
-   delete accessors (`Contain` and delete ingestion) that are off the pinned
-   search/retrieve read path; and the load-immutable member reads
+   The final query-chain sweep also closed the later-lifetime gaps: `SearchResult`
+   carries the visitor pin through reduce/export, where each segment gets a separate
+   temporary op context for row-count validation, global refine, PK fill, extra-field
+   reads, and ordered target-field fill. `GetJsonFlatIndexNestedPath`, element-level
+   array-offset lookup, Project field existence, struct validity chunk coordinates,
+   group-by raw/index routing, and external-manifest/field-access admission all resolve
+   the QueryContext pin.
+
+   Intentionally left unpinned (documented): standalone PK-lookup / delete accessors
+   (`Contain` and delete ingestion) that are off the pinned search/retrieve read path;
+   and the load-immutable member reads
    (`col_index_meta_`, `is_sorted_by_pk_`, and load/publish/reopen internals)
    which never pin by design.
 
@@ -354,10 +383,14 @@ the fault-injection witness is `num_chunk_data(F, nullptr)==0` vs
 `PinIdentityAcrossConcurrentPublish` (every `Capture*` on one op_ctx returns the
 same snapshot pointer across a concurrent publish), and `OwnerGuardRejectsForeignPin`
 (segment X's pin, consulted by segment Y, returns Y's live state).
-`PinnedVectorRetrieveSurvivesRawIndexTransition` directly exercises #51594's
-no-raw-index to raw-index transition: the live state drops the vector column and
-advertises index raw data after the operation pins, while pinned `bulk_subscript`
-continues to return the exact vectors from its original column snapshot.
+`PinnedVectorRetrieveSurvivesRawIndexTransition` exercises #51594's no-raw-index to
+raw-index transition through the production QueryContext -> `RetrieveResult` handoff:
+the live state drops the vector column and advertises index raw data after query
+execution, while materialization through the carried pin returns exact vectors.
+`SearchResultPinSurvivesRawIndexTransitionDuringOutputFill` performs the equivalent
+search handoff and proves reduce PK fill plus target-vector fill stay on the original
+per-segment snapshot. `StagedRowCountDoesNotMutateDeleteStateBeforePublish` covers
+rollback and final row-count/delete-state publication.
 
 milvus-common with the two OpContext fields is landed and `conanfile.py` is
 bumped to `milvus-common/1.0.0-6b16d93`. Note: the package bump also changed

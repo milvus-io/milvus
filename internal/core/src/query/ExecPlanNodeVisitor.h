@@ -154,6 +154,13 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return filter_only_;
     }
 
+    void
+    SetAccessEntries(std::vector<FieldId> access_entries,
+                     std::vector<FieldId> skipped_access_entries = {}) {
+        access_entries_ = std::move(access_entries);
+        skipped_access_entries_ = std::move(skipped_access_entries);
+    }
+
     ExecPlanNodeVisitor&
     SetEnableExprCache(bool enable) {
         enable_expr_cache_ = enable;
@@ -193,6 +200,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool filter_only_ = false;
     bool enable_expr_cache_ = false;
     milvus::tracer::SpanPtr trace_span_ = nullptr;
+    std::vector<FieldId> access_entries_;
+    std::vector<FieldId> skipped_access_entries_;
 };
 
 // for test use only

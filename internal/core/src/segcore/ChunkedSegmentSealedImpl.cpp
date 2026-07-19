@@ -351,8 +351,10 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
 
 std::string
 ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
-    FieldId field_id, std::string_view query_path) const {
-    auto runtime = CaptureRuntimeResourceState();
+    FieldId field_id,
+    std::string_view query_path,
+    milvus::OpContext* op_ctx) const {
+    auto runtime = CaptureRuntimeResourceState(op_ctx);
     std::string best_path;
     int path_len_diff = std::numeric_limits<int>::max();
     for (const auto& index : runtime->json_indices) {
@@ -2200,10 +2202,7 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         runtime->timestamps = std::move(timestamps);
         runtime->timestamp_index = std::make_shared<const TimestampIndex>();
         runtime->timestamp_index_slot.reset();
-        {
-            std::unique_lock lck(mutex_);
-            update_row_count(*runtime, 0);
-        }
+        update_row_count(*runtime, 0);
         return;
     }
 
@@ -2249,10 +2248,7 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
     }
 
     // Row count
-    {
-        std::unique_lock lck(mutex_);
-        update_row_count(*runtime, num_rows);
-    }
+    update_row_count(*runtime, num_rows);
 }
 
 void
@@ -2981,7 +2977,6 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                 }
                 committer.Commit([this, num_rows](RuntimeResourceState& runtime,
                                                   PublishedSegmentState&) {
-                    std::unique_lock lck(mutex_);
                     update_row_count(runtime, num_rows);
                 });
             }
@@ -3091,10 +3086,11 @@ ChunkedSegmentSealedImpl::load_system_field_internal(
     {
         std::unique_lock lck(mutex_);
         update_row_count(*target_runtime, num_rows);
-    }
-    if (owned_runtime != nullptr && publish_ready) {
-        PublishRuntimeStateLocked(
-            ToConstRuntimeState(std::move(owned_runtime)));
+        if (owned_runtime != nullptr && publish_ready) {
+            SyncDeletedRecordRowCount(*target_runtime);
+            PublishRuntimeStateLocked(
+                ToConstRuntimeState(std::move(owned_runtime)));
+        }
     }
 }
 
@@ -5659,8 +5655,7 @@ ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
                         op_ctx->runtime_load_priority;
                     local_ctx.pinned_segment_state =
                         op_ctx->pinned_segment_state;
-                    local_ctx.pinned_state_owner =
-                        op_ctx->pinned_state_owner;
+                    local_ctx.pinned_state_owner = op_ctx->pinned_state_owner;
                 }
                 // Intentionally bypass bulk_subscript's scalar-index raw-data
                 // routing here: the sealed VARCHAR PK fast path reads the
@@ -6185,8 +6180,8 @@ ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id,
 // Checks the cached loaded manifest instead of field-data/index bitsets.
 bool
 ChunkedSegmentSealedImpl::HasColumnInLoadedManifest(
-    const std::string& column_name) const {
-    auto load_info = CaptureLoadInfoSnapshot();
+    const std::string& column_name, milvus::OpContext* op_ctx) const {
+    auto load_info = CaptureLoadInfoSnapshot(op_ctx);
     if (load_info == nullptr || !load_info->HasManifestPath()) {
         return true;
     }
@@ -6999,6 +6994,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     apply_loaded_column(*next_runtime, old_column, *current);
 
     auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
+    SyncDeletedRecordRowCount(*published_runtime);
     if (SystemProperty::Instance().IsSystem(field_id)) {
         PublishRuntimeStateLocked(published_runtime);
     } else {
@@ -7720,36 +7716,36 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         return;
     }
 
-    committer.Commit(
-        [&](RuntimeResourceState& runtime, PublishedSegmentState&) {
-            for (auto& [field_meta, column] : fields_to_commit) {
-                auto field_id = field_meta.get_id();
-                runtime.fields.emplace(field_id, std::move(column));
-                auto [field_has_setting, field_mmap_enabled] =
-                    schema_snapshot->MmapEnabled(field_id);
-                auto is_vector = IsVectorDataType(field_meta.get_data_type());
-                auto& mmap_config =
-                    storage::MmapManager::GetInstance().GetMmapConfig();
-                bool global_use_mmap =
-                    is_vector ? mmap_config.GetVectorFieldEnableMmap()
-                              : mmap_config.GetScalarFieldEnableMmap();
-                bool use_mmap =
-                    field_has_setting ? field_mmap_enabled : global_use_mmap;
-                if (use_mmap) {
-                    runtime.mmap_field_ids.insert(field_id);
-                } else {
-                    runtime.mmap_field_ids.erase(field_id);
-                }
-                EnsureArrayOffsetsForStructField(
-                    field_meta, runtime.row_count, runtime);
-                LOG_INFO(
-                    "fill empty field {} (data type {}) for growing segment {} "
-                    "done",
-                    field_meta.get_data_type(),
-                    field_id.get(),
-                    id_);
+    committer.Commit([&](RuntimeResourceState& runtime,
+                         PublishedSegmentState&) {
+        for (auto& [field_meta, column] : fields_to_commit) {
+            auto field_id = field_meta.get_id();
+            runtime.fields.emplace(field_id, std::move(column));
+            auto [field_has_setting, field_mmap_enabled] =
+                schema_snapshot->MmapEnabled(field_id);
+            auto is_vector = IsVectorDataType(field_meta.get_data_type());
+            auto& mmap_config =
+                storage::MmapManager::GetInstance().GetMmapConfig();
+            bool global_use_mmap = is_vector
+                                       ? mmap_config.GetVectorFieldEnableMmap()
+                                       : mmap_config.GetScalarFieldEnableMmap();
+            bool use_mmap =
+                field_has_setting ? field_mmap_enabled : global_use_mmap;
+            if (use_mmap) {
+                runtime.mmap_field_ids.insert(field_id);
+            } else {
+                runtime.mmap_field_ids.erase(field_id);
             }
-        });
+            EnsureArrayOffsetsForStructField(
+                field_meta, runtime.row_count, runtime);
+            LOG_INFO(
+                "fill empty field {} (data type {}) for growing segment {} "
+                "done",
+                field_meta.get_data_type(),
+                field_id.get(),
+                id_);
+        }
+    });
 }
 
 void

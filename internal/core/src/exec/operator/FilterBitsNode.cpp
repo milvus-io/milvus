@@ -46,7 +46,9 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
     auto* segment =
         query_context != nullptr ? query_context->get_segment() : nullptr;
     if (segment != nullptr &&
-        segment->get_schema().get_ttl_field_id().has_value()) {
+        segment->get_schema(query_context->get_op_context())
+            .get_ttl_field_id()
+            .has_value()) {
         key += fmt::format("|entity_ttl_physical_time_us:{}",
                            query_context->get_entity_ttl_physical_time_us());
     }

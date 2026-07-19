@@ -52,7 +52,7 @@ class PhyCallExpr : public Expr {
           active_count_(active_count),
           segment_(segment),
           batch_size_(batch_size) {
-        size_per_chunk_ = segment_->size_per_chunk();
+        size_per_chunk_ = segment_->size_per_chunk(op_ctx);
         num_chunk_ = upper_div(active_count_, size_per_chunk_);
         AssertInfo(
             batch_size_ > 0,

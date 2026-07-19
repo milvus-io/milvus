@@ -102,10 +102,11 @@ PhyIterativeElementFilterNode::GetOutput() {
     }
 
     auto segment = query_context_->get_segment();
+    auto* op_ctx = query_context_->get_op_context();
     auto& field_meta =
-        segment->get_schema().GetFirstArrayFieldInStruct(struct_name_);
+        segment->get_schema(op_ctx).GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
-    auto array_offsets = segment->GetArrayOffsets(field_id);
+    auto array_offsets = segment->GetArrayOffsets(field_id, op_ctx);
     if (array_offsets == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "IArrayOffsets not found for field {}",

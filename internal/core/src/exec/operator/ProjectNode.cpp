@@ -119,13 +119,12 @@ PhyProjectNode::PhyProjectNode(
                projectNode->id(),
                "Project"),
       fields_to_project_(projectNode->FieldsToProject()),
-      query_context_(nullptr),
-      op_context_(nullptr) {
+      query_context_(nullptr) {
     auto exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
     segment_ = query_context_->get_segment();
-    op_context_ = query_context_->get_op_context();
-    AssertInfo(op_context_, "op_context_ cannot be nullptr for ProjectNode");
+    AssertInfo(query_context_->get_op_context(),
+               "QueryContext has no OpContext for ProjectNode");
     AssertInfo(segment_, "segment_ cannot be nullptr for ProjectNode");
 }
 
@@ -171,6 +170,8 @@ PhyProjectNode::GetOutput() {
         return nullptr;
     }
     auto row_type = OutputType();
+    auto* op_context = query_context_->get_op_context();
+    AssertInfo(op_context, "QueryContext has no OpContext for ProjectNode");
     std::vector<VectorPtr> column_vectors;
     column_vectors.reserve(fields_to_project_.size());
     for (int i = 0; i < fields_to_project_.size(); i++) {
@@ -193,7 +194,7 @@ PhyProjectNode::GetOutput() {
             continue;
         }
 
-        if (!segment_->is_field_exist(field_id)) {
+        if (!segment_->is_field_exist(field_id, op_context)) {
             auto field_data =
                 InitScalarFieldDataWithLength(column_type, selected_count);
             auto valid_map = TargetBitmap(selected_count, false);
@@ -204,7 +205,7 @@ PhyProjectNode::GetOutput() {
         }
 
         TargetBitmap valid_map(selected_count);
-        auto field_data = bulk_script_field_data(op_context_,
+        auto field_data = bulk_script_field_data(op_context,
                                                  field_id,
                                                  column_type,
                                                  selected_offsets.data(),

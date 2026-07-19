@@ -351,7 +351,7 @@ class PhyCompareFilterExpr : public Expr {
                                 offset % size_per_chunk};
                     } else {
                         return segment_chunk_reader_.segment_
-                            ->get_chunk_by_offset(field, offset);
+                            ->get_chunk_by_offset(field, offset, op_ctx_);
                     }
                 };
 
