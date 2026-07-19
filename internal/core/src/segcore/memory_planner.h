@@ -131,9 +131,9 @@ SetFieldDataReadWindowBytes(int64_t bytes);
 int64_t
 LoadTransientPoolUpperBound(size_t max_task_overhead_bytes);
 
-// Process-wide upper bound for loading overhead shared by all load readers.
-// Individual cells still report their own file-local overhead; this value only
-// caps the sum of concurrently loading cells in the shared MCL group.
+// Process-wide upper bound enforced by the configured load transient budget.
+// A single oversized task can exceed the budget and therefore supplies the
+// lower bound. Callers must not register a shared cap when the budget is zero.
 int64_t
 LoadTransientSharedOverheadUpperBound(size_t max_task_overhead_bytes);
 
