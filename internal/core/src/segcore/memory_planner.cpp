@@ -103,6 +103,26 @@ LoadTransientPoolUpperBound(size_t max_task_overhead_bytes) {
     return static_cast<int64_t>(max_load_tasks * max_task_overhead_bytes);
 }
 
+int64_t
+LoadTransientSharedOverheadUpperBound(size_t max_task_overhead_bytes) {
+    auto pool_upper_bound =
+        LoadTransientPoolUpperBound(max_task_overhead_bytes);
+    auto budget_capacity =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
+            .CapacityBytes();
+    if (budget_capacity == 0) {
+        return pool_upper_bound;
+    }
+
+    auto max_int64 = static_cast<size_t>(std::numeric_limits<int64_t>::max());
+    auto task_overhead =
+        static_cast<int64_t>(std::min(max_task_overhead_bytes, max_int64));
+    auto budget_upper_bound =
+        static_cast<int64_t>(std::min(budget_capacity, max_int64));
+    return std::min(std::max(budget_upper_bound, task_overhead),
+                    pool_upper_bound);
+}
+
 void
 SetFieldDataLoadBatchTargetBytes(int64_t bytes) {
     FIELD_DATA_LOAD_BATCH_TARGET_BYTES.store(

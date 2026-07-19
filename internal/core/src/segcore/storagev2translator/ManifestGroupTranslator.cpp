@@ -183,6 +183,11 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         // metadata reports disk/encoded size which varies by format
         // (parquet=uncompressed column chunk size, iceberg/vortex=often 0)
         // and is not a reliable proxy for in-memory Arrow buffer size.
+        // TODO: Preserve the per-field bytes/row produced by DataNode Take
+        // sampling and use only the estimate for fields selected by this
+        // translator. The current fallback is aggregated across the whole row,
+        // so applying it to each lazy field translator can greatly overestimate
+        // narrow fields.
         //
         // Non-external: use format metadata; only if it reports zero
         // (e.g. Vortex without size stats) fall back to a 4KB/row
