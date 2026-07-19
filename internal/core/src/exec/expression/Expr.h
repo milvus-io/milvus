@@ -1769,6 +1769,39 @@ class SegmentExpr : public Expr {
         return ProcessIndexChunksImpl<T>(func, true, validity_mode, values...);
     }
 
+    TargetBitmap
+    GetFieldRowValidity(int64_t row_count) const {
+        TargetBitmap valid_result(row_count, true);
+        if (row_count == 0) {
+            return valid_result;
+        }
+
+        int64_t processed_size = 0;
+        for (int64_t chunk_id = 0;
+             chunk_id < num_data_chunk_ && processed_size < row_count;
+             ++chunk_id) {
+            auto chunk_size = segment_->is_chunked()
+                                  ? segment_->chunk_size(field_id_, chunk_id)
+                                  : size_per_chunk_;
+            auto size = std::min(chunk_size, row_count - processed_size);
+            if (size == 0) {
+                continue;
+            }
+            segment_->ApplyFieldValidData(op_ctx_,
+                                          field_id_,
+                                          chunk_id,
+                                          0,
+                                          size,
+                                          valid_result.view() + processed_size);
+            processed_size += size;
+        }
+        AssertInfo(processed_size == row_count,
+                   "field validity row count mismatch: expected {}, got {}",
+                   row_count,
+                   processed_size);
+        return valid_result;
+    }
+
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunksImpl(FUNC func,
@@ -1874,7 +1907,7 @@ class SegmentExpr : public Expr {
                         }
                     } else if (cached_is_nested_index_ &&
                                func_returns_row_level) {
-                        valid_res = TargetBitmap(active_count_, true);
+                        valid_res = GetFieldRowValidity(active_count_);
                     } else {
                         valid_res = index_ptr->IsNotNull();
                     }
