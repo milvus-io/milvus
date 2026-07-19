@@ -2918,7 +2918,7 @@ func TestExternalCollectionDelegatorDoesNotCatchUpStreamingData(t *testing.T) {
 	replicaID := int64(65535)
 	vchannelName := "rootcoord-dml_1000_v0"
 	version := int64(2000)
-	startTs := tsoutil.ComposeTSByTime(time.Now().Add(-48*time.Hour), 0)
+	startTs := tsoutil.ComposeTSByTime(time.Now().Add(-48 * time.Hour))
 
 	manager := segments.NewManager()
 	loader := &segments.MockLoader{}
@@ -2976,7 +2976,7 @@ func TestExternalCollectionDelegatorDoesNotCatchUpStreamingData(t *testing.T) {
 }
 
 func TestExternalCollectionWaitTSafeUsesFullSnapshotTimestamp(t *testing.T) {
-	oldTSafe := tsoutil.ComposeTSByTime(time.Now().Add(-365*24*time.Hour), 0)
+	oldTSafe := tsoutil.ComposeTSByTime(time.Now().Add(-365 * 24 * time.Hour))
 	guaranteeTS := uint64(1)
 
 	sd := &shardDelegator{
@@ -3057,7 +3057,7 @@ func TestExternalCollectionQueryStreamUsesFullSnapshotTimestamp(t *testing.T) {
 }
 
 func TestExternalCollectionStrongConsistencyDoesNotRequestWALMVCC(t *testing.T) {
-	guaranteeTS := tsoutil.ComposeTSByTime(time.Now(), 0)
+	guaranteeTS := tsoutil.ComposeTSByTime(time.Now())
 	sd := &shardDelegator{
 		skipStreamingForExternalTable: true,
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
@@ -3082,7 +3082,7 @@ func TestNormalCollectionDelegatorCatchesUpStreamingData(t *testing.T) {
 	replicaID := int64(65535)
 	vchannelName := "rootcoord-dml_1001_v0"
 	version := int64(2001)
-	startTs := tsoutil.ComposeTSByTime(time.Now().Add(-48*time.Hour), 0)
+	startTs := tsoutil.ComposeTSByTime(time.Now().Add(-48 * time.Hour))
 
 	manager := segments.NewManager()
 	loader := &segments.MockLoader{}
