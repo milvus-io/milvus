@@ -74,7 +74,7 @@ func TestFieldSchema(t *testing.T) {
 }
 
 func TestFieldTypeUUID_Constants(t *testing.T) {
-	assert.EqualValues(t, 28, FieldTypeUUID)
+	assert.EqualValues(t, 31, FieldTypeUUID)
 }
 
 func TestFieldTypeUUID_Name(t *testing.T) {
