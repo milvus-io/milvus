@@ -283,6 +283,36 @@ TEST(FieldDataLoadingOverheadUpperBound, UsesBudgetWithMaxOverheadFloor) {
     EXPECT_EQ(mmap_larger_file_overhead.file_bytes, 32 * MB);
 }
 
+TEST(LoadTransientSharedOverheadUpperBound, UsesProcessWideConcurrencyBound) {
+    auto& budget =
+        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto& high_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& low_pool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto old_high_max = high_pool.GetMaxThreadNum();
+    auto old_low_max = low_pool.GetMaxThreadNum();
+    auto cleanup = folly::makeGuard([&]() {
+        budget.SetCapacityBytes(old_capacity);
+        high_pool.Resize(old_high_max);
+        low_pool.Resize(old_low_max);
+    });
+
+    high_pool.Resize(2);
+    low_pool.Resize(3);
+    constexpr size_t task_overhead = 128;
+
+    budget.SetCapacityBytes(0);
+    EXPECT_EQ(LoadTransientSharedOverheadUpperBound(task_overhead), 5 * 128);
+
+    budget.SetCapacityBytes(512);
+    EXPECT_EQ(LoadTransientSharedOverheadUpperBound(task_overhead), 512);
+
+    budget.SetCapacityBytes(64);
+    EXPECT_EQ(LoadTransientSharedOverheadUpperBound(task_overhead), 128);
+}
+
 // ---- LoadCellBatchAsync tests ----
 
 namespace {

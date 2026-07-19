@@ -131,6 +131,12 @@ SetFieldDataReadWindowBytes(int64_t bytes);
 int64_t
 LoadTransientPoolUpperBound(size_t max_task_overhead_bytes);
 
+// Process-wide upper bound for loading overhead shared by all load readers.
+// Individual cells still report their own file-local overhead; this value only
+// caps the sum of concurrently loading cells in the shared MCL group.
+int64_t
+LoadTransientSharedOverheadUpperBound(size_t max_task_overhead_bytes);
+
 milvus::cachinglayer::ResourceUsage
 FieldDataLoadingOverheadUpperBound(
     int64_t max_memory_overhead,
