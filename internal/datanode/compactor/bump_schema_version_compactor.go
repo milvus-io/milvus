@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -344,6 +345,18 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 			return nil, nil, merr.WrapErrServiceInternal("varchar primary key field not found in full schema rewrite record")
 		}
 		pkAt = func(i int) any { return stringArray.Value(i) }
+	case schemapb.DataType_UUID:
+		uuidArray, ok := pkArray.(*array.FixedSizeBinary)
+		if !ok {
+			return nil, nil, merr.WrapErrServiceInternal("uuid primary key field not found in full schema rewrite record")
+		}
+		pkAt = func(i int) any {
+			u, err := uuid.FromBytes(uuidArray.Value(i))
+			if err != nil {
+				return nil
+			}
+			return u
+		}
 	default:
 		return nil, nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
 	}

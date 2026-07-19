@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 
@@ -355,6 +356,12 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				pk = pkArray.(*array.Int64).Value(i)
 			case schemapb.DataType_VarChar:
 				pk = pkArray.(*array.String).Value(i)
+			case schemapb.DataType_UUID:
+				u, err := uuid.FromBytes(pkArray.(*array.FixedSizeBinary).Value(i))
+				if err != nil {
+					panic("invalid UUID data in compactor")
+				}
+				pk = u
 			default:
 				panic("invalid data type")
 			}

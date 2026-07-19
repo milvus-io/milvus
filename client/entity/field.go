@@ -196,7 +196,7 @@ const (
 	// FieldTypeTimestamptz field type timestamptz
 	FieldTypeTimestamptz FieldType = 26
 	// FieldTypeUUID field type UUID
-	FieldTypeUUID FieldType = 28
+	FieldTypeUUID FieldType = 31
 	// FieldTypeBinaryVector field type binary vector
 	FieldTypeBinaryVector FieldType = 100
 	// FieldTypeFloatVector field type float vector

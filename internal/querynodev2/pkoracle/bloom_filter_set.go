@@ -134,9 +134,12 @@ func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
 			int64Value := pk.(*storage.Int64PrimaryKey).Value
 			common.Endian.PutUint64(buf, uint64(int64Value))
 			s.currentStat.PkFilter.Add(buf)
-		case schemapb.DataType_VarChar, schemapb.DataType_UUID:
+		case schemapb.DataType_VarChar:
 			stringValue := pk.(*storage.VarCharPrimaryKey).Value
 			s.currentStat.PkFilter.AddString(stringValue)
+		case schemapb.DataType_UUID:
+			uuidPk := pk.(*storage.UUIDPrimaryKey)
+			s.currentStat.PkFilter.Add(uuidPk.Value[:])
 		default:
 			mlog.Error(context.TODO(), "failed to update bloomfilter", mlog.Any("PK type", pk.Type()))
 			panic("failed to update bloomfilter")

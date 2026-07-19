@@ -25,7 +25,7 @@ using namespace milvus;
 
 // Verify the DataType enum value for UUID.
 TEST(UuidTest, EnumValue) {
-    ASSERT_EQ(static_cast<int>(DataType::UUID), 28);
+    ASSERT_EQ(static_cast<int>(DataType::UUID), 31);
 }
 
 // Verify that UUID is not treated as a string data type internally.

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 
@@ -234,6 +235,23 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
+			expireTs := int64(-1)
+			if hasTTLField {
+				col := r.Column(t.ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
+			}
+			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
+		}
+	case schemapb.DataType_UUID:
+		predicate = func(r storage.Record, ri, i int) bool {
+			u, err := uuid.FromBytes(r.Column(pkField.FieldID).(*array.FixedSizeBinary).Value(i))
+			if err != nil {
+				panic("invalid UUID data in sort compaction")
+			}
+			pk := u
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {

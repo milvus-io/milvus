@@ -268,6 +268,12 @@ type UUIDPrimaryKey struct {
 	Value uuid.UUID
 }
 
+func NewUUIDPrimaryKey(v uuid.UUID) *UUIDPrimaryKey {
+	return &UUIDPrimaryKey{
+		Value: v,
+	}
+}
+
 func (pk *UUIDPrimaryKey) GT(key PrimaryKey) bool {
 	other := key.(*UUIDPrimaryKey).Value
 	return bytes.Compare(pk.Value[:], other[:]) > 0
@@ -333,7 +339,7 @@ func (pk *UUIDPrimaryKey) SetValue(data interface{}) error {
 }
 
 func (pk *UUIDPrimaryKey) GetValue() interface{} {
-	return pk.Value.String()
+	return pk.Value
 }
 
 func (pk *UUIDPrimaryKey) Type() schemapb.DataType {

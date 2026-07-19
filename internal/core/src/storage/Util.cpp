@@ -476,9 +476,12 @@ CreateArrowBuilder(DataType data_type) {
         }
         case DataType::VARCHAR:
         case DataType::STRING:
-        case DataType::TEXT:
-        case DataType::UUID: {
+        case DataType::TEXT: {
             return std::make_shared<arrow::StringBuilder>();
+        }
+        case DataType::UUID: {
+            return std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                arrow::fixed_size_binary(16));
         }
         case DataType::ARRAY:
         case DataType::JSON:
@@ -638,9 +641,14 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
-        case DataType::UUID:
             return std::make_shared<arrow::StringScalar>(
                 default_value.string_data());
+        case DataType::UUID: {
+            // UUID default value arrives as 16-byte binary from FieldMeta
+            return std::make_shared<arrow::FixedSizeBinaryScalar>(
+                arrow::Buffer::CopyFrom(default_value.bytes_data().data(), 16),
+                arrow::fixed_size_binary(16));
+        }
         case DataType::JSON:
             return std::make_shared<arrow::BinaryScalar>(
                 default_value.bytes_data());
@@ -688,10 +696,13 @@ CreateArrowSchema(DataType data_type, bool nullable) {
         }
         case DataType::VARCHAR:
         case DataType::STRING:
-        case DataType::TEXT:
-        case DataType::UUID: {
+        case DataType::TEXT: {
             return arrow::schema(
                 {arrow::field("val", arrow::utf8(), nullable)});
+        }
+        case DataType::UUID: {
+            return arrow::schema(
+                {arrow::field("val", arrow::fixed_size_binary(16), nullable)});
         }
         case DataType::ARRAY:
         case DataType::JSON:

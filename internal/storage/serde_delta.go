@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/google/uuid"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -413,6 +414,12 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 				pk := vv.Pk.GetValue().(string)
 				pb.Append(pk)
 			}
+		case schemapb.DataType_UUID:
+			pb := builder.Field(0).(*array.FixedSizeBinaryBuilder)
+			for _, vv := range v {
+				pk := vv.Pk.GetValue().(uuid.UUID)
+				pb.Append(pk[:])
+			}
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", v[0].PkType)
 		}
@@ -458,6 +465,18 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteL
 					v[j] = &DeleteLog{}
 				}
 				v[j].Pk = NewVarCharPrimaryKey(arr.Value(j))
+			}
+		case arrow.FIXED_SIZE_BINARY:
+			arr := r.Column(0).(*array.FixedSizeBinary)
+			for j := 0; j < r.Len(); j++ {
+				if v[j] == nil {
+					v[j] = &DeleteLog{}
+				}
+				u, err := uuid.FromBytes(arr.Value(j))
+				if err != nil {
+					return merr.WrapErrServiceInternalMsg("invalid UUID in delta log: %s", err)
+				}
+				v[j].Pk = NewUUIDPrimaryKey(u)
 			}
 		default:
 			return merr.WrapErrServiceInternalMsg("unexpected delta log pkType %v", fields[0].Type.Name())
@@ -639,6 +658,14 @@ func (r *deleteLogToRecordReader) Next() (Record, error) {
 			builder.Append(dl.Pk.GetValue().(string))
 		}
 		pkArray = builder.NewArray()
+	case schemapb.DataType_UUID:
+		builder := array.NewFixedSizeBinaryBuilder(allocator, &arrow.FixedSizeBinaryType{ByteWidth: 16})
+		defer builder.Release()
+		for _, dl := range deleteLogs {
+			pk := dl.Pk.GetValue().(uuid.UUID)
+			builder.Append(pk[:])
+		}
+		pkArray = builder.NewArray()
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported pk type: %v", r.pkType)
 	}
@@ -654,6 +681,8 @@ func (r *deleteLogToRecordReader) Next() (Record, error) {
 	var pkFieldType arrow.DataType
 	if r.pkType == schemapb.DataType_Int64 {
 		pkFieldType = arrow.PrimitiveTypes.Int64
+	} else if r.pkType == schemapb.DataType_UUID {
+		pkFieldType = &arrow.FixedSizeBinaryType{ByteWidth: 16}
 	} else {
 		pkFieldType = arrow.BinaryTypes.String
 	}
