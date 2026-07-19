@@ -3953,3 +3953,33 @@ TEST(IndexFactoryRawDataTest, CanUseIndexRawDataForFieldExcludesJsonAndArray) {
     EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::JSON, false));
 }
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupDropsDefaultFilledColumnWhenIndexHasRawData) {
+    // Schema evolution: field 108 was filled with a default value at runtime
+    // (FillDefaultValueFields -> resident column) and is NOT in the current
+    // manifest (cur_iter == end). The new manifest now backs it with a
+    // raw-data index (STL_SORT). The raw column is skipped (index serves it),
+    // but the stale default column must be dropped, otherwise it stays resident
+    // on top of the index (the default-filled flag is cleared on reopen, so no
+    // later pass could clean it).
+    auto new_proto = MakeManifestProto("/manifest/new");
+    AddScalarIndex(new_proto, 108, 8001, milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    // 108 is NOT in the current manifest, but resident as a default-filled col.
+    current_info.SetColumnGroupsForTesting(MakeColumnGroups({}));
+    current_info.SetFieldsFilledWithDefault({FieldId(108)});
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{108}, {"/cg/108.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_GT(diff.field_data_to_drop.count(FieldId(108)), 0u)
+        << "stale default-filled column must be dropped when the new index "
+           "carries raw data";
+    // And the raw column is not (re)loaded — the index serves the raw value.
+    EXPECT_FALSE(ColumnGroupFieldPresent(diff.column_groups_to_load, 108));
+    EXPECT_FALSE(ColumnGroupFieldPresent(diff.column_groups_to_lazyload, 108));
+}
