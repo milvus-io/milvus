@@ -326,22 +326,22 @@ func isFP16BF16VectorField(field *schemapb.FieldSchema) bool {
 
 func isFixedSizeListImportTarget(field *schemapb.FieldSchema) bool {
 	switch field.GetDataType() {
-	case schemapb.DataType_Array:
-		switch field.GetElementType() {
-		case schemapb.DataType_Bool,
-			schemapb.DataType_Int8,
-			schemapb.DataType_Int16,
-			schemapb.DataType_Int32,
-			schemapb.DataType_Int64,
-			schemapb.DataType_Float,
-			schemapb.DataType_Double,
-		schemapb.DataType_VarChar,
-		schemapb.DataType_String,
-		schemapb.DataType_UUID:
-		return true
-		default:
-			return false
-		}
+		case schemapb.DataType_Array:
+			switch field.GetElementType() {
+			case schemapb.DataType_Bool,
+				schemapb.DataType_Int8,
+				schemapb.DataType_Int16,
+				schemapb.DataType_Int32,
+				schemapb.DataType_Int64,
+				schemapb.DataType_Float,
+				schemapb.DataType_Double,
+				schemapb.DataType_VarChar,
+				schemapb.DataType_String,
+				schemapb.DataType_UUID:
+				return true
+			default:
+				return false
+			}
 	case schemapb.DataType_BinaryVector,
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_Float16Vector,
