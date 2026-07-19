@@ -236,7 +236,7 @@ func (p *systemColumnPolicy) Split(currentSplit *currentSplit) *currentSplit {
 		return field.GetFieldID() < common.StartOfUserFieldID ||
 			(p.includePrimaryKey && field.GetIsPrimaryKey()) ||
 			(p.includePartitionKey && field.GetIsPartitionKey()) ||
-			(p.includeClusteringKey && field.GetIsClusteringKey())
+			(p.includeClusteringKey && field.GetIsClusteringKey() && !IsVectorDataType(field.GetDataType()))
 	})
 
 	for _, group := range groups {
