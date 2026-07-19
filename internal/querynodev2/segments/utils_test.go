@@ -287,6 +287,16 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 		assert.Equal(t, common.WarmupAsync, policy)
 	})
 
+	t.Run("vector field TypeParams warmup is returned", func(t *testing.T) {
+		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: common.WarmupDisable},
+			},
+		})
+		assert.Equal(t, common.WarmupDisable, policy)
+	})
+
 	t.Run("fallback to global config for scalar field", func(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupSync)
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
@@ -722,6 +732,24 @@ func TestIsExternalCollectionLazyLoad(t *testing.T) {
 		assert.True(t, isExternalCollectionLazyLoad(schema))
 	})
 
+	t.Run("external_vector_without_raw_warmup_follows_vector_field", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key, common.WarmupDisable)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key)
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key, common.WarmupSync)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_vector",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "source_vector",
+				},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
+	})
+
 	t.Run("milvus_table_real_pk_forces_eager_load", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			ExternalSpec: `{"format":"milvus-table"}`,
@@ -738,5 +766,22 @@ func TestIsExternalCollectionLazyLoad(t *testing.T) {
 			},
 		}
 		assert.False(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("external_vector_follows_raw_field_warmup", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key, common.WarmupSync)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_vector",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "source_vector",
+					TypeParams:    []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+				},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
 	})
 }
