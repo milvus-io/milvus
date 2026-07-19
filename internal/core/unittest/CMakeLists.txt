@@ -39,6 +39,7 @@ set(MILVUS_TEST_FILES
         init_gtest.cpp
         test_loading.cpp
         test_exec.cpp
+        test_timestamptz_arith_compare.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
         test_search_group_by.cpp
