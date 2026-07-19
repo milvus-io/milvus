@@ -2277,6 +2277,56 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		s.Zero(gc.pauseUntil.PauseUntil())
 	})
 
+	s.Run("pause_timeout_after_signal_received", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Hour,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		controlDone := make(chan struct{})
+		go func() {
+			defer close(controlDone)
+			gc.startControlLoop(context.Background())
+		}()
+		defer func() {
+			gc.cancel()
+			<-controlDone
+			gc.option.removeObjectPool.Release()
+		}()
+
+		signalCh := make(chan gcCmd, 1)
+		go func() {
+			signalCh <- <-gc.controlChannels["meta"]
+		}()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pauseDone := make(chan error, 1)
+		go func() {
+			pauseDone <- gc.Pause(ctx, -1, "timeout-ticket", time.Minute)
+		}()
+
+		// Receiving here means the meta worker already took the signal, so pause()
+		// is past the send and parked in the ack wait.
+		select {
+		case <-signalCh:
+		case <-time.After(time.Second * 5):
+			s.T().Fatal("pause signal was not delivered to meta worker")
+		}
+
+		// Deliberately never close signal.done: cancelling only now makes the inner
+		// select take its timeout arm, with no dependency on wall-clock ordering.
+		cancel()
+
+		err := <-pauseDone
+		s.ErrorIs(err, context.Canceled)
+		s.Zero(gc.pauseUntil.PauseUntil())
+	})
+
 	s.Run("pause_collection", func() {
 		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
 			cli:              s.cli,

@@ -89,6 +89,7 @@ type gcCmd struct {
 	collectionID int64
 	ticket       string
 	done         chan error
+	ctx          context.Context
 	timeout      <-chan struct{}
 }
 
@@ -294,6 +295,7 @@ func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, ticke
 		collectionID: collectionID,
 		ticket:       ticket,
 		done:         done,
+		ctx:          ctx,
 		timeout:      ctx.Done(),
 	}:
 		return <-done
@@ -433,10 +435,23 @@ func (gc *garbageCollector) pause(cmd gcCmd) error {
 	}
 	select {
 	case signalCh <- signal:
-		<-signal.done
+		select {
+		case <-signal.done:
+		case <-cmd.timeout:
+			gc.resume(cmd)
+			return cmd.ctx.Err()
+		}
 	case <-cmd.timeout:
 		// timeout, resume the pause
 		gc.resume(cmd)
+		return cmd.ctx.Err()
+	case <-gc.ctx.Done():
+		// The collector is closing. The meta worker may already have returned on
+		// its own ctx.Done(), and signalCh is unbuffered, so the send above would
+		// never be received: bound the wait by the collector's lifetime instead of
+		// parking this control-loop goroutine and hanging gc.wg.Wait() in close().
+		gc.resume(cmd)
+		return merr.WrapErrServiceUnavailable("garbage collector is closing")
 	}
 	return nil
 }
