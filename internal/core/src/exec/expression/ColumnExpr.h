@@ -55,18 +55,18 @@ class PhyColumnExpr : public Expr {
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        auto& schema = segment->get_schema();
+        auto& schema = segment->get_schema(op_ctx_);
         auto& field_meta = schema[expr_->GetColumn().field_id_];
         pinned_index_ = PinIndex(op_ctx_, segment, field_meta);
         is_indexed_ = pinned_index_.size() > 0;
         use_index_data_ =
             is_indexed_ &&
-            segment->HasRawData(expr_->GetColumn().field_id_.get());
+            segment->HasRawData(expr_->GetColumn().field_id_.get(), op_ctx_);
         if (segment->is_chunked()) {
-            num_chunk_ =
-                use_index_data_
-                    ? pinned_index_.size()
-                    : segment->num_chunk_data(expr_->GetColumn().field_id_);
+            num_chunk_ = use_index_data_
+                             ? pinned_index_.size()
+                             : segment->num_chunk_data(
+                                   expr_->GetColumn().field_id_, op_ctx_);
         } else {
             num_chunk_ = use_index_data_
                              ? pinned_index_.size()
@@ -123,7 +123,9 @@ class PhyColumnExpr : public Expr {
                                        SegmentType::Sealed
                     ? current_chunk_pos_
                     : segment_chunk_reader_.segment_->num_rows_until_chunk(
-                          expr_->GetColumn().field_id_, current_chunk_id_) +
+                          expr_->GetColumn().field_id_,
+                          current_chunk_id_,
+                          op_ctx_) +
                           current_chunk_pos_;
             return current_rows;
         } else {

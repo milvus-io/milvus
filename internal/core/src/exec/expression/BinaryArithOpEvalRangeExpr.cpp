@@ -2672,7 +2672,7 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
         std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
                            int64_t,
                            T>;
-    auto& skip_index = segment_->GetSkipIndex();
+    auto& skip_index = segment_->GetSkipIndex(op_ctx_);
     auto value = GetValueWithCastNumber<H>(expr_->value_);
     auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
 

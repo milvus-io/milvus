@@ -259,6 +259,11 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     // take()/Arrow-convert path can short-circuit on abort.
     milvus::OpContext fte_op_ctx;
     fte_op_ctx.cancellation_token = cancel_token;
+    // Pin one published-state snapshot for the fill phase so its column reads
+    // stay layout-consistent even if a concurrent Reopen republishes between
+    // the scan (already pinned inside the visitor) and this fill. No-op for
+    // growing segments.
+    PinOpSnapshot(&fte_op_ctx);
     if (retrieve_results.field_data_.empty()) {
         FillTargetEntry(trace_ctx,
                         plan,
@@ -518,11 +523,16 @@ SegmentInternalInterface::FillTargetEntry(
     // Per-call OpContext keeps storage_usage scoped to this segment;
     // sharing the caller's op_ctx across segments would double-count
     // bytes. Inherit the caller's cancellation_token and load priority so
-    // in-loop cancellation still propagates.
+    // in-loop cancellation still propagates. Also carry over the pinned
+    // published-state snapshot (set by RetrieveByOffsets::PinOpSnapshot) so
+    // every bulk_subscript below reads the operation's pinned layout instead
+    // of re-capturing live state.
     milvus::OpContext local_ctx;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
         local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.pinned_segment_state = op_ctx->pinned_segment_state;
+        local_ctx.pinned_state_owner = op_ctx->pinned_state_owner;
     }
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -560,7 +570,9 @@ SegmentInternalInterface::FillTargetEntry(
         }
         std::unique_ptr<DataArray> col;
         auto& field_meta = plan->schema_->operator[](field_id);
-        if (!is_field_exist(field_id)) {
+        // Resolve field existence against the pinned snapshot carried in
+        // local_ctx so it agrees with the schema the bulk_subscript reads use.
+        if (!is_field_exist(field_id, &local_ctx)) {
             col = bulk_subscript_not_exist_field(field_meta, size);
         } else {
             col = bulk_subscript(&local_ctx, field_id, offsets, size);
@@ -632,6 +644,9 @@ SegmentInternalInterface::Retrieve(
     // path so RetrieveByOffsets on external fields can short-circuit.
     milvus::OpContext fte_op_ctx;
     fte_op_ctx.cancellation_token = cancel_token;
+    // Pin one published-state snapshot for this offset-driven retrieve so the
+    // FillTargetEntry read path stays layout-consistent. No-op for growing.
+    PinOpSnapshot(&fte_op_ctx);
     FillTargetEntry(
         trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
@@ -769,7 +784,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
 }
 
 const SkipIndex&
-SegmentInternalInterface::GetSkipIndex() const {
+SegmentInternalInterface::GetSkipIndex(milvus::OpContext* op_ctx) const {
     return skip_index_;
 }
 

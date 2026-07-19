@@ -36,16 +36,20 @@ std::pair<const index::IndexBase*, int64_t>
 GetIndexAndBaseOffset(const SegmentInternalInterface* segment,
                       FieldId field_id,
                       int chunk_id,
-                      PinnedIndexView pinned_index) {
+                      PinnedIndexView pinned_index,
+                      milvus::OpContext* op_ctx = nullptr) {
     if (pinned_index.empty()) {
         return {nullptr, 0};
     }
 
     if (chunk_id >= 0 && segment->type() == SegmentType::Sealed &&
         segment->is_chunked() && pinned_index.size() == 1) {
-        auto base_offset =
-            chunk_id == 0 ? 0
-                          : segment->num_rows_until_chunk(field_id, chunk_id);
+        // Resolve the base row offset against the operation's pinned snapshot
+        // (op_ctx) so the offset matches the layout the rest of the reader
+        // reads; without it this would re-capture live published state.
+        auto base_offset = chunk_id == 0 ? 0
+                                         : segment->num_rows_until_chunk(
+                                               field_id, chunk_id, op_ctx);
         return {pinned_index[0].get(), base_offset};
     }
 
@@ -85,7 +89,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
                 };
         }
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = segment_->num_chunk_data(field_id, op_ctx_);
     AssertInfo(current_chunk_id < num_chunks,
                "field {} cursor chunk_id {} exceeds num_chunks {}",
                field_id.get(),
@@ -97,7 +101,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     auto chunk_info = pw.get();
     auto chunk_data = chunk_info.data();
     auto chunk_valid_data = chunk_info.valid_data();
-    auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
+    auto current_chunk_size =
+        segment_->chunk_size(field_id, current_chunk_id, op_ctx_);
     return [=,
             this,
             pw = std::move(pw),
@@ -116,7 +121,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
             chunk_data = pw.get().data();
             chunk_valid_data = pw.get().valid_data();
             current_chunk_size =
-                segment_->chunk_size(field_id, current_chunk_id);
+                segment_->chunk_size(field_id, current_chunk_id, op_ctx_);
         }
         if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
             current_chunk_pos++;
@@ -154,7 +159,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
             };
         }
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = segment_->num_chunk_data(field_id, op_ctx_);
     AssertInfo(current_chunk_id < num_chunks,
                "field {} cursor chunk_id {} exceeds num_chunks {}",
                field_id.get(),
@@ -170,7 +175,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
         auto chunk_data = chunk_info.data();
         auto chunk_valid_data = chunk_info.valid_data();
         auto current_chunk_size =
-            segment_->chunk_size(field_id, current_chunk_id);
+            segment_->chunk_size(field_id, current_chunk_id, op_ctx_);
         return [pw = std::move(pw),
                 this,
                 field_id,
@@ -194,7 +199,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 chunk_data = pw.get().data();
                 chunk_valid_data = pw.get().valid_data();
                 current_chunk_size =
-                    segment_->chunk_size(field_id, current_chunk_id);
+                    segment_->chunk_size(field_id, current_chunk_id, op_ctx_);
             }
             if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
@@ -207,7 +212,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
         auto pw = segment_->chunk_view<std::string_view>(
             op_ctx_, field_id, current_chunk_id);
         auto current_chunk_size =
-            segment_->chunk_size(field_id, current_chunk_id);
+            segment_->chunk_size(field_id, current_chunk_id, op_ctx_);
         return [=,
                 this,
                 pw = std::move(pw),
@@ -224,7 +229,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 pw = segment_->chunk_view<std::string_view>(
                     op_ctx_, field_id, current_chunk_id);
                 current_chunk_size =
-                    segment_->chunk_size(field_id, current_chunk_id);
+                    segment_->chunk_size(field_id, current_chunk_id, op_ctx_);
             }
             auto& chunk_data = pw.get().first;
             auto& chunk_valid_data = pw.get().second;
@@ -284,8 +289,8 @@ ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                                          int chunk_id,
                                          PinnedIndexView pinned_index) const {
-    auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+    auto index_and_base_offset = GetIndexAndBaseOffset(
+        segment_, field_id, chunk_id, pinned_index, op_ctx_);
     auto index = index_and_base_offset.first;
     auto base_offset = index_and_base_offset.second;
     auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
@@ -299,7 +304,7 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                 return raw.value();
             };
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = segment_->num_chunk_data(field_id, op_ctx_);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",
                field_id.get(),
@@ -321,8 +326,8 @@ template <>
 ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor<std::string>(
     FieldId field_id, int chunk_id, PinnedIndexView pinned_index) const {
-    auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+    auto index_and_base_offset = GetIndexAndBaseOffset(
+        segment_, field_id, chunk_id, pinned_index, op_ctx_);
     auto index = index_and_base_offset.first;
     auto base_offset = index_and_base_offset.second;
     auto index_ptr =
@@ -337,7 +342,7 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
                 return raw.value();
             };
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = segment_->num_chunk_data(field_id, op_ctx_);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",
                field_id.get(),

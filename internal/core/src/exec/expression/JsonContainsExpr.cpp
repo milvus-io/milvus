@@ -2394,7 +2394,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
 
     // Get array offsets for nested index (needed for element-to-row conversion)
-    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+    auto array_offsets =
+        segment_->GetArrayOffsets(expr_->column_.field_id_, op_ctx_);
 
     auto execute_sub_batch =
         [this, &array_offsets](

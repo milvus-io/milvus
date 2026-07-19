@@ -834,13 +834,21 @@ TYPED_TEST_P(HybridIndexTestInverted,
         ctx,
         std::move(config));
 
+    // milvus-common now models loading overhead per dimension
+    // (LoadingOverheadConfig::memory / ::file), replacing the former
+    // single {group, upper_bound(ResourceUsage)} shape. The SealedIndexTranslator
+    // still builds it via the compatibility ctor
+    // LoadingOverheadConfig{upper_bound={mem, 0}, group}, which populates both
+    // dimensions with that group; assert against the new shape.
     ASSERT_TRUE(translator.meta()->loading_overhead.has_value());
-    EXPECT_EQ(translator.meta()->loading_overhead->group,
+    ASSERT_TRUE(translator.meta()->loading_overhead->memory.has_value());
+    ASSERT_TRUE(translator.meta()->loading_overhead->file.has_value());
+    EXPECT_EQ(translator.meta()->loading_overhead->memory->group,
               milvus::segcore::kLoadTransientOverheadGroup);
     EXPECT_EQ(
-        translator.meta()->loading_overhead->upper_bound.memory_bytes,
+        translator.meta()->loading_overhead->memory->upper_bound,
         milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.memory_bytes);
-    EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
+    EXPECT_EQ(translator.meta()->loading_overhead->file->upper_bound, 0);
 }
 
 template <typename T>

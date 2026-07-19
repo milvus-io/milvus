@@ -168,7 +168,7 @@ class SegmentInterface {
     get_row_count() const = 0;
 
     virtual const Schema&
-    get_schema() const = 0;
+    get_schema(milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
     get_deleted_count() const = 0;
@@ -201,13 +201,15 @@ class SegmentInterface {
     type() const = 0;
 
     virtual bool
-    HasRawData(int64_t field_id) const = 0;
+    HasRawData(int64_t field_id, milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual bool
-    HasFieldData(FieldId field_id) const = 0;
+    HasFieldData(FieldId field_id,
+                 milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual bool
-    is_nullable(FieldId field_id) const = 0;
+    is_nullable(FieldId field_id,
+                milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual void
     CreateTextIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) = 0;
@@ -341,13 +343,25 @@ class SegmentInterface {
     // Get IArrayOffsets for element-level filtering on array fields
     // Returns nullptr if the field doesn't have IArrayOffsets
     virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const = 0;
+    GetArrayOffsets(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) const = 0;
 };
 
 // internal API for DSL calculation
 // only for implementation
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    // Installs a per-operation read pin on op_ctx so every published-state read
+    // in this operation observes one immutable snapshot even if a concurrent
+    // Reopen republishes (see sealed-segment per-operation snapshot pinning).
+    // Called once at operation entry with the op_ctx that is threaded to the
+    // operation's expressions/accessors. Default is a no-op: growing segments
+    // have no published state; only sealed segments pin.
+    virtual void
+    PinOpSnapshot(milvus::OpContext* op_ctx) const {
+        // do nothing
+    }
+
     virtual void
     prefetch_chunks(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -529,7 +543,7 @@ class SegmentInternalInterface : public SegmentInterface {
              const folly::CancellationToken& cancel_token) const override;
 
     virtual bool
-    HasIndex(FieldId field_id) const = 0;
+    HasIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) const = 0;
 
     bool
     FieldAccessible(FieldId field_id) const {
@@ -549,7 +563,7 @@ class SegmentInternalInterface : public SegmentInterface {
     // Default returns false for segment types that never build JSON indexes
     // (e.g. growing segments); sealed segments override.
     virtual bool
-    HasJsonIndex(FieldId field_id) const {
+    HasJsonIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) const {
         return false;
     }
 
@@ -569,7 +583,7 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     const SkipIndex&
-    GetSkipIndex() const;
+    GetSkipIndex(milvus::OpContext* op_ctx = nullptr) const;
 
     void
     LoadSkipIndex(FieldId field_id,
@@ -588,7 +602,8 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     virtual DataType
-    GetFieldDataType(FieldId fieldId) const = 0;
+    GetFieldDataType(FieldId fieldId,
+                     milvus::OpContext* op_ctx = nullptr) const = 0;
 
     PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
@@ -631,10 +646,13 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // count of chunk that has raw data
     virtual int64_t
-    num_chunk_data(FieldId field_id) const = 0;
+    num_chunk_data(FieldId field_id,
+                   milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const = 0;
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         milvus::OpContext* op_ctx = nullptr) const = 0;
 
     // bitset 1 means not hit. 0 means hit.
     virtual void
@@ -644,13 +662,17 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // count of chunks
     virtual int64_t
-    num_chunk(FieldId field_id) const = 0;
+    num_chunk(FieldId field_id, milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const = 0;
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const = 0;
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        milvus::OpContext* op_ctx = nullptr) const = 0;
 
     // element size in each chunk
     virtual int64_t
@@ -660,7 +682,7 @@ class SegmentInternalInterface : public SegmentInterface {
     get_active_count(Timestamp ts) const = 0;
 
     virtual Timestamp
-    get_max_timestamp() const = 0;
+    get_max_timestamp(milvus::OpContext* op_ctx = nullptr) const = 0;
 
     /**
      * search offset by possible pk values and mvcc timestamp
@@ -795,7 +817,8 @@ class SegmentInternalInterface : public SegmentInterface {
 
  public:
     virtual bool
-    is_field_exist(FieldId field_id) const = 0;
+    is_field_exist(FieldId field_id,
+                   milvus::OpContext* op_ctx = nullptr) const = 0;
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(milvus::OpContext* op_ctx,

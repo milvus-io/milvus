@@ -5514,3 +5514,199 @@ TEST(SealedSegmentCowState, ExternalWrapperSynthesizeRequiresRuntime) {
 
     EXPECT_ANY_THROW(sealed->TestSynthesizeExternalSystemFields(nullptr));
 }
+
+// ==================== Per-Operation Snapshot Pinning Tests ====================
+//
+// These exercise the sealed-segment per-operation snapshot pin (see
+// docs/design-docs/design_docs/20260717-sealed-segment-op-snapshot-pinning.md).
+// The pin lives on milvus::OpContext: PinOpSnapshot() captures the segment's
+// current PublishedSegmentState into the op_ctx, and every op_ctx-aware
+// accessor (num_chunk_data / chunk_data / bulk_subscript / Capture*) resolves
+// reads against that pinned snapshot instead of re-loading the live state.
+
+// Reopen-race regression + fault-injection proof.
+//
+// An in-flight scan of scalar field F must complete on its pinned snapshot even
+// if a concurrent Reopen drops F from the live published state mid-scan. This
+// is the race the pin was built to close: without it, a read of F after the
+// drop resolves the new (F-less) live snapshot and the RawData accessor aborts
+// at AssertInfo(field_data_ready_bitset[F]) inside chunk_data_impl().
+TEST(SealedSegmentOpSnapshotPin, PinnedScanSurvivesMidScanFieldDrop) {
+    const int64_t N = 100;
+
+    auto old_schema = std::make_shared<Schema>();
+    auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    // F: the scalar field the in-flight scan reads on the RawData path.
+    auto scan_field = old_schema->AddDebugField("scan_field", DataType::INT64);
+    old_schema->set_primary_field_id(pk_id);
+    old_schema->set_schema_version(100);
+
+    auto dataset = DataGen(old_schema, N);
+    auto expected = dataset.get_col<int64_t>(scan_field);
+
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    // Begin the operation: pin the current published state (snapshot S0, which
+    // contains scan_field). PinOpSnapshot is public on the segment interface.
+    milvus::OpContext op_ctx;
+    segment->PinOpSnapshot(&op_ctx);
+
+    // First half of the scan reads scan_field through the pinned op_ctx.
+    ASSERT_EQ(sealed->num_chunk_data(scan_field, &op_ctx), 1);
+    {
+        auto pinned_span = sealed->chunk_data<int64_t>(&op_ctx, scan_field, 0);
+        const int64_t* data = pinned_span.get().data();
+        for (int64_t i = 0; i < N; ++i) {
+            ASSERT_EQ(data[i], expected[i]) << "pre-drop row " << i;
+        }
+    }
+
+    // Mid-scan republish: Reopen with a schema that no longer contains
+    // scan_field. Reopen does not block readers (reopen_mutex_ is writer-only),
+    // so this atomically swaps the live published state to S1 while our op_ctx
+    // still pins S0. This is exactly the concurrent-Reopen window from the
+    // design doc, made deterministic.
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+    EXPECT_NO_THROW(sealed->Reopen(new_schema));
+
+    // The live (unpinned) state has dropped scan_field: a fresh read with no
+    // op_ctx now sees zero data chunks for it.
+    EXPECT_FALSE(sealed->HasFieldData(scan_field));
+    EXPECT_EQ(sealed->num_chunk_data(scan_field, /*op_ctx=*/nullptr), 0);
+
+    // Second half of the scan, AFTER the drop, still reads scan_field correctly
+    // because the pinned op_ctx resolves S0 -- the field's column is held alive
+    // by the pin and the field_data_ready_bitset it checks is S0's, not S1's.
+    ASSERT_EQ(sealed->num_chunk_data(scan_field, &op_ctx), 1);
+    {
+        auto pinned_span = sealed->chunk_data<int64_t>(&op_ctx, scan_field, 0);
+        const int64_t* data = pinned_span.get().data();
+        for (int64_t i = 0; i < N; ++i) {
+            ASSERT_EQ(data[i], expected[i]) << "post-drop row " << i;
+        }
+    }
+
+    // A bulk_subscript through the pinned op_ctx also stays on S0.
+    std::vector<int64_t> offsets(N);
+    for (int64_t i = 0; i < N; ++i) {
+        offsets[i] = i;
+    }
+    auto pinned_result =
+        sealed->bulk_subscript(&op_ctx, scan_field, offsets.data(), N);
+    ASSERT_EQ(pinned_result->scalars().long_data().data_size(), N);
+    for (int64_t i = 0; i < N; ++i) {
+        ASSERT_EQ(pinned_result->scalars().long_data().data(i), expected[i])
+            << "bulk_subscript row " << i;
+    }
+
+    // Fault-injection argument (documented, not executed):
+    //   The same post-drop read WITHOUT the pin -- e.g.
+    //     sealed->chunk_data<int64_t>(nullptr, scan_field, 0);
+    //   resolves the live S1 state, whose field_data_ready_bitset has
+    //   scan_field cleared, and aborts inside chunk_data_impl() at
+    //     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id), ...)
+    //   Because AssertInfo aborts the process (SIGABRT), it cannot be caught
+    //   in-process to make a clean negative assertion here. num_chunk_data with
+    //   a null op_ctx returning 0 above (versus 1 with the pin) is the
+    //   in-process witness of the same live-vs-pinned divergence: an unpinned
+    //   scan that had cached num_chunk_data==1 from S0 and then re-read the
+    //   column would drive chunk_id past the (now empty) live column and hit
+    //   that assert. The pin makes the whole operation observe S0 only.
+}
+
+// Pin identity: within one op_ctx, every capture through the choke point
+// returns the exact same snapshot pointer, even while the writer publishes new
+// state. Mirrors the "one operation, one snapshot" guarantee.
+TEST(SealedSegmentOpSnapshotPin, PinIdentityAcrossConcurrentPublish) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto field_id = schema->AddDebugField("val", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+    schema->set_schema_version(100);
+
+    auto dataset = DataGen(schema, 16);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    milvus::OpContext op_ctx;
+    segment->PinOpSnapshot(&op_ctx);
+
+    auto pinned_state = sealed->TestCapturePublishedState(&op_ctx);
+    auto pinned_runtime = sealed->TestCaptureRuntimeResourceState(&op_ctx);
+    ASSERT_NE(pinned_state, nullptr);
+    ASSERT_NE(pinned_runtime, nullptr);
+    // The pinned runtime is the pinned state's runtime -- one snapshot for all.
+    EXPECT_EQ(pinned_runtime.get(), pinned_state->runtime.get());
+
+    // The pinned snapshot differs from the live one only after a publish; hold
+    // a reference to the live snapshot now to compare identity across a publish.
+    auto live_before = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(pinned_state.get(), live_before.get());
+
+    // Publish a new state via Reopen (drops "val", swaps the live pointer).
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+    EXPECT_NO_THROW(sealed->Reopen(new_schema));
+
+    // Live state has advanced...
+    auto live_after = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_NE(live_after.get(), pinned_state.get());
+
+    // ...but every capture through the pinned op_ctx still returns S0.
+    EXPECT_EQ(sealed->TestCapturePublishedState(&op_ctx).get(),
+              pinned_state.get());
+    EXPECT_EQ(sealed->TestCaptureRuntimeResourceState(&op_ctx).get(),
+              pinned_runtime.get());
+    // The pinned snapshot still carries "val"; the live one does not.
+    EXPECT_EQ(sealed->num_chunk_data(field_id, &op_ctx), 1);
+    EXPECT_EQ(sealed->num_chunk_data(field_id, /*op_ctx=*/nullptr), 0);
+}
+
+// Owner guard: an op_ctx pinned by segment X must NOT hand back X's snapshot
+// when consulted by a different segment Y. Y's accessors must observe Y's own
+// live state. This prevents an op_ctx reused across segments from leaking one
+// segment's layout into another.
+TEST(SealedSegmentOpSnapshotPin, OwnerGuardRejectsForeignPin) {
+    auto build = [](int64_t version) {
+        auto schema = std::make_shared<Schema>();
+        auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+        auto val_id = schema->AddDebugField("val", DataType::INT64);
+        schema->set_primary_field_id(pk_id);
+        schema->set_schema_version(version);
+        auto dataset = DataGen(schema, 8);
+        auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+        return std::make_pair(std::move(segment), val_id);
+    };
+
+    auto [seg_x, val_x] = build(100);
+    auto [seg_y, val_y] = build(200);
+    auto* sealed_x = dynamic_cast<ChunkedSegmentSealedImpl*>(seg_x.get());
+    auto* sealed_y = dynamic_cast<ChunkedSegmentSealedImpl*>(seg_y.get());
+    ASSERT_NE(sealed_x, nullptr);
+    ASSERT_NE(sealed_y, nullptr);
+
+    // Pin op_ctx on segment X.
+    milvus::OpContext op_ctx;
+    seg_x->PinOpSnapshot(&op_ctx);
+    auto x_pinned = sealed_x->TestCapturePublishedState(&op_ctx);
+    ASSERT_NE(x_pinned, nullptr);
+
+    // X honors its own pin.
+    EXPECT_EQ(sealed_x->TestCapturePublishedState(&op_ctx).get(),
+              x_pinned.get());
+
+    // Y sees the same op_ctx but the owner (pinned_state_owner) is X, not Y --
+    // so Y's capture ignores the foreign pin and returns Y's live state.
+    auto y_live = sealed_y->TestGetPublishedStateSnapshot();
+    auto y_via_foreign_ctx = sealed_y->TestCapturePublishedState(&op_ctx);
+    EXPECT_EQ(y_via_foreign_ctx.get(), y_live.get());
+    EXPECT_NE(y_via_foreign_ctx.get(), x_pinned.get());
+}

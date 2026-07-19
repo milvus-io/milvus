@@ -99,7 +99,9 @@ ExprSet::Eval(int32_t begin,
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context) {
     auto segment = query_context->get_segment();
-    auto& schema = segment->get_schema();
+    // Resolve the TTL-field schema against the operation's pinned snapshot so
+    // it matches the snapshot the rest of the query uses.
+    auto& schema = segment->get_schema(query_context->get_op_context());
     if (!schema.get_ttl_field_id().has_value()) {
         return nullptr;
     }
@@ -489,11 +491,16 @@ inline void
 ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                     ExecContext* context,
                     bool& has_heavy_operation) {
-    auto* segment = context->get_query_context()->get_segment();
+    auto* query_context = context->get_query_context();
+    auto* segment = query_context->get_segment();
     if (!segment || !expr) {
         return;
     }
-    auto schema = segment->get_schema();
+    // Route through the operation's pinned snapshot so schema/index probing
+    // used to reorder the conjunction agrees with the snapshot the expression
+    // evaluation itself uses.
+    auto* op_ctx = query_context->get_op_context();
+    auto schema = segment->get_schema(op_ctx);
     auto namespace_field_id = schema.get_namespace_field_id();
     std::vector<size_t> reorder;
     std::vector<size_t> numeric_expr;
@@ -535,7 +542,8 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                 numeric_expr.push_back(i);
                 continue;
             }
-            if (segment->HasIndex(column.field_id_) && !IsLikeExpr(input)) {
+            if (segment->HasIndex(column.field_id_, op_ctx) &&
+                !IsLikeExpr(input)) {
                 indexed_expr.push_back(i);
                 continue;
             }

@@ -175,7 +175,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 bool
 PhyTermFilterExpr::CanSkipSegment() {
-    const auto& skip_index = segment_->GetSkipIndex();
+    const auto& skip_index = segment_->GetSkipIndex(op_ctx_);
     T min, max;
     for (auto i = 0; i < expr_->vals_.size(); i++) {
         auto val = GetValueFromProto<T>(expr_->vals_[i]);
@@ -1308,7 +1308,7 @@ PhyTermFilterExpr::PrefetchRawData() {
 template <typename T>
 void
 PhyTermFilterExpr::PrefetchRawData() {
-    auto& skip_index = segment_->GetSkipIndex();
+    auto& skip_index = segment_->GetSkipIndex(op_ctx_);
 
     std::vector<T> elements;
     elements.reserve(expr_->vals_.size());

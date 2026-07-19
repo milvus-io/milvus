@@ -117,7 +117,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     bool
-    is_nullable(FieldId field_id) const override {
+    is_nullable(FieldId field_id,
+                milvus::OpContext* op_ctx = nullptr) const override {
         AssertInfo(insert_record_.is_data_exist(field_id),
                    "Cannot find field_data with field_id: " +
                        std::to_string(field_id.get()));
@@ -204,7 +205,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     Timestamp
-    get_max_timestamp() const override {
+    get_max_timestamp(milvus::OpContext* op_ctx = nullptr) const override {
         return insert_record_.timestamp_index_.get_max_timestamp();
     }
 
@@ -214,7 +215,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     const Schema&
-    get_schema() const override {
+    get_schema(milvus::OpContext* op_ctx = nullptr) const override {
         return *schema_;
     }
 
@@ -236,7 +237,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // count of chunk that has raw data
     int64_t
-    num_chunk_data(FieldId field_id) const final {
+    num_chunk_data(FieldId field_id,
+                   milvus::OpContext* op_ctx = nullptr) const final {
         auto size = get_insert_record().ack_responder_.GetAck();
         return upper_div(size, segcore_config_.get_chunk_rows());
     }
@@ -256,18 +258,24 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const final {
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               milvus::OpContext* op_ctx = nullptr) const final {
         return segcore_config_.get_chunk_rows();
     }
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        milvus::OpContext* op_ctx = nullptr) const override {
         auto size_per_chunk = segcore_config_.get_chunk_rows();
         return {offset / size_per_chunk, offset % size_per_chunk};
     }
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         milvus::OpContext* op_ctx = nullptr) const override {
         return chunk_id * segcore_config_.get_chunk_rows();
     }
 
@@ -510,7 +518,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   SearchResult& output) const override;
 
     DataType
-    GetFieldDataType(FieldId fieldId) const override;
+    GetFieldDataType(FieldId fieldId,
+                     milvus::OpContext* op_ctx = nullptr) const override;
 
  public:
     void
@@ -522,7 +531,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     search_ids(BitsetType& bitset, const IdArray& id_array) const override;
 
     bool
-    HasIndex(FieldId field_id) const override {
+    HasIndex(FieldId field_id,
+             milvus::OpContext* op_ctx = nullptr) const override {
         if (!is_field_exist(field_id)) {
             return false;
         }
@@ -569,7 +579,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     bool
-    HasFieldData(FieldId field_id) const override {
+    HasFieldData(FieldId field_id,
+                 milvus::OpContext* op_ctx = nullptr) const override {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             return insert_record_.row_count() > 0;
         }
@@ -580,7 +591,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     bool
-    HasRawData(int64_t field_id) const override {
+    HasRawData(int64_t field_id,
+               milvus::OpContext* op_ctx = nullptr) const override {
         //growing index hold raw data when
         // 1. growing index enabled and it holds raw data
         // 2. growing index disabled then raw data held by chunk
@@ -633,7 +645,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     bool
-    is_field_exist(FieldId field_id) const override {
+    is_field_exist(FieldId field_id,
+                   milvus::OpContext* op_ctx = nullptr) const override {
         return schema_->get_fields().find(field_id) !=
                schema_->get_fields().end();
     }
@@ -661,7 +674,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
+    GetArrayOffsets(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) const override {
         std::shared_lock lock(array_offsets_map_mutex_);
         auto it = array_offsets_map_.find(field_id);
         if (it != array_offsets_map_.end()) {
@@ -714,7 +728,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  protected:
     int64_t
-    num_chunk(FieldId field_id) const override;
+    num_chunk(FieldId field_id,
+              milvus::OpContext* op_ctx = nullptr) const override;
 
     PinWrapper<SpanBase>
     chunk_data_impl(milvus::OpContext* op_ctx,

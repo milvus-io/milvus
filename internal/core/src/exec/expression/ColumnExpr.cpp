@@ -110,9 +110,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else if (segment_chunk_reader_.segment_->is_chunked() &&
                            segment_chunk_reader_.segment_->num_chunk_data(
-                               expr_->GetColumn().field_id_) > 0) {
+                               expr_->GetColumn().field_id_, op_ctx_) > 0) {
                     return segment_chunk_reader_.segment_->get_chunk_by_offset(
-                        expr_->GetColumn().field_id_, offset);
+                        expr_->GetColumn().field_id_, offset, op_ctx_);
                 } else {
                     return {0, offset};
                 }

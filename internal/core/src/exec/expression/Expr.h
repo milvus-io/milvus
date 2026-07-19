@@ -285,7 +285,7 @@ class SegmentExpr : public Expr {
 
     void
     InitSegmentExpr() {
-        auto& schema = segment_->get_schema();
+        auto& schema = segment_->get_schema(op_ctx_);
         auto& field_meta = schema[field_id_];
         field_type_ = field_meta.get_data_type();
 
@@ -308,9 +308,9 @@ class SegmentExpr : public Expr {
         // PinCells() cold fetch under tiered storage.
 
         // if index not include raw data, also need load data
-        if (segment_->HasFieldData(field_id_)) {
+        if (segment_->HasFieldData(field_id_, op_ctx_)) {
             if (segment_->is_chunked()) {
-                num_data_chunk_ = segment_->num_chunk_data(field_id_);
+                num_data_chunk_ = segment_->num_chunk_data(field_id_, op_ctx_);
             } else {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
@@ -328,7 +328,7 @@ class SegmentExpr : public Expr {
             return;
         }
         pinned_index_initialized_ = true;
-        auto& schema = segment_->get_schema();
+        auto& schema = segment_->get_schema(op_ctx_);
         auto& field_meta = schema[field_id_];
         pinned_index_ = PinIndex(op_ctx_,
                                  segment_,
@@ -352,7 +352,8 @@ class SegmentExpr : public Expr {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
             // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size =
+                segment_->chunk_size(field_id_, i, op_ctx_) - data_pos;
 
             size = std::min(size, batch_size_ - processed_size);
 
@@ -420,7 +421,7 @@ class SegmentExpr : public Expr {
             }
             if (UseIndexCursor()) {
                 MoveCursorForIndex();
-                if (segment_->HasFieldData(field_id_)) {
+                if (segment_->HasFieldData(field_id_, op_ctx_)) {
                     MoveCursorForData();
                 }
             } else {
@@ -522,7 +523,8 @@ class SegmentExpr : public Expr {
             current_rows =
                 UseIndexCursor() && segment_->type() == SegmentType::Sealed
                     ? current_chunk_pos
-                    : segment_->num_rows_until_chunk(field_id_, current_chunk) +
+                    : segment_->num_rows_until_chunk(
+                          field_id_, current_chunk, op_ctx_) +
                           current_chunk_pos;
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
@@ -548,7 +550,7 @@ class SegmentExpr : public Expr {
     // and elem_count is the total number of elements in those rows
     std::pair<int64_t, int64_t>
     GetNextBatchSizeForElementLevel() {
-        auto array_offsets = segment_->GetArrayOffsets(field_id_);
+        auto array_offsets = segment_->GetArrayOffsets(field_id_, op_ctx_);
         AssertInfo(array_offsets != nullptr,
                    "ArrayOffsets not found for field {}",
                    field_id_.get());
@@ -564,9 +566,9 @@ class SegmentExpr : public Expr {
             // For sealed segment with index, position is already global
             current_rows = current_chunk_pos;
         } else if (segment_->is_chunked()) {
-            current_rows =
-                segment_->num_rows_until_chunk(field_id_, current_chunk) +
-                current_chunk_pos;
+            current_rows = segment_->num_rows_until_chunk(
+                               field_id_, current_chunk, op_ctx_) +
+                           current_chunk_pos;
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
@@ -607,7 +609,7 @@ class SegmentExpr : public Expr {
         if (need_size == 0)
             return 0;  //do not go empty-loop at the bound of the chunk
 
-        auto& skip_index = segment_->GetSkipIndex();
+        auto& skip_index = segment_->GetSkipIndex(op_ctx_);
         auto pw = segment_->get_batch_views<T>(
             op_ctx_, field_id_, 0, current_data_chunk_pos_, need_size);
         auto views_info = pw.get();
@@ -662,7 +664,7 @@ class SegmentExpr : public Expr {
         // For non_chunked sealed segment, only single chunk
         Assert(num_data_chunk_ == 1);
 
-        auto& skip_index = segment_->GetSkipIndex();
+        auto& skip_index = segment_->GetSkipIndex(op_ctx_);
         auto pw =
             segment_->get_views_by_offsets<T>(op_ctx_, field_id_, 0, *input);
         auto [data_vec, valid_data] = pw.get();
@@ -719,7 +721,7 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
-        auto& skip_index = segment_->GetSkipIndex();
+        auto& skip_index = segment_->GetSkipIndex(op_ctx_);
 
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -786,13 +788,13 @@ class SegmentExpr : public Expr {
             }
         }
 
-        auto& skip_index = segment_->GetSkipIndex();
+        auto& skip_index = segment_->GetSkipIndex(op_ctx_);
 
         if constexpr (std::is_same_v<T, VectorArrayView>) {
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, offset);
+                    segment_->get_chunk_by_offset(field_id_, offset, op_ctx_);
                 // chunk_data<VectorArrayView> would read the wrong layout:
                 // storage holds VectorArray, and nullable rows may be compacted.
                 // Use chunk_view to build logical VectorArrayView rows.
@@ -830,7 +832,8 @@ class SegmentExpr : public Expr {
                     for (size_t i = 0; i < input->size(); ++i) {
                         int64_t offset = (*input)[i];
                         auto [chunk_id, chunk_offset] =
-                            segment_->get_chunk_by_offset(field_id_, offset);
+                            segment_->get_chunk_by_offset(
+                                field_id_, offset, op_ctx_);
                         auto pw = segment_->get_views_by_offsets<T>(
                             op_ctx_,
                             field_id_,
@@ -860,7 +863,8 @@ class SegmentExpr : public Expr {
                 for (size_t i = 0; i < input->size(); ++i) {
                     int64_t offset = (*input)[i];
                     auto [chunk_id, chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, offset);
+                        segment_->get_chunk_by_offset(
+                            field_id_, offset, op_ctx_);
                     auto pw =
                         segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id);
                     auto chunk = pw.get();
@@ -958,13 +962,13 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
-        auto& skip_index = segment_->GetSkipIndex();
+        auto& skip_index = segment_->GetSkipIndex(op_ctx_);
         if (segment_->type() == SegmentType::Sealed) {
             AssertInfo(
                 segment_->is_chunked(),
                 "Element-level filtering requires chunked segment for sealed");
 
-            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            auto array_offsets = segment_->GetArrayOffsets(field_id_, op_ctx_);
             if (!array_offsets) {
                 ThrowInfo(ErrorCode::UnexpectedError,
                           "IArrayOffsets not found for field {}",
@@ -985,7 +989,7 @@ class SegmentExpr : public Expr {
                 auto [doc_id, elem_idx] =
                     array_offsets->ElementIDToRowID(element_id);
                 auto [chunk_id, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, doc_id);
+                    segment_->get_chunk_by_offset(field_id_, doc_id, op_ctx_);
 
                 // Collect consecutive elements belonging to the same chunk
                 offsets.clear();
@@ -1002,7 +1006,8 @@ class SegmentExpr : public Expr {
                     auto [next_doc_id, next_elem_idx] =
                         array_offsets->ElementIDToRowID(next_element_id);
                     auto [next_chunk_id, next_chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, next_doc_id);
+                        segment_->get_chunk_by_offset(
+                            field_id_, next_doc_id, op_ctx_);
 
                     if (next_chunk_id != chunk_id) {
                         break;  // Different chunk, process current batch
@@ -1051,14 +1056,14 @@ class SegmentExpr : public Expr {
             }
             return processed_size;
         } else {
-            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            auto array_offsets = segment_->GetArrayOffsets(field_id_, op_ctx_);
             if (!array_offsets) {
                 ThrowInfo(ErrorCode::UnexpectedError,
                           "IArrayOffsets not found for field {}",
                           field_id_.get());
             }
 
-            auto& skip_index = segment_->GetSkipIndex();
+            auto& skip_index = segment_->GetSkipIndex(op_ctx_);
             size_t processed_size = 0;
 
             for (size_t i = 0; i < element_ids->size(); i++) {
@@ -1143,7 +1148,7 @@ class SegmentExpr : public Expr {
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
             int64_t size;
             if (segment_->is_chunked()) {
-                size = segment_->chunk_size(field_id_, i) - data_pos;
+                size = segment_->chunk_size(field_id_, i, op_ctx_) - data_pos;
             } else {
                 size = (i == num_data_chunk_ - 1)
                            ? (active_count_ % size_per_chunk_ == 0
@@ -1156,7 +1161,7 @@ class SegmentExpr : public Expr {
                 continue;
             }
 
-            auto& skip_index = segment_->GetSkipIndex();
+            auto& skip_index = segment_->GetSkipIndex(op_ctx_);
             if ((!skip_func || !skip_func(skip_index, field_id_, i))) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<ArrayView>(
@@ -1401,7 +1406,7 @@ class SegmentExpr : public Expr {
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
 
-            auto& skip_index = segment_->GetSkipIndex();
+            auto& skip_index = segment_->GetSkipIndex(op_ctx_);
             auto process_chunk = [&](const T* data, const bool* valid_data) {
                 auto skipped = skip_func && skip_func(skip_index, field_id_, i);
                 if (!skipped) {
@@ -1524,19 +1529,21 @@ class SegmentExpr : public Expr {
                 i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
 
             // if segment is chunked, type won't be growing
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size =
+                segment_->chunk_size(field_id_, i, op_ctx_) - data_pos;
             size = std::min(size, batch_size_ - processed_size);
 
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
             std::vector<int32_t> segment_offsets_array(size);
             auto start_offset =
-                segment_->num_rows_until_chunk(field_id_, i) + data_pos;
+                segment_->num_rows_until_chunk(field_id_, i, op_ctx_) +
+                data_pos;
             for (int64_t j = 0; j < size; ++j) {
                 int64_t offset = start_offset + j;
                 segment_offsets_array[j] = static_cast<int32_t>(offset);
             }
-            auto& skip_index = segment_->GetSkipIndex();
+            auto& skip_index = segment_->GetSkipIndex(op_ctx_);
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 bool is_seal = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
@@ -1717,12 +1724,13 @@ class SegmentExpr : public Expr {
 
         // Find starting chunk and offset
         auto [start_chunk_id, start_chunk_offset] =
-            segment_->get_chunk_by_offset(field_id_, segment_offset);
+            segment_->get_chunk_by_offset(field_id_, segment_offset, op_ctx_);
 
         for (size_t chunk_id = start_chunk_id;
              chunk_id < num_data_chunk_ && remaining > 0;
              chunk_id++) {
-            int64_t chunk_size = segment_->chunk_size(field_id_, chunk_id);
+            int64_t chunk_size =
+                segment_->chunk_size(field_id_, chunk_id, op_ctx_);
             int64_t chunk_offset =
                 (chunk_id == start_chunk_id) ? start_chunk_offset : 0;
 
@@ -1927,7 +1935,7 @@ class SegmentExpr : public Expr {
 
         if (need_element_slicing) {
             // Nested index with element-level result: batch by rows, slice elements
-            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            auto array_offsets = segment_->GetArrayOffsets(field_id_, op_ctx_);
 
             auto data_pos = current_index_chunk_pos_;
             auto batch_rows = std::min(batch_size_, active_count_ - data_pos);
@@ -1976,8 +1984,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                    auto element_type = segment_->get_schema(op_ctx_)[field_id_]
+                                            .get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -2050,8 +2058,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if (std::is_same_v<T, ArrayView>) {
-                    auto element_type =
-                        segment_->get_schema()[field_id_].get_element_type();
+                    auto element_type = segment_->get_schema(op_ctx_)[field_id_]
+                                            .get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -2119,7 +2127,7 @@ class SegmentExpr : public Expr {
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
             int64_t size = 0;
             if (segment_->is_chunked()) {
-                size = segment_->chunk_size(field_id_, i) - data_pos;
+                size = segment_->chunk_size(field_id_, i, op_ctx_) - data_pos;
             } else {
                 size = (i == (num_data_chunk_ - 1))
                            ? (segment_->type() == SegmentType::Growing
@@ -2251,8 +2259,8 @@ class SegmentExpr : public Expr {
         // field type to avoid widening HasIndex() semantics -- which
         // ReorderConjunctExpr and other callers rely on remaining narrow.
         bool has = (field_type_ == DataType::JSON)
-                       ? segment_->HasJsonIndex(field_id_)
-                       : segment_->HasIndex(field_id_);
+                       ? segment_->HasJsonIndex(field_id_, op_ctx_)
+                       : segment_->HasIndex(field_id_, op_ctx_);
         return has && !CanUseNgramIndex();
     }
 

@@ -158,7 +158,10 @@ class PhyCompareFilterExpr : public Expr {
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        auto& schema = segment->get_schema();
+        // op_ctx_ carries the operation's pinned snapshot (installed at
+        // ExecPlanNodeVisitor entry). Forward it to every published-state read
+        // so this expression's cached chunk counts match the scan's snapshot.
+        auto& schema = segment->get_schema(op_ctx_);
         auto& left_field_meta = schema[left_field_];
         auto& right_field_meta = schema[right_field_];
         pinned_index_left_ = PinIndex(op_ctx_, segment, left_field_meta);
@@ -166,22 +169,23 @@ class PhyCompareFilterExpr : public Expr {
         is_left_indexed_ = pinned_index_left_.size() > 0;
         is_right_indexed_ = pinned_index_right_.size() > 0;
         left_use_index_data_ =
-            is_left_indexed_ && segment->HasRawData(left_field_.get());
+            is_left_indexed_ && segment->HasRawData(left_field_.get(), op_ctx_);
         right_use_index_data_ =
-            is_right_indexed_ && segment->HasRawData(right_field_.get());
+            is_right_indexed_ &&
+            segment->HasRawData(right_field_.get(), op_ctx_);
         if (segment->is_chunked()) {
             left_num_chunk_ =
                 left_use_index_data_ ? pinned_index_left_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
-                    : segment->num_chunk_data(left_field_);
+                    : segment->num_chunk_data(left_field_, op_ctx_);
             right_num_chunk_ =
                 right_use_index_data_ ? pinned_index_right_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
-                    : segment->num_chunk_data(right_field_);
+                    : segment->num_chunk_data(right_field_, op_ctx_);
             num_chunk_ = left_num_chunk_;
         } else {
             num_chunk_ = left_use_index_data_
@@ -283,7 +287,7 @@ class PhyCompareFilterExpr : public Expr {
                 left_use_index_data_
                     ? left_current_chunk_pos_
                     : segment_chunk_reader_.segment_->num_rows_until_chunk(
-                          left_field_, left_current_chunk_id_) +
+                          left_field_, left_current_chunk_id_, op_ctx_) +
                           left_current_chunk_pos_;
             return current_rows;
         } else {
@@ -532,9 +536,9 @@ class PhyCompareFilterExpr : public Expr {
                                      data_pos)
                         : segment_chunk_reader_.SizePerChunk() - data_pos;
             } else {
-                size =
-                    segment_chunk_reader_.segment_->chunk_size(left_field_, i) -
-                    data_pos;
+                size = segment_chunk_reader_.segment_->chunk_size(
+                           left_field_, i, op_ctx_) -
+                       data_pos;
             }
 
             if (processed_size + size >= batch_size_) {

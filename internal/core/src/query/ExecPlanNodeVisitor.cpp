@@ -299,6 +299,11 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
 
+    // Pin one published-state snapshot for the whole retrieve on this segment,
+    // so every accessor reading through this op_context sees a consistent
+    // layout even if a concurrent Reopen republishes. No-op for growing.
+    segment->PinOpSnapshot(&op_context);
+
     // Do task execution
     auto result = ExecuteTask(plan, query_context);
     setupRetrieveResult(
@@ -454,6 +459,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
             op_context.trace_span = trace_span_;
             query_context->set_op_context(&op_context);
 
+            // Pin one published-state snapshot for this filter-only pass.
+            segment->PinOpSnapshot(&op_context);
+
             auto result = ExecuteTask(plan_fragment, query_context);
 
             if (result != nullptr && !result->childrens().empty()) {
@@ -513,6 +521,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     auto op_context = milvus::OpContext(cancel_token_);
     op_context.trace_span = trace_span_;
     query_context->set_op_context(&op_context);
+
+    // Pin one published-state snapshot for the whole search on this segment.
+    segment->PinOpSnapshot(&op_context);
 
     // Do plan fragment task work
     auto result = ExecuteTask(plan, query_context);

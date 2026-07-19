@@ -1480,13 +1480,15 @@ SegmentGrowingImpl::chunk_array_views_by_offsets(
 }
 
 int64_t
-SegmentGrowingImpl::num_chunk(FieldId field_id) const {
+SegmentGrowingImpl::num_chunk(FieldId field_id,
+                              milvus::OpContext* op_ctx) const {
     auto size = get_insert_record().ack_responder_.GetAck();
     return upper_div(size, segcore_config_.get_chunk_rows());
 }
 
 DataType
-SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
+SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id,
+                                     milvus::OpContext* op_ctx) const {
     auto& field_meta = schema_->operator[](field_id);
     return field_meta.get_data_type();
 }

@@ -58,16 +58,16 @@ PhyCompareFilterExpr::CanUseBothDataFastPath() {
         return true;
     }
 
-    auto left_chunks = segment->num_chunk_data(left_field_);
-    auto right_chunks = segment->num_chunk_data(right_field_);
+    auto left_chunks = segment->num_chunk_data(left_field_, op_ctx_);
+    auto right_chunks = segment->num_chunk_data(right_field_, op_ctx_);
     if (left_chunks <= 0 || right_chunks <= 0 || left_chunks != right_chunks) {
         can_use_both_data_sequential_fast_path_ = false;
         return false;
     }
 
     for (int64_t i = 0; i <= left_chunks; ++i) {
-        if (segment->num_rows_until_chunk(left_field_, i) !=
-            segment->num_rows_until_chunk(right_field_, i)) {
+        if (segment->num_rows_until_chunk(left_field_, i, op_ctx_) !=
+            segment->num_rows_until_chunk(right_field_, i, op_ctx_)) {
             can_use_both_data_sequential_fast_path_ = false;
             return false;
         }
@@ -104,10 +104,10 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
 
         auto left_raw_data_chunk_count =
             segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->left_field_id_);
+                expr_->left_field_id_, op_ctx_);
         auto right_raw_data_chunk_count =
             segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->right_field_id_);
+                expr_->right_field_id_, op_ctx_);
 
         int64_t processed_rows = 0;
         const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
@@ -122,7 +122,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 } else if (segment_chunk_reader_.segment_->is_chunked() &&
                            raw_data_chunk_count > 0) {
                     return segment_chunk_reader_.segment_->get_chunk_by_offset(
-                        field, offset);
+                        field, offset, op_ctx_);
                 } else {
                     return {0, offset};
                 }

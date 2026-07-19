@@ -1220,7 +1220,7 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
                            U>;
     H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
     H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
-    auto& skip_index = segment_->GetSkipIndex();
+    auto& skip_index = segment_->GetSkipIndex(op_ctx_);
 
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = 0; i < num_data_chunk_; ++i) {

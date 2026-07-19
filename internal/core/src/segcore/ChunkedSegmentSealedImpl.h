@@ -130,11 +130,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     DropFieldData(const FieldId field_id) override;
     bool
-    HasIndex(FieldId field_id) const override;
+    HasIndex(FieldId field_id,
+             milvus::OpContext* op_ctx = nullptr) const override;
     bool
-    HasJsonIndex(FieldId field_id) const override;
+    HasJsonIndex(FieldId field_id,
+                 milvus::OpContext* op_ctx = nullptr) const override;
     bool
-    HasFieldData(FieldId field_id) const override;
+    HasFieldData(FieldId field_id,
+                 milvus::OpContext* op_ctx = nullptr) const override;
     // Checks the loaded external manifest for a storage column.
     bool
     HasColumnInLoadedManifest(const std::string& column_name) const override;
@@ -146,7 +149,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,
              bool include_ngram = false) const override {
-        auto snapshot = CapturePublishedState();
+        auto snapshot = CapturePublishedState(op_ctx);
         if (snapshot != nullptr && snapshot->runtime != nullptr) {
             const auto& runtime = *snapshot->runtime;
             if (!include_ngram && runtime.ngram_fields.find(field_id) !=
@@ -210,12 +213,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     bool
-    HasRawData(int64_t field_id) const override;
+    HasRawData(int64_t field_id,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     // Returns true only if the index itself contains raw data,
     // without considering whether field data is loaded.
     bool
-    IndexHasRawData(FieldId field_id) const;
+    IndexHasRawData(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) const;
 
     bool
     CalcDistByIDs(FieldId field_id,
@@ -252,7 +257,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          FieldId field_id) const override;
 
     DataType
-    GetFieldDataType(FieldId fieldId) const override;
+    GetFieldDataType(FieldId fieldId,
+                     milvus::OpContext* op_ctx = nullptr) const override;
 
     void
     RemoveFieldFile(const FieldId field_id) override;
@@ -276,8 +282,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          const std::string& nested_path) const override;
 
     std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
-        auto runtime = CaptureRuntimeResourceState();
+    GetArrayOffsets(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) const override {
+        auto runtime = CaptureRuntimeResourceState(op_ctx);
         auto it = runtime->array_offsets_map.find(field_id);
         if (it != runtime->array_offsets_map.end()) {
             return it->second;
@@ -291,7 +298,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     const std::function<void(milvus::Json, size_t, bool)>& fn,
                     const int64_t* offsets,
                     int64_t count) const override {
-        auto column = get_column(field_id);
+        auto column = get_column(field_id, op_ctx);
         AssertInfo(column != nullptr,
                    "json field {} must exist when bulk reading raw data",
                    field_id.get());
@@ -429,15 +436,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     get_deleted_count() const override;
 
     Timestamp
-    get_max_timestamp() const override {
-        auto runtime = CaptureRuntimeResourceState();
+    get_max_timestamp(milvus::OpContext* op_ctx = nullptr) const override {
+        auto runtime = CaptureRuntimeResourceState(op_ctx);
         return runtime != nullptr && runtime->timestamp_index != nullptr
                    ? runtime->timestamp_index->get_max_timestamp()
                    : 0;
     }
 
     const Schema&
-    get_schema() const override;
+    get_schema(milvus::OpContext* op_ctx = nullptr) const override;
 
     void
     pk_range(milvus::OpContext* op_ctx,
@@ -475,8 +482,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  int64_t count) const;
 
     bool
-    is_nullable(FieldId field_id) const override {
-        auto schema_snapshot = CaptureSchemaSnapshot();
+    is_nullable(FieldId field_id,
+                milvus::OpContext* op_ctx = nullptr) const override {
+        auto schema_snapshot = CaptureSchemaSnapshot(op_ctx);
         auto& field_meta = schema_snapshot->operator[](field_id);
         return field_meta.is_nullable();
     };
@@ -512,23 +520,31 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // count of chunk that has raw data
     int64_t
-    num_chunk_data(FieldId field_id) const override;
+    num_chunk_data(FieldId field_id,
+                   milvus::OpContext* op_ctx = nullptr) const override;
 
     int64_t
-    num_chunk(FieldId field_id) const override;
+    num_chunk(FieldId field_id,
+              milvus::OpContext* op_ctx = nullptr) const override;
 
     // return size_per_chunk for each chunk, renaming against confusion
     int64_t
     size_per_chunk() const override;
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const override;
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override;
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        milvus::OpContext* op_ctx = nullptr) const override;
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override;
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         milvus::OpContext* op_ctx = nullptr) const override;
 
     SegcoreError
     Delete(int64_t size,
@@ -568,8 +584,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ClearData() override;
 
     bool
-    is_field_exist(FieldId field_id) const override {
-        auto schema_snapshot = CaptureSchemaSnapshot();
+    is_field_exist(FieldId field_id,
+                   milvus::OpContext* op_ctx = nullptr) const override {
+        auto schema_snapshot = CaptureSchemaSnapshot(op_ctx);
         return schema_snapshot->get_fields().find(field_id) !=
                schema_snapshot->get_fields().end();
     }
@@ -1257,7 +1274,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     fill_with_empty(FieldId field_id,
                     int64_t count,
                     int64_t valid_count = 0,
-                    const void* valid_data = nullptr) const;
+                    const void* valid_data = nullptr,
+                    milvus::OpContext* op_ctx = nullptr) const;
 
     std::unique_ptr<DataArray>
     get_raw_data(milvus::OpContext* op_ctx,
@@ -1389,16 +1407,28 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::string& explicit_warmup_policy = "") const;
 
     SchemaPtr
-    CaptureSchemaSnapshot() const;
+    CaptureSchemaSnapshot(milvus::OpContext* op_ctx = nullptr) const;
 
     std::shared_ptr<const SegmentLoadInfo>
-    CaptureLoadInfoSnapshot() const;
+    CaptureLoadInfoSnapshot(milvus::OpContext* op_ctx = nullptr) const;
 
+    // Capture choke point: honors a per-operation pin installed by
+    // PinOpSnapshot() so every read within one operation observes one
+    // immutable snapshot (see sealed-segment per-operation snapshot pinning).
+    // When op_ctx is null / unpinned / owned by a different segment, falls
+    // back to the atomic load of the live published_state_.
     std::shared_ptr<const PublishedSegmentState>
-    CapturePublishedState() const;
+    CapturePublishedState(milvus::OpContext* op_ctx = nullptr) const;
 
     std::shared_ptr<const RuntimeResourceState>
-    CaptureRuntimeResourceState() const;
+    CaptureRuntimeResourceState(milvus::OpContext* op_ctx = nullptr) const;
+
+    // Installs the per-operation read pin on op_ctx: the current published
+    // state becomes the one snapshot all subsequent Capture*(op_ctx) reads in
+    // this operation see, even if a concurrent Reopen republishes. No-op when
+    // op_ctx is null. Idempotent for a given operation.
+    void
+    PinOpSnapshot(milvus::OpContext* op_ctx) const override;
 
     std::shared_ptr<const PublishedSegmentState>
     BuildPublishedState(const SchemaPtr& schema,
@@ -2139,8 +2169,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     std::shared_ptr<ChunkedColumnInterface>
-    get_column(FieldId field_id) const {
-        return get_column(CaptureRuntimeResourceState(), field_id);
+    get_column(FieldId field_id, milvus::OpContext* op_ctx = nullptr) const {
+        return get_column(CaptureRuntimeResourceState(op_ctx), field_id);
     }
 
     PinWrapper<const storagev2translator::TimestampIndexCell*>
@@ -2179,6 +2209,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                              int64_t start,
                              int64_t length) const;
 
+    // Load-immutable: set once at load (a reload asserts equality) and cleared
+    // only by ClearData() teardown. Read directly by scan paths, bypassing
+    // Capture*(), so per-operation snapshot pinning does NOT cover it -- it MUST
+    // NOT gain a Reopen write path (that would let a concurrent republish
+    // change the row count mid-operation and defeat the pin).
     std::optional<int64_t> num_rows_;
 
     // ngram indexings for json type
@@ -2230,6 +2265,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::unordered_set<FieldId> mmap_field_ids_;
 
     // only useful in binlog
+    // Load-immutable: ctor init-list only, never reassigned. Read directly
+    // (bypassing Capture*()), so it is outside per-operation snapshot pinning
+    // and MUST NOT gain a Reopen write path.
     IndexMetaPtr col_index_meta_;
     SegcoreConfig segcore_config_;
 
@@ -2237,6 +2275,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
+    // Load-immutable: ctor init-list only, never reassigned. Read directly
+    // (bypassing Capture*()), so it is outside per-operation snapshot pinning
+    // and MUST NOT gain a Reopen write path.
     bool is_sorted_by_pk_ = false;
 
     // Query-time reader calls remain non-thread-safe and must be serialized.
@@ -2352,6 +2393,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto it = runtime->fields.find(field_ids.front());
         AssertInfo(it != runtime->fields.end(), "test field was not loaded");
         return it->second;
+    }
+
+    // Route a capture through the op_ctx-aware choke point so tests can assert
+    // pin identity (same snapshot pointer returned for a pinned op_ctx while a
+    // concurrent publish swaps the live state) and the owner guard.
+    std::shared_ptr<const PublishedSegmentState>
+    TestCapturePublishedState(milvus::OpContext* op_ctx) const {
+        return CapturePublishedState(op_ctx);
+    }
+
+    std::shared_ptr<const RuntimeResourceState>
+    TestCaptureRuntimeResourceState(milvus::OpContext* op_ctx) const {
+        return CaptureRuntimeResourceState(op_ctx);
     }
 
     void

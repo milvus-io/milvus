@@ -550,9 +550,13 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     }
                 }
             } else {
-                milvus::OpContext op_ctx;
+                // Route bulk_subscript through the operation's pinned op_ctx
+                // (op_ctx_) so the sealed geometry column is read from the same
+                // published-state snapshot as the rest of this evaluation,
+                // instead of a fresh unpinned context that would re-capture
+                // live state.
                 auto data_array = segment_->bulk_subscript(
-                    &op_ctx, field_id_, hit_offsets.data(), hit_offsets.size());
+                    op_ctx_, field_id_, hit_offsets.data(), hit_offsets.size());
 
                 auto geometry_array =
                     static_cast<const milvus::proto::schema::GeometryArray*>(
@@ -602,7 +606,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size =
+                segment_->chunk_size(field_id_, i, op_ctx_) - data_pos;
             size = std::min(size, real_batch_size - processed_rows);
 
             if (size > 0) {

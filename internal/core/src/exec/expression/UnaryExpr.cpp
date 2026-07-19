@@ -731,7 +731,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             is_same = [this, reverse](milvus::proto::plan::Array& val,
                                       int64_t offset) -> bool {
                 auto [chunk_idx, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, offset);
+                    segment_->get_chunk_by_offset(field_id_, offset, op_ctx_);
                 auto pw = segment_->template chunk_view<milvus::ArrayView>(
                     op_ctx_, field_id_, chunk_idx);
                 auto chunk = pw.get();
@@ -1194,7 +1194,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
              i < num_data_chunk_ && valid_processed_size < active_count_;
              ++i) {
             int64_t size = segment_->is_chunked()
-                               ? segment_->chunk_size(field_id_, i)
+                               ? segment_->chunk_size(field_id_, i, op_ctx_)
                                : (i == num_data_chunk_ - 1
                                       ? active_count_ - valid_processed_size
                                       : size_per_chunk_);
@@ -2359,7 +2359,7 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
     using U =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     auto op_type = expr_->op_type_;
-    auto& skip_index = segment_->GetSkipIndex();
+    auto& skip_index = segment_->GetSkipIndex(op_ctx_);
     U val = GetValueFromProto<U>(expr_->val_);
 
     std::vector<int64_t> chunks_may_hit;
