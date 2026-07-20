@@ -1024,6 +1024,57 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, RetrieveByOffsetsChecksExternalLoadedManifest) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_field = FieldId(100);
+    auto missing_field = FieldId(101);
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               pk_field,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "pk_col"));
+    schema->AddField(FieldMeta(FieldName("new_field"),
+                               missing_field,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "new_col"));
+    schema->set_primary_field_id(pk_field);
+    schema->set_external_source("s3://bucket/table");
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(1);
+    load_info.set_manifest_path("/manifest/v1");
+    sealed->SetLoadInfo(load_info);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {missing_field};
+    plan->access_entries_ = {missing_field};
+
+    int64_t offsets[] = {0};
+    CRetrieveResult* retrieve_result = nullptr;
+    auto status =
+        CRetrieveByOffsets(static_cast<CSegmentInterface>(segment.get()),
+                           plan.get(),
+                           offsets,
+                           1,
+                           &retrieve_result);
+
+    ASSERT_EQ(status.error_code, FieldNotLoaded);
+    ASSERT_NE(status.error_msg, nullptr);
+    EXPECT_NE(std::string(status.error_msg).find("RefreshExternalCollection"),
+              std::string::npos)
+        << status.error_msg;
+    EXPECT_EQ(retrieve_result, nullptr);
+    free(const_cast<char*>(status.error_msg));
+}
+
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
@@ -1399,8 +1450,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // load vec index
-    status = UpdateSealedSegmentIndex(segment.get(), &load_index_info);
-    ASSERT_EQ(status.error_code, Success);
+    segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(segment.get(),

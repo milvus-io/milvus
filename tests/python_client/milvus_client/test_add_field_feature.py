@@ -931,6 +931,120 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_add_match_field_with_default_value_on_growing_data(self):
+        """
+        target: verify schema reopen builds a text index for an added enable_match VARCHAR field
+                and indexes its default value for pre-existing growing rows
+        method: load a basic collection, insert rows without flush, add an analyzer field with default_value,
+                query text_match immediately, insert another row that uses the default, then flush/reload and repeat
+        expected: old rows immediately match the default token, the new row matches after the growing text index
+                  catches up, and all results remain unchanged after reload
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        field_name = "text_content"
+        default_text = "defaultmarker"
+        old_row_count = default_nb
+        old_ids = set(range(old_row_count))
+
+        # Create and load before insert so the historical rows live in a QueryNode growing segment.
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        client.load_collection(collection_name)
+
+        vectors = cf.gen_vectors(old_row_count + 1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        old_rows = [{"id": i, "vec": vectors[i]} for i in range(old_row_count)]
+        client.insert(collection_name=collection_name, data=old_rows)
+
+        # Confirm the unflushed tail is query-visible before changing the schema.
+        visible = client.query(
+            collection_name,
+            filter=f"id == {old_row_count - 1}",
+            output_fields=["id"],
+        )
+        assert [row["id"] for row in visible] == [old_row_count - 1]
+
+        client.add_collection_field(
+            collection_name,
+            field_name=field_name,
+            data_type=DataType.VARCHAR,
+            nullable=True,
+            default_value=default_text,
+            max_length=64,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params={"tokenizer": "standard"},
+        )
+
+        # Critical regression assertion: do not flush, create an index, or reload before this query.
+        default_match = client.query(
+            collection_name,
+            filter=f"text_match({field_name}, '{default_text}')",
+            output_fields=["id", field_name],
+            limit=old_row_count + 1,
+        )
+        assert {row["id"] for row in default_match} == old_ids
+        assert len(default_match) == old_row_count
+        assert all(row[field_name] == default_text for row in default_match)
+
+        new_id = old_row_count
+        all_ids = set(range(old_row_count + 1))
+        client.insert(
+            collection_name=collection_name,
+            data=[{"id": new_id, "vec": vectors[new_id]}],
+        )
+
+        inserted = client.query(
+            collection_name,
+            filter=f"id == {new_id}",
+            output_fields=["id", field_name],
+        )
+        assert [row["id"] for row in inserted] == [new_id]
+        assert inserted[0][field_name] == default_text
+
+        # Growing text index updates asynchronously for newly inserted rows. Poll with a bounded timeout.
+        default_after_insert = []
+        for _ in range(30):
+            default_after_insert = client.query(
+                collection_name,
+                filter=f"text_match({field_name}, '{default_text}')",
+                output_fields=["id", field_name],
+                limit=old_row_count + 1,
+            )
+            if {row["id"] for row in default_after_insert} == all_ids:
+                break
+            time.sleep(1)
+        assert {row["id"] for row in default_after_insert} == all_ids
+        assert len(default_after_insert) == old_row_count + 1
+        assert all(row[field_name] == default_text for row in default_after_insert)
+
+        client.flush(collection_name)
+        client.release_collection(collection_name)
+        client.load_collection(collection_name)
+
+        default_after_reload = client.query(
+            collection_name,
+            filter=f"text_match({field_name}, '{default_text}')",
+            output_fields=["id", field_name],
+            limit=old_row_count + 1,
+        )
+        assert {row["id"] for row in default_after_reload} == all_ids
+        assert len(default_after_reload) == old_row_count + 1
+        assert all(row[field_name] == default_text for row in default_after_reload)
+
+        client.drop_collection(collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_add_field_and_update_existing_data(self):
         """
         target: test that updating existing data after adding a field works correctly in search

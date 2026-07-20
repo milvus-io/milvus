@@ -56,6 +56,11 @@ type bumpSchemaVersionCompactionTask struct {
 	logIDAlloc       allocator.Interface
 	chunkManager     storage.ChunkManager
 	currentTime      time.Time
+	// lobContext holds LOB (TEXT) compaction strategy decisions for the full-rewrite
+	// path. A schema bump is 1->1 and never changes existing TEXT LOB data, so it
+	// always uses REUSE_ALL: the existing LOB files are unchanged and only their
+	// references are merged into the output manifest (mirrors sort compaction).
+	lobContext *compaction.LOBCompactionContext
 }
 
 func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
@@ -405,6 +410,7 @@ func (t *bumpSchemaVersionCompactionTask) runSchemaVersionBumpOnly() *datapb.Com
 				Channel:             segment.GetInsertChannel(),
 				StorageVersion:      segment.GetStorageVersion(),
 				Manifest:            segment.GetManifest(),
+				BaseManifest:        segment.GetManifest(),
 				ExpirQuantiles:      segment.GetExpirQuantiles(),
 			},
 		},
@@ -449,8 +455,29 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	defer materializer.Close()
 
+	// Prepare LOB (TEXT) handling: a schema bump keeps existing TEXT LOB data
+	// unchanged, so REUSE_ALL — the writer preserves the encoded LOB reference
+	// bytes (WithTextRefsAsBinary) and the source LOB files are merged into the
+	// output manifest afterwards (applyLOBCompaction). Mirrors sort compaction.
+	if err := t.initLOBCompactionContext(t.ctx); err != nil {
+		return nil, err
+	}
+
 	alloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
-	// TODO(#50021): Support full TEXT LOB rewrite for schema-bump compaction.
+	writerOpts := []storage.RwOption{
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			return t.chunkManager.MultiWrite(ctx, kvs)
+		}),
+		storage.WithVersion(segment.GetStorageVersion()),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithCollectionID(collectionID),
+		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+	}
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		// Existing TEXT columns arrive from the reader as encoded binary LOB refs;
+		// tell the writer to write them via the physical binary schema unchanged.
+		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
+	}
 	writer, err := storage.NewBinlogRecordWriter(t.ctx,
 		collectionID,
 		segment.GetPartitionID(),
@@ -459,13 +486,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		alloc,
 		t.compactionParams.BinLogMaxSize,
 		t.plan.GetTotalRows(),
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
-			return t.chunkManager.MultiWrite(ctx, kvs)
-		}),
-		storage.WithVersion(segment.GetStorageVersion()),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithCollectionID(collectionID),
-		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		writerOpts...,
 	)
 	if err != nil {
 		return nil, err
@@ -529,6 +550,18 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		return nil, err
 	}
 	writerClosed = true
+
+	// Update per-LOB-file valid_rows for REUSE_ALL fields: rows dropped by
+	// delete/TTL during the rewrite reduce the number of live LOB references.
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		inputRows := t.plan.GetTotalRows()
+		deletedRows := inputRows - totalRows
+		if deletedRows < 0 {
+			deletedRows = 0
+		}
+		t.lobContext.SetSegmentRowStats(segment.GetSegmentID(), inputRows, deletedRows)
+	}
+
 	insertLogs, statsLog, bm25StatsLogs, manifestPath, expirQuantiles := writer.GetLogs()
 	if totalRows > 0 && manifestPath == "" {
 		return nil, merr.WrapErrServiceInternal("schema bump full rewrite produced empty manifest")
@@ -565,6 +598,18 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		IsSorted:            segment.GetIsSorted(),
 		IsSortedByNamespace: segment.GetIsSortedByNamespace(),
 	}
+
+	// Merge the source segment's TEXT LOB file references into the output manifest
+	// (REUSE_ALL) BEFORE building the text-match index. createTextIndex reads the TEXT
+	// column through this manifest, so the carried LOB files must already be referenced
+	// -- otherwise the match index for an out-of-line (>=64KB) TEXT field is built against
+	// a manifest that does not yet list those LOB files, silently missing that data.
+	// Mirrors sort/mix (applyLOBCompaction before createTextIndex); AddStatsToManifest
+	// below then chains its text stats onto the LOB-merged manifest.
+	if err := t.applyLOBCompaction(t.ctx, resultSegment); err != nil {
+		return nil, err
+	}
+
 	if totalRows > 0 {
 		// Text stats are built explicitly, matching sort compaction.
 		textStatsLogs, err := createTextIndex(t.ctx, t.chunkManager, t.plan, t.compactionParams, segment.GetStorageVersion(), collectionID, segment.GetPartitionID(), newSegmentID, t.plan.GetPlanID(), resultSegment)
@@ -597,6 +642,67 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		Segments: []*datapb.CompactionSegment{resultSegment},
 		Type:     t.plan.GetType(),
 	}, nil
+}
+
+// initLOBCompactionContext prepares REUSE_ALL LOB handling for the (single) input
+// segment's TEXT columns. A schema bump is 1->1 and never changes existing TEXT LOB
+// data, so all TEXT fields are forced REUSE_ALL (GetForcedStrategy): the source LOB
+// files stay in place and only their references are merged into the output manifest.
+// No-op when the schema has no TEXT fields. Mirrors sort compaction.
+func (t *bumpSchemaVersionCompactionTask) initLOBCompactionContext(ctx context.Context) error {
+	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
+	if len(textFieldIDs) == 0 {
+		return nil
+	}
+
+	// preCompact already guarantees a StorageV3 segment with a non-empty manifest,
+	// and this only runs from runFullSchemaRewrite (after preCompact), so no manifest guard.
+	segment := t.plan.GetSegmentBinlogs()[0]
+	sourceManifests := map[int64]string{segment.GetSegmentID(): segment.GetManifest()}
+	lobFilesBySegment, err := compaction.CollectLobFilesFromManifests(sourceManifests, t.compactionParams.StorageConfig)
+	if err != nil {
+		return err
+	}
+
+	t.lobContext = compaction.NewLOBCompactionContext()
+	for segID, files := range lobFilesBySegment {
+		t.lobContext.AddSegmentLobFiles(segID, files)
+	}
+	// schema-bump is always 1 source -> 1 output; forced REUSE_ALL.
+	t.lobContext.SetCompactionType(datapb.CompactionType_BumpSchemaVersionCompaction, 1, 1)
+	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	mlog.Info(ctx, "schema bump: initialized LOB compaction context (REUSE_ALL)",
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldSegmentID(segment.GetSegmentID()),
+		mlog.Int64s("textFieldIDs", textFieldIDs),
+	)
+	return nil
+}
+
+// applyLOBCompaction merges the source segment's TEXT LOB file references into the
+// output segment's manifest (REUSE_ALL): LOB files are unchanged, only their
+// references (and valid_rows) are copied over. Mirrors sort compaction.
+func (t *bumpSchemaVersionCompactionTask) applyLOBCompaction(ctx context.Context, outputSegment *datapb.CompactionSegment) error {
+	if t.lobContext == nil || !t.lobContext.HasReuseAllFields() {
+		return nil
+	}
+	if outputSegment.GetManifest() == "" {
+		return nil
+	}
+
+	outputManifests := map[int64]string{outputSegment.GetSegmentID(): outputSegment.GetManifest()}
+	updatedManifests, err := compaction.ApplyLobCompactionToManifests(t.lobContext, outputManifests, t.compactionParams.StorageConfig)
+	if err != nil {
+		return err
+	}
+	if newManifest, ok := updatedManifests[outputSegment.GetSegmentID()]; ok {
+		outputSegment.Manifest = newManifest
+	}
+	mlog.Info(ctx, "schema bump: merged TEXT LOB references into output manifest",
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldSegmentID(outputSegment.GetSegmentID()),
+	)
+	return nil
 }
 
 func appendBM25StatsFromArrowArray(stats *storage.BM25Stats, arr arrow.Array) (int, error) {
@@ -1019,6 +1125,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 				Channel:             segment.GetInsertChannel(),
 				StorageVersion:      writerResult.storageVersion,
 				Manifest:            manifestPath,
+				BaseManifest:        segment.GetManifest(),
 			},
 		},
 		Type: t.plan.GetType(),

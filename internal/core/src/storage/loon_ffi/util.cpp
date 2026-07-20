@@ -31,6 +31,9 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "common/type_c.h"
+#include "milvus-storage/ffi_c.h"
+#include "milvus-storage/ffi_internal/ffi_error_code.h"
+#include "milvus-storage/ffi_internal/result.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/transaction/transaction.h"
@@ -38,7 +41,6 @@
 #include "storage/Types.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/util.h"
-#include "milvus-storage/ffi_internal/result.h"
 
 using json = nlohmann::json;
 

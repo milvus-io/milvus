@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -54,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -88,6 +90,8 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/collections/add_function":         "AddCollectionFunction",
 	"/v2/vectordb/collections/alter_function":       "AlterCollectionFunction",
 	"/v2/vectordb/collections/drop_function":        "DropCollectionFunction",
+	"/v2/vectordb/collections/add_function_field":   "AlterCollectionSchema",
+	"/v2/vectordb/collections/drop_function_field":  "AlterCollectionSchema",
 	"/v2/vectordb/collections/drop_properties":      "AlterCollection",
 	"/v2/vectordb/collections/compact":              "ManualCompaction",
 	"/v2/vectordb/collections/get_compaction_state": "GetCompactionState",
@@ -204,6 +208,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+AddFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAddFunction{} }, wrapperTraceLog(h.addCollectionFunction))))
 	router.POST(CollectionCategory+AlterFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAlterFunction{} }, wrapperTraceLog(h.alterCollectionFunction))))
 	router.POST(CollectionCategory+DropFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionDropFunction{} }, wrapperTraceLog(h.dropCollectionFunction))))
+	router.POST(CollectionCategory+AddFunctionFieldAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAddFunctionField{} }, wrapperTraceLog(h.addCollectionFunctionField))))
+	router.POST(CollectionCategory+DropFunctionFieldAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionDropFunctionField{} }, wrapperTraceLog(h.dropCollectionFunctionField))))
 	router.POST(CollectionCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropCollectionPropertiesReq{} }, wrapperTraceLog(h.dropCollectionProperties))))
 	router.POST(CollectionCategory+CompactAction, timeoutMiddleware(wrapperPost(func() any { return &CompactReq{} }, wrapperTraceLog(h.compact))))
 	router.POST(CollectionCategory+CompactionStateAction, timeoutMiddleware(wrapperPost(func() any { return &GetCompactionStateReq{} }, wrapperTraceLog(h.getcompactionState))))
@@ -408,24 +414,26 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
 			metrics.TotalLabel,
+			metrics.CauseNA,
 			dbName,
 			collectionName,
 		).Inc()
-		label := requestutil.ParseMetricLabel(resp, err)
+		label, cause := requestutil.ParseMetricLabel(resp, err)
 		// set metrics for state code
 		metrics.ProxyFunctionCall.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
 			label,
+			cause,
 			dbName,
 			collectionName,
 		).Inc()
 
-		// Mirror the fail_input/fail_system metric split into the logs so a
-		// failed REST request can be filtered by error_type. System failures are
-		// logged at Warn (actionable); input failures at Info (expected user
-		// mistakes — keeping them at Warn would spam the logs).
-		if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+		// Mirror the metric's cause into the logs so a failed REST request can be
+		// filtered by error_type. System failures are logged at Warn (actionable);
+		// input failures at Info (expected user mistakes — keeping them at Warn
+		// would spam the logs).
+		if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
 			var status *commonpb.Status
 			switch r := resp.(type) {
 			case interface{ GetStatus() *commonpb.Status }:
@@ -434,7 +442,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				status = r
 			}
 			errType := merr.SystemError
-			if label == metrics.FailInputLabel {
+			if cause == metrics.CauseUser {
 				errType = merr.InputError
 			}
 			logger := mlog.With(
@@ -992,6 +1000,9 @@ func (h *HandlersV2) alterCollectionFunction(ctx context.Context, c *gin.Context
 	return resp, err
 }
 
+// dropCollectionFunction backs the deprecated /collections/drop_function endpoint,
+// which mapped to the legacy detach RPC. A function is coupled to its output field,
+// so the RPC is rejected; use /collections/drop_function_field instead.
 func (h *HandlersV2) dropCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionDropFunction)
 	req := &milvuspb.DropCollectionFunctionRequest{
@@ -1002,6 +1013,111 @@ func (h *HandlersV2) dropCollectionFunction(ctx context.Context, c *gin.Context,
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropCollectionFunction(reqCtx, req.(*milvuspb.DropCollectionFunctionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+// addCollectionFunctionField backs /collections/add_function_field: it attaches a
+// BM25/MinHash function together with its output field and index via AlterCollectionSchema.
+// A function is coupled to its output field, so both are added in one request.
+func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionAddFunctionField)
+	// The index always targets the newly-added output field; reject a mismatched
+	// indexParams.fieldName rather than silently building the index on outputField.
+	if httpReq.IndexParam.FieldName != httpReq.OutputField.FieldName {
+		err := merr.WrapErrParameterInvalidMsg(
+			"indexParams.fieldName %q must match outputField.fieldName %q",
+			httpReq.IndexParam.FieldName, httpReq.OutputField.FieldName)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	fieldSchema, err := httpReq.OutputField.GetProto(ctx)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	extraParams, err := convertToExtraParams(httpReq.IndexParam)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{
+							FieldSchema: fieldSchema,
+							IndexName:   httpReq.IndexParam.IndexName,
+							ExtraParams: extraParams,
+						},
+					},
+					FuncSchema: []*schemapb.FunctionSchema{fSchema},
+				},
+			},
+		},
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionSchema", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		r, callErr := h.proxy.AlterCollectionSchema(reqCtx, req.(*milvuspb.AlterCollectionSchemaRequest))
+		if callErr == nil {
+			callErr = merr.Error(r.GetAlterStatus())
+		}
+		return r, callErr
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+// dropCollectionFunctionField backs /collections/drop_function_field: it detaches a
+// function and drops its output field together via AlterCollectionSchema.
+func (h *HandlersV2) dropCollectionFunctionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionDropFunctionField)
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{
+						FunctionName: httpReq.FunctionName,
+					},
+					DropFunctionOutputFields: true,
+				},
+			},
+		},
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionSchema", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		r, callErr := h.proxy.AlterCollectionSchema(reqCtx, req.(*milvuspb.AlterCollectionSchemaRequest))
+		if callErr == nil {
+			callErr = merr.Error(r.GetAlterStatus())
+		}
+		return r, callErr
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -1241,6 +1357,9 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	}
 	if httpReq.Limit > 0 && !matchCountRule(httpReq.OutputFields) {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
+	}
+	if len(httpReq.OrderByFields) > 0 {
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
 	}
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
@@ -2046,6 +2165,82 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	return resp, err
 }
 
+func defaultMetricTypeForQuickCreate(dataType schemapb.DataType) string {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		return paramtable.BinaryVectorDefaultMetricType
+	case schemapb.DataType_SparseFloatVector:
+		return paramtable.SparseFloatVectorDefaultMetricType
+	default:
+		return DefaultMetricType
+	}
+}
+
+func binaryMetricTypesForQuickCreate() []string {
+	binaryIndexType := paramtable.Get().AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()[common.IndexTypeKey]
+	switch binaryIndexType {
+	case "BIN_FLAT":
+		return indexparamcheck.BinIDMapMetrics
+	case "BIN_IVF_FLAT", "":
+		return indexparamcheck.BinIvfMetrics
+	default:
+		return indexparamcheck.BinIvfMetrics
+	}
+}
+
+func validateMetricTypeForQuickCreate(dataType schemapb.DataType, metricType string) error {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		if !funcutil.SliceContain(binaryMetricTypesForQuickCreate(), metricType) {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType)
+		}
+	case schemapb.DataType_SparseFloatVector:
+		if !funcutil.SliceContain(indexparamcheck.SparseFloatVectorMetrics, metricType) {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only IP&BM25 is the supported metric type for sparse index")
+		}
+		if metricType == metric.BM25 {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only BM25 Function output field support BM25 metric type")
+		}
+	default:
+		if !funcutil.SliceContain(indexparamcheck.FloatVectorMetrics, metricType) {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "float vector index does not support metric type: "+metricType)
+		}
+	}
+	return nil
+}
+
+func consistencyLevelForCreateCollection(httpReq *CollectionReq) (commonpb.ConsistencyLevel, error) {
+	consistencyLevel := commonpb.ConsistencyLevel_Bounded
+	paramConsistencyLevel, hasParamConsistencyLevel := httpReq.Params["consistencyLevel"]
+	paramConsistencyLevelStr := ""
+	if hasParamConsistencyLevel {
+		paramConsistencyLevelStr = fmt.Sprintf("%s", paramConsistencyLevel)
+	}
+
+	if httpReq.ConsistencyLevel != "" && hasParamConsistencyLevel && httpReq.ConsistencyLevel != paramConsistencyLevelStr {
+		return consistencyLevel, merr.WrapErrParameterInvalid("same consistencyLevel", paramConsistencyLevel,
+			"top-level consistencyLevel conflicts with params.consistencyLevel")
+	}
+
+	consistencyLevelStr := httpReq.ConsistencyLevel
+	var actualConsistencyLevel interface{} = httpReq.ConsistencyLevel
+	if consistencyLevelStr == "" && hasParamConsistencyLevel {
+		consistencyLevelStr = paramConsistencyLevelStr
+		actualConsistencyLevel = paramConsistencyLevel
+	}
+
+	if consistencyLevelStr == "" {
+		return consistencyLevel, nil
+	}
+
+	if level, ok := commonpb.ConsistencyLevel_value[consistencyLevelStr]; ok {
+		return commonpb.ConsistencyLevel(level), nil
+	}
+
+	return consistencyLevel, merr.WrapErrParameterInvalid("Strong, Session, Bounded, Eventually, Customized", actualConsistencyLevel,
+		"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
+}
+
 func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionReq)
 	req := &milvuspb.CreateCollectionRequest{
@@ -2070,6 +2265,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	var err error
 	fieldNames := map[string]bool{}
 	partitionsNum := int64(-1)
+	quickCreateVectorDataType := schemapb.DataType_FloatVector
 	if len(httpReq.Schema.Fields) == 0 {
 		if httpReq.GetExternalSource() != "" || httpReq.GetExternalSpec() != "" {
 			err := merr.WrapErrParameterInvalid("schema.fields", "empty schema fields",
@@ -2092,9 +2288,53 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			return nil, err
 		}
 
-		if httpReq.Dimension == 0 {
+		switch httpReq.VectorFieldType {
+		case "", "FloatVector":
+			httpReq.VectorFieldType = "FloatVector"
+		case "BinaryVector":
+			quickCreateVectorDataType = schemapb.DataType_BinaryVector
+		case "Float16Vector":
+			quickCreateVectorDataType = schemapb.DataType_Float16Vector
+		case "BFloat16Vector":
+			quickCreateVectorDataType = schemapb.DataType_BFloat16Vector
+		case "SparseFloatVector":
+			quickCreateVectorDataType = schemapb.DataType_SparseFloatVector
+		default:
+			err := merr.WrapErrParameterInvalid("FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector", httpReq.VectorFieldType,
+				"vectorFieldType can only be [FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector], default: FloatVector")
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+
+		if quickCreateVectorDataType == schemapb.DataType_SparseFloatVector && httpReq.Dimension != 0 {
+			err := merr.WrapErrParameterInvalid(int32(0), httpReq.Dimension,
+				"dimension should not be specified for SparseFloatVector quick create")
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+
+		if quickCreateVectorDataType != schemapb.DataType_SparseFloatVector && httpReq.Dimension == 0 {
 			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
 				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		if len(httpReq.MetricType) == 0 {
+			httpReq.MetricType = defaultMetricTypeForQuickCreate(quickCreateVectorDataType)
+		}
+		if err := validateMetricTypeForQuickCreate(quickCreateVectorDataType, httpReq.MetricType); err != nil {
 			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
@@ -2142,6 +2382,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				return nil, err
 			}
 		}
+		vectorTypeParams := []*commonpb.KeyValuePair{}
+		if quickCreateVectorDataType != schemapb.DataType_SparseFloatVector {
+			vectorTypeParams = append(vectorTypeParams, &commonpb.KeyValuePair{
+				Key:   Dim,
+				Value: strconv.FormatInt(int64(httpReq.Dimension), 10),
+			})
+		}
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
 			Name: httpReq.CollectionName,
 			Fields: []*schemapb.FieldSchema{
@@ -2157,14 +2404,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 					FieldID:      common.StartOfUserFieldID + 1,
 					Name:         httpReq.VectorFieldName,
 					IsPrimaryKey: false,
-					DataType:     schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   Dim,
-							Value: strconv.FormatInt(int64(httpReq.Dimension), 10),
-						},
-					},
-					AutoID: DisableAutoID,
+					DataType:     quickCreateVectorDataType,
+					TypeParams:   vectorTypeParams,
+					AutoID:       DisableAutoID,
 				},
 			},
 			EnableDynamicField: enableDynamic,
@@ -2314,20 +2556,14 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	}
 	req.ShardsNum = shardsNum
 
-	consistencyLevel := commonpb.ConsistencyLevel_Bounded
-	if _, ok := httpReq.Params["consistencyLevel"]; ok {
-		if level, ok := commonpb.ConsistencyLevel_value[fmt.Sprintf("%s", httpReq.Params["consistencyLevel"])]; ok {
-			consistencyLevel = commonpb.ConsistencyLevel(level)
-		} else {
-			err := merr.WrapErrParameterInvalid("Strong, Session, Bounded, Eventually, Customized", httpReq.Params["consistencyLevel"],
-				"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
-			mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(err),
-				HTTPReturnMessage: err.Error(),
-			})
-			return nil, err
-		}
+	consistencyLevel, err := consistencyLevelForCreateCollection(httpReq)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
 	}
 	req.ConsistencyLevel = consistencyLevel
 
@@ -2404,9 +2640,6 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		return resp, err
 	}
 	if len(httpReq.Schema.Fields) == 0 {
-		if len(httpReq.MetricType) == 0 {
-			httpReq.MetricType = DefaultMetricType
-		}
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
 			CollectionName: httpReq.CollectionName,

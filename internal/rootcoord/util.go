@@ -461,6 +461,9 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 		if err := checkDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
 			return err
 		}
+		if err := validateLocalFormat(fieldSchema); err != nil {
+			return err
+		}
 		if err := checkDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
 			return err
 		}
@@ -492,6 +495,9 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
 			if err := checkDupKvPairs(field.GetTypeParams(), "type"); err != nil {
+				return err
+			}
+			if err := validateLocalFormat(field); err != nil {
 				return err
 			}
 			if err := checkDupKvPairs(field.GetIndexParams(), "index"); err != nil {
@@ -558,6 +564,34 @@ func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
 			return merr.WrapErrParameterInvalidMsg("duplicated %s param key \"%s\"", paramType, kv.GetKey())
 		}
 		set.Insert(kv.GetKey())
+	}
+	return nil
+}
+
+func validateLocalFormat(fieldSchema *schemapb.FieldSchema) error {
+	for _, kv := range fieldSchema.GetTypeParams() {
+		if kv.GetKey() == common.LocalFormatKey {
+			switch kv.GetValue() {
+			case common.LocalFormatRaw:
+				// valid
+			case common.LocalFormatVortex:
+				if fieldSchema.GetIsPrimaryKey() {
+					return merr.WrapErrParameterInvalidMsg(
+						"local_format vortex is not supported for primary key field '%s'",
+						fieldSchema.GetName())
+				}
+				if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+					return merr.WrapErrParameterInvalidMsg(
+						"local_format vortex is not supported for vector field '%s'",
+						fieldSchema.GetName())
+				}
+			default:
+				return merr.WrapErrParameterInvalidMsg(
+					"invalid local_format '%s' for field '%s', supported: raw, vortex",
+					kv.GetValue(), fieldSchema.GetName())
+			}
+			break
+		}
 	}
 	return nil
 }

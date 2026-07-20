@@ -309,6 +309,10 @@ message AlterCollectionMessageUpdates {
     common.ConsistencyLevel consistency_level = 6; // consistency level should be updated.
     repeated common.KeyValuePair properties   = 7; // collection properties should be updated.
     AlterLoadConfigOfAlterCollection alter_load_config = 8; // alter load config of alter collection.
+    // Index meta bound to newly added function-output/vector fields.
+    // Fully materialized (index id/name allocated, params validated) at DDL prepare
+    // stage BEFORE broadcast; applied atomically with the schema in the ack callback.
+    repeated index.FieldIndex bound_field_indexes = 9;
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.
@@ -400,6 +404,19 @@ message AlterAliasMessageHeader {
     int64 collection_id = 3;
     string collection_name = 4;
     string alias = 5;
+    // The collection the alias pointed to BEFORE this alter. Sentinel-encoded:
+    //   > 0  the known old target -- cache expiration evicts it by id;
+    //   == 0 UNKNOWN: either a new AlterAlias whose broadcast could not resolve
+    //        the old target, OR an older producer that predates this field. The
+    //        proxy falls back to an O(N) holder scan, so 0 is the safe default;
+    //   < 0  the "no old target" sentinel that CreateAlias sets -- it provably
+    //        has none, so it must NOT trigger the scan. A CreateAlias producer
+    //        MUST use this, NOT 0 (0 would O(N)-scan every create).
+    // Carried in the header -- computed once under the broadcaster's database
+    // lock -- so cache expiration can evict the old target by id even when a
+    // concurrent describe has already re-pointed the proxy's alias resolution to
+    // the new target, and so replaying the message stays deterministic.
+    int64 old_collection_id = 6;
 }
 
 // AlterAliasMessageBody is the body of alter alias message.
@@ -792,6 +809,18 @@ message CipherHeader {
     int64 collection_id = 2; // related to the collection id
     bytes safe_key = 3; // the safe key
     int64 payload_bytes = 4; // the size of the payload before encryption
+}
+
+// TraceContextHeader carries the trace context subset (trace_id, span_id,
+// flags) stored on a message. Tracestate is intentionally not persisted.
+// Serialized into Properties under reserved key `_tc` so that consumers on
+// the other side of an RPC / persistence boundary can stitch spans into the
+// correct parent-child tree.
+// See docs/agent_guides/streaming-system/wal/tracing.md for details.
+message TraceContextHeader {
+    bytes  trace_id = 1;  // 16 bytes
+    bytes  span_id  = 2;  // 8 bytes
+    uint32 flags    = 3;  // W3C TraceFlags (sampled bit)
 }
 
 // TruncateCollectionMessageHeader is the header of truncate collection message.

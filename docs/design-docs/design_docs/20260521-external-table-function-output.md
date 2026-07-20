@@ -314,9 +314,10 @@ readers only see stats after `AddStatsToManifest()` commits a new manifest.
 
 External collections may use `enable_match` on varchar fields. Refresh creates
 the external segments first; it does not synchronously build the text index.
-After segments are registered, DataCoord allows `TextIndexJob` for external
-collections while still skipping other stats jobs such as JSON key stats and BM25
-stats inspector jobs.
+After segments are registered, DataCoord allows external `TextIndexJob` tasks.
+It also allows `JsonKeyIndexJob` for StorageV3 external segments that already
+have a non-empty manifest path, so JSON key stats can be written back to the
+manifest. BM25 stats inspector jobs are still skipped for external collections.
 
 DataNode builds text index stats for every `EnableMatch()` field and registers
 manifest stats with key:
@@ -413,7 +414,8 @@ Key implementation points:
 - `internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp`: loads external
   manifests and uses `take()` for external and function output fields.
 - `internal/datacoord/stats_inspector.go`: permits external `TextIndexJob` and
-  skips other external stats jobs.
+  StorageV3 manifest-backed `JsonKeyIndexJob`, while skipping BM25 stats
+  inspector jobs for external collections.
 - `internal/datanode/index/task_stats.go`: builds text index stats and registers
   them into the manifest.
 

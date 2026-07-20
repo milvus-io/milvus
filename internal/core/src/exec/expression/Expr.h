@@ -190,6 +190,17 @@ class Expr : public std::enable_shared_from_this<Expr> {
         return false;
     }
 
+    // Called when this expression's output feeds a null-rejecting consumer:
+    // one that treats an UNKNOWN (NULL) row exactly like FALSE, such as the
+    // top-level filter, which folds UNKNOWN into the excluded set. Nodes
+    // whose operands keep that property (AND/OR) override this to accept the
+    // mark and propagate it to their inputs; everywhere else (in particular
+    // NOT, where FALSE and UNKNOWN produce different results) the default
+    // no-op stops the propagation.
+    virtual void
+    MarkNullRejecting() {
+    }
+
     virtual bool
     CanUseNestedIndex() const {
         return false;
@@ -1734,11 +1745,17 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
+    enum class IndexValidityMode {
+        Default,
+        JsonExactPath,
+    };
+
     // ProcessIndexChunks: execute index query and batch results
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(func, false, values...);
+        return ProcessIndexChunksImpl<T>(
+            func, false, IndexValidityMode::Default, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -1746,14 +1763,50 @@ class SegmentExpr : public Expr {
     //   (used when func already handles element-to-row conversion internally)
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
-    ProcessIndexChunksWithRowLevel(FUNC func, const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(func, true, values...);
+    ProcessIndexChunksWithRowLevel(FUNC func,
+                                   IndexValidityMode validity_mode,
+                                   const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, true, validity_mode, values...);
+    }
+
+    TargetBitmap
+    GetFieldRowValidity(int64_t row_count) const {
+        TargetBitmap valid_result(row_count, true);
+        if (row_count == 0) {
+            return valid_result;
+        }
+
+        int64_t processed_size = 0;
+        for (int64_t chunk_id = 0;
+             chunk_id < num_data_chunk_ && processed_size < row_count;
+             ++chunk_id) {
+            auto chunk_size = segment_->is_chunked()
+                                  ? segment_->chunk_size(field_id_, chunk_id)
+                                  : size_per_chunk_;
+            auto size = std::min(chunk_size, row_count - processed_size);
+            if (size == 0) {
+                continue;
+            }
+            segment_->ApplyFieldValidData(op_ctx_,
+                                          field_id_,
+                                          chunk_id,
+                                          0,
+                                          size,
+                                          valid_result.view() + processed_size);
+            processed_size += size;
+        }
+        AssertInfo(processed_size == row_count,
+                   "field validity row count mismatch: expected {}, got {}",
+                   row_count,
+                   processed_size);
+        return valid_result;
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunksImpl(FUNC func,
                            bool func_returns_row_level,
+                           IndexValidityMode validity_mode,
                            const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -1770,12 +1823,14 @@ class SegmentExpr : public Expr {
             PinWrapper<const index::IndexBase*> json_pw;
             std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
                 executor;
+            const auto json_pointer = field_type_ == DataType::JSON
+                                          ? milvus::Json::pointer(nested_path_)
+                                          : std::string();
             auto prepare_index = [&]() {
                 if (index_ptr != nullptr) {
                     return;
                 }
                 if (field_type_ == DataType::JSON) {
-                    auto pointer = milvus::Json::pointer(nested_path_);
                     json_pw = pinned_index_[0];
                     auto json_flat_index =
                         dynamic_cast<const index::JsonFlatIndex*>(
@@ -1786,7 +1841,7 @@ class SegmentExpr : public Expr {
                         executor =
                             json_flat_index
                                 ->template create_executor<IndexInnerType>(
-                                    pointer.substr(index_path.size()));
+                                    json_pointer.substr(index_path.size()));
                         index_ptr = executor.get();
                     } else {
                         auto json_index =
@@ -1811,8 +1866,48 @@ class SegmentExpr : public Expr {
                     TargetBitmap res = func(index_ptr, values...);
 
                     TargetBitmap valid_res;
-                    if (cached_is_nested_index_ && func_returns_row_level) {
-                        valid_res = TargetBitmap(active_count_, true);
+                    std::optional<index::JsonValueType> json_value_type;
+                    if (executor != nullptr) {
+                        if (validity_mode == IndexValidityMode::JsonExactPath) {
+                            json_value_type = index::JsonValueType::Any;
+                        } else if constexpr (std::is_same_v<IndexInnerType,
+                                                            bool>) {
+                            json_value_type = index::JsonValueType::Bool;
+                        } else if constexpr (std::is_integral_v<
+                                                 IndexInnerType> ||
+                                             std::is_floating_point_v<
+                                                 IndexInnerType>) {
+                            json_value_type = index::JsonValueType::Numeric;
+                        } else if constexpr (std::is_same_v<IndexInnerType,
+                                                            std::string>) {
+                            json_value_type = index::JsonValueType::String;
+                        }
+                    }
+
+                    if (json_value_type.has_value()) {
+                        const auto family =
+                            static_cast<unsigned int>(json_value_type.value());
+                        const auto signature = fmt::format(
+                            "json-flat-validity:v1:field={}:path-length={}:"
+                            "path={}:family={}",
+                            field_id_.get(),
+                            json_pointer.size(),
+                            json_pointer,
+                            family);
+                        if (ExprResCacheManager::IsEnabled()) {
+                            auto validity = ExprCacheHelper::GetOrComputeBitmap(
+                                segment_, signature, active_count_, [&]() {
+                                    return executor->ExactPathExists(
+                                        json_value_type.value());
+                                });
+                            valid_res = std::move(*validity);
+                        } else {
+                            valid_res = executor->ExactPathExists(
+                                json_value_type.value());
+                        }
+                    } else if (cached_is_nested_index_ &&
+                               func_returns_row_level) {
+                        valid_res = GetFieldRowValidity(active_count_);
                     } else {
                         valid_res = index_ptr->IsNotNull();
                     }
@@ -2086,9 +2181,10 @@ class SegmentExpr : public Expr {
 
                 if (json_flat_index) {
                     auto index_path = json_flat_index->GetNestedPath();
-                    executor = json_flat_index
-                                   ->template create_executor<IndexInnerType>(
-                                       pointer.substr(index_path.size()));
+                    executor =
+                        json_flat_index
+                            ->template create_executor<IndexInnerType>(
+                                pointer.substr(index_path.size()), false);
                     index_ptr = executor.get();
                 } else {
                     auto json_index =
@@ -2220,6 +2316,20 @@ class SegmentExpr : public Expr {
         }
 
         return true;
+    }
+
+    bool
+    PinnedJsonIndexIsFlat() const {
+        return field_type_ == DataType::JSON && !pinned_index_.empty() &&
+               dynamic_cast<const index::JsonFlatIndex*>(
+                   pinned_index_[0].get()) != nullptr;
+    }
+
+    static bool
+    IsInt64SafeForJsonDoubleIndex(int64_t value) {
+        constexpr int64_t kFirstNonInjectiveInteger = int64_t{1} << 53;
+        return value > -kFirstNonInjectiveInteger &&
+               value < kFirstNonInjectiveInteger;
     }
 
  public:
@@ -2563,10 +2673,20 @@ CompileExpression(const expr::TypedExprPtr& expr,
 
 class ExprSet {
  public:
+    // null_rejecting: the consumer of these expressions' output treats
+    // UNKNOWN rows exactly like FALSE (e.g. a filter that folds UNKNOWN into
+    // the excluded set); lets conjunctions drop UNKNOWN rows from their
+    // active sets early. See Expr::MarkNullRejecting.
     explicit ExprSet(const std::vector<expr::TypedExprPtr>& logical_exprs,
-                     ExecContext* exec_ctx)
+                     ExecContext* exec_ctx,
+                     bool null_rejecting = false)
         : exec_ctx_(exec_ctx) {
         exprs_ = CompileExpressions(logical_exprs, exec_ctx);
+        if (null_rejecting) {
+            for (auto& compiled_expr : exprs_) {
+                compiled_expr->MarkNullRejecting();
+            }
+        }
     }
 
     virtual ~ExprSet() = default;

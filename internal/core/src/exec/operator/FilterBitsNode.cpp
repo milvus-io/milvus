@@ -88,7 +88,12 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // This operator folds UNKNOWN predicate rows into the excluded set
+    // (ConvertPredicateToFilteredBitset), i.e. it is a null-rejecting
+    // consumer: let conjunctions in the predicate tree drop UNKNOWN rows
+    // from their active sets early.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
 

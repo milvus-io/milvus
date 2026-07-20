@@ -415,6 +415,9 @@ message SegmentLoadInfo {
     // passing to C++ segcore to overwrite the in-memory timestamp column
     // (enabling correct MVCC visibility and TTL evaluation).
     uint64 commit_timestamp = 28;
+    // child_manifest_paths carries compact-to child manifests whose delta logs
+    // must be loaded together with the fallback parent segment.
+    repeated string child_manifest_paths = 29;
 }
 
 message FieldIndexInfo {
@@ -444,9 +447,9 @@ message JsonStatsInfo {
 }
 
 enum LoadScope {
+    reserved 2;
     Full = 0;
     Delta = 1;
-    Index = 2;
     Stats = 3;
     Reopen = 4;
 }

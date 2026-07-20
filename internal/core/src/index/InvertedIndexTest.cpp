@@ -83,7 +83,7 @@ TEST(InvertedIndex, PatternMatchPlannerPolicy) {
     EXPECT_TRUE(index.ShouldUseOp(proto::plan::OpType::PrefixMatch));
     EXPECT_FALSE(index.ShouldUseOp(proto::plan::OpType::RegexMatch));
     EXPECT_TRUE(index.ShouldUseOp(proto::plan::OpType::Equal));
-    EXPECT_TRUE(index.ShouldUseOp(proto::plan::OpType::Match));
+    EXPECT_FALSE(index.ShouldUseOp(proto::plan::OpType::Match));
     EXPECT_FALSE(index.ShouldUseOp(proto::plan::OpType::InnerMatch));
     EXPECT_FALSE(index.ShouldUseOp(proto::plan::OpType::PostfixMatch));
 

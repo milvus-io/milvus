@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -28,8 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -105,6 +108,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
 			return err
 		}
+		if err := schemautil.CheckNoFunctionCascade(coll.ToCollectionSchemaPB().GetFunctions(), plan.Function); err != nil {
+			return err
+		}
 		for _, function := range coll.Functions {
 			if function.Name == plan.Function.GetName() {
 				return merr.WrapErrParameterInvalidMsg("function already exists, name: %s", plan.Function.GetName())
@@ -114,6 +120,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 
 	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
 	if err != nil {
+		return err
+	}
+	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
 	if plan.HasFunction() {
@@ -128,8 +137,24 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 
+	// Materialize the bound index meta for the new function output field BEFORE the
+	// broadcast, so the WAL message carries a complete, replay-deterministic index
+	// definition and the ack callback stays a pure idempotent apply.
+	var boundFieldIndexes []*indexpb.FieldIndex
+	if plan.Kind == schemautil.AlterSchemaAddFunctionField {
+		fieldIndex, err := c.prepareBoundFieldIndex(ctx, coll, plan)
+		if err != nil {
+			return err
+		}
+		boundFieldIndexes = append(boundFieldIndexes, fieldIndex)
+	}
+
 	// Broadcast.
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, coll, schema)
 	if err != nil {
 		return err
 	}
@@ -148,16 +173,103 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema:     schema,
-				Properties: properties,
+				Schema:            schema,
+				Properties:        properties,
+				BoundFieldIndexes: boundFieldIndexes,
 			},
 		}).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}
 	return nil
+}
+
+// prepareBoundFieldIndex materializes the index meta bound to the newly added
+// function-output field, strictly BEFORE the DDL broadcast: index id/name are
+// allocated here and serialized into the WAL message so that the ack-callback
+// apply is a pure idempotent write (a replayed callback rebuilds the identical
+// index), and every input-dependent rejection happens before anything commits.
+func (c *Core) prepareBoundFieldIndex(ctx context.Context, coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) (*indexpb.FieldIndex, error) {
+	indexParamsMap, err := indexparamcheck.PrepareFunctionOutputIndexParams(
+		plan.Function.GetType(), plan.Field.GetName(), plan.IndexExtraParams)
+	if err != nil {
+		return nil, err
+	}
+	// The index type must have a registered checker — an unknown type would pass
+	// structural validation, get persisted via the ack callback, and then never
+	// build. Proxy already rejects this, but the check must live pre-broadcast
+	// for callers that reach rootcoord directly.
+	indexType := indexParamsMap[common.IndexTypeKey]
+	if checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType); err != nil || indexparamcheck.IsHYBRIDChecker(checker) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"invalid index type %s for the bound index of function output field %q",
+			indexType, plan.Field.GetName())
+	}
+	// Full field-aware validation (params size, dimension fill+match, data-type
+	// compatibility, train params), identical to the create_index path — an index
+	// that cannot build must never be persisted through the ack callback.
+	if err := indexparamcheck.ValidateFieldIndexParams(plan.Field, indexParamsMap); err != nil {
+		return nil, err
+	}
+
+	indexName := plan.IndexName
+	if indexName == "" {
+		indexName = plan.Field.GetName()
+	}
+	// Name-format rule, same as the proxy path — enforced here too for callers
+	// that reach rootcoord directly.
+	if err := indexparamcheck.ValidateIndexName(indexName); err != nil {
+		return nil, err
+	}
+	// Reject index-name conflicts with existing indexes (the field itself is new,
+	// so only cross-field name collisions are possible).
+	resp, err := c.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: coll.CollectionID,
+	})
+	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+		if !merr.ErrIndexNotFound.Is(err) {
+			return nil, merr.Wrap(err, "failed to list existing indexes for bound index preparation")
+		}
+	} else {
+		for _, info := range resp.GetIndexInfos() {
+			if info.GetIndexName() == indexName {
+				return nil, merr.WrapErrParameterInvalidMsg("index name %s already exists in collection", indexName)
+			}
+		}
+	}
+
+	indexID, err := c.idAllocator.AllocOne()
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to allocate index id for bound index")
+	}
+	createTime, err := c.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to allocate timestamp for bound index")
+	}
+
+	indexParams := funcutil.Map2KeyValuePair(indexParamsMap)
+	// Field type params minus per-field mmap/warmup keys, mirroring datacoord CreateIndex.
+	typeParams := lo.Filter(plan.Field.GetTypeParams(), func(kv *commonpb.KeyValuePair, _ int) bool {
+		return kv.GetKey() != common.MmapEnabledKey && kv.GetKey() != common.WarmupKey
+	})
+	index := &model.Index{
+		CollectionID:    coll.CollectionID,
+		FieldID:         plan.Field.GetFieldID(),
+		IndexID:         indexID,
+		IndexName:       indexName,
+		TypeParams:      typeParams,
+		IndexParams:     indexParams,
+		CreateTime:      createTime,
+		IsAutoIndex:     false,
+		UserIndexParams: plan.IndexExtraParams,
+	}
+	if err := indexparamcheck.ValidateIndexParams(index); err != nil {
+		return nil, err
+	}
+	return model.MarshalIndexModel(index), nil
 }
 
 func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) error {
@@ -262,11 +374,11 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 
 	switch id := dropReq.GetIdentifier().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
-		if dropReq.GetDropFunctionOutputFields() {
-			schema, properties, droppedFieldIds, err = buildSchemaForDropFunctionField(coll, id.FunctionName)
-		} else {
-			schema, properties, droppedFieldIds, err = buildSchemaForDetachFunction(coll, id.FunctionName)
+		if !dropReq.GetDropFunctionOutputFields() {
+			return merr.WrapErrParameterInvalidMsg(
+				"detaching a function without dropping its output field is not supported; drop_function always removes the function together with its output field: %s", id.FunctionName)
 		}
+		schema, properties, droppedFieldIds, err = buildSchemaForDropFunctionField(coll, id.FunctionName)
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
 		schema, properties, droppedFieldIds, err = buildSchemaForDropField(coll, id.FieldName, 0)
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
@@ -277,8 +389,15 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	if err != nil {
 		return err
 	}
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, coll, schema)
 	if err != nil {
 		return err
 	}
@@ -305,6 +424,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}
 	return nil
@@ -344,6 +464,12 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		newFields = append(newFields, model.MarshalFieldModel(f))
 	}
 	if droppedField != nil {
+		// Mirror the proxy guard for direct-coord callers: a field a function
+		// depends on must be dropped via the function DDL, not directly, else the
+		// function is orphaned and its stored output invalidated.
+		if fn, kind := functionReferencing(coll.Functions, droppedField.Name); fn != "" {
+			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field is referenced by function %s as %s, drop function first", fn, kind)
+		}
 		schema = coll.ToCollectionSchemaPB()
 		maxFieldID := maxAssignedFieldIDFromSchema(schema)
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
@@ -369,6 +495,11 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		newStructs = append(newStructs, model.MarshalStructArrayFieldModel(s))
 	}
 	if droppedStruct != nil {
+		for _, sub := range droppedStruct.Fields {
+			if fn, kind := functionReferencing(coll.Functions, sub.Name); fn != "" {
+				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is referenced by function %s as %s", droppedStruct.Name, sub.Name, fn, kind)
+			}
+		}
 		schema = coll.ToCollectionSchemaPB()
 		maxFieldID := maxAssignedFieldIDFromSchema(schema)
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
@@ -388,55 +519,44 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 	return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field not found with id: %d", fieldID)
 }
 
-func buildSchemaForDetachFunction(coll *model.Collection, functionName string) (
-	schema *schemapb.CollectionSchema,
-	properties []*commonpb.KeyValuePair,
-	droppedFieldIds []int64,
-	err error,
-) {
-	var targetFunc *model.Function
-	for _, fn := range coll.Functions {
-		if fn.Name == functionName {
-			targetFunc = fn
+// resolveOutputFieldIDsFromNames re-derives a function's output field IDs from its
+// OutputFieldNames against the current schema (the authoritative name->id mapping),
+// and rejects if the persisted OutputFieldIDs disagree as a set. A drop deletes by
+// field id, but the proxy guard authorizes by name; a stale/injected persisted id
+// that no name resolves to (e.g. a primary key) would then be deleted past that
+// guard. Re-resolving keeps authorization (name) and action (id) on one carrier.
+// Read-only, unlike resolveFunctionFieldIDs which mutates the schema on add/alter.
+func resolveOutputFieldIDsFromNames(fn *model.Function, fields []*model.Field) ([]int64, error) {
+	nameToID := make(map[string]int64, len(fields))
+	for _, f := range fields {
+		nameToID[f.Name] = f.FieldID
+	}
+	resolved := make([]int64, 0, len(fn.OutputFieldNames))
+	resolvedSet := make(map[int64]struct{}, len(fn.OutputFieldNames))
+	for _, name := range fn.OutputFieldNames {
+		id, ok := nameToID[name]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("function %s output field %s not found in schema", fn.Name, name)
+		}
+		resolved = append(resolved, id)
+		resolvedSet[id] = struct{}{}
+	}
+	persistedSet := make(map[int64]struct{}, len(fn.OutputFieldIDs))
+	for _, id := range fn.OutputFieldIDs {
+		persistedSet[id] = struct{}{}
+	}
+	mismatch := len(resolvedSet) != len(persistedSet)
+	for id := range persistedSet {
+		if _, ok := resolvedSet[id]; !ok {
+			mismatch = true
 			break
 		}
 	}
-	if targetFunc == nil {
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	if mismatch {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"function %s persisted output field ids %v do not align with output field names %v; metadata may be corrupt", fn.Name, fn.OutputFieldIDs, fn.OutputFieldNames)
 	}
-	if targetFunc.Type == schemapb.FunctionType_BM25 {
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
-	}
-
-	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))
-	for _, fid := range targetFunc.OutputFieldIDs {
-		outputFieldIDSet[fid] = struct{}{}
-	}
-
-	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
-	for _, field := range coll.Fields {
-		fieldSchema := model.MarshalFieldModel(field)
-		if _, ok := outputFieldIDSet[field.FieldID]; ok {
-			fieldSchema.IsFunctionOutput = false
-		}
-		newFields = append(newFields, fieldSchema)
-	}
-
-	newFunctions := make([]*schemapb.FunctionSchema, 0, len(coll.Functions)-1)
-	for _, fn := range coll.Functions {
-		if fn.Name != functionName {
-			newFunctions = append(newFunctions, model.MarshalFunctionModel(fn))
-		}
-	}
-
-	schema = coll.ToCollectionSchemaPB()
-	properties = coll.Properties
-	schema.Fields = newFields
-	schema.Functions = newFunctions
-	schema.Properties = properties
-	schema.Version = coll.SchemaVersion + 1
-
-	return schema, properties, nil, nil
+	return resolved, nil
 }
 
 func buildSchemaForDropFunctionField(coll *model.Collection, functionName string) (
@@ -455,16 +575,29 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	if targetFunc == nil {
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
 	}
-	switch targetFunc.Type {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
-	default:
-		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
+	// Drop is uniform across function types (no backfill); unlike add_function_field
+	// it is not type-restricted. Re-resolve the delete set from names so an injected
+	// persisted id cannot be deleted past the name-based proxy guard.
+	outputFieldIDs, err := resolveOutputFieldIDsFromNames(targetFunc, coll.Fields)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	droppedFieldIds = append(droppedFieldIds, outputFieldIDs...)
+	outputFieldIDSet := make(map[int64]struct{}, len(outputFieldIDs))
+	for _, fid := range outputFieldIDs {
+		outputFieldIDSet[fid] = struct{}{}
 	}
 
-	droppedFieldIds = append(droppedFieldIds, targetFunc.OutputFieldIDs...)
-	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))
-	for _, fid := range targetFunc.OutputFieldIDs {
-		outputFieldIDSet[fid] = struct{}{}
+	// Mirror the proxy guard for direct-coord callers: dropping the output vector
+	// field(s) must not leave the collection with no vector field.
+	removedVectors := 0
+	for _, field := range coll.Fields {
+		if _, ok := outputFieldIDSet[field.FieldID]; ok && typeutil.IsVectorType(field.DataType) {
+			removedVectors++
+		}
+	}
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) {
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop function %s: it would leave no vector field in the collection", functionName)
 	}
 
 	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
@@ -490,4 +623,23 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	schema.Version = coll.SchemaVersion + 1
 
 	return schema, properties, droppedFieldIds, nil
+}
+
+// functionReferencing returns the name of the first function referencing fieldName
+// and its role ("input"/"output"), or "" if none. A field a function depends on
+// must not be dropped directly (mirrors the proxy validateDropField guard).
+func functionReferencing(functions []*model.Function, fieldName string) (string, string) {
+	for _, fn := range functions {
+		for _, in := range fn.InputFieldNames {
+			if in == fieldName {
+				return fn.Name, "input"
+			}
+		}
+		for _, out := range fn.OutputFieldNames {
+			if out == fieldName {
+				return fn.Name, "output"
+			}
+		}
+	}
+	return "", ""
 }

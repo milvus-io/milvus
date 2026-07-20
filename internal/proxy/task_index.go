@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -203,92 +202,23 @@ func wrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
 	}
 }
 
-func checkIndexParamsSize(size int) error {
-	maxIndexParamsSize := paramtable.Get().ProxyCfg.MaxIndexParamsSize.GetAsInt()
-	if size > maxIndexParamsSize {
-		return merr.WrapErrParameterInvalidMsg("index params size exceeds limit: %d > %d", size, maxIndexParamsSize)
-	}
-	return nil
-}
-
-func validateIndexParamsSize(params ...*commonpb.KeyValuePair) error {
-	size := 0
-	for _, param := range params {
-		size += len(param.GetKey()) + len(param.GetValue())
-	}
-	return checkIndexParamsSize(size)
-}
-
-func validateIndexParamsMapSize(params map[string]string) error {
-	size := 0
-	for k, v := range params {
-		size += len(k) + len(v)
-	}
-	return checkIndexParamsSize(size)
-}
-
 func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string]string) error {
 	if !cit.fieldSchema.GetIsFunctionOutput() {
 		return nil
 	}
-
-	switch cit.functionSchema.GetType() {
-	case schemapb.FunctionType_Unknown:
-		return merr.WrapErrParameterInvalidMsg("unknown function type encountered")
-
-	case schemapb.FunctionType_BM25:
-		// set default BM25 params if not provided in index params
-		if _, ok := indexParamsMap["bm25_k1"]; !ok {
-			indexParamsMap["bm25_k1"] = "1.2"
-		}
-
-		if _, ok := indexParamsMap["bm25_b"]; !ok {
-			indexParamsMap["bm25_b"] = "0.75"
-		}
-
-		if _, ok := indexParamsMap["bm25_avgdl"]; !ok {
-			indexParamsMap["bm25_avgdl"] = "100"
-		}
-
-		if metricType, ok := indexParamsMap["metric_type"]; !ok {
-			indexParamsMap["metric_type"] = metric.BM25
-		} else if metricType != metric.BM25 {
-			return merr.WrapErrParameterInvalidMsg("index metric type of BM25 function output field must be BM25, got %s", metricType)
-		}
-
-	default:
-		return nil
-	}
-
-	return nil
+	return indexparamcheck.FillFunctionOutputIndexParams(cit.functionSchema.GetType(), indexParamsMap)
 }
 
 func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	cit.newExtraParams = cit.req.GetExtraParams()
-	if err := validateIndexParamsSize(cit.newExtraParams...); err != nil {
+	if err := indexparamcheck.ValidateIndexParamsSize(cit.newExtraParams...); err != nil {
 		return err
 	}
 
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
-	indexParamsMap := make(map[string]string)
-
-	keys := typeutil.NewSet[string]()
-	for _, kv := range cit.req.GetExtraParams() {
-		if keys.Contain(kv.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("duplicated index param (key=%s) (value=%s) found", kv.GetKey(), kv.GetValue())
-		}
-		keys.Insert(kv.GetKey())
-		if kv.Key == common.ParamsKey {
-			params, err := funcutil.JSONToMap(kv.Value)
-			if err != nil {
-				return err
-			}
-			for k, v := range params {
-				indexParamsMap[k] = v
-			}
-		} else {
-			indexParamsMap[kv.Key] = kv.Value
-		}
+	indexParamsMap, err := indexparamcheck.ExpandIndexParams(cit.req.GetExtraParams())
+	if err != nil {
+		return err
 	}
 
 	if jsonCastType, exist := indexParamsMap[common.JSONCastTypeKey]; exist {
@@ -298,7 +228,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		indexParamsMap[common.JSONCastFunctionKey] = strings.ToUpper(strings.TrimSpace(jsonCastFunction))
 	}
 
-	if err := validateIndexParamsMapSize(indexParamsMap); err != nil {
+	if err := indexparamcheck.ValidateIndexParamsMapSize(indexParamsMap); err != nil {
 		return err
 	}
 
@@ -588,11 +518,11 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		}
 	}
 
-	if err := validateIndexParamsMapSize(indexParamsMap); err != nil {
+	if err := indexparamcheck.ValidateIndexParamsMapSize(indexParamsMap); err != nil {
 		return err
 	}
 
-	err := checkTrain(ctx, cit.fieldSchema, indexParamsMap)
+	err = checkTrain(ctx, cit.fieldSchema, indexParamsMap)
 	if err != nil {
 		// checkTrain may propagate errors from indexparamcheck (not yet
 		// merr-standardized). Already-merr errors (leaves / fillDimension /
@@ -654,28 +584,6 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 	return nil
 }
 
-func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) error {
-	if !typeutil.IsVectorType(field.GetDataType()) {
-		return nil
-	}
-	params := make([]*commonpb.KeyValuePair, 0, len(field.GetTypeParams())+len(field.GetIndexParams()))
-	params = append(params, field.GetTypeParams()...)
-	params = append(params, field.GetIndexParams()...)
-	dimensionInSchema, err := funcutil.GetAttrByKeyFromRepeatedKV(DimKey, params)
-	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("dimension not found in schema")
-	}
-	dimension, exist := indexParams[DimKey]
-	if exist {
-		if dimensionInSchema != dimension {
-			return merr.WrapErrParameterInvalidMsg("dimension mismatch, dimension in schema: %s, dimension: %s", dimensionInSchema, dimension)
-		}
-	} else {
-		indexParams[DimKey] = dimensionInSchema
-	}
-	return nil
-}
-
 func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams map[string]string) error {
 	indexType := indexParams[common.IndexTypeKey]
 
@@ -689,8 +597,7 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		indexParams[common.HybridHighCardinalityIndexTypeKey] = paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()
 	}
 
-	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
-	if err != nil {
+	if _, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType); err != nil {
 		mlog.Warn(ctx, "Failed to get index checker", mlog.String(common.IndexTypeKey, indexType))
 		return merr.WrapErrParameterInvalidMsg("invalid index type: %s", indexType)
 	}
@@ -714,28 +621,8 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		}
 	}
 
-	isSparse := typeutil.IsSparseFloatVectorType(field.DataType)
-
-	if !isSparse {
-		if err := fillDimension(field, indexParams); err != nil {
-			return err
-		}
-	}
-
-	effectiveField := field
-	if effectiveDataType != field.DataType {
-		effectiveField = proto.Clone(field).(*schemapb.FieldSchema)
-		effectiveField.DataType = effectiveDataType
-		effectiveField.ElementType = effectiveElementType
-	}
-
-	if err := checker.CheckValidDataType(indexType, effectiveField); err != nil {
-		mlog.Info(ctx, "create index with invalid data type", mlog.Err(err), mlog.String("data_type", field.GetDataType().String()))
-		return err
-	}
-
-	if err := checker.CheckTrain(effectiveDataType, effectiveElementType, indexParams); err != nil {
-		mlog.Info(ctx, "create index with invalid parameters", mlog.Err(err))
+	if err := indexparamcheck.ValidateFieldIndexParams(field, indexParams); err != nil {
+		mlog.Info(ctx, "create index with invalid parameters", mlog.Err(err), mlog.String("data_type", field.GetDataType().String()))
 		return err
 	}
 

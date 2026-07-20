@@ -2345,7 +2345,7 @@ class TestMilvusClientTextLOBEnvironmentGated(TestMilvusClientV2Base):
         assert threshold > 0, f"MILVUS_TEXT_INLINE_THRESHOLD must be positive, got {threshold}"
         minio_client = new_minio_client(minio_host)
         ensure_minio_bucket(minio_client, minio_bucket)
-        root_path = os.getenv("MILVUS_MINIO_ROOT_PATH", "files")
+        root_path = os.getenv("MILVUS_MINIO_ROOT_PATH", "file")
 
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()

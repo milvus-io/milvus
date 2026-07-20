@@ -147,6 +147,15 @@ ScalarIndex<int64_t>::BuildWithRawDataForUT(size_t n,
 
 template <>
 void
+ScalarIndex<uint64_t>::BuildWithRawDataForUT(size_t n,
+                                             const void* values,
+                                             const Config& config) {
+    auto data = reinterpret_cast<uint64_t*>(const_cast<void*>(values));
+    Build(n, data);
+}
+
+template <>
+void
 ScalarIndex<float>::BuildWithRawDataForUT(size_t n,
                                           const void* values,
                                           const Config& config) {
@@ -266,6 +275,7 @@ template class ScalarIndex<int8_t>;
 template class ScalarIndex<int16_t>;
 template class ScalarIndex<int32_t>;
 template class ScalarIndex<int64_t>;
+template class ScalarIndex<uint64_t>;
 template class ScalarIndex<float>;
 template class ScalarIndex<double>;
 template class ScalarIndex<std::string>;

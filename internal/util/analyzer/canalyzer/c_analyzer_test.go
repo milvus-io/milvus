@@ -182,7 +182,7 @@ func TestValidateAnalyzer(t *testing.T) {
 	{
 		resourcePath := pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
 		defer os.RemoveAll(resourcePath)
-		require.NoError(t, UpdateParams())
+		require.NoError(t, updateParams())
 		resourceID := int64(100)
 
 		// mock remote resource file
@@ -208,7 +208,7 @@ func TestValidateAnalyzer(t *testing.T) {
 	{
 		resourcePath := pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
 		defer os.RemoveAll(resourcePath)
-		require.NoError(t, UpdateParams())
+		require.NoError(t, updateParams())
 		resourceID := int64(100)
 
 		// mock remote resource file

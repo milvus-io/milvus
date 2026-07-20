@@ -1789,32 +1789,8 @@ func validCharInIndexName(c byte) bool {
 }
 
 func validateIndexName(indexName string) error {
-	indexName = strings.TrimSpace(indexName)
-
-	if indexName == "" {
-		return nil
-	}
-	invalidMsg := "Invalid index name: " + indexName + ". "
-	if len(indexName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		msg := invalidMsg + "The length of a index name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
-		return merr.WrapErrParameterInvalidMsg("%s", msg)
-	}
-
-	firstChar := indexName[0]
-	if firstChar != '_' && !isAlpha(firstChar) {
-		msg := invalidMsg + "The first character of a index name must be an underscore or letter."
-		return merr.WrapErrParameterInvalidMsg("%s", msg)
-	}
-
-	indexNameSize := len(indexName)
-	for i := 1; i < indexNameSize; i++ {
-		c := indexName[i]
-		if !validCharInIndexName(c) {
-			msg := invalidMsg + "Index name can only contain numbers, letters, and underscores."
-			return merr.WrapErrParameterInvalidMsg("%s", msg)
-		}
-	}
-	return nil
+	// Shared with rootcoord's bound-index prepare (indexparamcheck).
+	return indexparamcheck.ValidateIndexName(indexName)
 }
 
 func isCollectionLoaded(ctx context.Context, mc types.MixCoordClient, collID int64) (bool, error) {
@@ -3533,17 +3509,18 @@ func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSch
 }
 
 // failMetricLabel classifies a request failure for the ProxyFunctionCall
-// metric, matching the fail_input/fail_system split that
-// requestutil.ParseMetricLabel emits at the gRPC interceptor; the legacy
-// bare "fail" value must not reappear in this metric's value domain.
-func failMetricLabel(err error) string {
-	// Client cancellation is neither party's failure; keep it out of the
-	// fail_system bucket (parity with ParseMetricLabel).
+// metric, returning the same (status, cause) pair that
+// requestutil.ParseMetricLabel emits at the gRPC interceptor. The status stays
+// the coarse "fail" so that a query written against it counts every hard
+// failure regardless of who caused it.
+func failMetricLabel(err error) (status string, cause string) {
+	// Client cancellation is neither party's failure; cause is what lets a
+	// consumer exclude it (parity with ParseMetricLabel).
 	if errors.Is(err, context.Canceled) {
-		return metrics.CancelLabel
+		return metrics.FailLabel, metrics.CauseCancel
 	}
 	if merr.GetErrorType(err) == merr.InputError {
-		return metrics.FailInputLabel
+		return metrics.FailLabel, metrics.CauseUser
 	}
-	return metrics.FailSystemLabel
+	return metrics.FailLabel, metrics.CauseSystem
 }

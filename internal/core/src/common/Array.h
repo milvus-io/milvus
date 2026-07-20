@@ -447,7 +447,7 @@ class Array {
             case DataType::FLOAT: {
                 for (int i = 0; i < length_; i++) {
                     auto val = get_data<float>(i);
-                    if (val != arr2.array(i).float_val()) {
+                    if (val != static_cast<float>(arr2.array(i).float_val())) {
                         return false;
                     }
                 }
@@ -725,7 +725,7 @@ class ArrayView {
             case DataType::FLOAT: {
                 for (int i = 0; i < length_; i++) {
                     auto val = get_data<float>(i);
-                    if (val != arr2.array(i).float_val()) {
+                    if (val != static_cast<float>(arr2.array(i).float_val())) {
                         return false;
                     }
                 }

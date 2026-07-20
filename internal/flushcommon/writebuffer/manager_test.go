@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -143,7 +144,11 @@ func (s *ManagerSuite) TestFlushAllSegments() {
 
 func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	manager := s.manager
-	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 0)
+	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, CreateGrowingSegmentInfo{
+		PartitionID:    1,
+		SegmentID:      1,
+		StorageVersion: storage.StorageV2,
+	})
 	s.Error(err)
 
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
@@ -157,7 +162,12 @@ func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	s.NoError(err)
 
 	s.manager.buffers.Insert(s.channelName, wb)
-	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 100)
+	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, CreateGrowingSegmentInfo{
+		PartitionID:    1,
+		SegmentID:      1,
+		SchemaVersion:  100,
+		StorageVersion: storage.StorageV2,
+	})
 	s.NoError(err)
 }
 
@@ -190,7 +200,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 		wb := NewMockWriteBuffer(s.T())
 
 		manager.buffers.Insert(s.channelName, wb)
-		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0)}
+		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: tsoutil.ComposeTSByTime(time.Now())}
 		wb.EXPECT().GetCheckpoint().Return(pos)
 		wb.EXPECT().GetFlushTimestamp().Return(nonFlushTS)
 		result, needUpdate, err := manager.GetCheckpoint(s.channelName)
@@ -203,7 +213,7 @@ func (s *ManagerSuite) TestGetCheckpoint() {
 		wb := NewMockWriteBuffer(s.T())
 
 		manager.buffers.Insert(s.channelName, wb)
-		cpTimestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
+		cpTimestamp := tsoutil.ComposeTSByTime(time.Now())
 
 		pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: cpTimestamp}
 		wb.EXPECT().GetCheckpoint().Return(pos)

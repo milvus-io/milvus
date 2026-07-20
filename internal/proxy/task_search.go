@@ -322,7 +322,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.IsIterator = t.isIterator
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
-		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline)
 	}
 
 	// Set username of this search request for feature like task scheduling.
@@ -333,7 +333,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if collectionInfo.collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
-		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
 			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
@@ -909,6 +909,13 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		querynodeFunctionChains = qnChains
 	} else if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
+	}
+
+	// Search iterator v2 uses the final result score as the ANN continuation
+	// bound. Function rerank rewrites that score, so the next iterator request
+	// would interpret a rerank score in the ANN metric domain.
+	if queryInfo.GetSearchIteratorV2Info() != nil && (t.rerankMeta != nil || len(querynodeFunctionChains) > 0) {
+		return merr.WrapErrParameterInvalidMsg("function rerank is not supported with search iterator v2")
 	}
 
 	// order_by and function rerank cannot be used together

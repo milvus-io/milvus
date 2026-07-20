@@ -257,6 +257,25 @@ func TestGenerateEmptyArrayFromSchemaNullableDenseVectorUsesBinaryArrow(t *testi
 	}
 }
 
+func TestGenerateEmptyArrayFromSchemaNullableTextUsesBinaryArrow(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "added_text",
+		DataType: schemapb.DataType_Text,
+		Nullable: true,
+	}
+
+	arr, err := GenerateEmptyArrayFromSchema(field, 3)
+	defer arr.Release()
+
+	assert.NoError(t, err)
+	assert.Equal(t, arrow.BinaryTypes.Binary, arr.DataType())
+	assert.Equal(t, 3, arr.Len())
+	for i := 0; i < arr.Len(); i++ {
+		assert.True(t, arr.IsNull(i))
+	}
+}
+
 func TestGenerateEmptyArrayFromSchemaNullableVectorAppendsToRecordBuilder(t *testing.T) {
 	field := &schemapb.FieldSchema{
 		FieldID:  100,

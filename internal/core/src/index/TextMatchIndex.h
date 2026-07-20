@@ -24,10 +24,16 @@ using stdclock = std::chrono::high_resolution_clock;
 class TextMatchIndex : public InvertedIndexTantivy<std::string> {
  public:
     // for growing segment.
+    // In-memory writer. enable_background_merge must be true only for a
+    // long-lived growing segment (periodic commits would otherwise grow the
+    // segment count unbounded); a sealed interim index passes false so that
+    // finish()'s explicit merge-all is the only merge and cannot race a
+    // background policy merge.
     explicit TextMatchIndex(int64_t commit_interval_in_ms,
                             const char* unique_id,
                             const char* analyzer_name,
-                            const char* analyzer_params);
+                            const char* analyzer_params,
+                            bool enable_background_merge);
     // for sealed segment to create index from raw data during loading.
     explicit TextMatchIndex(const std::string& path,
                             const char* unique_id,

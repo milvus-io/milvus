@@ -157,42 +157,26 @@ class PhyConjunctFilterExpr : public Expr {
         return inputs_.size() - 1;
     }
 
-    // Set the bitmap input for the next expression in the conjunction.
-    // The bitmap indicates which rows still need to be evaluated.
-    //
-    // For AND: A row needs evaluation if it's currently TRUE or NULL
-    //   - TRUE rows: need to check if they remain TRUE after AND
-    //   - NULL rows: need to check if result becomes FALSE (NULL AND FALSE = FALSE)
-    //   - FALSE rows: already determined, no need to evaluate
-    //   => bitmap = data | ~valid (TRUE or NULL)
-    //
-    // For OR: A row needs evaluation if it's currently FALSE or NULL
-    //   - FALSE rows: need to check if they become TRUE after OR
-    //   - NULL rows: need to check if result becomes TRUE (NULL OR TRUE = TRUE)
-    //   - TRUE rows: already determined, no need to evaluate
-    //   => bitmap = ~data | ~valid (FALSE or NULL)
+    // This conjunction feeds a null-rejecting consumer: one that treats an
+    // UNKNOWN (NULL) output row exactly like FALSE. Under AND, an UNKNOWN
+    // row can never become TRUE (UNKNOWN AND x is UNKNOWN or FALSE), so a
+    // null-rejecting AND may stop evaluating it early; the row then stays
+    // UNKNOWN instead of possibly collapsing to FALSE, which is
+    // indistinguishable downstream. The property crosses AND/OR — their
+    // combination cannot turn an operand's UNKNOWN into TRUE when the root
+    // folds UNKNOWN into FALSE — so it propagates to the inputs; any other
+    // node keeps the no-op default and stops the propagation.
     void
-    SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
-        const size_t size = vec->size();
-        TargetBitmapView data(vec->GetRawData(), size);
-        TargetBitmapView valid(vec->GetValidRawData(), size);
-
-        if (is_and_) {
-            // bitmap = data | ~valid
-            // Using De Morgan's law: data | ~valid = ~(~data & valid) = ~(valid & ~data)
-            // Use inplace_sub which computes: this = this & ~other
-            TargetBitmap next_input_bitmap(valid);      // copy valid
-            next_input_bitmap.inplace_sub(data, size);  // valid & ~data
-            next_input_bitmap.flip();  // ~(valid & ~data) = data | ~valid
-            context.set_bitmap_input(std::move(next_input_bitmap));
-        } else {
-            // bitmap = ~data | ~valid
-            // Using De Morgan's law: ~data | ~valid = ~(data & valid)
-            TargetBitmap next_input_bitmap(data);        // copy data
-            next_input_bitmap.inplace_and(valid, size);  // data & valid
-            next_input_bitmap.flip();  // ~(data & valid) = ~data | ~valid
-            context.set_bitmap_input(std::move(next_input_bitmap));
+    MarkNullRejecting() override {
+        null_rejecting_ = true;
+        for (auto& input : inputs_) {
+            input->MarkNullRejecting();
         }
+    }
+
+    bool
+    IsNullRejecting() const {
+        return null_rejecting_;
     }
 
     void
@@ -221,21 +205,22 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
  private:
-    int64_t
-    UpdateResult(ColumnVectorPtr& input_result,
-                 EvalCtx& ctx,
-                 ColumnVectorPtr& result);
+    // Build the bitmap of rows that still need the following expressions:
+    // its count drives the batch-level early exit and the bitmap itself
+    // becomes the row-level input of the next expression.
+    TargetBitmap
+    BuildActiveBitmap(const ColumnVectorPtr& vec);
 
     static DataType
     ResolveType(const std::vector<DataType>& inputs);
-
-    bool
-    CanSkipFollowingExprs(ColumnVectorPtr& vec);
 
     void
     SkipFollowingExprs(int start);
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
+    // true if the consumer of this expression's output treats UNKNOWN like
+    // FALSE (see MarkNullRejecting).
+    bool null_rejecting_{false};
     std::vector<size_t> input_order_;
     // Indices of LIKE expressions for potential batch ngram optimization (AND only)
     std::vector<size_t> like_indices_;

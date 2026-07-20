@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -30,16 +31,25 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/tso"
+	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -64,7 +74,13 @@ func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName str
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-						{FieldSchema: outputFieldSchema},
+						{
+							FieldSchema: outputFieldSchema,
+							ExtraParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+								{Key: common.MetricTypeKey, Value: "BM25"},
+							},
+						},
 					},
 					FuncSchema: []*schemapb.FunctionSchema{functionSchema},
 				},
@@ -330,7 +346,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
-	require.Contains(t, resp.GetAlterStatus().GetReason(), "output field missing_minhash_output")
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "adding a function over existing fields is not supported")
 
 	// case 4.3: BM25 function with multiple output fields is rejected.
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -416,13 +432,27 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 						{Name: "fn_dup_field", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"field1"}, OutputFieldNames: []string{"field1"}},
 					},
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-						{FieldSchema: &schemapb.FieldSchema{Name: "field1", DataType: schemapb.DataType_SparseFloatVector}},
+						{
+							FieldSchema: &schemapb.FieldSchema{Name: "field1", DataType: schemapb.DataType_SparseFloatVector},
+							ExtraParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+								{Key: common.MetricTypeKey, Value: "BM25"},
+							},
+						},
 					},
 				},
 			},
 		},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+
+	// case 7.1: vector function output field without bound index params is rejected.
+	noIndexReq := buildAlterSchemaReq(dbName, collectionName, "field1", "sparse_no_index", "fn_no_index")
+	noIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = nil
+	resp, err = core.AlterCollectionSchema(ctx, noIndexReq)
+	noIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, noIndexErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, noIndexErr, "index params are required")
 
 	// case 8: output field points to an existing field while FieldInfos adds a different field
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -462,12 +492,39 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
 
+	// case 7.2: AUTOINDEX is not accepted as the bound index type in V1
+	// (rejected at rootcoord prepare, after function validation passes).
+	autoIndexReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_auto_index", "fn_auto_index")
+	autoIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+	}
+	resp, err = core.AlterCollectionSchema(ctx, autoIndexReq)
+	autoIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, autoIndexErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, autoIndexErr, "explicit index_type is required")
+
+	// case 7.3: an index type without a registered checker is rejected at prepare —
+	// it would otherwise be persisted via the ack callback and never build.
+	unknownIndexReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_unknown_index", "fn_unknown_index")
+	unknownIndexReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "NOT_A_REAL_INDEX"},
+		{Key: common.MetricTypeKey, Value: "BM25"},
+	}
+	resp, err = core.AlterCollectionSchema(ctx, unknownIndexReq)
+	unknownIndexErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, unknownIndexErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, unknownIndexErr, "invalid index type")
+
 	// happy path: add binary vector output field + MinHash function.
 	minHashReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "binary_minhash_output", "minhash_fn")
 	minHashFieldSchema := minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema()
 	minHashFieldSchema.DataType = schemapb.DataType_BinaryVector
 	minHashFieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{Key: common.DimKey, Value: "4096"},
+	}
+	minHashReq.GetAction().GetAddRequest().GetFieldInfos()[0].ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+		{Key: common.MetricTypeKey, Value: "MHJACCARD"},
 	}
 	minHashFunction := minHashReq.GetAction().GetAddRequest().GetFuncSchema()[0]
 	minHashFunction.Type = schemapb.FunctionType_MinHash
@@ -480,6 +537,27 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	resp, err = core.AlterCollectionSchema(ctx, minHashReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
+
+	// The bound index meta must have been applied through the CreateIndex ack
+	// callback within the same DDL, fully materialized at prepare time.
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	var minHashFieldID int64
+	for _, field := range coll.Fields {
+		if field.Name == "binary_minhash_output" {
+			minHashFieldID = field.FieldID
+		}
+	}
+	require.Positive(t, minHashFieldID)
+	boundIndexes := recordedBoundIndexes()
+	require.Len(t, boundIndexes, 1)
+	boundIndexInfo := boundIndexes[0].GetIndexInfo()
+	require.Equal(t, "binary_minhash_output", boundIndexInfo.GetIndexName())
+	require.Equal(t, minHashFieldID, boundIndexInfo.GetFieldID())
+	require.Positive(t, boundIndexInfo.GetIndexID())
+	boundIndexParams := funcutil.KeyValuePair2Map(boundIndexInfo.GetIndexParams())
+	require.Equal(t, "MINHASH_LSH", boundIndexParams[common.IndexTypeKey])
+	require.Equal(t, "MHJACCARD", boundIndexParams[common.MetricTypeKey])
 
 	minHashBadArityReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "minhash_bad_arity", "minhash_bad_arity_fn")
 	minHashBadArityReq.GetAction().GetAddRequest().GetFuncSchema()[0].Type = schemapb.FunctionType_MinHash
@@ -503,6 +581,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	existingOutputFieldSchema := &schemapb.FieldSchema{
 		Name:     "existing_minhash_output",
 		DataType: schemapb.DataType_BinaryVector,
+		Nullable: true,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "4096"},
 		},
@@ -529,9 +608,9 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	}))
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
-	require.Contains(t, resp.GetAlterStatus().GetReason(), "output field missing_minhash_output_late")
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "adding a function over existing fields is not supported")
 
-	// happy path: add only a function and mark an existing output field.
+	// function-only add (marking an existing field as output) is no longer supported.
 	functionOnlyReq := buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
 		Name:             "minhash_existing_fn",
 		Type:             schemapb.FunctionType_MinHash,
@@ -545,52 +624,27 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	})
 	resp, err = core.AlterCollectionSchema(ctx, functionOnlyReq)
-	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 7)
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
-	require.NoError(t, err)
-	require.Len(t, coll.Functions, 2)
-	existingOutputFound := false
-	for _, field := range coll.Fields {
-		if field.Name == "existing_minhash_output" {
-			existingOutputFound = true
-			require.True(t, field.IsFunctionOutput)
-		}
-	}
-	require.True(t, existingOutputFound)
-
-	// function-only rejects output fields already owned by another function.
-	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFunctionReq(dbName, collectionName, &schemapb.FunctionSchema{
-		Name:             "minhash_existing_fn2",
-		Type:             schemapb.FunctionType_MinHash,
-		InputFieldNames:  []string{"text_input"},
-		OutputFieldNames: []string{"existing_minhash_output"},
-		Params: []*commonpb.KeyValuePair{
-			{Key: "num_hashes", Value: "128"},
-			{Key: "shingle_size", Value: "3"},
-			{Key: "hash_function", Value: "xxhash64"},
-			{Key: "seed", Value: "42"},
-		},
-	}))
-	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	functionOnlyErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, functionOnlyErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, functionOnlyErr, "adding a function over existing fields is not supported")
 
 	// happy path: add sparse vector output field + BM25 function.
 	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, firstAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 8)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 7)
 
 	// second happy path with DoPhysicalBackfill=true: the flag is ignored by alter schema.
 	secondAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output2", "bm25_fn2")
 	secondAlterReq.GetAction().GetAddRequest().DoPhysicalBackfill = true
 	resp, err = core.AlterCollectionSchema(ctx, secondAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 9)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 8)
 	updated, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	schema := updated.ToCollectionSchemaPB()
 	require.False(t, schema.GetDoPhysicalBackfill())
-	require.EqualValues(t, 9, schema.GetVersion())
+	require.EqualValues(t, 8, schema.GetVersion())
 
 	// case 9: function already exists (same name "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
@@ -650,7 +704,73 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 }
 
-func TestDDLCallbacksAlterCollectionSchemaValidatesFunctionOnlyFinalSchema(t *testing.T) {
+func TestDDLCallbacksAlterCollectionSchemaAnalyzerFileResourceRefs(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	fieldName := "schema_text_with_dict"
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	meta := core.meta.(*MetaTable)
+	resourceID := int64(10002)
+	meta.fileResourceName2Meta = map[string]*internalpb.FileResourceInfo{
+		"schema_dict": {Id: resourceID, Name: "schema_dict", Path: "schema_dict.txt"},
+	}
+	meta.fileResourceID2Meta = map[int64]*internalpb.FileResourceInfo{
+		resourceID: {Id: resourceID, Name: "schema_dict", Path: "schema_dict.txt"},
+	}
+	meta.fileResourceRefCnt = map[int64]int{}
+
+	mixCoord := core.mixCoord.(*imocks.MixCoord)
+	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
+		infos := req.GetAnalyzerInfos()
+		return len(infos) == 1 &&
+			infos[0].GetField() == fieldName &&
+			infos[0].GetParams() == `{"tokenizer":"standard"}`
+	})).Return(&querypb.ValidateAnalyzerResponse{
+		Status:      merr.Success(),
+		ResourceIds: []int64{resourceID},
+	}, nil).Once()
+
+	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
+		Name:     fieldName,
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "128"},
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+		},
+	}, false))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []int64{resourceID}, coll.FileResourceIds)
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: fieldName},
+				},
+			},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Empty(t, coll.FileResourceIds)
+	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
+	assertFieldNotExists(t, ctx, core, dbName, collectionName, fieldName)
+}
+
+func TestDDLCallbacksAlterCollectionSchemaRejectsFunctionOnlyAdd(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -678,6 +798,7 @@ func TestDDLCallbacksAlterCollectionSchemaValidatesFunctionOnlyFinalSchema(t *te
 	invalidOutputBytes, err := proto.Marshal(&schemapb.FieldSchema{
 		Name:     "invalid_minhash_output",
 		DataType: schemapb.DataType_FloatVector,
+		Nullable: true,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "128"},
 		},
@@ -705,7 +826,7 @@ func TestDDLCallbacksAlterCollectionSchemaValidatesFunctionOnlyFinalSchema(t *te
 	}))
 	alterErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
 	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
-	require.ErrorContains(t, alterErr, "MinHash function output field must be a BinaryVector field")
+	require.ErrorContains(t, alterErr, "adding a function over existing fields is not supported")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 }
 
@@ -879,6 +1000,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) 
 	varcharFieldSchema := &schemapb.FieldSchema{
 		Name:     "text_input",
 		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.MaxLengthKey, Value: "256"},
 			{Key: common.EnableAnalyzerKey, Value: "true"},
@@ -935,83 +1057,6 @@ func mustParseInt64(s string) int64 {
 	return v
 }
 
-func TestBuildSchemaForDetachFunction(t *testing.T) {
-	t.Run("function not found", func(t *testing.T) {
-		coll := &model.Collection{
-			Functions: []*model.Function{
-				{Name: "func1", OutputFieldIDs: []int64{103}},
-			},
-		}
-		_, _, _, err := buildSchemaForDetachFunction(coll, "nonexistent")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "function not found")
-	})
-
-	t.Run("detach function keeps output fields", func(t *testing.T) {
-		coll := &model.Collection{
-			Name: "test_coll",
-			Fields: []*model.Field{
-				{FieldID: 100, Name: "pk"},
-				{FieldID: 101, Name: "text"},
-				{FieldID: 102, Name: "minhash_vec", IsFunctionOutput: true},
-				{FieldID: 103, Name: "dense_vec"},
-			},
-			Functions: []*model.Function{
-				{
-					Name:             "minhash_func",
-					Type:             schemapb.FunctionType_MinHash,
-					InputFieldIDs:    []int64{101},
-					InputFieldNames:  []string{"text"},
-					OutputFieldIDs:   []int64{102},
-					OutputFieldNames: []string{"minhash_vec"},
-				},
-				{
-					Name:             "embed_func",
-					Type:             schemapb.FunctionType_TextEmbedding,
-					InputFieldIDs:    []int64{101},
-					InputFieldNames:  []string{"text"},
-					OutputFieldIDs:   []int64{103},
-					OutputFieldNames: []string{"dense_vec"},
-				},
-			},
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.MaxFieldIDKey, Value: "103"},
-			},
-			SchemaVersion: 3,
-		}
-
-		schema, properties, droppedFieldIDs, err := buildSchemaForDetachFunction(coll, "minhash_func")
-		require.NoError(t, err)
-		require.Empty(t, droppedFieldIDs)
-		require.Equal(t, coll.Properties, properties)
-		require.Equal(t, int32(4), schema.Version)
-
-		require.Len(t, schema.Fields, 4)
-		var minhashField *schemapb.FieldSchema
-		for _, field := range schema.Fields {
-			if field.GetName() == "minhash_vec" {
-				minhashField = field
-				break
-			}
-		}
-		require.NotNil(t, minhashField)
-		require.False(t, minhashField.GetIsFunctionOutput())
-		require.Len(t, schema.Functions, 1)
-		require.Equal(t, "embed_func", schema.Functions[0].GetName())
-	})
-
-	t.Run("detach bm25 function fails", func(t *testing.T) {
-		coll := &model.Collection{
-			Functions: []*model.Function{
-				{Name: "bm25_func", Type: schemapb.FunctionType_BM25, OutputFieldIDs: []int64{102}},
-			},
-		}
-		_, _, _, err := buildSchemaForDetachFunction(coll, "bm25_func")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "BM25 function must be dropped with its output field")
-	})
-}
-
 func TestBuildSchemaForDropFunctionField(t *testing.T) {
 	t.Run("function not found", func(t *testing.T) {
 		coll := &model.Collection{
@@ -1024,15 +1069,43 @@ func TestBuildSchemaForDropFunctionField(t *testing.T) {
 		require.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("unsupported function type", func(t *testing.T) {
+	t.Run("dropping the last vector field rejected", func(t *testing.T) {
 		coll := &model.Collection{
-			Functions: []*model.Function{
-				{Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding, OutputFieldIDs: []int64{103}},
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "only_vec", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
 			},
+			Functions: []*model.Function{
+				{Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding, InputFieldIDs: []int64{101}, OutputFieldIDs: []int64{102}, OutputFieldNames: []string{"only_vec"}},
+			},
+			SchemaVersion: 1,
 		}
 		_, _, _, err := buildSchemaForDropFunctionField(coll, "embed_func")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "only BM25 and MinHash functions support dropping output fields")
+		require.ErrorContains(t, err, "leave no vector field")
+	})
+
+	t.Run("text embedding function can be dropped", func(t *testing.T) {
+		coll := &model.Collection{
+			Name: "test_coll",
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk"},
+				{FieldID: 101, Name: "text"},
+				{FieldID: 102, Name: "keep_vec"},
+				{FieldID: 103, Name: "dense_vec", IsFunctionOutput: true},
+			},
+			Functions: []*model.Function{
+				{Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding, InputFieldIDs: []int64{101}, OutputFieldIDs: []int64{103}, OutputFieldNames: []string{"dense_vec"}},
+			},
+			SchemaVersion: 2,
+		}
+		schema, _, droppedFieldIDs, err := buildSchemaForDropFunctionField(coll, "embed_func")
+		require.NoError(t, err)
+		require.Equal(t, []int64{103}, droppedFieldIDs)
+		require.Equal(t, 0, len(schema.Functions))
+		for _, f := range schema.Fields {
+			require.NotEqual(t, "dense_vec", f.Name)
+		}
 	})
 
 	t.Run("drop function removes function and output fields", func(t *testing.T) {
@@ -1123,6 +1196,32 @@ func TestBuildSchemaForDropFunctionField(t *testing.T) {
 		require.Equal(t, 1, len(schema.Functions))
 		require.Equal(t, "embed_func", schema.Functions[0].Name)
 	})
+
+	t.Run("corrupt persisted output ids rejected (primary key protection)", func(t *testing.T) {
+		// Stored with output name "sparse_vec" (id 102) but a stale/injected pk id
+		// (100) in OutputFieldIDs; drop must re-resolve from the name and reject the
+		// mismatch instead of deleting the primary key past the name-based guard.
+		coll := &model.Collection{
+			Name: "test_coll",
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse_vec", DataType: schemapb.DataType_SparseFloatVector},
+				{FieldID: 103, Name: "keep_vec", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*model.Function{
+				{
+					Name: "bm25_func", Type: schemapb.FunctionType_BM25,
+					InputFieldIDs:    []int64{101},
+					OutputFieldIDs:   []int64{100, 102}, // 100 = pk injected
+					OutputFieldNames: []string{"sparse_vec"},
+				},
+			},
+			SchemaVersion: 3,
+		}
+		_, _, _, err := buildSchemaForDropFunctionField(coll, "bm25_func")
+		require.ErrorContains(t, err, "do not align with output field names")
+	})
 }
 
 func TestBuildSchemaForDropField(t *testing.T) {
@@ -1145,6 +1244,18 @@ func TestBuildSchemaForDropField(t *testing.T) {
 		require.NotNil(t, properties)
 		require.Equal(t, []int64{102}, droppedFieldIDs)
 		require.Equal(t, int32(4), schema.Version)
+	})
+
+	t.Run("field referenced by function rejected", func(t *testing.T) {
+		coll := baseColl()
+		coll.Functions = []*model.Function{
+			{Name: "bm25", InputFieldNames: []string{"extra"}, OutputFieldNames: []string{"vec"}},
+		}
+		_, _, _, err := buildSchemaForDropField(coll, "extra", 0)
+		require.ErrorContains(t, err, "referenced by function bm25 as input, drop function first")
+
+		_, _, _, err = buildSchemaForDropField(coll, "vec", 0)
+		require.ErrorContains(t, err, "referenced by function bm25 as output, drop function first")
 	})
 
 	t.Run("drop by field id", func(t *testing.T) {
@@ -1343,4 +1454,239 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+}
+
+func newBoundIndexTestPlan() (*model.Collection, *schemautil.AlterSchemaAddPlan) {
+	coll := &model.Collection{CollectionID: 1, DBID: 1, Name: "coll"}
+	plan := &schemautil.AlterSchemaAddPlan{
+		Kind: schemautil.AlterSchemaAddFunctionField,
+		Field: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "sparse",
+			DataType: schemapb.DataType_SparseFloatVector,
+		},
+		Function: &schemapb.FunctionSchema{Name: "bm25_fn", Type: schemapb.FunctionType_BM25},
+		IndexExtraParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+			{Key: common.MetricTypeKey, Value: "BM25"},
+		},
+	}
+	return coll, plan
+}
+
+func withNoIndexMixCoord(t *testing.T) *imocks.MixCoord {
+	mixc := imocks.NewMixCoord(t)
+	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
+		&indexpb.DescribeIndexResponse{Status: merr.Status(merr.WrapErrIndexNotFound("sparse"))}, nil,
+	).Maybe()
+	return mixc
+}
+
+func withOkTso(t *testing.T) tso.Allocator {
+	alloc := mocktso.NewAllocator(t)
+	alloc.EXPECT().GenerateTSO(mock.Anything).Return(uint64(100), nil).Maybe()
+	return alloc
+}
+
+func TestPrepareBoundFieldIndex(t *testing.T) {
+	t.Run("happy path materializes replay-deterministic index", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		fieldIndex, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.NoError(t, err)
+		info := fieldIndex.GetIndexInfo()
+		require.Equal(t, int64(101), info.GetFieldID())
+		require.Equal(t, "sparse", info.GetIndexName())
+		require.Positive(t, info.GetIndexID())
+		params := funcutil.KeyValuePair2Map(info.GetIndexParams())
+		require.Equal(t, "SPARSE_INVERTED_INDEX", params[common.IndexTypeKey])
+		require.Equal(t, "1.2", params["bm25_k1"])
+		// UserIndexParams keep the user's ORIGINAL params (create_index
+		// convention), so a later create_index with identical params is
+		// treated as idempotent instead of a distinct index.
+		require.Equal(t, plan.IndexExtraParams, info.GetUserIndexParams())
+	})
+
+	t.Run("index name conflict rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
+			&indexpb.DescribeIndexResponse{
+				Status:     merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{{FieldID: 100, IndexID: 1, IndexName: "sparse"}},
+			}, nil,
+		)
+		c := newTestCore(withMixCoord(mixc), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "already exists")
+	})
+
+	t.Run("describe index transient error rejects the DDL", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, errors.New("rpc unavailable"))
+		c := newTestCore(withMixCoord(mixc), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to list existing indexes")
+	})
+
+	t.Run("index id allocation failure", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withInvalidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to allocate index id")
+	})
+
+	t.Run("incompatible index type for field data type rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		// SPARSE index on a binary vector field: must be rejected pre-broadcast.
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+	})
+
+	t.Run("dimension mismatch rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.Field = &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "binary_mh",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "512"},
+			},
+		}
+		plan.Function = &schemapb.FunctionSchema{Name: "mh_fn", Type: schemapb.FunctionType_MinHash}
+		plan.IndexExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+			{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+			{Key: common.DimKey, Value: "1024"},
+		}
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "dimension mismatch")
+	})
+
+	t.Run("bogus warmup policy rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = append(plan.IndexExtraParams, &commonpb.KeyValuePair{
+			Key: common.WarmupKey, Value: "bogus",
+		})
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "warmup")
+	})
+
+	t.Run("malformed index name rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexName = "1bad-name"
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "Invalid index name")
+	})
+
+	t.Run("oversized index params rejected", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		plan.IndexExtraParams = append(plan.IndexExtraParams, &commonpb.KeyValuePair{
+			Key:   "huge",
+			Value: strings.Repeat("x", paramtable.Get().ProxyCfg.MaxIndexParamsSize.GetAsInt()+1),
+		})
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(withOkTso(t)))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "exceeds limit")
+	})
+
+	t.Run("tso allocation failure", func(t *testing.T) {
+		coll, plan := newBoundIndexTestPlan()
+		alloc := mocktso.NewAllocator(t)
+		alloc.EXPECT().GenerateTSO(mock.Anything).Return(uint64(0), errors.New("tso unavailable"))
+		c := newTestCore(withMixCoord(withNoIndexMixCoord(t)), withValidIDAllocator(), withTsoAllocator(alloc))
+		_, err := c.prepareBoundFieldIndex(context.Background(), coll, plan)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to allocate timestamp")
+	})
+}
+
+func TestApplyBoundFieldIndexesInline(t *testing.T) {
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
+	streaming.SetWALForTest(wal)
+
+	boundFieldIndex := &indexpb.FieldIndex{
+		IndexInfo: &indexpb.IndexInfo{
+			CollectionID: 1,
+			FieldID:      101,
+			IndexID:      201,
+			IndexName:    "sparse",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+			},
+		},
+	}
+
+	buildResult := func(bound []*indexpb.FieldIndex) message.BroadcastResultAlterCollectionMessageV2 {
+		raw := message.NewAlterCollectionMessageBuilderV2().
+			WithHeader(&messagespb.AlterCollectionMessageHeader{
+				DbId:         1,
+				CollectionId: 1,
+			}).
+			WithBody(&messagespb.AlterCollectionMessageBody{
+				Updates: &messagespb.AlterCollectionMessageUpdates{
+					BoundFieldIndexes: bound,
+				},
+			}).
+			WithBroadcast([]string{funcutil.GetControlChannel("by-dev-rootcoord-dml_0")}).
+			MustBuildBroadcast()
+		msg := message.MustAsBroadcastAlterCollectionMessageV2(raw.WithBroadcastID(1))
+		return message.BroadcastResultAlterCollectionMessageV2{
+			Message: msg,
+			Results: map[string]*message.AppendResult{},
+		}
+	}
+
+	t.Run("no bound indexes short circuits", func(t *testing.T) {
+		registry.ResetRegistration()
+		cb := &DDLCallback{Core: newTestCore()}
+		require.NoError(t, cb.applyBoundFieldIndexesInline(context.Background(), buildResult(nil)))
+	})
+
+	t.Run("dispatches synthetic create index message", func(t *testing.T) {
+		registry.ResetRegistration()
+		var applied []*indexpb.FieldIndex
+		registry.RegisterCreateIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+			applied = append(applied, result.Message.MustBody().GetFieldIndex())
+			return nil
+		})
+		cb := &DDLCallback{Core: newTestCore()}
+		require.NoError(t, cb.applyBoundFieldIndexesInline(context.Background(), buildResult([]*indexpb.FieldIndex{boundFieldIndex})))
+		require.Len(t, applied, 1)
+		require.Equal(t, int64(201), applied[0].GetIndexInfo().GetIndexID())
+		require.Equal(t, "sparse", applied[0].GetIndexInfo().GetIndexName())
+	})
+
+	t.Run("dispatch failure propagates so the ack callback retries", func(t *testing.T) {
+		registry.ResetRegistration()
+		registry.RegisterCreateIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+			return errors.New("catalog write failed")
+		})
+		cb := &DDLCallback{Core: newTestCore()}
+		err := cb.applyBoundFieldIndexesInline(context.Background(), buildResult([]*indexpb.FieldIndex{boundFieldIndex}))
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to apply bound field index")
+	})
 }

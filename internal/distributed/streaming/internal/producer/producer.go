@@ -7,10 +7,13 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -124,7 +127,15 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 		if err != nil {
 			return nil, err
 		}
-		produceResult, err := producerHandler.Append(ctx, msg)
+		appendCtx, span := p.startDistAppendSpanIfRemote(ctx, producerHandler, msg)
+		produceResult, err := producerHandler.Append(appendCtx, msg)
+		if span != nil {
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+			}
+			span.End()
+		}
 		if err == nil {
 			return produceResult, nil
 		}
@@ -150,6 +161,20 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			}
 		}
 	}
+}
+
+func (p *ResumableProducer) startDistAppendSpanIfRemote(ctx context.Context, producerHandler handler.Producer, msg message.MutableMessage) (context.Context, trace.Span) {
+	if isLocalProducer(producerHandler) {
+		return ctx, nil
+	}
+	return message.StartSpanForMessage(ctx, msg, message.SpanNameWALDistAppend)
+}
+
+func isLocalProducer(producerHandler handler.Producer) bool {
+	if pm, ok := producerHandler.(producerWithMetrics); ok {
+		return registry.IsLocal(pm.Producer)
+	}
+	return registry.IsLocal(producerHandler)
 }
 
 // resumeLoop is used to resume producer from error.

@@ -90,12 +90,6 @@ type Loader interface {
 	// GetChunkManager returns the chunk manager for remote storage access.
 	GetChunkManager() storage.ChunkManager
 
-	// LoadIndex append index for segment and remove vector binlogs.
-	LoadIndex(ctx context.Context,
-		segment Segment,
-		info *querypb.SegmentLoadInfo,
-		version int64) error
-
 	// ReopenSegments update segment data according to new load info.
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
@@ -418,6 +412,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
+		if localSegment, ok := segment.(*LocalSegment); ok {
+			localSegment.compactLoadInfoForRuntime()
+		}
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
@@ -1139,6 +1136,8 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		}
 	}
 
+	relatedDataSize := calculateSegmentLogSize(segment.LoadInfo())
+	segment.relatedDataSize.Store(relatedDataSize)
 	binlogSize := calculateSegmentMemorySize(segment.LoadInfo())
 	segment.manager.AddLoadedBinlogSize(binlogSize)
 	segment.binlogSize.Store(binlogSize)
@@ -1193,45 +1192,6 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 	return nil
 }
 
-func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
-	schemaHelper *typeutil.SchemaHelper,
-	segment *LocalSegment,
-	numRows int64,
-	indexedFieldInfos map[int64]*IndexedFieldInfo,
-) error {
-	for _, fieldInfo := range indexedFieldInfos {
-		fieldID := fieldInfo.IndexInfo.FieldID
-		indexInfo := fieldInfo.IndexInfo
-		tr := timerecord.NewTimeRecorder("loadFieldIndex")
-		err := loader.loadFieldIndex(ctx, segment, indexInfo)
-		loadFieldIndexSpan := tr.RecordSpan()
-		if err != nil {
-			return err
-		}
-
-		mlog.Info(context.TODO(), "load field binlogs done for sealed segment with index",
-			mlog.Int64("fieldID", fieldID),
-			mlog.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
-			mlog.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
-			mlog.Duration("load_duration", loadFieldIndexSpan),
-		)
-
-		// set average row data size of variable field
-		field, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			return err
-		}
-		if typeutil.IsVariableDataType(field.GetDataType()) {
-			err = segment.UpdateFieldRawDataSize(ctx, numRows, fieldInfo.FieldBinlog)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
 func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64, stats map[int64]*storage.BM25Stats, binlogPaths map[int64][]string) error {
 	if len(binlogPaths) == 0 {
 		mlog.Info(context.TODO(), "there are no bm25 stats logs saved with segment")
@@ -1272,29 +1232,6 @@ func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64,
 	}
 
 	return nil
-}
-
-func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
-	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-
-	for _, indexPath := range indexInfo.IndexFilePaths {
-		if path.Base(indexPath) != storage.IndexParamsKey {
-			filteredPaths = append(filteredPaths, indexPath)
-		}
-	}
-
-	indexInfo.IndexFilePaths = filteredPaths
-	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
-	if err != nil {
-		return err
-	}
-
-	collection := loader.manager.Collection.Get(segment.Collection())
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
-	}
-
-	return segment.LoadIndex(ctx, indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadBloomFilter(
@@ -1453,7 +1390,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return readDeltaRecords(reader)
 	}
 
-	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" && !useExplicitDeltalogs {
+	// Manifest-backed delta loading is shared by the parent segment and by
+	// compact-to child manifests carried as a load-time delete overlay.
+	readManifestDeltas := func(manifestPath string) error {
 		if isMilvusTableRealPK {
 			// Real-PK milvus-table manifests keep source deltalogs. Target-owned
 			// deltalogs are only valid for virtual-PK translation.
@@ -1530,9 +1469,16 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				return err
 			}
 		}
+		return nil
+	}
+
+	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" && !useExplicitDeltalogs {
+		if err := readManifestDeltas(manifestPath); err != nil {
+			return err
+		}
 	} else {
 		// V1: delta data referenced by Deltalogs entries
-		var paths []string
+		paths := make([]string, 0)
 		for _, deltalog := range deltaLogs {
 			for _, binlog := range lo.Filter(deltalog.Binlogs, valid) {
 				if p := binlog.GetLogPath(); p != "" {
@@ -1545,6 +1491,14 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				return loader.cm.MultiRead(ctx, paths)
 			}),
 		); err != nil {
+			return err
+		}
+	}
+
+	// Child manifests are loaded after the parent delete source so all delete
+	// records are folded into the same DeltaData before segcore sees the segment.
+	for _, manifestPath := range loadInfo.GetChildManifestPaths() {
+		if err := readManifestDeltas(manifestPath); err != nil {
 			return err
 		}
 	}
@@ -2468,92 +2422,6 @@ func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
 		dataType == schemapb.DataType_SparseFloatVector ||
 		dataType == schemapb.DataType_Float16Vector ||
 		dataType == schemapb.DataType_BFloat16Vector
-}
-
-func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {
-	collection := loader.manager.Collection.Get(collectionID)
-	if collection == nil {
-		return 0, merr.WrapErrCollectionNotFound(collectionID)
-	}
-
-	for _, field := range collection.Schema().GetFields() {
-		if field.GetFieldID() == fieldID {
-			return field.GetDataType(), nil
-		}
-	}
-
-	for _, structField := range collection.Schema().GetStructArrayFields() {
-		if structField.GetFieldID() == fieldID {
-			return schemapb.DataType_ArrayOfStruct, nil
-		}
-		for _, subField := range structField.GetFields() {
-			if subField.GetFieldID() == fieldID {
-				return subField.GetDataType(), nil
-			}
-		}
-	}
-
-	return 0, merr.WrapErrFieldNotFound(fieldID)
-}
-
-func (loader *segmentLoader) LoadIndex(ctx context.Context,
-	seg Segment,
-	loadInfo *querypb.SegmentLoadInfo,
-	version int64,
-) error {
-	segment, ok := seg.(*LocalSegment)
-	if !ok {
-		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
-	}
-	// Filter out LOADING segments only
-	// use None to avoid loaded check
-	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfo)
-	defer loader.unregister(infos...)
-
-	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
-		info = typeutil.Clone(info)
-		// remain binlog paths whose field id is in index infos to estimate resource usage correctly
-		indexFields := typeutil.NewSet(lo.Map(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) int64 { return indexInfo.GetFieldID() })...)
-		var binlogPaths []*datapb.FieldBinlog
-		for _, binlog := range info.GetBinlogPaths() {
-			if indexFields.Contain(binlog.GetFieldID()) {
-				binlogPaths = append(binlogPaths, binlog)
-			}
-		}
-		info.BinlogPaths = binlogPaths
-		info.Deltalogs = nil
-		info.Statslogs = nil
-		return info
-	})
-	requestResourceResult, err := loader.requestResource(ctx, indexInfo...)
-	if err != nil {
-		return err
-	}
-	defer loader.freeRequestResource(requestResourceResult)
-
-	mlog.Info(context.TODO(), "segment loader start to load index", mlog.Int("segmentNumAfterFilter", len(infos)))
-	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Inc()
-	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Dec()
-
-	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
-	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	for _, loadInfo := range infos {
-		for _, info := range loadInfo.GetIndexInfos() {
-			if len(info.GetIndexFilePaths()) == 0 {
-				mlog.Warn(context.TODO(), "failed to add index for segment, index file list is empty, the segment may be too small")
-				return merr.WrapErrIndexNotFound("index file list empty")
-			}
-
-			err := loader.loadFieldIndex(ctx, segment, info)
-			if err != nil {
-				mlog.Warn(context.TODO(), "failed to load index for segment", mlog.Err(err))
-				return err
-			}
-		}
-		loader.notifyLoadFinish(loadInfo)
-	}
-
-	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
 }
 
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,

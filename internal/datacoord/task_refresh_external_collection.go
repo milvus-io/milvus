@@ -571,6 +571,8 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
+	cloned.TextStatsLogs = nil
+	cloned.JsonKeyStats = nil
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
@@ -686,6 +688,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		ExploreManifestPath:    t.GetExploreManifestPath(),
 		FileIndexBegin:         t.GetFileIndexBegin(),
 		FileIndexEnd:           t.GetFileIndexEnd(),
+		TargetRowsPerSegment:   paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64(),
 	}
 
 	// Submit task to worker via unified task system

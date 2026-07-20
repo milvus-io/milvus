@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -212,7 +214,7 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) (*types.BroadcastAppendResult, error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		guards.Unlock()
-		return nil, status.NewOnShutdownError("broadcaster is closing")
+		return nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
 
@@ -291,7 +293,6 @@ func (bm *broadcastTaskManager) Close() {
 
 // addBroadcastTask adds the broadcast task into the manager.
 func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) *broadcastTask {
-	msg = msg.OverwriteBroadcastHeader(broadcastID, guards.ResourceKeys()...)
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
@@ -364,10 +365,10 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 	return result
 }
 
-// GetPendingCreateCollectionResources returns collection ID → file resource IDs
-// for all non-tombstone CreateCollection broadcast tasks. Used during recovery to
-// rebuild file resource refCnt for collections whose AddCollection hasn't run yet.
-func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64][]int64 {
+// GetPendingSchemaFileResources returns collection ID -> file resource IDs
+// for all non-tombstone schema broadcast tasks. Used during recovery to rebuild
+// file resource refCnt for resources referenced by pending schema changes.
+func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int64 {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -376,18 +377,43 @@ func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64]
 		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 			continue
 		}
-		if task.msg.MessageType() != message.MessageTypeCreateCollection {
+		switch task.msg.MessageTypeWithVersion() {
+		case message.MessageTypeCreateCollectionV1:
+			createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
+			if err != nil {
+				continue
+			}
+			body := createMsg.MustBody()
+			ids := body.CollectionSchema.GetFileResourceIds()
+			appendPendingFileResourceIDs(result, createMsg.Header().CollectionId, ids)
+		case message.MessageTypeAlterCollectionV2:
+			alterMsg, err := message.AsMutableAlterCollectionMessageV2(task.msg)
+			if err != nil {
+				continue
+			}
+			schema := alterMsg.MustBody().GetUpdates().GetSchema()
+			ids := schema.GetFileResourceIds()
+			appendPendingFileResourceIDs(result, alterMsg.Header().CollectionId, ids)
+		default:
 			continue
-		}
-		createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
-		if err != nil {
-			continue
-		}
-		body := createMsg.MustBody()
-		ids := body.CollectionSchema.GetFileResourceIds()
-		if len(ids) > 0 {
-			result[createMsg.Header().CollectionId] = ids
 		}
 	}
 	return result
+}
+
+func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, ids []int64) {
+	if len(ids) == 0 {
+		return
+	}
+	seen := make(map[int64]struct{}, len(result[collectionID])+len(ids))
+	for _, id := range result[collectionID] {
+		seen[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		result[collectionID] = append(result[collectionID], id)
+		seen[id] = struct{}{}
+	}
 }

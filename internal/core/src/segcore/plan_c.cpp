@@ -9,11 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <string.h>
+#include <algorithm>
 #include <exception>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string.h>
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
@@ -140,6 +141,12 @@ GetMetricType(CSearchPlan plan) {
     auto search_plan = static_cast<milvus::query::Plan*>(plan);
     auto& metric_str = search_plan->plan_node_->search_info_.metric_type_;
     return strdup(metric_str.c_str());
+}
+
+bool
+HasTargetEntries(CSearchPlan plan) {
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    return !search_plan->target_entries_.empty();
 }
 
 void

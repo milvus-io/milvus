@@ -275,7 +275,8 @@ TEST(TextMatch, Index) {
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                          "unique_id",
                                          "milvus_tokenizer",
-                                         "{}");
+                                         "{}",
+                                         /*enable_background_merge=*/false);
     index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddTextSealed("football, basketball, pingpang", true, 0);
     index->AddTextSealed("", false, 1);
@@ -347,7 +348,8 @@ TEST(TextMatch, FuzzyIndex) {
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                          "unique_id",
                                          "milvus_tokenizer",
-                                         "{}");
+                                         "{}",
+                                         /*enable_background_merge=*/false);
     index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddTextSealed("football, basketball, pingpang", true, 0);
     index->AddTextSealed("", false, 1);
@@ -457,8 +459,11 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
 
     std::vector<milvus::FieldDataPtr> field_datas = {batch0, batch1, batch2};
 
-    auto index = std::make_unique<Index>(
-        200, "test_multi_batch", "milvus_tokenizer", "{}");
+    auto index = std::make_unique<Index>(200,
+                                         "test_multi_batch",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
@@ -784,8 +789,11 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
 
     std::vector<milvus::FieldDataPtr> field_datas = {fd};
 
-    auto index = std::make_unique<Index>(
-        200, "test_single_batch", "milvus_tokenizer", "{}");
+    auto index = std::make_unique<Index>(200,
+                                         "test_single_batch",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 

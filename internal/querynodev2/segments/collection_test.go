@@ -18,18 +18,27 @@ package segments
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CollectionManagerSuite struct {
@@ -39,6 +48,8 @@ type CollectionManagerSuite struct {
 
 func (s *CollectionManagerSuite) SetupSuite() {
 	paramtable.Init()
+	initcore.InitLocalChunkManager("CollectionManagerSuite")
+	initcore.InitMmapManager(paramtable.Get(), 1)
 }
 
 func (s *CollectionManagerSuite) SetupTest() {
@@ -48,6 +59,48 @@ func (s *CollectionManagerSuite) SetupTest() {
 		LoadType: querypb.LoadType_LoadCollection,
 	})
 	s.Require().NoError(err)
+}
+
+func (s *CollectionManagerSuite) newSimpleRetrieveRequest(collection *Collection) *querypb.QueryRequest {
+	pkField, err := typeutil.GetPrimaryFieldSchema(collection.Schema())
+	s.Require().NoError(err)
+
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Predicates{
+			Predicates: &planpb.Expr{
+				Expr: &planpb.Expr_TermExpr{
+					TermExpr: &planpb.TermExpr{
+						ColumnInfo: &planpb.ColumnInfo{
+							FieldId:  pkField.GetFieldID(),
+							DataType: pkField.GetDataType(),
+						},
+						Values: []*planpb.GenericValue{
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 1,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		OutputFieldIds: []int64{pkField.GetFieldID()},
+	}
+	planBytes, err := proto.Marshal(planNode)
+	s.Require().NoError(err)
+
+	return &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Retrieve,
+				MsgID:   100,
+			},
+			CollectionID:       collection.ID(),
+			SerializedExprPlan: planBytes,
+			MvccTimestamp:      1000,
+		},
+	}
 }
 
 func (s *CollectionManagerSuite) TestUpdateSchema() {
@@ -324,6 +377,321 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	s.True(found,
 		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
 		newVecFieldID)
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNativeLock() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	schema := proto.Clone(coll.Schema()).(*schemapb.CollectionSchema)
+	indexMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	indexMeta.MaxIndexRowCount++
+
+	coll.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		done <- s.cm.PutOrRef(1, schema, indexMeta, &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+	}()
+
+	select {
+	case err := <-done:
+		coll.mu.Unlock()
+		s.Require().NoError(err)
+		s.FailNow("PutOrRef updated index meta while collection native lock was held")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	coll.mu.Unlock()
+	s.Require().NoError(<-done)
+	s.cm.Unref(1, 1)
+}
+
+func holdInsertSchemaTransition(t *testing.T, collection *Collection) func() {
+	t.Helper()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	var releaseOnce sync.Once
+
+	go func() {
+		defer close(done)
+		collection.WithInsertSchemaTransition(func(*schemapb.CollectionSchema) {
+			close(entered)
+			<-release
+		})
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("insert schema transition reader did not start")
+	}
+
+	return func() {
+		releaseOnce.Do(func() {
+			close(release)
+		})
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("insert schema transition reader did not stop")
+		}
+	}
+}
+
+func waitForSchemaTransitionWriter(t *testing.T, collection *Collection) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+
+	for {
+		if !collection.schemaTransitionMu.TryRLock() {
+			return
+		}
+		collection.schemaTransitionMu.RUnlock()
+
+		select {
+		case <-deadline.C:
+			t.Fatal("schema writer did not queue behind the insert transition reader")
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+func mockNativeSchemaUpdate(t *testing.T) <-chan struct{} {
+	t.Helper()
+	entered := make(chan struct{})
+	var once sync.Once
+	var origin func(*segcore.CCollection, *schemapb.CollectionSchema, uint64) error
+	mock := mockey.Mock((*segcore.CCollection).UpdateSchema).To(func(c *segcore.CCollection, schema *schemapb.CollectionSchema, version uint64) error {
+		once.Do(func() {
+			close(entered)
+		})
+		return origin(c, schema, version)
+	}).Origin(&origin).Build()
+	t.Cleanup(func() {
+		mock.UnPatch()
+	})
+	return entered
+}
+
+func (s *CollectionManagerSuite) assertNativeSchemaUpdateWaitsForTransitionReader(collection *Collection, update func() error) {
+	releaseReader := holdInsertSchemaTransition(s.T(), collection)
+	defer releaseReader()
+
+	nativeEntered := mockNativeSchemaUpdate(s.T())
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- update()
+	}()
+
+	waitForSchemaTransitionWriter(s.T(), collection)
+
+	select {
+	case <-nativeEntered:
+		s.T().Fatal("native schema update entered while an insert transition reader was held")
+	default:
+	}
+
+	releaseReader()
+	select {
+	case <-nativeEntered:
+	case <-time.After(5 * time.Second):
+		s.T().Fatal("native schema update did not continue after the transition reader was released")
+	}
+	s.Require().NoError(<-updateDone)
+}
+
+func (s *CollectionManagerSuite) TestSchemaUpdateWaitsForTransitionReader() {
+	s.Run("UpdateSchema", func() {
+		coll := s.cm.Get(1)
+		s.Require().NotNil(coll)
+
+		schema := proto.Clone(coll.Schema()).(*schemapb.CollectionSchema)
+		schema.Version++
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:  580,
+			Name:     "schema_transition_update",
+			DataType: schemapb.DataType_Bool,
+			Nullable: true,
+		})
+
+		s.assertNativeSchemaUpdateWaitsForTransitionReader(coll, func() error {
+			return s.cm.UpdateSchema(coll.ID(), schema, 1)
+		})
+	})
+
+	s.Run("PutOrRef", func() {
+		coll := s.cm.Get(1)
+		s.Require().NotNil(coll)
+
+		schema := proto.Clone(coll.Schema()).(*schemapb.CollectionSchema)
+		schema.Version++
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:  581,
+			Name:     "schema_transition_put_or_ref",
+			DataType: schemapb.DataType_Bool,
+			Nullable: true,
+		})
+
+		s.assertNativeSchemaUpdateWaitsForTransitionReader(coll, func() error {
+			return s.cm.PutOrRef(coll.ID(), schema, nil, &querypb.LoadMetaInfo{
+				CollectionID:    coll.ID(),
+				LoadType:        querypb.LoadType_LoadCollection,
+				SchemaBarrierTs: 2,
+			})
+		})
+		s.cm.Unref(coll.ID(), 1)
+	})
+}
+
+func (s *CollectionManagerSuite) TestSchemaUpdateDoesNotBlockUnrelatedCollectionGet() {
+	otherSchema := mock_segcore.GenTestCollectionSchema("other_collection", schemapb.DataType_Int64, false)
+	s.Require().NoError(s.cm.PutOrRef(2, otherSchema, nil, &querypb.LoadMetaInfo{
+		CollectionID: 2,
+		LoadType:     querypb.LoadType_LoadCollection,
+	}))
+	defer s.cm.Unref(2, 1)
+
+	for _, test := range []struct {
+		name   string
+		update func(collection *Collection, schema *schemapb.CollectionSchema) error
+		unref  bool
+	}{
+		{
+			name: "UpdateSchema",
+			update: func(collection *Collection, schema *schemapb.CollectionSchema) error {
+				return s.cm.UpdateSchema(collection.ID(), schema, 1)
+			},
+		},
+		{
+			name: "PutOrRef",
+			update: func(collection *Collection, schema *schemapb.CollectionSchema) error {
+				return s.cm.PutOrRef(collection.ID(), schema, nil, &querypb.LoadMetaInfo{
+					CollectionID:    collection.ID(),
+					LoadType:        querypb.LoadType_LoadCollection,
+					SchemaBarrierTs: 1,
+				})
+			},
+			unref: true,
+		},
+	} {
+		s.Run(test.name, func() {
+			coll := s.cm.Get(1)
+			schema := proto.Clone(coll.Schema()).(*schemapb.CollectionSchema)
+			schema.Version++
+
+			releaseReader := holdInsertSchemaTransition(s.T(), coll)
+			defer releaseReader()
+			updateDone := make(chan error, 1)
+			go func() {
+				updateDone <- test.update(coll, schema)
+			}()
+
+			waitForSchemaTransitionWriter(s.T(), coll)
+
+			getDone := make(chan *Collection, 1)
+			go func() {
+				getDone <- s.cm.Get(2)
+			}()
+			select {
+			case other := <-getDone:
+				s.Require().NotNil(other)
+			case <-time.After(5 * time.Second):
+				s.T().Fatal("schema update on one collection blocked Get on another collection")
+			}
+
+			releaseReader()
+			s.Require().NoError(<-updateDone)
+			if test.unref {
+				s.cm.Unref(coll.ID(), 1)
+			}
+		})
+	}
+}
+
+func (s *CollectionManagerSuite) TestSchemaUpdateLeaseKeepsCollectionAliveWhileWaiting() {
+	coll := s.cm.Get(1)
+	schema := proto.Clone(coll.Schema()).(*schemapb.CollectionSchema)
+	schema.Version++
+
+	releaseReader := holdInsertSchemaTransition(s.T(), coll)
+	defer releaseReader()
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- s.cm.UpdateSchema(coll.ID(), schema, 1)
+	}()
+
+	waitForSchemaTransitionWriter(s.T(), coll)
+
+	unrefDone := make(chan bool, 1)
+	go func() {
+		unrefDone <- s.cm.Unref(coll.ID(), 1)
+	}()
+	select {
+	case released := <-unrefDone:
+		s.False(released, "the update lease must retain the collection")
+	case <-time.After(5 * time.Second):
+		s.T().Fatal("Unref blocked while schema update waited for transition reader")
+	}
+	s.Same(coll, s.cm.Get(coll.ID()))
+
+	releaseReader()
+	s.Require().NoError(<-updateDone)
+	s.Nil(s.cm.Get(coll.ID()), "releasing the lease should complete the pending collection release")
+}
+
+func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethods() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	searchReqPB, err := mock_segcore.GenQueryRequest(coll.GetCCollection(), nil, 1, 1, coll.ID())
+	s.Require().NoError(err)
+	searchReq, err := coll.NewSearchRequest(searchReqPB, searchReqPB.GetReq().GetPlaceholderGroup())
+	s.Require().NoError(err)
+	searchReq.Delete()
+
+	retrievePlan, err := coll.NewRetrievePlan(s.newSimpleRetrieveRequest(coll))
+	s.Require().NoError(err)
+	retrievePlan.Delete()
+
+	csegment, err := coll.CreateCSegment(&segcore.CreateCSegmentRequest{
+		SegmentID:   1,
+		SegmentType: SegmentTypeSealed,
+	})
+	s.Require().NoError(err)
+	releaser, ok := csegment.(interface{ Release() })
+	s.Require().True(ok)
+	releaser.Release()
+
+	s.NoError(coll.updateIndexMeta(nil))
+}
+
+func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+
+	searchReqPB, err := mock_segcore.GenQueryRequest(coll.GetCCollection(), nil, 1, 1, coll.ID())
+	s.Require().NoError(err)
+	retrieveReq := s.newSimpleRetrieveRequest(coll)
+	indexMeta := mock_segcore.GenTestIndexMeta(1, coll.Schema())
+
+	DeleteCollection(coll)
+
+	_, err = coll.NewSearchRequest(searchReqPB, searchReqPB.GetReq().GetPlaceholderGroup())
+	s.Error(err)
+	_, err = coll.NewRetrievePlan(retrieveReq)
+	s.Error(err)
+	_, err = coll.CreateCSegment(&segcore.CreateCSegmentRequest{
+		SegmentID:   1,
+		SegmentType: SegmentTypeSealed,
+	})
+	s.Error(err)
+	s.Error(coll.updateIndexMeta(indexMeta))
+	s.Error(coll.updateSchema(coll.Schema(), 1))
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersionDomain() {

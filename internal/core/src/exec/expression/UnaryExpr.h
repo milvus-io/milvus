@@ -477,18 +477,19 @@ struct UnaryElementFunc {
     }
 };
 
-#define UnaryArrayCompare(cmp)                                          \
-    do {                                                                \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {    \
-            res[i] = false;                                             \
-        } else {                                                        \
-            if (index >= src[i].length()) {                             \
-                res[i] = false;                                         \
-                continue;                                               \
-            }                                                           \
-            auto array_data = src[i].template get_data<GetType>(index); \
-            res[i] = (cmp);                                             \
-        }                                                               \
+#define UnaryArrayCompare(cmp)                                               \
+    do {                                                                     \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
+            res[i] = false;                                                  \
+        } else {                                                             \
+            if (index >= src[offset].length()) {                             \
+                res[i] = false;                                              \
+                valid_res[i] = false;                                        \
+                continue;                                                    \
+            }                                                                \
+            auto array_data = src[offset].template get_data<GetType>(index); \
+            res[i] = (cmp);                                                  \
+        }                                                                    \
     } while (false)
 
 template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
@@ -522,6 +523,10 @@ struct UnaryElementFuncForArray {
                 regex_matcher.emplace(val);
             }
         }
+        if constexpr (!std::is_same_v<GetType, proto::plan::Array>) {
+            AssertInfo(index >= 0,
+                       "array element predicate requires nested path");
+        }
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -540,6 +545,7 @@ struct UnaryElementFuncForArray {
                 } else {
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -552,6 +558,7 @@ struct UnaryElementFuncForArray {
                 } else {
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -580,6 +587,7 @@ struct UnaryElementFuncForArray {
                                      std::is_same_v<GetType, std::string>) {
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -599,6 +607,7 @@ struct UnaryElementFuncForArray {
                                      std::is_same_v<GetType, std::string>) {
                     if (index >= src[offset].length()) {
                         res[i] = false;
+                        valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
@@ -1105,6 +1114,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     template <typename ExprValueType>
     VectorPtr
     ExecRangeVisitorImplJson(EvalCtx& context);
+
+    VectorPtr
+    ExecRangeVisitorImplJsonPreciseNumeric(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr

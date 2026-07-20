@@ -140,6 +140,30 @@ func TestRecordMaterializerWrapFillsNullableMissingFields(t *testing.T) {
 	wrapped.Release()
 }
 
+func TestRecordMaterializerWrapFillsNullableMissingTextFieldAsBinary(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "added_text", DataType: schemapb.DataType_Text, Nullable: true},
+	}}
+	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	pk := newInt64Array(t, []int64{1, 2, 3})
+	defer pk.Release()
+	record := &materializerTestRecord{len: 3, columns: map[storage.FieldID]arrow.Array{100: pk}}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	require.NotSame(t, record, wrapped)
+
+	column := wrapped.Column(101)
+	require.NotNil(t, column)
+	require.IsType(t, &array.Binary{}, column)
+	require.Equal(t, 3, column.Len())
+	require.Equal(t, 3, column.NullN())
+	wrapped.Release()
+}
+
 func TestRecordMaterializerWrapWithSelectionMaterializesKeptRowsOnly(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},

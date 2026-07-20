@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -113,9 +114,7 @@ const (
 	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
 	AlterCollectionFieldTaskName  = "AlterCollectionFieldTask"
-	AddCollectionFunctionTask     = "AddCollectionFunctionTask"
 	AlterCollectionFunctionTask   = "AlterCollectionFunctionTask"
-	DropCollectionFunctionTask    = "DropCollectionFunctionTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
 	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
@@ -209,6 +208,64 @@ type BaseInsertTask = msgstream.InsertMsg
 func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
+	return nil
+}
+
+// validateAddFunctionRequiresStorageV3 rejects adding a function to an existing collection
+// unless the compaction infrastructure that backfills its output field into pre-existing
+// sealed segments is enabled. The new function-output field is materialized only by
+// compaction (bump_schema_version compaction requires a StorageV3 segment):
+//   - common.storage.useLoonFFI: StorageV3 mode (bump works only on V3 segments; TEXT needs V3).
+//   - dataCoord.compaction.bumpSchemaVersion.enabled: the bumpSchemaVersionPolicy that directly
+//     backfills pre-existing V3 segments; it defaults to false, and there is no direct trigger
+//     on the add-function DDL, so without it an already-V3 old segment never receives the output.
+//   - dataCoord.compaction.storageVersion.enabled: the storageVersionUpgradePolicy that first
+//     mix-upgrades a pre-existing V2 segment to V3 so it can be bumped.
+//
+// Without all three, the DDL would succeed while old rows silently never get the function output.
+// New writes always compute the function output at flush, so create_collection with a function is
+// unaffected; this guard applies only to add-function on an existing collection. See issue #51167.
+func validateAddFunctionRequiresStorageV3() error {
+	if !Params.CommonCfg.UseLoonFFI.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg("adding a function field requires StorageV3; enable common.storage.useLoonFFI")
+	}
+	if !Params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg("adding a function field requires schema-bump compaction to backfill existing segments; enable dataCoord.compaction.bumpSchemaVersion.enabled")
+	}
+	if !Params.DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg("adding a function field requires the storage-version upgrade compaction; enable dataCoord.compaction.storageVersion.enabled")
+	}
+	return nil
+}
+
+// validateAddFunctionInputNotText rejects adding a BM25/MinHash function whose input is a
+// TEXT field. TEXT columns are stored as binary LOB references, so when the async backfill
+// compaction materializes the function output for pre-existing segments it reads the input
+// back as *array.Binary and hard-fails in stringInputsFromRecord ("cannot materialize bm25
+// from text binary values without lob decoding"); the add-function DDL would return success
+// while the backfill silently fails and old rows never get the output. Reject it up front
+// (fail-fast). VarChar inputs stay allowed, and create_collection with such a function is
+// unaffected -- its output is computed at flush from the raw text. Distinct from the
+// storage-version gate (validateAddFunctionRequiresStorageV3): this is a request-content
+// input-type constraint, not an environment/config check. See issue #51167.
+func validateAddFunctionInputNotText(schema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	default:
+		// Only BM25/MinHash are materialized from string input during backfill.
+		return nil
+	}
+	fieldByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, f := range schema.GetFields() {
+		fieldByName[f.GetName()] = f
+	}
+	for _, name := range function.GetInputFieldNames() {
+		if f, ok := fieldByName[name]; ok && f.GetDataType() == schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg(
+				"adding a %s function with a TEXT input field (%s) is not supported: its output cannot be backfilled into existing segments; use a VARCHAR input field",
+				function.GetType().String(), name)
+		}
 	}
 	return nil
 }
@@ -1117,7 +1174,36 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		}
 	}
 	if plan.HasFunction() {
+		if err := validateAddFunctionRequiresStorageV3(); err != nil {
+			return err
+		}
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
+			return err
+		}
+		if err := schemautil.CheckNoFunctionCascade(t.oldSchema.GetFunctions(), plan.Function); err != nil {
+			return err
+		}
+	}
+
+	// Validate the bound index params against the new field, mirroring the
+	// create_index path (index name rules, checker existence, data-type
+	// compatibility, train params, dimension filling). Validation-only: the
+	// request keeps the user's original params so the persisted UserIndexParams
+	// match the create_index convention; rootcoord independently derives the
+	// normalized IndexParams at prepare.
+	if plan.Kind == schemautil.AlterSchemaAddFunctionField {
+		if err := validateIndexName(plan.IndexName); err != nil {
+			return err
+		}
+		if err := indexparamcheck.ValidateIndexParamsSize(plan.IndexExtraParams...); err != nil {
+			return err
+		}
+		indexParamsMap, err := indexparamcheck.PrepareFunctionOutputIndexParams(
+			plan.Function.GetType(), plan.Field.GetName(), plan.IndexExtraParams)
+		if err != nil {
+			return err
+		}
+		if err := checkTrain(ctx, plan.Field, indexParamsMap); err != nil {
 			return err
 		}
 	}
@@ -1131,6 +1217,9 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(plan.Field).(*schemapb.FieldSchema))
 	}
 	mergedSchema.Functions = append(mergedSchema.Functions, plan.Function)
+	if err := validateAddFunctionInputNotText(mergedSchema, plan.Function); err != nil {
+		return err
+	}
 	if err := validator.ValidateFunction(mergedSchema, plan.Function.GetName(), false); err != nil {
 		return err
 	}
@@ -1330,18 +1419,15 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 	}
 
 	if !dropOutputFields {
-		if targetFunc.GetType() == schemapb.FunctionType_BM25 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
-		}
-		return nil
+		// A function is coupled to its output field for all types: detaching (removing
+		// the function but keeping the field) is never allowed. drop_function always
+		// removes the function together with its output field.
+		return merr.WrapErrParameterInvalidMsg(
+			"detaching a function without dropping its output field is not supported; drop_function always removes the function together with its output field: %s", functionName)
 	}
 
-	switch targetFunc.GetType() {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
-	default:
-		return merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
-	}
-
+	// Drop is uniform across function types (no backfill); unlike add_function_field
+	// it is not type-restricted.
 	removedVectors := 0
 	for _, name := range targetFunc.OutputFieldNames {
 		if f := typeutil.GetFieldByName(schema, name); f != nil && typeutil.IsVectorType(f.DataType) {
@@ -1656,15 +1742,7 @@ func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
 func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result = &milvuspb.DescribeCollectionResponse{
-		Status: merr.Success(),
-		Schema: &schemapb.CollectionSchema{
-			Name:              "",
-			Description:       "",
-			AutoID:            false,
-			Fields:            make([]*schemapb.FieldSchema, 0),
-			Functions:         make([]*schemapb.FunctionSchema, 0),
-			StructArrayFields: make([]*schemapb.StructArrayFieldSchema, 0),
-		},
+		Status:               merr.Success(),
 		CollectionID:         0,
 		VirtualChannelNames:  nil,
 		PhysicalChannelNames: nil,
@@ -1678,32 +1756,19 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		t.result.Status = result.Status
-
-		// compatibility with PyMilvus existing implementation
-		err := merr.Error(t.result.GetStatus())
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			// nolint
-			t.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			// nolint
-			t.result.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", t.GetDbName(), t.GetCollectionName())
-			t.result.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
-		}
+	if !merr.Ok(result.GetStatus()) {
+		t.result.Status = describeCollectionErrorStatus(
+			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
 	}
+	if t.result.CollectionName == "" {
+		t.result.CollectionName = result.GetCollectionName()
+	}
 
-	t.result.Schema.Name = result.Schema.Name
-	t.result.Schema.Description = result.Schema.Description
-	t.result.Schema.AutoID = result.Schema.AutoID
-	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
-	t.result.Schema.ExternalSource = result.Schema.ExternalSource
-	// Pass spec through unredacted; the public proxy.DescribeCollection
-	// entry point applies RedactExternalSpec uniformly across cached and
-	// remote provider paths so internal-only callers of this task path
-	// (if any) still observe raw creds for FFI auth.
-	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
-	t.result.Schema.EnableNamespace = result.Schema.EnableNamespace
+	t.result.Schema, err = projectDescribeCollectionSchema(result.GetSchema(), false)
+	if err != nil {
+		return err
+	}
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
@@ -1713,61 +1778,13 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.ConsistencyLevel = result.ConsistencyLevel
 	t.result.Aliases = result.Aliases
 	t.result.Properties = result.Properties
-	t.result.DbName = result.GetDbName()
+	if result.GetDbName() != "" {
+		t.result.DbName = result.GetDbName()
+	}
 	t.result.DbId = result.GetDbId()
 	t.result.NumPartitions = result.NumPartitions
 	t.result.UpdateTimestamp = result.UpdateTimestamp
-	t.result.UpdateTimestampStr = result.UpdateTimestampStr
-	copyFieldSchema := func(field *schemapb.FieldSchema) *schemapb.FieldSchema {
-		return &schemapb.FieldSchema{
-			FieldID:          field.FieldID,
-			Name:             field.Name,
-			IsPrimaryKey:     field.IsPrimaryKey,
-			AutoID:           field.AutoID,
-			Description:      field.Description,
-			DataType:         field.DataType,
-			TypeParams:       field.TypeParams,
-			IndexParams:      field.IndexParams,
-			IsDynamic:        field.IsDynamic,
-			IsPartitionKey:   field.IsPartitionKey,
-			IsClusteringKey:  field.IsClusteringKey,
-			DefaultValue:     field.DefaultValue,
-			ElementType:      field.ElementType,
-			Nullable:         field.Nullable,
-			IsFunctionOutput: field.IsFunctionOutput,
-			ExternalField:    field.GetExternalField(),
-		}
-	}
-
-	for _, field := range result.Schema.Fields {
-		if field.IsDynamic || field.Name == common.NamespaceFieldName {
-			continue
-		}
-		if field.FieldID >= common.StartOfUserFieldID {
-			t.result.Schema.Fields = append(t.result.Schema.Fields, copyFieldSchema(field))
-		}
-	}
-
-	for i, structArrayField := range result.Schema.StructArrayFields {
-		t.result.Schema.StructArrayFields = append(t.result.Schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
-			FieldID:     structArrayField.FieldID,
-			Name:        structArrayField.Name,
-			Description: structArrayField.Description,
-			Fields:      make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
-			Nullable:    structArrayField.Nullable,
-		})
-		for _, field := range structArrayField.Fields {
-			t.result.Schema.StructArrayFields[i].Fields = append(t.result.Schema.StructArrayFields[i].Fields, copyFieldSchema(field))
-		}
-	}
-
-	for _, function := range result.Schema.Functions {
-		t.result.Schema.Functions = append(t.result.Schema.Functions, proto.Clone(function).(*schemapb.FunctionSchema))
-	}
-
-	if err := restoreStructFieldNames(t.result.Schema); err != nil {
-		return merr.WrapErrParameterInvalidMsg("failed to restore struct field names: %v", err)
-	}
+	t.result.UpdateTimestampStr = strconv.FormatUint(result.UpdateTimestamp, 10)
 
 	return nil
 }
@@ -2403,6 +2420,8 @@ var allowedAlterProps = []string{
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
 	common.FieldDescriptionKey,
+	common.EnableAnalyzerKey,
+	common.AnalyzerParamKey,
 	common.WarmupKey,
 	common.WarmupScalarFieldKey,
 	common.WarmupScalarIndexKey,
@@ -2412,6 +2431,8 @@ var allowedAlterProps = []string{
 
 var allowedDropProps = []string{
 	common.MmapEnabledKey,
+	common.EnableAnalyzerKey,
+	common.AnalyzerParamKey,
 	common.WarmupKey,
 	common.WarmupScalarFieldKey,
 	common.WarmupScalarIndexKey,
@@ -2465,6 +2486,40 @@ func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValu
 	return propKV
 }
 
+func isAnalyzerFieldParam(key string) bool {
+	return key == common.EnableAnalyzerKey || key == common.AnalyzerParamKey
+}
+
+func getAlterCollectionFieldTarget(schema *schemapb.CollectionSchema, fieldName string) *schemapb.FieldSchema {
+	for _, field := range schema.GetFields() {
+		if field.GetName() == fieldName {
+			return field
+		}
+	}
+	return nil
+}
+
+func validateAlterAnalyzerFieldParam(collSchema *schemapb.CollectionSchema, fieldName string) error {
+	field := getAlterCollectionFieldTarget(collSchema, fieldName)
+	if field == nil {
+		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+
+	if !typeutil.IsStringType(field.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
+	}
+
+	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() ||
+		typeutil.IsBm25FunctionInputField(collSchema, field) ||
+		typeutil.IsMinHashFunctionInputField(collSchema, field) {
+		return merr.WrapErrParameterInvalidMsg(
+			"can not alter analyzer params for field %s after text match is enabled or a BM25/MinHash function depends on it",
+			fieldName,
+		)
+	}
+	return nil
+}
+
 func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -2490,6 +2545,16 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		}
 		// Check the value type based on the key
 		switch prop.Key {
+		case common.EnableAnalyzerKey, common.AnalyzerParamKey:
+			if err := validateAlterAnalyzerFieldParam(collSchema.CollectionSchema, t.FieldName); err != nil {
+				return err
+			}
+			if prop.Key == common.EnableAnalyzerKey {
+				if _, err := strconv.ParseBool(prop.Value); err != nil {
+					return merr.WrapErrParameterInvalidMsg("%s should be a boolean, but got %s", prop.Key, prop.Value)
+				}
+			}
+
 		case common.MmapEnabledKey:
 			loaded, err := isCollectionLoadedFn()
 			if err != nil {
@@ -2563,6 +2628,11 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		updatedKey := updateKey(key)
 		if !IsKeyAllowDrop(updatedKey) {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
+		}
+		if isAnalyzerFieldParam(updatedKey) {
+			if err := validateAlterAnalyzerFieldParam(collSchema.CollectionSchema, t.FieldName); err != nil {
+				return err
+			}
 		}
 
 		if updatedKey == common.MmapEnabledKey || common.IsFieldWarmupKey(updatedKey) {

@@ -1928,6 +1928,161 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Nil(mutation)
 	})
 
+	suite.Run("in-place result with matching base manifest is adopted", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest, // == current pointer and advances it, adopt
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.EqualValues(1, infos[0].GetID())
+		suite.Equal(resultManifest, infos[0].GetManifestPath())
+	})
+
+	suite.Run("in-place result with stale base manifest is rejected", func() {
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		// pointer advanced past the result's base
+		old.ManifestPath = packed.MarshalManifestPath("/data/segments/1", 11)
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					Manifest:       packed.MarshalManifestPath("/data/segments/1", 12),
+					BaseManifest:   packed.MarshalManifestPath("/data/segments/1", 10), // stale, != current v11
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.Error(err)
+		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	// Defensive: base == current only claims the pointer has not drifted; it does
+	// not independently validate the worker's result. A buggy worker that reports
+	// the matching base but produces a result that does not advance the current
+	// manifest on the same base path (rollback / equal version / different base
+	// path / unparsable) must be rejected, not adopted.
+	suite.Run("in-place result on current base that does not advance is rejected", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		cases := map[string]string{
+			"rollback":       packed.MarshalManifestPath("/data/segments/1", 9),
+			"different base": packed.MarshalManifestPath("/data/segments/2", 12),
+			"unparsable":     "not-a-manifest",
+		}
+		for name, resultManifest := range cases {
+			suite.Run(name, func() {
+				segs := makeSegments(1, commonpb.SegmentState_Flushed)
+				old := segs.GetSegment(1)
+				old.StorageVersion = storage.StorageV3
+				old.ManifestPath = currentManifest
+				m := &meta{
+					catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+					segments: segs,
+				}
+				task := &datapb.CompactionTask{
+					InputSegments: []int64{1},
+					Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+					Schema:        &schemapb.CollectionSchema{Version: 3},
+				}
+				result := &datapb.CompactionPlanResult{
+					Segments: []*datapb.CompactionSegment{
+						{
+							SegmentID:      1,
+							NumOfRows:      5,
+							Manifest:       resultManifest,
+							BaseManifest:   currentManifest, // == current pointer, but result does not advance it
+							StorageVersion: storage.StorageV3,
+						},
+					},
+				}
+				infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+				suite.Error(err)
+				suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+				suite.Nil(infos)
+				suite.Nil(mutation)
+			})
+		}
+	})
+
+	suite.Run("in-place result already at current manifest is idempotently adopted", func() {
+		// Crash-replay: an adoption already succeeded (segment is at the
+		// materialized manifest) but the task state was lost before meta_saved.
+		// Replaying the same result — stale base, but manifest already == current
+		// — must be accepted, not rejected, so the already-succeeded task is not
+		// spuriously failed.
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = "base/manifest-12" // already adopted the materialized manifest
+		old.SchemaVersion = 3
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+					Manifest:       "base/manifest-12", // == current pointer
+					BaseManifest:   "base/manifest-10", // stale base, but result already current
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.Equal("base/manifest-12", infos[0].GetManifestPath())
+	})
+
 	suite.Run("replacement result without preallocated ID rejected", func() {
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
@@ -2362,6 +2517,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2408,6 +2564,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     segment.GetBinlogs(),
 					Manifest:       manifestPath,
+					BaseManifest:   manifestPath,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2443,6 +2600,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     segment.GetBinlogs(),
 					Manifest:       manifestPath,
+					BaseManifest:   manifestPath,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2544,6 +2702,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2796,6 +2955,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchema
 				SegmentID:      1,
 				InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 				Manifest:       manifestPath,
+				BaseManifest:   manifestPath,
 				StorageVersion: storage.StorageV3,
 			},
 		},
@@ -4744,6 +4904,175 @@ func equalCollectionInfo(t *testing.T, a *collectionInfo, b *collectionInfo) {
 	assert.Equal(t, a.Schema, b.Schema)
 	assert.Equal(t, a.Properties, b.Properties)
 	assert.Equal(t, a.StartPositions, b.StartPositions)
+}
+
+func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing.T) {
+	const (
+		channel1 = "channel-1"
+		channel2 = "channel-2"
+	)
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	channel1Entered := make(chan struct{})
+	releaseChannel1 := make(chan struct{})
+	channel2Entered := make(chan struct{})
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel1, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(channel1Entered)
+			<-releaseChannel1
+			return nil
+		}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel2, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(channel2Entered)
+			return nil
+		}).Once()
+
+	meta := &meta{
+		ctx:         context.Background(),
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+	}
+	channel1Done := make(chan error, 1)
+	go func() {
+		channel1Done <- meta.UpdateChannelCheckpoint(context.Background(), channel1, &msgpb.MsgPosition{
+			ChannelName: channel1,
+			MsgID:       []byte{1},
+			Timestamp:   1,
+		})
+	}()
+
+	select {
+	case <-channel1Entered:
+	case <-time.After(3 * time.Second):
+		close(releaseChannel1)
+		select {
+		case <-channel1Done:
+		case <-time.After(3 * time.Second):
+		}
+		t.Fatal("channel-1 did not enter SaveChannelCheckpoint")
+	}
+
+	channel2Done := make(chan error, 1)
+	go func() {
+		channel2Done <- meta.UpdateChannelCheckpoint(context.Background(), channel2, &msgpb.MsgPosition{
+			ChannelName: channel2,
+			MsgID:       []byte{2},
+			Timestamp:   2,
+		})
+	}()
+
+	channel2PersistedConcurrently := false
+	select {
+	case <-channel2Entered:
+		channel2PersistedConcurrently = true
+	case <-time.After(3 * time.Second):
+	}
+
+	close(releaseChannel1)
+	errs := make(map[string]error, 2)
+	for channel, done := range map[string]<-chan error{
+		channel1: channel1Done,
+		channel2: channel2Done,
+	} {
+		select {
+		case err := <-done:
+			errs[channel] = err
+		case <-time.After(3 * time.Second):
+			assert.Failf(t, "checkpoint update did not finish", "channel: %s", channel)
+		}
+	}
+	for _, err := range errs {
+		assert.NoError(t, err)
+	}
+	require.True(t, channel2PersistedConcurrently, "channel-2 did not enter catalog while channel-1 was blocked")
+}
+
+func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *testing.T) {
+	const channel = "channel-1"
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	batchEntered := make(chan struct{})
+	releaseBatch := make(chan struct{})
+	singleEntered := make(chan struct{})
+	catalog.EXPECT().SaveChannelCheckpoints(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, []*msgpb.MsgPosition) error {
+			close(batchEntered)
+			<-releaseBatch
+			return nil
+		}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, channel, mock.Anything).
+		RunAndReturn(func(context.Context, string, *msgpb.MsgPosition) error {
+			close(singleEntered)
+			return nil
+		}).Once()
+
+	meta := &meta{
+		ctx:         context.Background(),
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+	}
+	batchDone := make(chan error, 1)
+	go func() {
+		batchDone <- meta.UpdateChannelCheckpoints(context.Background(), []*msgpb.MsgPosition{{
+			ChannelName: channel,
+			MsgID:       []byte{1},
+			Timestamp:   1,
+		}})
+	}()
+
+	select {
+	case <-batchEntered:
+	case <-time.After(3 * time.Second):
+		close(releaseBatch)
+		select {
+		case <-batchDone:
+		case <-time.After(3 * time.Second):
+		}
+		t.Fatal("batch update did not enter SaveChannelCheckpoints")
+	}
+
+	singleStarted := make(chan struct{})
+	singleDone := make(chan error, 1)
+	go func() {
+		close(singleStarted)
+		singleDone <- meta.UpdateChannelCheckpoint(context.Background(), channel, &msgpb.MsgPosition{
+			ChannelName: channel,
+			MsgID:       []byte{2},
+			Timestamp:   2,
+		})
+	}()
+	<-singleStarted
+
+	singleEnteredBeforeBatchRelease := false
+	select {
+	case <-singleEntered:
+		singleEnteredBeforeBatchRelease = true
+	case <-time.After(2 * time.Second):
+	}
+
+	close(releaseBatch)
+	errs := make([]error, 0, 2)
+	for operation, done := range map[string]<-chan error{
+		"batch":  batchDone,
+		"single": singleDone,
+	} {
+		select {
+		case err := <-done:
+			errs = append(errs, err)
+		case <-time.After(3 * time.Second):
+			assert.Failf(t, "checkpoint update did not finish", "operation: %s", operation)
+		}
+	}
+	for _, err := range errs {
+		assert.NoError(t, err)
+	}
+	assert.False(t, singleEnteredBeforeBatchRelease, "single update entered catalog before the overlapping batch completed")
+	require.Equal(t, uint64(2), meta.GetChannelCheckpoint(channel).GetTimestamp())
 }
 
 func TestChannelCP(t *testing.T) {

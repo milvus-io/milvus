@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
@@ -98,7 +98,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ./client
+replace github.com/milvus-io/milvus/client/v3 => ./client
 
 require (
 	cel.dev/expr v0.25.1 // indirect

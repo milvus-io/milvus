@@ -32,6 +32,7 @@ pub extern "C" fn tantivy_create_index(
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
     enable_user_specified_doc_id: bool,
+    enable_background_merge: bool,
 ) -> RustResult {
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);
@@ -49,6 +50,7 @@ pub extern "C" fn tantivy_create_index(
         overall_memory_budget_in_bytes,
         tantivy_index_version,
         enable_user_specified_doc_id,
+        enable_background_merge,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
         Err(e) => RustResult::from_error(e.to_string()),

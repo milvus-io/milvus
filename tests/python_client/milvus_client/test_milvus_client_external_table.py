@@ -2160,11 +2160,6 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         assert filtered[0]["text_body"] == "external text body 100"
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="https://github.com/milvus-io/milvus/issues/50416: "
-        "querying newly added external field before refresh returns internal QueryNode assert",
-        strict=True,
-    )
     def test_milvus_client_external_table_add_field_without_refresh_not_silent(self, minio_env, external_prefix):
         """
         target: test external table add field without refresh does not silently return wrong data
@@ -2219,7 +2214,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         )[0][0]
         assert [hit["id"] for hit in old_hits] == [hit["id"] for hit in baseline_hits]
 
-        err_check = {ct.err_code: 65535, ct.err_msg: "refresh"}
+        err_check = {ct.err_code: 65535, ct.err_msg: "RefreshExternalCollection"}
         self.query(
             client,
             coll,
@@ -2936,11 +2931,18 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             ct.err_code: 1100,
             ct.err_msg: "alter collection schema operation is not supported for external collection",
         }
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(
+            field_name="bm25_sparse",
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25",
+        )
         self.add_function_field(
             client,
             collection_name=coll,
             field_schema=bm25_field,
             func=bm25_function,
+            index_params=bound_index_params,
             check_task=CheckTasks.err_res,
             check_items=error,
         )

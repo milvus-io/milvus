@@ -26,6 +26,7 @@ pub(crate) struct IndexWriterWrapperImpl {
     pub(crate) index_writer: Either<IndexWriter, SingleSegmentIndexWriter>,
     pub(crate) id_field: Option<Field>,
     pub(crate) _index: Arc<Index>,
+    pub(crate) enable_background_merge: bool,
 }
 
 #[inline]
@@ -100,10 +101,11 @@ impl IndexWriterWrapperImpl {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
+        enable_background_merge: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
-            "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
-            field_name, data_type
+            "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5, enable_background_merge: {}",
+            field_name, data_type, enable_background_merge
         );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
@@ -113,11 +115,18 @@ impl IndexWriterWrapperImpl {
         let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        if !enable_background_merge {
+            // Sealed index builds end with an explicit merge-all in finish();
+            // background policy-driven merges would only waste IO and race
+            // with it, so disable them entirely for build-mode writers.
+            index_writer.set_merge_policy(Box::new(tantivy_5::merge_policy::NoMergePolicy));
+        }
         Ok(IndexWriterWrapperImpl {
             field,
             index_writer: Either::Left(index_writer),
             id_field: Some(id_field),
             _index: Arc::new(index),
+            enable_background_merge,
         })
     }
 
@@ -140,6 +149,8 @@ impl IndexWriterWrapperImpl {
             index_writer: Either::Right(index_writer),
             id_field: None,
             _index: Arc::new(index),
+            // Single-segment writer never runs finish()'s merge-all; value unused.
+            enable_background_merge: false,
         })
     }
 
@@ -284,19 +295,30 @@ impl IndexWriterWrapperImpl {
     }
 
     pub fn finish(self) -> Result<()> {
+        let enable_background_merge = self.enable_background_merge;
         match self.index_writer {
             Either::Left(mut index_writer) => {
                 index_writer.commit()?;
 
-                // merge all segments
-                let segment_ids = index_writer.index().searchable_segment_ids()?;
-                if segment_ids.len() > 1 {
-                    let _ = index_writer.merge(&segment_ids).wait();
+                if !enable_background_merge {
+                    // Build-mode writers use NoMergePolicy (set in new()), so no
+                    // background merge can race this explicit merge-all. Collapse
+                    // the auto-flushed segments into a single one. Background-merge
+                    // writers (e.g. growing segments) keep their own policy and are
+                    // not forced to a single segment here.
+                    let segment_ids = index_writer.index().searchable_segment_ids()?;
+                    if segment_ids.len() > 1 {
+                        index_writer.merge(&segment_ids).wait()?;
+                    }
                 }
 
                 index_writer.garbage_collect_files().wait()?;
 
                 index_writer.wait_merging_threads()?;
+
+                let metas = self._index.searchable_segment_metas()?;
+                let segment_ids: Vec<_> = metas.iter().map(|m| m.id().uuid_string()).collect();
+                info!("tantivy index_writer finish, segments: {:?}", segment_ids);
             }
             Either::Right(single_segment_index_writer) => {
                 single_segment_index_writer

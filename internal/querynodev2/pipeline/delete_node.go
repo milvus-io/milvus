@@ -41,6 +41,7 @@ type deleteNode struct {
 
 // addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
 func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.DeleteData, msg *DeleteMsg) {
+	ctx := msg.TraceCtx()
 	deleteData, ok := deleteDatas[msg.PartitionID]
 	if !ok {
 		deleteData = &delegator.DeleteData{
@@ -53,7 +54,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 	deleteData.Timestamps = append(deleteData.Timestamps, msg.Timestamps...)
 	deleteData.RowCount += int64(len(pks))
 
-	mlog.Info(context.TODO(), "pipeline fetch delete msg",
+	mlog.Info(ctx, "pipeline fetch delete msg",
 		mlog.FieldCollectionID(dNode.collectionID),
 		mlog.FieldPartitionID(msg.PartitionID),
 		mlog.Int("deleteRowNum", len(pks)),

@@ -105,8 +105,8 @@ component-to-component) must be `*merr.milvusError` defined in
 If an error needs to be visible to the wire, it lives here. No exceptions.
 
 Every sentinel also carries an Input-vs-System classification (who is to
-blame) that drives `Status.Retriable`, the `fail_input`/`fail_system` metric
-labels, lb_policy failover and `retry.Do`; see "Input vs System: who is to
+blame) that drives `Status.Retriable`, the `cause` metric label, lb_policy
+failover and `retry.Do`; see "Input vs System: who is to
 blame?" in [error_handling_guide.md](error_handling_guide.md).
 
 #### Code-range partition

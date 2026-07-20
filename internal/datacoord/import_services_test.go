@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ================================
@@ -86,6 +88,56 @@ func (s *ImportServicesSuite) TestImportV2_InvalidTimeoutReturnsError() {
 	s.NoError(err)
 	s.NotNil(resp)
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+}
+
+func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
+	paramtable.Init()
+	ctx := context.Background()
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// enableL0Import defaults to false, so an l0_import request must be rejected
+	// before reaching allocation (allocator is nil here, proving the early reject).
+	req := &internalpb.ImportRequestInternal{
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: "l0_import", Value: "true"},
+		},
+	}
+
+	resp, err := server.ImportV2(ctx, req)
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+	s.Contains(resp.GetStatus().GetReason(), "l0 import is disabled")
+}
+
+func (s *ImportServicesSuite) TestImportV2_L0ImportEnabledPassesGate() {
+	paramtable.Init()
+	ctx := context.Background()
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.EnableL0Import.Key, "true")
+	defer params.Reset(params.DataCoordCfg.EnableL0Import.Key)
+
+	// With enableL0Import=true the same request must get past the L0 gate and
+	// fail later on the nil allocator instead — proof the gate was skipped.
+	req := &internalpb.ImportRequestInternal{
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: "l0_import", Value: "true"},
+		},
+	}
+
+	resp, err := server.ImportV2(ctx, req)
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
+	s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
 }
 
 func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
@@ -700,6 +752,138 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AssignsFileIDs() {
 	s.Equal(int64(1001), files[0].GetId()) // idStart + 0 + 1
 	s.Equal(int64(1002), files[1].GetId()) // idStart + 1 + 1
 	s.Equal(int64(1003), files[2].GetId()) // idStart + 2 + 1
+}
+
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportDisabledCreatesFailedJob() {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID:            100,
+		VChannelNames: []string{"v1"},
+	}, nil)
+
+	var savedJob *datapb.ImportJob
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, job *datapb.ImportJob) error {
+		savedJob = job
+		return nil
+	})
+
+	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	s.NoError(err)
+
+	server := &Server{
+		handler:    mockHandler,
+		importMeta: importMeta,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
+	server.allocator = mockAllocator
+
+	// enableL0Import defaults to false. A replicated l0_import message reaching
+	// the ack path must NOT create a runnable job, and must NOT return an error
+	// (ack callbacks retry forever); instead the job is created in Failed state
+	// so replicated CommitImport becomes a terminal no-op.
+	req := &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		PartitionIDs:   []int64{1},
+		ChannelNames:   []string{"v1"},
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
+		Files: []*internalpb.ImportFile{
+			{Id: 1, Paths: []string{"/test/file.json"}},
+		},
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: "l0_import", Value: "true"},
+		},
+		DataTimestamp: 123456789,
+		JobID:         2000,
+	}
+
+	resp, err := server.createImportJobFromAck(ctx, req)
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal("2000", resp.GetJobID())
+
+	s.NotNil(savedJob)
+	s.Equal(internalpb.ImportJobState_Failed, savedJob.GetState())
+	s.Contains(savedJob.GetReason(), "l0 import is disabled")
+	// Failed at creation must carry a real cleanup ts so GC can reclaim the job.
+	s.NotEqual(uint64(math.MaxUint64), savedJob.GetCleanupTs())
+}
+
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesPendingJob() {
+	paramtable.Init()
+	ctx := context.Background()
+
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.EnableL0Import.Key, "true")
+	defer params.Reset(params.DataCoordCfg.EnableL0Import.Key)
+
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID:            100,
+		VChannelNames: []string{"v1"},
+	}, nil)
+
+	var savedJob *datapb.ImportJob
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, job *datapb.ImportJob) error {
+		savedJob = job
+		return nil
+	})
+
+	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	s.NoError(err)
+
+	server := &Server{
+		handler:    mockHandler,
+		importMeta: importMeta,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
+	server.allocator = mockAllocator
+
+	req := &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		PartitionIDs:   []int64{1},
+		ChannelNames:   []string{"v1"},
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
+		Files: []*internalpb.ImportFile{
+			{Id: 1, Paths: []string{"/test/file.json"}},
+		},
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: "l0_import", Value: "true"},
+		},
+		DataTimestamp: 123456789,
+		JobID:         2000,
+	}
+
+	resp, err := server.createImportJobFromAck(ctx, req)
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+
+	s.NotNil(savedJob)
+	s.Equal(internalpb.ImportJobState_Pending, savedJob.GetState())
 }
 
 // Helper types are defined in import_callbacks_test.go (mockBalancerImpl, mockBroadcastAPIImpl, newMockBroadcastAPIImpl)

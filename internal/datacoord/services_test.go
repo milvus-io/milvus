@@ -275,6 +275,65 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 	}
 }
 
+func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	info := &datapb.SegmentInfo{
+		ID:             10,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Growing,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV2,
+	}
+	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+	s.Require().NoError(err)
+
+	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:      10,
+		Channel:        "ch1",
+		StorageVersion: storage.StorageV3,
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
+
+	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID: 10,
+		Channel:   "ch1",
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
+	segment := s.testServer.meta.GetSegment(context.TODO(), 10)
+	s.EqualValues(storage.StorageV2, segment.GetStorageVersion())
+
+	info = &datapb.SegmentInfo{
+		ID:             11,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Growing,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV1,
+	}
+	err = s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+	s.Require().NoError(err)
+
+	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:      11,
+		Channel:        "ch1",
+		StorageVersion: storage.StorageV2,
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
+	segment = s.testServer.meta.GetSegment(context.TODO(), 11)
+	s.EqualValues(storage.StorageV1, segment.GetStorageVersion())
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
@@ -1983,7 +2042,7 @@ func TestServer_FlushAll(t *testing.T) {
 			for _, vchannel := range msg.BroadcastHeader().VChannels {
 				results[vchannel] = &message.AppendResult{
 					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 					LastConfirmedMessageID: rmq.NewRmqID(1),
 				}
 			}
@@ -2363,36 +2422,42 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 }
 
 func TestGetSegmentInfo_WithCompaction(t *testing.T) {
-	t.Run("use handler.GetDeltaLogFromCompactTo", func(t *testing.T) {
+	setupParent := func(t *testing.T, collID, partID, parentID int64) *Server {
+		t.Helper()
+
 		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
+		t.Cleanup(func() {
+			closeTestServer(t, svr)
+		})
 
-		collID := int64(100)
-		partID := int64(10)
-
-		// Add collection
 		svr.meta.AddCollection(&collectionInfo{
 			ID:         collID,
 			Partitions: []int64{partID},
 		})
-
-		// Create parent segment
-		parent := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           1000,
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           parentID,
 			CollectionID: collID,
 			PartitionID:  partID,
 			State:        commonpb.SegmentState_Dropped,
-		})
-		err := svr.meta.AddSegment(context.TODO(), parent)
-		require.NoError(t, err)
+		})))
+		return svr
+	}
+
+	t.Run("legacy child appends delta logs", func(t *testing.T) {
+		collID := int64(100)
+		partID := int64(10)
+		parentID := int64(1000)
+		childID := int64(1001)
+
+		svr := setupParent(t, collID, partID, parentID)
 
 		// Create child segment with delta logs
 		child := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             1001,
+			ID:             childID,
 			CollectionID:   collID,
 			PartitionID:    partID,
 			State:          commonpb.SegmentState_Flushed,
-			CompactionFrom: []int64{1000},
+			CompactionFrom: []int64{parentID},
 			NumOfRows:      100,
 			Deltalogs: []*datapb.FieldBinlog{
 				{
@@ -2403,12 +2468,11 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 				},
 			},
 		})
-		err = svr.meta.AddSegment(context.TODO(), child)
-		require.NoError(t, err)
+		require.NoError(t, svr.meta.AddSegment(context.Background(), child))
 
 		// Test GetSegmentInfo
 		req := &datapb.GetSegmentInfoRequest{
-			SegmentIDs:       []int64{1000},
+			SegmentIDs:       []int64{parentID},
 			IncludeUnHealthy: true,
 		}
 
@@ -2419,8 +2483,91 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 
 		// Verify delta logs were merged from child
 		info := resp.GetInfos()[0]
-		assert.Equal(t, int64(1000), info.GetID())
+		assert.Equal(t, parentID, info.GetID())
 		assert.NotEmpty(t, info.GetDeltalogs())
+	})
+
+	t.Run("v3 child returns child manifest path", func(t *testing.T) {
+		collID := int64(101)
+		partID := int64(11)
+		parentID := int64(1100)
+		childID := int64(1101)
+		childManifest := `{"ver":3,"base_path":"files/insert_log/101/11/1101"}`
+
+		svr := setupParent(t, collID, partID, parentID)
+
+		child := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             childID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{parentID},
+			ManifestPath:   childManifest,
+			Deltalogs: []*datapb.FieldBinlog{{
+				FieldID: 0,
+				Binlogs: []*datapb.Binlog{{
+					LogID:      9001,
+					EntriesNum: 7,
+				}},
+			}},
+		})
+		require.NoError(t, svr.meta.AddSegment(context.Background(), child))
+
+		resp, err := svr.GetSegmentInfo(context.Background(), &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{parentID},
+			IncludeUnHealthy: true,
+		})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetStatus()), resp.GetStatus().GetReason())
+		require.Len(t, resp.GetInfos(), 1)
+		assert.Equal(t, []string{childManifest}, resp.GetInfos()[0].GetChildManifestPaths())
+		assert.Empty(t, resp.GetInfos()[0].GetDeltalogs())
+	})
+
+	t.Run("mixed child chain returns legacy deltalogs and v3 manifests", func(t *testing.T) {
+		collID := int64(102)
+		partID := int64(12)
+		parentID := int64(1200)
+		legacyChildID := int64(1201)
+		v3GrandChildID := int64(1202)
+		grandChildManifest := `{"ver":5,"base_path":"files/insert_log/102/12/1202"}`
+
+		svr := setupParent(t, collID, partID, parentID)
+
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             legacyChildID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Dropped,
+			CompactionFrom: []int64{parentID},
+			Deltalogs: []*datapb.FieldBinlog{{
+				FieldID: 0,
+				Binlogs: []*datapb.Binlog{{
+					LogID:      7001,
+					LogSize:    100,
+					EntriesNum: 3,
+				}},
+			}},
+		})))
+
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             v3GrandChildID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{legacyChildID},
+			ManifestPath:   grandChildManifest,
+		})))
+
+		resp, err := svr.GetSegmentInfo(context.Background(), &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{parentID},
+			IncludeUnHealthy: true,
+		})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetStatus()), resp.GetStatus().GetReason())
+		require.Len(t, resp.GetInfos(), 1)
+		assert.Len(t, resp.GetInfos()[0].GetDeltalogs(), 1)
+		assert.Equal(t, []string{grandChildManifest}, resp.GetInfos()[0].GetChildManifestPaths())
 	})
 }
 
@@ -3822,7 +3969,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 					AppendResults: map[string]*types2.AppendResult{
 						"by-dev-rootcoord-dml_0": {
 							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 							LastConfirmedMessageID: rmq.NewRmqID(1),
 						},
 					},
@@ -3963,7 +4110,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			AppendResults: map[string]*types2.AppendResult{
 				"by-dev-rootcoord-dml_0": {
 					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 					LastConfirmedMessageID: rmq.NewRmqID(1),
 				},
 			},
@@ -4032,7 +4179,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 					AppendResults: map[string]*types2.AppendResult{
 						"by-dev-rootcoord-dml_0": {
 							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 							LastConfirmedMessageID: rmq.NewRmqID(1),
 						},
 					},
@@ -4292,7 +4439,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 					AppendResults: map[string]*types2.AppendResult{
 						"by-dev-rootcoord-dml_0": {
 							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 							LastConfirmedMessageID: rmq.NewRmqID(1),
 						},
 					},
@@ -4459,7 +4606,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			AppendResults: map[string]*types2.AppendResult{
 				"by-dev-rootcoord-dml_0": {
 					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 					LastConfirmedMessageID: rmq.NewRmqID(1),
 				},
 			},
@@ -5664,3 +5811,69 @@ type (
 	embeddedBroadcastAPI struct{ broadcaster.BroadcastAPI }
 	embeddedBroker       struct{ broker.Broker }
 )
+
+func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
+	ctx := context.Background()
+	// A source whose own import failed (real reason, not user-aborted) must still be
+	// abortable, so the control plane can release the peer cluster's Uncommitted job.
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 2101, CollectionID: 300,
+		State: internalpb.ImportJobState_Failed, Reason: "disk quota exceeded",
+	}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2101)).Return(job).Times(2)
+
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	// The broadcast is the assertion of record: a regression that short-circuits
+	// AbortImport on a Failed job (returning success without running the action)
+	// would skip the rollback and strand the peer, so success alone is not enough.
+	rollbackCalls := 0
+	var rollbackJobID int64
+	bm := mockey.Mock((*Server).broadcastRollbackImportMessage).To(
+		func(s *Server, ctx context.Context, job ImportJob) error {
+			rollbackCalls++
+			rollbackJobID = job.GetJobID()
+			return nil
+		}).Build()
+	defer bm.UnPatch()
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2101})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+	assert.Equal(t, 1, rollbackCalls)
+	assert.Equal(t, int64(2101), rollbackJobID)
+}
+
+func TestAbortImport_CompletedRejected(t *testing.T) {
+	ctx := context.Background()
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 2103, State: internalpb.ImportJobState_Completed,
+	}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2103)).Return(job).Once()
+
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2103})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}
+
+func TestAbortImport_CommittingRejected(t *testing.T) {
+	ctx := context.Background()
+	// Committing is mid-commit and cannot be rolled back.
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 2104, State: internalpb.ImportJobState_Committing,
+	}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2104)).Return(job).Once()
+
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2104})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}

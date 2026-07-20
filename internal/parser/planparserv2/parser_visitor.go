@@ -1953,6 +1953,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			Expr: &planpb.Expr_ElementFilterExpr{
 				ElementFilterExpr: elementFilterExpr,
 			},
+			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
 		}
 	} else {
 		expr = &planpb.Expr{
@@ -2248,6 +2249,7 @@ func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interfa
 						FieldId:     field.FieldID,
 						DataType:    field.DataType,
 						ElementType: field.GetElementType(),
+						Nullable:    field.GetNullable(),
 					},
 				},
 			},
@@ -3103,6 +3105,7 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 					StructName:  arrayFieldName,
 				},
 			},
+			IsTemplate: exprWithType.expr.GetIsTemplate(),
 		},
 		dataType: schemapb.DataType_Bool,
 	}
@@ -3196,6 +3199,7 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 					Count:      count,
 				},
 			},
+			IsTemplate: predicateExpr.expr.GetIsTemplate(),
 		},
 		dataType: schemapb.DataType_Bool,
 	}

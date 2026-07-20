@@ -32,10 +32,10 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-test-packLoadSegmentRequest-v0"
 	mockPChannel := "fake-by-dev-rootcoord-dml-1"
 
-	t0 := tsoutil.ComposeTSByTime(time.Now().Add(-20*time.Minute), 0)
-	t1 := tsoutil.ComposeTSByTime(time.Now().Add(-8*time.Minute), 0)
-	t2 := tsoutil.ComposeTSByTime(time.Now().Add(-5*time.Minute), 0)
-	t3 := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0)
+	t0 := tsoutil.ComposeTSByTime(time.Now().Add(-20 * time.Minute))
+	t1 := tsoutil.ComposeTSByTime(time.Now().Add(-8 * time.Minute))
+	t2 := tsoutil.ComposeTSByTime(time.Now().Add(-5 * time.Minute))
+	t3 := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Minute))
 
 	segmentInfo := &datapb.SegmentInfo{
 		ID:            0,
@@ -88,13 +88,15 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 	mockPChannel := "fake-by-dev-rootcoord-dml-1"
 	checkpoint := &msgpb.MsgPosition{
 		ChannelName: mockPChannel,
-		Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0),
+		Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Minute)),
 	}
 
-	t.Run("manifest set clears legacy stats fields", func(t *testing.T) {
+	t.Run("manifest set clears legacy stats fields and keeps json stats placeholders", func(t *testing.T) {
+		childManifestPaths := []string{`{"ver":4,"base_path":"files/insert_log/100/10/2001"}`}
 		seg := &datapb.SegmentInfo{
-			ID:           100,
-			ManifestPath: "base/path@5",
+			ID:                 100,
+			ManifestPath:       "base/path@5",
+			ChildManifestPaths: childManifestPaths,
 			Statslogs: []*datapb.FieldBinlog{
 				{FieldID: 1},
 			},
@@ -114,10 +116,11 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 		loadInfo := PackSegmentLoadInfo(seg, checkpoint, nil)
 
 		assert.Equal(t, "base/path@5", loadInfo.GetManifestPath())
+		assert.Equal(t, childManifestPaths, loadInfo.GetChildManifestPaths())
 		assert.Empty(t, loadInfo.GetStatslogs())
 		assert.Empty(t, loadInfo.GetBm25Logs())
 		assert.Empty(t, loadInfo.GetTextStatsLogs())
-		assert.Empty(t, loadInfo.GetJsonKeyStatsLogs())
+		assert.NotEmpty(t, loadInfo.GetJsonKeyStatsLogs())
 		// Deltalogs should always be populated
 		assert.NotEmpty(t, loadInfo.GetDeltalogs())
 	})

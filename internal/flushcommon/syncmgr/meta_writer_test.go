@@ -315,8 +315,9 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncMetaErrorsReturnError() {
 
 			bfs := pkoracle.NewBloomFilterSet()
 			seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-				ID:          1,
-				PartitionID: 2,
+				ID:             1,
+				PartitionID:    2,
+				StorageVersion: storage.StorageV3,
 			}, bfs, nil)
 			s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(seg, true).Once()
 			s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()

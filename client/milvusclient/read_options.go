@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
 )
 
 const (
@@ -47,6 +47,7 @@ const (
 	spGroupBy         = `group_by_field`
 	spGroupSize       = `group_size`
 	spStrictGroupSize = `strict_group_size`
+	spOrderByFields   = `order_by_fields`
 )
 
 type SearchOption interface {
@@ -700,6 +701,17 @@ func (opt *queryOption) WithLimit(limit int) *queryOption {
 		opt.queryParams = make(map[string]string)
 	}
 	opt.queryParams[spLimit] = strconv.Itoa(limit)
+	return opt
+}
+
+// WithOrderByFields sorts query results by the given scalar fields.
+// Each spec is "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
+// The server requires an explicit limit when order-by fields are set.
+func (opt *queryOption) WithOrderByFields(fields ...string) *queryOption {
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
+	opt.queryParams[spOrderByFields] = strings.Join(fields, ",")
 	return opt
 }
 

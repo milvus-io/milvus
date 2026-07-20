@@ -81,6 +81,7 @@ type CopySegmentMeta interface {
 	// Job operations
 	AddJob(ctx context.Context, job CopySegmentJob) error
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
+	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
@@ -391,6 +392,32 @@ func (m *copySegmentMeta) UpdateJob(ctx context.Context, jobID int64, actions ..
 	defer m.mu.Unlock()
 	_, _, err := m.updateJob(ctx, jobID, actions...)
 	return err
+}
+
+// UpdateJobInState applies the actions only if the cached job is currently in
+// expectedState, with the check and the update under the same write lock.
+//
+// Callers that hold a job snapshot taken before a slow operation (e.g. the
+// checker creating tasks) must use this instead of UpdateJob for state
+// transitions: a concurrent failure path (markTaskAndJobFailed) may have moved
+// the job to a terminal state in the meantime, and an unconditional update
+// would resurrect it — e.g. Failed -> Executing after the job's snapshot pin
+// was already released.
+//
+// Returns (false, nil) when the job is missing or not in expectedState (the
+// update is skipped), (true, nil) on success.
+func (m *copySegmentMeta) UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, ok := m.jobs[jobID]
+	if !ok || job.GetState() != expectedState {
+		return false, nil
+	}
+	_, _, err := m.updateJob(ctx, jobID, actions...)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetJob retrieves a job by ID from in-memory cache.

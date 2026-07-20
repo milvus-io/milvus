@@ -27,6 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "milvus-storage/ffi_c.h"
+#include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_internal/result.h"
 #include "milvus-storage/filesystem/fs.h"
 

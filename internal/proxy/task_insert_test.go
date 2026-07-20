@@ -92,7 +92,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 		dbName         = "db"
 		collectionName = "text_collection"
 	)
-	schema := newSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
+	schema := mustNewSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{}, nil)
@@ -479,7 +479,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		idAllocator: idAllocator,
 	}
 
-	info := newSchemaInfo(schema)
+	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
 	cache.On("GetCollectionID",
@@ -616,7 +616,7 @@ func TestInsertTask_Function(t *testing.T) {
 		idAllocator: idAllocator,
 	}
 
-	info := newSchemaInfo(schema)
+	info := mustNewSchemaInfo(schema)
 	cache := NewMockCache(t)
 	collectionID := UniqueID(0)
 	cache.On("GetCollectionID",
@@ -674,7 +674,7 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
-			schema: newSchemaInfo(&schemapb.CollectionSchema{
+			schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
 				Name: "fooooo",
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -731,9 +731,9 @@ func TestInsertTask_Namespace(t *testing.T) {
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			schema: newSchemaInfo(schemaWithNamespaceEnabled),
+			schema: mustNewSchemaInfo(schemaWithNamespaceEnabled),
 		}, nil).Maybe()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceEnabled), nil).Maybe()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schemaWithNamespaceEnabled), nil).Maybe()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
 			name:                "p1",
 			partitionID:         10,
@@ -778,9 +778,9 @@ func TestInsertTask_Namespace(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			schema: newSchemaInfo(schemaWithNamespaceDisabled),
+			schema: mustNewSchemaInfo(schemaWithNamespaceDisabled),
 		}, nil).Maybe()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceDisabled), nil).Maybe()
+		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schemaWithNamespaceDisabled), nil).Maybe()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
 			name:                "p1",
 			partitionID:         10,

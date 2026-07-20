@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -78,8 +77,13 @@ type Cache interface {
 	// DeprecateShardCache(database, collectionName string)
 	// InvalidateShardLeaderCache(collections []int64)
 	// ListShardLocation() map[int64]nodeInfo
-	RemoveCollection(ctx context.Context, database, collectionName string, version uint64)
-	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string
+	RemoveCollection(ctx context.Context, database, collectionName string)
+	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
+	// InvalidateCollectionMeta atomically applies the O(1) collection-cache
+	// invalidations carried by one expiration request: resolution by real name
+	// or alias, eviction by forwarded id, and optional alias-hint removal.
+	// O(N) fallbacks such as RemoveAliasHolders remain separate operations.
+	InvalidateCollectionMeta(ctx context.Context, database, collectionName string, collectionID UniqueID, removeAlias bool) []string
 
 	// GetCredentialInfo operate credential cache
 	// GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
@@ -93,18 +97,33 @@ type Cache interface {
 
 	// RemoveAlias removes a cached alias entry.
 	RemoveAlias(ctx context.Context, database, alias string)
+	// RemoveAliasHolders evicts every cached entry of database whose declared
+	// aliases contain alias. FALLBACK for alias-DDL broadcasts that carry no
+	// target id (id==0) -- i.e. when the old target could not be precisely
+	// located. Two sources reach here, so it is a PERMANENT safety net, NOT
+	// upgrade-window-only: (a) an old rootcoord that predates old_collection_id,
+	// and (b) a new rootcoord that could not resolve the pre-alter AlterAlias
+	// target (a meta inconsistency). Do not delete it as post-upgrade dead code.
+	RemoveAliasHolders(ctx context.Context, database, alias string)
+	// RemoveDatabase evicts every cached entry of the database. Ordering against
+	// in-flight fills is handled by fillMu, so no version floor is needed.
 	RemoveDatabase(ctx context.Context, database string)
+	// RemoveDatabaseInfo invalidates only database-level metadata. AlterDatabase
+	// changes database properties but does not invalidate collection metadata, so
+	// it must not pay RemoveDatabase's O(number of cached collections) cleanup.
+	RemoveDatabaseInfo(ctx context.Context, database string)
 	HasDatabase(ctx context.Context, database string) bool
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
 
-	RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64)
+	RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string)
 	Close()
 }
 
 type collectionInfo struct {
 	collID                typeutil.UniqueID
+	dbID                  typeutil.UniqueID
 	dbName                string
 	schema                *schemaInfo
 	createdTimestamp      uint64
@@ -120,13 +139,6 @@ type collectionInfo struct {
 	shardsNum             int32
 	aliases               []string
 	properties            []*commonpb.KeyValuePair
-}
-
-const aliasCacheNegativeTTL = 30 * time.Second
-
-type aliasEntry struct {
-	collectionName string    // real collection name; "" means negative cache (not an alias)
-	cachedAt       time.Time // when this entry was cached; used for TTL on negative entries
 }
 
 type databaseInfo struct {
@@ -146,7 +158,7 @@ type schemaInfo struct {
 	schemaHelper          *typeutil.SchemaHelper
 }
 
-func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
+func newSchemaInfo(schema *schemapb.CollectionSchema) (*schemaInfo, error) {
 	fieldMap := typeutil.NewConcurrentMap[string, int64]()
 	hasPartitionkey := false
 	var pkField *schemapb.FieldSchema
@@ -167,7 +179,14 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 	}
 	// skip load fields logic for now
 	// partial load shall be processed as hint after tiered storage feature
-	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
+	// A malformed schema (nil, duplicate field name/id, multiple primary keys)
+	// only reaches here on a RootCoord bug, so this is defensive; propagate it as
+	// a retriable internal error rather than leaving schemaHelper nil for a later
+	// dereference to panic on.
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to create schema helper")
+	}
 	return &schemaInfo{
 		CollectionSchema:      schema,
 		fieldMap:              fieldMap,
@@ -175,7 +194,7 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 		pkField:               pkField,
 		multiAnalyzerFieldMap: typeutil.NewConcurrentMap[int64, int64](),
 		schemaHelper:          schemaHelper,
-	}
+	}, nil
 }
 
 func (s *schemaInfo) MapFieldID(name string) (int64, bool) {
@@ -356,9 +375,25 @@ var _ Cache = (*MetaCache)(nil)
 type MetaCache struct {
 	mixCoord types.MixCoordClient
 
-	dbInfo    map[string]*databaseInfo              // database -> db_info
-	collInfo  map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
-	aliasInfo map[string]map[string]*aliasEntry     // database -> alias -> entry
+	dbInfo map[string]*databaseInfo // database -> db_info
+
+	// collections is the PRIMARY store and the single source of truth: an entry
+	// is live if and only if its cluster-unique collection id is in this map --
+	// liveness IS presence; every invalidation deletes explicitly through
+	// evictCollectionEntryLocked, which removes the entry TOGETHER with
+	// everything it owns (its name hint, its declared alias hints, its
+	// partition list).
+	collections map[UniqueID]*collectionInfo // collection id -> entry
+	// nameIdx and aliasInfo are HINTS: they resolve a (db, name) or (db, alias)
+	// to the primary store and are validated against it on every read (the id
+	// must exist and the entry's identity -- name, database -- must still
+	// match). A stale hint is at worst one extra describe, never a stale read.
+	// Hints are written ONLY together with their entry (update(): the name, the
+	// entry's declared aliases) and evictions clean exactly that set -- so every
+	// hint is discoverable from its target entry, nothing can dangle, and there
+	// is NO background GC over these maps.
+	nameIdx   map[string]map[string]UniqueID // database -> real collection name -> id
+	aliasInfo map[string]map[string]string   // database -> alias -> target real name (positive entries only)
 
 	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
 	privilegeInfos map[string]struct{}                   // privileges cache
@@ -374,13 +409,64 @@ type MetaCache struct {
 	IDIndex int64
 	IDLock  sync.RWMutex
 
-	collectionCacheVersion map[UniqueID]uint64 // collectionID -> cacheVersion
+	// testHookRemoveDatabaseMidWindow, when non-nil (tests only), runs between
+	// RemoveDatabase's bucket drop (fill lock released) and its batched primary
+	// walk -- the exact window where a racing fill can rebuild an entry with
+	// fresh hints that the walk must then evict through the unified routine.
+	testHookRemoveDatabaseMidWindow func()
 
-	partitionCache          *VersionCache[string, *partitionInfo]  // partitionName -> partitionInfo
-	collLevelPartitionCache *VersionCache[string, *partitionInfos] // collectionName -> partitionInfos
+	// fillMu orders cache fills against invalidations, replacing the previous
+	// per-collection version floor (collectionCacheVersion). A fill holds the READ
+	// side for the whole singleflight lifecycle: RPC, write-back, result delivery,
+	// and removal of the completed flight. An invalidation takes the WRITE side,
+	// so it drains every in-flight fill before evicting. Any fill that read a
+	// pre-DDL snapshot has therefore finished serving its result BEFORE the
+	// eviction runs (and its write-back is cleaned by it), and any fill issued
+	// after the eviction reads post-DDL state (rootcoord commits before
+	// broadcasting) -- no timestamp comparison needed, and it also covers
+	// write-backs the floor could not (alias resolution entries, RequestTime==0
+	// responses from older rootcoords).
+	// Costs, accepted by design: an invalidation waits for the slowest in-flight
+	// fill. Fill RPCs preserve the caller's context and do not impose a shorter
+	// MetaCache-specific deadline, so callers must provide an appropriate
+	// deadline (or rely on the coordinator client's transport policy). Fills
+	// issued while an invalidation is pending briefly block behind it.
+	// Cache HITS never touch this lock; fills don't block each other.
+	// Lock order: fillMu before m.mu. Deadlock-free against rootcoord: ack
+	// callbacks release the meta lock before the expiration fan-out, so a fill's
+	// describe RPC is never blocked by the DDL whose invalidation is waiting on
+	// that fill.
+	fillMu sync.RWMutex
 
-	sfPartitionCache          conc.Singleflight[*partitionInfo]
-	sfCollLevelPartitionCache conc.Singleflight[*partitionInfos]
+	// testHookBeforeSingleflightReturn, when non-nil (tests only), runs after a
+	// collection fill has written back but before its singleflight callback
+	// returns. fillMu.RLock is still held across this hook and the subsequent
+	// singleflight cleanup.
+	testHookBeforeSingleflightReturn func()
+
+	// testHookInvalidateCollectionMetaMidMutation, when non-nil (tests only),
+	// runs after the batch has evicted every resolved collection but before it
+	// removes the explicit alias hint. Both fillMu and m.mu are still held.
+	testHookInvalidateCollectionMetaMidMutation func()
+
+	// partitionCache: collection id (as a string key) -> the collection's FULL
+	// partition list (plus name->info map and the partition-key routing order).
+	// One cache for both access shapes: by-name point lookups resolve through
+	// name2Info, and list consumers (partition-key routing, ShowPartitions) take
+	// it whole -- the filler always fetched the full list anyway (ShowPartitions
+	// has no name filter), so a separate per-partition cache duplicated this data.
+	//
+	// A plain map guarded by m.mu and ordered against invalidations by fillMu,
+	// exactly like the primary store: a fill writes it back under fillMu.RLock,
+	// an invalidation deletes it under fillMu.Lock after draining in-flight
+	// fills. The list values are immutable once built and are handed out by
+	// pointer (Go's GC keeps a returned list alive independent of map
+	// membership), so no reference counting, stale-marker lifecycle, version
+	// floor, or background reclamation is needed -- an invalidation's plain
+	// delete is safe even while a request still routes over a list it already
+	// read.
+	partitionCache   map[string]*partitionInfos
+	sfPartitionCache conc.Singleflight[*partitionInfos]
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
@@ -416,46 +502,65 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 	metaCache := &MetaCache{
-		mixCoord:                mixCoord,
-		dbInfo:                  map[string]*databaseInfo{},
-		aliasInfo:               map[string]map[string]*aliasEntry{},
-		collInfo:                map[string]map[string]*collectionInfo{},
-		credMap:                 map[string]*internalpb.CredentialInfo{},
-		privilegeInfos:          map[string]struct{}{},
-		userToRoles:             map[string]map[string]struct{}{},
-		collectionCacheVersion:  make(map[UniqueID]uint64),
-		partitionCache:          NewVersionCache[string, *partitionInfo](),
-		collLevelPartitionCache: NewVersionCache[string, *partitionInfos](),
-		stopCh:                  make(chan struct{}),
-		closeOnce:               sync.Once{},
+		mixCoord:       mixCoord,
+		dbInfo:         map[string]*databaseInfo{},
+		aliasInfo:      map[string]map[string]string{},
+		collections:    map[UniqueID]*collectionInfo{},
+		nameIdx:        map[string]map[string]UniqueID{},
+		credMap:        map[string]*internalpb.CredentialInfo{},
+		privilegeInfos: map[string]struct{}{},
+		userToRoles:    map[string]map[string]struct{}{},
+		partitionCache: map[string]*partitionInfos{},
+		stopCh:         make(chan struct{}),
+		closeOnce:      sync.Once{},
 	}
-	metaCache.backgroundGCLoop(metaCache.stopCh)
 	return metaCache, nil
+}
+
+// liveLocked returns the primary entry for id. Liveness IS presence: every
+// invalidation (including RemoveDatabase) deletes primary entries explicitly.
+// Caller must hold m.mu (read or write).
+func (m *MetaCache) liveLocked(collectionID UniqueID) (*collectionInfo, bool) {
+	entry, ok := m.collections[collectionID]
+	return entry, ok
 }
 
 func (m *MetaCache) getCollection(database, collectionName string, collectionID UniqueID) (*collectionInfo, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	db, ok := m.collInfo[database]
-	if !ok {
+	if collectionName == "" {
+		// By-id lookup: collection ids are cluster-unique and rootcoord ignores
+		// the db name when describing by id, so serve straight from the primary.
+		if entry, ok := m.liveLocked(collectionID); ok {
+			return entry, entry.isCollectionCached()
+		}
 		return nil, false
 	}
-	if collectionName == "" {
-		for _, collection := range db {
-			if collection.collID == collectionID {
-				return collection, collection.isCollectionCached()
+
+	database = normalizeDBName(database)
+	// Name hint -> primary, validated: the entry must still carry this exact
+	// name in this database (after a rename the old-name hint still points at
+	// the live id but the name no longer matches -- it must miss; the hint is
+	// removed when its owner is evicted, or overwritten by a same-name refill).
+	// A failed validation is just a miss.
+	if ids, ok := m.nameIdx[database]; ok {
+		if id, ok := ids[collectionName]; ok {
+			if entry, ok := m.liveLocked(id); ok &&
+				entry.schema.GetName() == collectionName && normalizeDBName(entry.dbName) == database {
+				return entry, entry.isCollectionCached()
 			}
 		}
-	} else {
-		if collection, ok := db[collectionName]; ok {
-			return collection, collection.isCollectionCached()
-		}
-		// update() stores alias requests under the real collection name.
-		if aliasDB, ok := m.aliasInfo[database]; ok {
-			if entry, ok := aliasDB[collectionName]; ok && entry.collectionName != "" {
-				if collection, ok := db[entry.collectionName]; ok {
-					return collection, collection.isCollectionCached()
+	}
+	// Alias hint -> real name -> name hint -> primary, same validation chain.
+	if aliasDB, ok := m.aliasInfo[database]; ok {
+		if target, ok := aliasDB[collectionName]; ok && target != "" {
+			if ids, ok := m.nameIdx[database]; ok {
+				if id, ok := ids[target]; ok {
+					if entry, ok := m.liveLocked(id); ok &&
+						entry.schema.GetName() == target && normalizeDBName(entry.dbName) == database {
+						return entry, entry.isCollectionCached()
+					}
 				}
 			}
 		}
@@ -475,13 +580,10 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 
 	realName := collection.Schema.GetName()
-	originalName := collectionName
-	isAlias := collectionName != "" && realName != "" && realName != collectionName
-	if collectionName == "" || isAlias {
+	// the caller may have addressed the collection by an alias; cache under the
+	// real name (the alias hint comes from the declared-aliases loop below)
+	if collectionName == "" || (realName != "" && realName != collectionName) {
 		collectionName = realName
-	}
-	if database == "" {
-		mlog.Warn(ctx, "database is empty, use default database name", mlog.String("collectionName", collectionName), mlog.Stack("stack"))
 	}
 	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
 	if err != nil {
@@ -489,50 +591,102 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
 
-	schemaInfo := newSchemaInfo(collection.Schema)
+	schemaInfo, err := newSchemaInfo(collection.Schema)
+	if err != nil {
+		return nil, err
+	}
+
+	bucketDB := collection.GetDbName()
+	if bucketDB == "" {
+		if collectionID != 0 {
+			// Old-rootcoord id-only describe: the response omits the db, so the
+			// entry's database is unknown and NO database DDL could ever
+			// reach it (no database event could ever name its db). Serve
+			// the response uncached instead of inventing a compat mechanism for
+			// an upgrade-window-only entry class -- repeat lookups just
+			// re-describe until the rootcoords are upgraded.
+			return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
+		}
+		// By-name lookup: the request database is authoritative.
+		bucketDB = normalizeDBName(database)
+	}
+
+	info := newCollectionInfo(collection, schemaInfo, isolation, queryMode)
+	if info.dbName == "" {
+		info.dbName = bucketDB // authoritative for by-name fills
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
-	// Compatibility logic: if the rootcoord version is lower(requestTime = 0), update the cache directly.
-	if collection.GetRequestTime() < curVersion && collection.GetRequestTime() != 0 {
-		mlog.Debug(ctx, "describe collection timestamp less than version, don't update cache",
-			mlog.String("collectionName", collectionName),
-			mlog.Uint64("version", collection.GetRequestTime()), mlog.Uint64("cache version", curVersion))
-		return &collectionInfo{
-			collID:                collection.CollectionID,
-			dbName:                collection.GetDbName(),
-			schema:                schemaInfo,
-			createdTimestamp:      collection.CreatedTimestamp,
-			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
-			consistencyLevel:      collection.ConsistencyLevel,
-			partitionKeyIsolation: isolation,
-			queryMode:             queryMode,
-			updateTimestamp:       collection.UpdateTimestamp,
-			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
-			vChannels:             collection.VirtualChannelNames,
-			pChannels:             collection.PhysicalChannelNames,
-			numPartitions:         collection.NumPartitions,
-			shardsNum:             collection.ShardsNum,
-			aliases:               collection.Aliases,
-			properties:            collection.Properties,
-		}, nil
+	// A fill can observe a rename before the rename broadcast arrives: the same
+	// id re-fills under a new canonical (database, name) location. Delete the
+	// previous name hint when either coordinate changed so nothing dangles (no
+	// background GC exists to catch it later).
+	if prev, ok := m.collections[collection.GetCollectionID()]; ok && prev.schema != nil {
+		prevName := prev.schema.GetName()
+		prevDB := normalizeDBName(prev.dbName)
+		if prevName != "" && (prevDB != bucketDB || prevName != collectionName) {
+			if ids, ok := m.nameIdx[prevDB]; ok && ids[prevName] == collection.GetCollectionID() {
+				delete(ids, prevName)
+				if len(ids) == 0 {
+					delete(m.nameIdx, prevDB)
+				}
+			}
+		}
 	}
-	_, dbOk := m.collInfo[database]
-	if !dbOk {
-		m.collInfo[database] = make(map[string]*collectionInfo)
+	m.collections[collection.GetCollectionID()] = info
+
+	if bucketDB != "" {
+		// name hint; overwrites any stale hint for this name (rename, or a
+		// drop+recreate reusing it) -- old hints self-invalidate on read
+		ids, ok := m.nameIdx[bucketDB]
+		if !ok {
+			ids = make(map[string]UniqueID)
+			m.nameIdx[bucketDB] = ids
+		}
+		ids[collectionName] = collection.GetCollectionID()
+
+		// Alias hints are written ONLY from the entry's own declared aliases, so
+		// every hint is discoverable from its target entry and eviction can
+		// always clean them -- no stray hints can exist (a stray would validate
+		// again after a same-name recreate and resurrect a dead alias). This
+		// also covers the alias the caller used, and lets an alias DDL broadcast
+		// from an older rootcoord (alias name only, CollectionID=0) resolve the
+		// alias to the primary entry to evict it.
+		for _, alias := range collection.Aliases {
+			if alias != "" && alias != collectionName {
+				m.setAliasLocked(bucketDB, alias, collectionName)
+			}
+		}
 	}
 
-	if isAlias {
-		// Caller passed an alias; record the alias→realName mapping so
-		// subsequent ResolveCollectionAlias calls hit Level 2 cache.
-		m.setAliasLocked(database, originalName, &aliasEntry{collectionName: realName, cachedAt: time.Now()})
-		// Remove any stale collInfo entry that was previously cached under the alias key.
-		delete(m.collInfo[database], originalName)
-	}
+	mlog.Info(ctx, "meta update success", mlog.String("requestDatabase", database), mlog.String("database", bucketDB),
+		mlog.String("collectionName", collectionName),
+		mlog.String("actual collection Name", collection.Schema.GetName()), mlog.Int64("collectionID", collection.CollectionID),
+		mlog.Uint64("version", collection.GetRequestTime()), mlog.Any("aliases", collection.Aliases),
+		mlog.Bool("partition key isolation", isolation), mlog.String("queryMode", queryMode),
+	)
 
-	m.collInfo[database][collectionName] = &collectionInfo{
+	return info, nil
+}
+
+// normalizeDBName maps an empty database name to the default database,
+// mirroring rootcoord's backward-compat normalization for name lookups
+// (meta_table.getCollectionByNameInternal).
+func normalizeDBName(database string) string {
+	if database == "" {
+		return defaultDB
+	}
+	return database
+}
+
+// newCollectionInfo builds a collectionInfo from a describe response. It does
+// not touch any cache map, so it is safe to use for entries that are returned
+// without being cached.
+func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaInfo *schemaInfo, isolation bool, queryMode string) *collectionInfo {
+	return &collectionInfo{
 		collID:                collection.CollectionID,
+		dbID:                  collection.GetDbId(),
 		dbName:                collection.GetDbName(),
 		schema:                schemaInfo,
 		createdTimestamp:      collection.CreatedTimestamp,
@@ -549,17 +703,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		aliases:               collection.Aliases,
 		properties:            collection.Properties,
 	}
-
-	mlog.Info(ctx, "meta update success", mlog.String("database", database), mlog.String("collectionName", collectionName),
-		mlog.String("actual collection Name", collection.Schema.GetName()), mlog.Int64("collectionID", collection.CollectionID),
-		mlog.Uint64("version", collection.GetRequestTime()), mlog.Any("aliases", collection.Aliases),
-		mlog.Bool("partition key isolation", isolation), mlog.String("queryMode", queryMode),
-	)
-
-	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()
-	collInfo := m.collInfo[database][collectionName]
-
-	return collInfo, nil
 }
 
 func buildSfKeyByName(database, collectionName string) string {
@@ -570,14 +713,48 @@ func buildSfKeyById(database string, collectionID UniqueID) string {
 	return database + "--" + fmt.Sprint(collectionID)
 }
 
-func buildPartitionSfKey(database, collectionName, partitionName string) string {
-	return database + "-" + collectionName + "-" + partitionName
+// The partition cache is keyed by the collection id: the primary store is
+// id-keyed, ids are cluster-unique and never reused, so a drop+recreate can
+// never alias into old partition entries, and no name/alias expansion is ever
+// needed to invalidate them.
+func buildPartitionCacheKey(collectionID UniqueID) string {
+	return fmt.Sprint(collectionID)
+}
+
+func (m *MetaCache) updateWithSingleflight(
+	ctx context.Context,
+	key string,
+	database string,
+	collectionName string,
+	collectionID UniqueID,
+) (*collectionInfo, error) {
+	// The read lock must cover the entire singleflight.Do call, not only update().
+	// singleflight keeps a completed callback in its map until its own cleanup
+	// runs. Releasing fillMu inside update would let an invalidation evict the
+	// write-back while a post-invalidation caller could still join that old flight
+	// and receive its pre-DDL result directly, bypassing the cache maps.
+	m.fillMu.RLock()
+	defer m.fillMu.RUnlock()
+
+	collection, err, _ := m.sfGlobal.Do(key, func() (*collectionInfo, error) {
+		info, err := m.update(ctx, database, collectionName, collectionID)
+		if h := m.testHookBeforeSingleflightReturn; h != nil {
+			h()
+		}
+		return info, err
+	})
+	return collection, err
 }
 
 func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName string) (*collectionInfo, error) {
-	collection, err, _ := m.sfGlobal.Do(buildSfKeyByName(database, collectionName), func() (*collectionInfo, error) {
-		return m.update(ctx, database, collectionName, 0)
-	})
+	database = normalizeDBName(database)
+	collection, err := m.updateWithSingleflight(
+		ctx,
+		buildSfKeyByName(database, collectionName),
+		database,
+		collectionName,
+		0,
+	)
 	// Name resolution failed -> the caller named a collection/db that does not
 	// exist, which is the user's input error, not a system fault. Mark it here,
 	// the single name-resolution chokepoint shared by every name-based
@@ -591,10 +768,16 @@ func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName s
 }
 
 func (m *MetaCache) UpdateByID(ctx context.Context, database string, collectionID UniqueID) (*collectionInfo, error) {
-	collection, err, _ := m.sfGlobal.Do(buildSfKeyById(database, collectionID), func() (*collectionInfo, error) {
-		return m.update(ctx, database, "", collectionID)
-	})
-	return collection, err
+	// Do not normalize an empty db to default here: update() needs to tell an
+	// external id-only lookup (no db context) apart from an internal by-id
+	// refresh that carries a real db, to decide whether it may cache by name.
+	return m.updateWithSingleflight(
+		ctx,
+		buildSfKeyById(database, collectionID),
+		database,
+		"",
+		collectionID,
+	)
 }
 
 // GetCollectionID returns the corresponding collection id for provided collection name
@@ -641,7 +824,11 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 }
 
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
-	collInfo, ok := m.getCollection(database, collectionName, 0)
+	// Pass collectionID through so an id-only lookup (collectionName == "") hits
+	// the cluster-wide id index instead of probing id 0, which always misses and
+	// forces a needless UpdateByID/singleflight round plus a spurious cache-miss
+	// metric. For name lookups getCollection ignores the id.
+	collInfo, ok := m.getCollection(database, collectionName, collectionID)
 
 	method := "GetCollectionInfo"
 	// if collInfo.collID != collectionID, means that the cache is not trustable
@@ -694,109 +881,101 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 	return collInfo.schema, nil
 }
 
-func (m *MetaCache) getAlias(database, alias string) (*aliasEntry, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if db, ok := m.aliasInfo[database]; ok {
-		if entry, ok := db[alias]; ok {
-			// Expire negative cache entries after TTL
-			if entry.collectionName == "" && time.Since(entry.cachedAt) > aliasCacheNegativeTTL {
-				return nil, false
-			}
-			return entry, true
-		}
-	}
-	return nil, false
-}
-
-// setAliasLocked sets an alias cache entry. Caller must hold m.mu write lock.
-func (m *MetaCache) setAliasLocked(database, alias string, entry *aliasEntry) {
+// setAliasLocked sets an alias hint (alias -> real name). Caller must hold m.mu
+// write lock.
+func (m *MetaCache) setAliasLocked(database, alias, realName string) {
+	database = normalizeDBName(database)
 	if _, ok := m.aliasInfo[database]; !ok {
-		m.aliasInfo[database] = make(map[string]*aliasEntry)
+		m.aliasInfo[database] = make(map[string]string)
 	}
-	m.aliasInfo[database][alias] = entry
+	m.aliasInfo[database][alias] = realName
 }
 
-// removeAliasLocked removes an alias cache entry. Caller must hold m.mu write lock.
+// removeAliasLocked removes an alias hint. Caller must hold m.mu write lock.
 func (m *MetaCache) removeAliasLocked(database, alias string) {
-	if db, ok := m.aliasInfo[database]; ok {
+	if db, ok := m.aliasInfo[normalizeDBName(database)]; ok {
 		delete(db, alias)
 	}
 }
 
-// removeAliasesForCollectionLocked removes all positive alias entries pointing to collectionName.
-// Caller must hold m.mu write lock.
-func (m *MetaCache) removeAliasesForCollectionLocked(database, collectionName string) {
-	if db, ok := m.aliasInfo[database]; ok {
-		for alias, entry := range db {
-			if entry.collectionName == collectionName {
-				delete(db, alias)
-			}
-		}
-	}
-}
-
 func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
+	// Invalidation: drain in-flight fills (e.g. a DescribeAlias write-back racing
+	// this alias DDL) before removing, see fillMu.
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.removeAliasLocked(database, alias)
 	mlog.Debug(ctx, "remove alias from cache", mlog.String("db", database), mlog.String("alias", alias))
 }
 
-func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
-	// Level 1: Found in collection cache — but the key might be an alias because
-	// DescribeCollection accepts aliases and update() caches under the caller's name.
-	// Compare with the schema's real collection name to detect this.
-	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
-		if collInfo.schema != nil {
-			if realName := collInfo.schema.GetName(); realName != "" && realName != nameOrAlias {
-				return realName, nil
+// RemoveAliasHolders evicts every cached entry of database whose declared
+// aliases contain alias, by scanning the primary store. FALLBACK gated by the
+// caller to alias-DDL broadcasts that carry no target id (id==0) -- i.e. when
+// the old target could not be precisely located. This is a PERMANENT safety
+// net, not upgrade-window compat: id==0 arrives both from an old rootcoord that
+// predates old_collection_id AND from a new rootcoord that could not resolve
+// the pre-alter AlterAlias target (a meta inconsistency). It closes the
+// otherwise-unhealable window case: a concurrent describe re-points the alias
+// hint to the new target before the broadcast arrives, so name-based resolution
+// misses the OLD target, whose stale Aliases list would then persist until an
+// unrelated eviction (a stable, name-addressed collection might never get one).
+// O(cached collections), paid only when the old target id is absent.
+func (m *MetaCache) RemoveAliasHolders(ctx context.Context, database, alias string) {
+	// Invalidation: drain in-flight fills first, see fillMu.
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	db := normalizeDBName(database)
+	var ids []UniqueID
+	for id, entry := range m.collections {
+		if normalizeDBName(entry.dbName) != db {
+			continue
+		}
+		for _, a := range entry.aliases {
+			if a == alias {
+				ids = append(ids, id)
+				break
 			}
 		}
+	}
+	for _, id := range ids {
+		m.removeCollectionByID(ctx, id)
+	}
+	mlog.Debug(ctx, "removed alias holders (old-rootcoord fallback)", mlog.String("db", database),
+		mlog.String("alias", alias), mlog.Int("holders", len(ids)))
+}
+
+// ResolveCollectionAlias normalizes a caller-supplied name -- which may be an
+// alias -- to the collection's real name, for RBAC object resolution. It is
+// just the collection cache with a fill on miss: no dedicated alias RPC, no
+// separately-lifecycled alias state. The fill's describe resolves aliases at
+// rootcoord and caches the entry under its real name plus its declared alias
+// hints, so the next request hits the cache (a resolve-and-forget RPC would
+// re-ask forever). A name that does not resolve to any collection (junk, or an
+// alias unknown to rootcoord) is returned unchanged: authorization proceeds
+// against the literal name and the task fails not-found later, as before.
+func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
+	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
+		if collInfo.schema != nil && collInfo.schema.GetName() != "" {
+			return collInfo.schema.GetName(), nil
+		}
 		return nameOrAlias, nil
 	}
 
-	// Level 2: Found in alias cache
-	if entry, ok := m.getAlias(database, nameOrAlias); ok {
-		if entry.collectionName == "" {
-			// Negative cache: not an alias, return as-is
-			return nameOrAlias, nil
-		}
-		return entry.collectionName, nil
-	}
-
-	// Level 3: Cache miss, call DescribeAlias RPC
-	resp, err := m.mixCoord.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
-		DbName: database,
-		Alias:  nameOrAlias,
-	})
+	info, err := m.GetCollectionInfo(ctx, database, nameOrAlias, 0)
 	if err != nil {
-		return "", err
-	}
-	if err = merr.CheckRPCCall(resp, nil); err != nil {
-		if errors.Is(err, merr.ErrAliasNotFound) || errors.Is(err, merr.ErrCollectionNotFound) {
-			// Negative cache: this name is not an alias
-			m.mu.Lock()
-			m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: "", cachedAt: time.Now()})
-			m.mu.Unlock()
+		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrAliasNotFound) {
 			return nameOrAlias, nil
 		}
 		return "", err
 	}
-
-	if resp.GetCollection() == "" {
-		// Negative cache
-		m.mu.Lock()
-		m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: "", cachedAt: time.Now()})
-		m.mu.Unlock()
-		return nameOrAlias, nil
+	if info.schema != nil && info.schema.GetName() != "" {
+		return info.schema.GetName(), nil
 	}
-
-	// Positive cache: alias -> real collection name
-	m.mu.Lock()
-	m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: resp.GetCollection(), cachedAt: time.Now()})
-	m.mu.Unlock()
-	return resp.GetCollection(), nil
+	return nameOrAlias, nil
 }
 
 func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error) {
@@ -831,54 +1010,42 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 	return partitions.name2ID, nil
 }
 
+// resolvePartitionCollection resolves the caller-supplied (database, name) --
+// which may be an alias and/or an empty db -- to the collection entry, filling
+// the collection cache on a miss. Partition caches are keyed by the entry's
+// cluster-unique id, so every collection has exactly ONE partition-cache
+// location no matter how it is addressed, invalidation stales exact id-keys,
+// and a drop+recreate can never alias into old entries (new id). It also
+// returns the canonical (db, name) to address rootcoord with.
+func (m *MetaCache) resolvePartitionCollection(ctx context.Context, database, collectionName string) (UniqueID, string, string, error) {
+	info, err := m.GetCollectionInfo(ctx, database, collectionName, 0)
+	if err != nil {
+		return 0, "", "", err
+	}
+	db := info.dbName
+	if db == "" {
+		db = normalizeDBName(database)
+	}
+	name := collectionName
+	if info.schema != nil && info.schema.GetName() != "" {
+		name = info.schema.GetName()
+	}
+	return info.collID, db, name, nil
+}
+
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*partitionInfo, error) {
 	// Handle empty partitionName - use default partition
 	if partitionName == "" {
 		partitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 	}
-
-	key := buildPartitionSfKey(database, collectionName, partitionName)
-	entry, ok, release := m.partitionCache.Lookup(key)
-	defer release(entry)
-	if ok && entry.state == EntryStateActive && entry.value != nil {
-		return entry.value, nil
-	}
-
-	collectionKey := buildSfKeyByName(database, collectionName)
-	_, err, _ := m.sfPartitionCache.Do(collectionKey, func() (*partitionInfo, error) {
-		// as rootcoord does not support show partitions by partition name, we need to get all partitions first.
-		resp, err := m.showPartitions(ctx, database, collectionName, 0)
-		if err != nil {
-			return nil, err
-		}
-		keys := make([]string, 0)
-		values := make([]*partitionInfo, 0)
-		versions := make([]uint64, 0)
-		var ret *partitionInfo
-		for i := range resp.PartitionNames {
-			keys = append(keys, buildPartitionSfKey(database, collectionName, resp.PartitionNames[i]))
-			values = append(values, &partitionInfo{
-				name:                resp.PartitionNames[i],
-				partitionID:         resp.PartitionIDs[i],
-				createdTimestamp:    resp.CreatedTimestamps[i],
-				createdUtcTimestamp: resp.CreatedUtcTimestamps[i],
-			})
-			versions = append(versions, resp.CreatedTimestamps[i])
-			if resp.PartitionNames[i] == partitionName {
-				ret = values[i]
-			}
-		}
-		m.partitionCache.InsertBatchWithoutRef(keys, values, versions)
-		return ret, nil
-	})
+	// One partition cache for everything: resolve the full list (cached by
+	// collection id) and answer the point lookup from its name map.
+	partitions, err := m.GetPartitionInfos(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
 	}
-
-	entry, ok, release = m.partitionCache.Lookup(key)
-	defer release(entry)
-	if ok && entry.state == EntryStateActive && entry.value != nil {
-		return entry.value, nil
+	if info, ok := partitions.name2Info[partitionName]; ok {
+		return info, nil
 	}
 	// partitionName is caller-supplied; a failed name resolution is the user's
 	// input error, not a system fault. Mark it here, the single partition-name
@@ -903,22 +1070,48 @@ func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collection
 
 func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionName string) (*partitionInfos, error) {
 	method := "GetPartitionInfo"
-	key := buildSfKeyByName(database, collectionName)
-	entry, ok, release := m.collLevelPartitionCache.Lookup(key)
-	defer release(entry)
-	if ok && entry.state == EntryStateActive && entry.value != nil {
-		return entry.value, nil
+	// See resolvePartitionCollection: entries are keyed by the collection id, so
+	// they have exactly one location and invalidation stales exact id-keys.
+	collectionID, rpcDB, rpcName, err := m.resolvePartitionCollection(ctx, database, collectionName)
+	if err != nil {
+		return nil, err
+	}
+	key := buildPartitionCacheKey(collectionID)
+	m.mu.RLock()
+	cached, ok := m.partitionCache[key]
+	m.mu.RUnlock()
+	if ok && cached != nil {
+		return cached, nil
 	}
 	tr := timerecord.NewTimeRecorder("UpdateCache")
 	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
-	partitionsInfo, err, _ := m.sfCollLevelPartitionCache.Do(key, func() (*partitionInfos, error) {
-		collection, err := m.describeCollection(ctx, database, collectionName, 0)
+	// Keep the fill lock through singleflight cleanup, not only its callback.
+	// Otherwise a partition invalidation can finish after the callback unlocks
+	// while a new caller still joins the completed pre-invalidation flight.
+	m.fillMu.RLock()
+	defer m.fillMu.RUnlock()
+	partitionsInfo, err, _ := m.sfPartitionCache.Do(key, func() (*partitionInfos, error) {
+		// Describe/show BY ID (collectionID resolved above), not by name: the
+		// cache key is that id, and resolving by name here would let a
+		// concurrent same-name drop+recreate return the NEW collection's
+		// partitions and cache them under the OLD id (wrong partition context,
+		// and with no GC an entry nothing can clean). By id, a dropped old id
+		// returns not-found and the fill fails (the caller re-resolves) rather
+		// than caching a mismatch. The empty name forces id-only resolution.
+		collection, err := m.describeCollection(ctx, rpcDB, "", collectionID)
 		if err != nil {
 			return nil, err
 		}
-		schemaInfo := newSchemaInfo(collection.Schema)
+		if collection.GetCollectionID() != collectionID {
+			// defense: the id and the returned collection must be the same one
+			return nil, merr.WrapErrCollectionNotFound(rpcName)
+		}
+		schemaInfo, err := newSchemaInfo(collection.Schema)
+		if err != nil {
+			return nil, err
+		}
 
-		resp, err := m.showPartitions(ctx, database, collectionName, 0)
+		resp, err := m.showPartitions(ctx, rpcDB, "", collectionID)
 		if err != nil {
 			return nil, err
 		}
@@ -932,10 +1125,31 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 			})
 		}
 		partitionsInfo := parsePartitionsInfo(partitions, schemaInfo.IsPartitionKeyCollection())
-		entry, release := m.collLevelPartitionCache.Insert(key, partitionsInfo, collection.RequestTime)
-		defer release(entry)
+		// Write-back under m.mu, ordered against invalidations by fillMu (held
+		// across this whole closure): an invalidation drains in-flight fills
+		// before deleting, so this insert either lands before the delete (and is
+		// cleaned by it) or the fill was issued after the DDL. No version floor.
+		//
+		// Only cache the list while the collection's PRIMARY entry is still live.
+		// collectionID was resolved before we took fillMu.RLock; an invalidation
+		// in that window evicts the primary AND its partition list, but the fill
+		// still describes/shows the collection successfully (it lives at rootcoord
+		// for Load/Release/Alter). Writing anyway would leave a partition entry
+		// with NO primary owner: a later Create/DropPartition invalidation routes
+		// through evictCollectionEntryLocked, which no-ops when the primary is
+		// absent, so the stale list would survive and be re-adopted when the
+		// primary re-fills. fillMu.RLock is held here, so no invalidation can run
+		// between this check and the write -- if the primary is present now it
+		// stays present until we release, and any future eviction of it cleans
+		// the list. Absent primary => skip the cache; the caller still gets the
+		// correct list, just uncached (one extra fill next time).
+		m.mu.Lock()
+		if _, ok := m.collections[collectionID]; ok {
+			m.partitionCache[key] = partitionsInfo
+		}
+		m.mu.Unlock()
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return entry.value, nil
+		return partitionsInfo, nil
 	})
 	if err != nil {
 		return nil, err
@@ -1058,6 +1272,15 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 			mlog.Info(context.TODO(), "partition group not in partitionKey pattern", mlog.String("partitionName", partitionName), mlog.Err(err))
 			return result
 		}
+		// Defense against anomalous ShowPartitions metadata (e.g. a "_3" suffix
+		// with only two partitions): a raw index into partitionNames would panic.
+		// Degrade to the unindexed result, like the sibling
+		// typeutil.RearrangePartitionsForPartitionKey.
+		if index < 0 || index >= int64(len(infos)) {
+			mlog.Info(context.TODO(), "partition group index out of range for partitionKey pattern",
+				mlog.String("partitionName", partitionName), mlog.Int64("index", index), mlog.Int("partitionCount", len(infos)))
+			return result
+		}
 		partitionNames[index] = partitionName
 	}
 
@@ -1065,115 +1288,287 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 	return result
 }
 
-func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string, version uint64) {
+// removeCollectionByAliasLocked, when alias is a cached alias hint in database,
+// invalidates the collection it currently resolves to (by id) so an alias DDL
+// from an OLDER rootcoord (alias name only, CollectionID=0) still evicts the
+// target's primary entry. Newer rootcoords forward the target ids explicitly --
+// including both sides of an AlterAlias -- which does not depend on this hint.
+// Returns true if it found and invalidated (or cleaned up) a target. Caller
+// must hold m.mu write lock.
+func (m *MetaCache) removeCollectionByAliasLocked(ctx context.Context, database, alias string) bool {
+	aliases, ok := m.aliasInfo[database]
+	if !ok {
+		return false
+	}
+	target, ok := aliases[alias]
+	if !ok || target == "" {
+		return false
+	}
+	if ids, ok := m.nameIdx[database]; ok {
+		if id, ok := ids[target]; ok {
+			m.removeCollectionByID(ctx, id)
+			return true
+		}
+	}
+	// Unreachable under the invariant "an alias hint exists only while its
+	// target entry lives and declares it" (hints are written solely from
+	// update()'s declared-aliases loop and cleaned at eviction); kept as a
+	// one-line defense against future edits.
+	delete(aliases, alias)
+	return true
+}
+
+func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string) {
+	// Invalidation: drain in-flight fills first, see fillMu.
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	found := false
-	if db, dbOk := m.collInfo[database]; dbOk {
-		if coll, ok := db[collectionName]; ok {
-			m.removeCollectionByID(ctx, coll.collID, version, false)
-			found = true
+	// All hint buckets are keyed by the normalized database.
+	database = normalizeDBName(database)
+	if ids, ok := m.nameIdx[database]; ok {
+		if id, ok := ids[collectionName]; ok {
+			m.removeCollectionByID(ctx, id)
 		}
 	}
-	if database == "" {
-		if db, dbOk := m.collInfo[defaultDB]; dbOk {
-			if coll, ok := db[collectionName]; ok {
-				m.removeCollectionByID(ctx, coll.collID, version, false)
-				found = true
-			}
-		}
-	}
-	// If the collection was not in cache, alias entries pointing to it won't
-	// have been cleaned up by removeCollectionByID. Clean them up here.
-	if !found {
-		m.removeAliasesForCollectionLocked(database, collectionName)
-		if database == "" {
-			m.removeAliasesForCollectionLocked(defaultDB, collectionName)
-		}
-	}
+	// The name may be an alias (alias DDL from an older rootcoord broadcasts
+	// only the alias name); resolve it to its target and evict that primary
+	// entry too. Either eviction runs the unified routine, which cleans the
+	// entry's hints synchronously.
+	m.removeCollectionByAliasLocked(ctx, database, collectionName)
 	mlog.Debug(ctx, "remove collection", mlog.String("db", database), mlog.String("collection", collectionName))
 }
 
-func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
+// InvalidateCollectionMeta applies every O(1) mutation carried by one cache
+// expiration request under one fillMu/m.mu critical section. Resolving all ids
+// before the first eviction is important: evictCollectionEntryLocked removes
+// the entry's name and alias hints, which may be needed to locate another target
+// named by the same request.
+//
+// The caller keeps O(N) policies separate. In particular, an alias DDL whose
+// old target id is unknown may follow this method with RemoveAliasHolders; that
+// scan is intentionally not hidden inside this O(1) batch.
+func (m *MetaCache) InvalidateCollectionMeta(
+	ctx context.Context,
+	database string,
+	collectionName string,
+	collectionID UniqueID,
+	removeAlias bool,
+) []string {
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.removeCollectionByID(ctx, collectionID, version, removeVersion)
-}
+	database = normalizeDBName(database)
+	ids := make([]UniqueID, 0, 3)
+	seenIDs := make(map[UniqueID]struct{}, 3)
+	addID := func(id UniqueID) {
+		if id == 0 {
+			return
+		}
+		if _, ok := seenIDs[id]; ok {
+			return
+		}
+		seenIDs[id] = struct{}{}
+		ids = append(ids, id)
+	}
 
-func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
-	curVersion := m.collectionCacheVersion[collectionID]
-	var collNames []string
-	for database, db := range m.collInfo {
-		for k, v := range db {
-			if v.collID == collectionID {
-				if version == 0 || curVersion <= version {
-					delete(m.collInfo[database], k)
-					collNames = append(collNames, k)
-					collectionKey := buildSfKeyByName(database, k)
-					m.sfGlobal.Forget(collectionKey)
-					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
-					realName := k
-					if v.schema != nil && v.schema.GetName() != "" {
-						realName = v.schema.GetName()
-					}
-					m.removeAliasesForCollectionLocked(database, realName)
-					m.sfCollLevelPartitionCache.Forget(collectionKey)
-					m.collLevelPartitionCache.Stale(collectionKey, version)
-
-					partitionPrefix := database + "-" + realName + "-"
-					m.sfPartitionCache.Forget(collectionKey)
-					m.partitionCache.StaleIf(func(key string) bool {
-						return strings.HasPrefix(key, partitionPrefix)
-					}, version)
+	if collectionName != "" {
+		if names, ok := m.nameIdx[database]; ok {
+			addID(names[collectionName])
+		}
+		if aliases, ok := m.aliasInfo[database]; ok {
+			if target := aliases[collectionName]; target != "" {
+				if names, ok := m.nameIdx[database]; ok {
+					addID(names[target])
 				}
 			}
 		}
 	}
-	if removeVersion {
-		delete(m.collectionCacheVersion, collectionID)
-	} else if version != 0 {
-		m.collectionCacheVersion[collectionID] = version
+	addID(collectionID)
+
+	removedNames := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if name, ok := m.evictCollectionEntryLocked(id); ok && name != "" {
+			removedNames = append(removedNames, name)
+		}
+	}
+
+	if h := m.testHookInvalidateCollectionMetaMidMutation; h != nil {
+		h()
+	}
+	if removeAlias && collectionName != "" {
+		m.removeAliasLocked(database, collectionName)
+	}
+
+	mlog.Debug(ctx, "invalidated collection meta cache",
+		mlog.String("db", database),
+		mlog.String("collection", collectionName),
+		mlog.Int64("id", collectionID),
+		mlog.Bool("removeAlias", removeAlias),
+		mlog.Strings("removedCollections", removedNames))
+	return removedNames
+}
+
+func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string {
+	// Invalidation: drain in-flight fills first, see fillMu.
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.removeCollectionByID(ctx, collectionID)
+}
+
+// evictCollectionEntryLocked is THE single eviction routine: it removes the
+// primary entry and everything the entry owns, all O(1)-reachable from the
+// entry in hand (no background GC exists):
+//  1. its declared alias hints -- aliases are cascade-dropped with their
+//     collection at rootcoord but the DropCollection broadcast carries no
+//     per-alias expiration, and a lazily-kept hint would VALIDATE again after
+//     a same-name recreate (alias -> name -> the NEW id), permanently
+//     resurrecting a deleted alias for RBAC and routing;
+//  2. its name hint, only while it still points at this id (a same-name
+//     recreate may have already overwritten it);
+//  3. its partition list -- Load/Release/Alter share the eviction path and pay
+//     one extra ShowPartitions on the next partition access.
+//
+// EVERY deletion from m.collections must go through here: a raw delete leaves
+// the entry's hints behind with no owner, and a later drop + same-name
+// recreate turns them into resurrected aliases. Returns the entry's real name
+// and whether an entry was evicted. Caller must hold m.mu write lock, with
+// fills either drained (fillMu held) or racing tolerably (RemoveDatabase's
+// post-drain walk: evicting a freshly re-filled entry removes it TOGETHER with
+// its hints -- one refetch, never a dangling hint).
+func (m *MetaCache) evictCollectionEntryLocked(collectionID UniqueID) (string, bool) {
+	entry, ok := m.collections[collectionID]
+	if !ok {
+		return "", false
+	}
+	name := ""
+	if entry.schema != nil {
+		name = entry.schema.GetName()
+	}
+	db := normalizeDBName(entry.dbName)
+	if aliases, ok := m.aliasInfo[db]; ok {
+		for _, alias := range entry.aliases {
+			if aliases[alias] == name {
+				delete(aliases, alias)
+			}
+		}
+	}
+	if ids, ok := m.nameIdx[db]; ok && ids[name] == collectionID {
+		delete(ids, name)
+		if len(ids) == 0 {
+			delete(m.nameIdx, db)
+		}
+	}
+	m.stalePartitionCacheLocked(collectionID)
+	delete(m.collections, collectionID)
+	return name, true
+}
+
+func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID UniqueID) []string {
+	var collNames []string
+	if name, ok := m.evictCollectionEntryLocked(collectionID); ok && name != "" {
+		collNames = append(collNames, name)
 	}
 	mlog.Debug(ctx, "remove collection by id", mlog.Int64("id", collectionID),
-		mlog.Strings("collection", collNames), mlog.Uint64("currentVersion", curVersion),
-		mlog.Uint64("version", version), mlog.Bool("removeVersion", removeVersion))
+		mlog.Strings("collection", collNames))
 	return collNames
 }
 
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	mlog.Debug(ctx, "remove database", mlog.String("name", database))
+	// Invalidation: drain in-flight fills first, so a describe issued before the
+	// DropDatabase broadcast cannot write its pre-DDL response back
+	// afterwards and resurrect an entry of this database. See fillMu.
+	// Hold the fill write lock ONLY for the drain plus the O(1) part (DETACH and
+	// drop the hint buckets by reference), then release it BEFORE both collecting
+	// the ids from the detached bucket and the O(N_db) primary walk -- a database
+	// DDL must not block the whole proxy's fills for longer than any other
+	// invalidation's drain. This stays safe without the
+	// lock: any pre-DDL snapshot was either drained (its id is in the collected
+	// list below and gets deleted) or its fill was blocked here and will issue
+	// its RPC only after we release -- reading post-DDL state, since rootcoord
+	// commits before broadcasting. A FRESH entry written by such a fill while
+	// the batched walk runs may get over-deleted by it -- harmless, one extra
+	// describe -- the "a wrong deletion only ever costs a refetch" principle.
+	//
+	// COMPLETENESS of the collected list: every live primary entry has a
+	// validating name hint in its database's nameIdx bucket -- update() writes
+	// both together, and a hint is only removed by the eviction that removes
+	// its entry -- so the bucket reaches every entry of this db.
+	m.fillMu.Lock()
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	// O(1) under the lock: DETACH the db's hint bucket by reference and drop it
+	// from the maps -- do NOT iterate it here. Once detached, no fill or eviction
+	// touches this map (a new fill for this db creates a fresh bucket; evictions
+	// look up m.nameIdx[db], now absent), so it can be walked lock-free below.
+	// This keeps the lock hold O(1) instead of O(the db's collections); the
+	// earlier in-lock iteration was the scan the "O(1) hold" comment promised to
+	// avoid.
+	bucket := m.nameIdx[database]
+	delete(m.dbInfo, database)
+	delete(m.nameIdx, database)
+	delete(m.aliasInfo, database)
+	m.mu.Unlock()
+	m.fillMu.Unlock()
 
-	// Forget singleflight keys for all collections in this database
-	if db, ok := m.collInfo[database]; ok {
-		for collectionName := range db {
-			collectionKey := buildSfKeyByName(database, collectionName)
-			m.sfCollLevelPartitionCache.Forget(collectionKey)
-			m.sfPartitionCache.Forget(collectionKey)
-		}
+	// Collect the doomed ids from the detached bucket OUTSIDE the locks.
+	ids := make([]UniqueID, 0, len(bucket))
+	for _, id := range bucket {
+		ids = append(ids, id)
 	}
 
-	delete(m.collInfo, database)
-	delete(m.dbInfo, database)
-	delete(m.aliasInfo, database)
+	if h := m.testHookRemoveDatabaseMidWindow; h != nil {
+		h()
+	}
 
-	// Clean up partition cache
-	prefix := database + "-"
-	m.collLevelPartitionCache.StaleIf(func(key string) bool {
-		return strings.HasPrefix(key, prefix)
-	}, 0)
-	m.partitionCache.StaleIf(func(key string) bool {
-		return strings.HasPrefix(key, prefix)
-	}, 0)
+	// O(the db's cached collections), rare op, batched so m.mu is held O(batch)
+	// at a time; completes before returning, so the broadcast ack still implies
+	// "no stale reads afterwards".
+	const removeBatch = 1024
+	evicted := 0
+	for start := 0; start < len(ids); start += removeBatch {
+		end := min(start+removeBatch, len(ids))
+		m.mu.Lock()
+		for _, id := range ids[start:end] {
+			// Unified eviction, not a raw delete: if a fill racing this walk has
+			// rebuilt the entry WITH fresh name/alias hints, deleting
+			// only the primary would leave those hints dangling, and a later
+			// drop + same-name recreate would resurrect a dead alias.
+			if _, ok := m.evictCollectionEntryLocked(id); ok {
+				evicted++
+			}
+		}
+		m.mu.Unlock()
+	}
+	mlog.Debug(ctx, "removed database collections", mlog.String("db", database), mlog.Int("evicted", evicted))
+}
+
+// RemoveDatabaseInfo invalidates only the database metadata entry. Drain the
+// complete database-info singleflight lifecycle before deleting the write-back,
+// so a DescribeDatabase issued before AlterDatabase cannot resurrect stale
+// properties after this method returns. Collection metadata is deliberately
+// left untouched: AlterDatabase changes database properties only.
+func (m *MetaCache) RemoveDatabaseInfo(ctx context.Context, database string) {
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
+
+	m.mu.Lock()
+	delete(m.dbInfo, database)
+	m.mu.Unlock()
+
+	mlog.Debug(ctx, "removed database info", mlog.String("db", database))
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	_, ok := m.collInfo[database]
+	_, ok := m.nameIdx[database]
 	return ok
 }
 
@@ -1183,6 +1578,11 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*data
 		return dbInfo, nil
 	}
 
+	// Keep the fill lock through singleflight cleanup, matching collection and
+	// partition fills. RemoveDatabase/RemoveDatabaseInfo must not finish while a
+	// new caller can still join a completed pre-invalidation database flight.
+	m.fillMu.RLock()
+	defer m.fillMu.RUnlock()
 	dbInfo, err, _ := m.sfDB.Do(database, func() (*databaseInfo, error) {
 		resp, err := m.describeDatabase(ctx, database)
 		if err != nil {
@@ -1243,202 +1643,65 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 	return id, nil
 }
 
-func (m *MetaCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64) {
-	m.ensureCollectionForPartitionInvalidation(ctx, database, collectionID, collectionName)
-
+func (m *MetaCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string) {
+	// Invalidation: drain in-flight fills first, see fillMu.
+	m.fillMu.Lock()
+	defer m.fillMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	staleCollectionInfo := m.shouldStaleCollectionInfoLocked(collectionID, version)
-	names := make(map[string]struct{})
-	realNames := make(map[string]struct{})
-	for _, dbName := range partitionInvalidationDatabases(database) {
-		m.collectPartitionCacheNamesLocked(dbName, collectionID, collectionName, names, realNames)
-		for name := range names {
-			if coll, ok := m.getCollectionLocked(dbName, name); ok && coll.schema != nil {
-				realName := coll.schema.GetName()
-				if realName != "" {
-					realNames[realName] = struct{}{}
-				}
+	// Partition entries are keyed by the collection id. Resolve the id from the
+	// broadcast or the LOCAL hints only -- no RPC on the invalidation path.
+	// This is complete: a partition list exists only while its collection's
+	// primary entry lives (evictions clean both together), and a live entry
+	// always has its name and declared-alias hints. So if the hints cannot
+	// resolve the broadcast name, nothing of this collection is cached and
+	// there is nothing to invalidate. (This also removes the old failure mode
+	// where a name-only broadcast from an older rootcoord plus a transient
+	// describe error silently dropped the invalidation.)
+	id := collectionID
+	if id == 0 && collectionName != "" {
+		db := normalizeDBName(database)
+		resolved := collectionName
+		if aliasDB, ok := m.aliasInfo[db]; ok {
+			if target, ok := aliasDB[collectionName]; ok && target != "" {
+				resolved = target
 			}
 		}
-		if aliases, ok := m.aliasInfo[dbName]; ok {
-			for alias, entry := range aliases {
-				if entry == nil || entry.collectionName == "" {
-					continue
-				}
-				if _, ok := realNames[entry.collectionName]; ok {
-					names[alias] = struct{}{}
-					names[entry.collectionName] = struct{}{}
-				}
-			}
+		if ids, ok := m.nameIdx[db]; ok {
+			id = ids[resolved]
 		}
-
-		if staleCollectionInfo {
-			// Partition DDL changes collection-level fields such as NumPartitions,
-			// without requiring removeCollectionByID's partition-cache sweep.
-			for name := range names {
-				m.staleCollectionInfoByNameLocked(dbName, name)
-			}
-			if collectionID != 0 {
-				m.sfGlobal.Forget(buildSfKeyById(dbName, collectionID))
-			}
-		}
-		for name := range names {
-			m.stalePartitionCacheLocked(dbName, name, partitionName, version)
-		}
-		clear(names)
-		clear(realNames)
 	}
-	if staleCollectionInfo && collectionID != 0 && version != 0 {
-		m.collectionCacheVersion[collectionID] = version
+	if id != 0 {
+		// Partition DDL changes collection-level fields such as NumPartitions,
+		// so evict the primary entry too (next lookup re-describes) -- through
+		// the unified eviction routine: a raw delete would leave the entry's
+		// alias hints behind, and a later drop + same-name recreate would
+		// resurrect a dead alias through them (the drop's cleanup no-ops when
+		// the entry is already gone).
+		m.removeCollectionByID(ctx, id)
+		// Drop the partition list unconditionally. evictCollectionEntryLocked
+		// (inside removeCollectionByID) cleans it only when the primary exists;
+		// if the primary is already gone but an owner-less partition entry
+		// somehow lingers, a partition DDL means it is stale regardless, so evict
+		// it directly. Idempotent when the primary path already cleaned it.
+		m.stalePartitionCacheLocked(id)
 	}
 
-	mlog.Debug(ctx, "remove partition", mlog.String("db", database), mlog.Int64("collectionID", collectionID), mlog.String("collection", collectionName), mlog.String("partition", partitionName), mlog.Uint64("version", version))
+	mlog.Debug(ctx, "remove partition", mlog.String("db", database), mlog.Int64("collectionID", id), mlog.String("collection", collectionName), mlog.String("partition", partitionName))
 }
 
-func (m *MetaCache) ensureCollectionForPartitionInvalidation(ctx context.Context, database string, collectionID UniqueID, collectionName string) {
-	if collectionID != 0 {
-		for _, dbName := range partitionInvalidationDatabases(database) {
-			if _, ok := m.getCollection(dbName, "", collectionID); ok {
-				return
-			}
-		}
-
-		fetchDB := database
-		if fetchDB == "" {
-			fetchDB = defaultDB
-		}
-		if _, err := m.UpdateByID(ctx, fetchDB, collectionID); err != nil {
-			mlog.Debug(ctx, "failed to refresh collection cache before partition invalidation",
-				mlog.String("db", fetchDB),
-				mlog.Int64("collectionID", collectionID),
-				mlog.Err(err))
-		}
-		return
-	}
-
-	if collectionName == "" {
-		return
-	}
-
-	for _, dbName := range partitionInvalidationDatabases(database) {
-		if _, ok := m.getCollection(dbName, collectionName, 0); ok {
-			return
-		}
-	}
-
-	fetchDB := database
-	if fetchDB == "" {
-		fetchDB = defaultDB
-	}
-	if _, err := m.UpdateByName(ctx, fetchDB, collectionName); err != nil {
-		mlog.Debug(ctx, "failed to refresh collection cache by name before partition invalidation",
-			mlog.String("db", fetchDB),
-			mlog.String("collection", collectionName),
-			mlog.Err(err))
-	}
-}
-
-func partitionInvalidationDatabases(database string) []string {
-	if database == "" {
-		return []string{database, defaultDB}
-	}
-	return []string{database}
-}
-
-func (m *MetaCache) getCollectionLocked(database, collectionName string) (*collectionInfo, bool) {
-	db, ok := m.collInfo[database]
-	if !ok {
-		return nil, false
-	}
-	collection, ok := db[collectionName]
-	return collection, ok
-}
-
-func (m *MetaCache) collectPartitionCacheNamesLocked(database string, collectionID UniqueID, collectionName string, names, realNames map[string]struct{}) {
-	if collectionName != "" {
-		names[collectionName] = struct{}{}
-		if coll, ok := m.getCollectionLocked(database, collectionName); ok && coll.schema != nil {
-			realName := coll.schema.GetName()
-			if realName != "" {
-				names[realName] = struct{}{}
-				realNames[realName] = struct{}{}
-			}
-			for _, alias := range coll.aliases {
-				names[alias] = struct{}{}
-			}
-		}
-	}
-
-	if collectionID == 0 {
-		return
-	}
-
-	if db, ok := m.collInfo[database]; ok {
-		for name, coll := range db {
-			if coll.collID != collectionID {
-				continue
-			}
-			names[name] = struct{}{}
-			if coll.schema != nil {
-				realName := coll.schema.GetName()
-				if realName != "" {
-					names[realName] = struct{}{}
-					realNames[realName] = struct{}{}
-				}
-			}
-			for _, alias := range coll.aliases {
-				names[alias] = struct{}{}
-			}
-		}
-	}
-}
-
-func (m *MetaCache) stalePartitionCacheLocked(database, collectionName, partitionName string, version uint64) {
-	collectionKey := buildSfKeyByName(database, collectionName)
-	m.sfPartitionCache.Forget(collectionKey)
-	m.partitionCache.Stale(buildPartitionSfKey(database, collectionName, partitionName), version)
-	m.sfCollLevelPartitionCache.Forget(collectionKey)
-	m.collLevelPartitionCache.Stale(collectionKey, version)
-}
-
-func (m *MetaCache) shouldStaleCollectionInfoLocked(collectionID UniqueID, version uint64) bool {
-	if collectionID == 0 || version == 0 {
-		return true
-	}
-	return m.collectionCacheVersion[collectionID] <= version
-}
-
-func (m *MetaCache) staleCollectionInfoByNameLocked(database, collectionName string) {
-	if db, ok := m.collInfo[database]; ok {
-		delete(db, collectionName)
-	}
-
-	m.sfGlobal.Forget(buildSfKeyByName(database, collectionName))
-}
-
-func (m *MetaCache) backgroundGCLoop(stopCh <-chan struct{}) {
-	go func() {
-		interval := Params.ProxyCfg.MetaCacheGCTimeInterval.GetAsDuration(time.Second)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				m.partitionCache.Prune()
-				m.collLevelPartitionCache.Prune()
-
-				newInterval := Params.ProxyCfg.MetaCacheGCTimeInterval.GetAsDuration(time.Second)
-				if newInterval != interval {
-					interval = newInterval
-					ticker.Reset(interval)
-				}
-			case <-stopCh:
-				return
-			}
-		}
-	}()
+// stalePartitionCacheLocked drops a collection's partition list. Called from
+// evictCollectionEntryLocked under m.mu (with fills drained via fillMu), so a
+// plain delete is safe: any in-flight fill has already written back and is
+// removed here, and any request still routing over a list it already read holds
+// it by pointer (Go's GC keeps it alive). Forget the singleflight key too, so a
+// fill issued after this invalidation starts fresh instead of joining a
+// pre-invalidation flight.
+func (m *MetaCache) stalePartitionCacheLocked(collectionID UniqueID) {
+	key := buildPartitionCacheKey(collectionID)
+	m.sfPartitionCache.Forget(key)
+	delete(m.partitionCache, key)
 }
 
 func (m *MetaCache) Close() {

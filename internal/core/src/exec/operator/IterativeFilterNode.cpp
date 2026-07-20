@@ -64,7 +64,11 @@ PhyIterativeFilterNode::PhyIterativeFilterNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // This operator reads only the data bits of the predicate output, so
+    // UNKNOWN rows are excluded exactly like FALSE — a null-rejecting
+    // consumer.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     const auto& exprs = exprs_->exprs();
     for (const auto& expr : exprs) {
         is_native_supported_ =
@@ -82,47 +86,6 @@ PhyIterativeFilterNode::AddInput(RowVectorPtr& input) {
 bool
 PhyIterativeFilterNode::IsFinished() {
     return is_finished_;
-}
-
-inline void
-insert_helper(milvus::SearchResult& search_result,
-              int& topk,
-              const bool large_is_better,
-              const FixedVector<float>& distances,
-              const int64_t nq_index,
-              const int64_t unity_topk,
-              const int i,
-              int64_t doc_id,
-              std::optional<int32_t> elem_idx) {
-    auto pos = large_is_better
-                   ? find_binsert_position<true>(search_result.distances_,
-                                                 nq_index * unity_topk,
-                                                 nq_index * unity_topk + topk,
-                                                 distances[i])
-                   : find_binsert_position<false>(search_result.distances_,
-                                                  nq_index * unity_topk,
-                                                  nq_index * unity_topk + topk,
-                                                  distances[i]);
-
-    if (topk > pos) {
-        std::memmove(&search_result.distances_[pos + 1],
-                     &search_result.distances_[pos],
-                     (topk - pos) * sizeof(float));
-        std::memmove(&search_result.seg_offsets_[pos + 1],
-                     &search_result.seg_offsets_[pos],
-                     (topk - pos) * sizeof(int64_t));
-        if (elem_idx.has_value()) {
-            std::memmove(&search_result.element_indices_[pos + 1],
-                         &search_result.element_indices_[pos],
-                         (topk - pos) * sizeof(int32_t));
-        }
-    }
-    search_result.seg_offsets_[pos] = doc_id;
-    if (elem_idx.has_value()) {
-        search_result.element_indices_[pos] = elem_idx.value();
-    }
-    search_result.distances_[pos] = distances[i];
-    ++topk;
 }
 
 RowVectorPtr
@@ -186,6 +149,11 @@ PhyIterativeFilterNode::GetOutput() {
         }
         Assert(bitset.size() == need_process_rows_);
         Assert(valid_bitset.size() == need_process_rows_);
+        // Rows are included below on the data bit alone, so fold UNKNOWN
+        // into FALSE explicitly (data &= valid) instead of relying on the
+        // convention that UNKNOWN rows carry data=0. This is what makes
+        // this operator a null-rejecting consumer by construction.
+        bitset.inplace_and(valid_bitset, need_process_rows_);
     }
     if (search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
@@ -222,7 +190,7 @@ PhyIterativeFilterNode::GetOutput() {
 
         for (auto& iterator : search_result.vector_iterators_.value()) {
             EvalCtx eval_ctx(operator_context_->get_exec_context());
-            int topk = 0;
+            int64_t topk = 0;
             while (iterator->HasNext() && topk < unity_topk) {
                 offsets.clear();
                 distances.clear();
@@ -294,6 +262,11 @@ PhyIterativeFilterNode::GetOutput() {
                     auto col_vec_size = col_vec->size();
                     TargetBitmapView bitsetview(col_vec->GetRawData(),
                                                 col_vec_size);
+                    // Fold UNKNOWN into FALSE explicitly (data &= valid):
+                    // rows are included below on the data bit alone.
+                    TargetBitmapView validview(col_vec->GetValidRawData(),
+                                               col_vec_size);
+                    bitsetview.inplace_and(validview, col_vec_size);
 
                     if (element_level) {
                         Assert(bitsetview.size() == doc_offsets.size());
@@ -305,15 +278,13 @@ PhyIterativeFilterNode::GetOutput() {
                         for (size_t i = 0; i < offsets.size(); ++i) {
                             auto [doc_id, elem_idx] = element_to_doc_mapping[i];
                             if (doc_eval_cache[doc_id]) {
-                                insert_helper(search_result,
-                                              topk,
-                                              large_is_better,
-                                              distances,
-                                              nq_index,
-                                              unity_topk,
-                                              i,
-                                              doc_id,
-                                              elem_idx);
+                                topk_binsert(search_result,
+                                             nq_index * unity_topk,
+                                             topk,
+                                             large_is_better,
+                                             distances[i],
+                                             doc_id,
+                                             elem_idx);
                                 if (topk == unity_topk) {
                                     break;
                                 }
@@ -324,15 +295,13 @@ PhyIterativeFilterNode::GetOutput() {
                         Assert(bitsetview.size() == offsets.size());
                         for (auto i = 0; i < offsets.size(); ++i) {
                             if (bitsetview[i]) {
-                                insert_helper(search_result,
-                                              topk,
-                                              large_is_better,
-                                              distances,
-                                              nq_index,
-                                              unity_topk,
-                                              i,
-                                              offsets[i],
-                                              std::nullopt);
+                                topk_binsert(search_result,
+                                             nq_index * unity_topk,
+                                             topk,
+                                             large_is_better,
+                                             distances[i],
+                                             offsets[i],
+                                             std::nullopt);
                                 if (topk == unity_topk) {
                                     break;
                                 }
@@ -343,15 +312,13 @@ PhyIterativeFilterNode::GetOutput() {
                     Assert(!element_level);
                     for (auto i = 0; i < offsets.size(); ++i) {
                         if (bitset[offsets[i]] > 0) {
-                            insert_helper(search_result,
-                                          topk,
-                                          large_is_better,
-                                          distances,
-                                          nq_index,
-                                          unity_topk,
-                                          i,
-                                          offsets[i],
-                                          std::nullopt);
+                            topk_binsert(search_result,
+                                         nq_index * unity_topk,
+                                         topk,
+                                         large_is_better,
+                                         distances[i],
+                                         offsets[i],
+                                         std::nullopt);
                             if (topk == unity_topk) {
                                 break;
                             }

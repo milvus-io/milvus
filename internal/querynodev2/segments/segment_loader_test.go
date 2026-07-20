@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1261,15 +1260,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	ctx := context.Background()
 
 	msgLength := 4
-	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
-		suite.collectionID,
-		suite.partitionID,
-		suite.segmentID,
-		msgLength,
-		suite.schema,
-		suite.chunkManager,
-	)
-	suite.Require().NoError(err)
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
 
 	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
 		suite.partitionID,
@@ -1277,19 +1268,6 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
-
-	segs, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:     suite.segmentID,
-		PartitionID:   suite.partitionID,
-		CollectionID:  suite.collectionID,
-		BinlogPaths:   binlogs,
-		Statslogs:     statsLogs,
-		NumOfRows:     int64(msgLength),
-		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	})
-	suite.Require().NoError(err)
-	suite.Require().Len(segs, 1)
-	segment := segs[0]
 
 	readerCalled := atomic.NewInt32(0)
 	manifestCalled := atomic.NewInt32(0)
@@ -1317,7 +1295,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 		Deltalogs:     deltaLogs,
 		NumOfRows:     int64(msgLength),
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-		// ManifestPath left empty → V1 path.
+		// ManifestPath left empty: V1 path.
 	}
 
 	loader := suite.loader.(*segmentLoader)
@@ -1328,67 +1306,94 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 		"GetDeltaLogPathsFromManifest must not be called when ManifestPath is empty")
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndex() {
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3ParentLoadsChildManifestDeltas() {
 	ctx := context.Background()
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		IndexInfos: []*querypb.FieldIndexInfo{
-			{
-				IndexFilePaths: []string{},
-			},
-		},
-		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	}
-	segment := &LocalSegment{
-		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
-		bm25StatsHolder: newBM25StatsHolder(),
-	}
 
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.ErrorIs(err, merr.ErrIndexNotFound)
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
+	parentManifest := `{"ver":1,"base_path":"files/insert_log/1/2/1000"}`
+	childManifest := `{"ver":2,"base_path":"files/insert_log/1/2/1001"}`
+	calledManifests := make([]string, 0, 2)
+
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			calledManifests = append(calledManifests, manifestPath)
+			return nil, nil
+		},
+	).Build()
+	defer patchManifest.UnPatch()
+
+	err := suite.loader.(*segmentLoader).loadDeltalogs(ctx, segment, &querypb.SegmentLoadInfo{
+		SegmentID:          suite.segmentID,
+		PartitionID:        suite.partitionID,
+		CollectionID:       suite.collectionID,
+		ManifestPath:       parentManifest,
+		ChildManifestPaths: []string{childManifest},
+	})
+	suite.NoError(err)
+	suite.Equal([]string{parentManifest, childManifest}, calledManifests)
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsLegacyParentLoadsChildManifestDeltas() {
 	ctx := context.Background()
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    1,
+
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
+	legacyReaderCalls := atomic.NewInt32(0)
+	childManifestCalls := atomic.NewInt32(0)
+	childManifest := `{"ver":3,"base_path":"files/insert_log/1/2/1002"}`
+
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			suite.Equal(childManifest, manifestPath)
+			childManifestCalls.Inc()
+			return nil, nil
+		},
+	).Build()
+	defer patchManifest.UnPatch()
+
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			legacyReaderCalls.Inc()
+			return storage.NewLegacyDeltalogReader(&schemapb.FieldSchema{
+				FieldID:      0,
+				DataType:     pkType,
+				IsPrimaryKey: true,
+			}, nil, nil)
+		},
+	).Build()
+	defer patchReader.UnPatch()
+
+	err := suite.loader.(*segmentLoader).loadDeltalogs(ctx, segment, &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
 		CollectionID: suite.collectionID,
-		IndexInfos: []*querypb.FieldIndexInfo{
-			{
-				FieldID:        1,
-				IndexFilePaths: []string{},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: indexparamcheck.IndexINVERTED,
-					},
-				},
-			},
-		},
-		BinlogPaths: []*datapb.FieldBinlog{
-			{
-				FieldID: 1,
-				Binlogs: []*datapb.Binlog{
-					{
-						LogSize:    1000000000,
-						MemorySize: 1000000000,
-					},
-				},
-			},
-		},
-	}
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    "/tmp/legacy-delta",
+				EntriesNum: 1,
+			}},
+		}},
+		ChildManifestPaths: []string{childManifest},
+	})
+	suite.NoError(err)
+	suite.EqualValues(1, legacyReaderCalls.Load())
+	suite.EqualValues(1, childManifestCalls.Load())
+}
 
-	segment := &LocalSegment{
-		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
-		bm25StatsHolder: newBM25StatsHolder(),
-	}
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
-	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsChildManifestReadError() {
+	ctx := context.Background()
+
+	segment := &deltaLoadTestSegment{id: suite.segmentID, collectionID: suite.collectionID}
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return(nil, errors.New("manifest read failed")).Build()
+	defer patchManifest.UnPatch()
+
+	err := suite.loader.(*segmentLoader).loadDeltalogs(ctx, segment, &querypb.SegmentLoadInfo{
+		SegmentID:          suite.segmentID,
+		PartitionID:        suite.partitionID,
+		CollectionID:       suite.collectionID,
+		ChildManifestPaths: []string{`{"ver":1,"base_path":"files/insert_log/1/2/1003"}`},
+	})
 	suite.Error(err)
+	suite.Contains(err.Error(), "manifest read failed")
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {

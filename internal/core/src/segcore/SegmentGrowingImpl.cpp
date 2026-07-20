@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/iterator/counting_iterator.hpp>
+#include <folly/ScopeGuard.h>
 #include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
@@ -344,6 +345,8 @@ SchemaHasTextField(const Schema& schema) {
 
 void
 SegmentGrowingImpl::InitializeArrayOffsets() {
+    std::unique_lock lock(array_offsets_map_mutex_);
+
     // Group fields by struct_name
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
@@ -393,17 +396,6 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
-    if (segcore_config_.get_storage_v3_enabled() &&
-        (SchemaHasTextField(*schema_) ||
-         segcore_config_.get_enable_growing_source_flush())) {
-        // StorageV3 TEXT and growing-source flush persist growing segments
-        // through milvus-storage. Interim indexes may also contain raw vector
-        // data, but FlushGrowingSegmentData reads directly from insert_record_
-        // chunks. Keep raw chunks until the flush path can reliably export from
-        // indexes too.
-        return;
-    }
-
     //remove the chunk data to reduce memory consumption
     auto& field_meta = schema_->operator[](fieldId);
     auto data_type = field_meta.get_data_type();
@@ -763,8 +755,17 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
 
-        // update ArrayOffsetsGrowing for struct fields
-        if (struct_representative_fields_.count(field_id) > 0) {
+        std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+        {
+            std::shared_lock lock(array_offsets_map_mutex_);
+            if (struct_representative_fields_.count(field_id) > 0) {
+                auto offsets_it = array_offsets_map_.find(field_id);
+                if (offsets_it != array_offsets_map_.end()) {
+                    array_offsets = offsets_it->second;
+                }
+            }
+        }
+        if (array_offsets != nullptr) {
             const auto& field_data =
                 insert_record_proto->fields_data(data_offset);
 
@@ -772,11 +773,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             ExtractArrayLengths(
                 field_data, field_meta, num_rows, array_lengths.data());
 
-            auto offsets_it = array_offsets_map_.find(field_id);
-            if (offsets_it != array_offsets_map_.end()) {
-                offsets_it->second->Insert(
-                    reserved_offset, array_lengths.data(), num_rows);
-            }
+            array_offsets->Insert(
+                reserved_offset, array_lengths.data(), num_rows);
         }
 
         // index text.
@@ -1020,17 +1018,22 @@ SegmentGrowingImpl::load_field_data_common(
         }
     }
 
-    // update ArrayOffsetsGrowing for struct fields
-    if (struct_representative_fields_.count(field_id) > 0) {
+    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+    {
+        std::shared_lock lock(array_offsets_map_mutex_);
+        if (struct_representative_fields_.count(field_id) > 0) {
+            auto offsets_it = array_offsets_map_.find(field_id);
+            if (offsets_it != array_offsets_map_.end()) {
+                array_offsets = offsets_it->second;
+            }
+        }
+    }
+    if (array_offsets != nullptr) {
         std::vector<int32_t> array_lengths(num_rows);
         ExtractArrayLengthsFromFieldData(
             field_data, field_meta, array_lengths.data());
 
-        auto offsets_it = array_offsets_map_.find(field_id);
-        if (offsets_it != array_offsets_map_.end()) {
-            offsets_it->second->Insert(
-                reserved_offset, array_lengths.data(), num_rows);
-        }
+        array_offsets->Insert(reserved_offset, array_lengths.data(), num_rows);
 
         LOG_INFO("Updated ArrayOffsetsGrowing for field {} with {} rows",
                  field_id.get(),
@@ -1129,6 +1132,20 @@ SegmentGrowingImpl::load_column_group_data_internal(
             this->get_segment_id(),
             column_group_id.get());
 
+        // The load task captures this frame by reference and may be blocked
+        // pushing into the bounded channel. If the consumer loop below
+        // throws, unblock the task and wait for it before unwinding
+        // (see #46958).
+        auto drain_on_unwind = folly::makeGuard([&]() {
+            try {
+                std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                while (column_group_info.arrow_reader_channel->pop(discard)) {
+                }
+            } catch (...) {
+            }
+            storage::DrainFuture(load_future);
+        });
+
         std::shared_ptr<milvus::ArrowDataWrapper> r;
 
         std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
@@ -1183,6 +1200,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
         }
         // access underlying feature to get exception if any
         load_future.get();
+        drain_on_unwind.dismiss();
 
         for (auto& [field_id, field_data] : field_data_map) {
             load_field_data_common(field_id,
@@ -1907,20 +1925,20 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     milvus::proto::schema::SparseFloatArray* output) const {
     AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
 
-    // if index has finished building, grab from index without any
-    // synchronization operations.
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
+    // If the index has finished building and keeps raw data, grab from index
+    // without any synchronization operations.
+    if (indexing_record_.HasRawData(field_id)) {
         indexing_record_.GetDataFromIndex(
             field_id, seg_offsets, count, 0, output);
         return;
     }
     {
         std::lock_guard<std::shared_mutex> guard(chunk_mutex_);
-        // check again after lock to make sure: if index has finished building
-        // after the above check but before we grabbed the lock, we should grab
-        // from index as the data in chunk may have been removed in
-        // try_remove_chunks.
-        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+        // Check again after lock to make sure: if index has finished building
+        // and can provide raw data after the above check but before we grabbed
+        // the lock, we should grab from index as the data in chunk may have
+        // been removed in try_remove_chunks.
+        if (!indexing_record_.HasRawData(field_id)) {
             // copy from raw data
             SparseRowsToProto(
                 [&](size_t i) {
@@ -2388,8 +2406,15 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
     CheckCancellation(
         op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
 
+    auto index = BuildTextIndexForMeta(schema_->operator[](field_id));
     std::unique_lock lock(mutex_);
-    const auto& field_meta = schema_->operator[](field_id);
+    text_indexes_[field_id] = std::move(index);
+}
+
+// Builds a standalone index without publishing it into text_indexes_; the
+// meta is passed in because Reopen runs before the field is in schema_.
+std::unique_ptr<index::TextMatchIndex>
+SegmentGrowingImpl::BuildTextIndexForMeta(const FieldMeta& field_meta) {
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
                "cannot create text index on non-string type");
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
@@ -2398,12 +2423,13 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
         200,
         unique_id.c_str(),
         "milvus_tokenizer",
-        field_meta.get_analyzer_params().c_str());
+        field_meta.get_analyzer_params().c_str(),
+        /*enable_background_merge=*/true);
     index->Commit();
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer",
                             field_meta.get_analyzer_params().c_str());
-    text_indexes_[field_id] = std::move(index);
+    return index;
 }
 
 void
@@ -2558,9 +2584,52 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             fill_empty_field(field_meta);
         }
 
+        auto row_count = insert_record_.row_count();
+        // #50484: build text indexes for new enable_match fields BEFORE
+        // publishing schema_ -- readers skip Reopen once the new schema_ is
+        // visible. Backfill every pre-existing row (default value or nulls,
+        // same as fill_empty_field): doc offsets must stay dense and aligned
+        // with insert_record_ rows. Commit+Reload so the triggering query
+        // sees the backfill. Stage all fields locally and publish together
+        // only after every one succeeds: a present text_indexes_ entry is
+        // always complete, and a mid-build throw publishes nothing (schema_
+        // un-advanced, so the next query rebuilds from scratch).
+        std::vector<std::pair<FieldId, std::unique_ptr<index::TextMatchIndex>>>
+            staged_text_indexes;
+        for (const auto& field_meta : *absent_fields) {
+            if (sch->is_function_output(field_meta.get_id())) {
+                continue;
+            }
+            auto field_id = field_meta.get_id();
+            if (IsStringDataType(field_meta.get_data_type()) &&
+                field_meta.enable_match() &&
+                text_indexes_.find(field_id) == text_indexes_.end()) {
+                auto index = BuildTextIndexForMeta(field_meta);
+                if (row_count > 0) {
+                    const bool has_default =
+                        field_meta.default_value().has_value();
+                    std::vector<std::string> texts(
+                        row_count,
+                        has_default ? field_meta.default_value()->string_data()
+                                    : std::string());
+                    FixedVector<bool> texts_valid_data(row_count, has_default);
+                    index->AddTextsGrowing(
+                        row_count, texts.data(), texts_valid_data.data(), 0);
+                }
+                index->Commit();
+                index->Reload();
+                staged_text_indexes.emplace_back(field_id, std::move(index));
+            }
+        }
+        if (!staged_text_indexes.empty()) {
+            std::unique_lock lock(mutex_);
+            for (auto& [field_id, index] : staged_text_indexes) {
+                text_indexes_[field_id] = std::move(index);
+            }
+        }
+
         schema_ = sch;
 
-        auto row_count = insert_record_.row_count();
         for (const auto& field_meta : *absent_fields) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
@@ -2674,6 +2743,8 @@ SegmentGrowingImpl::FillAbsentFields() {
                 insert_record_.is_valid_data_exist(field_id) &&
                 insert_record_.get_valid_data(field_id)->get_data().empty()) {
                 fill_empty_field(field_meta);
+                EnsureArrayOffsetsForStructField(field_meta,
+                                                 insert_record_.row_count());
             }
             continue;
         }
@@ -2681,6 +2752,8 @@ SegmentGrowingImpl::FillAbsentFields() {
         // so we must check data empty here
         if (insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
+            EnsureArrayOffsetsForStructField(field_meta,
+                                             insert_record_.row_count());
         }
     }
 }
@@ -2708,11 +2781,37 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
+    // A column group whose fields were all dropped from the segment schema
+    // has an empty read projection; opening it violates the reader contract
+    // (ChunkReaderImpl::open rejects a group containing none of the needed
+    // columns). Such a group is a legal leftover of drop semantics — skip it
+    // and let compaction remove it from the manifest.
+    auto schema_snapshot = schema_;
+    auto group_has_live_field = [&](int64_t group_index) {
+        for (const auto& column : column_groups->at(group_index)->columns) {
+            // An untranslatable column name is a broken manifest and throws
+            // (same contract as the sealed loader).
+            auto field_id = schema_snapshot->ResolveColumnFieldId(column);
+            if (schema_snapshot->has_field(field_id)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
+        if (!group_has_live_field(i)) {
+            LOG_INFO(
+                "skip loading column group {} of segment {}: all of its "
+                "fields are dropped from the schema",
+                i,
+                id_);
+            continue;
+        }
         auto future =
             pool.Submit([this, column_groups, properties, i, num_rows] {
                 return LoadColumnGroup(column_groups, properties, i, num_rows);
@@ -2944,6 +3043,8 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
         return;
     }
 
+    std::unique_lock lock(array_offsets_map_mutex_);
+
     std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
     for (const auto& [field_id, offsets] : array_offsets_map_) {
         auto field_it = schema_->get_fields().find(field_id);
@@ -2961,11 +3062,21 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
 
     if (!array_offsets) {
         array_offsets = std::make_shared<ArrayOffsetsGrowing>();
-        if (row_count > 0) {
-            std::vector<int32_t> empty_lengths(row_count, 0);
-            array_offsets->Insert(0, empty_lengths.data(), row_count);
-        }
         struct_representative_fields_.insert(field_meta.get_id());
+    }
+
+    auto current_row_count = array_offsets->GetRowCount();
+    AssertInfo(current_row_count <= row_count,
+               "struct array offsets row count {} exceeds segment row count "
+               "{} for field {}",
+               current_row_count,
+               row_count,
+               field_meta.get_id().get());
+    if (current_row_count < row_count) {
+        auto missing_row_count = row_count - current_row_count;
+        std::vector<int32_t> empty_lengths(missing_row_count, 0);
+        array_offsets->Insert(
+            current_row_count, empty_lengths.data(), missing_row_count);
     }
 
     array_offsets_map_[field_meta.get_id()] = array_offsets;

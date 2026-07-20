@@ -263,7 +263,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             auto cload_index_info =
                 static_cast<CLoadIndexInfo>(&load_index_info);
             AppendIndexV2(trace, cload_index_info);
-            UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+            segment->LoadIndex(load_index_info);
         };
 
     // Load pk field

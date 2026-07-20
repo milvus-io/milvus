@@ -51,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -79,7 +78,7 @@ func initStreamingSystem(t *testing.T) {
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              rmq.NewRmqID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
@@ -2865,112 +2864,6 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 
 		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 0, len(segments))
-	})
-}
-
-func TestValidateIndexParams(t *testing.T) {
-	t.Run("valid", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.MmapEnabledKey,
-					Value: "true",
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.NoError(t, err)
-	})
-
-	t.Run("invalid index param", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.MmapEnabledKey,
-					Value: "h",
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid index user param", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-			UserIndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MmapEnabledKey,
-					Value: "h",
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("duplicated_index_params", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("duplicated_user_index_params", func(t *testing.T) {
-		index := &model.Index{
-			UserIndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("duplicated_user_index_params", func(t *testing.T) {
-		index := &model.Index{
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
 	})
 }
 

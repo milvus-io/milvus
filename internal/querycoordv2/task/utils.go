@@ -135,10 +135,6 @@ func packLoadSegmentRequest(
 	indexInfo []*indexpb.IndexInfo,
 ) *querypb.LoadSegmentsRequest {
 	loadScope := querypb.LoadScope_Full
-	if action.Type() == ActionTypeUpdate {
-		loadScope = querypb.LoadScope_Index
-	}
-
 	if action.Type() == ActionTypeStatsUpdate {
 		loadScope = querypb.LoadScope_Stats
 	}
@@ -287,6 +283,19 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 
 	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
 	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
+
+	// Index warmup is normally materialized into each IndexInfo by
+	// applyIndexWarmupSetting. No-index vector fields have no IndexInfo carrier,
+	// but segcore treats their raw data as the vector-index/search path until an
+	// index exists. Carry QueryCoord's auto-warmup vector-index fallback through
+	// the effective load schema without changing warmup.vectorField semantics.
+	if _, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, schemaCloned.GetProperties()...); !exist &&
+		autoWarmupForNonPKIsolationCollection(collectionProperties) {
+		schemaCloned.Properties = append(schemaCloned.Properties, &commonpb.KeyValuePair{
+			Key:   common.WarmupVectorIndexKey,
+			Value: common.WarmupSync,
+		})
+	}
 	return schemaCloned
 }
 

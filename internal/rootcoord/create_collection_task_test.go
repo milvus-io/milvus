@@ -349,6 +349,32 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("primary field rejects vortex local format", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.LocalFormatKey, Value: common.LocalFormatVortex},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "local_format vortex is not supported for primary key field")
+	})
+
 	t.Run("has system fields", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
@@ -1541,7 +1567,6 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 					TypeParams: []*commonpb.KeyValuePair{
 						{Key: common.MaxLengthKey, Value: "100"},
 						{Key: "enable_analyzer", Value: "true"},
-						{Key: "enable_match", Value: "true"},
 						{Key: "analyzer_params", Value: `{"type": "standard"}`},
 					},
 				},
@@ -1598,7 +1623,6 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 					TypeParams: []*commonpb.KeyValuePair{
 						{Key: common.MaxLengthKey, Value: "100"},
 						{Key: "enable_analyzer", Value: "true"},
-						{Key: "enable_match", Value: "true"},
 						{Key: "analyzer_params", Value: `{"type": "standard"}`},
 					},
 				},
@@ -2786,6 +2810,19 @@ func Test_validateAnalyzer(t *testing.T) {
 		assert.Len(t, infos, 0)
 	})
 
+	t.Run("field with analyzer params but analyzer disabled", func(t *testing.T) {
+		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "100"},
+			{Key: common.AnalyzerParamKey, Value: `{"type": "standard"}`},
+		})
+		collSchema := createTestCollectionSchemaWithBM25([]*schemapb.FieldSchema{fieldSchema}, "invalid_field")
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		err := validateAnalyzer(collSchema, fieldSchema, &infos)
+		assert.NoError(t, err)
+		assert.Empty(t, infos)
+	})
+
 	t.Run("field with enable_match but no enable_analyzer", func(t *testing.T) {
 		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
 			{Key: common.MaxLengthKey, Value: "100"},
@@ -2902,8 +2939,7 @@ func Test_validateAnalyzer(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("field with analyzer_params only", func(t *testing.T) {
-		// Create a field with analyzer_params only
+	t.Run("field with enable_analyzer and analyzer_params", func(t *testing.T) {
 		fieldSchema := createTestFieldSchema("text_field", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
 			{Key: common.MaxLengthKey, Value: "100"},
 			{Key: "enable_analyzer", Value: "true"},
@@ -2934,6 +2970,20 @@ func Test_validateAnalyzer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, infos, 0) // No analyzer_params, uses default analyzer
 	})
+}
+
+func TestCheckFieldSchemaAllowsAnalyzerParamsWithoutEnableAnalyzer(t *testing.T) {
+	err := checkFieldSchema([]*schemapb.FieldSchema{
+		{
+			Name:     "text_field",
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "100"},
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+		},
+	})
+	require.NoError(t, err)
 }
 
 func Test_appendConsistecyLevel(t *testing.T) {

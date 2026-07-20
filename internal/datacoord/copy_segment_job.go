@@ -59,6 +59,15 @@ func WithoutCopyJobStates(states ...datapb.CopySegmentJobState) CopySegmentJobFi
 	}
 }
 
+// CopyJobTimeoutTs returns the job timeout deadline as a hybrid TSO timestamp
+// (physical milliseconds << 18), matching how tryTimeoutJob reads it back via
+// tsoutil.PhysicalTime and how CleanupTs is composed. Storing UnixNano here
+// instead would be interpreted as a TSO landing centuries in the future, so
+// the job timeout would never fire.
+func CopyJobTimeoutTs(timeout time.Duration) uint64 {
+	return tsoutil.AddPhysicalDurationOnTs(tsoutil.ComposeTSByTime(time.Now()), timeout)
+}
+
 type UpdateCopySegmentJobAction func(job CopySegmentJob)
 
 func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAction {
@@ -69,7 +78,7 @@ func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAc
 			// Set cleanup ts based on copy segment task retention
 			dur := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
 			cleanupTime := time.Now().Add(dur)
-			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
+			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime)
 			job.(*copySegmentJob).CleanupTs = cleanupTs
 			mlog.Info(context.TODO(), "set copy segment job cleanup ts",
 				mlog.FieldJobID(job.GetJobId()),
@@ -88,6 +97,16 @@ func UpdateCopyJobReason(reason string) UpdateCopySegmentJobAction {
 func UpdateCopyJobProgress(copied, total int64) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
 		job.(*copySegmentJob).CopiedSegments = copied
+		job.(*copySegmentJob).TotalSegments = total
+	}
+}
+
+// UpdateCopyJobTotalSegments sets only the segment total, leaving CopiedSegments
+// untouched. Used when (re-)entering Executing: on a resume after a restart some
+// tasks may already be completed, and zeroing the copied count here would make
+// the reported progress transiently drop until the next checkCopyingJob tick.
+func UpdateCopyJobTotalSegments(total int64) UpdateCopySegmentJobAction {
+	return func(job CopySegmentJob) {
 		job.(*copySegmentJob).TotalSegments = total
 	}
 }

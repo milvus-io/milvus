@@ -124,6 +124,32 @@ func (req *CollectionAddFunction) GetFunction() *FunctionSchema {
 	return &req.Function
 }
 
+type CollectionAddFunctionField struct {
+	DbName         string         `json:"dbName"`
+	CollectionName string         `json:"collectionName" binding:"required"`
+	Function       FunctionSchema `json:"function" binding:"required"`
+	OutputField    FieldSchema    `json:"outputField" binding:"required"`
+	IndexParam     IndexParam     `json:"indexParams" binding:"required"`
+}
+
+func (req *CollectionAddFunctionField) GetDbName() string { return req.DbName }
+
+func (req *CollectionAddFunctionField) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type CollectionDropFunctionField struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	FunctionName   string `json:"functionName" binding:"required"`
+}
+
+func (req *CollectionDropFunctionField) GetDbName() string { return req.DbName }
+
+func (req *CollectionDropFunctionField) GetCollectionName() string {
+	return req.CollectionName
+}
+
 type CollectionAlterFunction struct {
 	DbName         string         `json:"dbName"`
 	CollectionName string         `json:"collectionName" binding:"required"`
@@ -349,13 +375,16 @@ type ExportSnapshotReq struct {
 func (req *ExportSnapshotReq) GetDbName() string { return req.DbName }
 
 type QueryReqV2 struct {
-	DbName           string                 `json:"dbName"`
-	CollectionName   string                 `json:"collectionName" binding:"required"`
-	PartitionNames   []string               `json:"partitionNames"`
-	OutputFields     []string               `json:"outputFields"`
-	Filter           string                 `json:"filter"`
-	Limit            int32                  `json:"limit"`
-	Offset           int32                  `json:"offset"`
+	DbName         string   `json:"dbName"`
+	CollectionName string   `json:"collectionName" binding:"required"`
+	PartitionNames []string `json:"partitionNames"`
+	OutputFields   []string `json:"outputFields"`
+	Filter         string   `json:"filter"`
+	Limit          int32    `json:"limit"`
+	Offset         int32    `json:"offset"`
+	// OrderByFields sorts query results by scalar fields; each item is
+	// "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
+	OrderByFields    []string               `json:"orderByFields"`
 	ExprParams       map[string]interface{} `json:"exprParams"`
 	ConsistencyLevel string                 `json:"consistencyLevel"`
 }
@@ -939,6 +968,8 @@ type CollectionReq struct {
 	IDType           string                 `json:"idType"`
 	AutoID           bool                   `json:"autoID"`
 	MetricType       string                 `json:"metricType"`
+	VectorFieldType  string                 `json:"vectorFieldType"`
+	ConsistencyLevel string                 `json:"consistencyLevel"`
 	PrimaryFieldName string                 `json:"primaryFieldName"`
 	VectorFieldName  string                 `json:"vectorFieldName"`
 	Schema           CollectionSchema       `json:"schema"`
