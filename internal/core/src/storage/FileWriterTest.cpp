@@ -19,15 +19,13 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "gtest/gtest.h"
+#include "local/FileSystem.h"
 #include "storage/FileWriter.h"
-#include "test_utils/Constants.h"
 
 using namespace milvus;
 using namespace milvus::storage;
@@ -36,7 +34,9 @@ class FileWriterTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        test_dir_ = std::filesystem::path(TestLocalPath) / "file_writer_test";
+        test_dir_ =
+            std::filesystem::temp_directory_path() / "milvus_file_writer_test" /
+            testing::UnitTest::GetInstance()->current_test_info()->name();
         std::filesystem::create_directories(test_dir_);
     }
 
@@ -55,6 +55,29 @@ class FileWriterTest : public testing::Test {
 
     std::filesystem::path test_dir_;
     const size_t kBufferSize = 4096;  // 4KB buffer size
+
+    milvus::local::io::WritableFile
+    OpenWritable(const std::string& filename,
+                 io::Priority priority = io::Priority::MIDDLE) {
+        auto files = milvus::local::FileSystem::Open(test_dir_);
+        auto direct_io = priority != io::Priority::HIGH &&
+                         FileWriter::GetMode() == FileWriter::WriteMode::DIRECT;
+        return files.OpenForWrite(
+            milvus::local::Path(filename),
+            milvus::local::WriteOptions{
+                .create = true, .truncate = true, .direct_io = direct_io});
+    }
+
+    template <typename Operation>
+    void
+    ExpectSegcoreError(Operation operation, ErrorCode expected_code) {
+        try {
+            operation();
+            FAIL() << "expected SegcoreError";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), expected_code);
+        }
+    }
 };
 
 // Test basic file writing functionality with buffered IO
@@ -353,7 +376,8 @@ TEST_F(FileWriterTest, InvalidFilePathWithDirectIO) {
     FileWriter::SetBufferSize(kBufferSize);
 
     std::string invalid_path = "/invalid/path/file.txt";
-    EXPECT_THROW(FileWriter writer(invalid_path), std::runtime_error);
+    ExpectSegcoreError([&]() { FileWriter writer(invalid_path); },
+                       ErrorCode::FileCreateFailed);
 }
 
 // Test writing to a file that already exists
@@ -444,8 +468,8 @@ TEST_F(FileWriterTest, PositionedWriterDirectIORejectsUnalignedOffset) {
     std::vector<char> data(kBufferSize);
 
     PositionedFileWriter writer(filename, data.size());
-    EXPECT_THROW(writer.WriteAt(1, data.data(), data.size()),
-                 std::runtime_error);
+    ExpectSegcoreError([&]() { writer.WriteAt(1, data.data(), data.size()); },
+                       ErrorCode::UnexpectedError);
 }
 
 TEST_F(FileWriterTest, PositionedWriterDirectIORejectsMiddleUnalignedWrite) {
@@ -457,8 +481,8 @@ TEST_F(FileWriterTest, PositionedWriterDirectIORejectsMiddleUnalignedWrite) {
     std::vector<char> data(kBufferSize * 2 + 17);
 
     PositionedFileWriter writer(filename, data.size());
-    EXPECT_THROW(writer.WriteAt(kBufferSize, data.data(), 17),
-                 std::runtime_error);
+    ExpectSegcoreError([&]() { writer.WriteAt(kBufferSize, data.data(), 17); },
+                       ErrorCode::UnexpectedError);
 }
 
 TEST_F(FileWriterTest, PositionedWriterKeepsFileOpenAfterWriteAtError) {
@@ -472,8 +496,9 @@ TEST_F(FileWriterTest, PositionedWriterKeepsFileOpenAfterWriteAtError) {
 
     {
         PositionedFileWriter writer(filename, data.size());
-        EXPECT_THROW(writer.WriteAt(kBufferSize, data.data(), 17),
-                     std::runtime_error);
+        ExpectSegcoreError(
+            [&]() { writer.WriteAt(kBufferSize, data.data(), 17); },
+            ErrorCode::UnexpectedError);
         writer.WriteAt(0, data.data(), kBufferSize);
         writer.WriteAt(kBufferSize, data.data() + kBufferSize, kBufferSize);
         writer.Finish();
@@ -515,6 +540,107 @@ TEST_F(FileWriterTest, PositionedWriterDirectIOSupportsConcurrentWrites) {
     std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
                                 std::istreambuf_iterator<char>());
     EXPECT_EQ(read_data, data);
+}
+
+TEST_F(FileWriterTest, WritableFileConstructorMatchesLegacyOutput) {
+    FileWriter::SetBufferSize(kBufferSize);
+    std::vector<char> data(kBufferSize * 2 + 17);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    for (auto mode :
+         {FileWriter::WriteMode::BUFFERED, FileWriter::WriteMode::DIRECT}) {
+        FileWriter::SetMode(mode);
+        auto suffix =
+            mode == FileWriter::WriteMode::BUFFERED ? "buffered" : "direct";
+        auto legacy_name = std::string("legacy_") + suffix;
+        auto handle_name = std::string("handle_") + suffix;
+
+        FileWriter legacy((test_dir_ / legacy_name).string());
+        legacy.Write(data.data(), data.size());
+        EXPECT_EQ(legacy.Finish(), data.size());
+
+        FileWriter handle(OpenWritable(handle_name));
+        handle.Write(data.data(), data.size());
+        EXPECT_EQ(handle.Finish(), data.size());
+
+        std::ifstream legacy_file(test_dir_ / legacy_name, std::ios::binary);
+        std::ifstream handle_file(test_dir_ / handle_name, std::ios::binary);
+        std::vector<char> legacy_data(
+            (std::istreambuf_iterator<char>(legacy_file)),
+            std::istreambuf_iterator<char>());
+        std::vector<char> handle_data(
+            (std::istreambuf_iterator<char>(handle_file)),
+            std::istreambuf_iterator<char>());
+        EXPECT_EQ(handle_data, legacy_data);
+        EXPECT_EQ(handle_data, data);
+    }
+}
+
+TEST_F(FileWriterTest, PositionedWritableFileWritesOutOfOrder) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    std::vector<char> data(kBufferSize * 2 + 17);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    PositionedFileWriter writer(OpenWritable("positioned_handle"), data.size());
+    writer.WriteAt(kBufferSize, data.data() + kBufferSize, kBufferSize);
+    writer.WriteAt(kBufferSize * 2, data.data() + kBufferSize * 2, 17);
+    writer.WriteAt(0, data.data(), kBufferSize);
+    EXPECT_EQ(writer.Finish(), data.size());
+
+    std::ifstream file(test_dir_ / "positioned_handle", std::ios::binary);
+    std::vector<char> actual((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+    EXPECT_EQ(actual, data);
+}
+
+TEST_F(FileWriterTest, PositionedWritableFileSupportsConcurrentDirectWrites) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+    std::vector<char> data(kBufferSize * 8);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    PositionedFileWriter writer(OpenWritable("positioned_handle_direct"),
+                                data.size());
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < 8; ++i) {
+        threads.emplace_back([&, i]() {
+            writer.WriteAt(
+                i * kBufferSize, data.data() + i * kBufferSize, kBufferSize);
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    EXPECT_EQ(writer.Finish(), data.size());
+
+    std::ifstream file(test_dir_ / "positioned_handle_direct",
+                       std::ios::binary);
+    std::vector<char> actual((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+    EXPECT_EQ(actual, data);
+}
+
+TEST_F(FileWriterTest, WritableFileConstructorsRejectMismatchedDirectIOMode) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+    auto files = milvus::local::FileSystem::Open(test_dir_);
+
+    auto open_buffered = [&](const std::string& filename) {
+        return files.OpenForWrite(
+            milvus::local::Path(filename),
+            milvus::local::WriteOptions{
+                .create = true, .truncate = true, .direct_io = false});
+    };
+
+    ExpectSegcoreError(
+        [&]() { FileWriter writer(open_buffered("sequential")); },
+        ErrorCode::InvalidParameter);
+    ExpectSegcoreError(
+        [&]() {
+            PositionedFileWriter writer(open_buffered("positioned"),
+                                        kBufferSize);
+        },
+        ErrorCode::InvalidParameter);
 }
 
 // Test rate limiter basic behavior: alignment and refill period
@@ -1060,14 +1186,14 @@ TEST_F(FileWriterTest, ErrorHandlingInAsyncOperations) {
     std::string invalid_path = "/invalid/path/async_test.txt";
 
     // This should throw an exception even in async context
-    EXPECT_THROW(
-        {
+    ExpectSegcoreError(
+        [&]() {
             FileWriter writer(invalid_path);
             std::string test_data = "Test data";
             writer.Write(test_data.data(), test_data.size());
             writer.Finish();
         },
-        std::runtime_error);
+        ErrorCode::FileCreateFailed);
 }
 
 // Test concurrent access to FileWriterConfig

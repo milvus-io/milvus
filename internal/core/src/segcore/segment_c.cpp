@@ -116,7 +116,8 @@ CreateSegment(milvus::segcore::Collection* col,
                 col->get_schema(),
                 col->get_index_meta(),
                 segment_id,
-                milvus::segcore::SegcoreConfig::default_config());
+                milvus::segcore::SegcoreConfig::default_config(),
+                col->get_local_files());
             segment = std::move(seg);
             break;
         }
@@ -127,7 +128,8 @@ CreateSegment(milvus::segcore::Collection* col,
                 col->get_index_meta(),
                 segment_id,
                 milvus::segcore::SegcoreConfig::default_config(),
-                is_sorted_by_pk);
+                is_sorted_by_pk,
+                col->get_local_files());
             break;
 
         default:

@@ -15,6 +15,7 @@
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "local/LegacyLocalChunkFiles.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Collection.h"
@@ -48,6 +49,29 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
 
     schema_ = Schema::ParseFrom(collection_schema);
     collection_name_ = std::move(*collection_schema.mutable_name());
+}
+
+Collection::Collection(const void* schema_proto,
+                       const int64_t length,
+                       local::FileSystem local_files)
+    : local_files_(std::move(local_files)) {
+    Assert(schema_proto != nullptr);
+    milvus::proto::schema::CollectionSchema collection_schema;
+    auto suc = collection_schema.ParseFromArray(schema_proto, length);
+    if (!suc) {
+        LOG_WARN("unmarshal schema string failed");
+    }
+
+    schema_ = Schema::ParseFrom(collection_schema);
+    collection_name_ = std::move(*collection_schema.mutable_name());
+}
+
+local::FileSystem
+Collection::get_local_files() const {
+    if (local_files_.has_value()) {
+        return *local_files_;
+    }
+    return local::LegacyLocalChunkFiles();
 }
 
 void

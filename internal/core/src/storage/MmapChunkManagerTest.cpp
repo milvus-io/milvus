@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 
 #include <gtest/gtest.h>
 #include <memory>
@@ -19,6 +20,31 @@
 #include "gtest/gtest.h"
 #include "storage/MmapChunkManager.h"
 #include "storage/MmapManager.h"
+
+TEST(MmapChunkManager, UsesIndependentRootedFilesystems) {
+    namespace fs = std::filesystem;
+    auto base = fs::temp_directory_path() / "milvus_mmap_rooted_files";
+    auto first_root = base / "first";
+    auto second_root = base / "second";
+    fs::remove_all(base);
+
+    {
+        milvus::storage::MmapChunkManager first(
+            milvus::local::FileSystem::Open(first_root), 1 << 20, 4096);
+        milvus::storage::MmapChunkManager second(
+            milvus::local::FileSystem::Open(second_root), 1 << 20, 4096);
+        auto first_descriptor = first.Register();
+        auto second_descriptor = second.Register();
+        ASSERT_NE(first.Allocate(first_descriptor, 128), nullptr);
+        ASSERT_NE(second.Allocate(second_descriptor, 128), nullptr);
+        EXPECT_FALSE(fs::is_empty(first_root));
+        EXPECT_FALSE(fs::is_empty(second_root));
+    }
+
+    EXPECT_TRUE(fs::is_empty(first_root));
+    EXPECT_TRUE(fs::is_empty(second_root));
+    fs::remove_all(base);
+}
 
 /*
 checking register function of mmap chunk manager

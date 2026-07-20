@@ -136,8 +136,7 @@
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "local/LegacyLocalChunkFiles.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPool.h"
@@ -2479,10 +2478,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             continue;
         }
 
-        auto mmap_dir_path =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager()
-                ->GetRootPath();
+        auto mmap_dir_path = LocalFiles().NativeRoot().string();
         auto column_group_info = FieldDataInfo(column_group_id.get(),
                                                num_rows,
                                                mmap_dir_path,
@@ -2632,10 +2628,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             continue;
         }
 
-        auto mmap_dir_path =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager()
-                ->GetRootPath();
+        auto mmap_dir_path = LocalFiles().NativeRoot().string();
         auto column_group_info = FieldDataInfo(column_group_id.get(),
                                                num_rows,
                                                mmap_dir_path,
@@ -2802,10 +2795,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_id = FieldId(id);
 
-        auto mmap_dir_path =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager()
-                ->GetRootPath();
+        auto mmap_dir_path = LocalFiles().NativeRoot().string();
         auto field_data_info =
             FieldDataInfo(field_id.get(),
                           num_rows,
@@ -2914,10 +2904,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_id = FieldId(id);
 
-        auto mmap_dir_path =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager()
-                ->GetRootPath();
+        auto mmap_dir_path = LocalFiles().NativeRoot().string();
         auto field_data_info =
             FieldDataInfo(field_id.get(),
                           num_rows,
@@ -4447,7 +4434,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     IndexMetaPtr index_meta,
     const SegcoreConfig& segcore_config,
     int64_t segment_id,
-    bool is_sorted_by_pk)
+    bool is_sorted_by_pk,
+    std::optional<local::FileSystem> local_files)
     : segcore_config_(segcore_config),
       ngram_fields_(std::unordered_set<FieldId>(schema->size())),
       scalar_indexings_(std::unordered_map<FieldId, index::CacheIndexBasePtr>(
@@ -4457,6 +4445,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                            ->Register()),
       id_(segment_id),
       col_index_meta_(index_meta),
+      local_files_(std::move(local_files)),
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           nullptr,
@@ -4593,9 +4582,17 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
           },
           segment_id) {
     auto load_info = std::make_shared<const SegmentLoadInfo>(
-        milvus::proto::segcore::SegmentLoadInfo(), schema);
+        milvus::proto::segcore::SegmentLoadInfo(), schema, local_files_);
     std::atomic_store(&published_state_,
                       BuildPublishedState(schema, load_info, commit_ts_));
+}
+
+local::FileSystem
+ChunkedSegmentSealedImpl::LocalFiles() const {
+    if (local_files_.has_value()) {
+        return *local_files_;
+    }
+    return local::LegacyLocalChunkFiles();
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
@@ -5371,7 +5368,7 @@ ChunkedSegmentSealedImpl::BuildTextIndexFromFiles(
         config[STATS_BASE_PATH_KEY] = info_proto->base_path();
     }
     milvus::storage::FileManagerContext file_ctx(
-        field_data_meta, index_meta, remote_chunk_manager, fs);
+        field_data_meta, index_meta, remote_chunk_manager, fs, LocalFiles());
     if (!info_proto->base_path().empty()) {
         file_ctx.set_stats_base_path(info_proto->base_path());
     }
@@ -5473,7 +5470,7 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
     config[JSON_STATS_CACHE_SHARD_KEY] = load_info_snapshot->GetInsertChannel();
 
     milvus::storage::FileManagerContext file_ctx(
-        field_data_meta, index_meta, remote_chunk_manager, fs);
+        field_data_meta, index_meta, remote_chunk_manager, fs, LocalFiles());
     auto index = std::make_shared<milvus::index::JsonKeyStats>(file_ctx, true);
     milvus::tracer::TraceContext trace_ctx;
     try {
@@ -7412,10 +7409,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     bool use_mmap = field_has_setting ? field_mmap_enabled : global_use_mmap;
-    auto mmap_dir_path =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager()
-            ->GetRootPath();
+    auto mmap_dir_path = LocalFiles().NativeRoot().string();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
     auto field_data_info = FieldDataInfo(field_id.get(),
@@ -7566,10 +7560,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
                                    : mmap_config.GetScalarFieldEnableMmap();
         bool use_mmap =
             field_has_setting ? field_mmap_enabled : global_use_mmap;
-        auto mmap_dir_path =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager()
-                ->GetRootPath();
+        auto mmap_dir_path = LocalFiles().NativeRoot().string();
         int64_t size = num_rows_.value();
         AssertInfo(size > 0,
                    "Chunked Sealed segment must have more than 0 row");
@@ -7702,7 +7693,7 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
     // Do not parse manifest here: Load() must be able to observe a
     // pre-cancelled OpContext before any storage/manifest IO happens.
     auto published = std::make_shared<const SegmentLoadInfo>(
-        std::move(load_info), schema_snapshot);
+        std::move(load_info), schema_snapshot, local_files_);
     PublishState(BuildNextPublishedState(
         CapturePublishedState(),
         MakeStateDelta(
@@ -7962,10 +7953,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
              this->get_segment_id(),
              index);
-    auto mmap_dir_path =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager()
-            ->GetRootPath();
+    auto mmap_dir_path = LocalFiles().NativeRoot().string();
 
     // Determine warmup policy: use per-field settings if any,
     // otherwise pass empty string to fall back to global config
@@ -8106,10 +8094,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
              this->get_segment_id(),
              index);
-    auto mmap_dir_path =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager()
-            ->GetRootPath();
+    auto mmap_dir_path = LocalFiles().NativeRoot().string();
 
     std::string warmup_policy = aggregated_warmup_policy;
 

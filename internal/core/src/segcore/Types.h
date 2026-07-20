@@ -26,6 +26,7 @@
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "index/Index.h"
+#include "local/FileSystem.h"
 #include "pb/index_coord.pb.h"
 #include "storage/Types.h"
 
@@ -65,6 +66,7 @@ struct LoadIndexInfo {
         warmup_policy;  // "disable", "sync", or "async"; empty means use global config
     std::string shard;
     std::optional<LoadResourceRequest> load_resource_request;
+    std::optional<local::FileSystem> local_files;
 
     // Default constructor
     LoadIndexInfo() = default;
@@ -101,7 +103,8 @@ struct LoadIndexInfo {
           dim(other.dim),
           warmup_policy(other.warmup_policy),
           shard(other.shard),
-          load_resource_request(other.load_resource_request) {
+          load_resource_request(other.load_resource_request),
+          local_files(other.local_files) {
     }
 
     // Copy assignment operator
@@ -133,6 +136,7 @@ struct LoadIndexInfo {
             warmup_policy = other.warmup_policy;
             shard = other.shard;
             load_resource_request = other.load_resource_request;
+            local_files = other.local_files;
         }
         return *this;
     }

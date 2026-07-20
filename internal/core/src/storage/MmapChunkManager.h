@@ -23,6 +23,7 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include "local/FileSystem.h"
 #include <vector>
 
 namespace milvus::storage {
@@ -173,7 +174,7 @@ class MmapBlocksHandler {
  */
 class MmapChunkManager {
  public:
-    explicit MmapChunkManager(std::string root_path,
+    explicit MmapChunkManager(local::FileSystem local_files,
                               const uint64_t disk_limit,
                               const uint64_t file_size);
     ~MmapChunkManager();
@@ -213,7 +214,7 @@ class MmapChunkManager {
     std::unordered_map<MmapChunkDescriptor::ID, std::vector<MmapBlockPtr>>
         blocks_table_;
     std::unique_ptr<MmapBlocksHandler> blocks_handler_ = nullptr;
-    std::string mmap_file_prefix_;
+    local::FileSystem local_files_;
     std::atomic<uint64_t> descriptor_counter_;
 };
 using MmapChunkManagerPtr = std::shared_ptr<MmapChunkManager>;

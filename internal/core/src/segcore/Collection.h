@@ -13,12 +13,14 @@
 
 #include <stdint.h>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <string_view>
 
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
+#include "local/FileSystem.h"
 #include "pb/schema.pb.h"
 
 namespace milvus::segcore {
@@ -28,6 +30,9 @@ class Collection {
     explicit Collection(const milvus::proto::schema::CollectionSchema* schema);
     explicit Collection(const std::string_view schema_proto);
     explicit Collection(const void* collection_proto, const int64_t length);
+    Collection(const void* collection_proto,
+               int64_t length,
+               local::FileSystem local_files);
 
     void
     parseIndexMeta(const void* index_meta_proto_blob, const int64_t length);
@@ -80,12 +85,16 @@ class Collection {
         return collection_name_;
     }
 
+    local::FileSystem
+    get_local_files() const;
+
  private:
     std::string collection_name_;
     SchemaPtr schema_;
     std::shared_mutex schema_mutex_;
     IndexMetaPtr index_meta_;
     std::shared_mutex index_meta_mutex_;
+    std::optional<local::FileSystem> local_files_;
 };
 
 using CollectionPtr = std::unique_ptr<Collection>;

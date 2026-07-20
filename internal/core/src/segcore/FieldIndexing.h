@@ -36,6 +36,7 @@
 #include "index/VectorIndex.h"
 #include "knowhere/config.h"
 #include "log/Log.h"
+#include "local/FileSystem.h"
 #include "oneapi/tbb/concurrent_vector.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -50,14 +51,17 @@ namespace milvus::segcore {
 // All concurrent
 class FieldIndexing {
  public:
-    explicit FieldIndexing(const FieldMeta& field_meta,
-                           const SegcoreConfig& segcore_config)
+    explicit FieldIndexing(
+        const FieldMeta& field_meta,
+        const SegcoreConfig& segcore_config,
+        std::optional<local::FileSystem> local_files = std::nullopt)
         : data_type_(field_meta.get_data_type()),
           dim_(IsVectorDataType(field_meta.get_data_type()) &&
                        !IsSparseFloatVectorDataType(field_meta.get_data_type())
                    ? field_meta.get_dim()
                    : 1),
-          segcore_config_(segcore_config) {
+          segcore_config_(segcore_config),
+          local_files_(std::move(local_files)) {
     }
     FieldIndexing(const FieldIndexing&) = delete;
     FieldIndexing&
@@ -135,6 +139,7 @@ class FieldIndexing {
     const DataType data_type_;
     const int64_t dim_;
     const SegcoreConfig& segcore_config_;
+    std::optional<local::FileSystem> local_files_;
 };
 
 template <typename T>
@@ -142,11 +147,13 @@ class ScalarFieldIndexing : public FieldIndexing {
  public:
     using FieldIndexing::FieldIndexing;
 
-    explicit ScalarFieldIndexing(const FieldMeta& field_meta,
-                                 const FieldIndexMeta& field_index_meta,
-                                 int64_t segment_max_row_count,
-                                 const SegcoreConfig& segcore_config,
-                                 const VectorBase* field_raw_data);
+    explicit ScalarFieldIndexing(
+        const FieldMeta& field_meta,
+        const FieldIndexMeta& field_index_meta,
+        int64_t segment_max_row_count,
+        const SegcoreConfig& segcore_config,
+        const VectorBase* field_raw_data,
+        std::optional<local::FileSystem> local_files = std::nullopt);
 
     void
     AppendSegmentIndexDense(int64_t reserved_offset,
@@ -366,15 +373,20 @@ CreateIndex(const FieldMeta& field_meta,
             const FieldIndexMeta& field_index_meta,
             int64_t segment_max_row_count,
             const SegcoreConfig& segcore_config,
-            const VectorBase* field_raw_data = nullptr);
+            const VectorBase* field_raw_data = nullptr,
+            std::optional<local::FileSystem> local_files = std::nullopt);
 
 class IndexingRecord {
  public:
-    explicit IndexingRecord(const Schema& schema,
-                            const IndexMetaPtr& indexMetaPtr,
-                            const SegcoreConfig& segcore_config,
-                            const InsertRecord<false>* insert_record)
-        : index_meta_(indexMetaPtr), segcore_config_(segcore_config) {
+    explicit IndexingRecord(
+        const Schema& schema,
+        const IndexMetaPtr& indexMetaPtr,
+        const SegcoreConfig& segcore_config,
+        const InsertRecord<false>* insert_record,
+        std::optional<local::FileSystem> local_files = std::nullopt)
+        : index_meta_(indexMetaPtr),
+          segcore_config_(segcore_config),
+          local_files_(std::move(local_files)) {
         Initialize(schema, insert_record);
     }
 
@@ -412,7 +424,8 @@ class IndexingRecord {
                                         vec_field_meta,
                                         index_meta_->GetIndexMaxRowCount(),
                                         segcore_config_,
-                                        field_raw_data));
+                                        field_raw_data,
+                                        local_files_));
                     }
                 }
             } else if (field_meta.get_data_type() == DataType::GEOMETRY) {
@@ -433,7 +446,8 @@ class IndexingRecord {
                                     geo_field_meta,
                                     index_meta_->GetIndexMaxRowCount(),
                                     segcore_config_,
-                                    field_raw_data));
+                                    field_raw_data,
+                                    local_files_));
                 }
             }
         }
@@ -540,6 +554,7 @@ class IndexingRecord {
  private:
     IndexMetaPtr index_meta_;
     const SegcoreConfig& segcore_config_;
+    std::optional<local::FileSystem> local_files_;
 
     // control info
     std::atomic<int64_t> resource_ack_ = 0;

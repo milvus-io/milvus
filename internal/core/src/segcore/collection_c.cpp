@@ -39,6 +39,28 @@ NewCollection(const void* schema_proto_blob,
 }
 
 CStatus
+NewCollectionWithLocalFileSystem(const void* schema_proto_blob,
+                                 const int64_t length,
+                                 CLocalFileSystem filesystem,
+                                 CCollection* new_collection) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(filesystem != nullptr, "local filesystem is null");
+        const auto& node_cache =
+            *static_cast<milvus::local::FileSystem*>(filesystem);
+        auto collection = std::make_unique<milvus::segcore::Collection>(
+            schema_proto_blob,
+            length,
+            node_cache.Subtree(milvus::local::Path("local_chunk")));
+        *new_collection = collection.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 UpdateSchema(CCollection collection,
              const void* proto_blob,
              const int64_t length,

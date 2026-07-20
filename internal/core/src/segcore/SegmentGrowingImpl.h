@@ -431,10 +431,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
                          const SegcoreConfig& segcore_config,
                          int64_t segment_id);
 
-    explicit SegmentGrowingImpl(SchemaPtr schema,
-                                IndexMetaPtr indexMeta,
-                                const SegcoreConfig& segcore_config,
-                                int64_t segment_id)
+    explicit SegmentGrowingImpl(
+        SchemaPtr schema,
+        IndexMetaPtr indexMeta,
+        const SegcoreConfig& segcore_config,
+        int64_t segment_id,
+        std::optional<local::FileSystem> local_files = std::nullopt)
         : mmap_descriptor_(storage::MmapManager::GetInstance()
                                .GetMmapChunkManager()
                                ->Register()),
@@ -449,8 +451,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
           index_meta_(indexMeta),
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
-          indexing_record_(
-              *schema_, index_meta_, segcore_config_, &insert_record_),
+          indexing_record_(*schema_,
+                           index_meta_,
+                           segcore_config_,
+                           &insert_record_,
+                           std::move(local_files)),
           id_(segment_id),
           deleted_record_(
               &insert_record_,
@@ -925,9 +930,10 @@ CreateGrowingSegment(
     SchemaPtr schema,
     IndexMetaPtr indexMeta,
     int64_t segment_id = 0,
-    const SegcoreConfig& conf = SegcoreConfig::default_config()) {
+    const SegcoreConfig& conf = SegcoreConfig::default_config(),
+    std::optional<local::FileSystem> local_files = std::nullopt) {
     return std::make_unique<SegmentGrowingImpl>(
-        schema, indexMeta, conf, segment_id);
+        schema, indexMeta, conf, segment_id, std::move(local_files));
 }
 
 }  // namespace milvus::segcore

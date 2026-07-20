@@ -28,6 +28,7 @@ type CreateCCollectionRequest struct {
 	Schema        *schemapb.CollectionSchema
 	IndexMeta     *segcorepb.CollectionIndexMeta
 	LoadFieldList []int64
+	LocalFiles    *LocalFileSystem
 }
 
 // CreateCCollection creates a CCollection from a CreateCCollectionRequest.
@@ -44,7 +45,12 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 		}
 	}
 	var ptr C.CCollection
-	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &ptr)
+	var status C.CStatus
+	if req.LocalFiles != nil {
+		status = C.NewCollectionWithLocalFileSystem(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), req.LocalFiles.rawPointer(), &ptr)
+	} else {
+		status = C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &ptr)
+	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
