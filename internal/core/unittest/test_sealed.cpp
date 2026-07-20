@@ -4031,11 +4031,71 @@ TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
     proto::segcore::SegmentLoadInfo stale_proto =
         sealed->TestGetSegmentLoadInfo()->GetProto();
     milvus::OpContext op_ctx;
-    EXPECT_NO_THROW(sealed->Reopen(&op_ctx, stale_proto, stale_schema));
+    EXPECT_NO_THROW(
+        sealed->Reopen(&op_ctx, stale_proto, stale_schema, nullptr));
 
     auto snapshot = sealed->TestGetLoadInfoSnapshot();
     EXPECT_TRUE(snapshot->HasFieldInSchema(new_field));
     EXPECT_TRUE(sealed->HasFieldData(new_field));
+}
+
+// A non-null index meta passed to the 4-arg reopen must be published into the
+// segment's collection-level index meta, so a field added after the segment was
+// created becomes searchable (its GetFieldIndexMeta lookup succeeds instead of
+// asserting index-not-found). A regression that drops the refreshed meta would
+// leave HasField(new_field) false here while still compiling and passing the
+// nullptr-meta reopen tests.
+TEST(SealedSegmentReopen, ReopenWithNonNullIndexMetaPublishesNewFieldIndex) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk_id);
+    old_schema->set_schema_version(1);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    // New schema adds a nullable vector field that carries a freshly built index.
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    auto new_field = new_schema->AddDebugField("added_vec",
+                                               DataType::VECTOR_FLOAT,
+                                               128,
+                                               knowhere::metric::L2,
+                                               /*nullable=*/true);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(2);
+
+    // Non-null index meta that introduces the new field's index.
+    std::map<std::string, std::string> index_params = {
+        {"index_type", "FLAT"}, {"metric_type", knowhere::metric::L2}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta new_field_index_meta(
+        new_field, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> field_map = {
+        {new_field, new_field_index_meta}};
+    IndexMetaPtr new_index_meta =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(field_map));
+
+    // Precondition: the currently published index meta does not know the field.
+    auto before = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_FALSE(before->col_index_meta != nullptr &&
+                 before->col_index_meta->HasField(new_field));
+
+    proto::segcore::SegmentLoadInfo proto =
+        sealed->TestGetSegmentLoadInfo()->GetProto();
+    milvus::OpContext op_ctx;
+    EXPECT_NO_THROW(sealed->Reopen(&op_ctx, proto, new_schema, new_index_meta));
+
+    auto after = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(after->col_index_meta, nullptr);
+    EXPECT_TRUE(after->col_index_meta->HasField(new_field))
+        << "reopen must publish the non-null index meta for the added field";
 }
 
 TEST(SealedSegmentReopen, DropFieldReopenPublishesSchemaAndLoadInfoTogether) {
@@ -4883,6 +4943,7 @@ TEST(SealedSegmentCowState,
         auto staged = sealed->TestBuildNextPublishedState(
             current,
             {current->schema,
+             current->col_index_meta,
              current->load_info,
              sealed->TestFreezeRuntimeResourceState(runtime),
              current->commit_ts});
@@ -5582,6 +5643,7 @@ TEST(SealedSegmentCowState,
     auto next = sealed->TestBuildNextPublishedState(
         current,
         {current->schema,
+         current->col_index_meta,
          current->load_info,
          sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
          current->commit_ts});
@@ -5624,6 +5686,7 @@ TEST(SealedSegmentCowState,
     auto next = sealed->TestBuildNextPublishedState(
         current,
         {current->schema,
+         current->col_index_meta,
          current->load_info,
          sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
          current->commit_ts});

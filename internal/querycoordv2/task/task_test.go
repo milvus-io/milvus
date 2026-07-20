@@ -250,7 +250,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 				},
 			},
 		},
-	}, nil)
+	}, 0, nil)
 	suite.cluster.EXPECT().WatchDmChannels(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
 	// Test subscribe channel task
@@ -445,7 +445,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, 0, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 			{
@@ -560,7 +560,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, 0, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 			{
@@ -854,7 +854,7 @@ func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterLoadRPC() {
 			},
 		}, nil
 	})
-	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, 0, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
 		{
 			ID:            segmentID,
@@ -1039,7 +1039,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, 0, nil)
 	for _, segment := range suite.moveSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 			{
@@ -1173,7 +1173,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, 0, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 			{
@@ -1327,7 +1327,7 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, 0, nil)
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 			{
@@ -2489,7 +2489,7 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 		{
 			CollectionID: suite.collection,
 		},
-	}, nil)
+	}, 0, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
 		{
 			ID:            segmentID,

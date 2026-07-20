@@ -971,9 +971,11 @@ std::shared_ptr<const ChunkedSegmentSealedImpl::PublishedSegmentState>
 ChunkedSegmentSealedImpl::BuildPublishedState(
     const SchemaPtr& schema,
     const std::shared_ptr<const SegmentLoadInfo>& load_info,
-    Timestamp commit_ts) const {
+    Timestamp commit_ts,
+    const IndexMetaPtr& col_index_meta) const {
     auto state = std::make_shared<PublishedSegmentState>();
     state->schema = schema;
+    state->col_index_meta = col_index_meta;
     state->load_info = load_info;
     state->runtime = BuildRuntimeResourceState();
     state->commit_ts = commit_ts;
@@ -1136,6 +1138,7 @@ ChunkedSegmentSealedImpl::ClonePublishedState(
         return state;
     }
     state->schema = current->schema;
+    state->col_index_meta = current->col_index_meta;
     state->load_info = current->load_info;
     state->runtime =
         current->runtime ? current->runtime : BuildRuntimeResourceState();
@@ -1159,6 +1162,9 @@ ChunkedSegmentSealedImpl::ApplyDeltaToState(PublishedSegmentState& state,
                                             const StateDelta& delta) const {
     if (delta.schema.has_value()) {
         state.schema = *delta.schema;
+    }
+    if (delta.col_index_meta.has_value()) {
+        state.col_index_meta = *delta.col_index_meta;
     }
     if (delta.load_info.has_value()) {
         state.load_info = *delta.load_info;
@@ -3559,8 +3565,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         std::map<std::string, std::string> index_info;
         if (search_info.metric_type_ == knowhere::metric::BM25 ||
             search_info.metric_type_ == knowhere::metric::MHJACCARD) {
-            index_info =
-                col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
+            index_info = snapshot->col_index_meta->GetFieldIndexMeta(field_id)
+                             .GetIndexParams();
         }
 
         query::SearchOnSealedColumn(*snapshot->schema,
@@ -4527,7 +4533,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                            .GetMmapChunkManager()
                            ->Register()),
       id_(segment_id),
-      col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           nullptr,
@@ -4665,8 +4670,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
           segment_id) {
     auto load_info = std::make_shared<const SegmentLoadInfo>(
         milvus::proto::segcore::SegmentLoadInfo(), schema);
-    std::atomic_store(&published_state_,
-                      BuildPublishedState(schema, load_info, commit_ts_));
+    std::atomic_store(
+        &published_state_,
+        BuildPublishedState(schema, load_info, commit_ts_, index_meta));
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
@@ -6584,13 +6590,26 @@ ChunkedSegmentSealedImpl::generate_interim_index(
     const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
     milvus::OpContext* op_ctx,
     StagedStateCommitter* committer) {
-    if (col_index_meta_ == nullptr || !col_index_meta_->HasField(field_id)) {
+    // During reopen/load the staged snapshot (via committer) carries the
+    // refreshed schema and index meta so a newly added field is visible; fall
+    // back to the published snapshot when called without a committer (tests).
+    // schema and col_index_meta MUST come from the same snapshot: reading the
+    // staged meta but the published (pre-Publish) schema would throw on a
+    // newly added field that is not yet in the published schema.
+    std::shared_ptr<const PublishedSegmentState> published_snapshot;
+    if (committer == nullptr) {
+        published_snapshot = CapturePublishedState();
+    }
+    const PublishedSegmentState* state_snapshot =
+        committer != nullptr ? committer->staged_state()
+                             : published_snapshot.get();
+    const IndexMetaPtr& col_index_meta = state_snapshot->col_index_meta;
+    if (col_index_meta == nullptr || !col_index_meta->HasField(field_id)) {
         return false;
     }
-    auto snapshot = CapturePublishedState();
-    auto schema_snapshot = snapshot->schema;
+    auto schema_snapshot = state_snapshot->schema;
     auto& field_meta = schema_snapshot->operator[](field_id);
-    auto& field_index_meta = col_index_meta_->GetFieldIndexMeta(field_id);
+    auto& field_index_meta = col_index_meta->GetFieldIndexMeta(field_id);
     auto& index_params = field_index_meta.GetIndexParams();
 
     bool is_sparse =
@@ -6625,7 +6644,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                 return false;
             }
         } else {
-            if (RuntimeVectorIndexReady(snapshot->runtime.get(), field_id)) {
+            if (RuntimeVectorIndexReady(state_snapshot->runtime.get(),
+                                        field_id)) {
                 return false;
             }
         }
@@ -7362,30 +7382,34 @@ void
 ChunkedSegmentSealedImpl::Reopen(
     milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
-    Reopen(op_ctx, new_load_info, nullptr);
+    Reopen(op_ctx, new_load_info, nullptr, nullptr);
 }
 
 void
 ChunkedSegmentSealedImpl::Reopen(
     milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
-    SchemaPtr new_schema) {
+    SchemaPtr new_schema,
+    const IndexMetaPtr& new_index_meta) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
 
     auto current = CapturePublishedState();
     auto current_schema = current->schema;
-    if (new_schema && new_schema->get_schema_version() <
-                          current_schema->get_schema_version()) {
-        LOG_WARN(
-            "Skip stale reopen segment {}, current schema version {}, incoming "
-            "schema version {}",
-            id_,
-            current_schema->get_schema_version(),
-            new_schema->get_schema_version());
-        return;
-    }
-
-    auto target_schema = new_schema ? std::move(new_schema) : current_schema;
+    // A reopen queued before a concurrent LazyCheckSchema advanced this segment
+    // may arrive with an older schema. Clamp to the current schema (never roll
+    // it back) but still apply this reopen's load info and index meta, whose
+    // freshness is independent of the schema version. Returning here would drop
+    // them while reporting success, stranding the segment on stale data/meta
+    // with no retrigger. Only the schema needs clamping: index meta has a single
+    // serialized writer (Reopen) that LazyCheckSchema never races, so it cannot
+    // roll back and needs no guard of its own.
+    auto target_schema =
+        (new_schema && new_schema->get_schema_version() >=
+                           current_schema->get_schema_version())
+            ? std::move(new_schema)
+            : current_schema;
+    auto target_index_meta =
+        new_index_meta ? new_index_meta : current->col_index_meta;
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
@@ -7411,6 +7435,7 @@ ChunkedSegmentSealedImpl::Reopen(
     auto next_runtime = CloneMutableRuntimeResourceState();
     auto staged = ClonePublishedState(current);
     staged->schema = target_schema;
+    staged->col_index_meta = target_index_meta;
     staged->load_info = std::make_shared<const SegmentLoadInfo>(new_local);
     staged->runtime = ToConstRuntimeState(next_runtime);
     staged->commit_ts = current->commit_ts;
@@ -7424,6 +7449,7 @@ ChunkedSegmentSealedImpl::Reopen(
                                 published,
                                 ToConstRuntimeState(std::move(next_runtime)),
                                 current->commit_ts);
+    delta.col_index_meta = target_index_meta;
     delta.published_index_ready_bitset =
         staged->published_index_ready_bitset.clone();
     delta.published_binlog_index_ready_bitset =

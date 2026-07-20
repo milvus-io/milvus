@@ -140,7 +140,7 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 			FieldID: 101,
 			IndexID: 1000,
 		},
-	}, nil)
+	}, 0, nil)
 
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
 		Return([]*datapb.SegmentInfo{}, nil).Maybe()
@@ -227,7 +227,7 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 			FieldID: 101,
 			IndexID: 1000,
 		},
-	}, nil)
+	}, 0, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
 		Return([]*datapb.SegmentInfo{}, nil).Maybe()
 	tasks := checker.Check(context.Background())
@@ -274,7 +274,7 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 			FieldID: 101,
 			IndexID: 1000,
 		},
-	}, nil)
+	}, 0, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
 		Return([]*datapb.SegmentInfo{}, nil).Maybe()
 	tasks := checker.Check(context.Background())
@@ -320,7 +320,7 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 
 	// broker
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Call.Return(
-		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, uint64, error) {
 			return []*indexpb.IndexInfo{
 				{
 					FieldID: 101,
@@ -330,7 +330,7 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 					FieldID: 102,
 					IndexID: 1001,
 				},
-			}, nil
+			}, 0, nil
 		},
 	)
 	suite.broker.EXPECT().GetIndexInfo(mock.Anything, mock.Anything, mock.AnythingOfType("int64")).
@@ -424,7 +424,7 @@ func TestRemoveRedundantIndex(t *testing.T) {
 			FieldID: 101,
 			IndexID: 1000,
 		},
-	}, nil)
+	}, 0, nil)
 	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
 		Return([]*datapb.SegmentInfo{}, nil).Maybe()
 
@@ -483,13 +483,13 @@ func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
 
 	// broker
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Call.Return(
-		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, uint64, error) {
 			return []*indexpb.IndexInfo{
 				{
 					FieldID: 101,
 					IndexID: 1000,
 				},
-			}, nil
+			}, 0, nil
 		},
 	)
 	mockJSONKeyStats := map[int64]*datapb.JsonKeyStats{
@@ -560,13 +560,13 @@ func (suite *IndexCheckerSuite) TestJsonIndexNotMatch() {
 
 	// broker
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Call.Return(
-		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, uint64, error) {
 			return []*indexpb.IndexInfo{
 				{
 					FieldID: 101,
 					IndexID: 1000,
 				},
-			}, nil
+			}, 0, nil
 		},
 	)
 	suite.broker.EXPECT().GetIndexInfo(mock.Anything, mock.Anything, mock.AnythingOfType("int64")).
@@ -631,13 +631,13 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 
 	// broker
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Call.Return(
-		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, uint64, error) {
 			return []*indexpb.IndexInfo{
 				{
 					FieldID: 101,
 					IndexID: 1000,
 				},
-			}, nil
+			}, 0, nil
 		},
 	)
 	mockJSONKeyStats := map[int64]*datapb.JsonKeyStats{

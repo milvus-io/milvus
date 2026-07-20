@@ -39,6 +39,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -317,10 +318,14 @@ class SegmentInterface {
     Reopen(milvus::OpContext* op_ctx,
            const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
+    // new_index_meta refreshes the segment's collection-level index meta
+    // (nullptr keeps the current one); required so a field added after segment
+    // creation (e.g. a BM25 sparse field) becomes searchable after reopen.
     virtual void
     Reopen(milvus::OpContext* op_ctx,
            const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
-           SchemaPtr new_schema) = 0;
+           SchemaPtr new_schema,
+           const IndexMetaPtr& new_index_meta) = 0;
 
     virtual void
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) = 0;

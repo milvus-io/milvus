@@ -1092,7 +1092,7 @@ func (s *Server) ListIndexes(ctx context.Context, req *indexpb.ListIndexesReques
 		}, nil
 	}
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "")
+	indexes, indexMetaVersion := s.meta.indexMeta.GetIndexesForCollectionWithVersion(req.GetCollectionID(), "")
 
 	indexInfos := lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
 		return &indexpb.IndexInfo{
@@ -1107,7 +1107,8 @@ func (s *Server) ListIndexes(ctx context.Context, req *indexpb.ListIndexesReques
 		}
 	})
 	return &indexpb.ListIndexesResponse{
-		Status:     merr.Success(),
-		IndexInfos: indexInfos,
+		Status:           merr.Success(),
+		IndexInfos:       indexInfos,
+		IndexMetaVersion: indexMetaVersion,
 	}, nil
 }

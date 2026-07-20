@@ -374,6 +374,21 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	}
 	defer runtime.KeepAlive(schemaBlob)
 
+	// IndexMeta is optional: a nil/empty blob tells segcore to keep the
+	// segment's current collection-level index meta.
+	var indexMetaBlob []byte
+	if req.IndexMeta != nil {
+		indexMetaBlob, err = proto.Marshal(req.IndexMeta)
+		if err != nil {
+			return err
+		}
+	}
+	defer runtime.KeepAlive(indexMetaBlob)
+	var indexMetaPtr *C.uint8_t
+	if len(indexMetaBlob) > 0 {
+		indexMetaPtr = (*C.uint8_t)(unsafe.Pointer(&indexMetaBlob[0]))
+	}
+
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
 			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
@@ -384,6 +399,8 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 				unsafe.Pointer(&schemaBlob[0]),
 				C.int64_t(len(schemaBlob)),
 				C.uint64_t(req.SchemaVersion),
+				indexMetaPtr,
+				C.int64_t(len(indexMetaBlob)),
 			))
 		},
 		cgo.WithName("segment-reopen"),

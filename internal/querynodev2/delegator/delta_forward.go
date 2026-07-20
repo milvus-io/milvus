@@ -170,7 +170,12 @@ func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
 		LoadScope:     querypb.LoadScope_Delta,
 		Schema:        req.GetSchema(),
 		IndexInfoList: req.GetIndexInfoList(),
-		Version:       req.GetVersion(),
+		// Forward LoadMeta so the target's collection index-meta refresh carries the
+		// coordinator-stamped index_meta_version (#51584); otherwise it arrives as
+		// version 0 and the unconditional v0 refresh rolls the collection meta back
+		// to this delta-forward's snapshot.
+		LoadMeta: req.GetLoadMeta(),
+		Version:  req.GetVersion(),
 	})
 }
 

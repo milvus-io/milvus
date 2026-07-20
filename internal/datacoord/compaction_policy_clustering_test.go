@@ -64,7 +64,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 
 	compactionTaskMeta, _ := newCompactionTaskMeta(context.TODO(), s.catalog)
 	partitionStatsMeta, _ := newPartitionStatsMeta(context.TODO(), s.catalog)
-	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog, nil)
+	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog, nil, nil)
 
 	meta := &meta{
 		segments:           NewSegmentsInfo(),

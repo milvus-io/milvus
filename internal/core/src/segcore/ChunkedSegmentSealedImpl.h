@@ -293,7 +293,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     Reopen(milvus::OpContext* op_ctx,
            const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
-           SchemaPtr new_schema) override;
+           SchemaPtr new_schema,
+           const IndexMetaPtr& new_index_meta) override;
 
     void
     LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
@@ -366,6 +367,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     struct PublishedSegmentState {
         SchemaPtr schema;
+        // Collection-level index meta; snapshot-published so reopen can refresh
+        // it (e.g. a newly added BM25 field) without racing readers.
+        IndexMetaPtr col_index_meta;
         std::shared_ptr<const SegmentLoadInfo> load_info;
         std::shared_ptr<const RuntimeResourceState> runtime;
         Timestamp commit_ts{0};
@@ -382,6 +386,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     struct StateDelta {
         std::optional<SchemaPtr> schema;
+        std::optional<IndexMetaPtr> col_index_meta;
         std::optional<std::shared_ptr<const SegmentLoadInfo>> load_info;
         std::optional<std::shared_ptr<const RuntimeResourceState>> runtime;
         std::optional<Timestamp> commit_ts;
@@ -1403,7 +1408,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<const PublishedSegmentState>
     BuildPublishedState(const SchemaPtr& schema,
                         const std::shared_ptr<const SegmentLoadInfo>& load_info,
-                        Timestamp commit_ts) const;
+                        Timestamp commit_ts,
+                        const IndexMetaPtr& col_index_meta) const;
 
     std::shared_ptr<PublishedSegmentState>
     ClonePublishedState(
@@ -2208,8 +2214,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     std::unordered_set<FieldId> pending_text_index_fields_;
 
-    // only useful in binlog
-    IndexMetaPtr col_index_meta_;
     SegcoreConfig segcore_config_;
 
     SegmentStats stats_{};

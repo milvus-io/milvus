@@ -44,7 +44,9 @@ type Broker interface {
 	DescribeCollection(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error)
 	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
-	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
+	// ListIndexes returns the collection's index infos together with the
+	// coordinator-stamped index-meta version (0 when the server does not stamp).
+	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, uint64, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
@@ -371,7 +373,7 @@ func (broker *CoordinatorBroker) describeIndex(ctx context.Context, collectionID
 	return resp.GetIndexInfos(), nil
 }
 
-func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
+func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
@@ -383,11 +385,12 @@ func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID U
 	if err != nil {
 		if errors.Is(err, merr.ErrServiceUnimplemented) {
 			mlog.Warn(context.TODO(), "datacoord does not implement ListIndex API fallback to DescribeIndex")
-			return broker.describeIndex(ctx, collectionID)
+			infos, err := broker.describeIndex(ctx, collectionID)
+			return infos, 0, err
 		}
 		mlog.Warn(context.TODO(), "failed to fetch index meta", mlog.Err(err))
-		return nil, err
+		return nil, 0, err
 	}
 
-	return resp.GetIndexInfos(), nil
+	return resp.GetIndexInfos(), resp.GetIndexMetaVersion(), nil
 }

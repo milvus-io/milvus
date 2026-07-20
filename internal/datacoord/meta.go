@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -259,7 +260,7 @@ func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, erro
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
+func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker, alloc allocator.Allocator) (*meta, error) {
 	// Fetch collection IDs first so both reloadFromKV and indexMeta can use them for per-collection loading.
 	collectionIDs, err := showCollectionIDs(ctx, broker)
 	if err != nil {
@@ -294,7 +295,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	g.Go(func() error {
 		var err error
-		im, err = newIndexMeta(ctx, catalog, collectionIDs)
+		im, err = newIndexMeta(ctx, catalog, collectionIDs, alloc)
 		return err
 	})
 

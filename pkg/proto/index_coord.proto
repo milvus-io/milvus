@@ -289,6 +289,10 @@ message ListIndexesRequest {
 message ListIndexesResponse {
     common.Status status = 1;
     repeated IndexInfo index_infos = 2;
+    // Monotonic version of the collection's index meta, stamped under the
+    // index-meta mutation lock; orders index_infos snapshots across responses.
+    // 0 means the server does not stamp versions (legacy).
+    uint64 index_meta_version = 3;
 }
 
 message AnalyzeTask {
