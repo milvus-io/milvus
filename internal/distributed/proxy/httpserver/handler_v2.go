@@ -98,7 +98,8 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/collections/flush":                "Flush",
 
 	"/v2/vectordb/collections/fields/alter_properties": "AlterCollectionField",
-	"/v2/vectordb/collections/fields/add":              "AddCollectionField",
+	"/v2/vectordb/collections/fields/add":              "AlterCollectionSchema",
+	"/v2/vectordb/collections/fields/drop":             "AlterCollectionSchema",
 	"/v2/vectordb/collections/struct_fields/add":       "AddCollectionStructField",
 
 	"/v2/vectordb/databases/create":           "CreateDatabase",
@@ -223,6 +224,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	// /collections/fields/add
 	router.POST(CollectionFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionField))))
+	router.POST(CollectionFieldCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionDropField{} }, wrapperTraceLog(h.dropCollectionField))))
 	router.POST(CollectionStructFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionStructField))))
 
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
@@ -441,13 +443,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		// logged at Warn (actionable); input failures at Info (expected user
 		// mistakes — keeping them at Warn would spam the logs).
 		if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
-			var status *commonpb.Status
-			switch r := resp.(type) {
-			case interface{ GetStatus() *commonpb.Status }:
-				status = r.GetStatus()
-			case *commonpb.Status:
-				status = r
-			}
+			status, _ := requestutil.GetStatusFromResponse(resp)
 			errType := merr.SystemError
 			if label == metrics.FailInputLabel {
 				errType = merr.InputError
@@ -1280,22 +1276,71 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 		return nil, err
 	}
 
-	bs, err := proto.Marshal(schemaProto)
-	if err != nil {
-		return nil, err
-	}
-
-	req := &milvuspb.AddCollectionFieldRequest{
+	req := &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		Schema:         bs,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: schemaProto},
+					},
+				},
+			},
+		},
 	}
 
 	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
-		return h.proxy.AddCollectionField(reqCtx, req.(*milvuspb.AddCollectionFieldRequest))
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionSchema", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		r, callErr := h.proxy.AlterCollectionSchema(reqCtx, req.(*milvuspb.AlterCollectionSchemaRequest))
+		if callErr == nil {
+			callErr = merr.Error(r.GetAlterStatus())
+		}
+		return r, callErr
 	})
 
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropCollectionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionDropField)
+	hasFieldName := httpReq.FieldName != ""
+	hasFieldID := httpReq.FieldID != nil
+	if hasFieldName == hasFieldID {
+		err := merr.WrapErrParameterInvalidMsg("exactly one of fieldName or fieldId is required")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	if hasFieldID && *httpReq.FieldID <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("fieldId must be greater than 0")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	dropRequest := &milvuspb.AlterCollectionSchemaRequest_DropRequest{}
+	if hasFieldName {
+		dropRequest.Identifier = &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: httpReq.FieldName}
+	} else {
+		dropRequest.Identifier = &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{FieldId: *httpReq.FieldID}
+	}
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{DropRequest: dropRequest},
+		},
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionSchema", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		r, callErr := h.proxy.AlterCollectionSchema(reqCtx, req.(*milvuspb.AlterCollectionSchemaRequest))
+		if callErr == nil {
+			callErr = merr.Error(r.GetAlterStatus())
+		}
+		return r, callErr
+	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
