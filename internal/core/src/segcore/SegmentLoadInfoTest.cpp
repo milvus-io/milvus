@@ -31,6 +31,7 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/IndexFactory.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
@@ -3814,3 +3815,122 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogsDroppedField) {
 // but it cannot be unit-tested because GetColumnGroups() requires Loon FFI
 // (real manifest file access). The filter uses the same pattern
 // (new_info.schema_->has_field()) as ComputeDiffBinlogs tested above.
+
+// ==================== storage-v3 raw-index skip (vector-only) ================
+// Regression tests for the DiskANN double-footprint fix (PR #51541): on
+// storage-v3 the skip is restricted to VECTOR fields — a vector index
+// (IVF_FLAT / DiskANN / HNSW-with-raw) reconstructs the raw vector at retrieve
+// (get_vector), so its raw column is dropped. Scalar / JSON / ARRAY raw columns
+// always stay resident (their index-read paths do not cover every consumer).
+// The vector skip + retrieve-from-index correctness is exercised end-to-end by
+// the storage-v3 e2e / go-sdk suites; these unit tests pin the LoadDiff
+// classification, in particular that scalars are NOT skipped.
+// CanUseIndexRawDataForField additionally excludes JSON/ARRAY at the source.
+
+namespace {
+
+// True if `field_id` appears in any (group_index, fields) entry.
+bool
+ColumnGroupFieldPresent(
+    const std::vector<std::pair<int, std::vector<FieldId>>>& groups,
+    int64_t field_id) {
+    for (const auto& [group_index, fields] : groups) {
+        for (const auto& f : fields) {
+            if (f.get() == field_id) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Attach a scalar index (index_type) to a field so BuildCache populates
+// field_index_has_raw_data_ (ASCENDING_SORT/STL_SORT => has raw data,
+// INVERTED => no raw data).
+void
+AddScalarIndex(proto::segcore::SegmentLoadInfo& proto,
+               int64_t field_id,
+               int64_t index_id,
+               const std::string& index_type) {
+    auto* idx = proto.add_index_infos();
+    idx->set_fieldid(field_id);
+    idx->set_indexid(index_id);
+    idx->add_index_file_paths("/idx/" + std::to_string(field_id));
+    auto* param = idx->add_index_params();
+    param->set_key("index_type");
+    param->set_value(index_type);
+}
+
+}  // namespace
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupDoesNotSkipScalarRawDataIndex) {
+    // The skip is vector-only. A scalar field (108, INT64) with a raw-data
+    // index (STL_SORT) must NOT be skipped: its raw column stays resident
+    // (loaded) and is never dropped, because scalar index-read paths do not
+    // cover every consumer (nullable Reverse_Lookup, column-scan-only exprs).
+    auto new_proto = MakeManifestProto("/manifest/new");
+    AddScalarIndex(new_proto, 108, 6001, milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(MakeColumnGroups({}));
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{108}, {"/cg/108.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    bool loaded = ColumnGroupFieldPresent(diff.column_groups_to_load, 108) ||
+                  ColumnGroupFieldPresent(diff.column_groups_to_lazyload, 108);
+    EXPECT_TRUE(loaded)
+        << "scalar raw column must stay resident (skip is vector-only)";
+    EXPECT_EQ(diff.field_data_to_drop.count(FieldId(108)), 0u)
+        << "scalar raw column must not be dropped";
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffColumnGroupNeverSkipsPrimaryKey) {
+    // The pk (field 100) column must stay resident even when its index carries
+    // raw data: sorted-segment row navigation (num_rows_until_chunk /
+    // get_chunk_by_offset) reads the pk column directly, and a pk scalar index
+    // is not registered for expression index-reads.
+    auto new_proto = MakeManifestProto("/manifest/new");
+    AddScalarIndex(new_proto, 100, 6002, milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(MakeColumnGroups({}));
+    SegmentLoadInfo new_info(new_proto, schema_);
+    new_info.SetColumnGroupsForTesting(
+        MakeColumnGroups({{{100}, {"/cg/100.parquet"}}}));
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // pk must NOT be skipped: it lands in a load list (lazy, since its index
+    // reports raw data, but still resident).
+    bool pk_loaded =
+        ColumnGroupFieldPresent(diff.column_groups_to_load, 100) ||
+        ColumnGroupFieldPresent(diff.column_groups_to_lazyload, 100);
+    EXPECT_TRUE(pk_loaded)
+        << "primary key column must load even when its index has raw data";
+}
+
+TEST(IndexFactoryRawDataTest, CanUseIndexRawDataForFieldExcludesJsonAndArray) {
+    // JSON and ARRAY indexes only index a projection (a JSON path / array
+    // elements) and cannot reconstruct the whole value, so their index never
+    // substitutes for the raw column, regardless of the index's own has_raw_data.
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::JSON, true));
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::ARRAY, true));
+    // Other field types pass the index's has_raw_data through unchanged.
+    EXPECT_TRUE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::INT64, true));
+    EXPECT_TRUE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::VECTOR_FLOAT, true));
+    EXPECT_TRUE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::VARCHAR, true));
+    // has_raw_data == false is always false.
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::INT64, false));
+    EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
+        DataType::JSON, false));
+}
