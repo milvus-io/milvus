@@ -353,6 +353,7 @@ message LoadMetaInfo {
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
     uint64 schema_barrier_ts = 9; // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
+    uint64 index_meta_version = 10; // Orders index-meta payloads independently of schema_barrier_ts; 0 = unstamped (legacy), consumer applies unconditionally.
 }
 
 message WatchDmChannelsRequest {

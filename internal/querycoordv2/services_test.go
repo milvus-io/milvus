@@ -2126,7 +2126,7 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 
 func (suite *ServiceSuite) expectLoadMetaRPCs() {
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
-		Return(nil, nil).Maybe()
+		Return(nil, 0, nil).Maybe()
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {

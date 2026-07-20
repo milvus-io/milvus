@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -74,10 +75,20 @@ type indexMeta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 
+	// allocator stamps index-meta versions from the global TSO; nil disables
+	// stamping (versions stay 0 and consumers apply index meta unconditionally).
+	allocator allocator.Allocator
+
 	// collectionIndexes records which indexes are on the collection
 	// collID -> indexID -> index
 	fieldIndexLock sync.RWMutex
 	indexes        map[UniqueID]map[UniqueID]*model.Index
+	// indexMetaVersions orders each collection's index snapshot; stamped inside
+	// fieldIndexLock so version order matches state order.
+	indexMetaVersions map[UniqueID]uint64
+	// baseIndexMetaVersion covers collections with no post-reload mutation;
+	// stamped once after reload, newer than every version issued before restart.
+	baseIndexMetaVersion uint64
 
 	// buildID2Meta records building index meta information of the segment
 	segmentBuildInfo *segmentBuildInfo
@@ -158,14 +169,16 @@ func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog, collectionIDs []int64) (*indexMeta, error) {
+func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog, collectionIDs []int64, alloc allocator.Allocator) (*indexMeta, error) {
 	mt := &indexMeta{
-		ctx:              ctx,
-		catalog:          catalog,
-		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		ctx:               ctx,
+		catalog:           catalog,
+		allocator:         alloc,
+		indexes:           make(map[UniqueID]map[UniqueID]*model.Index),
+		indexMetaVersions: make(map[UniqueID]uint64),
+		keyLock:           lock.NewKeyLock[UniqueID](),
+		segmentBuildInfo:  newSegmentIndexBuildInfo(),
+		segmentIndexes:    typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
 	err := mt.reloadFromKV(collectionIDs)
 	if err != nil {
@@ -235,6 +248,17 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 		return err
 	}
 
+	// Stamp the reloaded snapshot. The TSO is monotonic across restarts, so the
+	// base version is newer than every version this meta issued before reload.
+	if m.allocator != nil {
+		baseVersion, err := m.allocator.AllocTimestamp(m.ctx)
+		if err != nil {
+			mlog.Error(context.TODO(), "indexMeta reloadFromKV alloc base index-meta version fail", mlog.Err(err))
+			return err
+		}
+		m.baseIndexMetaVersion = baseVersion
+	}
+
 	// Update Prometheus metrics asynchronously. Launched after g.Wait() so that
 	// both m.indexes (from goroutine 1) and collectionSegIdxes (from goroutine 2)
 	// are fully populated. Only count active indexes (index definition alive).
@@ -263,6 +287,23 @@ func (m *indexMeta) updateCollectionIndex(index *model.Index) {
 		m.indexes[index.CollectionID] = make(map[UniqueID]*model.Index)
 	}
 	m.indexes[index.CollectionID][index.IndexID] = index
+}
+
+// allocIndexMetaVersion draws a fresh TSO version for an index-meta mutation.
+// Call inside fieldIndexLock and before the catalog write, so version order
+// matches mutation order and an allocation failure aborts before persisting.
+func (m *indexMeta) allocIndexMetaVersion(ctx context.Context) (uint64, error) {
+	if m.allocator == nil {
+		return 0, nil
+	}
+	return m.allocator.AllocTimestamp(ctx)
+}
+
+func (m *indexMeta) setIndexMetaVersionLocked(collID UniqueID, version uint64) {
+	if version == 0 {
+		return
+	}
+	m.indexMetaVersions[collID] = version
 }
 
 func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
@@ -524,6 +565,10 @@ func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	mlog.Info(ctx, "meta update: CreateIndex", mlog.Int64("collectionID", index.CollectionID),
 		mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID), mlog.String("indexName", index.IndexName))
 
+	version, err := m.allocIndexMetaVersion(ctx)
+	if err != nil {
+		return err
+	}
 	if err := m.catalog.CreateIndex(ctx, index); err != nil {
 		mlog.Error(ctx, "meta update: CreateIndex save meta fail", mlog.Int64("collectionID", index.CollectionID),
 			mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID),
@@ -532,6 +577,7 @@ func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	}
 
 	m.updateCollectionIndex(index)
+	m.setIndexMetaVersionLocked(index.CollectionID, version)
 	mlog.Info(ctx, "meta update: CreateIndex success", mlog.Int64("collectionID", index.CollectionID),
 		mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID), mlog.String("indexName", index.IndexName))
 	return nil
@@ -541,13 +587,17 @@ func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) err
 	m.fieldIndexLock.Lock()
 	defer m.fieldIndexLock.Unlock()
 
-	err := m.catalog.AlterIndexes(ctx, indexes)
+	version, err := m.allocIndexMetaVersion(ctx)
 	if err != nil {
+		return err
+	}
+	if err := m.catalog.AlterIndexes(ctx, indexes); err != nil {
 		return err
 	}
 
 	for _, index := range indexes {
 		m.updateCollectionIndex(index)
+		m.setIndexMetaVersionLocked(index.CollectionID, version)
 	}
 
 	return nil
@@ -723,6 +773,25 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 
+	return m.getIndexesForCollectionLocked(collID, indexName)
+}
+
+// GetIndexesForCollectionWithVersion returns the collection's index snapshot
+// paired with its index-meta version under one lock hold, so the version
+// always describes exactly the returned snapshot. Collections untouched since
+// reload report the base version.
+func (m *indexMeta) GetIndexesForCollectionWithVersion(collID UniqueID, indexName string) ([]*model.Index, uint64) {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
+	version, ok := m.indexMetaVersions[collID]
+	if !ok {
+		version = m.baseIndexMetaVersion
+	}
+	return m.getIndexesForCollectionLocked(collID, indexName), version
+}
+
+func (m *indexMeta) getIndexesForCollectionLocked(collID UniqueID, indexName string) []*model.Index {
 	indexInfos := make([]*model.Index, 0)
 	for _, index := range m.indexes[collID] {
 		if index.IsDeleted {
@@ -789,8 +858,11 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 	if len(indexes) == 0 {
 		return nil
 	}
-	err := m.catalog.AlterIndexes(ctx, indexes)
+	version, err := m.allocIndexMetaVersion(ctx)
 	if err != nil {
+		return err
+	}
+	if err := m.catalog.AlterIndexes(ctx, indexes); err != nil {
 		mlog.Error(ctx, "failed to alter index meta in meta store", mlog.Int("indexes num", len(indexes)), mlog.Err(err))
 		return err
 	}
@@ -800,6 +872,7 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		m.indexes[index.CollectionID][index.IndexID] = index
 		deletedSet[index.IndexID] = struct{}{}
 	}
+	m.setIndexMetaVersionLocked(collID, version)
 
 	// Subtract immediately — gauge tracks alive indexes only; deferred GC (RemoveSegmentIndex)
 	// must not re-subtract. fieldIndexLock.Lock serializes with concurrent RLock gauge adders.

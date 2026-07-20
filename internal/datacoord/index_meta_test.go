@@ -50,7 +50,7 @@ func TestReloadFromKV(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
 		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
+		_, err := newIndexMeta(context.TODO(), catalog, []int64{0}, nil)
 		assert.Error(t, err)
 	})
 
@@ -59,7 +59,7 @@ func TestReloadFromKV(t *testing.T) {
 		catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
-		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
+		_, err := newIndexMeta(context.TODO(), catalog, []int64{0}, nil)
 		assert.Error(t, err)
 	})
 
@@ -81,7 +81,7 @@ func TestReloadFromKV(t *testing.T) {
 			},
 		}, nil)
 
-		meta, err := newIndexMeta(context.TODO(), catalog, []int64{0})
+		meta, err := newIndexMeta(context.TODO(), catalog, []int64{0}, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 	})
@@ -109,7 +109,7 @@ func TestReloadFromKV(t *testing.T) {
 			{SegmentID: 20, CollectionID: collID, IndexID: deadIndexID, BuildID: 200, IndexSerializedSize: deadSize},
 		}, nil)
 
-		meta, err := newIndexMeta(context.TODO(), catalog, []int64{collID})
+		meta, err := newIndexMeta(context.TODO(), catalog, []int64{collID}, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 
@@ -482,12 +482,13 @@ func TestMeta_HasSameReq(t *testing.T) {
 
 func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	return &indexMeta{
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		ctx:              context.Background(),
-		catalog:          catalog,
-		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		keyLock:           lock.NewKeyLock[UniqueID](),
+		ctx:               context.Background(),
+		catalog:           catalog,
+		indexes:           make(map[UniqueID]map[UniqueID]*model.Index),
+		indexMetaVersions: make(map[UniqueID]uint64),
+		segmentBuildInfo:  newSegmentIndexBuildInfo(),
+		segmentIndexes:    typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
 }
 

@@ -120,10 +120,11 @@ func (m *collectionManager) acquireCollectionLease(collectionID int64) (*Collect
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	logicalSchemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
 	schemaBarrierTs := loadMeta.GetSchemaBarrierTs()
+	indexMetaVersion := loadMeta.GetIndexMetaVersion()
 
 	if collection, ok := m.acquireCollectionLease(collectionID); ok {
 		defer m.Unref(collectionID, 1)
-		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs, indexMetaVersion)
 	}
 
 	m.mut.Lock()
@@ -131,7 +132,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		collection.refCount.Inc()
 		m.mut.Unlock()
 		defer m.Unref(collectionID, 1)
-		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs, indexMetaVersion)
 	}
 	defer m.mut.Unlock()
 
@@ -148,12 +149,12 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) error {
+func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64, indexMetaVersion uint64) error {
 	// Existing collections may be reached by a later load result or by a
 	// same-version properties refresh. Keep the Go-side logical schema version
 	// separate from the barrier timestamp so stale schema payloads cannot roll
 	// back fields, while newer properties-only payloads can still refresh.
-	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, logicalSchemaVersion, schemaBarrierTs)
+	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, logicalSchemaVersion, schemaBarrierTs, indexMetaVersion)
 	if err != nil {
 		return err
 	}
@@ -320,12 +321,15 @@ type Collection struct {
 	mu                 sync.RWMutex // protects colllectionPtr
 	schemaTransitionMu sync.RWMutex // serializes schema transitions with insert payload conversion and growing writes
 	ccollection        *segcore.CCollection
-	id                 int64
-	partitions         *typeutil.ConcurrentSet[int64]
-	loadType           querypb.LoadType
-	dbName             string
-	dbProperties       []*commonpb.KeyValuePair
-	resourceGroup      string
+	// indexMetaVersion is the coordinator-stamped version of the applied index
+	// meta (#51584); guarded by schemaTransitionMu. 0 until a stamped payload.
+	indexMetaVersion uint64
+	id               int64
+	partitions       *typeutil.ConcurrentSet[int64]
+	loadType         querypb.LoadType
+	dbName           string
+	dbProperties     []*commonpb.KeyValuePair
+	resourceGroup    string
 	// resource group of node may be changed if node transfer,
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
@@ -360,6 +364,27 @@ func (c *Collection) ID() int64 {
 // GetCCollection returns the CCollection of collection
 func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
+}
+
+// SchemaVersionAndIndexMeta returns the schema, its segcore schema version, and
+// the collection index meta captured under a single schema-transition read lock,
+// so a reopen never observes a torn (schema, meta) pair from an in-flight update
+// (applyLoadUpdate applies the schema before the index meta). Index meta is nil
+// when the collection has been released.
+func (c *Collection) SchemaVersionAndIndexMeta() (*schemapb.CollectionSchema, uint64, *segcorepb.CollectionIndexMeta) {
+	c.schemaTransitionMu.RLock()
+	defer c.schemaTransitionMu.RUnlock()
+
+	schema, _, _, segcoreSchemaVersion := c.schemaSnapshotWithSegcoreSchemaVersion()
+
+	var indexMeta *segcorepb.CollectionIndexMeta
+	c.mu.RLock()
+	if c.ccollection != nil {
+		indexMeta = c.ccollection.IndexMeta()
+	}
+	c.mu.RUnlock()
+
+	return schema, segcoreSchemaVersion, indexMeta
 }
 
 func (c *Collection) NewSearchRequest(req *querypb.SearchRequest, placeholderGroup []byte) (*segcore.SearchRequest, error) {
@@ -435,7 +460,7 @@ func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logica
 	return c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
 }
 
-func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
+func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64, indexMetaVersion uint64) (collectionSchemaUpdatePlan, bool, error) {
 	c.lockSchemaTransitionForUpdate()
 	defer c.unlockSchemaTransitionForUpdate()
 
@@ -443,10 +468,39 @@ func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *se
 	if err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}
-	// Always update index meta to ensure newly indexed fields are visible
-	// for search plan creation (CollectionIndexMeta::HasField check).
-	if err := c.updateIndexMeta(meta); err != nil {
-		return collectionSchemaUpdatePlan{}, false, err
+	// Index meta carries its own coordinator-stamped version (#51584),
+	// independent of schema.Version and schemaBarrierTs, so a stale load cannot
+	// clobber fresher index meta. Version 0 is a legacy unstamped payload: it is
+	// applied only before any stamped version has been seen; once a stamped
+	// version has landed, an unstamped payload must NOT roll back its content
+	// (v0 carries no ordering, so an unversioned write path could otherwise
+	// revert a fresher meta while leaving the version counter ahead). Equal
+	// versions skip silently: every load re-sends the current version, so that is
+	// the steady state.
+	switch {
+	case indexMetaVersion > c.indexMetaVersion:
+		if err := c.updateIndexMeta(meta); err != nil {
+			return collectionSchemaUpdatePlan{}, false, err
+		}
+		mlog.Info(context.TODO(), "applied index meta update",
+			mlog.Int64("collectionID", c.id),
+			mlog.Uint64("indexMetaVersion", indexMetaVersion),
+			mlog.Uint64("prevIndexMetaVersion", c.indexMetaVersion))
+		c.indexMetaVersion = indexMetaVersion
+	case indexMetaVersion == 0 && c.indexMetaVersion == 0:
+		// Legacy cluster that never stamps a version: keep the unconditional refresh.
+		if err := c.updateIndexMeta(meta); err != nil {
+			return collectionSchemaUpdatePlan{}, false, err
+		}
+	case indexMetaVersion == 0:
+		mlog.Info(context.TODO(), "dropped unstamped index meta payload after a stamped version",
+			mlog.Int64("collectionID", c.id),
+			mlog.Uint64("currentIndexMetaVersion", c.indexMetaVersion))
+	case indexMetaVersion < c.indexMetaVersion:
+		mlog.Info(context.TODO(), "dropped stale index meta payload",
+			mlog.Int64("collectionID", c.id),
+			mlog.Uint64("indexMetaVersion", indexMetaVersion),
+			mlog.Uint64("currentIndexMetaVersion", c.indexMetaVersion))
 	}
 	// The temporary manager lease keeps the collection alive while this update
 	// waits. Publish the caller-visible ref only after the schema and index meta
@@ -619,16 +673,17 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		return nil, err
 	}
 	coll := &Collection{
-		ccollection:   ccollection,
-		id:            collectionID,
-		partitions:    typeutil.NewConcurrentSet[int64](),
-		loadType:      loadMetaInfo.GetLoadType(),
-		dbName:        loadMetaInfo.GetDbName(),
-		dbProperties:  loadMetaInfo.GetDbProperties(),
-		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		refCount:      atomic.NewUint32(0),
-		isGpuIndex:    isGpuIndex,
-		loadFields:    loadFieldIDs,
+		ccollection:      ccollection,
+		id:               collectionID,
+		partitions:       typeutil.NewConcurrentSet[int64](),
+		loadType:         loadMetaInfo.GetLoadType(),
+		dbName:           loadMetaInfo.GetDbName(),
+		dbProperties:     loadMetaInfo.GetDbProperties(),
+		resourceGroup:    loadMetaInfo.GetResourceGroup(),
+		refCount:         atomic.NewUint32(0),
+		isGpuIndex:       isGpuIndex,
+		loadFields:       loadFieldIDs,
+		indexMetaVersion: loadMetaInfo.GetIndexMetaVersion(),
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)

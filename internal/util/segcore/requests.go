@@ -128,4 +128,8 @@ type ReopenRequest struct {
 	LoadInfo      *querypb.SegmentLoadInfo
 	Schema        *schemapb.CollectionSchema
 	SchemaVersion uint64
+	// IndexMeta refreshes the segment's collection-level index meta; nil keeps
+	// the current one. Needed so a field added after segment creation (e.g. a
+	// BM25 sparse field) becomes searchable after reopen.
+	IndexMeta *segcorepb.CollectionIndexMeta
 }

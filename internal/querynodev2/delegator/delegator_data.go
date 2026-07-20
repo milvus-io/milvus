@@ -586,7 +586,11 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 // forwarded worker load. Worker LoadSegments already updates IndexMeta on the target
 // worker, but the delegator (which executes growing search locally) must stay in sync.
 func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	if len(req.GetIndexInfoList()) == 0 {
+	// An empty index list with a coordinator-stamped version (#51584) is an
+	// authoritative empty snapshot (e.g. the collection's last index was dropped)
+	// and must be applied so the delegator's local index meta drops it too; only
+	// unstamped (legacy) empty payloads are skipped.
+	if len(req.GetIndexInfoList()) == 0 && req.GetLoadMeta().GetIndexMetaVersion() == 0 {
 		return nil
 	}
 

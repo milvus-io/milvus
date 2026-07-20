@@ -212,6 +212,21 @@ ParseFlushSchema(const void* schema_blob, const int64_t schema_length) {
     return milvus::Schema::ParseFrom(collection_schema);
 }
 
+milvus::IndexMetaPtr
+ParseReopenIndexMeta(const uint8_t* index_meta_blob,
+                     const int64_t index_meta_length) {
+    // Null/empty blob means "keep the current collection index meta"
+    // (e.g. a schema-only reopen with no index-meta refresh).
+    if (index_meta_blob == nullptr || index_meta_length == 0) {
+        return nullptr;
+    }
+    milvus::proto::segcore::CollectionIndexMeta index_meta_proto;
+    auto suc =
+        index_meta_proto.ParseFromArray(index_meta_blob, index_meta_length);
+    AssertInfo(suc, "unmarshal reopen index meta failed");
+    return std::make_shared<milvus::CollectionIndexMeta>(index_meta_proto);
+}
+
 CFuture*
 AsyncReopenSegment(CTraceContext c_trace,
                    CSegmentInterface c_segment,
@@ -219,7 +234,9 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const int64_t load_info_length,
                    const void* schema_blob,
                    const int64_t schema_length,
-                   const uint64_t schema_version) {
+                   const uint64_t schema_version,
+                   const uint8_t* index_meta_blob,
+                   const int64_t index_meta_length) {
     try {
         AssertInfo(load_info_blob, "load info is null");
         milvus::proto::segcore::SegmentLoadInfo load_info;
@@ -227,6 +244,8 @@ AsyncReopenSegment(CTraceContext c_trace,
         AssertInfo(suc, "unmarshal load info failed");
         auto schema =
             ParseReopenSchema(schema_blob, schema_length, schema_version);
+        auto index_meta =
+            ParseReopenIndexMeta(index_meta_blob, index_meta_length);
 
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -237,10 +256,11 @@ AsyncReopenSegment(CTraceContext c_trace,
             [c_trace,
              segment,
              load_info = std::move(load_info),
-             schema = std::move(schema)](
+             schema = std::move(schema),
+             index_meta = std::move(index_meta)](
                 folly::CancellationToken cancel_token) -> bool* {
                 milvus::OpContext op_ctx(cancel_token);
-                segment->Reopen(&op_ctx, load_info, schema);
+                segment->Reopen(&op_ctx, load_info, schema, index_meta);
                 return nullptr;
             },
             milvus::futures::PoolType::kLoad);

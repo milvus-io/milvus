@@ -61,6 +61,55 @@ func (s *CollectionManagerSuite) SetupTest() {
 	s.Require().NoError(err)
 }
 
+func (s *CollectionManagerSuite) TestIndexMetaVersionGate() {
+	collection := s.cm.Get(1)
+	s.Require().NotNil(collection)
+	schema := collection.Schema()
+
+	metaWithRowCount := func(delta int64) *segcorepb.CollectionIndexMeta {
+		meta := proto.Clone(mock_segcore.GenTestIndexMeta(1, schema)).(*segcorepb.CollectionIndexMeta)
+		meta.MaxIndexRowCount += delta
+		return meta
+	}
+	loadMeta := func(indexMetaVersion uint64) *querypb.LoadMetaInfo {
+		return &querypb.LoadMetaInfo{
+			LoadType:         querypb.LoadType_LoadCollection,
+			IndexMetaVersion: indexMetaVersion,
+		}
+	}
+	putAndGetMeta := func(meta *segcorepb.CollectionIndexMeta, indexMetaVersion uint64) *segcorepb.CollectionIndexMeta {
+		s.Require().NoError(s.cm.PutOrRef(1, schema, meta, loadMeta(indexMetaVersion)))
+		s.cm.Unref(1, 1)
+		_, _, applied := collection.SchemaVersionAndIndexMeta()
+		return applied
+	}
+
+	metaV10 := metaWithRowCount(1)
+	metaStale := metaWithRowCount(2)
+	metaLegacy := metaWithRowCount(3)
+
+	// First stamped payload applies over the unstamped initial meta.
+	s.True(proto.Equal(metaV10, putAndGetMeta(metaV10, 10)))
+
+	// A stale payload with a smaller version cannot clobber fresher meta (race 1).
+	s.True(proto.Equal(metaV10, putAndGetMeta(metaStale, 5)))
+
+	// An equal version is dropped; content is already applied or identical.
+	s.True(proto.Equal(metaV10, putAndGetMeta(metaStale, 10)))
+
+	// A newer version applies even when the schema payload is unchanged (race 2).
+	s.True(proto.Equal(metaStale, putAndGetMeta(metaStale, 20)))
+
+	// Once a stamped version has been applied, an unstamped (v0) payload no longer
+	// refreshes the meta: applying it would roll the content back while leaving the
+	// version watermark ahead, so it is dropped (#51584). A stale stamped payload
+	// (version below the watermark) is dropped too; both leave metaStale in place.
+	s.True(proto.Equal(metaStale, putAndGetMeta(metaLegacy, 0)))
+	s.True(proto.Equal(metaStale, putAndGetMeta(metaV10, 15)))
+	// A newer stamped version still applies and advances the watermark.
+	s.True(proto.Equal(metaV10, putAndGetMeta(metaV10, 21)))
+}
+
 func (s *CollectionManagerSuite) newSimpleRetrieveRequest(collection *Collection) *querypb.QueryRequest {
 	pkField, err := typeutil.GetPrimaryFieldSchema(collection.Schema())
 	s.Require().NoError(err)

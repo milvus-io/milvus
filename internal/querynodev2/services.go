@@ -201,8 +201,12 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 	defer node.lifetime.Done()
 
-	// check index
-	if len(req.GetIndexInfoList()) == 0 {
+	// check index. A coordinator-stamped payload (index_meta_version > 0) with an
+	// empty index list is an AUTHORITATIVE empty snapshot (e.g. the collection's
+	// last index was dropped) and must flow through so a channel can resubscribe on
+	// recovery/reassign, not be rejected (#51584). Only unstamped (legacy) empty
+	// payloads are rejected.
+	if len(req.GetIndexInfoList()) == 0 && req.GetLoadMeta().GetIndexMetaVersion() == 0 {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
@@ -480,8 +484,13 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 	defer node.lifetime.Done()
 
-	// check index
-	if len(req.GetIndexInfoList()) == 0 {
+	// check index. An empty index list is normally treated as "index info not
+	// ready" and rejected. A coordinator-stamped payload (index_meta_version > 0)
+	// with an empty list is an AUTHORITATIVE empty snapshot (e.g. the collection's
+	// last index was dropped) and must flow through to refresh the collection
+	// index meta, not be rejected (#51584). Only unstamped (legacy) empty payloads
+	// are rejected.
+	if len(req.GetIndexInfoList()) == 0 && req.GetLoadMeta().GetIndexMetaVersion() == 0 {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
@@ -1476,6 +1485,20 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
+			// Reconcile the collection index meta from this target-driven snapshot so an
+			// index-meta advance that does not itself trigger a segment reopen (e.g.
+			// altered index params, or a dropped last index) still lands on this node.
+			// UpdateVersion carries the current index list + coordinator-stamped version
+			// (#51584); apply it under the same version gate as the load paths.
+			if collection := node.manager.Collection.Get(req.GetCollectionID()); collection != nil {
+				schema := collection.Schema()
+				indexMeta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
+				if err := node.manager.Collection.PutOrRef(req.GetCollectionID(), schema, indexMeta, req.GetLoadMeta()); err != nil {
+					log.Warn(ctx, "failed to reconcile collection index meta on UpdateVersion", mlog.Err(err))
+				} else {
+					node.manager.Collection.Unref(req.GetCollectionID(), 1)
+				}
+			}
 			shardDelegator.SyncTargetVersion(action, req.GetLoadMeta().GetPartitionIDs())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info(ctx, "sync update partition stats versions")

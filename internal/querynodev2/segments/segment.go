@@ -1303,11 +1303,15 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	}
 	defer s.ptrLock.Unpin()
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	schema, schemaVersion, indexMeta := s.collection.SchemaVersionAndIndexMeta()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,
 		SchemaVersion: schemaVersion,
+		// Schema and index meta come from one transition-lock snapshot so a field
+		// added after this segment was created (e.g. a backfilled BM25 sparse
+		// field) is searchable after reopen without observing a torn pair.
+		IndexMeta: indexMeta,
 	})
 	if err != nil {
 		return err

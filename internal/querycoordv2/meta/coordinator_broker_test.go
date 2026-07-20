@@ -333,17 +333,19 @@ func (s *CoordinatorBrokerDataCoordSuite) TestListIndexes() {
 				IndexInfos: lo.Map(indexIDs, func(id int64, _ int) *indexpb.IndexInfo {
 					return &indexpb.IndexInfo{IndexID: id}
 				}),
+				IndexMetaVersion: 42,
 			}, nil).Once()
-		infos, err := s.broker.ListIndexes(ctx, collectionID)
+		infos, indexMetaVersion, err := s.broker.ListIndexes(ctx, collectionID)
 		s.NoError(err)
 		s.ElementsMatch(indexIDs, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 { return info.GetIndexID() }))
+		s.EqualValues(42, indexMetaVersion)
 	})
 
 	s.Run("datacoord_return_error", func() {
 		s.mixcoord.EXPECT().ListIndexes(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mocked")).Once()
 
-		_, err := s.broker.ListIndexes(ctx, collectionID)
+		_, _, err := s.broker.ListIndexes(ctx, collectionID)
 		s.Error(err)
 	})
 
@@ -353,7 +355,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestListIndexes() {
 				Status: merr.Status(errors.New("mocked")),
 			}, nil).Once()
 
-		_, err := s.broker.ListIndexes(ctx, collectionID)
+		_, _, err := s.broker.ListIndexes(ctx, collectionID)
 		s.Error(err)
 	})
 
@@ -372,8 +374,11 @@ func (s *CoordinatorBrokerDataCoordSuite) TestListIndexes() {
 				}),
 			}, nil).Once()
 
-		_, err := s.broker.ListIndexes(ctx, collectionID)
+		_, indexMetaVersion, err := s.broker.ListIndexes(ctx, collectionID)
 		s.NoError(err)
+		// The DescribeIndex fallback carries no version; consumers treat 0 as
+		// a legacy unstamped payload.
+		s.Zero(indexMetaVersion)
 	})
 }
 
