@@ -41,6 +41,7 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
           load_index_info->field_id,
           load_index_info->index_build_id,
           load_index_info->index_version,
+          load_index_info->local_files,
       }),
       binary_set_(binary_set),
       key_(fmt::format("seg_{}_si_{}",
@@ -148,8 +149,16 @@ V1SealedIndexTranslator::LoadVecIndex() {
             index_load_info_.index_params);
         config["index_files"] = index_load_info_.index_files;
 
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, remote_chunk_manager, fs);
+        auto fileManagerContext =
+            index_load_info_.local_files.has_value()
+                ? milvus::storage::FileManagerContext(
+                      field_meta,
+                      index_meta,
+                      remote_chunk_manager,
+                      fs,
+                      *index_load_info_.local_files)
+                : milvus::storage::FileManagerContext(
+                      field_meta, index_meta, remote_chunk_manager, fs);
         fileManagerContext.set_for_loading_index(true);
 
         auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(

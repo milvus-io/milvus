@@ -37,10 +37,32 @@ const (
 
 type Executor interface {
 	Start(ctx context.Context)
+	Stop()
 	Enqueue(task Compactor) (bool, error)
 	Slots() int64
 	RemoveTask(planID int64)                                // Deprecated in 2.6
 	GetResults(planID int64) []*datapb.CompactionPlanResult // Deprecated in 2.6
+}
+
+func (e *executor) Stop() {
+	e.mu.RLock()
+	tasks := make([]Compactor, 0, len(e.tasks))
+	for _, task := range e.tasks {
+		if task.state == datapb.CompactionTaskState_executing {
+			tasks = append(tasks, task.compactor)
+		}
+	}
+	e.mu.RUnlock()
+
+	var wg sync.WaitGroup
+	wg.Add(len(tasks))
+	for _, task := range tasks {
+		go func() {
+			defer wg.Done()
+			task.Stop()
+		}()
+	}
+	wg.Wait()
 }
 
 // taskState represents the state of a compaction task

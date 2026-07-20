@@ -49,7 +49,7 @@
 #include "segcore/FieldIndexing.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 
 namespace milvus::segcore {
 using std::unique_ptr;
@@ -571,8 +571,9 @@ ScalarFieldIndexing<T>::ScalarFieldIndexing(
     const FieldIndexMeta& field_index_meta,
     int64_t segment_max_row_count,
     const SegcoreConfig& segcore_config,
-    const VectorBase* field_raw_data)
-    : FieldIndexing(field_meta, segcore_config),
+    const VectorBase* field_raw_data,
+    std::optional<local::FileSystem> local_files)
+    : FieldIndexing(field_meta, segcore_config, std::move(local_files)),
       built_(false),
       sync_with_index_(false),
       config_(std::make_unique<FieldIndexMeta>(field_index_meta)) {
@@ -587,8 +588,8 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
         if (field_meta.get_data_type() == DataType::GEOMETRY) {
             // Create chunk manager for file operations
             auto chunk_manager =
-                milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                    .GetChunkManager();
+                milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                    .GetRemoteChunkManager();
             auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
             // Create FieldDataMeta for RTree index
@@ -615,8 +616,14 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             index_meta.index_non_encoding = false;
 
             // Create FileManagerContext with all required components
-            storage::FileManagerContext ctx(
-                field_data_meta, index_meta, chunk_manager, fs);
+            AssertInfo(local_files_.has_value(),
+                       "field indexing has no local filesystem");
+            auto local_files = *local_files_;
+            storage::FileManagerContext ctx(field_data_meta,
+                                            index_meta,
+                                            chunk_manager,
+                                            fs,
+                                            std::move(local_files));
 
             index_ = std::make_unique<index::RTreeIndex<std::string>>(ctx);
             built_ = false;
@@ -792,7 +799,8 @@ CreateIndex(const FieldMeta& field_meta,
             const FieldIndexMeta& field_index_meta,
             int64_t segment_max_row_count,
             const SegcoreConfig& segcore_config,
-            const VectorBase* field_raw_data) {
+            const VectorBase* field_raw_data,
+            std::optional<local::FileSystem> local_files) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT ||
             field_meta.get_data_type() == DataType::VECTOR_FLOAT16 ||
@@ -844,7 +852,8 @@ CreateIndex(const FieldMeta& field_meta,
                 field_index_meta,
                 segment_max_row_count,
                 segcore_config,
-                field_raw_data);
+                field_raw_data,
+                std::move(local_files));
         default:
             ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported scalar type in index: {}",

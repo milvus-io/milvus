@@ -13,12 +13,16 @@ import (
 
 func TestCollection(t *testing.T) {
 	paramtable.Init()
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	assert.NoError(t, err)
+	t.Cleanup(localFiles.Close)
 	schema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 	indexMeta := mock_segcore.GenTestIndexMeta(1, schema)
 	ccollection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
 		CollectionID: 1,
 		Schema:       schema,
 		IndexMeta:    indexMeta,
+		LocalFiles:   localFiles,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, ccollection)

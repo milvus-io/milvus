@@ -253,6 +253,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			req,
 			compactionParams,
 			sortFields,
+			node.localFiles,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
@@ -270,7 +271,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 				return merr.Status(err), err
 			}
 			sortFields = append(sortFields, pk.GetFieldID())
-			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, cm, compactionParams, sortFields)
+			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, cm, compactionParams, sortFields, node.localFiles)
 		} else {
 			task = compactor.NewClusteringCompactionTask(
 				taskCtx,
@@ -301,9 +302,10 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			req,
 			compactionParams,
 			sortFields,
+			node.localFiles,
 		)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
-		task = compactor.NewBumpSchemaVersionCompactionTask(taskCtx, cm, req, compactionParams)
+		task = compactor.NewBumpSchemaVersionCompactionTask(taskCtx, cm, req, compactionParams, node.localFiles)
 	default:
 		mlog.Warn(context.TODO(), "Unknown compaction type", mlog.String("type", req.GetType().String()))
 		return merr.Status(merr.WrapErrServiceInternalMsg("Unknown compaction type: %v", req.GetType().String())), nil

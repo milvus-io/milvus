@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -87,6 +88,7 @@ type DataNode struct {
 	storageFactory StorageFactory
 	taskScheduler  *index.TaskScheduler
 	taskManager    *index.TaskManager
+	localFiles     *segcore.LocalFileSystem
 
 	externalCollectionManager *external.ExternalCollectionManager
 
@@ -218,11 +220,12 @@ func (node *DataNode) Init() error {
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
 
-		err := index.InitSegcore(serverID)
+		localFiles, err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
 			return
 		}
+		node.localFiles = localFiles
 
 		if err := analyzer.InitOptions(); err != nil {
 			log.Error(node.ctx, "DataNode init analyzer options failed", mlog.Err(err))
@@ -327,12 +330,19 @@ func (node *DataNode) Stop() error {
 		if node.externalCollectionManager != nil {
 			node.externalCollectionManager.Close()
 		}
+		if node.compactionExecutor != nil {
+			node.compactionExecutor.Stop()
+		}
 
 		// cleanup all running tasks
 		node.taskManager.DeleteAllTasks()
 
 		if node.taskScheduler != nil {
 			node.taskScheduler.Close()
+		}
+		if node.localFiles != nil {
+			node.localFiles.Close()
+			node.localFiles = nil
 		}
 
 		index.CloseSegcore()

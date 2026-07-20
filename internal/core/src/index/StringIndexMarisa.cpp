@@ -55,8 +55,6 @@
 #include "marisa/keyset.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
-#include "storage/FileWriter.h"
-#include "storage/LocalChunkManager.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/MemFileManagerImpl.h"
@@ -71,11 +69,19 @@ constexpr uint32_t MARISA_CSR_FORMAT_VERSION = 1;
 constexpr const char* MARISA_CSR_FORMAT_VERSION_META =
     "marisa_csr_format_version";
 
+local::FileSystem
+ResolveLocalFiles(const storage::FileManagerContext& context) {
+    AssertInfo(context.local_files.has_value(),
+               "string index has no local filesystem");
+    return *context.local_files;
+}
+
 }  // namespace
 
 StringIndexMarisa::StringIndexMarisa(
     const storage::FileManagerContext& file_manager_context)
-    : StringIndex(MARISA_TRIE) {
+    : StringIndex(MARISA_TRIE),
+      local_files_(ResolveLocalFiles(file_manager_context)) {
     if (file_manager_context.Valid()) {
         this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -289,25 +295,24 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
                                        const Config& config) {
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
-    // TODO: change the mmap path of marisa index
-    auto file_name = std::string("/tmp/") + uuid_string;
+    auto trie_path = local::Path("tmp/marisa/" + uuid_string);
+    local_files_.CreateDirectories(local::Path("tmp/marisa"));
+    auto file_name = local_files_.ResolveNativePath(trie_path).string();
+    auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
 
     auto index = set.GetByName(MARISA_TRIE_INDEX);
     auto len = index->size;
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
-
     {
-        auto file_writer = storage::FileWriter(
-            file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
-        file_writer.Write(index->data.get(), len);
-        file_writer.Finish();
+        auto file_writer = local_files_.OpenForWrite(
+            trie_path, local::WriteOptions{.create = true, .truncate = true});
+        auto bytes = std::span(
+            reinterpret_cast<const std::byte*>(index->data.get()), len);
+        AssertInfo(file_writer.Write(bytes) == len,
+                   "short write of marisa trie");
+        file_writer.Sync();
     }
 
     if (config.contains(MMAP_FILE_PATH)) {
-        auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
         trie_.mmap(file_name.c_str());
         mmap_file_raii_ = std::move(trie_file_raii);
     } else {
@@ -317,7 +322,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     }
 
     if (!config.contains(MMAP_FILE_PATH)) {
-        unlink(file_name.c_str());
+        local_files_.RemoveFile(trie_path);
     }
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
@@ -825,24 +830,17 @@ StringIndexMarisa::in_lexicographic_order() {
 void
 StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     // Write trie data via temp file (marisa trie writes to file descriptor)
-    auto local_cm =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    std::string tmp_dir =
-        local_cm ? local_cm->GetRootPath() : std::string("/tmp");
-    std::error_code ec;
-    std::filesystem::create_directories(tmp_dir, ec);
-    AssertInfo(!ec,
-               "failed to create string index temp directory: {}, error: {}",
-               tmp_dir,
-               ec.message());
+    const auto tmp_dir = local::Path("tmp/marisa");
+    local_files_.CreateDirectories(tmp_dir);
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
-    auto file = tmp_dir + "/" + uuid_string;
+    auto file_path = local::Path("tmp/marisa/" + uuid_string);
+    auto file = local_files_.ResolveNativePath(file_path);
 
     auto fd = open(file.c_str(),
                    O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
                    S_IRUSR | S_IWUSR | S_IXUSR);
-    AssertInfo(fd != -1, "open file failed: {}", file);
+    AssertInfo(fd != -1, "open file failed: {}", file.string());
     auto close_fd = folly::makeGuard([fd]() { close(fd); });
 
     // Immediately unlink the file so it will be deleted when fd is closed,
@@ -873,38 +871,29 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
 void
 StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                                const Config& config) {
-    auto local_cm =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    std::string tmp_dir =
-        local_cm ? local_cm->GetRootPath() : std::string("/tmp");
-    std::error_code ec;
-    std::filesystem::create_directories(tmp_dir, ec);
-    AssertInfo(!ec,
-               "failed to create string index temp directory: {}, error: {}",
-               tmp_dir,
-               ec.message());
+    const auto tmp_dir = local::Path("tmp/marisa");
+    local_files_.CreateDirectories(tmp_dir);
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
-    auto file_name = tmp_dir + "/" + uuid_string;
+    auto trie_path = local::Path("tmp/marisa/" + uuid_string);
+    auto file_name = local_files_.ResolveNativePath(trie_path).string();
+    auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
 
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
-
-    // Stream trie entry directly to temp file (no full-size temp buffer)
+    // Stream trie entry directly to a rooted temp file.
     {
-        auto file_writer = storage::FileWriter(
-            file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
-        reader.ReadEntryStream(MARISA_TRIE_INDEX,
-                               [&](const uint8_t* data, size_t len) {
-                                   file_writer.Write(data, len);
-                               });
-        file_writer.Finish();
+        auto file_writer = local_files_.OpenForWrite(
+            trie_path, local::WriteOptions{.create = true, .truncate = true});
+        reader.ReadEntryStream(
+            MARISA_TRIE_INDEX, [&](const uint8_t* data, size_t len) {
+                auto bytes =
+                    std::span(reinterpret_cast<const std::byte*>(data), len);
+                AssertInfo(file_writer.Write(bytes) == len,
+                           "short write of marisa trie");
+            });
+        file_writer.Sync();
     }
 
     if (config.contains(MMAP_FILE_PATH)) {
-        auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
         trie_.mmap(file_name.c_str());
         mmap_file_raii_ = std::move(trie_file_raii);
     } else {
@@ -914,7 +903,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     }
 
     if (!config.contains(MMAP_FILE_PATH)) {
-        unlink(file_name.c_str());
+        local_files_.RemoveFile(trie_path);
     }
 
     // Stream str_ids entry
@@ -923,24 +912,28 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         MARISA_STR_IDS, str_ids_bytes, sizeof(int64_t));
     if (config.contains(MMAP_FILE_PATH)) {
         // mmap path: stream to disk file, then mmap
-        auto str_ids_path = file_name + ".str_ids";
+        auto str_ids_local_path =
+            local::Path(std::string(trie_path.String()) + ".str_ids");
+        auto str_ids_path =
+            local_files_.ResolveNativePath(str_ids_local_path).string();
+        auto str_ids_file_raii = std::make_unique<MmapFileRAII>(str_ids_path);
         {
-            auto fw = storage::FileWriter(
-                str_ids_path,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
+            auto fw = local_files_.OpenForWrite(
+                str_ids_local_path,
+                local::WriteOptions{.create = true, .truncate = true});
             size_t written = 0;
-            reader.ReadEntryStream(MARISA_STR_IDS,
-                                   [&](const uint8_t* d, size_t len) {
-                                       fw.Write(d, len);
-                                       written += len;
-                                   });
+            reader.ReadEntryStream(
+                MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
+                    auto bytes =
+                        std::span(reinterpret_cast<const std::byte*>(d), len);
+                    written += fw.Write(bytes);
+                });
             AssertInfo(written == str_ids_bytes,
                        "str_ids stream read size mismatch: got {}, expected {}",
                        written,
                        str_ids_bytes);
-            fw.Finish();
+            fw.Sync();
         }
-        auto str_ids_file_raii = std::make_unique<MmapFileRAII>(str_ids_path);
         auto str_ids_file = File::Open(str_ids_path, O_RDONLY);
         auto* mapped = mmap(NULL,
                             str_ids_bytes,
@@ -1037,31 +1030,36 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
 
         if (config.contains(MMAP_FILE_PATH)) {
             // mmap path: stream csr_index + csr_offsets to disk, then mmap
-            auto csr_path = file_name + ".csr";
+            auto csr_local_path =
+                local::Path(std::string(trie_path.String()) + ".csr");
+            auto csr_path =
+                local_files_.ResolveNativePath(csr_local_path).string();
+            auto csr_file_raii = std::make_unique<MmapFileRAII>(csr_path);
 
             {
-                auto fw = storage::FileWriter(
-                    csr_path,
-                    storage::io::GetPriorityFromLoadPriority(load_priority));
+                auto fw = local_files_.OpenForWrite(
+                    csr_local_path,
+                    local::WriteOptions{.create = true, .truncate = true});
                 size_t written = 0;
-                reader.ReadEntryStream(MARISA_CSR_INDEX,
-                                       [&](const uint8_t* d, size_t len) {
-                                           fw.Write(d, len);
-                                           written += len;
-                                       });
-                reader.ReadEntryStream(MARISA_CSR_OFFSETS,
-                                       [&](const uint8_t* d, size_t len) {
-                                           fw.Write(d, len);
-                                           written += len;
-                                       });
+                reader.ReadEntryStream(
+                    MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
+                        auto bytes = std::span(
+                            reinterpret_cast<const std::byte*>(d), len);
+                        written += fw.Write(bytes);
+                    });
+                reader.ReadEntryStream(
+                    MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
+                        auto bytes = std::span(
+                            reinterpret_cast<const std::byte*>(d), len);
+                        written += fw.Write(bytes);
+                    });
                 AssertInfo(written == idx_bytes + off_bytes,
                            "CSR stream read size mismatch: got {}, expected {}",
                            written,
                            idx_bytes + off_bytes);
-                fw.Finish();
+                fw.Sync();
             }
 
-            auto csr_file_raii = std::make_unique<MmapFileRAII>(csr_path);
             csr_mmap_size_ = idx_bytes + off_bytes;
             auto csr_file = File::Open(csr_path, O_RDONLY);
             auto* mapped = mmap(NULL,

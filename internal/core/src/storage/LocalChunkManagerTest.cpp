@@ -13,6 +13,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -20,7 +22,7 @@
 #include "gtest/gtest.h"
 #include "storage/ChunkManager.h"
 #include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "test_utils/Constants.h"
 
 using namespace std;
 using namespace milvus;
@@ -28,28 +30,39 @@ using namespace milvus::storage;
 
 class LocalChunkManagerTest : public testing::Test {};
 
-TEST_F(LocalChunkManagerTest, DirPositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    string test_dir = lcm->GetRootPath() + "/local-test-dir/";
-    lcm->RemoveDir(test_dir);
-    lcm->CreateDir(test_dir);
+namespace {
 
-    bool exist = lcm->DirExist(test_dir);
+void
+CreateEmptyFile(const std::string& path) {
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    std::ofstream(path, std::ios::binary).close();
+}
+
+}  // namespace
+
+TEST_F(LocalChunkManagerTest, DirPositive) {
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
+    string test_dir = lcm->GetRootPath() + "/local-test-dir/";
+    std::filesystem::remove_all(test_dir);
+    std::filesystem::create_directories(test_dir);
+
+    bool exist = std::filesystem::exists(test_dir);
     EXPECT_EQ(exist, true);
 
-    lcm->RemoveDir(test_dir);
-    exist = lcm->DirExist(test_dir);
+    std::filesystem::remove_all(test_dir);
+    exist = std::filesystem::exists(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, FilePositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-file";
     auto exist = lcm->Exist(file);
     EXPECT_EQ(exist, false);
-    lcm->CreateFile(file);
+    CreateEmptyFile(file);
     exist = lcm->Exist(file);
     EXPECT_EQ(exist, true);
 
@@ -57,19 +70,19 @@ TEST_F(LocalChunkManagerTest, FilePositive) {
     exist = lcm->Exist(file);
     EXPECT_EQ(exist, false);
 
-    lcm->RemoveDir(test_dir);
-    exist = lcm->DirExist(test_dir);
+    std::filesystem::remove_all(test_dir);
+    exist = std::filesystem::exists(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, WritePositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-write-positive";
     auto exist = lcm->Exist(file);
     EXPECT_EQ(exist, false);
-    lcm->CreateFile(file);
+    CreateEmptyFile(file);
 
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
     lcm->Write(file, data, sizeof(data));
@@ -90,18 +103,18 @@ TEST_F(LocalChunkManagerTest, WritePositive) {
     EXPECT_EQ(size, datasize);
     delete[] bigdata;
 
-    lcm->RemoveDir(test_dir);
-    exist = lcm->DirExist(test_dir);
+    std::filesystem::remove_all(test_dir);
+    exist = std::filesystem::exists(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, ReadPositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
     string path = test_dir + "/test-read-positive";
-    lcm->CreateFile(path);
+    CreateEmptyFile(path);
     lcm->Write(path, data, sizeof(data));
     bool exist = lcm->Exist(path);
     EXPECT_EQ(exist, true);
@@ -137,19 +150,19 @@ TEST_F(LocalChunkManagerTest, ReadPositive) {
     EXPECT_EQ(readdata[3], 0x34);
     EXPECT_EQ(readdata[4], 0x23);
 
-    lcm->RemoveDir(test_dir);
-    exist = lcm->DirExist(test_dir);
+    std::filesystem::remove_all(test_dir);
+    exist = std::filesystem::exists(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, WriteOffset) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-write-offset";
     auto exist = lcm->Exist(file);
     EXPECT_EQ(exist, false);
-    lcm->CreateFile(file);
+    CreateEmptyFile(file);
     exist = lcm->Exist(file);
     EXPECT_EQ(exist, true);
 
@@ -181,17 +194,17 @@ TEST_F(LocalChunkManagerTest, WriteOffset) {
     EXPECT_EQ(read_data[8], 0x34);
     EXPECT_EQ(read_data[9], 0x23);
 
-    lcm->RemoveDir(test_dir);
-    exist = lcm->DirExist(test_dir);
+    std::filesystem::remove_all(test_dir);
+    exist = std::filesystem::exists(test_dir);
     EXPECT_EQ(exist, false);
 }
 
 TEST_F(LocalChunkManagerTest, ReadOffset) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-read-offset";
-    lcm->CreateFile(file);
+    CreateEmptyFile(file);
     auto exist = lcm->Exist(file);
     EXPECT_EQ(exist, true);
 
@@ -217,40 +230,33 @@ TEST_F(LocalChunkManagerTest, ReadOffset) {
     EXPECT_EQ(size, 1);
     EXPECT_EQ(read_data[0], 0x98);
 
-    lcm->RemoveDir(test_dir);
-    exist = lcm->DirExist(test_dir);
+    std::filesystem::remove_all(test_dir);
+    exist = std::filesystem::exists(test_dir);
     EXPECT_EQ(exist, false);
 }
 
-TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto test_dir = lcm->GetRootPath() + "/local-test-dir";
-    EXPECT_EQ(lcm->DirExist(test_dir), false);
-    lcm->CreateDir(test_dir);
-    EXPECT_EQ(lcm->DirExist(test_dir), true);
-    EXPECT_EQ(lcm->GetSizeOfDir(test_dir), 0);
+TEST_F(LocalChunkManagerTest, ListWithPrefix) {
+    auto lcm = std::make_shared<LocalChunkManager>(TestLocalPath);
+    auto test_dir = lcm->GetRootPath() + "/local-list-prefix";
+    std::filesystem::remove_all(test_dir);
 
     uint8_t data[] = {0x17, 0x32, 0x00, 0x34, 0x23, 0x23, 0x87, 0x98};
-    // test get size of file in test_dir
-    auto file1 = test_dir + "/file";
-    auto res = lcm->CreateFile(file1);
-    EXPECT_EQ(res, true);
-    lcm->Write(file1, data, sizeof(data));
-    EXPECT_EQ(lcm->GetSizeOfDir(test_dir), sizeof(data));
-    lcm->Remove(file1);
-    auto exist = lcm->Exist(file1);
-    EXPECT_EQ(exist, false);
+    auto first = test_dir + "/alpha/one";
+    auto second = test_dir + "/alpha/two";
+    auto sibling = test_dir + "/alpha-extra/four";
+    auto other = test_dir + "/beta/three";
+    lcm->Write(first, data, sizeof(data));
+    lcm->Write(second, data, sizeof(data));
+    lcm->Write(sibling, data, sizeof(data));
+    lcm->Write(other, data, sizeof(data));
 
-    // test get dir size with nested dirs
-    auto nest_dir = test_dir + "/nest_dir";
-    auto file2 = nest_dir + "/file";
-    res = lcm->CreateFile(file2);
-    EXPECT_EQ(res, true);
-    lcm->Write(file2, data, sizeof(data));
-    EXPECT_EQ(lcm->GetSizeOfDir(test_dir), sizeof(data));
-    lcm->RemoveDir(test_dir);
+    EXPECT_EQ(lcm->ListWithPrefix(test_dir + "/alpha"),
+              (std::vector<std::string>{sibling, first, second}));
+    EXPECT_EQ(lcm->ListWithPrefix("local-list-prefix/alpha"),
+              (std::vector<std::string>{sibling, first, second}));
+    EXPECT_EQ(lcm->ListWithPrefix(test_dir + "/alpha/o"),
+              (std::vector<std::string>{first}));
+    EXPECT_TRUE(lcm->ListWithPrefix(test_dir + "/missing").empty());
 
-    lcm->RemoveDir(test_dir);
-    exist = lcm->DirExist(test_dir);
-    EXPECT_EQ(exist, false);
+    std::filesystem::remove_all(test_dir);
 }

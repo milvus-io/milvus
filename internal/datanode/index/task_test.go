@@ -20,12 +20,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -121,7 +123,7 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
 	suite.NoError(err)
 
-	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()), nil)
+	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()), nil, nil)
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
@@ -133,6 +135,38 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 
 func TestIndexBuildTask(t *testing.T) {
 	suite.Run(t, new(IndexBuildTaskSuite))
+}
+
+func TestIndexBuildTasksKeepDistinctLocalFileSystems(t *testing.T) {
+	firstFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(firstFiles.Close)
+	secondFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(secondFiles.Close)
+
+	firstTask := NewIndexBuildTask(
+		context.Background(),
+		func() {},
+		&workerpb.CreateJobRequest{},
+		nil,
+		NewTaskManager(context.Background()),
+		nil,
+		firstFiles,
+	)
+	secondTask := NewIndexBuildTask(
+		context.Background(),
+		func() {},
+		&workerpb.CreateJobRequest{},
+		nil,
+		NewTaskManager(context.Background()),
+		nil,
+		secondFiles,
+	)
+
+	require.Same(t, firstFiles, firstTask.localFiles)
+	require.Same(t, secondFiles, secondTask.localFiles)
+	require.NotEqual(t, firstTask.localFiles.RawPointer(), secondTask.localFiles.RawPointer())
 }
 
 type AnalyzeTaskSuite struct {

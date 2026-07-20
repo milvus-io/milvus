@@ -58,6 +58,7 @@ type CollectionManager interface {
 type collectionManager struct {
 	mut         sync.RWMutex
 	collections map[int64]*Collection
+	localFiles  *segcore.LocalFileSystem
 }
 
 type collectionSchemaUpdatePlan struct {
@@ -73,9 +74,10 @@ type collectionSchemaUpdatePlan struct {
 	segcoreSchemaVersion uint64
 }
 
-func NewCollectionManager() *collectionManager {
+func NewCollectionManager(localFiles *segcore.LocalFileSystem) *collectionManager {
 	return &collectionManager{
 		collections: make(map[int64]*Collection),
+		localFiles:  localFiles,
 	}
 }
 
@@ -136,7 +138,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	defer m.mut.Unlock()
 
 	mlog.Info(context.TODO(), "put new collection", mlog.Int64("collectionID", collectionID), mlog.Any("schema", schema))
-	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
+	collection, err := newCollection(collectionID, schema, meta, loadMeta, m.localFiles)
 	mlog.Info(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID), mlog.Any("schema", schema), mlog.Err(err))
 	if err != nil {
 		return err
@@ -334,6 +336,7 @@ type Collection struct {
 	schema     atomic.Pointer[collectionSchemaSnapshot]
 	isGpuIndex bool
 	loadFields typeutil.Set[int64]
+	localFiles *segcore.LocalFileSystem
 
 	refCount *atomic.Uint32
 }
@@ -577,12 +580,11 @@ func (c *Collection) Unref(count uint32) uint32 {
 }
 
 // newCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) (*Collection, error) {
-	/*
-		CCollection
-		NewCollection(const char* schema_proto_blob);
-	*/
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo, localFiles *segcore.LocalFileSystem) (*Collection, error) {
+	return newCollection(collectionID, schema, indexMeta, loadMetaInfo, localFiles)
+}
 
+func newCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo, localFiles *segcore.LocalFileSystem) (*Collection, error) {
 	var loadFieldIDs typeutil.Set[int64]
 	loadSchema := typeutil.Clone(schema)
 	// if load fields is specified, do filtering logic
@@ -602,6 +604,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	req := &segcore.CreateCCollectionRequest{
 		Schema:        loadSchema,
 		LoadFieldList: loadFieldIDs.Collect(),
+		LocalFiles:    localFiles,
 	}
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		req.IndexMeta = indexMeta
@@ -629,6 +632,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
+		localFiles:    localFiles,
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)

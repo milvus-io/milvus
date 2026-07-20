@@ -30,8 +30,6 @@
 #include "prometheus/gauge.h"
 #include "prometheus/histogram.h"
 #include "stdio.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::storage {
 namespace {
@@ -247,11 +245,7 @@ MmapChunkManager::~MmapChunkManager() {
         blocks_handler_ = nullptr;
     }
     // clean the mmap dir
-    auto cm =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    if (cm->Exist(mmap_file_prefix_)) {
-        cm->RemoveDir(mmap_file_prefix_);
-    }
+    local_files_.Clear();
 }
 
 MmapChunkDescriptorPtr
@@ -330,20 +324,14 @@ MmapChunkManager::Allocate(const MmapChunkDescriptorPtr descriptor,
     }
 }
 
-MmapChunkManager::MmapChunkManager(std::string root_path,
+MmapChunkManager::MmapChunkManager(local::FileSystem local_files,
                                    const uint64_t disk_limit,
-                                   const uint64_t file_size) {
+                                   const uint64_t file_size)
+    : local_files_(std::move(local_files)) {
+    auto root_path = local_files_.NativeRoot().string();
     blocks_handler_ =
         std::make_unique<MmapBlocksHandler>(disk_limit, file_size, root_path);
-    mmap_file_prefix_ = root_path;
-    auto cm =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    AssertInfo(cm != nullptr,
-               "Fail to get LocalChunkManager, LocalChunkManagerPtr is null");
-    if (cm->Exist(root_path)) {
-        cm->RemoveDir(root_path);
-    }
-    cm->CreateDir(root_path);
+    local_files_.Clear();
     this->descriptor_counter_.store(0);
     LOG_INFO(
         "Init MappChunkManager with: Path {}, MaxDiskSize {} MB, "

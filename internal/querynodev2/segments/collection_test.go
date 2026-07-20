@@ -43,19 +43,23 @@ import (
 
 type CollectionManagerSuite struct {
 	suite.Suite
-	cm *collectionManager
+	cm         *collectionManager
+	localFiles *segcore.LocalFileSystem
 }
 
 func (s *CollectionManagerSuite) SetupSuite() {
 	paramtable.Init()
-	initcore.InitLocalChunkManager("CollectionManagerSuite")
 	initcore.InitMmapManager(paramtable.Get(), 1)
 }
 
 func (s *CollectionManagerSuite) SetupTest() {
-	s.cm = NewCollectionManager()
+	var err error
+	s.localFiles, err = segcore.NewLocalFileSystem(s.T().TempDir())
+	s.Require().NoError(err)
+	s.T().Cleanup(s.localFiles.Close)
+	s.cm = NewCollectionManager(s.localFiles)
 	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
-	err := s.cm.PutOrRef(1, schema, mock_segcore.GenTestIndexMeta(1, schema), &querypb.LoadMetaInfo{
+	err = s.cm.PutOrRef(1, schema, mock_segcore.GenTestIndexMeta(1, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
 	s.Require().NoError(err)
@@ -133,7 +137,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 
 	s.Run("stale_schema_version_with_larger_timestamp", func() {
-		cm := NewCollectionManager()
+		cm := NewCollectionManager(s.localFiles)
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
 		baseSchema.Version = 7
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
@@ -168,7 +172,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 
 	s.Run("same_schema_version_with_newer_barrier_updates_properties", func() {
-		cm := NewCollectionManager()
+		cm := NewCollectionManager(s.localFiles)
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
 			LoadType:        querypb.LoadType_LoadCollection,
@@ -193,7 +197,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 
 	s.Run("higher_schema_version_after_high_barrier_refresh_uses_monotonic_segcore_schema_version", func() {
-		cm := NewCollectionManager()
+		cm := NewCollectionManager(s.localFiles)
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
 			LoadType:        querypb.LoadType_LoadCollection,
@@ -221,7 +225,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 
 	s.Run("manager_uses_schema_version_from_caller", func() {
-		cm := NewCollectionManager()
+		cm := NewCollectionManager(s.localFiles)
 		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
 			LoadType: querypb.LoadType_LoadCollection,
@@ -311,7 +315,7 @@ func (s *CollectionManagerSuite) TestNewMilvusTableCollectionKeepsUserSchema() {
 	schema := milvusTableCollectionSchema(false)
 	collection, err := NewCollection(10, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, s.localFiles)
 	s.Require().NoError(err)
 	defer DeleteCollection(collection)
 
@@ -695,7 +699,7 @@ func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersionDomain() {
-	cm := NewCollectionManager()
+	cm := NewCollectionManager(s.localFiles)
 	initialSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
 	err := cm.PutOrRef(10, initialSchema, mock_segcore.GenTestIndexMeta(10, initialSchema), &querypb.LoadMetaInfo{
 		LoadType:        querypb.LoadType_LoadCollection,
@@ -810,7 +814,7 @@ func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
 
 			collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
 				LoadType: querypb.LoadType_LoadCollection,
-			})
+			}, s.localFiles)
 			s.Require().NoError(err)
 			defer DeleteCollection(collection)
 			s.Equal(test.expected, collection.IsGpuIndex())
@@ -850,7 +854,7 @@ func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
 
 		collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
 			LoadType: querypb.LoadType_LoadCollection,
-		})
+		}, s.localFiles)
 		s.Require().NoError(err)
 		defer DeleteCollection(collection)
 		s.False(collection.IsGpuIndex())
@@ -924,7 +928,7 @@ func (s *CollectionManagerSuite) TestUnref() {
 
 	s.Run("unref_with_release", func() {
 		// Create a new collection manager for this test
-		cm := NewCollectionManager()
+		cm := NewCollectionManager(s.localFiles)
 		schema := mock_segcore.GenTestCollectionSchema("collection_2", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(2, schema, mock_segcore.GenTestIndexMeta(2, schema), &querypb.LoadMetaInfo{
 			LoadType: querypb.LoadType_LoadCollection,
@@ -954,7 +958,7 @@ func (s *CollectionManagerSuite) TestListWithName() {
 
 func (s *CollectionManagerSuite) TestPutOrRef() {
 	s.Run("put_new_collection", func() {
-		cm := NewCollectionManager()
+		cm := NewCollectionManager(s.localFiles)
 		schema := mock_segcore.GenTestCollectionSchema("collection_new", schemapb.DataType_Int64, false)
 		err := cm.PutOrRef(100, schema, mock_segcore.GenTestIndexMeta(100, schema), &querypb.LoadMetaInfo{
 			LoadType: querypb.LoadType_LoadCollection,

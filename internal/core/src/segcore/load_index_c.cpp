@@ -55,8 +55,6 @@
 #include "segcore/Utils.h"
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
 #include "storage/FileManager.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 
@@ -69,23 +67,20 @@ IsLoadWithDisk(const char* index_type, int index_engine_version) {
 }
 
 CStatus
-NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
+NewLoadIndexInfo(CLocalFileSystem filesystem,
+                 CLoadIndexInfo* c_load_index_info) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        AssertInfo(filesystem != nullptr, "local filesystem is null");
         auto load_index_info =
             std::make_unique<milvus::segcore::LoadIndexInfo>();
-
+        load_index_info->local_files =
+            *static_cast<milvus::local::FileSystem*>(filesystem);
         *c_load_index_info = load_index_info.release();
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
+        return milvus::FailureCStatus(&e);
     }
 }
 
@@ -375,10 +370,10 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                     .GetRemoteChunkManager();
-            load_index_info->mmap_dir_path =
-                milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                    .GetChunkManager()
-                    ->GetRootPath();
+            AssertInfo(load_index_info->local_files.has_value(),
+                       "load index info has no local filesystem");
+            auto local_files = *load_index_info->local_files;
+            load_index_info->mmap_dir_path = local_files.NativeRoot().string();
         }
         auto status = CStatus();
         status.error_code = milvus::Success;

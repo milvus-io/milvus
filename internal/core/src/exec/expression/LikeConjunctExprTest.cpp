@@ -94,7 +94,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     auto content_fid = schema->AddDebugField("content", DataType::VARCHAR);
     schema->set_primary_field_id(pk_fid);
 
-    // Use TestLocalPath to match LocalChunkManagerSingleton initialized in init_gtest.cpp
+    // Use the shard-local test root configured in init_gtest.cpp.
     auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);

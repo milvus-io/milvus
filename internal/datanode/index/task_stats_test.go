@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -47,6 +48,20 @@ import (
 
 func TestTaskStatsSuite(t *testing.T) {
 	suite.Run(t, new(TaskStatsSuite))
+}
+
+func TestStatsTaskKeepsLocalFileSystem(t *testing.T) {
+	localFiles := new(segcore.LocalFileSystem)
+	task := NewStatsTask(
+		context.Background(),
+		func() {},
+		&workerpb.CreateStatsRequest{},
+		NewTaskManager(context.Background()),
+		nil,
+		localFiles,
+	)
+
+	require.Same(t, localFiles, task.localFiles)
 }
 
 type TaskStatsSuite struct {
@@ -125,7 +140,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager)
+		}, manager, s.mockChunkManager, nil)
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -177,7 +192,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager)
+		}, manager, s.mockChunkManager, nil)
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -332,7 +347,8 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+	localFiles := new(segcore.LocalFileSystem)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, localFiles)
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -340,7 +356,8 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 
 	var gotInsertFiles []string
 	var gotNumRows int64
-	m := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(func(_ context.Context, info *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+	m := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(func(_ context.Context, info *indexcgopb.BuildIndexInfo, gotLocalFiles *segcore.LocalFileSystem) (*indexcgowrapper.JSONKeyStatsResult, error) {
+		require.Same(t, localFiles, gotLocalFiles)
 		gotInsertFiles = info.InsertFiles
 		gotNumRows = info.GetNumRows()
 		return &indexcgowrapper.JSONKeyStatsResult{Files: map[string]int64{}}, nil
@@ -385,7 +402,7 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},

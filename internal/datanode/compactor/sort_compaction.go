@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -71,6 +72,7 @@ type sortCompactionTask struct {
 
 	compactionParams compaction.Params
 	sortByFieldIDs   []int64
+	localFiles       *segcore.LocalFileSystem
 
 	// lobContext holds LOB compaction strategy decisions for TEXT columns
 	lobContext *compaction.LOBCompactionContext
@@ -84,6 +86,7 @@ func NewSortCompactionTask(
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
 	sortByFieldIDs []int64,
+	localFiles *segcore.LocalFileSystem,
 ) *sortCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &sortCompactionTask{
@@ -97,6 +100,7 @@ func NewSortCompactionTask(
 		done:             make(chan struct{}, 1),
 		compactionParams: compactionParams,
 		sortByFieldIDs:   sortByFieldIDs,
+		localFiles:       localFiles,
 	}
 }
 
@@ -552,7 +556,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	taskID int64,
 	segment *datapb.CompactionSegment,
 ) (map[int64]*datapb.TextIndexStats, error) {
-	return createTextIndex(ctx, t.cm, t.plan, t.compactionParams, t.storageVersion, collectionID, partitionID, segmentID, taskID, segment)
+	return createTextIndex(ctx, t.cm, t.plan, t.compactionParams, t.storageVersion, collectionID, partitionID, segmentID, taskID, segment, t.localFiles)
 }
 
 // initLOBCompactionContext initializes the LOB compaction context for TEXT columns.

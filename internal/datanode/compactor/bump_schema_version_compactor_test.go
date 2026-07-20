@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
@@ -163,7 +164,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) setupTest() {
 	}
 	compactionParams := compaction.GenParams()
 	compactionParams.StorageVersion = storage.StorageV3
-	s.task = NewBumpSchemaVersionCompactionTask(context.Background(), cm, plan, compactionParams)
+	s.task = NewBumpSchemaVersionCompactionTask(context.Background(), cm, plan, compactionParams, nil)
 }
 
 func genTestCollectionMetaWithMinHash() *etcdpb.CollectionMeta {
@@ -238,7 +239,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) setupMinHashTest() {
 	s.Require().NoError(err)
 	compactionParams := compaction.GenParams()
 	compactionParams.StorageVersion = storage.StorageV3
-	s.task = NewBumpSchemaVersionCompactionTask(context.Background(), cm, plan, compactionParams)
+	s.task = NewBumpSchemaVersionCompactionTask(context.Background(), cm, plan, compactionParams, nil)
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) prepareMinHashBumpSchemaVersionCompaction() {
@@ -725,7 +726,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRebuildsTextStats(
 		}
 	}
 
-	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(context.Context, *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(context.Context, *indexcgopb.BuildIndexInfo, *segcore.LocalFileSystem) (indexcgowrapper.CodecIndex, error) {
 		return fakeTextIndex{}, nil
 	}).Build()
 	defer createIndexPatch.UnPatch()
@@ -829,7 +830,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMergesLOBRefsBefor
 	var manifestAtTextIndex string
 	textIndexPatch := mockey.Mock(createTextIndex).
 		To(func(_ context.Context, _ storage.ChunkManager, _ *datapb.CompactionPlan, _ compaction.Params,
-			_ int64, _ int64, _ int64, _ int64, _ int64, seg *datapb.CompactionSegment,
+			_ int64, _ int64, _ int64, _ int64, _ int64, seg *datapb.CompactionSegment, _ *segcore.LocalFileSystem,
 		) (map[int64]*datapb.TextIndexStats, error) {
 			manifestAtTextIndex = seg.GetManifest()
 			return map[int64]*datapb.TextIndexStats{}, nil
@@ -1197,7 +1198,7 @@ func TestBumpSchemaVersionCompactionTaskBasic(t *testing.T) {
 	}
 
 	mockCM := mock_storage.NewMockChunkManager(t)
-	task := NewBumpSchemaVersionCompactionTask(ctx, mockCM, plan, compaction.GenParams())
+	task := NewBumpSchemaVersionCompactionTask(ctx, mockCM, plan, compaction.GenParams(), nil)
 	assert.NotNil(t, task)
 	assert.Equal(t, int64(1000), task.GetPlanID())
 	assert.Equal(t, int64(1), task.GetCollection())

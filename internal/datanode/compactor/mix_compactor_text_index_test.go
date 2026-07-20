@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -74,12 +75,14 @@ func TestMixCompaction_createTextIndex_Delegates(t *testing.T) {
 		collectionID:     collectionID,
 		partitionID:      partitionID,
 		compactionParams: compaction.GenParams(),
+		localFiles:       new(segcore.LocalFileSystem),
 	}
 
 	mockHelper := mockey.Mock(createTextIndex).To(
 		func(_ context.Context, _ storage.ChunkManager, gotPlan *datapb.CompactionPlan, _ compaction.Params,
-			gotStorageVer, gotColl, gotPart, gotSeg, gotTask int64, _ *datapb.CompactionSegment,
+			gotStorageVer, gotColl, gotPart, gotSeg, gotTask int64, _ *datapb.CompactionSegment, gotLocalFiles *segcore.LocalFileSystem,
 		) (map[int64]*datapb.TextIndexStats, error) {
+			assert.Same(t, task.localFiles, gotLocalFiles)
 			assert.Equal(t, plan, gotPlan)
 			assert.Equal(t, storageVer, gotStorageVer)
 			assert.Equal(t, collectionID, gotColl)
@@ -189,7 +192,7 @@ func TestMixCompaction_Compact_InlineTextIndex(t *testing.T) {
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 30000, End: 40000},
 	}
 
-	task := NewMixCompactionTask(context.Background(), nil, nil, plan, params, []int64{fieldID})
+	task := NewMixCompactionTask(context.Background(), nil, nil, plan, params, []int64{fieldID}, nil)
 
 	result, err := task.Compact()
 	require.NoError(t, err)
@@ -246,7 +249,7 @@ func TestMixCompaction_Compact_InlineTextIndex_BuildError(t *testing.T) {
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 30000, End: 40000},
 	}
 
-	task := NewMixCompactionTask(context.Background(), nil, nil, plan, params, []int64{101})
+	task := NewMixCompactionTask(context.Background(), nil, nil, plan, params, []int64{101}, nil)
 	_, err := task.Compact()
 	assert.ErrorIs(t, err, assert.AnError)
 }
@@ -301,7 +304,7 @@ func TestMixCompaction_Compact_InlineTextIndex_ManifestError(t *testing.T) {
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 30000, End: 40000},
 	}
 
-	task := NewMixCompactionTask(context.Background(), nil, nil, plan, params, []int64{fieldID})
+	task := NewMixCompactionTask(context.Background(), nil, nil, plan, params, []int64{fieldID}, nil)
 	_, err := task.Compact()
 	assert.ErrorIs(t, err, assert.AnError)
 }

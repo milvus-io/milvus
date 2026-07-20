@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "common/common_type_c.h"
+#include "storage/storage_c.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +24,8 @@ typedef void* CCollection;
 
 CStatus
 NewCollection(const void* schema_proto_blob,
-              const int64_t length,
+              int64_t length,
+              CLocalFileSystem filesystem,
               CCollection* collection);
 
 CStatus

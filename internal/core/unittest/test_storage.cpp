@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -37,7 +38,6 @@
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -109,11 +109,6 @@ class StorageTest : public testing::Test {
     SetUp() {
     }
 };
-
-TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
-    auto status = InitLocalChunkManagerSingleton("tmp");
-    EXPECT_EQ(status.error_code, Success);
-}
 
 TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
 #ifndef BUILD_VORTEX_BRIDGE
@@ -615,10 +610,8 @@ TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
 
 TEST_F(StorageTest, GetLocalUsedSize) {
     int64_t size = 0;
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    EXPECT_EQ(lcm->GetRootPath(), TestLocalPath);
     string test_dir =
-        lcm->GetRootPath() + "tmp" +
+        TestLocalPath + "tmp" +
         // add random number to avoid dir conflict
         std::to_string(
             std::chrono::system_clock::now().time_since_epoch().count());
@@ -627,14 +620,15 @@ TEST_F(StorageTest, GetLocalUsedSize) {
     auto status = GetLocalUsedSize(test_dir.c_str(), &size);
     EXPECT_EQ(status.error_code, Success);
     EXPECT_EQ(size, 0);
-    lcm->CreateDir(test_dir);
-    lcm->CreateFile(test_file);
+    std::filesystem::create_directories(test_dir);
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
-    lcm->Write(test_file, data, sizeof(data));
+    std::ofstream output(test_file, std::ios::binary);
+    output.write(reinterpret_cast<const char*>(data), sizeof(data));
+    output.close();
     status = GetLocalUsedSize(test_dir.c_str(), &size);
     EXPECT_EQ(status.error_code, Success);
     EXPECT_EQ(size, 5);
-    lcm->RemoveDir(test_dir);
+    std::filesystem::remove_all(test_dir);
 }
 
 TEST_F(StorageTest, InitRemoteChunkManagerSingleton) {

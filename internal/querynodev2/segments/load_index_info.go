@@ -31,6 +31,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 )
 
@@ -40,12 +41,12 @@ type LoadIndexInfo struct {
 }
 
 // newLoadIndexInfo returns a new LoadIndexInfo and error
-func newLoadIndexInfo(ctx context.Context) (*LoadIndexInfo, error) {
+func newLoadIndexInfo(ctx context.Context, localFiles *segcore.LocalFileSystem) (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
-		status = C.NewLoadIndexInfo(&cLoadIndexInfo)
+		status = C.NewLoadIndexInfo(C.CLocalFileSystem(localFiles.RawPointer()), &cLoadIndexInfo)
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(ctx, &status, "NewLoadIndexInfo failed"); err != nil {

@@ -34,12 +34,13 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func InitSegcore(nodeID int64) error {
+func InitSegcore(nodeID int64) (*segcore.LocalFileSystem, error) {
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.IndexBuilderInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
@@ -83,10 +84,6 @@ func InitSegcore(nodeID int64) error {
 	}
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereThreadPoolSize)
 
-	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
-	if err := initcore.InitLocalChunkManager(localDataRootPath); err != nil {
-		return err
-	}
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
@@ -99,7 +96,7 @@ func InitSegcore(nodeID int64) error {
 
 	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
 	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
@@ -110,7 +107,11 @@ func InitSegcore(nodeID int64) error {
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()
 
-	return initcore.InitPluginLoader()
+	if err := initcore.InitPluginLoader(); err != nil {
+		return nil, err
+	}
+
+	return segcore.NewLocalFileSystem(pathutil.GetPath(pathutil.RootCachePath, nodeID))
 }
 
 func CloseSegcore() {

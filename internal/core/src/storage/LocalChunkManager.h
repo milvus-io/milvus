@@ -112,33 +112,6 @@ class LocalChunkManager : public ChunkManager {
         return "";
     }
 
-    bool
-    CreateFile(const std::string& filepath);
-
- public:
-    bool
-    DirExist(const std::string& dir);
-    /**
-     * @brief Delete directory totally
-     * different from Remove, this interface drop local dir
-     * instead of file, but for remote system, may has no
-     * concept of directory, so just used in local chunk manager
-     * @param dir
-     */
-    void
-    RemoveDir(const std::string& dir);
-
-    /**
-     * @brief Create a Dir object
-     * if dir already exists, throw exception
-     * @param dir
-     */
-    void
-    CreateDir(const std::string& dir);
-
-    int64_t
-    GetSizeOfDir(const std::string& dir);
-
  private:
     std::string path_prefix_;
 };

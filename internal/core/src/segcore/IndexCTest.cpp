@@ -40,6 +40,7 @@
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -384,11 +385,17 @@ TEST(CreateIndexTest, StorageV2) {
     std::string serialized_info;
     build_index_info->SerializeToString(&serialized_info);
 
+    CLocalFileSystem local_files = nullptr;
+    auto open_status = OpenLocalFileSystem(TestLocalPath.c_str(), &local_files);
+    ASSERT_EQ(open_status.error_code, milvus::Success);
+
     CIndex index;
     CStatus status =
         CreateIndex(&index,
                     reinterpret_cast<const uint8_t*>(serialized_info.data()),
-                    serialized_info.size());
+                    serialized_info.size(),
+                    local_files);
+    CloseLocalFileSystem(local_files);
 
     ASSERT_EQ(status.error_code, milvus::S3Error);
     free(const_cast<char*>(static_cast<const char*>(status.error_msg)));
@@ -437,11 +444,17 @@ TEST(VectorMemIndexTest, StorageV2) {
     std::string serialized_info;
     build_index_info->SerializeToString(&serialized_info);
 
+    CLocalFileSystem local_files = nullptr;
+    auto open_status = OpenLocalFileSystem(TestLocalPath.c_str(), &local_files);
+    ASSERT_EQ(open_status.error_code, milvus::Success);
+
     CIndex index;
     CStatus status =
         CreateIndex(&index,
                     reinterpret_cast<const uint8_t*>(serialized_info.data()),
-                    serialized_info.size());
+                    serialized_info.size(),
+                    local_files);
+    CloseLocalFileSystem(local_files);
 
     ASSERT_EQ(status.error_code, milvus::UnexpectedError);
     free(const_cast<char*>(static_cast<const char*>(status.error_msg)));

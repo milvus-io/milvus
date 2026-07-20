@@ -24,11 +24,16 @@ extern "C" {
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 
-CStatus
-GetLocalUsedSize(const char* c_path, int64_t* size);
+typedef void* CLocalFileSystem;
 
 CStatus
-InitLocalChunkManagerSingleton(const char* path);
+OpenLocalFileSystem(const char* root, CLocalFileSystem* filesystem);
+
+void
+CloseLocalFileSystem(CLocalFileSystem filesystem);
+
+CStatus
+GetLocalUsedSize(const char* c_path, int64_t* size);
 
 CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);

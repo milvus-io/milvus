@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -35,6 +36,7 @@ import (
 type SearchSuite struct {
 	suite.Suite
 	chunkManager storage.ChunkManager
+	localFiles   *segcore.LocalFileSystem
 
 	manager      *Manager
 	collectionID int64
@@ -58,7 +60,9 @@ func (suite *SearchSuite) SetupTest() {
 	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
-	initcore.InitLocalChunkManager(suite.T().Name())
+	suite.localFiles, err = segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(suite.localFiles.Close)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
 
@@ -66,7 +70,7 @@ func (suite *SearchSuite) SetupTest() {
 	suite.partitionID = 10
 	suite.segmentID = 1
 
-	suite.manager = NewManager()
+	suite.manager = NewManager(suite.localFiles)
 	suite.schema = mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
 	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,

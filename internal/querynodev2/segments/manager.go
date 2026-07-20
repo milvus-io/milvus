@@ -32,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -73,10 +74,10 @@ type Manager struct {
 	Loader     Loader
 }
 
-func NewManager() *Manager {
+func NewManager(localFiles *segcore.LocalFileSystem) *Manager {
 	segMgr := NewSegmentManager()
 	manager := &Manager{
-		Collection: NewCollectionManager(),
+		Collection: NewCollectionManager(localFiles),
 		Segment:    segMgr,
 	}
 

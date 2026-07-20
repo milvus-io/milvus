@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -225,12 +226,15 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 func (suite *QueryNodeSuite) TestStop() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "2")
 
-	suite.node.manager = segments.NewManager()
+	localFiles, err := segcore.NewLocalFileSystem(suite.T().TempDir())
+	suite.Require().NoError(err)
+	suite.T().Cleanup(localFiles.Close)
+	suite.node.manager = segments.NewManager(localFiles)
 
 	schema := mock_segcore.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
 	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-	})
+	}, localFiles)
 	suite.Require().NoError(err)
 	segment, err := segments.NewSegment(
 		context.Background(),

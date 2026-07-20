@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -63,6 +64,7 @@ func createTextIndex(ctx context.Context,
 	segmentID int64,
 	taskID int64,
 	segment *datapb.CompactionSegment,
+	localFiles *segcore.LocalFileSystem,
 ) (map[int64]*datapb.TextIndexStats, error) {
 	log := mlog.With(
 		mlog.FieldCollectionID(collectionID),
@@ -173,7 +175,7 @@ func createTextIndex(ctx context.Context,
 					segmentID)
 			}
 
-			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams)
+			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams, localFiles)
 			if err != nil {
 				return err
 			}

@@ -97,7 +97,7 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext, node.localFiles)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
@@ -301,7 +301,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		return merr.Status(err), nil
 	}
 
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext, node.localFiles)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
@@ -398,7 +398,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		return merr.Status(err), nil
 	}
 
-	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm)
+	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm, node.localFiles)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))

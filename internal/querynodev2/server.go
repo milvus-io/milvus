@@ -108,6 +108,7 @@ type QueryNode struct {
 
 	// internal components
 	manager               *segments.Manager
+	localFiles            *segcore.LocalFileSystem
 	clusterManager        cluster.Manager
 	pipelineManager       pipeline.Manager
 	subscribingChannels   *typeutil.ConcurrentSet[string]
@@ -403,7 +404,14 @@ func (node *QueryNode) Init() error {
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
-		node.manager = segments.NewManager()
+		node.localFiles, err = segcore.NewLocalFileSystem(
+			pathutil.GetPath(pathutil.RootCachePath, node.GetNodeID()))
+		if err != nil {
+			mlog.Error(node.ctx, "QueryNode open local filesystem failed", mlog.Err(err))
+			initError = err
+			return
+		}
+		node.manager = segments.NewManager(node.localFiles)
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
@@ -552,6 +560,10 @@ func (node *QueryNode) Stop() error {
 		}
 
 		node.CloseSegcore()
+		if node.localFiles != nil {
+			node.localFiles.Close()
+			node.localFiles = nil
+		}
 
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the pipeline
 		node.cancel()

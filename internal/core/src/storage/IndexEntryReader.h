@@ -23,6 +23,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "folly/CancellationToken.h"
@@ -72,8 +73,19 @@ class IndexEntryReader {
                           io::Priority write_priority = io::Priority::MIDDLE);
 
     void
+    ReadEntryStreamToFile(const std::string& name,
+                          local::io::WritableFile output,
+                          io::Priority write_priority = io::Priority::MIDDLE);
+
+    void
     ReadEntriesStreamToFiles(
         const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
+        io::Priority write_priority = io::Priority::MIDDLE);
+
+    void
+    ReadEntriesStreamToFiles(
+        std::vector<std::pair<std::string, local::io::WritableFile>>
+            named_outputs,
         io::Priority write_priority = io::Priority::MIDDLE);
 
     /// Stream entry data via transient memory budget.
@@ -226,6 +238,16 @@ class IndexEntryReader {
                                const std::string& local_path,
                                const EntryMeta& meta,
                                io::Priority write_priority);
+
+    EntryStreamDownloadState
+    PrepareEntryStreamDownload(const std::string& name,
+                               local::io::WritableFile output,
+                               const EntryMeta& meta,
+                               io::Priority write_priority);
+
+    void
+    CompleteEntryStreamDownloads(std::vector<EntryStreamDownloadState>& states,
+                                 size_t total_task_count);
 
     void
     SubmitEntryStreamDownloadTasks(const EntryMeta& meta,

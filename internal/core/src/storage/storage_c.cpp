@@ -22,10 +22,10 @@
 
 #include "PluginInterface.h"
 #include "common/EasyAssert.h"
+#include "local/FileSystem.h"
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -35,31 +35,29 @@
 #include "storage/loon_ffi/property_singleton.h"
 
 CStatus
-GetLocalUsedSize(const char* c_dir, int64_t* size) {
-    SCOPE_CGO_CALL_METRIC();
-
+OpenLocalFileSystem(const char* root, CLocalFileSystem* filesystem) {
     try {
-        auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager();
-        std::string dir(c_dir);
-        if (local_chunk_manager->DirExist(dir)) {
-            *size = local_chunk_manager->GetSizeOfDir(dir);
-        } else {
-            *size = 0;
-        }
+        auto local_files = std::make_unique<milvus::local::FileSystem>(
+            milvus::local::FileSystem::Open(root));
+        *filesystem = local_files.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
 }
 
-CStatus
-InitLocalChunkManagerSingleton(const char* c_path) {
-    try {
-        std::string path(c_path);
-        milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(path);
+void
+CloseLocalFileSystem(CLocalFileSystem filesystem) {
+    delete static_cast<milvus::local::FileSystem*>(filesystem);
+}
 
+CStatus
+GetLocalUsedSize(const char* c_dir, int64_t* size) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto local_files = milvus::local::FileSystem::Open(c_dir);
+        *size = local_files.UsedSize();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

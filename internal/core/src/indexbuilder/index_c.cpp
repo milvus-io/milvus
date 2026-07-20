@@ -41,6 +41,8 @@
 #include "knowhere/binaryset.h"
 #include "knowhere/dataset.h"
 #include "knowhere/version.h"
+#include "local/FileSystem.h"
+#include "local/Path.h"
 #include "log/Log.h"
 #include "monitor/scope_metric.h"
 #include "nlohmann/json.hpp"
@@ -271,13 +273,35 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     return config;
 }
 
+namespace {
+
+milvus::storage::FileManagerContext
+make_file_manager_context(const milvus::storage::FieldDataMeta& field_meta,
+                          const milvus::storage::IndexMeta& index_meta,
+                          const milvus::storage::ChunkManagerPtr& chunk_manager,
+                          milvus_storage::ArrowFileSystemPtr fs,
+                          CLocalFileSystem filesystem) {
+    AssertInfo(filesystem != nullptr, "local filesystem is null");
+    const auto& node_cache =
+        *static_cast<const milvus::local::FileSystem*>(filesystem);
+    return {field_meta,
+            index_meta,
+            chunk_manager,
+            std::move(fs),
+            node_cache.Subtree(milvus::local::Path("local_chunk"))};
+}
+
+}  // namespace
+
 CStatus
 CreateIndex(CIndex* res_index,
             const uint8_t* serialized_build_index_info,
-            const uint64_t len) {
+            const uint64_t len,
+            CLocalFileSystem filesystem) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        AssertInfo(filesystem != nullptr, "local filesystem is null");
         auto build_index_info =
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
         auto res =
@@ -336,8 +360,8 @@ CreateIndex(CIndex* res_index,
         LOG_INFO("init arrow file system success, build_id: {}",
                  build_index_info->buildid());
 
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager, fs);
+        auto fileManagerContext = make_file_manager_context(
+            field_meta, index_meta, chunk_manager, std::move(fs), filesystem);
         if (!build_index_info->stats_base_path().empty()) {
             fileManagerContext.set_stats_base_path(
                 build_index_info->stats_base_path());
@@ -390,10 +414,12 @@ CreateIndex(CIndex* res_index,
 CStatus
 BuildJsonKeyIndex(ProtoLayoutInterface result,
                   const uint8_t* serialized_build_index_info,
-                  const uint64_t len) {
+                  const uint64_t len,
+                  CLocalFileSystem filesystem) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        AssertInfo(filesystem != nullptr, "local filesystem is null");
         auto build_index_info =
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
         auto res =
@@ -440,8 +466,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             milvus::storage::CreateChunkManager(storage_config);
         auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager, fs);
+        auto fileManagerContext = make_file_manager_context(
+            field_meta, index_meta, chunk_manager, std::move(fs), filesystem);
         fileManagerContext.set_stats_base_path(
             build_index_info->stats_base_path());
 

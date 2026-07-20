@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstddef>
 #include <mutex>
+#include <optional>
 
 #include "log/Log.h"
 #include "storage/MmapChunkManager.h"
@@ -59,10 +60,15 @@ class MmapManager {
             mmap_config_ = config;
             if (mcm_ == nullptr) {
                 mcm_ = std::make_shared<MmapChunkManager>(
-                    mmap_config_.mmap_path,
+                    local::FileSystem::Open(mmap_config_.mmap_path),
                     mmap_config_.disk_limit,
                     mmap_config_.fix_file_size);
             }
+            const auto& json_stats_root =
+                mmap_config_.json_stats_mmap_path.empty()
+                    ? mmap_config_.mmap_path
+                    : mmap_config_.json_stats_mmap_path;
+            json_stats_files_.emplace(local::FileSystem::Open(json_stats_root));
             LOG_INFO("Init MmapConfig with MmapConfig: {}",
                      mmap_config_.ToString());
             init_flag_ = true;
@@ -81,6 +87,13 @@ class MmapManager {
     GetMmapConfig() {
         AssertInfo(init_flag_ == true, "Mmap manager has not been init.");
         return mmap_config_;
+    }
+
+    const local::FileSystem&
+    GetJsonStatsFileSystem() const {
+        AssertInfo(json_stats_files_.has_value(),
+                   "Mmap manager has not been init.");
+        return *json_stats_files_;
     }
 
     size_t
@@ -105,6 +118,7 @@ class MmapManager {
     mutable std::mutex init_mutex_;
     MmapConfig mmap_config_;
     MmapChunkManagerPtr mcm_ = nullptr;
+    std::optional<local::FileSystem> json_stats_files_;
     std::atomic<bool> init_flag_ = false;
 };
 

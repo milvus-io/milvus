@@ -22,6 +22,8 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <optional>
+#include "local/FileSystem.h"
 #include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
@@ -158,6 +160,7 @@ class StringIndexMarisa : public StringIndex {
                 const Config& config) override;
 
  private:
+    local::FileSystem local_files_;
     Config config_;
     marisa::Trie trie_;
 

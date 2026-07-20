@@ -31,7 +31,6 @@
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "index/Meta.h"
@@ -97,8 +96,6 @@ main(int argc, char** argv) {
     // Initialize expression function factory (registers aggregate functions like count, sum, min, max)
     InitExecExpressionFunctionFactory();
 
-    milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
-        TestLocalPath);
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
         get_default_local_storage_config());
     milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());

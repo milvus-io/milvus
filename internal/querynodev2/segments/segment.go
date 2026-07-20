@@ -225,7 +225,7 @@ func (s *baseSegment) compactLoadInfoForRuntime() {
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
 		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-	})
+	}, s.collection.localFiles)
 	if err != nil {
 		s.resourceUsageCache.Store(nil)
 		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))
@@ -400,7 +400,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
 		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-	})
+	}, s.collection.localFiles)
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.
 		mlog.Warn(context.TODO(), "unreachable: failed to get resource usage estimate of segment", mlog.Err(err), mlog.FieldCollectionID(s.Collection()), mlog.FieldSegmentID(s.ID()))
@@ -1167,9 +1167,10 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo *querypb.FieldIndexInfo,
 	f func(c *LoadIndexInfo) error,
+	localFiles *segcore.LocalFileSystem,
 ) error {
 	// 1.
-	loadIndexInfo, err := newLoadIndexInfo(ctx)
+	loadIndexInfo, err := newLoadIndexInfo(ctx, localFiles)
 	if err != nil {
 		return err
 	}

@@ -23,11 +23,13 @@ extern "C" {
 #include "common/protobuf_utils_c.h"
 #include "common/type_c.h"
 #include "indexbuilder/type_c.h"
+#include "storage/storage_c.h"
 
 CStatus
 CreateIndex(CIndex* res_index,
             const uint8_t* serialized_build_index_info,
-            const uint64_t len);
+            uint64_t len,
+            CLocalFileSystem filesystem);
 
 CStatus
 DeleteIndex(CIndex index);
@@ -35,7 +37,8 @@ DeleteIndex(CIndex index);
 CStatus
 BuildJsonKeyIndex(ProtoLayoutInterface c_binary_set,
                   const uint8_t* serialized_build_index_info,
-                  const uint64_t len);
+                  uint64_t len,
+                  CLocalFileSystem filesystem);
 
 CStatus
 CleanLocalData(CIndex index);

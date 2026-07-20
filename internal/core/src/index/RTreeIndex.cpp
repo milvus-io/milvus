@@ -43,8 +43,6 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/DataCodec.h"
-#include "storage/LocalChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryReader.h"
@@ -54,12 +52,6 @@
 namespace milvus::index {
 
 static constexpr size_t kMetaJsonSuffixLen = sizeof(".meta.json") - 1;
-
-static std::string
-GetRTreeTempPrefix() {
-    auto& lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance();
-    return lcm.GetChunkManager()->GetRootPath() + "/rtree-index/";
-}
 
 // helper to check suffix
 static inline bool
@@ -76,9 +68,12 @@ RTreeIndex<T>::InitForBuildIndex(bool is_growing) {
     if (is_growing) {
         path_ = "";
     } else {
-        auto prefix = disk_file_manager_->GetIndexIdentifier();
-        path_ = GetRTreeTempPrefix() + prefix;
-        boost::filesystem::create_directories(path_);
+        path_ =
+            disk_file_manager_->GetLocalTempIndexObjectPrefix() + "rtree-index";
+        auto lease = disk_file_manager_->AcquireLocalDirWriteLease(path_);
+        auto path =
+            disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+        disk_file_manager_->GetLocalFiles().CreateDirectories(path);
         index_file_path = path_ + "/index_file";  // base path (no ext)
         if (boost::filesystem::exists(index_file_path + ".bgi")) {
             ThrowInfo(IndexBuildError,
@@ -107,16 +102,6 @@ template <typename T>
 RTreeIndex<T>::~RTreeIndex() {
     // Free wrapper explicitly to ensure files not being used
     wrapper_.reset();
-
-    // Remove temporary directory if it exists
-    if (!path_.empty()) {
-        auto local_cm = storage::LocalChunkManagerSingleton::GetInstance()
-                            .GetChunkManager();
-        if (local_cm) {
-            LOG_INFO("rtree index remove path:{}", path_);
-            local_cm->RemoveDir(path_);
-        }
-    }
 }
 
 static std::string
@@ -143,7 +128,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 
     // 1. Extract and load null_offset file(s) if present
     {
-        auto find_file = [&](const std::string& target) -> auto{
+        auto find_file = [&](const std::string& target) -> auto {
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
                     return GetFileName(filename) == target;
@@ -696,7 +681,9 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     bool has_null = reader.GetMeta<bool>("has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
-    boost::filesystem::create_directories(path_);
+    auto lease = disk_file_manager_->AcquireLocalDirWriteLease(path_);
+    auto path = disk_file_manager_->GetLocalFiles().PathFromNativePath(path_);
+    disk_file_manager_->GetLocalFiles().CreateDirectories(path);
 
     std::vector<std::pair<std::string, std::string>> pairs;
     for (const auto& fn : file_names) {

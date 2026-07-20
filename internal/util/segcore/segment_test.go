@@ -2,7 +2,6 @@ package segcore_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,9 +25,10 @@ import (
 func TestGrowingSegment(t *testing.T) {
 	paramtable.Init()
 	initcore.InitExecExpressionFunctionFactory()
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
-	err := initcore.InitMmapManager(paramtable.Get(), 1)
+	localFiles, err := segcore.NewLocalFileSystem(t.TempDir())
+	assert.NoError(t, err)
+	t.Cleanup(localFiles.Close)
+	err = initcore.InitMmapManager(paramtable.Get(), 1)
 	assert.NoError(t, err)
 	initcore.InitTieredStorage(paramtable.Get())
 	assert.NoError(t, err)
@@ -41,6 +41,7 @@ func TestGrowingSegment(t *testing.T) {
 		CollectionID: collectionID,
 		Schema:       schema,
 		IndexMeta:    mock_segcore.GenTestIndexMeta(collectionID, schema),
+		LocalFiles:   localFiles,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, collection)

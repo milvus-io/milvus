@@ -274,7 +274,7 @@ func (s *MixCompactionTaskStorageV3Suite) SetupTest() {
 	pk, err := typeutil.GetPrimaryFieldSchema(s.meta.GetSchema())
 	s.Require().NoError(err)
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, cm, plan, compaction.GenParams(), []int64{pk.FieldID})
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, cm, plan, compaction.GenParams(), []int64{pk.FieldID}, nil)
 }
 
 func (s *MixCompactionTaskStorageV3Suite) TearDownTest() {

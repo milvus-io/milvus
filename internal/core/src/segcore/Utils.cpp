@@ -1569,8 +1569,15 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             .GetRemoteChunkManager();
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     AssertInfo(fs != nullptr, "arrow file system is nullptr");
+    AssertInfo(load_index_info->local_files.has_value(),
+               "load index info has no local filesystem");
+    auto local_files = *load_index_info->local_files;
     milvus::storage::FileManagerContext file_manager_context(
-        field_meta, index_meta, remote_chunk_manager, fs);
+        field_meta,
+        index_meta,
+        remote_chunk_manager,
+        fs,
+        std::move(local_files));
     file_manager_context.set_for_loading_index(true);
 
     // use cache layer to load vector/scalar index

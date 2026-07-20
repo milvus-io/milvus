@@ -50,6 +50,27 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
     collection_name_ = std::move(*collection_schema.mutable_name());
 }
 
+Collection::Collection(const void* schema_proto,
+                       const int64_t length,
+                       local::FileSystem local_files)
+    : local_files_(std::move(local_files)) {
+    Assert(schema_proto != nullptr);
+    milvus::proto::schema::CollectionSchema collection_schema;
+    auto suc = collection_schema.ParseFromArray(schema_proto, length);
+    if (!suc) {
+        LOG_WARN("unmarshal schema string failed");
+    }
+
+    schema_ = Schema::ParseFrom(collection_schema);
+    collection_name_ = std::move(*collection_schema.mutable_name());
+}
+
+local::FileSystem
+Collection::get_local_files() const {
+    AssertInfo(local_files_.has_value(), "collection has no local filesystem");
+    return *local_files_;
+}
+
 void
 Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
     Assert(index_proto != nullptr);
