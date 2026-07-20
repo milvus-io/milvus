@@ -1889,7 +1889,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	mlog.Info(context.TODO(), "receive import request from proxy, will broadcast",
+	mlog.Info(context.TODO(), "receive import request from proxy",
 		mlog.Int("fileNum", len(in.GetFiles())),
 		mlog.Any("files", in.GetFiles()),
 		mlog.Any("options", in.GetOptions()))
@@ -1899,6 +1899,18 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	_, err := importutilv2.GetTimeoutTs(in.GetOptions())
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
+		return resp, nil
+	}
+
+	// Reject L0 import when disabled (default). Restoring L0 (delete-only) segments
+	// is incompatible with commit_timestamp (2PC / replication imports), where it
+	// silently breaks delete semantics. Backups should have their L0 deletes folded
+	// into per-segment deltalogs beforehand; set dataCoord.import.enableL0Import=true
+	// to re-enable the legacy behavior.
+	if importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool() {
+		resp.Status = merr.Status(merr.WrapErrImportFailed("l0 import is disabled " +
+			"(dataCoord.import.enableL0Import=false); fold L0 deletes into data segment deltalogs " +
+			"before restore, or set the config to true to re-enable the legacy L0 import"))
 		return resp, nil
 	}
 
@@ -1944,6 +1956,15 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 // createImportJobFromAck creates an import job from ack callback.
 // This is called internally when broadcast ack is received.
+// Note: the pre-broadcast L0-import gate in ImportV2 covers only locally
+// originated imports. Replicated import messages (CDC) from a cluster with
+// enableL0Import=true land here directly without passing that gate, so it must
+// be re-checked. The gate here must NOT return an error: ack callbacks are
+// retried forever (callMessageAckCallbackUntilDone), and skipping job creation
+// would wedge the replicated CommitImport path (HandleCommitVchannel retries
+// on job-not-found). Instead the job is created directly in Failed state — a
+// terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
+// and the failure stays visible via GetImportProgress.
 func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
@@ -1966,9 +1987,15 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		return resp, nil
 	}
 
+	// See the function comment: an L0 import reaching this callback while the
+	// gate is disabled (replicated from a cluster where it is enabled, or a
+	// config flip between broadcast and ack) is terminally failed below instead
+	// of running ungated or returning an error (which would retry forever).
+	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
+
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup {
+	if isBackup && !l0ImportDisabled {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2024,6 +2051,14 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
+	}
+	if l0ImportDisabled {
+		mlog.Warn(ctx, "l0 import is disabled, creating the job in Failed state",
+			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()))
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
+			"into data segment deltalogs before restore, or set the config to true on this cluster " +
+			"to re-enable the legacy L0 import")(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

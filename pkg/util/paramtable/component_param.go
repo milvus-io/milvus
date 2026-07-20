@@ -5336,6 +5336,7 @@ type dataCoordConfig struct {
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
+	EnableL0Import                  ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
@@ -6574,6 +6575,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.ImportInReplicatingCluster.Init(base.mgr)
+
+	p.EnableL0Import = ParamItem{
+		Key:     "dataCoord.import.enableL0Import",
+		Version: "2.7.0",
+		Doc: "Whether to allow importing L0 (delete-only) segments during a binlog/backup import. " +
+			"Disabled by default because restoring L0 segments is incompatible with commit_timestamp " +
+			"(two-phase-commit / replication imports), where it silently breaks delete semantics. " +
+			"Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to " +
+			"re-enable the legacy L0 import behavior.",
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.EnableL0Import.Init(base.mgr)
 
 	p.ImportPreAllocIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.import.preAllocateIDExpansionFactor",

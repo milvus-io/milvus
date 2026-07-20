@@ -416,10 +416,14 @@ func (mr *MilvusRoles) Run() {
 
 	// Persist immutable configurations at startup, such as mqType paramItem
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
-		// Initialize the actual walName instead of default
-		util.InitAndSelectWALName()
-		// persist immutable configs if necessary
-		if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(); err != nil {
+		// Resolve the actual walName instead of default
+		walName := util.InitAndSelectWALName()
+		// persist immutable configs if necessary; mq.type's literal "default" is
+		// rendered to the resolved walName so the value pinned in etcd is always
+		// a concrete WAL name (issue #51497)
+		if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(map[string]func(string) string{
+			paramtable.Get().MQCfg.Type.Key: func(string) string { return walName.String() },
+		}); err != nil {
 			mlog.Error(context.TODO(), "failed to process immutable configs", mlog.Err(err))
 			return
 		}
