@@ -115,8 +115,8 @@ The frontiers mean:
 
 | Field | Meaning | Phase 2 consumer |
 |---|---|---|
-| `growing_timetick` | WAL TimeTick position that the corresponding StreamingNode shard's growing runtime must consume before serving growing queries. | StreamingNode only. |
-| `transforming_timetick` | WAL TimeTick position that the corresponding QueryNode shard's TransformBuffer must consume before serving sealed queries. | QueryNode only. |
+| `growing_timetick` | WAL TimeTick position that the corresponding StreamingNode shard's growing runtime must consume before serving growing queries. | StreamingNode. |
+| `transforming_timetick` | WAL TimeTick position that TransformLog-equivalent consumers must observe before serving queries. | QueryNode TransformBuffer, and StreamingNode growing runtime when growing-side execution depends on transform-equivalent effects such as deletes. |
 
 Both values must come from persisted WAL message TimeTicks. There is no
 system-clock, local-wall-clock, or synthetic non-WAL MVCC source.
@@ -177,10 +177,51 @@ targets consistent inside one PChannel-local critical path.
 
 The first implementation should:
 
-1. Include the StreamingNode work node from `QueryViewOfStreamingNode`.
+1. Include the StreamingNode work node from `QueryViewOfStreamingNode` unless
+   growing-side execution is explicitly ignored or can be proven empty.
 2. Include every QueryNode that has at least one selected sealed segment.
 3. Apply request partition pruning before returning the plan, so Proxy avoids
    Phase 2 calls to nodes that cannot contribute results.
+
+`work_nodes` must be built from the optimized request, not from the original
+legacy request. Global optimizers may rewrite request scope, serialized plans,
+or other planning inputs; node pruning must reflect the request that Phase 2
+will actually execute.
+
+QueryNode pruning is deterministic from the selected QueryView:
+
+- If the request carries no `partition_ids`, keep a QueryNode when any
+  partition in its view has at least one sealed segment.
+- If the request carries `partition_ids`, keep a QueryNode only when one of the
+  requested partitions exists in that QueryNode view and has sealed segments.
+
+StreamingNode pruning is an opportunistic runtime optimization. After
+`QueryPlanMVCC` is resolved and after the final request is available,
+`walAdaptorImpl.GetQueryPlan` may ask the selected view's query runtime whether
+the StreamingNode can contribute any growing segment at the requested MVCC.
+
+The probe must be fail-open:
+
+- If the request sets `ignoreGrowing`, omit StreamingNode.
+- If the selected QueryView has no `QueryViewOfStreamingNode`, omit
+  StreamingNode.
+- If the query runtime is missing, still preparing, failed, or unavailable,
+  keep StreamingNode.
+- If the runtime has not already applied both MVCC frontiers required by the
+  probe, keep StreamingNode.
+- If the runtime cannot apply the requested segment filter, keep StreamingNode.
+- Only when the runtime is ready, already visible at the target MVCC, and the
+  filtered growing segment candidate set is empty, omit StreamingNode.
+
+Flushed segment markers retained by StreamingNode for WAL replay idempotency are
+not growing candidates. The probe must ignore these entries because they have no
+queryable segment handle and exist only to prevent old replayed segment logs
+from resurrecting already sealed data.
+
+`GetQueryPlan` must not call the blocking Phase 2 wait path just to perform this
+optimization. Planning should use a non-blocking "may have visible growing
+segments" style probe; inability to prove emptiness means the plan remains
+conservative and includes StreamingNode.
 
 The optimizer does not need `work_nodes` as an explicit input. If an optimizer
 needs distribution information later, it should obtain it from the vchannel-
@@ -248,10 +289,11 @@ walAdaptorImpl.GetQueryPlan(req)
   -> acquire latest Up QueryView lease from SNQueryViewHandler
   -> defer lease.Release()
   -> resolve QueryPlanMVCC from request mode
-  -> create GlobalOptimizer from wal/vchannel using lease.View
+  -> get QueryRuntime for the selected QueryView, if it is ready
+  -> create GlobalOptimizer from wal/vchannel using lease.View and QueryRuntime
   -> clone request
   -> run optimizer on cloned request
-  -> build work_nodes from lease.View
+  -> build work_nodes from lease.View, optimized request, QueryRuntime, and MVCC
   -> build QueryPlan {
        lease.version,
        lease.shard_id,
@@ -278,6 +320,11 @@ Phase 1 errors should be retriable unless the request itself is invalid.
 | No Up view | Retriable view error | Retry Phase 1 for the shard. |
 | Requested primary MVCC on non-primary WAL | `NOT_PRIMARY` | Refresh primary mapping and retry. |
 | View invalidated while building plan | Retriable view error | Retry Phase 1 for the shard. |
+
+Runtime-side StreamingNode pruning must not introduce new user-visible errors.
+If the pruning probe cannot prove that growing-side execution is empty, planning
+keeps the StreamingNode work node and lets Phase 2 perform the normal MVCC wait
+and segment acquisition.
 
 Errors should be projected through the query-view RPC error conversion layer,
 not embedded inside response messages.
@@ -313,4 +360,6 @@ The first node-side Phase 1 milestone is:
 3. Add `SNQueryViewHandler` query-facing lease acquisition for latest Up view.
 4. Build primary-only `QueryPlanMVCC`, optimized request, and WorkNode list inside `walAdaptorImpl.GetQueryPlan`.
 5. Return a valid `QueryPlan` with a no-op global optimizer.
-6. Keep secondary and advanced optimizer behavior behind explicit follow-up work.
+6. Add fail-open StreamingNode work-node pruning for already-visible empty
+   growing runtime candidate sets.
+7. Keep secondary and advanced optimizer behavior behind explicit follow-up work.

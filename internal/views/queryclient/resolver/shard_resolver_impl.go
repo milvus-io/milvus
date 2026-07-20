@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -74,7 +75,10 @@ func (t *ShardResolverImpl) ResolveVChannels(ctx context.Context, collectionID i
 	if err != nil {
 		return nil, err
 	}
-	vchannels := cache.collectionVChannels[collectionID]
+	vchannels, ok := cache.collectionVChannels[collectionID]
+	if !ok || len(vchannels) == 0 {
+		return nil, merr.WrapErrCollectionNotLoaded(collectionID)
+	}
 	return append([]string(nil), vchannels...), nil
 }
 

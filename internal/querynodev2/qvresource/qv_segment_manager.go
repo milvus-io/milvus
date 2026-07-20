@@ -1,6 +1,8 @@
 package qvresource
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	qvtransformlogbuffer "github.com/milvus-io/milvus/internal/querynodev2/transformlogbuffer"
@@ -21,12 +23,20 @@ func NewQueryViewPhysicalSegmentLoader(manager *segments.Manager, loader segment
 	})
 }
 
-func NewQueryViewSegmentManager(manager *segments.Manager, loader segments.Loader, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager) qnview.SegmentManager {
+func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, loader segments.Loader, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, watcherFactories ...qnview.SegmentLoadInfoWatcherFactory) qnview.SegmentManager {
 	if manager == nil || loader == nil || meta == nil || streams == nil {
 		return nil
 	}
 	physicalLoader := NewQueryViewPhysicalSegmentLoader(manager, loader)
-	physicalManager := qnview.NewViewScopedPhysicalSegmentManager(meta, physicalLoader, newQueryViewSegmentResourceEstimator(loader))
+	var watcher qnview.SegmentLoadInfoWatcher
+	physicalManager := qnview.NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(
+		qnview.NewQueryViewSegmentLoadScheduler(meta, physicalLoader, newQueryViewSegmentResourceEstimator(loader)),
+		watcher,
+	)
+	if len(watcherFactories) > 0 && watcherFactories[0] != nil {
+		watcher = watcherFactories[0].NewSegmentLoadInfoWatcher(ctx, physicalManager.ApplyLoadInfoSnapshot)
+		physicalManager.SetSegmentLoadInfoWatcher(watcher)
+	}
 	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, manager.Collection)
 	return qnview.NewQueryViewSegmentReadinessManager(physicalManager, qvtransformlogbuffer.New(streams), collectionRuntime)
 }

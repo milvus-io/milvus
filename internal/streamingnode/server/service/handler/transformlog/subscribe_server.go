@@ -215,19 +215,19 @@ func (s *SubscribeServer) sendSubscriptionEvent(event wal.TransformLogStreamEven
 			},
 		})
 	}
-	if event.CaughtUp != nil {
-		mlog.Debug(s.stream.Context(), "streamingnode transform log forward caught-up",
+	if event.SyncUp != nil {
+		mlog.Debug(s.stream.Context(), "streamingnode transform log forward sync-up",
 			mlog.FieldPChannel(s.pchannel),
 			mlog.FieldVChannel(event.VChannel),
 			mlog.Int64("subscriptionID", event.SubscriptionID),
-			mlog.Uint64("startAfterTimeTick", event.CaughtUp.StartAfterTimeTick),
+			mlog.Uint64("timeTick", event.SyncUp.TimeTick),
 		)
 		return s.send(&streamingpb.TransformResponse{
-			Response: &streamingpb.TransformResponse_CaughtUp{
-				CaughtUp: &streamingpb.TransformSubscriptionCaughtUp{
-					SubscriptionId:     event.SubscriptionID,
-					Vchannel:           event.VChannel,
-					StartAfterTimeTick: event.CaughtUp.StartAfterTimeTick,
+			Response: &streamingpb.TransformResponse_SyncUp{
+				SyncUp: &streamingpb.TransformSubscriptionSyncUp{
+					SubscriptionId: event.SubscriptionID,
+					Vchannel:       event.VChannel,
+					TimeTick:       event.SyncUp.TimeTick,
 				},
 			},
 		})

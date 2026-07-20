@@ -46,6 +46,30 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 	return newQueryViewTransformSegment(loaded, l.segments, qvSegmentVChannel(info), qvSegmentTransformStartAfter(info)), nil
 }
 
+func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnview.TransformSegment, collection qnview.CollectionRuntime, snapshot qnview.SegmentLoadInfoSnapshot, action qnview.SegmentUpdateAction) error {
+	if segment == nil {
+		return fmt.Errorf("query view transform segment is nil")
+	}
+	if snapshot.LoadInfo == nil {
+		return fmt.Errorf("query view segment load info is nil")
+	}
+	transform, ok := segment.(*queryViewTransformSegment)
+	if !ok {
+		return fmt.Errorf("unexpected query view transform segment type %T", segment)
+	}
+	if action.Has(qnview.SegmentUpdateReopen) {
+		if err := l.loader.ReopenSegment(ctx, transform.segment, snapshot.LoadInfo); err != nil {
+			return err
+		}
+	}
+	if action.Has(qnview.SegmentUpdateLoadIndex) {
+		if err := l.loader.LoadIndex(ctx, transform.segment, snapshot.LoadInfo, int64(snapshot.Revision.Revision)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func qvSegmentVChannel(info *querypb.SegmentLoadInfo) string {
 	if info != nil && info.GetInsertChannel() != "" {
 		return info.GetInsertChannel()
@@ -97,6 +121,22 @@ func (l realQVSegmentLoader) LoadSegment(ctx context.Context, segment qvLoadedSe
 		return err
 	}
 	return l.loader.LoadSegment(ctx, local.segment, info)
+}
+
+func (l realQVSegmentLoader) ReopenSegment(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
+	local, err := asQVLocalSegment(segment)
+	if err != nil {
+		return err
+	}
+	return local.segment.Reopen(ctx, info)
+}
+
+func (l realQVSegmentLoader) LoadIndex(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error {
+	local, err := asQVLocalSegment(segment)
+	if err != nil {
+		return err
+	}
+	return l.loader.LoadIndex(ctx, local.segment, info, version)
 }
 
 func (l realQVSegmentLoader) LoadDeltaLogs(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {

@@ -39,10 +39,7 @@ func assignmentsFromBuilder(builder *qviews.QueryViewAtCoordBuilder) map[int64]i
 func upStats(version qviews.DataVersion, partitions []int64, fields []int64, placements ...testSegmentPlacement) *coordview.ShardStats {
 	return testShardStats(
 		&qviews.QueryViewVersion{DataVersion: version, QueryVersion: 1},
-		&viewpb.QueryViewSettings{
-			RequiredPartitions: partitions,
-			RequiredFields:     fields,
-		},
+		1,
 		placements...,
 	)
 }
@@ -51,7 +48,7 @@ func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 10, VChannel: "v0"}
 	snap := &BalancerSnapshot{
 		ShardViewSnapshot: coordview.NewShardViewSnapshot(1, map[qviews.ShardID]*coordview.ShardStats{
-			shardID: testShardStats(nil, nil, placement(101, 1, 1, coordview.SegmentStateUp)),
+			shardID: testShardStats(nil, 0, placement(101, 1, 1, coordview.SegmentStateUp)),
 		}),
 		LoadConfigSnapshot: loadmgr.NewLoadConfigSnapshot(1, map[int64]*loadmgr.LoadConfig{}),
 		Nodes:              map[int64]*BalanceNode{1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"}},

@@ -91,7 +91,7 @@ func allocate(
 		shardID.VChannel,
 	)
 	builder.SetAssignments(assignments)
-	builder.SetSettings(settingsFromConfig(desired))
+	builder.SetLoadInfoVersion(snap.LoadConfigSnapshot.ConfigVersion(desired.CollectionID))
 	return builder
 }
 
@@ -167,20 +167,6 @@ func syntheticDataView(
 		CollectionId: cfg.CollectionID,
 		DataVersion:  dv.IntoProto(),
 		Shards:       []*viewpb.DataViewOfShard{shard},
-	}
-}
-
-// settingsFromConfig derives QueryViewSettings from a LoadConfig. Partition IDs
-// go into RequiredPartitions; field IDs into RequiredFields. Everything is a
-// "required" list in the current design (no optional/lazy semantics yet).
-func settingsFromConfig(cfg *loadmgr.LoadConfig) *viewpb.QueryViewSettings {
-	fields := make([]int64, len(cfg.LoadFields))
-	for i, f := range cfg.LoadFields {
-		fields[i] = f.GetFieldId()
-	}
-	return &viewpb.QueryViewSettings{
-		RequiredPartitions: append([]int64{}, cfg.PartitionIDs...),
-		RequiredFields:     fields,
 	}
 }
 

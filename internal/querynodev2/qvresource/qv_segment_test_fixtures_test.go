@@ -13,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 )
@@ -68,15 +68,17 @@ func (m *fakeQVSegmentManager) Remove(_ context.Context, segmentID int64, scope 
 }
 
 type fakeQVLoader struct {
-	collectionID int64
-	version      int64
-	infos        []*querypb.SegmentLoadInfo
-	segment      qvLoadedSegment
-	newCalled    bool
-	loadCalled   bool
-	deltaCalled  bool
-	pkCalled     bool
-	err          error
+	collectionID    int64
+	version         int64
+	infos           []*querypb.SegmentLoadInfo
+	segment         qvLoadedSegment
+	newCalled       bool
+	loadCalled      bool
+	reopenCalled    bool
+	loadIndexCalled bool
+	deltaCalled     bool
+	pkCalled        bool
+	err             error
 }
 
 type fakeQVResourceLoader struct {
@@ -101,16 +103,25 @@ func (r *fakeQVResourceReservation) Release() {
 }
 
 type fakeQVLoadMetadataProvider struct {
-	collection *milvuspb.DescribeCollectionResponse
-	err        error
+	collection   *milvuspb.DescribeCollectionResponse
+	partitionIDs []int64
+	loadFields   []int64
+	err          error
 }
 
 func (p *fakeQVLoadMetadataProvider) DescribeCollection(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
 	return p.collection, p.err
 }
 
-func (p *fakeQVLoadMetadataProvider) GetQueryViewSegmentLoadInfo(context.Context, int64, ...int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
-	return nil, nil, p.err
+func (p *fakeQVLoadMetadataProvider) GetQueryViewLoadInfo(context.Context, int64, qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
+	fields := make([]*messagespb.LoadFieldConfig, 0, len(p.loadFields))
+	for _, fieldID := range p.loadFields {
+		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: fieldID})
+	}
+	return qnview.QueryViewLoadInfo{
+		PartitionIDs: append([]int64(nil), p.partitionIDs...),
+		LoadFields:   fields,
+	}, p.err
 }
 
 func (l *fakeQVLoader) NewSegment(_ context.Context, _ qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) (qvLoadedSegment, error) {
@@ -122,6 +133,19 @@ func (l *fakeQVLoader) NewSegment(_ context.Context, _ qnview.CollectionRuntime,
 
 func (l *fakeQVLoader) LoadSegment(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
 	l.loadCalled = true
+	l.infos = append(l.infos, info)
+	return l.err
+}
+
+func (l *fakeQVLoader) ReopenSegment(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
+	l.reopenCalled = true
+	l.infos = append(l.infos, info)
+	return l.err
+}
+
+func (l *fakeQVLoader) LoadIndex(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error {
+	l.loadIndexCalled = true
+	l.version = version
 	l.infos = append(l.infos, info)
 	return l.err
 }

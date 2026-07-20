@@ -364,6 +364,10 @@ Implements both QueryPlanService and ViewQueryService gRPC servers.
 4. Build work node list from the query view (SN itself + all QNs).
    If partition_ids are specified, prune work nodes that have no segments
    for the requested partitions to reduce Phase 2 fan-out.
+   SN may also be omitted when its query runtime is ready, already visible at
+   the planned MVCC, and has no growing segment candidates after request-scope
+   filtering. This SN pruning is fail-open: any unknown or not-yet-visible state
+   keeps SN in the plan.
 5. Return query plan with optimized request.
 
 **Phase 1 — GetMVCCTimestamp:**

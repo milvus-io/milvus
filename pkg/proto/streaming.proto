@@ -591,7 +591,7 @@ message TransformLogEntry {
 
     oneof entry {
         TransformDeleteEntry delete = 2;
- TransformBarrierEntry barrier = 3;
+ 
     }
 }
 
@@ -1038,7 +1038,7 @@ message TransformResponse {
     oneof response {
         CreateTransformSubscriptionResponse create = 1;
         TransformMessageBatch message_batch = 2;
-        TransformSubscriptionCaughtUp caught_up = 3;
+        TransformSubscriptionSyncUp sync_up = 3;
         TransformSubscriptionError subscription_error = 4;
         CloseTransformSubscriptionResponse close_subscription = 5;
         CloseTransformStreamResponse close_stream = 6;
@@ -1060,13 +1060,13 @@ message CloseTransformSubscriptionResponse {
     string vchannel = 2;
 }
 
-message TransformSubscriptionCaughtUp {
+message TransformSubscriptionSyncUp {
     int64 subscription_id = 1;
     string vchannel = 2;
 
     // Echoes the requested exclusive start point. It is not a latest TimeTick
     // watermark.
-    uint64 start_after_time_tick = 3;
+    uint64 time_tick = 3;
 }
 
 message TransformSubscriptionError {
@@ -1122,4 +1122,4 @@ message ShardAssignmentEntry {
     int64 replica_id = 3;     // Replica this shard belongs to.
 }
 
-message TransformBarrierEntry {}
+
