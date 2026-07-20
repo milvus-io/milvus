@@ -119,6 +119,10 @@ func getLengthFromTemplateValue(tv *schemapb.TemplateValue) int {
 		return len(arrayValues.GetStringData().GetData())
 	case *schemapb.TemplateArrayValue_JsonData:
 		return len(arrayValues.GetJsonData().GetData())
+	case *schemapb.TemplateArrayValue_ArrayData:
+		return len(arrayValues.GetArrayData().GetData())
+	case nil:
+		return 0
 	default:
 		// undefined
 		return -1
