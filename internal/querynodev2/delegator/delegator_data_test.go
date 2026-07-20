@@ -1239,7 +1239,6 @@ func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners()
 	})
 	s.Require().NoError(err)
 	s.True(ok)
-
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
