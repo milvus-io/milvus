@@ -224,8 +224,7 @@ IndexFactory::CanUseIndexRawDataForField(DataType field_type,
     // vector payloads, but the field column is still needed for struct offsets
     // and parent-row validity.
     return has_raw_data && field_type != DataType::ARRAY &&
-           field_type != DataType::VECTOR_ARRAY &&
-           field_type != DataType::JSON;
+           field_type != DataType::VECTOR_ARRAY && field_type != DataType::JSON;
 }
 
 template <typename T>
