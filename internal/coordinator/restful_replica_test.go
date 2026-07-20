@@ -236,6 +236,9 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker3 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker3.UnPatch()
 
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
 
@@ -471,6 +474,53 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.Contains(t, resp.Reason, "catching up")
 	})
 
+	t.Run("delegator not serviceable reason takes precedence over query-invisible", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
+
+		replica := meta.NewReplica(&querypb.Replica{
+			ID:            1,
+			CollectionID:  100,
+			ResourceGroup: "rg1",
+		}, typeutil.NewUniqueSet())
+		mutableReplica := replica.CopyForWrite()
+		mutableReplica.SetQueryInvisible(true)
+		replicas := []*meta.Replica{mutableReplica.IntoReplica()}
+
+		coord := &mixCoordImpl{
+			queryCoordServer: &querycoordv2.Server{},
+		}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mocker2.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).
+			Return(fmt.Errorf("replica 1 (rg=rg1) channel c1 not serviceable: delegator reported not serviceable")).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Contains(t, resp.Reason, "delegator reported not serviceable")
+		assert.NotContains(t, resp.Reason, "not query visible")
+	})
+
 	t.Run("query-invisible replica returns NotReady", func(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
@@ -500,6 +550,9 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 
 		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker2.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mocker3.UnPatch()
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
