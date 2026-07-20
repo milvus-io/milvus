@@ -73,8 +73,12 @@ type staticQueryTrafficLabelProvider struct {
 	nodes  map[int64]querytraffic.Labels
 }
 
-func (p staticQueryTrafficLabelProvider) GetLabels(ctx context.Context, nodeIDs []int64) (querytraffic.Labels, map[int64]querytraffic.Labels, error) {
-	return p.source, p.nodes, nil
+func (p staticQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
+	return p.source, nil
+}
+
+func (p staticQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error) {
+	return p.nodes, nil
 }
 
 type captureWeightedBalancer struct {
@@ -281,6 +285,11 @@ func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
 func (s *LBPolicySuite) TestSelectNodeAppliesQueryTrafficRoutingBeforeBalancer() {
 	ctx := context.Background()
 	weightedBalancer := &captureWeightedBalancer{}
+	nodes := []NodeInfo{
+		{NodeID: 1, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+		{NodeID: 2, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az2"}},
+		{NodeID: 3, Address: "localhost", Serviceable: true, Labels: querytraffic.Labels{"AZ": "az1"}},
+	}
 	s.lbPolicy.queryTrafficRouter = newQueryTrafficRouter(
 		staticQueryTrafficConfig{
 			enabled: true,
@@ -288,14 +297,9 @@ func (s *LBPolicySuite) TestSelectNodeAppliesQueryTrafficRoutingBeforeBalancer()
 		},
 		staticQueryTrafficLabelProvider{
 			source: querytraffic.Labels{"AZ": "az1"},
-			nodes: map[int64]querytraffic.Labels{
-				1: {"AZ": "az1"},
-				2: {"AZ": "az2"},
-				3: {"AZ": "az1"},
-			},
 		},
 	)
-	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes[:3], nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(nodes, nil)
 
 	excludeNodes := typeutil.NewUniqueSet()
 	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, weightedBalancer, ChannelWorkload{
