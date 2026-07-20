@@ -42,6 +42,11 @@ def _parse_order_by_field(order_by_field):
 
 
 def _expected_rows(order_by_fields, limit, row_filter=None, offset=0):
+    """Build a deterministic reference order for local assertions.
+
+    The final ID key stabilizes this test helper only. Query ORDER BY does not
+    guarantee an implicit PK tie-breaker when all explicit sort fields match.
+    """
     rows = [row for row in _rows() if row_filter is None or row_filter(row)]
     order_specs = [_parse_order_by_field(field) for field in order_by_fields]
 
@@ -138,7 +143,8 @@ class TestQueryOrderBy(TestBase):
         assert actual == expected
 
     @staticmethod
-    def _assert_pk_tie_breaker(rows, fields):
+    def _assert_returned_ties_pk_monotonic(rows, fields):
+        """Check the current returned subset without asserting exact tie selection."""
         for current, following in zip(rows, rows[1:]):
             if all(current[field] == following[field] for field in fields):
                 assert current["id"] < following["id"], rows
@@ -262,7 +268,7 @@ class TestQueryOrderBy(TestBase):
             row_filter=lambda row: 12 <= row["price"] <= 16,
         )
         self._assert_expected_values(rows, expected, ["price"])
-        self._assert_pk_tie_breaker(rows, ["price"])
+        self._assert_returned_ties_pk_monotonic(rows, ["price"])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_order_by_default_limit(self):

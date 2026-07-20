@@ -1,14 +1,14 @@
 import time
 
 import pytest
-
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from pymilvus import DataType
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
+
 default_nb = 3200
 default_dim = 8
 default_batch = 1000
@@ -418,7 +418,7 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_order_by_pagination(self):
-        """OB-020~023: Pagination with ORDER BY (single field, PK as implicit tie-breaker)."""
+        """OB-020~023: Pagination with a single ORDER BY field."""
         client = self._client()
         order_by = [{"field": "price", "order": "asc"}]
 
@@ -604,7 +604,7 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_order_by_all_null_values(self):
-        """OB-028: Filter to only NULL rows, sort — all NULL, PK as implicit tie-breaker"""
+        """OB-028: Filter to only NULL rows and inspect the returned subset order."""
         client = self._client()
         # idx % 5 == 0 rows have NULL nullable_score
         res = self.query(client, VALID_COLLECTION_NAME,
@@ -618,7 +618,8 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
         for r in res:
             assert r["nullable_score"] is None, \
                 f"Expected NULL nullable_score, got {r['nullable_score']}"
-        # All values are NULL, PK (id) should serve as implicit tie-breaker (ascending)
+        # Check monotonic IDs within the returned subset only. The API does not
+        # guarantee which rows are selected when all explicit sort keys tie.
         ids = [r["id"] for r in res]
         for i in range(len(ids) - 1):
             assert ids[i] < ids[i + 1], \
@@ -674,13 +675,13 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
             a, b = non_null_rows[i], non_null_rows[i + 1]
             assert a["nullable_score"] >= b["nullable_score"], \
                 f"nullable_score not descending at index {i}: {a['nullable_score']} < {b['nullable_score']}"
-            # PK as tie-breaker when values are equal
+            # Check the order of surviving equal-key rows, not the exact tied subset.
             if a["nullable_score"] == b["nullable_score"]:
                 assert a["id"] < b["id"], \
-                    f"id not ascending as tie-breaker at index {i}: {a['id']} >= {b['id']}"
+                    f"id not ascending among returned equal-key rows at index {i}: {a['id']} >= {b['id']}"
         for v in nulls:
             assert v is None, f"Expected NULL at end, got {v}"
-        # Among NULL rows, PK (id) should be ascending as tie-breaker
+        # This checks only the order of returned NULL rows, not exact row selection.
         null_ids = [r["id"] for r in null_rows]
         for i in range(len(null_ids) - 1):
             assert null_ids[i] < null_ids[i + 1], \
@@ -1098,7 +1099,7 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_order_by_all_values_identical(self):
-        """OB-048: All values identical — int32_field==0 rows, PK as tie-breaker"""
+        """OB-048: All values identical — inspect the returned subset order."""
         client = self._client()
         # int32_field = idx % 500, so int32_field==0 matches idx=0,500,1000,...
         res = self.query(client, VALID_COLLECTION_NAME,
@@ -1111,11 +1112,12 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
         assert len(res) > 0
         for r in res:
             assert r["int32_field"] == 0
-        # All values identical, PK (id) should be ascending as tie-breaker
+        # Check monotonic IDs in the returned subset without asserting that it is
+        # the exact PK-ordered prefix of all matching rows.
         ids = [r["id"] for r in res]
         for i in range(len(ids) - 1):
             assert ids[i] < ids[i + 1], \
-                f"id not ascending as tie-breaker at index {i}: {ids[i]} >= {ids[i + 1]}"
+                f"id not ascending among returned equal-key rows at index {i}: {ids[i]} >= {ids[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_order_by_three_sort_fields(self):
@@ -1349,7 +1351,7 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_order_by_float_field_with_duplicates(self):
-        """OB-059: ORDER BY float field with many duplicate values — verify stable sort with PK tie-breaking.
+        """OB-059: ORDER BY float field with many duplicate values.
         float_field = round((idx % 1000) * 0.1, 1), so 3200 rows produce many duplicates."""
         client = self._client()
         res = self.query(client, VALID_COLLECTION_NAME,
@@ -1359,13 +1361,14 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
                          order_by_fields=[{"field": "float_field", "order": "asc"}],
                          consistency_level="Strong")[0]
 
-        assert len(res) > 1, "Need multiple rows with same float value to test tie-breaking"
+        assert len(res) > 1, "Need multiple rows with the same float value to exercise equal-key ordering"
         # All float values should be identical
         for r in res:
             assert r["float_field"] == 0.5, \
                 f"Expected float_field=0.5, got {r['float_field']}"
-        # PK (id) should be ascending as tie-breaker
+        # Check monotonic IDs within the returned subset. Equal-key candidate
+        # selection is not guaranteed without an explicit final sort field.
         ids = [r["id"] for r in res]
         for i in range(len(ids) - 1):
             assert ids[i] < ids[i + 1], \
-                f"id not ascending as tie-breaker at index {i}: {ids[i]} >= {ids[i + 1]}"
+                f"id not ascending among returned equal-key rows at index {i}: {ids[i]} >= {ids[i + 1]}"
