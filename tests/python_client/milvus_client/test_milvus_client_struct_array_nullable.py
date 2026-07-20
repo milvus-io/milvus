@@ -965,7 +965,9 @@ def gt_struct_array_expression_rows(
         threshold = int(raw_threshold) if raw_threshold is not None else None
         results = []
         for row in scoped_rows:
-            struct_array = row.get(STRUCT_FIELD) or []
+            struct_array = row.get(STRUCT_FIELD)
+            if struct_array is None:
+                continue
             match_count = sum(1 for element in struct_array if _eval_struct_element_condition(element, condition))
             total_count = len(struct_array)
             matched = (
@@ -1887,7 +1889,8 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         method: create nullable scalar Struct Array rows covering explicit null, omitted, empty, one-match,
             two-match, and zero-match profiles in both sealed and growing segments, then query every MATCH operator
         expected: expected result sets are computed from source data and expression; MATCH_ANY/LEAST only return rows
-            with enough matching elements, and MATCH_ALL/MOST/EXACT treat null/empty profiles as zero-element inputs
+            with enough matching elements, null/omitted profiles evaluate to unknown, and MATCH_ALL/MOST/EXACT treat
+            empty profiles as zero-element inputs
         """
         collection_name = cf.gen_unique_str(f"{prefix}_nullable_struct_match_null_expr")
         client = self._client()

@@ -495,6 +495,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::JsonStats;
             return;
         }
+        if (expr_->column_.data_type_ == DataType::ARRAY &&
+            expr_->vals_.empty()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
         SegmentExpr::DetermineExecPath();
     }
 

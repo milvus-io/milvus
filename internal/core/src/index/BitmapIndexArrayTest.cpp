@@ -578,7 +578,7 @@ TEST(BitmapIndexArrayNestedTest, BuildAndLoadElementLevelBitmap) {
     auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
     index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
     ASSERT_TRUE(index->IsNestedIndex());
-    ASSERT_TRUE(index->HasRawData());
+    ASSERT_FALSE(index->HasRawData());
     ASSERT_EQ(index->Count(), 4);
 
     auto binary_set = index->Serialize({});
@@ -586,6 +586,7 @@ TEST(BitmapIndexArrayNestedTest, BuildAndLoadElementLevelBitmap) {
         std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
     loaded_index->Load(binary_set, {});
     ASSERT_TRUE(loaded_index->IsNestedIndex());
+    ASSERT_FALSE(loaded_index->HasRawData());
     ASSERT_EQ(loaded_index->Count(), 4);
 
     int32_t value = 2;

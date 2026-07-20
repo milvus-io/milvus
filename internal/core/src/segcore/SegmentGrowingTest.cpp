@@ -349,6 +349,45 @@ TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     }
 }
 
+TEST(Growing, LoadMissingStructArrayOffsetsReturnsEmptyForOldRows) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto label =
+        schema->AddDebugArrayField("chunks[label]", DataType::VARCHAR, true);
+    auto score =
+        schema->AddDebugArrayField("chunks[score]", DataType::INT32, true);
+
+    constexpr int64_t row_count = 5;
+    auto dataset = DataGen(schema, row_count);
+    auto config = SegcoreConfig::default_config();
+    auto segment = CreateGrowingWithFieldDataLoaded(
+        schema,
+        empty_index_meta,
+        config,
+        dataset,
+        false,
+        std::vector<int64_t>{label.get(), score.get()});
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    growing->FillAbsentFields();
+    ASSERT_EQ(growing->get_row_count(), row_count);
+
+    auto offsets = growing->GetArrayOffsets(label);
+    ASSERT_NE(offsets, nullptr);
+    auto score_offsets = growing->GetArrayOffsets(score);
+    ASSERT_NE(score_offsets, nullptr);
+    EXPECT_EQ(offsets.get(), score_offsets.get());
+    EXPECT_EQ(offsets->GetRowCount(), row_count);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+    for (int64_t i = 0; i <= row_count; ++i) {
+        auto [start, end] = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(start, 0);
+        EXPECT_EQ(end, 0);
+    }
+}
+
 class GrowingTest
     : public ::testing::TestWithParam<
           std::tuple</*index type*/ std::string, knowhere::MetricType>> {
