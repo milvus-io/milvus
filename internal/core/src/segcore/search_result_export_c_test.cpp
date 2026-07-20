@@ -31,6 +31,7 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/Utils.h"
 #include "segcore/reduce/Reduce.h"
@@ -68,6 +69,16 @@ using ChunkSizesPtr = std::unique_ptr<int64_t, decltype(&ReleaseChunkSizes)>;
 static ChunkSizesPtr
 AdoptChunkSizes(int64_t* chunk_sizes) {
     return ChunkSizesPtr(chunk_sizes, ReleaseChunkSizes);
+}
+
+static void
+AttachSealedRequestLease(SearchResult& result,
+                         milvus::segcore::SegmentInterface* segment) {
+    auto* sealed =
+        dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
+    ASSERT_NE(sealed, nullptr);
+    result.segment_ = segment;
+    result.read_lease_ = sealed->AcquireReadLease(folly::CancellationToken());
 }
 
 // ---------------------------------------------------------------------------
@@ -843,7 +854,7 @@ TEST(SearchResultExport,
     sr.total_nq_ = 1;
     sr.unity_topK_ = 3;
     sr.pk_type_ = DataType::INT64;
-    sr.segment_ = segment.get();
+    AttachSealedRequestLease(sr, segment.get());
     sr.seg_offsets_ = {0, 1, 2};
     sr.distances_ = {0.9f, 0.8f, 0.7f};
     sr.primary_keys_ = {
@@ -1038,7 +1049,7 @@ TEST(SearchResultExport,
     non_empty_sr.total_nq_ = 1;
     non_empty_sr.unity_topK_ = 2;
     non_empty_sr.pk_type_ = DataType::INT64;
-    non_empty_sr.segment_ = segment.get();
+    AttachSealedRequestLease(non_empty_sr, segment.get());
     non_empty_sr.seg_offsets_ = {0, 1};
     non_empty_sr.distances_ = {0.9f, 0.8f};
     non_empty_sr.primary_keys_ = {PkType(int64_t(100)), PkType(int64_t(101))};
@@ -1098,7 +1109,7 @@ TEST(SearchResultExport, ExportSearchResultAsArrowRecordBatch_ExtraFieldIds) {
     sr.total_nq_ = 1;
     sr.unity_topK_ = 3;
     sr.pk_type_ = DataType::INT64;
-    sr.segment_ = segment.get();
+    AttachSealedRequestLease(sr, segment.get());
     sr.seg_offsets_ = {0, 1, 2};
     sr.distances_ = {0.9f, 0.8f, 0.7f};
     sr.primary_keys_ = {
@@ -1155,7 +1166,7 @@ TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     EXPECT_TRUE(HasTargetEntries(reinterpret_cast<CSearchPlan>(plan.get())));
 
     SearchResult sr;
-    sr.segment_ = segment.get();
+    AttachSealedRequestLease(sr, segment.get());
 
     std::vector<CSearchResult> c_results = {
         reinterpret_cast<CSearchResult>(&sr)};
@@ -1369,7 +1380,7 @@ TEST(SearchResultExport, PrepareSearchResultsForExport_FillsPrimaryKeys) {
     sr_a.total_nq_ = 1;
     sr_a.unity_topK_ = 3;
     sr_a.total_data_cnt_ = N;
-    sr_a.segment_ = seg_a.get();
+    AttachSealedRequestLease(sr_a, seg_a.get());
     sr_a.seg_offsets_ = {0, INVALID_SEG_OFFSET, 5};
     sr_a.distances_ = {1.0f, 2.0f, 3.0f};
 
@@ -1377,7 +1388,7 @@ TEST(SearchResultExport, PrepareSearchResultsForExport_FillsPrimaryKeys) {
     sr_b.total_nq_ = 1;
     sr_b.unity_topK_ = 3;
     sr_b.total_data_cnt_ = N;
-    sr_b.segment_ = seg_b.get();
+    AttachSealedRequestLease(sr_b, seg_b.get());
     sr_b.seg_offsets_ = {1, 7, 10};
     sr_b.distances_ = {1.5f, 2.5f, 3.5f};
 
@@ -1385,7 +1396,7 @@ TEST(SearchResultExport, PrepareSearchResultsForExport_FillsPrimaryKeys) {
     sr_no_hit.total_nq_ = 1;
     sr_no_hit.unity_topK_ = 3;
     sr_no_hit.total_data_cnt_ = N;
-    sr_no_hit.segment_ = seg_b.get();
+    AttachSealedRequestLease(sr_no_hit, seg_b.get());
     sr_no_hit.seg_offsets_ = {
         INVALID_SEG_OFFSET, INVALID_SEG_OFFSET, INVALID_SEG_OFFSET};
     sr_no_hit.distances_ = {4.0f, 5.0f, 6.0f};

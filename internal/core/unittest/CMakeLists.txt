@@ -71,6 +71,7 @@ set(MILVUS_TEST_FILES
         test_commit_timestamp.cpp
         test_schema_reopen.cpp
         test_growing_concurrent_reopen.cpp
+        test_segment_read_lease.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
