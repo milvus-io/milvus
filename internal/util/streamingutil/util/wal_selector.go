@@ -25,14 +25,15 @@ type walEnable struct {
 }
 
 // InitAndSelectWALName init and select wal name.
-func InitAndSelectWALName() {
+// The resolved name is intentionally NOT saved into the runtime config overlay:
+// the overlay would take priority over the etcd source forever, hiding a later
+// WAL switch (mq.type updated in etcd) from every reader in this process.
+// Persisting the resolved name is handled by ProcessImmutableConfigs with a
+// renderer at coordinator startup instead.
+func InitAndSelectWALName() message.WALName {
 	walName := MustSelectWALName()
 	message.RegisterDefaultWALName(walName)
-	mqTypeKey := paramtable.Get().MQCfg.Type.Key
-	err := paramtable.Get().Save(mqTypeKey, walName.String())
-	if err != nil {
-		panic(err)
-	}
+	return walName
 }
 
 // MustSelectWALName select wal name.
