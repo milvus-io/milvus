@@ -5524,7 +5524,7 @@ ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
             continue;
         }
         committer.Commit(
-            [field_id, index = std::move(index)](
+            [field_id = field_id, index = std::move(index)](
                 RuntimeResourceState& runtime, PublishedSegmentState&) mutable {
                 runtime.json_stats[field_id] = std::move(index);
             });
@@ -7145,7 +7145,7 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     for (const auto& [field_id, nested_paths] : diff.json_indexes_to_drop) {
         for (const auto& nested_path : nested_paths) {
-            committer.Commit([&, field_id, nested_path](
+            committer.Commit([&, field_id = field_id, nested_path](
                                  RuntimeResourceState& runtime,
                                  PublishedSegmentState& staged_state) {
                 for (auto& retired :
@@ -8249,7 +8249,7 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
                    field_id.get());
         auto future = pool.Submit([this,
                                    op_ctx,
-                                   field_id,
+                                   field_id = field_id,
                                    info = std::move(load_text_index_info),
                                    &segment_load_info,
                                    &committer]() mutable -> void {
