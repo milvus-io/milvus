@@ -264,6 +264,30 @@ func TestDelegatorGrowingSourceProviderHandoffOnlyRejectsNewSegmentsBeforeFence(
 	provider.Close()
 }
 
+func TestDelegatorGrowingSourceProviderClearsHandoffOnlyAfterReleasePrepared(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	provider := newDelegatorGrowingSourceProvider(segmentManager, nil)
+
+	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: 1001},
+	})
+	require.NoError(t, err)
+	require.True(t, provider.IsReleaseAllowed(1001, 0))
+
+	provider.ClearReleasePrepared(1001)
+
+	segment := segments.NewMockSegment(t)
+	segmentManager.EXPECT().GetGrowing(int64(1002)).Return(segment).Once()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(int64(1)).Once()
+	segment.EXPECT().Unpin().Once()
+
+	source, state := provider.GetGrowingFlushSource(1002, 1, nil)
+	require.Equal(t, syncmgr.GrowingSourceUsable, state)
+	require.NotNil(t, source)
+	source.Release()
+}
+
 func TestDelegatorGrowingSourceProviderDeactivatedOnlyServesRetainedSources(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
 	segment := segments.NewMockSegment(t)
