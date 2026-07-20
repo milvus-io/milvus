@@ -292,21 +292,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
-		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
-			proxy.DatabaseInterceptor(),
-			UnaryRequestStatsInterceptor,
-			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			interceptor.NewObservabilityServerUnaryInterceptor(),
-			accesslog.UnaryAccessLogInterceptor,
-			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.UnaryServerHookInterceptor(),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
-			proxy.RateLimitInterceptor(limiter),
-			accesslog.UnaryUpdateAccessInfoInterceptor,
-			proxy.TraceLogInterceptor,
-			connection.KeepActiveInterceptor,
-		))
+		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(buildExternalProxyUnaryInterceptors(limiter)...))
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
 	}
@@ -393,6 +379,24 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return
 	}
 	mlog.Info(context.TODO(), "Proxy external grpc server exited")
+}
+
+func buildExternalProxyUnaryInterceptors(limiter types.Limiter) []grpc.UnaryServerInterceptor {
+	return []grpc.UnaryServerInterceptor{
+		streaming.ForwardLegacyProxyUnaryServerInterceptor(),
+		proxy.DatabaseInterceptor(),
+		UnaryRequestStatsInterceptor,
+		mlog.UnaryServerInterceptor(typeutil.ProxyRole),
+		interceptor.NewObservabilityServerUnaryInterceptor(),
+		accesslog.UnaryAccessLogInterceptor,
+		proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
+		proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
+		proxy.UnaryServerHookInterceptor(),
+		proxy.RateLimitInterceptor(limiter),
+		accesslog.UnaryUpdateAccessInfoInterceptor,
+		proxy.TraceLogInterceptor,
+		connection.KeepActiveInterceptor,
+	}
 }
 
 func (s *Server) startInternalGrpc(errChan chan error) {

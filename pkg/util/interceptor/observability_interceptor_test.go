@@ -23,9 +23,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -263,6 +266,31 @@ func TestObservabilityServerUnary_AccessLogPath(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestObservabilityServerUnary_RecordsMetricsLabels(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterGRPCMetrics(registry)
+	method := "/testpb.ObservabilityMetricService/UnaryDenied"
+	intercept := NewObservabilityServerUnaryInterceptor()
+
+	wantErr := status.Error(codes.PermissionDenied, "denied")
+	handler := func(ctx context.Context, req any) (any, error) {
+		return nil, wantErr
+	}
+	resp, err := intercept(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: method}, handler)
+	assert.Nil(t, resp)
+	assert.ErrorIs(t, err, wantErr)
+
+	mfs, err := registry.Gather()
+	assert.NoError(t, err)
+	assert.True(t, hasMetricWithLabels(mfs, "milvus_grpc_server_handled_total", map[string]string{
+		"grpc_type":    "unary",
+		"grpc_service": "testpb.ObservabilityMetricService",
+		"grpc_method":  "UnaryDenied",
+		"grpc_code":    codes.PermissionDenied.String(),
+		"node_id":      paramtable.GetStringNodeID(),
+	}))
+}
+
 func TestObservabilityServerStream_AccessLogPath(t *testing.T) {
 	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
 	configureObservabilityLogMethodsForTest(t, "/svc/Stream", "")
@@ -341,4 +369,31 @@ func (s *mockClientStream) SendMsg(any) error {
 
 func (s *mockClientStream) RecvMsg(any) error {
 	return nil
+}
+
+func hasMetricWithLabels(mfs []*dto.MetricFamily, name string, labels map[string]string) bool {
+	for _, mf := range mfs {
+		if mf.GetName() != name {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			if metricHasLabels(metric, labels) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func metricHasLabels(metric *dto.Metric, labels map[string]string) bool {
+	got := make(map[string]string, len(metric.GetLabel()))
+	for _, label := range metric.GetLabel() {
+		got[label.GetName()] = label.GetValue()
+	}
+	for key, want := range labels {
+		if got[key] != want {
+			return false
+		}
+	}
+	return true
 }
