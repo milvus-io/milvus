@@ -95,6 +95,51 @@ func TestDecimalTermExpr(t *testing.T) {
 	assert.EqualValues(t, 300000, termExpr.GetValues()[2].GetInt64Val())
 }
 
+func TestDecimalArithmetic(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+
+	// "price - 5 > 10": both the arithmetic operand and the comparison value must be
+	// scaled by the field's declared scale (4), not passed through as raw integers.
+	expr, err := ParseExpr(helper, `DecimalField - 5 > 10`, nil)
+	require.NoError(t, err)
+	arith := expr.GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, arith)
+	assert.Equal(t, schemapb.DataType_Decimal, arith.GetColumnInfo().GetDataType())
+	assert.Equal(t, planpb.ArithOpType_Sub, arith.GetArithOp())
+	assert.EqualValues(t, 50000, arith.GetRightOperand().GetInt64Val())
+	assert.Equal(t, planpb.OpType_GreaterThan, arith.GetOp())
+	assert.EqualValues(t, 100000, arith.GetValue().GetInt64Val())
+
+	// Fractional operand, exact source text (not float round-tripped).
+	expr, err = ParseExpr(helper, `DecimalField + 5.5 == 25.49`, nil)
+	require.NoError(t, err)
+	arith = expr.GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, arith)
+	assert.Equal(t, planpb.ArithOpType_Add, arith.GetArithOp())
+	assert.EqualValues(t, 55000, arith.GetRightOperand().GetInt64Val())
+	assert.EqualValues(t, 254900, arith.GetValue().GetInt64Val())
+
+	// Add is commutative: literal-first form must produce the same scaled operand.
+	expr, err = ParseExpr(helper, `5 + DecimalField > 10`, nil)
+	require.NoError(t, err)
+	arith = expr.GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, arith)
+	assert.Equal(t, planpb.ArithOpType_Add, arith.GetArithOp())
+	assert.EqualValues(t, 50000, arith.GetRightOperand().GetInt64Val())
+	assert.EqualValues(t, 100000, arith.GetValue().GetInt64Val())
+}
+
+func TestDecimalArithmeticUnsupportedOps(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+
+	// Multiply/divide/modulo are explicitly out of scope for now (would need real
+	// fixed-point rescaling for fractional operands) - must fail loudly, not silently
+	// produce a wrongly-scaled result.
+	assertInvalidExpr(t, helper, `DecimalField * 2 > 10`)
+	assertInvalidExpr(t, helper, `DecimalField / 2 > 10`)
+	assertInvalidExpr(t, helper, `DecimalField % 2 == 0`)
+}
+
 func TestDecimalInvalidLiterals(t *testing.T) {
 	helper := newTestSchemaHelper(t)
 

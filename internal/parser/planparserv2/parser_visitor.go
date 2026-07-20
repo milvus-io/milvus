@@ -357,6 +357,14 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	if err = checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
 		return err
 	}
+
+	// "price - 5": re-derive the literal side from exact source text at price's declared
+	// scale, so the unscaled int64 subtraction stays correct (see fixupDecimalOperands).
+	leftExpr, rightExpr, err = v.fixupDecimalOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
+	if err != nil {
+		return err
+	}
+
 	var dataType schemapb.DataType
 	if leftExpr.expr.GetIsTemplate() {
 		dataType = rightExpr.dataType
@@ -440,6 +448,14 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
+	// Multiply/divide/modulo need the literal operand rescaled differently than add/subtract
+	// (an integer multiplier must stay unscaled; a fractional one needs real fixed-point
+	// rescaling), which isn't implemented yet - reject explicitly rather than silently
+	// producing a wrong result.
+	if leftExpr.dataType == schemapb.DataType_Decimal || rightExpr.dataType == schemapb.DataType_Decimal {
+		return merr.WrapErrParameterInvalidMsg("decimal fields only support add/subtract in arithmetic expressions for now, got: %s", ctx.GetOp().GetText())
+	}
+
 	if err := checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
 		return err
 	}
@@ -492,7 +508,11 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 // that would silently reintroduce binary floating-point error, defeating the entire point
 // of the Decimal type, if used to compare against a Decimal column.
 func (v *ParserVisitor) fixupDecimalLiteral(litCtx parser.IExprContext, colExpr *ExprWithType) (*ExprWithType, error) {
-	fieldSchema, err := v.schema.GetFieldFromID(toColumnInfo(colExpr).GetFieldId())
+	columnInfo := decimalArithColumnInfo(colExpr)
+	if columnInfo == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("cannot resolve decimal field for literal %q", litCtx.GetText())
+	}
+	fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
 	if err != nil {
 		return nil, err
 	}
@@ -573,20 +593,23 @@ func (v *ParserVisitor) fixupDecimalTermValues(termCtx parser.IExprContext, data
 	return fixed, nil
 }
 
-// fixupDecimalComparisonOperands detects "Decimal column op numeric-literal" (in either
-// order) and swaps the literal side's ExprWithType for one derived from exact source text.
-// No-op (returns inputs unchanged) for every other shape, including Decimal-vs-Decimal
-// field comparisons and non-Decimal columns.
-func (v *ParserVisitor) fixupDecimalComparisonOperands(leftCtx, rightCtx parser.IExprContext, leftExpr, rightExpr *ExprWithType) (*ExprWithType, *ExprWithType, error) {
+// fixupDecimalOperands detects "Decimal-typed expr op numeric-literal" (in either order)
+// and swaps the literal side's ExprWithType for one derived from exact source text. The
+// Decimal-typed side may be a direct column reference (plain comparisons, e.g. "price >
+// 10") or a BinaryArithExpr wrapping one (arithmetic, e.g. "price - 5 > 10", where this
+// same function also fixes up the "5" operand from within VisitAddSub). No-op (returns
+// inputs unchanged) for every other shape, including Decimal-vs-Decimal field comparisons
+// and non-Decimal columns.
+func (v *ParserVisitor) fixupDecimalOperands(leftCtx, rightCtx parser.IExprContext, leftExpr, rightExpr *ExprWithType) (*ExprWithType, *ExprWithType, error) {
 	leftIsValue, rightIsValue := leftExpr.expr.GetValueExpr() != nil, rightExpr.expr.GetValueExpr() != nil
 	switch {
-	case rightIsValue && !leftIsValue && toColumnInfo(leftExpr).GetDataType() == schemapb.DataType_Decimal:
+	case rightIsValue && !leftIsValue && leftExpr.dataType == schemapb.DataType_Decimal:
 		fixed, err := v.fixupDecimalLiteral(rightCtx, leftExpr)
 		if err != nil {
 			return nil, nil, err
 		}
 		return leftExpr, fixed, nil
-	case leftIsValue && !rightIsValue && toColumnInfo(rightExpr).GetDataType() == schemapb.DataType_Decimal:
+	case leftIsValue && !rightIsValue && rightExpr.dataType == schemapb.DataType_Decimal:
 		fixed, err := v.fixupDecimalLiteral(leftCtx, rightExpr)
 		if err != nil {
 			return nil, nil, err
@@ -630,7 +653,7 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	leftExpr, rightExpr, err := v.fixupDecimalComparisonOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
+	leftExpr, rightExpr, err := v.fixupDecimalOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
 	if err != nil {
 		return err
 	}
@@ -689,7 +712,7 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 	if err := checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
 		return err
 	}
-	leftExpr, rightExpr, err := v.fixupDecimalComparisonOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
+	leftExpr, rightExpr, err := v.fixupDecimalOperands(ctx.Expr(0), ctx.Expr(1), leftExpr, rightExpr)
 	if err != nil {
 		return err
 	}

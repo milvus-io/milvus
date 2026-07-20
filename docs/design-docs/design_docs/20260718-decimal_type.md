@@ -77,7 +77,11 @@ Because `Decimal` is stored as ordinary `int64` under a fixed scale, it can use 
 
 **Explicitly out of scope for this iteration:** `BITMAP` and `HYBRID` (cardinality-based auto-selection between sorted-array and bitmap indexes) are not yet supported for `Decimal`. They are a natural follow-up once the `STL_SORT`-only path has landed and been validated, since `HYBRID`'s cardinality measurement and `BITMAP`'s per-distinct-value bit-list both need their own validation against Decimal's unscaled-int64 representation before being enabled.
 
-**Also out of scope:** arithmetic expressions on `Decimal` fields (e.g. `price - 5 > 10`) are not yet supported. Naive `int64` arithmetic on two operands is only correct when both share the same scale; mixed-scale arithmetic needs explicit scale alignment before the operation, which is unimplemented (`internal/core/src/exec/expression/BinaryArithOpEvalRangeExpr.cpp`).
+### Arithmetic (Add/Sub only)
+
+`price - 5 > 10` parses as `Compare(BinaryArithExpr(price, Sub, 5), 10)`. Both the arithmetic operand (`5`) and the comparison threshold (`10`) are re-derived from their exact source text and rescaled to the column's declared scale — reusing the same `EncodeUnscaledInt64` fixup mechanism plain comparisons already use — so the unscaled-`int64` subtraction and the final comparison both stay correct. The parser-level fixup (`fixupDecimalOperands` in `parser_visitor.go`) now handles both shapes: a direct `Decimal` column, or a `BinaryArithExpr` wrapping one. On the C++ side, `DataType::DECIMAL` reuses `ExecRangeVisitorImpl<int64_t>` verbatim in `BinaryArithOpEvalRangeExpr.cpp` — identical to `INT64` — since Add/Sub-by-a-rescaled-constant is scale-preserving.
+
+**Multiply/divide/modulo are explicitly rejected** (`internal/parser/planparserv2/parser_visitor.go`, `VisitMulDivMod`): unlike Add/Sub, an integer multiplier must stay *unscaled* while a fractional one needs real fixed-point rescaling to avoid corrupting the result's magnitude — that logic isn't implemented yet, so these ops fail loudly with a clear error rather than silently producing a wrong answer. Field-vs-field arithmetic (`price - other_price`) was already rejected for all types before this change (`handleBinaryArithExpr`), so it remains out of scope here too — mixing two potentially different scales needs its own alignment logic.
 
 ## Appendix: Modification Points
 
@@ -111,8 +115,14 @@ Because `Decimal` is stored as ordinary `int64` under a fixed scale, it can use 
 
 | File | Change |
 | --- | --- |
-| `internal/parser/planparserv2/parser_visitor.go` | `fixupDecimalLiteral`, `fixupDecimalComparisonOperands`, `fixupDecimalRangeBound`, `fixupDecimalTermValues`; wired into `VisitEquality`/`VisitRelational`/`VisitRange`/`VisitReverseRange`/`VisitTerm` |
-| `internal/parser/planparserv2/utils.go` | `canBeComparedDataType`/`castValue` Decimal cases |
+| `internal/parser/planparserv2/parser_visitor.go` | `fixupDecimalLiteral`, `fixupDecimalOperands` (renamed from `fixupDecimalComparisonOperands`, now also used by `VisitAddSub`), `fixupDecimalRangeBound`, `fixupDecimalTermValues`; wired into `VisitEquality`/`VisitRelational`/`VisitRange`/`VisitReverseRange`/`VisitTerm`/`VisitAddSub`; `VisitMulDivMod` explicitly rejects `Decimal` operands |
+| `internal/parser/planparserv2/utils.go` | `canBeComparedDataType`/`castValue` Decimal cases; `canArithmeticDataType`/`getTargetType` Decimal cases; `decimalArithColumnInfo` helper (resolves the underlying column through a `BinaryArithExpr` wrapper) |
+
+### C++ — Query Execution: Arithmetic
+
+| File | Change |
+| --- | --- |
+| `internal/core/src/exec/expression/BinaryArithOpEvalRangeExpr.cpp` | `DataType::DECIMAL` case in `Eval()` and `PrefetchRawData()`, reusing `ExecRangeVisitorImpl<int64_t>`/`PrefetchRawData<int64_t>` verbatim from `INT64` |
 
 ### Go — Indexing / AUTOINDEX
 
@@ -169,5 +179,6 @@ Because `Decimal` is stored as ordinary `int64` under a fixed scale, it can use 
 ## Open Follow-ups
 
 1. `BITMAP` / `HYBRID` indexing for `Decimal` (cardinality-based auto-selection).
-2. Arithmetic expression support (`+`, `-`, `*`, `/`) with scale alignment across mixed-scale operands.
-3. C++ build/test verification in a resource-adequate environment (local dev machine is memory-constrained for a from-scratch `make build-cpp`; considering CI-based verification instead).
+2. `Multiply`/`Divide`/`Modulo` arithmetic on `Decimal` (needs fixed-point rescaling logic distinct from `Add`/`Sub`'s constant-rescale approach — see "Arithmetic" above). `Add`/`Sub` are implemented.
+3. Field-vs-field arithmetic (`price - other_price`), including the general case of two `Decimal` columns with different scales.
+4. C++ build/test verification in a resource-adequate environment (local dev machine is memory-constrained for a from-scratch `make build-cpp`; considering CI-based verification instead). Note: the Go-side parser changes (including arithmetic, this section) *have* been compiled and test-verified natively — see `internal/parser/planparserv2/decimal_test.go`.
