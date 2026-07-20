@@ -71,6 +71,9 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
+			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -107,9 +110,6 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"age": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
 			}},
-			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
-				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
-			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -117,6 +117,31 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
 	})
+}
+
+func (s *FillExpressionValueSuite) TestEmptyArrayTemplate() {
+	emptyArray := generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{})
+	testcases := []testcase{
+		{`Int64Field in {values}`, map[string]*schemapb.TemplateValue{"values": emptyArray}},
+		{`Int64Field not in {values}`, map[string]*schemapb.TemplateValue{"values": emptyArray}},
+		{`array_contains_any(ArrayField, {values})`, map[string]*schemapb.TemplateValue{"values": emptyArray}},
+		{`array_contains_all(ArrayField, {values})`, map[string]*schemapb.TemplateValue{"values": emptyArray}},
+		{`json_contains_any(JSONField["A"], {values})`, map[string]*schemapb.TemplateValue{"values": emptyArray}},
+		{`json_contains_all(JSONField["A"], {values})`, map[string]*schemapb.TemplateValue{"values": emptyArray}},
+		{`Int64Field >= {minimum}`, map[string]*schemapb.TemplateValue{
+			"minimum": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			"unused":  emptyArray,
+		}},
+		{`ArrayField in {values}`, map[string]*schemapb.TemplateValue{
+			"values": generateTemplateValue(schemapb.DataType_Array,
+				generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{{}})),
+		}},
+	}
+
+	schemaH := newTestSchemaHelper(s.T())
+	for _, c := range testcases {
+		s.assertValidExpr(schemaH, c.expr, c.values)
+	}
 }
 
 func (s *FillExpressionValueSuite) TestUnaryRange() {

@@ -130,6 +130,62 @@ func Test_ConvertToGenericValue(t *testing.T) {
 		},
 		{
 			input: map[string]*schemapb.TemplateValue{
+				"empty_array": {
+					Val: &schemapb.TemplateValue_ArrayVal{
+						ArrayVal: &schemapb.TemplateArrayValue{},
+					},
+				},
+			},
+			expect: map[string]*planpb.GenericValue{
+				"empty_array": {
+					Val: &planpb.GenericValue_ArrayVal{
+						ArrayVal: &planpb.Array{
+							Array:       []*planpb.GenericValue{},
+							SameType:    true,
+							ElementType: schemapb.DataType_None,
+						},
+					},
+				},
+			},
+		},
+		{
+			input: map[string]*schemapb.TemplateValue{
+				"nested_empty_array": {
+					Val: &schemapb.TemplateValue_ArrayVal{
+						ArrayVal: &schemapb.TemplateArrayValue{
+							Data: &schemapb.TemplateArrayValue_ArrayData{
+								ArrayData: &schemapb.TemplateArrayValueArray{
+									Data: []*schemapb.TemplateArrayValue{{}},
+								},
+							},
+						},
+					},
+				},
+			},
+			expect: map[string]*planpb.GenericValue{
+				"nested_empty_array": {
+					Val: &planpb.GenericValue_ArrayVal{
+						ArrayVal: &planpb.Array{
+							Array: []*planpb.GenericValue{
+								{
+									Val: &planpb.GenericValue_ArrayVal{
+										ArrayVal: &planpb.Array{
+											Array:       []*planpb.GenericValue{},
+											SameType:    true,
+											ElementType: schemapb.DataType_None,
+										},
+									},
+								},
+							},
+							SameType:    true,
+							ElementType: schemapb.DataType_Array,
+						},
+					},
+				},
+			},
+		},
+		{
+			input: map[string]*schemapb.TemplateValue{
 				"not_same_array": {
 					Val: &schemapb.TemplateValue_ArrayVal{
 						ArrayVal: &schemapb.TemplateArrayValue{
