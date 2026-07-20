@@ -1795,7 +1795,9 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 	segment := segments[0]
 	indexIDs := req.GetIndexIDs()
 	for _, indexID := range indexIDs {
-		segment.DropIndex(ctx, indexID)
+		if err := segment.DropIndex(ctx, indexID); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	return merr.Success(), nil

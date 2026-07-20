@@ -77,6 +77,7 @@
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentReadLease.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
@@ -122,10 +123,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadSegmentMeta(
         const milvus::proto::segcore::LoadSegmentMeta& segment_meta) override;
     void
-    DropIndex(const FieldId field_id) override;
+    DropIndex(const FieldId field_id,
+              milvus::OpContext* op_ctx = nullptr) override;
     void
     DropJSONIndex(const FieldId field_id,
-                  const std::string& nested_path) override;
+                  const std::string& nested_path,
+                  milvus::OpContext* op_ctx = nullptr) override;
     void
     DropFieldData(const FieldId field_id) override;
     bool
@@ -192,6 +195,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     get_segment_id() const override {
         return id_;
     }
+
+    std::shared_ptr<SegmentReadLease>
+    AcquireReadLease(const folly::CancellationToken& cancel_token) const {
+        return operation_gate_.AcquireRead(cancel_token, id_);
+    }
+
+    void
+    ValidateSchemaCompatibility(const SchemaPtr& plan_schema) const;
 
     bool
     HasRawData(int64_t field_id) const override;
@@ -1473,6 +1484,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     NormalizePublishedState(PublishedSegmentState& state) const;
 
+    enum class PublishMode {
+        Drain,
+        FailFast,
+    };
+
     class StagedStateCommitter {
      public:
         StagedStateCommitter(ChunkedSegmentSealedImpl& segment,
@@ -1540,16 +1556,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
         void
         Publish(const std::shared_ptr<const PublishedSegmentState>& current,
-                const StateDelta& delta) {
+                const StateDelta& delta,
+                milvus::OpContext* op_ctx = nullptr,
+                PublishMode publish_mode = PublishMode::Drain) {
             std::vector<SealedIndexingEntryPtr> retired_indexings;
             std::vector<index::CacheIndexBasePtr> retired_cache_indexings;
+            std::shared_ptr<PublishedSegmentState> next;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                segment_.PublishState(
-                    segment_.BuildNextPublishedState(current, delta));
+                next = segment_.BuildNextPublishedState(current, delta);
                 retired_indexings.swap(retired_vector_indexings_);
                 retired_cache_indexings.swap(retired_cache_indexings_);
             }
+            segment_.PublishStateOnline(std::move(next), op_ctx, publish_mode);
             for (auto& entry : retired_indexings) {
                 if (entry != nullptr && entry->indexing_ != nullptr) {
                     entry->indexing_->CancelWarmup();
@@ -1587,10 +1606,23 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     };
 
     void
-    PublishState(const std::shared_ptr<const PublishedSegmentState>& state);
+    PublishState(PublishLease& publish_lease,
+                 const std::shared_ptr<const PublishedSegmentState>& state);
 
     void
-    PublishState(std::shared_ptr<PublishedSegmentState> state);
+    PublishState(PublishLease& publish_lease,
+                 std::shared_ptr<PublishedSegmentState> state);
+
+    void
+    PublishStateOnline(
+        const std::shared_ptr<const PublishedSegmentState>& state,
+        milvus::OpContext* op_ctx = nullptr,
+        PublishMode publish_mode = PublishMode::Drain);
+
+    void
+    PublishStateOnline(std::shared_ptr<PublishedSegmentState> state,
+                       milvus::OpContext* op_ctx = nullptr,
+                       PublishMode publish_mode = PublishMode::Drain);
 
     std::shared_ptr<index::JsonKeyStats>
     BuildJsonKeyStatsIndex(
@@ -1610,12 +1642,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     template <typename Mutator>
     void
-    MutatePublishedStateLocked(Mutator&& mutator) {
+    MutatePublishedStateLocked(Mutator&& mutator,
+                               milvus::OpContext* op_ctx = nullptr) {
         auto current = CapturePublishedState();
         auto next = ClonePublishedState(current);
         mutator(*next);
         NormalizePublishedState(*next);
-        PublishState(std::move(next));
+        PublishStateOnline(std::move(next), op_ctx);
     }
 
     static bool
@@ -1783,7 +1816,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     PublishIndexDroppedLocked(
         FieldId field_id,
-        const std::shared_ptr<const RuntimeResourceState>& runtime = nullptr);
+        const std::shared_ptr<const RuntimeResourceState>& runtime = nullptr,
+        milvus::OpContext* op_ctx = nullptr);
 
     void
     PublishRuntimeStateLocked(
@@ -1840,7 +1874,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     DropIndex(const FieldId field_id,
               const SchemaPtr& schema_snapshot,
-              RuntimeResourceState* runtime = nullptr);
+              RuntimeResourceState* runtime = nullptr,
+              milvus::OpContext* op_ctx = nullptr);
 
     void
     DropFieldData(
@@ -2094,6 +2129,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     Reopen(milvus::OpContext* op_ctx, SchemaPtr sch);
 
     void
+    ReopenSchemaLocked(milvus::OpContext* op_ctx,
+                       SchemaPtr sch,
+                       PublishMode publish_mode);
+
+    void
     ApplySchemaForReopen(SchemaPtr sch);
 
     void
@@ -2111,9 +2151,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
-
-    void
-    CompactRuntimeLoadInfoForManifest();
 
     void
     load_field_data_common(
@@ -2199,6 +2236,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // and reader paths that take mutex_ must not take reopen_mutex_.
     std::mutex reopen_mutex_;
 
+    // Cross-thread request leases block online publication while a sealed
+    // SearchResult remains alive. Growing segments do not use this gate.
+    mutable SegmentReadGate operation_gate_;
+
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     int64_t id_;
     // commit_ts_ remains the writer-side source of truth for load-time data
@@ -2228,6 +2269,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Test-only: inject a mock Reader for unit testing take() paths.
     void
     SetReaderForTesting(std::unique_ptr<milvus_storage::api::Reader> r) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         auto runtime = CloneMutableRuntimeResourceState();
         runtime->reader =
             std::shared_ptr<milvus_storage::api::Reader>(std::move(r));
@@ -2258,6 +2300,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     SchemaPtr
     TestGetSchemaSnapshot() const {
         return CapturePublishedState()->schema;
+    }
+
+    bool
+    TestReadGateWriterPending() const {
+        return operation_gate_.WriterPending();
     }
 
     std::shared_ptr<const PublishedSegmentState>
@@ -2335,6 +2382,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     TestPublishSystemFieldState() {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         PublishSystemFieldStateLocked();
     }
 
@@ -2389,6 +2437,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const PublishedSegmentState>& current,
         StateDelta& final_delta,
         Verifier&& verifier) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         StagedStateCommitter committer(*this, runtime.get(), staged_state);
         committer.Commit([&](RuntimeResourceState& staged_runtime,
                              PublishedSegmentState& staged) {
@@ -2423,6 +2472,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const PublishedSegmentState>& current,
         StateDelta& final_delta,
         Verifier&& verifier) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         StagedStateCommitter committer(*this, runtime.get(), staged_state);
         load_field_data_common(field_id,
                                column,
@@ -2456,6 +2506,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t num_rows,
         milvus::OpContext* op_ctx,
         Verifier&& verifier) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         StagedStateCommitter committer(*this, runtime.get(), staged_state);
         committer.Commit([&](RuntimeResourceState& staged_runtime,
                              PublishedSegmentState& staged) {
@@ -2503,6 +2554,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                 bool ready,
                                 bool binlog_ready,
                                 std::optional<bool> has_raw_data) {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         PublishVectorIndexFactsLocked(
             field_id, ready, binlog_ready, has_raw_data);
     }
@@ -2540,7 +2592,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         auto runtime = CloneRuntimeResourceState(current->runtime);
         runtime->text_lob_paths[field_id] = std::move(lob_base_path);
         next->runtime = ToConstRuntimeState(std::move(runtime));
-        PublishState(std::move(next));
+        PublishStateOnline(std::move(next));
     }
 
     void
@@ -2553,7 +2605,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         runtime->json_stats[field_id] = std::move(stats);
         next->runtime = ToConstRuntimeState(std::move(runtime));
         NormalizePublishedState(*next);
-        PublishState(std::move(next));
+        PublishStateOnline(std::move(next));
     }
 
     std::shared_ptr<const SegmentLoadInfo>
@@ -2602,6 +2654,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     TestClearPublishedState() {
+        std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         ClearPublishedStateLocked();
     }
 

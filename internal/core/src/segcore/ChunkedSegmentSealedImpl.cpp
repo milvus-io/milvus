@@ -792,6 +792,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
                     owned_runtime != nullptr
                         ? ToConstRuntimeState(std::move(owned_runtime))
                         : FreezeRuntimeResourceState(*target_runtime);
+                lck.unlock();
                 PublishIndexReadyLocked(field_id, false, published_runtime);
                 cancel_retired_indexings();
             }
@@ -811,6 +812,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
             } else if (owned_runtime != nullptr) {
                 auto published_runtime =
                     ToConstRuntimeState(std::move(owned_runtime));
+                lck.unlock();
                 MutatePublishedStateLocked([&](PublishedSegmentState& state) {
                     state.runtime = published_runtime;
                     SyncJsonNgramIndexState(
@@ -885,6 +887,67 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
 SchemaPtr
 ChunkedSegmentSealedImpl::CaptureSchemaSnapshot() const {
     return CapturePublishedState()->schema;
+}
+
+void
+ChunkedSegmentSealedImpl::ValidateSchemaCompatibility(
+    const SchemaPtr& plan_schema) const {
+    if (plan_schema == nullptr) {
+        return;
+    }
+
+    auto published_schema = CaptureSchemaSnapshot();
+    AssertInfo(published_schema != nullptr,
+               "published schema is null for segment {}",
+               id_);
+    if (published_schema->get_schema_version() <
+        plan_schema->get_schema_version()) {
+        ThrowInfo(UnexpectedError,
+                  "published schema version {} is older than plan schema "
+                  "version {} for segment {}",
+                  published_schema->get_schema_version(),
+                  plan_schema->get_schema_version(),
+                  id_);
+    }
+
+    auto plan_primary = plan_schema->get_primary_field_id();
+    auto published_primary = published_schema->get_primary_field_id();
+    if (plan_primary.has_value() && published_primary.has_value() &&
+        plan_primary.value() != published_primary.value()) {
+        ThrowInfo(UnexpectedError,
+                  "primary field changed from {} to {} across schema "
+                  "versions for segment {}",
+                  plan_primary.value().get(),
+                  published_primary.value().get(),
+                  id_);
+    }
+
+    for (const auto& [field_id, plan_field] : plan_schema->get_fields()) {
+        if (!published_schema->has_field(field_id)) {
+            continue;
+        }
+        const auto& published_field = published_schema->operator[](field_id);
+        if (plan_field.get_data_type() != published_field.get_data_type() ||
+            plan_field.get_element_type() !=
+                published_field.get_element_type()) {
+            ThrowInfo(UnexpectedError,
+                      "field {} type changed across schema versions for "
+                      "segment {}",
+                      field_id.get(),
+                      id_);
+        }
+        if (plan_field.is_vector() &&
+            !IsSparseFloatVectorDataType(plan_field.get_data_type()) &&
+            plan_field.get_dim() != published_field.get_dim()) {
+            ThrowInfo(UnexpectedError,
+                      "field {} dimension changed from {} to {} across "
+                      "schema versions for segment {}",
+                      field_id.get(),
+                      plan_field.get_dim(),
+                      published_field.get_dim(),
+                      id_);
+        }
+    }
 }
 
 std::shared_ptr<const SegmentLoadInfo>
@@ -1501,7 +1564,7 @@ void
 ChunkedSegmentSealedImpl::PublishReopenState(
     const std::shared_ptr<const PublishedSegmentState>& current,
     const StateDelta& delta) {
-    PublishState(BuildNextPublishedState(current, delta));
+    PublishStateOnline(BuildNextPublishedState(current, delta));
 }
 
 void
@@ -1587,7 +1650,7 @@ ChunkedSegmentSealedImpl::SetUseTakeForOutputForTestingLocked(bool val) {
     auto current = CapturePublishedState();
     auto next = ClonePublishedState(current);
     next->use_take_for_output = val;
-    PublishState(std::move(next));
+    PublishStateOnline(std::move(next));
 }
 
 void
@@ -1768,13 +1831,16 @@ ChunkedSegmentSealedImpl::PublishFieldDroppedLocked(
 void
 ChunkedSegmentSealedImpl::PublishIndexDroppedLocked(
     FieldId field_id,
-    const std::shared_ptr<const RuntimeResourceState>& runtime) {
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        if (runtime != nullptr) {
-            state.runtime = runtime;
-        }
-        DropIndexFromState(state, field_id);
-    });
+    const std::shared_ptr<const RuntimeResourceState>& runtime,
+    milvus::OpContext* op_ctx) {
+    MutatePublishedStateLocked(
+        [&](PublishedSegmentState& state) {
+            if (runtime != nullptr) {
+                state.runtime = runtime;
+            }
+            DropIndexFromState(state, field_id);
+        },
+        op_ctx);
 }
 
 void
@@ -1784,7 +1850,7 @@ ChunkedSegmentSealedImpl::PublishRuntimeStateLocked(
         return;
     }
     auto current = CapturePublishedState();
-    PublishState(BuildNextPublishedState(
+    PublishStateOnline(BuildNextPublishedState(
         current,
         MakeStateDelta(
             current->schema, current->load_info, runtime, current->commit_ts)));
@@ -1851,7 +1917,7 @@ ChunkedSegmentSealedImpl::RefreshPublishedLoadInfoLocked(
     const std::shared_ptr<const SegmentLoadInfo>& load_info,
     Timestamp commit_ts) {
     auto current = CapturePublishedState();
-    PublishState(BuildNextPublishedState(
+    PublishStateOnline(BuildNextPublishedState(
         current, MakeStateDelta(current->schema, load_info, commit_ts)));
 }
 
@@ -1859,7 +1925,7 @@ void
 ChunkedSegmentSealedImpl::RefreshPublishedSchemaLocked(
     const SchemaPtr& schema_snapshot) {
     auto current = CapturePublishedState();
-    PublishState(BuildNextPublishedState(
+    PublishStateOnline(BuildNextPublishedState(
         current,
         MakeStateDelta(
             schema_snapshot, current->load_info, current->commit_ts)));
@@ -1871,7 +1937,7 @@ ChunkedSegmentSealedImpl::RefreshPublishedStateLocked(
     const std::shared_ptr<const SegmentLoadInfo>& load_info,
     Timestamp commit_ts) {
     auto current = CapturePublishedState();
-    PublishState(BuildNextPublishedState(
+    PublishStateOnline(BuildNextPublishedState(
         current, MakeStateDelta(schema_snapshot, load_info, commit_ts)));
 }
 
@@ -1888,18 +1954,48 @@ ChunkedSegmentSealedImpl::PrepareMutableStateForPublish(
 
 void
 ChunkedSegmentSealedImpl::PublishState(
+    PublishLease& publish_lease,
     const std::shared_ptr<const PublishedSegmentState>& state) {
     if (!state) {
         return;
     }
+    AssertInfo(publish_lease.valid(), "online publication requires a lease");
     std::atomic_store(&published_state_, state);
+    publish_lease.MarkPublished();
 }
 
 void
 ChunkedSegmentSealedImpl::PublishState(
-    std::shared_ptr<PublishedSegmentState> state) {
+    PublishLease& publish_lease, std::shared_ptr<PublishedSegmentState> state) {
     PublishState(
+        publish_lease,
         std::const_pointer_cast<const PublishedSegmentState>(std::move(state)));
+}
+
+void
+ChunkedSegmentSealedImpl::PublishStateOnline(
+    const std::shared_ptr<const PublishedSegmentState>& state,
+    milvus::OpContext* op_ctx,
+    PublishMode publish_mode) {
+    if (!state) {
+        return;
+    }
+    auto publish_lease =
+        publish_mode == PublishMode::FailFast
+            ? operation_gate_.AcquirePublishFailFast(op_ctx, id_)
+            : operation_gate_.AcquirePublish(op_ctx, id_);
+    PublishState(publish_lease, state);
+}
+
+void
+ChunkedSegmentSealedImpl::PublishStateOnline(
+    std::shared_ptr<PublishedSegmentState> state,
+    milvus::OpContext* op_ctx,
+    PublishMode publish_mode) {
+    PublishStateOnline(
+        std::const_pointer_cast<const PublishedSegmentState>(std::move(state)),
+        op_ctx,
+        publish_mode);
 }
 
 void
@@ -3458,7 +3554,7 @@ ChunkedSegmentSealedImpl::set_field_avg_size(FieldId field_id,
     field_info.second = size / field_info.first;
     auto next = ClonePublishedState(current);
     next->runtime = ToConstRuntimeState(std::move(runtime));
-    PublishState(std::move(next));
+    PublishStateOnline(std::move(next));
 }
 
 std::shared_ptr<const SkipIndex>
@@ -3937,16 +4033,18 @@ ChunkedSegmentSealedImpl::DropFieldData(
 }
 
 void
-ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
+ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
+                                    milvus::OpContext* op_ctx) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto snapshot = CapturePublishedState();
-    DropIndex(field_id, snapshot->schema);
+    DropIndex(field_id, snapshot->schema, nullptr, op_ctx);
 }
 
 void
 ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
                                     const SchemaPtr& schema_snapshot,
-                                    RuntimeResourceState* runtime) {
+                                    RuntimeResourceState* runtime,
+                                    milvus::OpContext* op_ctx) {
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
                "Field id:" + std::to_string(field_id.get()) +
                    " isn't one of system type when drop index");
@@ -3964,23 +4062,26 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id,
         next_runtime->ngram_fields.erase(field_id);
         DropVectorIndexing(*next_runtime, field_id);
         next_runtime->vec_binlog_config.erase(field_id);
-        PublishIndexDroppedLocked(field_id,
-                                  ToConstRuntimeState(std::move(next_runtime)));
+        PublishIndexDroppedLocked(
+            field_id, ToConstRuntimeState(std::move(next_runtime)), op_ctx);
     }
 }
 
 void
 ChunkedSegmentSealedImpl::DropJSONIndex(const FieldId field_id,
-                                        const std::string& nested_path) {
+                                        const std::string& nested_path,
+                                        milvus::OpContext* op_ctx) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto next_runtime = CloneMutableRuntimeResourceState();
     auto retired_indexings =
         EraseJsonIndexesAtPath(*next_runtime, field_id, nested_path);
     auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
-    MutatePublishedStateLocked([&](PublishedSegmentState& state) {
-        state.runtime = published_runtime;
-        SyncJsonNgramIndexState(state, *published_runtime, field_id);
-    });
+    MutatePublishedStateLocked(
+        [&](PublishedSegmentState& state) {
+            state.runtime = published_runtime;
+            SyncJsonNgramIndexState(state, *published_runtime, field_id);
+        },
+        op_ctx);
     for (auto& indexing : retired_indexings) {
         if (indexing != nullptr) {
             indexing->CancelWarmup();
@@ -5355,7 +5456,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                 CloneLoadInfoWithTextIndexCreated(next->load_info, field_id);
         }
         NormalizePublishedState(*next);
-        PublishState(std::move(next));
+        PublishStateOnline(std::move(next));
     }
 }
 
@@ -6769,16 +6870,48 @@ ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch,
     auto current_schema = CaptureSchemaSnapshot();
     auto current_schema_version = current_schema->get_schema_version();
 
-    if (sch->get_schema_version() > current_schema_version) {
-        LOG_INFO(
-            "lazy check schema segment {} found newer schema version, "
-            "current "
-            "schema version {}, new schema version {}",
-            id_,
-            current_schema_version,
-            sch->get_schema_version());
-        Reopen(op_ctx, std::move(sch));
+    if (sch->get_schema_version() <= current_schema_version) {
+        return;
     }
+
+    if (op_ctx != nullptr &&
+        op_ctx->cancellation_token.isCancellationRequested()) {
+        ThrowInfo(ErrorCode::FollyCancel,
+                  "lazy schema reopen cancelled for segment {}",
+                  id_);
+    }
+
+    std::unique_lock<std::mutex> reopen_guard(reopen_mutex_, std::try_to_lock);
+    if (!reopen_guard.owns_lock()) {
+        ThrowInfo(ErrorCode::FollyOtherException,
+                  "segment read gate busy for segment {} while another "
+                  "schema reopen is in progress",
+                  id_);
+    }
+
+    current_schema = CaptureSchemaSnapshot();
+    current_schema_version = current_schema->get_schema_version();
+    if (sch->get_schema_version() <= current_schema_version) {
+        return;
+    }
+
+    // Avoid preparing a new snapshot while an old SearchResult is known to
+    // hold a lease. This is only a preflight optimization; the final
+    // fail-fast publish check is the linearization point.
+    if (!operation_gate_.CanAcquirePublishImmediately()) {
+        ThrowInfo(ErrorCode::FollyOtherException,
+                  "segment read gate busy for segment {} during lazy schema "
+                  "reopen",
+                  id_);
+    }
+
+    LOG_INFO(
+        "lazy check schema segment {} found newer schema version, current "
+        "schema version {}, new schema version {}",
+        id_,
+        current_schema_version,
+        sch->get_schema_version());
+    ReopenSchemaLocked(op_ctx, std::move(sch), PublishMode::FailFast);
 }
 
 void
@@ -6970,6 +7103,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     apply_loaded_column(*next_runtime, old_column, *current);
 
     auto published_runtime = ToConstRuntimeState(std::move(next_runtime));
+    lck.unlock();
     if (SystemProperty::Instance().IsSystem(field_id)) {
         PublishRuntimeStateLocked(published_runtime);
     } else {
@@ -7006,23 +7140,6 @@ void
 ChunkedSegmentSealedImpl::ApplySchemaForReopen(SchemaPtr sch) {
     PrepareSchemaForReopen(sch);
     PublishReopenState(sch, nullptr);
-}
-
-void
-ChunkedSegmentSealedImpl::CompactRuntimeLoadInfoForManifest() {
-    auto current = CapturePublishedState();
-    if (current == nullptr || current->load_info == nullptr ||
-        !current->load_info->HasManifestPath()) {
-        return;
-    }
-
-    auto compacted = std::make_shared<SegmentLoadInfo>(*current->load_info);
-    compacted->CompactRuntimeInfoForManifest();
-    auto published = std::const_pointer_cast<const SegmentLoadInfo>(compacted);
-    PublishReopenState(
-        current,
-        MakeStateDelta(
-            current->schema, published, current->runtime, current->commit_ts));
 }
 
 void
@@ -7312,6 +7429,17 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     }
 
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+    ReopenSchemaLocked(op_ctx, std::move(sch), PublishMode::Drain);
+}
+
+void
+ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
+                                             SchemaPtr sch,
+                                             PublishMode publish_mode) {
+    if (!sch) {
+        return;
+    }
+
     auto current = CapturePublishedState();
     auto current_schema = current->schema;
     if (sch->get_schema_version() <= current_schema->get_schema_version()) {
@@ -7344,6 +7472,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     StagedStateCommitter committer(*this, next_runtime.get(), staged.get());
     PrepareLoadDiffForReopen(op_ctx, new_local, diff, sch, committer);
     FinalizeLoadDiffForReopen(op_ctx, new_local, diff, sch, committer);
+    new_local.CompactRuntimeInfoForManifest();
     auto published = std::make_shared<const SegmentLoadInfo>(new_local);
     auto delta = MakeStateDelta(sch,
                                 published,
@@ -7354,8 +7483,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     delta.published_binlog_index_ready_bitset =
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
-    committer.Publish(current, delta);
-    CompactRuntimeLoadInfoForManifest();
+    committer.Publish(current, delta, op_ctx, publish_mode);
 
     LOG_INFO("Schema-only reopen segment {} done", id_);
 }
@@ -7420,6 +7548,7 @@ ChunkedSegmentSealedImpl::Reopen(
     PrepareLoadDiffForReopen(op_ctx, new_local, diff, target_schema, committer);
     FinalizeLoadDiffForReopen(
         op_ctx, new_local, diff, target_schema, committer);
+    new_local.CompactRuntimeInfoForManifest();
     auto published = std::make_shared<const SegmentLoadInfo>(new_local);
     auto delta = MakeStateDelta(target_schema,
                                 published,
@@ -7430,8 +7559,7 @@ ChunkedSegmentSealedImpl::Reopen(
     delta.published_binlog_index_ready_bitset =
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
-    committer.Publish(current, delta);
-    CompactRuntimeLoadInfoForManifest();
+    committer.Publish(current, delta, op_ctx);
 
     LOG_INFO("Reopen segment {} done", id_);
 }
@@ -7455,6 +7583,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
         op_ctx, segment_load_info, diff, schema_snapshot, committer);
     FinalizeLoadDiffForReopen(
         op_ctx, segment_load_info, diff, schema_snapshot, committer);
+    segment_load_info.CompactRuntimeInfoForManifest();
     auto published = std::make_shared<const SegmentLoadInfo>(segment_load_info);
     auto delta = MakeStateDelta(schema_snapshot,
                                 published,
@@ -7465,7 +7594,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     delta.published_binlog_index_ready_bitset =
         staged->published_binlog_index_ready_bitset.clone();
     delta.published_index_has_raw_data = staged->published_index_has_raw_data;
-    committer.Publish(current, delta);
+    committer.Publish(current, delta, op_ctx);
 }
 
 void
@@ -7601,15 +7730,19 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
 
     if (owned_runtime != nullptr) {
         auto published_runtime = ToConstRuntimeState(std::move(owned_runtime));
-        for (const auto& field_id : filled_fields) {
-            PublishFieldDataReadyLocked(field_id, published_runtime);
-        }
+        MutatePublishedStateLocked([&](PublishedSegmentState& state) {
+            state.runtime = published_runtime;
+            for (const auto& field_id : filled_fields) {
+                set_bit(state.field_data_ready_bitset, field_id, true);
+            }
+        });
     }
 }
 
 void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids) {
+    std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto snapshot = CapturePublishedState();
     FillDefaultValueFields(
         field_ids, *snapshot->load_info, snapshot->schema, nullptr);
@@ -7808,7 +7941,7 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
     // pre-cancelled OpContext before any storage/manifest IO happens.
     auto published = std::make_shared<const SegmentLoadInfo>(
         std::move(load_info), schema_snapshot);
-    PublishState(BuildNextPublishedState(
+    PublishStateOnline(BuildNextPublishedState(
         current,
         MakeStateDelta(
             schema_snapshot, published, static_cast<Timestamp>(commit_ts))));
@@ -8655,7 +8788,6 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
-    CompactRuntimeLoadInfoForManifest();
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
