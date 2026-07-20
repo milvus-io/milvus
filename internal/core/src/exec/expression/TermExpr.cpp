@@ -1229,6 +1229,23 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
 
 void
 PhyTermFilterExpr::DetermineExecPath() {
+    // Validate before execution-path selection or asynchronous prefetch can
+    // consume values using the type selected from vals_[0].
+    if (expr_->column_.data_type_ == DataType::JSON &&
+        expr_->vals_.size() > 1) {
+        const auto expected_type = expr_->vals_[0].val_case();
+        for (size_t i = 1; i < expr_->vals_.size(); ++i) {
+            if (expr_->vals_[i].val_case() != expected_type) {
+                ThrowInfo(DataTypeInvalid,
+                          "TermExpr values must have the same type, value 0 "
+                          "has type {} but value {} has type {}",
+                          static_cast<int>(expected_type),
+                          i,
+                          static_cast<int>(expr_->vals_[i].val_case()));
+            }
+        }
+    }
+
     // PkIndex
     if (is_pk_field_) {
         exec_path_ = ExprExecPath::PkIndex;

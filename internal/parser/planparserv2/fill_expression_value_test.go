@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -767,29 +768,18 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRangeDivisionByZero() {
 }
 
 func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
-	// Test that mixed int64/float types in 'in' expression are normalized to float for JSON fields.
-	// This prevents assertion failures in C++ expression execution.
-	// Related to the BinaryRange fix for issue: https://github.com/milvus-io/milvus/issues/46588
+	// Mixed JSON membership is split into homogeneous predicates so segcore
+	// never receives a TermExpr whose type disagrees with one of its values.
 	schemaH := newTestSchemaHelper(s.T())
 
-	s.Run("mixed int and float should normalize all to float", func() {
+	s.Run("mixed int and float should split by concrete type", func() {
 		// A is a dynamic field (JSON type)
-		// Directly parse expression with mixed int and float values
 		exprStr := `A in [1, 2.5, 3, 4.5]`
 
 		expr, err := ParseExpr(schemaH, exprStr, nil)
 		s.NoError(err)
 		s.NotNil(expr)
-
-		// Verify all values are normalized to float type
-		te := expr.GetTermExpr()
-		s.NotNil(te, "expected TermExpr")
-		s.Len(te.GetValues(), 4)
-		// All integers should be converted to floats
-		s.Equal(float64(1), te.GetValues()[0].GetFloatVal())
-		s.Equal(float64(2.5), te.GetValues()[1].GetFloatVal())
-		s.Equal(float64(3), te.GetValues()[2].GetFloatVal())
-		s.Equal(float64(4.5), te.GetValues()[3].GetFloatVal())
+		assertJSONMembershipKinds(s.T(), expr, map[string]int{"int64": 2, "float": 2})
 	})
 
 	s.Run("all integers should remain int64", func() {
@@ -826,37 +816,24 @@ func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
 		s.Equal(float64(4.5), te.GetValues()[3].GetFloatVal())
 	})
 
-	s.Run("single float with integers should normalize all to float", func() {
+	s.Run("single float with integers should keep exact literal types", func() {
 		exprStr := `A in [1, 2, 3.0, 4]`
 
 		expr, err := ParseExpr(schemaH, exprStr, nil)
 		s.NoError(err)
 		s.NotNil(expr)
 
-		// Verify all values are normalized to float type
-		te := expr.GetTermExpr()
-		s.NotNil(te, "expected TermExpr")
-		s.Len(te.GetValues(), 4)
-		s.Equal(float64(1), te.GetValues()[0].GetFloatVal())
-		s.Equal(float64(2), te.GetValues()[1].GetFloatVal())
-		s.Equal(float64(3.0), te.GetValues()[2].GetFloatVal())
-		s.Equal(float64(4), te.GetValues()[3].GetFloatVal())
+		assertJSONMembershipKinds(s.T(), expr, map[string]int{"int64": 3, "float": 1})
 	})
 
-	s.Run("JSONField with mixed int and float should normalize all to float", func() {
+	s.Run("JSONField with mixed int and float should split", func() {
 		exprStr := `JSONField["x"] in [10, 20.5, 30]`
 
 		expr, err := ParseExpr(schemaH, exprStr, nil)
 		s.NoError(err)
 		s.NotNil(expr)
 
-		// Verify all values are normalized to float type
-		te := expr.GetTermExpr()
-		s.NotNil(te, "expected TermExpr")
-		s.Len(te.GetValues(), 3)
-		s.Equal(float64(10), te.GetValues()[0].GetFloatVal())
-		s.Equal(float64(20.5), te.GetValues()[1].GetFloatVal())
-		s.Equal(float64(30), te.GetValues()[2].GetFloatVal())
+		assertJSONMembershipKinds(s.T(), expr, map[string]int{"int64": 2, "float": 1})
 	})
 
 	s.Run("non-JSON field should not be affected by mixed type normalization", func() {
@@ -877,23 +854,91 @@ func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
 		}
 	})
 
-	s.Run("not in with mixed int and float should normalize all to float", func() {
+	s.Run("not in with mixed int and float should negate split membership", func() {
 		exprStr := `A not in [1, 2.5, 3]`
 
 		expr, err := ParseExpr(schemaH, exprStr, nil)
 		s.NoError(err)
 		s.NotNil(expr)
 
-		// The not in expression wraps a TermExpr in a UnaryExpr
 		ue := expr.GetUnaryExpr()
 		s.NotNil(ue, "expected UnaryExpr")
-		te := ue.GetChild().GetTermExpr()
-		s.NotNil(te, "expected TermExpr")
-		s.Len(te.GetValues(), 3)
-		s.Equal(float64(1), te.GetValues()[0].GetFloatVal())
-		s.Equal(float64(2.5), te.GetValues()[1].GetFloatVal())
-		s.Equal(float64(3), te.GetValues()[2].GetFloatVal())
+		s.Equal(planpb.UnaryExpr_Not, ue.GetOp())
+		assertJSONMembershipKinds(s.T(), ue.GetChild(), map[string]int{"int64": 2, "float": 1})
 	})
+
+	s.Run("mixed template values should split by concrete type", func() {
+		expr, err := ParseExpr(schemaH, `A in {list}`, map[string]*schemapb.TemplateValue{
+			"list": generateTemplateValue(schemapb.DataType_Array,
+				generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{
+					generateJSONData(int64(1)),
+					generateJSONData(2.5),
+					generateJSONData("3"),
+					generateJSONData(true),
+				})),
+		})
+		s.NoError(err)
+		s.NotNil(expr)
+		assertJSONMembershipKinds(s.T(), expr, map[string]int{
+			"bool": 1, "int64": 1, "float": 1, "string": 1,
+		})
+	})
+}
+
+func assertJSONMembershipKinds(t *testing.T, expr *planpb.Expr, expected map[string]int) {
+	t.Helper()
+	actual := make(map[string]int)
+	var visit func(*planpb.Expr)
+	visit = func(current *planpb.Expr) {
+		if current == nil {
+			return
+		}
+		if term := current.GetTermExpr(); term != nil {
+			var termKind string
+			for _, value := range term.GetValues() {
+				kind := genericValueKind(value)
+				if termKind == "" {
+					termKind = kind
+				}
+				require.Equal(t, termKind, kind, "TermExpr must be homogeneous")
+				actual[kind]++
+			}
+			return
+		}
+		if unaryRange := current.GetUnaryRangeExpr(); unaryRange != nil {
+			if unaryRange.GetOp() == planpb.OpType_Equal {
+				actual[genericValueKind(unaryRange.GetValue())]++
+			}
+			return
+		}
+		if binary := current.GetBinaryExpr(); binary != nil {
+			visit(binary.GetLeft())
+			visit(binary.GetRight())
+			return
+		}
+		if unary := current.GetUnaryExpr(); unary != nil {
+			visit(unary.GetChild())
+		}
+	}
+	visit(expr)
+	require.Equal(t, expected, actual)
+}
+
+func genericValueKind(value *planpb.GenericValue) string {
+	switch value.GetVal().(type) {
+	case *planpb.GenericValue_BoolVal:
+		return "bool"
+	case *planpb.GenericValue_Int64Val:
+		return "int64"
+	case *planpb.GenericValue_FloatVal:
+		return "float"
+	case *planpb.GenericValue_StringVal:
+		return "string"
+	case *planpb.GenericValue_ArrayVal:
+		return "array"
+	default:
+		return "other"
+	}
 }
 
 // assertNoUnfilledPlaceholder walks the expression tree and asserts that
