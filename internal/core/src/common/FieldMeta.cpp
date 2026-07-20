@@ -142,6 +142,10 @@ FieldMeta::ToProto() const {
         add_type_param(LOCAL_FORMAT_KEY, local_format_);
     }
 
+    if (local_format_ != LOCAL_FORMAT_RAW) {
+        add_type_param(LOCAL_FORMAT_KEY, local_format_);
+    }
+
     return proto;
 }
 
