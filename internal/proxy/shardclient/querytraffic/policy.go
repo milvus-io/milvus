@@ -68,19 +68,36 @@ func Compile(cfg PolicyConfig) (*Policy, error) {
 }
 
 func (p *Policy) Route(source Labels, candidates []Candidate) []WeightedCandidate {
+	return p.RouteWithResult(source, candidates).Candidates
+}
+
+func (p *Policy) RouteWithResult(source Labels, candidates []Candidate) RouteResult {
 	if p == nil {
-		return nil
+		return RouteResult{
+			FallbackReason: "no_policy",
+		}
 	}
+	matchedRule := false
 	for _, rule := range p.rules {
 		if !rule.sourceLabelsMatch.Match(source, source) {
 			continue
 		}
+		matchedRule = true
 		routed := rule.route(source, candidates)
 		if len(routed) > 0 {
-			return routed
+			return RouteResult{
+				Candidates: routed,
+				RuleName:   rule.name,
+			}
 		}
 	}
-	return nil
+	fallbackReason := "no_matching_rule"
+	if matchedRule {
+		fallbackReason = "no_candidate"
+	}
+	return RouteResult{
+		FallbackReason: fallbackReason,
+	}
 }
 
 func (r rule) route(source Labels, candidates []Candidate) []WeightedCandidate {

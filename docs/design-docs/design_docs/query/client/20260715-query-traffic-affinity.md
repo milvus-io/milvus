@@ -379,9 +379,9 @@ Routing decisions expose only bounded fields used to evaluate rule hit counts
 and downstream request distribution:
 
 1. selected rule name;
-2. selected route name;
-3. fallback reason;
-4. input candidate count;
-5. selected candidate count.
+2. fallback reason;
+3. input candidate count;
+4. selected candidate count;
+5. selected node ID.
 
 Arbitrary Session label keys and values must not be used as metric labels.

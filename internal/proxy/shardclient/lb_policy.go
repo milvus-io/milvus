@@ -329,18 +329,27 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 			selectableNodes = serviceableNodes
 		}
 		availableNodeIDs := lo.Keys(selectableNodes)
-		weightedNodes, routed, routeErr := lb.queryTrafficRouter.route(ctx, lo.Values(selectableNodes))
+		routeResult, routeErr := lb.queryTrafficRouter.route(ctx, lo.Values(selectableNodes))
 		if routeErr != nil {
 			log.Warn(ctx, "failed to apply query traffic routing, fallback to original candidates",
 				mlog.Err(routeErr))
 		}
-		if routed {
-			targetNodeID, err = selectWeightedNode(ctx, balancer, weightedNodes, workload.Nq)
+		if routeResult.routed {
+			targetNodeID, err = selectWeightedNode(ctx, balancer, routeResult.weightedNodes, workload.Nq)
 		} else {
 			targetNodeID, err = balancer.SelectNode(ctx, availableNodeIDs, workload.Nq)
 		}
 		if err != nil {
 			return NodeInfo{}, false, err
+		}
+		if routeResult.enabled && mlog.LevelEnabled(mlog.DebugLevel) {
+			log.Debug(ctx, "query traffic routing decision",
+				mlog.Bool("routed", routeResult.routed),
+				mlog.String("ruleName", routeResult.ruleName),
+				mlog.String("fallbackReason", routeResult.fallbackReason),
+				mlog.Int("inputCandidateCount", routeResult.inputCandidateCount),
+				mlog.Int("selectedCandidateCount", len(routeResult.weightedNodes)),
+				mlog.Int64("selectedNodeID", targetNodeID))
 		}
 
 		if _, ok := candidateNodes[targetNodeID]; !ok {

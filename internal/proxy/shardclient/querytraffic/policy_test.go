@@ -105,6 +105,14 @@ func TestPolicyRoutesByRuleOrderAndFallback(t *testing.T) {
 		{NodeID: 10, Weight: 100},
 		{NodeID: 11, Weight: 100},
 	}, routed)
+
+	result := policy.RouteWithResult(Labels{"AZ": "az1"}, []Candidate{
+		{NodeID: 10, Labels: Labels{"AZ": "az2"}},
+		{NodeID: 11, Labels: Labels{"AZ": "az2"}},
+	})
+	require.Equal(t, "fallback", result.RuleName)
+	require.Empty(t, result.FallbackReason)
+	require.Equal(t, routed, result.Candidates)
 }
 
 func TestPolicyUsesFirstMatchingRouteAndPerNodeWeight(t *testing.T) {
@@ -190,4 +198,10 @@ func TestPolicyIgnoresZeroWeightRoutes(t *testing.T) {
 	require.Empty(t, policy.Route(Labels{}, []Candidate{
 		{NodeID: 1, Labels: Labels{"AZ": "az1"}},
 	}))
+
+	result := policy.RouteWithResult(Labels{}, []Candidate{
+		{NodeID: 1, Labels: Labels{"AZ": "az1"}},
+	})
+	require.Equal(t, "no_candidate", result.FallbackReason)
+	require.Empty(t, result.Candidates)
 }

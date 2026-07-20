@@ -45,6 +45,15 @@ type queryTrafficRouter struct {
 	policy *querytraffic.Policy
 }
 
+type queryTrafficRouteResult struct {
+	enabled             bool
+	weightedNodes       []WeightedNode
+	routed              bool
+	ruleName            string
+	fallbackReason      string
+	inputCandidateCount int
+}
+
 func newQueryTrafficRouter(configProvider queryTrafficConfigProvider, labelProvider QueryTrafficLabelProvider) *queryTrafficRouter {
 	return &queryTrafficRouter{
 		configProvider: configProvider,
@@ -52,21 +61,26 @@ func newQueryTrafficRouter(configProvider queryTrafficConfigProvider, labelProvi
 	}
 }
 
-func (r *queryTrafficRouter) route(ctx context.Context, nodes []NodeInfo) ([]WeightedNode, bool, error) {
+func (r *queryTrafficRouter) route(ctx context.Context, nodes []NodeInfo) (queryTrafficRouteResult, error) {
 	if r == nil || r.configProvider == nil || r.labelProvider == nil || !r.configProvider.Enabled() {
-		return nil, false, nil
+		return queryTrafficRouteResult{}, nil
+	}
+	result := queryTrafficRouteResult{
+		enabled:             true,
+		inputCandidateCount: len(nodes),
 	}
 	policy, err := r.getPolicy()
 	if err != nil {
-		return nil, false, err
+		return result, err
 	}
 	if policy == nil {
-		return nil, false, nil
+		result.fallbackReason = "no_policy"
+		return result, nil
 	}
 
 	sourceLabels, err := r.labelProvider.GetSourceLabels(ctx)
 	if err != nil {
-		return nil, false, err
+		return result, err
 	}
 	candidates := make([]querytraffic.Candidate, 0, len(nodes))
 	for _, node := range nodes {
@@ -76,18 +90,18 @@ func (r *queryTrafficRouter) route(ctx context.Context, nodes []NodeInfo) ([]Wei
 		})
 	}
 
-	routed := policy.Route(cloneQueryTrafficLabels(sourceLabels), candidates)
-	if len(routed) == 0 {
-		return nil, false, nil
-	}
-	weightedNodes := make([]WeightedNode, 0, len(routed))
-	for _, candidate := range routed {
-		weightedNodes = append(weightedNodes, WeightedNode{
+	routeResult := policy.RouteWithResult(cloneQueryTrafficLabels(sourceLabels), candidates)
+	result.routed = len(routeResult.Candidates) > 0
+	result.ruleName = routeResult.RuleName
+	result.fallbackReason = routeResult.FallbackReason
+	result.weightedNodes = make([]WeightedNode, 0, len(routeResult.Candidates))
+	for _, candidate := range routeResult.Candidates {
+		result.weightedNodes = append(result.weightedNodes, WeightedNode{
 			NodeID: candidate.NodeID,
 			Weight: candidate.Weight,
 		})
 	}
-	return weightedNodes, true, nil
+	return result, nil
 }
 
 func (r *queryTrafficRouter) getPolicy() (*querytraffic.Policy, error) {
