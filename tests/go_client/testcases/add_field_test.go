@@ -76,6 +76,72 @@ func TestAddCollectionField(t *testing.T) {
 	}
 }
 
+func TestAlterCollectionSchemaFunctionField(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	previousStorageV3, err := hp.AlterServerConfig("common.storage.useLoonFFI", "true")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = hp.AlterServerConfig("common.storage.useLoonFFI", previousStorageV3)
+	})
+
+	previousSchemaBump, err := hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "true")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", previousSchemaBump)
+	})
+
+	collectionName := common.GenRandomString("alter_function_field", 6)
+	schema := entity.NewSchema().
+		WithName(collectionName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+		WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1024).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"})).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(8))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema)))
+
+	outputField := entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector)
+	function := entity.NewFunction().
+		WithName("bm25").
+		WithType(entity.FunctionTypeBM25).
+		WithInputFields("text").
+		WithOutputFields("sparse")
+	require.NoError(t, mc.AddFunctionField(ctx, client.NewAddFunctionFieldOption(collectionName, outputField, function, index.NewSparseInvertedIndex(entity.BM25, 0.2)).WithIndexName("sparse_idx")))
+
+	collection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collectionName))
+	require.NoError(t, err)
+	require.Contains(t, mapFieldsByName(collection.Schema.Fields), "sparse")
+	require.Contains(t, mapFunctionsByName(collection.Schema.Functions), "bm25")
+
+	require.NoError(t, mc.DropFunctionField(ctx, client.NewDropFunctionFieldOption(collectionName, "bm25")))
+	collection, err = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collectionName))
+	require.NoError(t, err)
+	require.NotContains(t, mapFieldsByName(collection.Schema.Fields), "sparse")
+	require.NotContains(t, mapFunctionsByName(collection.Schema.Functions), "bm25")
+
+	field := entity.NewField().WithName("status").WithDataType(entity.FieldTypeInt32).WithNullable(true)
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collectionName, field)))
+	require.NoError(t, mc.DropCollectionField(ctx, client.NewDropCollectionFieldOption(collectionName, "status")))
+	collection, err = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collectionName))
+	require.NoError(t, err)
+	require.NotContains(t, mapFieldsByName(collection.Schema.Fields), "status")
+}
+
+func mapFieldsByName(fields []*entity.Field) map[string]*entity.Field {
+	result := make(map[string]*entity.Field, len(fields))
+	for _, field := range fields {
+		result[field.Name] = field
+	}
+	return result
+}
+
+func mapFunctionsByName(functions []*entity.Function) map[string]*entity.Function {
+	result := make(map[string]*entity.Function, len(functions))
+	for _, function := range functions {
+		result[function.Name] = function
+	}
+	return result
+}
+
 func TestAddCollectionStructField(t *testing.T) {
 	t.Parallel()
 

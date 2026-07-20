@@ -89,13 +89,15 @@ func (e *RPCError) Is(target error) bool {
 }
 
 var (
-	ErrServiceNotReady = newRPCError("service not ready", 1, commonpb.ErrorCode_NotReadyServe, true, false)
-	ErrServiceInternal = newRPCError("service internal error", 5, commonpb.ErrorCode_UnexpectedError, false, false)
+	ErrServiceNotReady      = newRPCError("service not ready", 1, commonpb.ErrorCode_NotReadyServe, true, false)
+	ErrServiceInternal      = newRPCError("service internal error", 5, commonpb.ErrorCode_UnexpectedError, false, false)
+	ErrServiceUnimplemented = newRPCError("service unimplemented", 10, commonpb.ErrorCode_UnexpectedError, false, false)
 
 	ErrCollectionNotFound       = newRPCError("collection not found", 100, commonpb.ErrorCode_CollectionNotExists, false, false)
 	ErrCollectionSchemaMismatch = newRPCError("collection schema mismatch", 109, commonpb.ErrorCode_SchemaMismatch, false, true)
 	ErrIndexNotFound            = newRPCError("index not found", 700, commonpb.ErrorCode_IndexNotExist, false, false)
 	ErrParameterInvalid         = newRPCError("invalid parameter", 1100, commonpb.ErrorCode_IllegalArgument, false, true)
+	ErrParameterMissing         = newRPCError("missing required parameters", 1101, commonpb.ErrorCode_IllegalArgument, false, true)
 
 	errUnexpected = newRPCError("unexpected error", unexpectedCode, commonpb.ErrorCode_UnexpectedError, false, false)
 )
@@ -326,4 +328,18 @@ func WrapErrParameterInvalid[T any](expected, actual T, messages ...string) erro
 		message = strings.Join(messages, "->") + ": " + message
 	}
 	return cloneWithMessage(ErrParameterInvalid, message)
+}
+
+func WrapErrParameterInvalidMsg(format string, args ...any) error {
+	return cloneWithMessage(ErrParameterInvalid, fmt.Sprintf(format, args...))
+}
+
+// WrapErrParameterInvalidErr reclassifies err as ErrParameterInvalid and only
+// retains the original error text, not its identity or code.
+func WrapErrParameterInvalidErr(err error, message string) error {
+	return cloneWithMessage(ErrParameterInvalid, message+": "+err.Error())
+}
+
+func WrapErrParameterMissingMsg(format string, args ...any) error {
+	return cloneWithMessage(ErrParameterMissing, fmt.Sprintf(format, args...))
 }
