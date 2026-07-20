@@ -86,7 +86,7 @@ func TestRewrite_JSON_NestedPath_NonNullable_ContradictionsKeepPredicate(t *test
 	}
 }
 
-func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteBlocked(t *testing.T) {
+func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteAllowed(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 
 	for _, exprStr := range []string{
@@ -96,9 +96,9 @@ func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteBlocked(t *testing.T) {
 		expr, err := parser.ParseExpr(helper, exprStr, nil)
 		require.NoError(t, err, exprStr)
 		require.NotNil(t, expr, exprStr)
-		unary := expr.GetUnaryExpr()
-		require.NotNil(t, unary, "scalar JSON missing-path NOT must remain explicit: %s", exprStr)
-		require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp(), exprStr)
+		unaryRange := expr.GetUnaryRangeExpr()
+		require.NotNil(t, unaryRange, "scalar JSON NOT equality should become !=: %s", exprStr)
+		require.Equal(t, planpb.OpType_NotEqual, unaryRange.GetOp(), exprStr)
 	}
 }
 
