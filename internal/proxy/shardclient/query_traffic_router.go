@@ -32,7 +32,8 @@ type queryTrafficConfigProvider interface {
 }
 
 type QueryTrafficLabelProvider interface {
-	GetLabels(ctx context.Context, nodeIDs []int64) (querytraffic.Labels, map[int64]querytraffic.Labels, error)
+	GetSourceLabels(ctx context.Context) (querytraffic.Labels, error)
+	GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error)
 }
 
 type queryTrafficRouter struct {
@@ -51,7 +52,7 @@ func newQueryTrafficRouter(configProvider queryTrafficConfigProvider, labelProvi
 	}
 }
 
-func (r *queryTrafficRouter) route(ctx context.Context, nodeIDs []int64) ([]WeightedNode, bool, error) {
+func (r *queryTrafficRouter) route(ctx context.Context, nodes []NodeInfo) ([]WeightedNode, bool, error) {
 	if r == nil || r.configProvider == nil || r.labelProvider == nil || !r.configProvider.Enabled() {
 		return nil, false, nil
 	}
@@ -63,15 +64,15 @@ func (r *queryTrafficRouter) route(ctx context.Context, nodeIDs []int64) ([]Weig
 		return nil, false, nil
 	}
 
-	sourceLabels, nodeLabels, err := r.labelProvider.GetLabels(ctx, nodeIDs)
+	sourceLabels, err := r.labelProvider.GetSourceLabels(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	candidates := make([]querytraffic.Candidate, 0, len(nodeIDs))
-	for _, nodeID := range nodeIDs {
+	candidates := make([]querytraffic.Candidate, 0, len(nodes))
+	for _, node := range nodes {
 		candidates = append(candidates, querytraffic.Candidate{
-			NodeID: nodeID,
-			Labels: cloneQueryTrafficLabels(nodeLabels[nodeID]),
+			NodeID: node.NodeID,
+			Labels: cloneQueryTrafficLabels(node.Labels),
 		})
 	}
 
@@ -126,23 +127,35 @@ func (paramtableQueryTrafficConfig) Rules() string {
 }
 
 type sessionQueryTrafficLabelProvider struct {
-	session *sessionutil.Session
+	session      *sessionutil.Session
+	sourceLabels querytraffic.Labels
 }
 
 func NewSessionQueryTrafficLabelProvider(session *sessionutil.Session) QueryTrafficLabelProvider {
+	var sourceLabels querytraffic.Labels
+	if session != nil {
+		sourceLabels = cloneQueryTrafficLabels(session.GetServerLabel())
+	}
 	return &sessionQueryTrafficLabelProvider{
-		session: session,
+		session:      session,
+		sourceLabels: sourceLabels,
 	}
 }
 
-func (p *sessionQueryTrafficLabelProvider) GetLabels(ctx context.Context, nodeIDs []int64) (querytraffic.Labels, map[int64]querytraffic.Labels, error) {
-	if p == nil || p.session == nil {
-		return nil, nil, nil
+func (p *sessionQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
+	if p == nil {
+		return nil, nil
 	}
-	sourceLabels := cloneQueryTrafficLabels(p.session.GetServerLabel())
+	return cloneQueryTrafficLabels(p.sourceLabels), nil
+}
+
+func (p *sessionQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error) {
+	if p == nil || p.session == nil {
+		return nil, nil
+	}
 	sessions, _, err := p.session.GetSessions(ctx, typeutil.QueryNodeRole)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	nodeIDSet := typeutil.NewUniqueSet(nodeIDs...)
@@ -153,7 +166,7 @@ func (p *sessionQueryTrafficLabelProvider) GetLabels(ctx context.Context, nodeID
 		}
 		nodeLabels[session.ServerID] = cloneQueryTrafficLabels(session.GetServerLabel())
 	}
-	return sourceLabels, nodeLabels, nil
+	return nodeLabels, nil
 }
 
 func cloneQueryTrafficLabels(labels map[string]string) querytraffic.Labels {

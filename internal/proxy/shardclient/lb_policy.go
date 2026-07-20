@@ -329,7 +329,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 			selectableNodes = serviceableNodes
 		}
 		availableNodeIDs := lo.Keys(selectableNodes)
-		weightedNodes, routed, routeErr := lb.queryTrafficRouter.route(ctx, availableNodeIDs)
+		weightedNodes, routed, routeErr := lb.queryTrafficRouter.route(ctx, lo.Values(selectableNodes))
 		if routeErr != nil {
 			log.Warn(ctx, "failed to apply query traffic routing, fallback to original candidates",
 				mlog.Err(routeErr))

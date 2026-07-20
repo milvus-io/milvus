@@ -61,9 +61,12 @@ func (it shardLeadersReader) Shuffle() map[string][]NodeInfo {
 		}
 
 		// make each copy has same probability to be first replica
-		for index, leader := range shuffled {
-			if leader == leaders[int(it.idx)%l] {
-				shuffled[0], shuffled[index] = shuffled[index], shuffled[0]
+		if l > 0 {
+			firstLeader := leaders[int(it.idx)%l]
+			for index, leader := range shuffled {
+				if leader.NodeID == firstLeader.NodeID {
+					shuffled[0], shuffled[index] = shuffled[index], shuffled[0]
+				}
 			}
 		}
 
