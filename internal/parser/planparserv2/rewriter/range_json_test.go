@@ -105,16 +105,25 @@ func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteBlocked(t *testing.T) {
 func TestRewrite_JSON_NestedPath_ArrayNotEqualRewriteBlocked(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 
+	exprStr := `not (JSONField["arr"] == [1, 2])`
+	expr, err := parser.ParseExpr(helper, exprStr, nil)
+	require.NoError(t, err, exprStr)
+	require.NotNil(t, expr, exprStr)
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary, "array-valued JSON missing-path NOT must remain explicit: %s", exprStr)
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp(), exprStr)
+}
+
+func TestRewrite_JSON_NestedPath_ArrayTermRejected(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
 	for _, exprStr := range []string{
-		`not (JSONField["arr"] == [1, 2])`,
+		`JSONField["arr"] in [[1, 2]]`,
 		`JSONField["arr"] not in [[1, 2]]`,
 	} {
 		expr, err := parser.ParseExpr(helper, exprStr, nil)
-		require.NoError(t, err, exprStr)
-		require.NotNil(t, expr, exprStr)
-		unary := expr.GetUnaryExpr()
-		require.NotNil(t, unary, "array-valued JSON missing-path NOT must remain explicit: %s", exprStr)
-		require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp(), exprStr)
+		require.ErrorContains(t, err, "array values are not supported in term expressions", exprStr)
+		require.Nil(t, expr, exprStr)
 	}
 }
 

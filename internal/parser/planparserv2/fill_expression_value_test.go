@@ -111,6 +111,12 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{{}})),
 			}},
+			{`JSONField["arr"] not in {list}`, map[string]*schemapb.TemplateValue{
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{
+						generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2}),
+					})),
+			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
