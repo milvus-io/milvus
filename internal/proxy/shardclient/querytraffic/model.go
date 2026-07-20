@@ -28,6 +28,12 @@ type WeightedCandidate struct {
 	Weight int
 }
 
+type RouteResult struct {
+	Candidates     []WeightedCandidate
+	RuleName       string
+	FallbackReason string
+}
+
 type PolicyConfig struct {
 	Rules []RuleConfig `json:"rules" yaml:"rules"`
 }
