@@ -127,6 +127,28 @@ func TestContextCodes(t *testing.T) {
 	require.Equal(t, TimeoutCode, Code(context.DeadlineExceeded))
 }
 
+func TestParameterMissing(t *testing.T) {
+	err := WrapErrParameterMissingMsg("collection name is required")
+	require.ErrorIs(t, err, ErrParameterMissing)
+	require.Equal(t, int32(1101), Code(err))
+	require.Equal(t, commonpb.ErrorCode_IllegalArgument, Status(err).GetErrorCode())
+}
+
+func TestParameterInvalidWrappers(t *testing.T) {
+	t.Run("message", func(t *testing.T) {
+		err := WrapErrParameterInvalidMsg("invalid field %q", "vector")
+		require.ErrorIs(t, err, ErrParameterInvalid)
+		require.Equal(t, int32(1100), Code(err))
+		require.Contains(t, err.Error(), `invalid field "vector"`)
+	})
+
+	t.Run("cause text", func(t *testing.T) {
+		err := WrapErrParameterInvalidErr(errors.New("invalid character"), "invalid legacy params")
+		require.ErrorIs(t, err, ErrParameterInvalid)
+		require.Contains(t, err.Error(), "invalid legacy params: invalid character")
+	})
+}
+
 func TestCheckRPCCall(t *testing.T) {
 	transportErr := errors.New("transport")
 	require.ErrorIs(t, CheckRPCCall(nil, transportErr), transportErr)

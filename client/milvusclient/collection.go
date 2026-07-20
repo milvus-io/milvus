@@ -21,8 +21,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
@@ -197,6 +201,30 @@ func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption
 	return stats, nil
 }
 
+func (c *Client) alterCollectionSchemaRequest(ctx context.Context, req *milvuspb.AlterCollectionSchemaRequest, callOpts ...grpc.CallOption) error {
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterCollectionSchema(ctx, req, callOpts...)
+		if resp == nil || resp.GetAlterStatus() == nil {
+			return merr.CheckRPCCall(nil, err)
+		}
+		if err := merr.CheckRPCCall(resp.GetAlterStatus(), err); err != nil {
+			return err
+		}
+		c.collCache.Evict(req.GetCollectionName())
+		return nil
+	})
+}
+
+func (c *Client) alterCollectionSchema(ctx context.Context, opt alterCollectionSchemaOption, callOpts ...grpc.CallOption) error {
+	if opt == nil {
+		return merr.WrapErrParameterMissingMsg("alter collection schema option is nil")
+	}
+	if err := opt.Validate(); err != nil {
+		return err
+	}
+	return c.alterCollectionSchemaRequest(ctx, opt.Request(), callOpts...)
+}
+
 // AddCollectionField adds a field to a collection.
 func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldOption, callOpts ...grpc.CallOption) error {
 	if err := opt.Validate(); err != nil {
@@ -204,12 +232,42 @@ func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldO
 	}
 
 	req := opt.Request()
+	fieldSchema := &schemapb.FieldSchema{}
+	if err := proto.Unmarshal(req.GetSchema(), fieldSchema); err != nil {
+		return merr.WrapErrParameterInvalidErr(err, "invalid field schema")
+	}
 
-	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	alterReq := newAlterCollectionSchemaAddRequest(req.GetCollectionName(), fieldSchema, nil)
+	alterReq.DbName = req.GetDbName()
+	alterReq.CollectionID = req.GetCollectionID()
+	err := c.alterCollectionSchemaRequest(ctx, alterReq, callOpts...)
+	if grpcstatus.Code(err) != codes.Unimplemented && !errors.Is(err, merr.ErrServiceUnimplemented) {
+		return err
+	}
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AddCollectionField(ctx, req, callOpts...)
-		return merr.CheckRPCCall(resp, err)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		c.collCache.Evict(req.GetCollectionName())
+		return nil
 	})
-	return err
+}
+
+// AddFunctionField adds a function and its output field to a collection.
+func (c *Client) AddFunctionField(ctx context.Context, opt AddFunctionFieldOption, callOpts ...grpc.CallOption) error {
+	return c.alterCollectionSchema(ctx, opt, callOpts...)
+}
+
+// DropCollectionField drops a field from a collection.
+func (c *Client) DropCollectionField(ctx context.Context, opt DropCollectionFieldOption, callOpts ...grpc.CallOption) error {
+	return c.alterCollectionSchema(ctx, opt, callOpts...)
+}
+
+// DropFunctionField drops a function and its output field from a collection.
+func (c *Client) DropFunctionField(ctx context.Context, opt DropFunctionFieldOption, callOpts ...grpc.CallOption) error {
+	return c.alterCollectionSchema(ctx, opt, callOpts...)
 }
 
 // AddCollectionStructField adds a struct array field to a collection.
