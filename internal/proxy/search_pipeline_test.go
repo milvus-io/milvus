@@ -1279,7 +1279,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 			tasks: highlightTasks,
 		},
 		lb:             mockLb,
-		schema:         newSchemaInfo(schema),
+		schema:         mustNewSchemaInfo(schema),
 		request:        req,
 		collectionName: collName,
 		SearchRequest: &internalpb.SearchRequest{
@@ -1398,7 +1398,7 @@ func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHigh
 					tasks: highlightTasks,
 				},
 				lb:             mockLb,
-				schema:         newSchemaInfo(schema),
+				schema:         mustNewSchemaInfo(schema),
 				request:        &milvuspb.SearchRequest{CollectionName: collName, DbName: "default"},
 				collectionName: collName,
 				SearchRequest:  &internalpb.SearchRequest{CollectionID: 0},
@@ -3404,7 +3404,7 @@ func (s *SearchPipelineSuite) TestNewSearchReduceOperatorUsesPipelineOffsetParam
 			CollectionID: 100,
 			PartitionIDs: []int64{10},
 		},
-		schema: newSchemaInfo(&schemapb.CollectionSchema{
+		schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			},

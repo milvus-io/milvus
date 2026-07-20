@@ -45,6 +45,24 @@ func TestDatabaseInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("id-only describe keeps omitted database empty", func(t *testing.T) {
+		md := metadata.Pairs(util.HeaderDBName, "db-from-header")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		req := &milvuspb.DescribeCollectionRequest{CollectionID: 100}
+		_, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
+		assert.NoError(t, err)
+		assert.Empty(t, req.GetDbName())
+	})
+
+	t.Run("name-based describe still gets database from metadata", func(t *testing.T) {
+		md := metadata.Pairs(util.HeaderDBName, "db-from-header")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		req := &milvuspb.DescribeCollectionRequest{CollectionName: "collection"}
+		_, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
+		assert.NoError(t, err)
+		assert.Equal(t, "db-from-header", req.GetDbName())
+	})
+
 	t.Run("external snapshot requests get db from metadata", func(t *testing.T) {
 		md := metadata.Pairs(util.HeaderDBName, "db")
 		ctx := metadata.NewIncomingContext(context.Background(), md)

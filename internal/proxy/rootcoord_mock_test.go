@@ -812,11 +812,18 @@ func (coord *MixCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 	coord.collMtx.RLock()
 	defer coord.collMtx.RUnlock()
 
+	// mirror DescribeCollection: an empty CollectionName means the caller
+	// addressed the collection by id -- the proxy's id-primary partition fill
+	// shows partitions BY id (empty name) -- so resolve from req.CollectionID.
+	usingID := req.CollectionName == ""
 	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
+	if !exist && !usingID {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)),
 		}, nil
+	}
+	if usingID {
+		collID = req.CollectionID
 	}
 
 	coord.partitionMtx.RLock()
