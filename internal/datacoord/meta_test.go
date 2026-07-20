@@ -5902,6 +5902,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 				InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 70000)},
 				StorageVersion: storage.StorageV3,
 				Manifest:       "manifest",
+				BaseManifest:   "manifest",
 			}},
 		}
 
