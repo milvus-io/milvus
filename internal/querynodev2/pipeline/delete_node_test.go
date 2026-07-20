@@ -23,9 +23,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -145,6 +147,26 @@ func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
 	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	out := node.Operate(in)
 	suite.Nil(out)
+}
+
+func (suite *DeleteNodeSuite) TestUpdateSchemaErrorPanics() {
+	manager := &segments.Manager{
+		Collection: segments.NewMockCollectionManager(suite.T()),
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+	delegator := delegator.NewMockShardDelegator(suite.T())
+	schema := &schemapb.CollectionSchema{Version: 2}
+	expectedErr := merr.WrapErrFunctionFailedMsg("invalid function metadata")
+	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
+	suite.PanicsWithError(expectedErr.Error(), func() {
+		node.Operate(&deleteNodeMsg{
+			schema:          schema,
+			schemaBarrierTs: 10,
+			timeRange:       TimeRange{timestampMax: 10},
+		})
+	})
 }
 
 func TestDeleteNode(t *testing.T) {

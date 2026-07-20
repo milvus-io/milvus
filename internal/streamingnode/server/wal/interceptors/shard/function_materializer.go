@@ -18,11 +18,11 @@ func walFunctionRunnerKey(vchannel string) string {
 
 func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
 	key := walFunctionRunnerKey(vchannel)
-	schemaVersion := function.LatestFunctionRunnerVersion
-	if schema != nil {
-		schemaVersion = schema.GetVersion()
-	}
-	if err := function.AllocFunctionRunners(collectionID, key, schema); err != nil {
+	if err := function.GetManager().Alloc(collectionID, key, schema); err != nil {
+		var schemaVersion int32
+		if schema != nil {
+			schemaVersion = schema.GetVersion()
+		}
 		impl.shardManager.Logger().Warn(context.TODO(), "failed to allocate function runners",
 			mlog.Int64("collectionID", collectionID),
 			mlog.String("vchannel", vchannel),
@@ -34,11 +34,11 @@ func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel 
 
 func (impl *shardInterceptor) updateFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
 	key := walFunctionRunnerKey(vchannel)
-	schemaVersion := function.LatestFunctionRunnerVersion
-	if schema != nil {
-		schemaVersion = schema.GetVersion()
-	}
-	if err := function.UpdateFunctionRunners(collectionID, key, schema); err != nil {
+	if err := function.GetManager().Update(collectionID, key, schema); err != nil {
+		var schemaVersion int32
+		if schema != nil {
+			schemaVersion = schema.GetVersion()
+		}
 		impl.shardManager.Logger().Warn(context.TODO(), "failed to update function runners",
 			mlog.Int64("collectionID", collectionID),
 			mlog.String("vchannel", vchannel),
@@ -56,36 +56,33 @@ type collectionSchemaGetter interface {
 	GetCollectionSchema(collectionID int64, schemaVersion int32) (*schemapb.CollectionSchema, error)
 }
 
-func (impl *shardInterceptor) materializeFunctionFields(ctx context.Context, insertMsg message.MutableInsertMessageV1, collectionID int64, schemaVersion int32) error {
+func (impl *shardInterceptor) materializeFunctionFields(
+	ctx context.Context,
+	insertMsg message.MutableInsertMessageV1,
+	collectionID int64,
+	schemaVersion int32,
+	schemaVersionProvided bool,
+) error {
+	if !schemaVersionProvided {
+		if schemaGetter, ok := impl.shardManager.(collectionSchemaGetter); ok {
+			schema, err := schemaGetter.GetCollectionSchema(collectionID, schemaVersion)
+			if errors.Is(err, shards.ErrCollectionSchemaNotFound) {
+				// A legacy create message may not carry collection schema, and old
+				// proxies omit schema_version on inserts. There is no function
+				// metadata to execute until a schema becomes available.
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !function.HasEmbeddingFunctions(schema) {
+				return nil
+			}
+		}
+	}
+
 	body := insertMsg.MustBody()
-	changed, ok, err := function.TryMaterialize(collectionID, schemaVersion, body)
-	if err != nil {
-		return err
-	}
-	if ok {
-		if changed {
-			insertMsg.OverwriteBody(body)
-		}
-		return nil
-	}
-
-	schemaGetter, ok := impl.shardManager.(collectionSchemaGetter)
-	if !ok {
-		return nil
-	}
-
-	schema, err := schemaGetter.GetCollectionSchema(collectionID, schemaVersion)
-	if err != nil {
-		if errors.Is(err, shards.ErrCollectionSchemaNotFound) {
-			return nil
-		}
-		return err
-	}
-	if !function.HasEmbeddingFunctions(schema) {
-		return nil
-	}
-
-	changed, err = function.FillFunctionData(ctx, collectionID, schema, body)
+	changed, err := function.GetManager().Materialize(ctx, collectionID, walFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, body)
 	if err != nil {
 		return err
 	}

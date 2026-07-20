@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -25,6 +26,49 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
+
+func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, schemaVersion int32) {
+	t.Helper()
+	key := walFunctionRunnerKey(vchannel)
+	assert.NoError(t, function.GetManager().Alloc(collectionID, key, &schemapb.CollectionSchema{Version: schemaVersion}))
+	t.Cleanup(func() {
+		function.GetManager().Release(collectionID, key)
+	})
+}
+
+type legacySchemaShardManager struct {
+	shards.ShardManager
+}
+
+func (m *legacySchemaShardManager) GetCollectionSchema(int64, int32) (*schemapb.CollectionSchema, error) {
+	return nil, shards.ErrCollectionSchemaNotFound
+}
+
+type noFunctionSchemaShardManager struct {
+	shards.ShardManager
+}
+
+func (m *noFunctionSchemaShardManager) GetCollectionSchema(int64, int32) (*schemapb.CollectionSchema, error) {
+	return &schemapb.CollectionSchema{Version: 0}, nil
+}
+
+func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing.T) {
+	collectionID := int64(99000)
+	vchannel := "v1"
+	shardManager := mock_shards.NewMockShardManager(t)
+	impl := &shardInterceptor{
+		shardManager: &noFunctionSchemaShardManager{ShardManager: shardManager},
+	}
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&messagespb.InsertMessageHeader{CollectionId: collectionID}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable()
+
+	insertMsg := message.MustAsMutableInsertMessageV1(msg)
+	err := impl.materializeFunctionFields(context.Background(), insertMsg, collectionID, 0, false)
+	assert.NoError(t, err)
+}
 
 func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
 	b := NewInterceptorBuilder()
@@ -101,7 +145,7 @@ func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *test
 	assert.Nil(t, msgID)
 }
 
-func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *testing.T) {
+func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(t *testing.T) {
 	collectionID := int64(99001)
 	vchannel := "by-dev-rootcoord-dml_0_99001v0"
 	schema := &schemapb.CollectionSchema{
@@ -128,10 +172,10 @@ func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *te
 			},
 		},
 	}
-	assert.NoError(t, function.AllocFunctionRunners(collectionID, walFunctionRunnerKey(vchannel), schema))
-	defer function.ReleaseFunctionRunners(collectionID, walFunctionRunnerKey(vchannel))
+	assert.NoError(t, function.GetManager().Alloc(collectionID, walFunctionRunnerKey(vchannel), schema))
+	defer function.GetManager().Release(collectionID, walFunctionRunnerKey(vchannel))
 
-	ok, err := function.RunWithAnalyzer(context.Background(), collectionID, schema.GetVersion(), 101, func(function.Analyzer) error {
+	ok, err := function.GetManager().RunWithAnalyzer(context.Background(), collectionID, walFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -146,7 +190,58 @@ func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *te
 	noFunctionSchema.Functions = nil
 	impl.updateFunctionRunners(collectionID, vchannel, noFunctionSchema)
 
-	ok, err = function.RunWithAnalyzer(context.Background(), collectionID, schema.GetVersion(), 101, func(function.Analyzer) error {
+	ok, err = function.GetManager().RunWithAnalyzer(context.Background(), collectionID, walFunctionRunnerKey(vchannel), 101, func(function.Analyzer) error {
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.False(t, ok)
+
+	invalidSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	invalidSchema.Version = 3
+	invalidSchema.Functions[0].OutputFieldIds = []int64{999}
+	assert.NotPanics(t, func() {
+		impl.updateFunctionRunners(collectionID, vchannel, invalidSchema)
+	})
+	assert.NotPanics(t, func() {
+		impl.allocFunctionRunners(collectionID+1, vchannel+"-alloc", invalidSchema)
+	})
+}
+
+func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *testing.T) {
+	collectionID := int64(99002)
+	vchannel := "by-dev-rootcoord-dml_0_99002v0"
+	key := walFunctionRunnerKey(vchannel)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	assert.NoError(t, function.GetManager().Alloc(collectionID, key, schema))
+	defer function.GetManager().Release(collectionID, key)
+
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().AlterCollection(mock.Anything).Return(nil, nil)
+	impl := &shardInterceptor{shardManager: shardManager}
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionExternalSpec}},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema: &schemapb.CollectionSchema{ExternalSource: "s3://bucket/object"},
+			},
+		}).
+		MustBuildMutable().WithTimeTick(1)
+
+	msgID, err := impl.handleAlterCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, msgID)
+
+	ok, err := function.GetManager().RunWithRunner(context.Background(), collectionID, key, 100, func(function.FunctionRunner) error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -184,6 +279,7 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
+	allocWALSchemaForTest(t, 1, "v1", 3)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
@@ -222,6 +318,7 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
+	allocWALSchemaForTest(t, 1, "v1", 0)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
@@ -254,6 +351,66 @@ func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 
 	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, msgID)
+}
+
+func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
+	b := NewInterceptorBuilder()
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
+	i := b.Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer i.Close()
+
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("missing-snapshot-v1").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 99101,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{PartitionId: 1, Rows: 1, BinarySize: 100},
+			},
+			SchemaVersion: proto.Int32(1),
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil)
+	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	assert.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	assert.Nil(t, msgID)
+}
+
+func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T) {
+	b := NewInterceptorBuilder()
+	baseManager := mock_shards.NewMockShardManager(t)
+	baseManager.EXPECT().Logger().Return(mlog.With()).Maybe()
+	shardManager := &legacySchemaShardManager{ShardManager: baseManager}
+	i := b.Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer i.Close()
+
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("legacy-v1").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 99102,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{PartitionId: 1, Rows: 1, BinarySize: 100},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	baseManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(0), nil)
+	baseManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
+	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
 	})
 	assert.NoError(t, err)
@@ -441,6 +598,7 @@ func TestShardInterceptor(t *testing.T) {
 		}).
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().WithTimeTick(1)
+	allocWALSchemaForTest(t, 1, vchannel, 0)
 
 	insertHdrMatcher := mock.MatchedBy(func(h *message.InsertMessageHeader) bool {
 		return h != nil && h.GetCollectionId() == int64(1) && h.SchemaVersion == nil
