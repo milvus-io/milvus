@@ -418,6 +418,10 @@ class SegmentExpr : public Expr {
                 // One-shot execution, no cursor movement needed.
                 return;
             }
+            if (exec_path_ == ExprExecPath::JsonStats) {
+                current_data_global_pos_ += GetNextBatchSize();
+                return;
+            }
             if (UseIndexCursor()) {
                 MoveCursorForIndex();
                 if (segment_->HasFieldData(field_id_)) {
@@ -513,6 +517,10 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
+        if (exec_path_ == ExprExecPath::JsonStats) {
+            return std::min(active_count_ - current_data_global_pos_,
+                            batch_size_);
+        }
         auto current_chunk =
             UseIndexCursor() ? current_index_chunk_ : current_data_chunk_;
         auto current_chunk_pos = UseIndexCursor() ? current_index_chunk_pos_

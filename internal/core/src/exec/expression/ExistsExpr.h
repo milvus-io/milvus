@@ -101,10 +101,10 @@ class PhyExistsFilterExpr : public SegmentExpr {
     EvalJsonExistsForDataSegment(EvalCtx& context);
 
     VectorPtr
-    EvalJsonExistsForIndex();
+    EvalJsonExistsForIndex(EvalCtx& context);
 
     VectorPtr
-    EvalJsonExistsForDataSegmentByStats();
+    EvalJsonExistsForDataSegmentByStats(EvalCtx& context);
 
  private:
     std::shared_ptr<const milvus::expr::ExistsExpr> expr_;

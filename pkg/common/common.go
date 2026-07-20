@@ -190,8 +190,8 @@ const (
 )
 
 const (
-	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
-	JSONStatsDataFormatVersion = 3
+	// Version 4: the shared column carries the original JSON column validity.
+	JSONStatsDataFormatVersion = 4
 )
 
 // Search, Index parameter keys

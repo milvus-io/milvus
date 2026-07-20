@@ -198,6 +198,7 @@ ConvertJsonToTypedFieldData(
     FixedVector<T> values(total_rows);
     std::vector<uint8_t> valid_data((total_rows + 7) / 8, 0);
     std::vector<size_t> non_exist_offsets;
+    std::vector<size_t> field_null_offsets;
 
     ProcessJsonFieldData<T>(
         json_field_datas,
@@ -211,7 +212,9 @@ ConvertJsonToTypedFieldData(
                 valid_data[offset / 8] |= (1 << (offset % 8));
             }
         },
-        [](int64_t) {},
+        [&field_null_offsets](int64_t offset) {
+            field_null_offsets.push_back(offset);
+        },
         // non_exist_adder: track offsets where the path truly doesn't exist
         [&non_exist_offsets](int64_t offset) {
             non_exist_offsets.push_back(offset);
@@ -226,6 +229,7 @@ ConvertJsonToTypedFieldData(
     return JsonToTypedResult{
         .field_data = field_data,
         .non_exist_offsets = std::move(non_exist_offsets),
+        .field_null_offsets = std::move(field_null_offsets),
     };
 }
 

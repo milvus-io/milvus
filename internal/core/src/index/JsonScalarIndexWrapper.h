@@ -17,13 +17,14 @@
 #pragma once
 
 #include <algorithm>
-#include "common/FastMem.h"
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
 
+#include "common/FastMem.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
@@ -91,9 +92,11 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                                          cast_type_,
                                                          cast_function_);
             non_exist_offsets_ = std::move(result.non_exist_offsets);
+            field_null_offsets_ = std::move(result.field_null_offsets);
             auto total_rows = result.field_data->get_num_rows();
             BaseIndex::BuildWithFieldData({result.field_data});
             BuildExistsBitset(total_rows);
+            BuildFieldValidityBitset(total_rows);
         }
     }
 
@@ -112,9 +115,11 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                                          cast_function_);
 
             non_exist_offsets_ = std::move(result.non_exist_offsets);
+            field_null_offsets_ = std::move(result.field_null_offsets);
             auto total_rows = result.field_data->get_num_rows();
             BaseIndex::BuildWithFieldData({result.field_data});
             BuildExistsBitset(total_rows);
+            BuildFieldValidityBitset(total_rows);
         }
     }
 
@@ -150,11 +155,19 @@ class JsonScalarIndexWrapper : public BaseIndex {
                 res_set.Append(
                     INDEX_NON_EXIST_OFFSET_FILE_NAME, ne_data, ne_len);
             }
+            AppendFieldNullOffsets(res_set);
             lock.unlock();
             milvus::Disassemble(res_set);
             return res_set;
         } else {
-            return BaseIndex::Serialize(config);
+            // Legacy V2 scalar indexes serialize their own entries before
+            // returning the BinarySet. Append the JSON column-validity
+            // sidecar as a separate entry so nullable index-only execution is
+            // still self-contained when scalar_index_engine_version < 3.
+            auto res_set = BaseIndex::Serialize(config);
+            AppendNonExistOffsets(res_set);
+            AppendFieldNullOffsets(res_set);
+            return res_set;
         }
     }
 
@@ -172,6 +185,10 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                non_exist_offsets_.data(),
                                non_exist_offsets_.size() * sizeof(size_t));
         }
+        auto field_null_data = EncodeFieldNullOffsets();
+        writer->WriteEntry(INDEX_FIELD_NULL_OFFSET_FILE_NAME,
+                           field_null_data.data(),
+                           field_null_data.size() * sizeof(size_t));
     }
 
     void
@@ -186,11 +203,38 @@ class JsonScalarIndexWrapper : public BaseIndex {
             milvus::fastmem::FastMemcpy(
                 non_exist_offsets_.data(), e.data.data(), e.data.size());
         }
+        field_validity_available_ = false;
+        if (reader.HasEntry(INDEX_FIELD_NULL_OFFSET_FILE_NAME)) {
+            auto e = reader.ReadEntry(INDEX_FIELD_NULL_OFFSET_FILE_NAME);
+            DecodeFieldNullOffsets(e.data.data(), e.data.size());
+        }
         LOG_INFO("LoadEntries JsonScalarIndexWrapper done, has_non_exist: {}",
                  has_non_exist);
         // BaseIndex::LoadEntries has fully initialized the base index, so
         // Count() is safe to call and we can eagerly build the exists bitmap.
         BuildExistsBitset(this->Count());
+        BuildFieldValidityBitset(this->Count());
+    }
+
+    void
+    Load(const BinarySet& binary_set, const Config& config = {}) override {
+        if constexpr (!kIsInverted) {
+            non_exist_offsets_.clear();
+            if (binary_set.Contains(INDEX_NON_EXIST_OFFSET_FILE_NAME)) {
+                auto data =
+                    binary_set.GetByName(INDEX_NON_EXIST_OFFSET_FILE_NAME);
+                DecodeNonExistOffsets(data->data.get(), data->size);
+            }
+            field_validity_available_ = false;
+            if (binary_set.Contains(INDEX_FIELD_NULL_OFFSET_FILE_NAME)) {
+                auto data =
+                    binary_set.GetByName(INDEX_FIELD_NULL_OFFSET_FILE_NAME);
+                DecodeFieldNullOffsets(data->data.get(), data->size);
+            }
+        }
+        BaseIndex::Load(binary_set, config);
+        BuildExistsBitset(this->Count());
+        BuildFieldValidityBitset(this->Count());
     }
 
     // v2 format: override Load() to defer the eager exists bitmap build
@@ -199,8 +243,26 @@ class JsonScalarIndexWrapper : public BaseIndex {
     // only safely compute Count() here, not inside LoadIndexMetas.
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override {
+        if constexpr (!kIsInverted) {
+            auto index_files = GetValueFromConfig<std::vector<std::string>>(
+                config, INDEX_FILES);
+            AssertInfo(index_files.has_value(),
+                       "index files are required to load JSON field validity");
+            LoadNonExistOffsets(*index_files, config);
+            LoadFieldNullOffsets(*index_files, config);
+        }
         BaseIndex::Load(ctx, config);
         BuildExistsBitset(this->Count());
+        BuildFieldValidityBitset(this->Count());
+    }
+
+    std::optional<TargetBitmap>
+    FieldIsNotNull(milvus::OpContext* op_ctx = nullptr) override {
+        (void)op_ctx;
+        if (!field_validity_available_) {
+            return std::nullopt;
+        }
+        return field_validity_bitset_.clone();
     }
 
     JsonCastType
@@ -235,6 +297,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
                    const Config& config) {
         if constexpr (kIsInverted) {
             InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
+
+            LoadFieldNullOffsets(index_files, config);
 
             auto fill = [&](const uint8_t* data, int64_t size) {
                 non_exist_offsets_.resize((size_t)size / sizeof(size_t));
@@ -322,10 +386,17 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     index_files.end(),
                     [](const std::string& f) {
                         return boost::filesystem::path(f)
-                                   .filename()
-                                   .string()
-                                   .find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
-                               std::string::npos;
+                                       .filename()
+                                       .string()
+                                       .find(
+                                           INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
+                                   std::string::npos ||
+                               boost::filesystem::path(f)
+                                       .filename()
+                                       .string()
+                                       .find(
+                                           INDEX_FIELD_NULL_OFFSET_FILE_NAME) !=
+                                   std::string::npos;
                     }),
                 index_files.end());
             InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);
@@ -344,9 +415,11 @@ class JsonScalarIndexWrapper : public BaseIndex {
                                                          cast_type_,
                                                          cast_function_);
             non_exist_offsets_ = std::move(result.non_exist_offsets);
+            field_null_offsets_ = std::move(result.field_null_offsets);
             auto total_rows = result.field_data->get_num_rows();
             BaseIndex::BuildWithFieldData({result.field_data});
             BuildExistsBitset(total_rows);
+            BuildFieldValidityBitset(total_rows);
             return;
         }
 
@@ -371,11 +444,15 @@ class JsonScalarIndexWrapper : public BaseIndex {
                             data, size);
                 }
             },
-            [this](int64_t offset) { this->null_offset_.push_back(offset); },
+            [this](int64_t offset) {
+                this->null_offset_.push_back(offset);
+                field_null_offsets_.push_back(offset);
+            },
             [this](int64_t offset) { non_exist_offsets_.push_back(offset); },
             [](const Json&, const std::string&, simdjson::error_code) {});
 
         BuildExistsBitset(total_rows);
+        BuildFieldValidityBitset(total_rows);
     }
 
     // Build the exists bitmap. The caller must supply the total row count
@@ -393,8 +470,164 @@ class JsonScalarIndexWrapper : public BaseIndex {
         }
     }
 
+    void
+    BuildFieldValidityBitset(int64_t count) {
+        if (!field_validity_available_) {
+            field_validity_bitset_ = TargetBitmap();
+            return;
+        }
+        field_validity_bitset_ = TargetBitmap(count, true);
+        for (auto offset : field_null_offsets_) {
+            if (static_cast<int64_t>(offset) >= count) {
+                break;
+            }
+            field_validity_bitset_.reset(offset);
+        }
+    }
+
+    std::vector<size_t>
+    EncodeFieldNullOffsets() const {
+        std::vector<size_t> encoded;
+        encoded.reserve(field_null_offsets_.size() + 1);
+        encoded.push_back(std::numeric_limits<size_t>::max());
+        encoded.insert(encoded.end(),
+                       field_null_offsets_.begin(),
+                       field_null_offsets_.end());
+        return encoded;
+    }
+
+    void
+    AppendNonExistOffsets(BinarySet& binary_set) const {
+        if (non_exist_offsets_.empty()) {
+            return;
+        }
+        auto byte_size = non_exist_offsets_.size() * sizeof(size_t);
+        std::shared_ptr<uint8_t[]> bytes(new uint8_t[byte_size]);
+        milvus::fastmem::FastMemcpy(
+            bytes.get(), non_exist_offsets_.data(), byte_size);
+        binary_set.Append(INDEX_NON_EXIST_OFFSET_FILE_NAME, bytes, byte_size);
+    }
+
+    void
+    AppendFieldNullOffsets(BinarySet& binary_set) const {
+        auto field_null_data = EncodeFieldNullOffsets();
+        auto field_null_len = field_null_data.size() * sizeof(size_t);
+        std::shared_ptr<uint8_t[]> field_null_bytes(
+            new uint8_t[field_null_len]);
+        milvus::fastmem::FastMemcpy(
+            field_null_bytes.get(), field_null_data.data(), field_null_len);
+        binary_set.Append(INDEX_FIELD_NULL_OFFSET_FILE_NAME,
+                          field_null_bytes,
+                          field_null_len);
+    }
+
+    void
+    DecodeFieldNullOffsets(const uint8_t* data, size_t size) {
+        AssertInfo(size >= sizeof(size_t) && size % sizeof(size_t) == 0,
+                   "invalid JSON field-null sidecar size: {}",
+                   size);
+        size_t marker;
+        milvus::fastmem::FastMemcpy(&marker, data, sizeof(size_t));
+        AssertInfo(marker == std::numeric_limits<size_t>::max(),
+                   "invalid JSON field-null sidecar marker");
+        auto count = size / sizeof(size_t) - 1;
+        field_null_offsets_.resize(count);
+        if (count > 0) {
+            milvus::fastmem::FastMemcpy(field_null_offsets_.data(),
+                                        data + sizeof(size_t),
+                                        count * sizeof(size_t));
+        }
+        field_validity_available_ = true;
+    }
+
+    void
+    DecodeNonExistOffsets(const uint8_t* data, size_t size) {
+        AssertInfo(size % sizeof(size_t) == 0,
+                   "invalid JSON non-exist sidecar size: {}",
+                   size);
+        non_exist_offsets_.resize(size / sizeof(size_t));
+        if (size > 0) {
+            milvus::fastmem::FastMemcpy(non_exist_offsets_.data(), data, size);
+        }
+    }
+
+    void
+    LoadNonExistOffsets(const std::vector<std::string>& index_files,
+                        const Config& config) {
+        non_exist_offsets_.clear();
+        auto file = std::find_if(
+            index_files.begin(), index_files.end(), [](const std::string& f) {
+                return boost::filesystem::path(f).filename().string() ==
+                       INDEX_NON_EXIST_OFFSET_FILE_NAME;
+            });
+        if (file == index_files.end()) {
+            return;
+        }
+
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        auto datas =
+            this->file_manager_->LoadIndexToMemory({*file}, load_priority);
+        auto& data = datas.at(INDEX_NON_EXIST_OFFSET_FILE_NAME);
+        DecodeNonExistOffsets(data->PayloadData(), data->PayloadSize());
+    }
+
+    void
+    LoadFieldNullOffsets(const std::vector<std::string>& index_files,
+                         const Config& config) {
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        auto exact = std::find_if(
+            index_files.begin(), index_files.end(), [](const std::string& f) {
+                return boost::filesystem::path(f).filename().string() ==
+                       INDEX_FIELD_NULL_OFFSET_FILE_NAME;
+            });
+        if (exact != index_files.end()) {
+            auto datas =
+                this->file_manager_->LoadIndexToMemory({*exact}, load_priority);
+            auto& d = datas.at(INDEX_FIELD_NULL_OFFSET_FILE_NAME);
+            DecodeFieldNullOffsets(d->PayloadData(), d->PayloadSize());
+            return;
+        }
+
+        std::vector<std::string> sliced;
+        std::optional<std::string> slice_meta_file;
+        for (const auto& f : index_files) {
+            auto name = boost::filesystem::path(f).filename().string();
+            if (name.find(INDEX_FIELD_NULL_OFFSET_FILE_NAME) !=
+                std::string::npos) {
+                sliced.push_back(f);
+            }
+            if (name == INDEX_FILE_SLICE_META) {
+                slice_meta_file = f;
+            }
+        }
+        if (sliced.empty()) {
+            field_validity_available_ = false;
+            return;
+        }
+        AssertInfo(slice_meta_file.has_value(),
+                   "JSON field-null slices found but _meta_slice is missing");
+        sliced.push_back(*slice_meta_file);
+        auto datas =
+            this->file_manager_->LoadIndexToMemory(sliced, load_priority);
+        auto slice_meta = std::move(datas.at(INDEX_FILE_SLICE_META));
+        auto codecs = CompactIndexDatasByKey(
+            INDEX_FIELD_NULL_OFFSET_FILE_NAME, std::move(slice_meta), datas);
+        auto assembled = AssembleIndexDataCodec(codecs);
+        DecodeFieldNullOffsets(assembled->PayloadData(),
+                               assembled->PayloadSize());
+    }
+
     std::vector<size_t> non_exist_offsets_;
+    std::vector<size_t> field_null_offsets_;
     TargetBitmap exists_bitset_;
+    TargetBitmap field_validity_bitset_;
+    bool field_validity_available_{true};
 
  private:
     JsonCastType cast_type_;

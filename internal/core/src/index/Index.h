@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <boost/dynamic_bitset.hpp>
 #include "cachinglayer/CacheSlot.h"
 #include "common/FieldData.h"
@@ -111,6 +112,19 @@ class IndexBase {
     virtual TargetBitmap
     Exists() {
         ThrowInfo(NotImplemented, "Exists() not supported for this index type");
+    }
+
+    // Returns the validity of the original field row, independently of any
+    // path extraction or cast performed by a JSON index.  JSON predicates need
+    // this distinction for SQL three-valued logic: a missing path is a valid
+    // FALSE result, while a NULL JSON column is UNKNOWN.
+    //
+    // nullopt means that this index format does not carry field-level
+    // validity (for example, an index built by an older Milvus version).
+    virtual std::optional<TargetBitmap>
+    FieldIsNotNull(milvus::OpContext* op_ctx = nullptr) {
+        (void)op_ctx;
+        return std::nullopt;
     }
 
     // TODO: how to get the cell byte size?

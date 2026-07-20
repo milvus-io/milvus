@@ -99,6 +99,8 @@ constexpr const char* VALID_DATA_PATH_KEY = "valid_data_file_path";
 // JSON path index file names
 constexpr const char* INDEX_NON_EXIST_OFFSET_FILE_NAME =
     "json_index_non_exist_offsets";
+constexpr const char* INDEX_FIELD_NULL_OFFSET_FILE_NAME =
+    "json_index_field_null_offsets";
 
 // VecIndex node filtering
 constexpr const char* VEC_OPT_FIELDS_PATH = "opt_fields_path";

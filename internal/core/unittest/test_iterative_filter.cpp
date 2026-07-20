@@ -351,6 +351,66 @@ TEST(IterativeFilter, GrowingRawData) {
     }
 }
 
+TEST(IterativeFilter, NullableJsonExists) {
+    constexpr int dim = 32;
+    constexpr int64_t row_count = 100;
+    constexpr int topk = 10;
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(int64_fid);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(8);
+    config.set_enable_interim_segment_index(false);
+    auto segment = CreateGrowingSegment(schema, nullptr, 1, config);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+
+    auto data_set = DataGen(schema, row_count, 42, 0, 8, 10, false, false);
+    auto json_valid = data_set.get_col_valid(json_fid);
+    auto valid_count = std::count(json_valid.begin(), json_valid.end(), true);
+    ASSERT_LT(valid_count, row_count);
+    ASSERT_GE(valid_count, topk);
+    auto offset = growing->PreInsert(row_count);
+    growing->Insert(offset,
+                    row_count,
+                    data_set.row_ids_.data(),
+                    data_set.timestamps_.data(),
+                    data_set.raw_);
+
+    ScopedSchemaHandle handle(*schema);
+    const std::string expr = R"(not (exists json["definitely_missing"]))";
+    auto iterative_plan_bytes = handle.ParseSearch(
+        expr, "embeddings", topk, "L2", "{\"ef\": 50}", -1, "iterative_filter");
+    auto iterative_plan = CreateSearchPlanByExpr(
+        schema, iterative_plan_bytes.data(), iterative_plan_bytes.size());
+    auto prefilter_plan_bytes =
+        handle.ParseSearch(expr, "embeddings", topk, "L2", "{\"ef\": 50}");
+    auto prefilter_plan = CreateSearchPlanByExpr(
+        schema, prefilter_plan_bytes.data(), prefilter_plan_bytes.size());
+
+    auto placeholder_raw = CreatePlaceholderGroup(1, dim, 1024);
+    auto placeholder = ParsePlaceholderGroup(
+        iterative_plan.get(), placeholder_raw.SerializeAsString());
+    auto iterative_result =
+        growing->Search(iterative_plan.get(), placeholder.get(), MAX_TIMESTAMP);
+    auto prefilter_result =
+        growing->Search(prefilter_plan.get(), placeholder.get(), MAX_TIMESTAMP);
+
+    CheckFilterSearchResult(
+        *iterative_result, *prefilter_result, topk, /*nq=*/1);
+    for (auto row : iterative_result->seg_offsets_) {
+        ASSERT_GE(row, 0);
+        ASSERT_LT(row, row_count);
+        EXPECT_TRUE(json_valid[row])
+            << "column-NULL JSON row must remain UNKNOWN under NOT EXISTS";
+    }
+}
+
 TEST(IterativeFilter, GrowingIndex) {
     int dim = 128;
     auto schema = std::make_shared<Schema>();

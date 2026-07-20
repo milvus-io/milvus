@@ -756,13 +756,17 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         R"(null)",
     };
 
-    // bool: exists or not
+    // bool: exists or not.
+    // Row 8 (bit 7) is a column-NULL JSON row (json_valid_data[1] == 0xFE). For
+    // the two NOT-exists cases its bit is now 0: a column-null row is UNKNOWN
+    // for exists (3VL), so NOT exists excludes it — the exists index path now
+    // honors column NULL instead of reporting all-true validity.
     std::vector<std::tuple<std::vector<std::string>, bool, uint32_t>>
         test_cases = {
             {{"a"}, true, 0b1111101000000100},
             {{"a", "b"}, true, 0b0000100000000000},
-            {{"a"}, false, 0b0000010111111011},
-            {{"a", "b"}, false, 0b1111011111111111},
+            {{"a"}, false, 0b0000010101111011},
+            {{"a", "b"}, false, 0b1111011101111111},
         };
 
     auto json_index_path = GetParam();
@@ -818,11 +822,20 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         CreateTestCacheIndex("test", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
+    // This parameterized regression also exercises query paths that are not
+    // covered by the exact scalar-index path (for example /a/b over an /a
+    // scalar index), so keep raw JSON available for the expected fallback.
+    // Nullable index-only execution is covered separately for every index
+    // family below.
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
     auto load_info = PrepareSingleFieldInsertBinlog(
         1, 1, 1, json_fid.get(), {json_field}, cm);
     seg->LoadFieldData(load_info);
+
+    auto& expr_cache = exec::ExprResCacheManager::Instance();
+    expr_cache.Clear();
+    exec::ExprResCacheManager::SetEnabled(true);
 
     for (auto& [nested_path, exists, expect] : test_cases) {
         BitsetType expect_res;
@@ -844,11 +857,401 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         }
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            exists_expr);
-        auto result =
-            ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
-
-        EXPECT_TRUE(result == expect_res);
+        for (int run = 0; run < 2; ++run) {
+            auto result = milvus::test::gen_filter_res(
+                plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+            TargetBitmapView result_view(result->GetRawData(), result->size());
+            TargetBitmapView valid_view(result->GetValidRawData(),
+                                        result->size());
+            for (size_t i = 0; i < json_strs.size(); ++i) {
+                EXPECT_EQ(result_view[i], expect_res[i])
+                    << "row " << i << ", cache run " << run;
+            }
+            EXPECT_FALSE(valid_view[8]) << "cache run " << run;
+        }
     }
+
+    expr_cache.Clear();
+    exec::ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(JsonIndexExistsTest, NullableIndexOnlyAcrossScalarIndexTypes) {
+    auto& expr_cache = exec::ExprResCacheManager::Instance();
+    const bool cache_was_enabled = exec::ExprResCacheManager::IsEnabled();
+    expr_cache.Clear();
+    exec::ExprResCacheManager::SetEnabled(false);
+
+    const std::vector<std::pair<IndexType, JsonCastType>> index_cases = {
+        {index::INVERTED_INDEX_TYPE, JsonCastType::FromString("VARCHAR")},
+        {index::ASCENDING_SORT, JsonCastType::FromString("VARCHAR")},
+        {index::BITMAP_INDEX_TYPE, JsonCastType::FromString("VARCHAR")},
+        {index::HYBRID_INDEX_TYPE, JsonCastType::FromString("VARCHAR")},
+    };
+    const std::vector<std::string> json_strs = {
+        R"({"a": "zero"})",
+        R"({"a": "one"})",
+        R"({})",
+        R"({"a": null})",
+        R"({"b": 1})",
+        R"({"a": "two"})",
+    };
+    const std::vector<bool> expected_result = {
+        false, false, true, true, true, false};
+    const std::vector<bool> expected_valid = {
+        false, true, true, true, true, true};
+
+    for (const auto& [index_type, cast_type] : index_cases) {
+        SCOPED_TRACE(index_type);
+
+        auto schema = std::make_shared<Schema>();
+        auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+        auto segment = CreateSealedSegment(schema);
+
+        auto file_manager_ctx = storage::FileManagerContext();
+        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+            proto::schema::JSON);
+        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+        file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+        file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+        auto json_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+            index::CreateIndexInfo{
+                .index_type = index_type,
+                .json_cast_type = cast_type,
+                .json_path = "/a",
+            },
+            file_manager_ctx);
+
+        auto json_field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        std::vector<milvus::Json> jsons;
+        for (const auto& json : json_strs) {
+            jsons.emplace_back(simdjson::padded_string(json));
+        }
+        json_field->add_json_data(jsons);
+        json_field->ValidData()[0] = 0x3E;  // row 0 is a NULL JSON column
+
+        auto* scalar_index =
+            dynamic_cast<index::ScalarIndex<std::string>*>(json_index.get());
+        ASSERT_NE(scalar_index, nullptr);
+        scalar_index->BuildWithFieldData({json_field});
+
+        if (index_type == index::INVERTED_INDEX_TYPE) {
+            auto* inverted =
+                dynamic_cast<index::JsonInvertedIndex<std::string>*>(
+                    json_index.get());
+            ASSERT_NE(inverted, nullptr);
+            inverted->finish();
+            inverted->create_reader(milvus::index::SetBitsetSealed);
+        }
+
+        segcore::LoadIndexInfo load_index_info;
+        load_index_info.field_id = json_fid.get();
+        load_index_info.field_type = DataType::JSON;
+        load_index_info.index_params = {{JSON_PATH, "/a"},
+                                        {JSON_CAST_TYPE, cast_type.ToString()}};
+        load_index_info.cache_index = CreateTestCacheIndex(
+            "json-exists-" + index_type, std::move(json_index));
+        segment->LoadIndex(load_index_info);
+        ASSERT_FALSE(segment->HasFieldData(json_fid));
+
+        auto child = std::make_shared<expr::ExistsExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true));
+        auto filter = std::make_shared<expr::LogicalUnaryExpr>(
+            expr::LogicalUnaryExpr::OpType::LogicalNot, child);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, filter);
+        auto result = milvus::test::gen_filter_res(
+            plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP);
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+
+        for (size_t i = 0; i < json_strs.size(); ++i) {
+            EXPECT_EQ(result_view[i], expected_result[i]) << "row " << i;
+            EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
+        }
+
+        exec::OffsetVector offsets = {0, 2, 3, 5};
+        auto offset_result = milvus::test::gen_filter_res(plan.get(),
+                                                          segment.get(),
+                                                          json_strs.size(),
+                                                          MAX_TIMESTAMP,
+                                                          &offsets);
+        TargetBitmapView offset_result_view(offset_result->GetRawData(),
+                                            offset_result->size());
+        TargetBitmapView offset_valid_view(offset_result->GetValidRawData(),
+                                           offset_result->size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            EXPECT_EQ(offset_result_view[i], expected_result[offsets[i]])
+                << "offset row " << offsets[i];
+            EXPECT_EQ(offset_valid_view[i], expected_valid[offsets[i]])
+                << "offset row " << offsets[i];
+        }
+
+        // The offset index path is also used as a later conjunct. Verify that
+        // bitmap_input suppresses an otherwise-true candidate without losing
+        // the JSON column's validity. Duplicate row 1 intentionally so the
+        // same indexed value is evaluated once masked and once active.
+        auto exists_plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, child);
+        exec::OffsetVector bitmap_offsets = {0, 1, 1, 2};
+        TargetBitmap bitmap_input(bitmap_offsets.size(), true);
+        bitmap_input.reset(1);
+        auto bitmap_result = milvus::test::gen_filter_res(exists_plan.get(),
+                                                          segment.get(),
+                                                          json_strs.size(),
+                                                          MAX_TIMESTAMP,
+                                                          &bitmap_offsets,
+                                                          &bitmap_input);
+        TargetBitmapView bitmap_result_view(bitmap_result->GetRawData(),
+                                            bitmap_result->size());
+        TargetBitmapView bitmap_valid_view(bitmap_result->GetValidRawData(),
+                                           bitmap_result->size());
+        EXPECT_FALSE(bitmap_valid_view[0]);
+        EXPECT_FALSE(bitmap_result_view[0]);
+        EXPECT_TRUE(bitmap_valid_view[1]);
+        EXPECT_FALSE(bitmap_result_view[1]);
+        EXPECT_TRUE(bitmap_valid_view[2]);
+        EXPECT_TRUE(bitmap_result_view[2]);
+        EXPECT_TRUE(bitmap_valid_view[3]);
+        EXPECT_FALSE(bitmap_result_view[3]);
+    }
+
+    expr_cache.Clear();
+    exec::ExprResCacheManager::SetEnabled(cache_was_enabled);
+}
+
+TEST(JsonIndexExistsTest, LegacyIndexFallsBackToLoadedRawValidity) {
+    const std::vector<std::string> json_strs = {
+        R"({"a": "zero"})", R"({"a": "one"})", R"({})", R"({"a": null})"};
+
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto segment = CreateSealedSegment(schema);
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+    index::CreateIndexInfo index_info;
+    index_info.index_type = index::ASCENDING_SORT;
+    index_info.json_cast_type = JsonCastType::FromString("VARCHAR");
+    index_info.json_path = "/a";
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    json_field->ValidData()[0] = 0x0E;  // row 0 is a NULL JSON column
+
+    auto build_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index_info, file_manager_ctx);
+    auto* scalar_index =
+        dynamic_cast<index::ScalarIndex<std::string>*>(build_index.get());
+    ASSERT_NE(scalar_index, nullptr);
+    scalar_index->BuildWithFieldData({json_field});
+
+    // Simulate a V2 JSON path index produced before the field-level validity
+    // sidecar existed. The expression must recover the validity from loaded
+    // raw data instead of treating every row as valid.
+    auto legacy_binary_set = build_index->Serialize({});
+    legacy_binary_set.binary_map_.erase(
+        index::INDEX_FIELD_NULL_OFFSET_FILE_NAME);
+    auto loaded_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index_info, file_manager_ctx);
+    Config load_config;
+    load_config[index::ENABLE_MMAP] = false;
+    loaded_index->Load(legacy_binary_set, load_config);
+    EXPECT_FALSE(loaded_index->FieldIsNotNull().has_value());
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, "VARCHAR"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("legacy-json-exists", std::move(loaded_index));
+    segment->LoadIndex(load_index_info);
+
+    auto& expr_cache = exec::ExprResCacheManager::Instance();
+    expr_cache.Clear();
+
+    auto child = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true));
+    auto filter = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, child);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, filter);
+    auto result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP);
+    TargetBitmapView result_view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+
+    EXPECT_FALSE(valid_view[0]);
+    EXPECT_FALSE(result_view[0]);
+    EXPECT_TRUE(valid_view[1]);
+    EXPECT_FALSE(result_view[1]);
+    EXPECT_TRUE(valid_view[2]);
+    EXPECT_TRUE(result_view[2]);
+    EXPECT_TRUE(valid_view[3]);
+    EXPECT_TRUE(result_view[3]);
+
+    exec::OffsetVector offsets = {0, 2, 3};
+    auto offset_result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
+    TargetBitmapView offset_result_view(offset_result->GetRawData(),
+                                        offset_result->size());
+    TargetBitmapView offset_valid_view(offset_result->GetValidRawData(),
+                                       offset_result->size());
+    EXPECT_FALSE(offset_valid_view[0]);
+    EXPECT_FALSE(offset_result_view[0]);
+    EXPECT_TRUE(offset_valid_view[1]);
+    EXPECT_TRUE(offset_result_view[1]);
+    EXPECT_TRUE(offset_valid_view[2]);
+    EXPECT_TRUE(offset_result_view[2]);
+
+    // The same legacy index is not self-contained after raw data is dropped.
+    // Reject execution explicitly instead of silently treating every row as
+    // a non-NULL JSON column.
+    auto no_raw_binary_set = build_index->Serialize({});
+    no_raw_binary_set.binary_map_.erase(
+        index::INDEX_FIELD_NULL_OFFSET_FILE_NAME);
+    auto no_raw_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index_info, file_manager_ctx);
+    no_raw_index->Load(no_raw_binary_set, load_config);
+
+    auto no_raw_segment = CreateSealedSegment(schema);
+    segcore::LoadIndexInfo no_raw_load_index_info;
+    no_raw_load_index_info.field_id = json_fid.get();
+    no_raw_load_index_info.field_type = DataType::JSON;
+    no_raw_load_index_info.index_params = {{JSON_PATH, "/a"},
+                                           {JSON_CAST_TYPE, "VARCHAR"}};
+    no_raw_load_index_info.cache_index = CreateTestCacheIndex(
+        "legacy-json-exists-no-raw", std::move(no_raw_index));
+    no_raw_segment->LoadIndex(no_raw_load_index_info);
+    ASSERT_FALSE(no_raw_segment->HasFieldData(json_fid));
+    expr_cache.Clear();
+    EXPECT_ANY_THROW(milvus::test::gen_filter_res(
+        plan.get(), no_raw_segment.get(), json_strs.size(), MAX_TIMESTAMP));
+    expr_cache.Clear();
+}
+
+TEST(JsonFlatIndexExistsTest, NullableIndexOnly) {
+    std::vector<std::string> json_strs = {
+        R"({"a": 1})", R"({"a": 1})", R"({})", R"({"a": null})"};
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto segment = CreateSealedSegment(schema);
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+    index::CreateIndexInfo index_info;
+    index_info.index_type = index::INVERTED_INDEX_TYPE;
+    index_info.json_cast_type = JsonCastType::FromString("JSON");
+    index_info.json_path = "";
+    auto base_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index_info, file_manager_ctx);
+    auto json_index = std::unique_ptr<index::JsonFlatIndex>(
+        static_cast<index::JsonFlatIndex*>(base_index.release()));
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    json_field->ValidData()[0] = 0x0E;  // row 0 is a NULL JSON column
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
+
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index_params = {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("json-flat-exists", std::move(json_index));
+    segment->LoadIndex(load_index_info);
+    ASSERT_FALSE(segment->HasFieldData(json_fid));
+
+    auto child = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true));
+    auto filter = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, child);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, filter);
+    auto result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP);
+    TargetBitmapView result_view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+
+    EXPECT_FALSE(valid_view[0]);
+    EXPECT_FALSE(result_view[0]);
+    EXPECT_TRUE(valid_view[1]);
+    EXPECT_FALSE(result_view[1]);
+    EXPECT_TRUE(valid_view[2]);
+    EXPECT_TRUE(result_view[2]);
+    EXPECT_TRUE(valid_view[3]);
+    EXPECT_TRUE(result_view[3]);
+
+    exec::OffsetVector offsets = {0, 2, 3};
+    auto offset_result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
+    TargetBitmapView offset_result_view(offset_result->GetRawData(),
+                                        offset_result->size());
+    TargetBitmapView offset_valid_view(offset_result->GetValidRawData(),
+                                       offset_result->size());
+    EXPECT_FALSE(offset_valid_view[0]);
+    EXPECT_FALSE(offset_result_view[0]);
+    EXPECT_TRUE(offset_valid_view[1]);
+    EXPECT_TRUE(offset_result_view[1]);
+    EXPECT_TRUE(offset_valid_view[2]);
+    EXPECT_TRUE(offset_result_view[2]);
+
+    auto exists_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, child);
+    exec::OffsetVector bitmap_offsets = {0, 1, 1, 2};
+    TargetBitmap bitmap_input(bitmap_offsets.size(), true);
+    bitmap_input.reset(1);
+    auto bitmap_result = milvus::test::gen_filter_res(exists_plan.get(),
+                                                      segment.get(),
+                                                      json_strs.size(),
+                                                      MAX_TIMESTAMP,
+                                                      &bitmap_offsets,
+                                                      &bitmap_input);
+    TargetBitmapView bitmap_result_view(bitmap_result->GetRawData(),
+                                        bitmap_result->size());
+    TargetBitmapView bitmap_valid_view(bitmap_result->GetValidRawData(),
+                                       bitmap_result->size());
+    EXPECT_FALSE(bitmap_valid_view[0]);
+    EXPECT_FALSE(bitmap_result_view[0]);
+    EXPECT_TRUE(bitmap_valid_view[1]);
+    EXPECT_FALSE(bitmap_result_view[1]);
+    EXPECT_TRUE(bitmap_valid_view[2]);
+    EXPECT_TRUE(bitmap_result_view[2]);
+    EXPECT_TRUE(bitmap_valid_view[3]);
+    EXPECT_FALSE(bitmap_result_view[3]);
 }
 
 class JsonIndexBinaryExprTest : public testing::TestWithParam<JsonCastType> {};
@@ -1133,4 +1536,86 @@ TEST(JsonNonIndexExistsTest, TestExistsExprSealedNoIndex) {
 
         EXPECT_TRUE(result == expect_res);
     }
+}
+
+TEST(JsonNonIndexExistsTest, NullableSealedRawData) {
+    std::vector<std::string> json_strs = {
+        R"({"a": 1})", R"({"a": 1})", R"({})", R"({"a": null})"};
+
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto segment = CreateSealedSegment(schema);
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+    json_field->ValidData()[0] = 0x0E;  // row 0 is a NULL JSON column
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    auto child = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true));
+    auto filter = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, child);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, filter);
+    auto result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP);
+    TargetBitmapView result_view(result->GetRawData(), result->size());
+    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+
+    EXPECT_FALSE(valid_view[0]);
+    EXPECT_FALSE(result_view[0]);
+    EXPECT_TRUE(valid_view[1]);
+    EXPECT_FALSE(result_view[1]);
+    EXPECT_TRUE(valid_view[2]);
+    EXPECT_TRUE(result_view[2]);
+    EXPECT_TRUE(valid_view[3]);
+    EXPECT_TRUE(result_view[3]);
+
+    exec::OffsetVector offsets = {0, 2, 3};
+    auto offset_result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
+    TargetBitmapView offset_result_view(offset_result->GetRawData(),
+                                        offset_result->size());
+    TargetBitmapView offset_valid_view(offset_result->GetValidRawData(),
+                                       offset_result->size());
+    EXPECT_FALSE(offset_valid_view[0]);
+    EXPECT_FALSE(offset_result_view[0]);
+    EXPECT_TRUE(offset_valid_view[1]);
+    EXPECT_TRUE(offset_result_view[1]);
+    EXPECT_TRUE(offset_valid_view[2]);
+    EXPECT_TRUE(offset_result_view[2]);
+
+    auto exists_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, child);
+    exec::OffsetVector bitmap_offsets = {0, 1, 1, 2};
+    TargetBitmap bitmap_input(bitmap_offsets.size(), true);
+    bitmap_input.reset(1);
+    auto bitmap_result = milvus::test::gen_filter_res(exists_plan.get(),
+                                                      segment.get(),
+                                                      json_strs.size(),
+                                                      MAX_TIMESTAMP,
+                                                      &bitmap_offsets,
+                                                      &bitmap_input);
+    TargetBitmapView bitmap_result_view(bitmap_result->GetRawData(),
+                                        bitmap_result->size());
+    TargetBitmapView bitmap_valid_view(bitmap_result->GetValidRawData(),
+                                       bitmap_result->size());
+    EXPECT_FALSE(bitmap_valid_view[0]);
+    EXPECT_FALSE(bitmap_result_view[0]);
+    EXPECT_TRUE(bitmap_valid_view[1]);
+    EXPECT_FALSE(bitmap_result_view[1]);
+    EXPECT_TRUE(bitmap_valid_view[2]);
+    EXPECT_TRUE(bitmap_result_view[2]);
+    EXPECT_TRUE(bitmap_valid_view[3]);
+    EXPECT_FALSE(bitmap_result_view[3]);
 }

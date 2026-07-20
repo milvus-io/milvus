@@ -56,6 +56,11 @@ struct JsonToTypedResult {
     // Used for EXISTS queries: Exists() should return true for rows where
     // the path exists, even if the value can't be cast to the index type.
     std::vector<size_t> non_exist_offsets;
+
+    // Offsets where the original JSON column is NULL.  This is intentionally
+    // narrower than non_exist_offsets: a non-NULL document with a missing path
+    // must remain a valid FALSE result for EXISTS.
+    std::vector<size_t> field_null_offsets;
 };
 
 // Convert JSON field data into typed FieldData by extracting values at

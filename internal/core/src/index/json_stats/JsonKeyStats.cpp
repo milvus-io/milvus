@@ -598,15 +598,19 @@ JsonKeyStats::TraverseJsonForBuildStats(
 }
 
 void
-JsonKeyStats::BuildKeyStatsForNullRow() {
+JsonKeyStats::BuildKeyStatsForNullRow(bool column_is_null) {
     // add empty value for column keys that not hit
     for (const auto& key : column_keys_) {
         parquet_writer_->AppendValue(key.ToColumnName(), "");
     }
 
     // add null bson to shared column
-    BsonDocument null_doc;
-    parquet_writer_->AppendSharedRow(null_doc.data(), null_doc.length());
+    if (column_is_null) {
+        parquet_writer_->AppendSharedRow(nullptr, 0);
+    } else {
+        BsonDocument empty_doc;
+        parquet_writer_->AppendSharedRow(empty_doc.data(), empty_doc.length());
+    }
 
     parquet_writer_->AddCurrentRow();
 }
@@ -713,7 +717,7 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
         auto n = data->get_num_rows();
         for (uint32_t i = 0; i < n; i++) {
             if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
-                BuildKeyStatsForNullRow();
+                BuildKeyStatsForNullRow(true);
             } else {
                 auto json_str =
                     static_cast<const milvus::Json*>(data->RawValue(i))
@@ -723,7 +727,7 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                 // some situations, such as empty json string,
                 // should be handled as null row
                 if (strlen(json_str) == 0) {
-                    BuildKeyStatsForNullRow();
+                    BuildKeyStatsForNullRow(false);
                 } else {
                     BuildKeyStatsForRow(json_str, row_id);
                 }

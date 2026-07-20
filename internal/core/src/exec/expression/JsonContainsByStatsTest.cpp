@@ -436,6 +436,138 @@ AssertJsonStatsProjectionMode(const std::string& warmup_policy,
 
 }  // namespace
 
+TEST(JsonExistsByStatsTest, NullableStatsOnlyAndCache) {
+    std::vector<std::string> json_raw_data = {
+        R"({"a": 1})", R"({"a": 1})", R"({})", R"({"a": null})", ""};
+    std::vector<uint8_t> valid_data{0x1E};  // row 0 is column NULL
+
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1101,
+                                          2101,
+                                          3101,
+                                          json_fid.get(),
+                                          5101,
+                                          1,
+                                          &valid_data);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
+    ASSERT_FALSE(segment->HasFieldData(json_fid));
+
+    auto child = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true));
+    auto filter = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, child);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, filter);
+
+    auto& cache = exec::ExprResCacheManager::Instance();
+    exec::CacheConfig cache_config;
+    cache_config.mode = exec::CacheMode::Memory;
+    cache_config.mem_max_bytes = 1 << 20;
+    cache_config.admission_threshold = 1;
+    cache_config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(cache.SetConfig(cache_config));
+    cache.Clear();
+    exec::ExprResCacheManager::SetEnabled(true);
+    exec::OffsetVector offsets = {0, 2, 3, 4};
+    for (int run = 0; run < 2; ++run) {
+        auto result = milvus::test::gen_filter_res(
+            plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+        TargetBitmapView result_view(result->GetRawData(), result->size());
+        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+
+        EXPECT_FALSE(valid_view[0]) << "cache run " << run;
+        EXPECT_FALSE(result_view[0]) << "cache run " << run;
+        EXPECT_TRUE(valid_view[1]) << "cache run " << run;
+        EXPECT_FALSE(result_view[1]) << "cache run " << run;
+        EXPECT_TRUE(valid_view[2]) << "cache run " << run;
+        EXPECT_TRUE(result_view[2]) << "cache run " << run;
+        EXPECT_TRUE(valid_view[3]) << "cache run " << run;
+        EXPECT_TRUE(result_view[3]) << "cache run " << run;
+        EXPECT_TRUE(valid_view[4]) << "cache run " << run;
+        EXPECT_TRUE(result_view[4])
+            << "valid empty JSON must differ from a NULL JSON column, cache "
+               "run "
+            << run;
+
+        auto offset_result = milvus::test::gen_filter_res(plan.get(),
+                                                          segment.get(),
+                                                          json_raw_data.size(),
+                                                          MAX_TIMESTAMP,
+                                                          &offsets);
+        TargetBitmapView offset_result_view(offset_result->GetRawData(),
+                                            offset_result->size());
+        TargetBitmapView offset_valid_view(offset_result->GetValidRawData(),
+                                           offset_result->size());
+        EXPECT_FALSE(offset_valid_view[0]) << "offset cache run " << run;
+        EXPECT_FALSE(offset_result_view[0]) << "offset cache run " << run;
+        EXPECT_TRUE(offset_valid_view[1]) << "offset cache run " << run;
+        EXPECT_TRUE(offset_result_view[1]) << "offset cache run " << run;
+        EXPECT_TRUE(offset_valid_view[2]) << "offset cache run " << run;
+        EXPECT_TRUE(offset_result_view[2]) << "offset cache run " << run;
+        EXPECT_TRUE(offset_valid_view[3]) << "offset cache run " << run;
+        EXPECT_TRUE(offset_result_view[3]) << "offset cache run " << run;
+
+        auto exists_plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, child);
+        exec::OffsetVector bitmap_offsets = {0, 1, 1, 2};
+        TargetBitmap bitmap_input(bitmap_offsets.size(), true);
+        bitmap_input.reset(1);
+        auto bitmap_result = milvus::test::gen_filter_res(exists_plan.get(),
+                                                          segment.get(),
+                                                          json_raw_data.size(),
+                                                          MAX_TIMESTAMP,
+                                                          &bitmap_offsets,
+                                                          &bitmap_input);
+        TargetBitmapView bitmap_result_view(bitmap_result->GetRawData(),
+                                            bitmap_result->size());
+        TargetBitmapView bitmap_valid_view(bitmap_result->GetValidRawData(),
+                                           bitmap_result->size());
+        EXPECT_FALSE(bitmap_valid_view[0]) << "bitmap cache run " << run;
+        EXPECT_FALSE(bitmap_result_view[0]) << "bitmap cache run " << run;
+        EXPECT_TRUE(bitmap_valid_view[1]) << "bitmap cache run " << run;
+        EXPECT_FALSE(bitmap_result_view[1]) << "bitmap cache run " << run;
+        EXPECT_TRUE(bitmap_valid_view[2]) << "bitmap cache run " << run;
+        EXPECT_TRUE(bitmap_result_view[2]) << "bitmap cache run " << run;
+        EXPECT_TRUE(bitmap_valid_view[3]) << "bitmap cache run " << run;
+        EXPECT_FALSE(bitmap_result_view[3]) << "bitmap cache run " << run;
+    }
+
+    // Exercise the production all-at-once path with deterministic cache
+    // admission. Later runs read the inner ExistsExpr entry; its bitmaps must
+    // remain intact instead of being moved out of the cache.
+    cache.Clear();
+    BitsetType expected(json_raw_data.size());
+    expected.set(2);
+    expected.set(3);
+    expected.set(4);
+    for (int run = 0; run < 3; ++run) {
+        auto result = query::ExecuteQueryExpr(
+            plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+        EXPECT_TRUE(result == expected) << "all-at-once cache run " << run;
+    }
+    exec::ExprResCacheManager::Value cached_exists;
+    cached_exists.active_count = json_raw_data.size();
+    ASSERT_TRUE(cache.Get({segment->get_segment_id(), child->ToString()},
+                          cached_exists));
+    ASSERT_NE(cached_exists.result, nullptr);
+    ASSERT_NE(cached_exists.valid_result, nullptr);
+    EXPECT_EQ(cached_exists.result->size(), json_raw_data.size());
+    EXPECT_EQ(cached_exists.valid_result->size(), json_raw_data.size());
+    EXPECT_FALSE((*cached_exists.valid_result)[0]);
+    cache.Clear();
+    exec::ExprResCacheManager::SetEnabled(false);
+    ASSERT_TRUE(cache.SetConfig(exec::CacheConfig{}));
+}
+
 TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON);

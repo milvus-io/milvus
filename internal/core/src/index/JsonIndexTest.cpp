@@ -41,6 +41,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
+#include "index/JsonFlatIndex.h"
 #include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
@@ -82,6 +83,7 @@ struct LoadedJsonOffsetStats {
     int64_t count;
     int64_t exists_count;
     int64_t null_count;
+    int64_t field_valid_count;
 };
 
 LoadedJsonOffsetStats
@@ -170,9 +172,13 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
     loaded_json_index->Load(milvus::tracer::TraceContext{}, load_config);
     auto exists = loaded_json_index->Exists();
     auto nulls = loaded_json_index->IsNull();
+    auto field_valid = loaded_json_index->FieldIsNotNull();
+    AssertInfo(field_valid.has_value(),
+               "loaded JSON index must contain field validity");
     return {loaded_json_index->Count(),
             static_cast<int64_t>(exists.count()),
-            static_cast<int64_t>(nulls.count())};
+            static_cast<int64_t>(nulls.count()),
+            static_cast<int64_t>(field_valid->count())};
 }
 
 }  // namespace
@@ -550,6 +556,7 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNonExistOffsets) {
         BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data);
     EXPECT_EQ(stats.count, json_raw_data.size());
     EXPECT_EQ(stats.exists_count, 10);
+    EXPECT_EQ(stats.field_valid_count, json_raw_data.size());
 }
 
 TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
@@ -572,4 +579,241 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
     EXPECT_EQ(stats.count, json_raw_data.size());
     EXPECT_EQ(stats.exists_count, 10);
     EXPECT_EQ(stats.null_count, 20);
+    EXPECT_EQ(stats.field_valid_count, 10);
+}
+
+TEST(JsonIndexTest, NullableFieldValidityV3RoundTripAcrossIndexTypes) {
+    const std::vector<std::pair<IndexType, JsonCastType>> index_cases = {
+        {INVERTED_INDEX_TYPE, JsonCastType::FromString("VARCHAR")},
+        {ASCENDING_SORT, JsonCastType::FromString("VARCHAR")},
+        {BITMAP_INDEX_TYPE, JsonCastType::FromString("VARCHAR")},
+        {HYBRID_INDEX_TYPE, JsonCastType::FromString("VARCHAR")},
+    };
+    const std::vector<std::string> json_raw_data = {
+        R"({"a": "zero"})",
+        R"({"a": "one"})",
+        R"({})",
+        R"({"a": null})",
+        R"({"b": 1})",
+        R"({"a": "two"})",
+    };
+    const std::vector<bool> expected_exists = {
+        false, true, false, false, false, true};
+    const std::vector<bool> expected_field_valid = {
+        false, true, true, true, true, true};
+
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_raw_data) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    json_field->add_json_data(jsons);
+    json_field->ValidData()[0] = 0x3E;  // row 0 is a NULL JSON column
+
+    auto root_path =
+        (boost::filesystem::path(TestLocalPath) /
+         boost::filesystem::unique_path("json-validity-v3-%%%%-%%%%"))
+            .string();
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    ChunkManagerWrapper cm_w(cm);
+
+    for (size_t case_id = 0; case_id < index_cases.size(); ++case_id) {
+        const auto& [index_type, cast_type] = index_cases[case_id];
+        SCOPED_TRACE(index_type);
+
+        constexpr int64_t collection_id = 1;
+        constexpr int64_t partition_id = 2;
+        constexpr int64_t segment_id = 3;
+        constexpr int64_t field_id = 101;
+        auto build_id = 7000 + static_cast<int64_t>(case_id);
+        auto index_version = 8000 + static_cast<int64_t>(case_id);
+        auto field_meta = milvus::segcore::gen_field_meta(
+            collection_id, partition_id, segment_id, field_id, DataType::JSON);
+        field_meta.field_schema.set_nullable(true);
+        auto index_meta =
+            gen_index_meta(segment_id, field_id, build_id, index_version);
+
+        storage::FileManagerContext build_ctx(field_meta, index_meta, cm, fs);
+        index::CreateIndexInfo create_index_info;
+        create_index_info.index_type = index_type;
+        create_index_info.json_cast_type = cast_type;
+        create_index_info.json_path = "/a";
+
+        auto build_index = IndexFactory::GetInstance().CreateJsonIndex(
+            create_index_info, build_ctx);
+        auto* scalar_index =
+            dynamic_cast<ScalarIndex<std::string>*>(build_index.get());
+        ASSERT_NE(scalar_index, nullptr);
+        scalar_index->BuildWithFieldData({json_field});
+
+        auto stats = build_index->UploadUnified({});
+        auto index_files = stats->GetIndexFiles();
+
+        build_ctx.set_for_loading_index(true);
+        auto loaded_index = IndexFactory::GetInstance().CreateJsonIndex(
+            create_index_info, build_ctx);
+        Config load_config;
+        load_config[INDEX_FILES] = index_files;
+        load_config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+        loaded_index->LoadUnified(load_config);
+
+        auto exists = loaded_index->Exists();
+        auto field_valid = loaded_index->FieldIsNotNull();
+        ASSERT_TRUE(field_valid.has_value());
+        ASSERT_EQ(exists.size(), json_raw_data.size());
+        ASSERT_EQ(field_valid->size(), json_raw_data.size());
+        for (size_t i = 0; i < json_raw_data.size(); ++i) {
+            EXPECT_EQ(exists[i], expected_exists[i]) << "row " << i;
+            EXPECT_EQ((*field_valid)[i], expected_field_valid[i])
+                << "row " << i;
+        }
+    }
+}
+
+TEST(JsonIndexTest, NullableJsonFlatFieldValidityV3RoundTrip) {
+    const std::vector<std::string> json_raw_data = {
+        R"({"a": 1})", R"({"a": 2})", R"({})", R"({"a": null})"};
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_raw_data) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    json_field->add_json_data(jsons);
+    json_field->ValidData()[0] = 0x0E;  // row 0 is a NULL JSON column
+
+    auto root_path =
+        (boost::filesystem::path(TestLocalPath) /
+         boost::filesystem::unique_path("json-flat-validity-v3-%%%%-%%%%"))
+            .string();
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    ChunkManagerWrapper cm_w(cm);
+
+    auto field_meta =
+        milvus::segcore::gen_field_meta(1, 2, 3, 101, DataType::JSON);
+    field_meta.field_schema.set_nullable(true);
+    auto index_meta = gen_index_meta(3, 101, 8500, 8600);
+    storage::FileManagerContext build_ctx(field_meta, index_meta, cm, fs);
+
+    index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = INVERTED_INDEX_TYPE;
+    create_index_info.json_cast_type = JsonCastType::FromString("JSON");
+    create_index_info.json_path = "";
+
+    auto build_index = IndexFactory::GetInstance().CreateJsonIndex(
+        create_index_info, build_ctx);
+    auto* scalar_index =
+        dynamic_cast<ScalarIndex<std::string>*>(build_index.get());
+    ASSERT_NE(scalar_index, nullptr);
+    scalar_index->BuildWithFieldData({json_field});
+
+    auto stats = build_index->UploadUnified({});
+    auto index_files = stats->GetIndexFiles();
+
+    build_ctx.set_for_loading_index(true);
+    auto loaded_index = IndexFactory::GetInstance().CreateJsonIndex(
+        create_index_info, build_ctx);
+    Config load_config;
+    load_config[INDEX_FILES] = index_files;
+    load_config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    loaded_index->LoadUnified(load_config);
+
+    auto field_valid = loaded_index->FieldIsNotNull();
+    ASSERT_TRUE(field_valid.has_value());
+    ASSERT_EQ(field_valid->size(), json_raw_data.size());
+    EXPECT_FALSE((*field_valid)[0]);
+    EXPECT_TRUE((*field_valid)[1]);
+    EXPECT_TRUE((*field_valid)[2]);
+    EXPECT_TRUE((*field_valid)[3]);
+
+    auto* json_flat = dynamic_cast<JsonFlatIndex*>(loaded_index.get());
+    ASSERT_NE(json_flat, nullptr);
+    auto executor = json_flat->create_executor<double>("/a");
+    auto exists = executor->Exists();
+    ASSERT_EQ(exists.size(), json_raw_data.size());
+    EXPECT_FALSE(exists[0]);
+    EXPECT_TRUE(exists[1]);
+    EXPECT_FALSE(exists[2]);
+    EXPECT_FALSE(exists[3]);
+}
+
+TEST(JsonIndexTest, NullableFieldValidityV2RoundTripAcrossNonInvertedTypes) {
+    const std::vector<IndexType> index_types = {
+        ASCENDING_SORT, BITMAP_INDEX_TYPE, HYBRID_INDEX_TYPE};
+    const std::vector<std::string> json_raw_data = {
+        R"({"a": "zero"})", R"({"a": "one"})", R"({})", R"({"a": null})"};
+
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : json_raw_data) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    json_field->add_json_data(jsons);
+    json_field->ValidData()[0] = 0x0E;  // row 0 is a NULL JSON column
+
+    auto root_path =
+        (boost::filesystem::path(TestLocalPath) /
+         boost::filesystem::unique_path("json-validity-v2-%%%%-%%%%"))
+            .string();
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    ChunkManagerWrapper cm_w(cm);
+
+    for (size_t case_id = 0; case_id < index_types.size(); ++case_id) {
+        const auto& index_type = index_types[case_id];
+        SCOPED_TRACE(index_type);
+
+        auto field_meta =
+            milvus::segcore::gen_field_meta(1, 2, 3, 101, DataType::JSON);
+        field_meta.field_schema.set_nullable(true);
+        auto index_meta = gen_index_meta(3,
+                                         101,
+                                         9000 + static_cast<int64_t>(case_id),
+                                         9100 + static_cast<int64_t>(case_id));
+        storage::FileManagerContext build_ctx(field_meta, index_meta, cm, fs);
+
+        index::CreateIndexInfo create_index_info;
+        create_index_info.index_type = index_type;
+        create_index_info.json_cast_type = JsonCastType::FromString("VARCHAR");
+        create_index_info.json_path = "/a";
+
+        auto build_index = IndexFactory::GetInstance().CreateJsonIndex(
+            create_index_info, build_ctx);
+        auto* scalar_index =
+            dynamic_cast<ScalarIndex<std::string>*>(build_index.get());
+        ASSERT_NE(scalar_index, nullptr);
+        scalar_index->BuildWithFieldData({json_field});
+
+        auto stats = build_index->Upload();
+        auto index_files = stats->GetIndexFiles();
+
+        build_ctx.set_for_loading_index(true);
+        auto loaded_index = IndexFactory::GetInstance().CreateJsonIndex(
+            create_index_info, build_ctx);
+        Config load_config;
+        load_config[INDEX_FILES] = index_files;
+        load_config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+        loaded_index->Load(milvus::tracer::TraceContext{}, load_config);
+
+        auto exists = loaded_index->Exists();
+        auto field_valid = loaded_index->FieldIsNotNull();
+        ASSERT_TRUE(field_valid.has_value());
+        ASSERT_EQ(exists.size(), json_raw_data.size());
+        ASSERT_EQ(field_valid->size(), json_raw_data.size());
+        EXPECT_FALSE(exists[0]);
+        EXPECT_TRUE(exists[1]);
+        EXPECT_FALSE(exists[2]);
+        EXPECT_FALSE(exists[3]);
+        EXPECT_FALSE((*field_valid)[0]);
+        EXPECT_TRUE((*field_valid)[1]);
+        EXPECT_TRUE((*field_valid)[2]);
+        EXPECT_TRUE((*field_valid)[3]);
+    }
 }

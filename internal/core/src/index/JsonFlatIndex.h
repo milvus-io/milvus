@@ -768,6 +768,20 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
         return JsonCastType::FromString("JSON");
     }
 
+    std::optional<TargetBitmap>
+    FieldIsNotNull(milvus::OpContext* op_ctx = nullptr) override {
+        (void)op_ctx;
+        auto count = this->Count();
+        TargetBitmap valid(count, true);
+        for (auto offset : this->null_offset_) {
+            if (static_cast<int64_t>(offset) >= count) {
+                break;
+            }
+            valid.reset(offset);
+        }
+        return valid;
+    }
+
     std::string
     GetNestedPath() const {
         return nested_path_;

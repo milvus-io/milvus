@@ -174,6 +174,29 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                   "IsNotNull not supported for JsonKeyStats");
     }
 
+    std::optional<TargetBitmap>
+    FieldIsNotNull(milvus::OpContext* op_ctx = nullptr) override {
+        TargetBitmap valid(num_rows_, true);
+        AssertInfo(shared_column_ != nullptr,
+                   "shared JSON stats column is required for field validity");
+
+        TargetBitmapView valid_view(valid);
+        size_t processed_size = 0;
+        for (size_t i = 0; i < shared_column_->num_chunks(); ++i) {
+            auto chunk_size = shared_column_->chunk_row_nums(i);
+            auto pw = shared_column_->StringViews(op_ctx, i);
+            auto valid_data = pw.get().second.data();
+            ApplyOnlyValidData(
+                valid_data, valid_view + processed_size, chunk_size);
+            processed_size += chunk_size;
+        }
+        AssertInfo(processed_size == valid.size(),
+                   "processed JSON stats validity rows {} not equal to {}",
+                   processed_size,
+                   valid.size());
+        return valid;
+    }
+
     const TargetBitmap
     NotIn(size_t n, const std::string* values) override {
         ThrowInfo(ErrorCode::NotImplemented,
@@ -481,7 +504,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     BuildKeyStatsForRow(const char* json_str, uint32_t row_id);
 
     void
-    BuildKeyStatsForNullRow();
+    BuildKeyStatsForNullRow(bool column_is_null);
 
     std::string
     GetShreddingDir();

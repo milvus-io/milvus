@@ -910,6 +910,26 @@ TEST_P(ExprTest, TestExistsWithJSONNullable) {
     std::vector<
         std::tuple<std::string, std::function<bool(bool, bool)>, std::string>>
         testcases = {
+            // NOT over exists on a nullable JSON column: a NULL-JSON row must
+            // be excluded (3VL: NOT(unknown)=unknown). Pre-fix ExistsExpr left
+            // valid_res=true for a column-null row, so NOT flipped res=false to
+            // a wrong match.
+            {R"(not (exists json["bool"]))",
+             [](bool v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return !v;
+             },
+             "bool"},
+            {R"(not (exists json["int"]))",
+             [](bool v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return !v;
+             },
+             "int"},
             {R"(exists json["bool"])",
              [](bool v, bool valid) {
                  if (!valid) {

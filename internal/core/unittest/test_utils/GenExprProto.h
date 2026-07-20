@@ -171,7 +171,8 @@ gen_filter_res(milvus::plan::PlanNode* plan_node,
                const milvus::segcore::SegmentInternalInterface* segment,
                uint64_t active_count,
                uint64_t timestamp,
-               FixedVector<int32_t>* offsets = nullptr) {
+               FixedVector<int32_t>* offsets = nullptr,
+               const TargetBitmap* bitmap_input = nullptr) {
     auto filter_node = dynamic_cast<milvus::plan::FilterBitsNode*>(plan_node);
     assert(filter_node != nullptr);
     std::vector<milvus::expr::TypedExprPtr> filters;
@@ -185,6 +186,9 @@ gen_filter_res(milvus::plan::PlanNode* plan_node,
         std::make_unique<milvus::exec::ExprSet>(filters, exec_context.get());
     std::vector<VectorPtr> results_;
     milvus::exec::EvalCtx eval_ctx(exec_context.get(), offsets);
+    if (bitmap_input != nullptr) {
+        eval_ctx.set_bitmap_input(bitmap_input->clone());
+    }
     exprs_->Eval(0, 1, true, eval_ctx, results_);
 
     AssertInfo(results_.size() == 1 && results_[0] != nullptr,
