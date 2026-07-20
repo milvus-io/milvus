@@ -96,6 +96,9 @@ type Loader interface {
 	// the provided segment without putting it into SegmentManager.
 	LoadSegment(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
 
+	// LoadIndex loads or replaces index files on an already loaded sealed segment.
+	LoadIndex(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo, version int64) error
+
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
@@ -1202,6 +1205,13 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		}
 	}
 	return nil
+}
+
+func (loader *segmentLoader) LoadIndex(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo, version int64) error {
+	if segment == nil {
+		return merr.WrapErrSegmentNotFound(0, "segment is nil")
+	}
+	return segment.LoadIndex(ctx, loadInfo)
 }
 
 func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {

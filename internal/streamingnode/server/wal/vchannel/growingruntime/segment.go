@@ -32,6 +32,7 @@ type growingSegment struct {
 	partitionID            int64
 	segment                segcore.CSegment
 	flushed                bool
+	flushTimeTick          uint64
 	sealedAtDataVersion    qviews.DataVersion
 	hasSealedAtDataVersion bool
 	released               bool
@@ -61,10 +62,17 @@ func newGrowingSegmentFromVisible(ctx context.Context, collection *segcore.CColl
 		}
 	}
 	if visible.SealedAtDataVersion != nil {
-		segment.markFlushed()
+		segment.markFlushed(visible.Assignment.GetCheckpointTimeTick())
 		segment.markSealed(qviews.FromProtoDataVersion(visible.SealedAtDataVersion))
 	}
 	return segment, nil
+}
+
+func newGrowingSegmentFromFlushed(collection *segcore.CCollection, flushed walview.FlushedSegment) *growingSegment {
+	segment := newGrowingSegment(collection, flushed.SegmentID, flushed.PartitionID)
+	segment.markFlushed(flushed.FlushTimeTick)
+	segment.markSealed(flushed.SealedAtDataVersion)
+	return segment
 }
 
 func (s *growingSegment) id() int64 {
@@ -143,7 +151,7 @@ func (s *growingSegment) loadPersisted(ctx context.Context, visible walview.Visi
 	return csegment.Load(ctx)
 }
 
-func (s *growingSegment) ensureCSegment() error {
+func (s *growingSegment) ensureCSegment(timetick uint64) error {
 	if s == nil || s.collection == nil {
 		return nil
 	}
@@ -151,6 +159,12 @@ func (s *growingSegment) ensureCSegment() error {
 	defer s.mu.Unlock()
 	if s.released {
 		return errors.Errorf("growing segment %d released", s.segmentID)
+	}
+	if s.flushed {
+		if s.shouldSkipFlushedReplayLocked(timetick) {
+			return nil
+		}
+		return errors.Errorf("growing segment %d already flushed at timetick %d", s.segmentID, s.flushTimeTick)
 	}
 	if s.segment != nil {
 		return nil
@@ -177,7 +191,24 @@ func (s *growingSegment) applySnapshotInsert(ctx context.Context, raw message.Im
 }
 
 func (s *growingSegment) applyInsert(ctx context.Context, insert walview.SegmentInsertMessage) error {
-	if s == nil || s.collection == nil {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return errors.Errorf("growing segment %d released", s.segmentID)
+	}
+	if s.flushed {
+		if s.shouldSkipFlushedReplayLocked(insert.TimeTick) {
+			s.mu.Unlock()
+			return nil
+		}
+		s.mu.Unlock()
+		return errors.Errorf("growing segment %d already flushed at timetick %d", s.segmentID, s.flushTimeTick)
+	}
+	s.mu.Unlock()
+	if s.collection == nil {
 		return nil
 	}
 	body := insert.Message.MustBody()
@@ -214,7 +245,10 @@ func (s *growingSegment) applyInsert(ctx context.Context, insert walview.Segment
 		return errors.Errorf("growing segment %d released", s.segmentID)
 	}
 	if s.flushed {
-		return errors.Errorf("growing segment %d already flushed", s.segmentID)
+		if s.shouldSkipFlushedReplayLocked(insert.TimeTick) {
+			return nil
+		}
+		return errors.Errorf("growing segment %d already flushed at timetick %d", s.segmentID, s.flushTimeTick)
 	}
 	if s.segment == nil {
 		if err := s.ensureCSegmentLocked(); err != nil {
@@ -285,13 +319,16 @@ func (s *growingSegment) applyDelete(ctx context.Context, primaryKeys storage.Pr
 	return err
 }
 
-func (s *growingSegment) markFlushed() {
+func (s *growingSegment) markFlushed(timetick uint64) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.flushed = true
+	if timetick > s.flushTimeTick {
+		s.flushTimeTick = timetick
+	}
 }
 
 func (s *growingSegment) markSealed(sealedAt qviews.DataVersion) {
@@ -307,13 +344,23 @@ func (s *growingSegment) markSealed(sealedAt qviews.DataVersion) {
 	s.hasSealedAtDataVersion = true
 }
 
-func (s *growingSegment) shouldRelease(truncateTo qviews.DataVersion) bool {
+func (s *growingSegment) shouldReleaseAt(truncateTo qviews.DataVersion, appliedGrowingTimeTick uint64) bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.hasSealedAtDataVersion && truncateTo.GTE(s.sealedAtDataVersion)
+	return s.hasSealedAtDataVersion &&
+		truncateTo.GTE(s.sealedAtDataVersion) &&
+		s.safeToReleaseForReplayLocked(appliedGrowingTimeTick)
+}
+
+func (s *growingSegment) shouldSkipFlushedReplayLocked(timetick uint64) bool {
+	return s.flushed && s.flushTimeTick > 0 && timetick <= s.flushTimeTick
+}
+
+func (s *growingSegment) safeToReleaseForReplayLocked(appliedGrowingTimeTick uint64) bool {
+	return s.flushTimeTick == 0 || appliedGrowingTimeTick > s.flushTimeTick
 }
 
 func (s *growingSegment) release() {

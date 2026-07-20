@@ -59,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -598,7 +597,7 @@ func TestGetSegmentInfo(t *testing.T) {
 	})
 }
 
-func TestGetQueryViewSegmentLoadInfo(t *testing.T) {
+func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 	t.Run("packs complete segment load info and collection indexes", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
@@ -657,16 +656,12 @@ func TestGetQueryViewSegmentLoadInfo(t *testing.T) {
 			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 		}))
 
-		resp, err := svr.GetQueryViewSegmentLoadInfo(context.Background(), &querypb.GetQueryViewSegmentLoadInfoRequest{
-			CollectionID: collectionID,
-			SegmentIDs:   []int64{segmentID},
-		})
+		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID})
 
 		require.NoError(t, err)
-		require.NoError(t, merr.Error(resp.GetStatus()))
-		require.Len(t, resp.GetInfos(), 1)
-		require.Len(t, resp.GetIndexInfoList(), 1)
-		info := resp.GetInfos()[0]
+		require.Len(t, infos, 1)
+		require.Len(t, indexInfos, 1)
+		info := infos[0]
 		assert.Equal(t, segmentID, info.GetSegmentID())
 		assert.Equal(t, partitionID, info.GetPartitionID())
 		assert.Equal(t, collectionID, info.GetCollectionID())
@@ -705,13 +700,9 @@ func TestGetQueryViewSegmentLoadInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		resp, err := svr.GetQueryViewSegmentLoadInfo(context.Background(), &querypb.GetQueryViewSegmentLoadInfoRequest{
-			CollectionID: 100,
-			SegmentIDs:   []int64{404},
-		})
+		_, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), 100, []int64{404})
 
-		require.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrSegmentNotFound)
+		assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
 	})
 }
 

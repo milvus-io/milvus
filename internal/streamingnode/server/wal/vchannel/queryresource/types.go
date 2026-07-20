@@ -5,6 +5,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
 // QueryRuntimeModule is a concrete vchannel resource module managed by
@@ -19,4 +21,14 @@ type QueryRuntimeModule interface {
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.
 type QueryRuntimeModuleBuilder interface {
 	NewRuntime() (QueryRuntimeModule, error)
+}
+
+type LoadInfoProvider interface {
+	QueryViewLoadInfo(ctx context.Context, collectionID int64, version uint64) (QueryViewLoadInfo, error)
+}
+
+type QueryViewLoadInfo struct {
+	PartitionIDs []int64
+	LoadFields   []*messagespb.LoadFieldConfig
+	IndexInfos   []*indexpb.IndexInfo
 }

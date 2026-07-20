@@ -229,6 +229,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		cp,
 		param.LastTimeTickMessage,
 		recovery.WithQueryRuntimeModuleBuilders(queryRuntimeBuilders...),
+		recovery.WithQueryViewLoadInfoProvider(queryresource.NewFutureLoadInfoProvider(resource.Resource().MixCoordClient())),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "when recovering recovery storage")

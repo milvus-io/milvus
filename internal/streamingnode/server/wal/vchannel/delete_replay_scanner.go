@@ -118,8 +118,8 @@ func (h streamDeleteReplayHandler) Handle(event wal.TransformLogStreamEvent) err
 	}
 	select {
 	case h.scanner.ch <- wal.TransformLogEvent{
-		Entry:    event.Entry,
-		CaughtUp: event.CaughtUp,
+		Entry:  event.Entry,
+		SyncUp: event.SyncUp,
 	}:
 		return nil
 	case <-h.scanner.done:

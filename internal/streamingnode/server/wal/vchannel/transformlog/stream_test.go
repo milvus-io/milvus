@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 func TestTransformLogStreamManagerCatchupThenDispatch(t *testing.T) {
@@ -44,17 +45,21 @@ func TestTransformLogStreamManagerCatchupThenDispatch(t *testing.T) {
 
 	assert.Equal(t, uint64(10), recvStreamEvent(t, handler1.events).Entry.GetTimeTick())
 	assert.Equal(t, uint64(20), recvStreamEvent(t, handler1.events).Entry.GetTimeTick())
-	require.NotNil(t, recvStreamEvent(t, handler1.events).CaughtUp)
+	syncUp1 := recvStreamEvent(t, handler1.events)
+	require.NotNil(t, syncUp1.SyncUp)
+	assert.Equal(t, uint64(20), syncUp1.SyncUp.TimeTick)
 
 	assert.Equal(t, uint64(20), recvStreamEvent(t, handler2.events).Entry.GetTimeTick())
-	require.NotNil(t, recvStreamEvent(t, handler2.events).CaughtUp)
+	syncUp2 := recvStreamEvent(t, handler2.events)
+	require.NotNil(t, syncUp2.SyncUp)
+	assert.Equal(t, uint64(20), syncUp2.SyncUp.TimeTick)
 
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 30), appendOption{}).Appended)
 	assert.Equal(t, uint64(30), recvStreamEvent(t, handler1.events).Entry.GetTimeTick())
 	assert.Equal(t, uint64(30), recvStreamEvent(t, handler2.events).Entry.GetTimeTick())
 }
 
-func TestTransformLogStreamManagerBoundedReplayEmitsCaughtUpAndCloses(t *testing.T) {
+func TestTransformLogStreamManagerBoundedReplayEmitsSyncUpAndCloses(t *testing.T) {
 	ctx := context.Background()
 	transformLog := New(Config{VChannel: "v1"})
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
@@ -78,7 +83,9 @@ func TestTransformLogStreamManagerBoundedReplayEmitsCaughtUpAndCloses(t *testing
 
 	assert.Equal(t, uint64(10), recvStreamEvent(t, handler.events).Entry.GetTimeTick())
 	assert.Equal(t, uint64(20), recvStreamEvent(t, handler.events).Entry.GetTimeTick())
-	require.NotNil(t, recvStreamEvent(t, handler.events).CaughtUp)
+	syncUp := recvStreamEvent(t, handler.events)
+	require.NotNil(t, syncUp.SyncUp)
+	assert.Equal(t, uint64(20), syncUp.SyncUp.TimeTick)
 	require.Eventually(t, func() bool {
 		select {
 		case <-handler.closed:
@@ -89,6 +96,54 @@ func TestTransformLogStreamManagerBoundedReplayEmitsCaughtUpAndCloses(t *testing
 	}, time.Second, 10*time.Millisecond)
 	require.NoError(t, sub.Close())
 	requireNoStreamEvent(t, handler.events)
+}
+
+func TestTransformLogStreamManagerCatchupDrainsDeletesAppendedAfterSubscribe(t *testing.T) {
+	ctx := context.Background()
+	store := newBlockingReadStore()
+	require.NoError(t, store.WriteTransformLogChunk(ctx, "v1", &streamingpb.TransformLogChunk{
+		ChunkId: 0,
+		Entries: []*streamingpb.TransformLogEntry{
+			testTransformLogDeleteEntry(10, 1),
+		},
+	}))
+	transformLog := New(Config{
+		VChannel: "v1",
+		Store:    store,
+		Meta: &streamingpb.VChannelTransformLogMeta{
+			CheckpointTimeTick: 10,
+			NextChunkId:        1,
+		},
+	})
+	manager := NewStreamManager("pchannel")
+	manager.Register("v1", transformLog)
+
+	stream, err := manager.AcquireStream(ctx, "pchannel")
+	require.NoError(t, err)
+	defer stream.Close()
+
+	handler := newRecordingStreamHandler()
+	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
+		VChannel:           "v1",
+		StartAfterTimeTick: 0,
+		Handler:            handler,
+	})
+	require.NoError(t, err)
+	defer sub.Close()
+
+	store.waitReadStarted(t)
+	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 20), appendOption{}).Appended)
+	store.release()
+
+	first := recvStreamEvent(t, handler.events)
+	require.NotNil(t, first.Entry)
+	assert.Equal(t, uint64(10), first.Entry.GetTimeTick())
+	second := recvStreamEvent(t, handler.events)
+	require.NotNil(t, second.Entry)
+	assert.Equal(t, uint64(20), second.Entry.GetTimeTick())
+	syncUp := recvStreamEvent(t, handler.events)
+	require.NotNil(t, syncUp.SyncUp)
+	assert.Equal(t, uint64(20), syncUp.SyncUp.TimeTick)
 }
 
 func TestTransformLogStreamManagerRemovesRegisteredLog(t *testing.T) {
@@ -108,6 +163,46 @@ func TestTransformLogStreamManagerRemovesRegisteredLog(t *testing.T) {
 		Handler:            newRecordingStreamHandler(),
 	})
 	require.Error(t, err)
+}
+
+type blockingReadStore struct {
+	*memoryStore
+	readStarted chan struct{}
+	releaseRead chan struct{}
+	once        sync.Once
+}
+
+func newBlockingReadStore() *blockingReadStore {
+	return &blockingReadStore{
+		memoryStore: newMemoryStore(),
+		readStarted: make(chan struct{}),
+		releaseRead: make(chan struct{}),
+	}
+}
+
+func (s *blockingReadStore) ReadTransformLogChunk(ctx context.Context, vchannel string, chunkID uint64) (*streamingpb.TransformLogChunk, error) {
+	s.once.Do(func() {
+		close(s.readStarted)
+	})
+	select {
+	case <-s.releaseRead:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.memoryStore.ReadTransformLogChunk(ctx, vchannel, chunkID)
+}
+
+func (s *blockingReadStore) waitReadStarted(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting transform log chunk read")
+	}
+}
+
+func (s *blockingReadStore) release() {
+	close(s.releaseRead)
 }
 
 type recordingStreamHandler struct {

@@ -13,6 +13,8 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // shardViewQueryClient executes two-phase queries at the shard granularity.
@@ -117,6 +119,9 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 			})
 			if err != nil {
 				return err
+			}
+			if isEmptySuccessfulQueryResponse(resp) {
+				return nil
 			}
 			return req.Reducer.Add(shardID, resp)
 		},
@@ -305,6 +310,16 @@ func legacyMVCCForNode(mvcc *viewpb.QueryPlanMVCC, node qviews.WorkNode) uint64 
 		return mvcc.GetGrowingTimetick()
 	}
 	return mvcc.GetTransformingTimetick()
+}
+
+func isEmptySuccessfulQueryResponse(resp *viewpb.QueryOnViewResponse) bool {
+	result := resp.GetLegacyResults()
+	if result == nil || !merr.Ok(result.GetStatus()) {
+		return false
+	}
+	return result.GetAllRetrieveCount() == 0 &&
+		typeutil.GetSizeOfIDs(result.GetIds()) == 0 &&
+		len(result.GetFieldsData()) == 0
 }
 
 // workNodesFromPlan converts proto QueryPlanWorkNode list to domain WorkNode types.

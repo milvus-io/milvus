@@ -83,6 +83,7 @@ type TransformLog struct {
 	meta                  *streamingpb.VChannelTransformLogMeta
 	persistedDataTimeTick uint64
 	persistedMaterialized uint64
+	syncUpTimeTick        uint64
 	dirty                 bool
 	pendingDirtySnapshot  *streamingpb.VChannelTransformLogMeta
 	buffer                buffer
@@ -106,6 +107,7 @@ func New(config Config) *TransformLog {
 		meta:                  meta,
 		persistedDataTimeTick: meta.GetCheckpointTimeTick(),
 		persistedMaterialized: meta.GetMaterializedTimeTick(),
+		syncUpTimeTick:        meta.GetCheckpointTimeTick(),
 		notifyCh:              make(chan struct{}),
 		buffer:                newBuffer(config.MaxRows),
 		store:                 config.Store,
@@ -139,18 +141,18 @@ func (t *TransformLog) ObserveMessage(ctx context.Context, msg message.Immutable
 		}
 		result = t.append(msg, appendOption{})
 	case messageutil.TransformLogKindBarrier:
-		if msg.TimeTick() <= t.dataCheckpointTimeTick() && !t.HasPendingWork() {
+		if msg.TimeTick() <= t.latestTimeTick() && !t.HasPendingWork() {
 			return moduleapi.ObserveResult{}
 		}
-		result = t.appendBarrier(msg.TimeTick())
+		result = t.syncUp(msg.TimeTick())
 	}
 	if !result.Appended && !t.HasPendingWork() {
 		return moduleapi.ObserveResult{}
 	}
-	if result.Appended && (result.ShouldFlush || kind == messageutil.TransformLogKindBarrier) {
+	if result.Appended && result.ShouldFlush {
 		t.submitFlushTask(result.DataTimeTick)
-	} else if kind == messageutil.TransformLogKindBarrier {
-		t.submitFlushTask(msg.TimeTick())
+	} else if kind == messageutil.TransformLogKindBarrier && t.hasFlushWork() {
+		t.submitFlushTask(result.DataTimeTick)
 	}
 	if t.shouldMaterializeByMessage(msg) {
 		t.submitMaterializeTask(msg.TimeTick())
@@ -176,13 +178,13 @@ func (t *TransformLog) append(msg message.ImmutableMessage, opt appendOption) ap
 	}
 }
 
-func (t *TransformLog) appendBarrier(timeTick uint64) appendResult {
+func (t *TransformLog) syncUp(timeTick uint64) appendResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if timeTick <= t.meta.GetCheckpointTimeTick() || timeTick <= t.buffer.DataTimeTick() {
+	if timeTick <= t.syncUpTimeTick {
 		return appendResult{DataTimeTick: t.buffer.DataTimeTick()}
 	}
-	t.buffer.AppendEntry(transformBarrierEntry(timeTick))
+	t.syncUpTimeTick = timeTick
 	t.notifyScannersLocked()
 	t.notifyStreamLocked()
 	return appendResult{
@@ -237,8 +239,9 @@ func (t *TransformLog) materialize(ctx context.Context, opt materializeOption) (
 		t.mu.Unlock()
 		return materializeResult{}, nil
 	}
-	if targetTimeTick > t.meta.GetCheckpointTimeTick() {
-		targetTimeTick = t.meta.GetCheckpointTimeTick()
+	latestTimeTick := t.latestTimeTickLocked()
+	if targetTimeTick > latestTimeTick {
+		targetTimeTick = latestTimeTick
 	}
 	if targetTimeTick <= t.meta.GetMaterializedTimeTick() {
 		t.mu.Unlock()
@@ -312,7 +315,13 @@ func (t *TransformLog) SnapshotMeta() *streamingpb.VChannelTransformLogMeta {
 func (t *TransformLog) LatestTimeTick() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return max(t.meta.GetCheckpointTimeTick(), t.buffer.DataTimeTick())
+	return t.latestTimeTickLocked()
+}
+
+func (t *TransformLog) latestTimeTick() uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.latestTimeTickLocked()
 }
 
 func (t *TransformLog) dataCheckpointTimeTick() uint64 {
@@ -373,6 +382,12 @@ func (t *TransformLog) HasPendingWork() bool {
 	return !t.buffer.IsEmpty() ||
 		t.buffer.IsFlushing() ||
 		t.buffer.FlushTargetTimeTick() > t.persistedDataTimeTick
+}
+
+func (t *TransformLog) hasFlushWork() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.buffer.IsEmpty() || t.buffer.IsFlushing()
 }
 
 func (t *TransformLog) shouldMaterialize() bool {
@@ -438,16 +453,9 @@ func (t *TransformLog) commitFlushLocked(work flushWork) flushResult {
 		}
 		t.dirty = true
 		result.DurableTimeTick = toTimeTick
-		if !t.buffer.HasFlushWorkThrough(work.TargetTimeTick) {
-			result.DurableTimeTick = work.TargetTimeTick
-		}
 		if result.DurableTimeTick > t.meta.GetCheckpointTimeTick() {
 			t.meta.CheckpointTimeTick = result.DurableTimeTick
 		}
-	} else if work.TargetTimeTick > t.meta.GetCheckpointTimeTick() {
-		t.meta.CheckpointTimeTick = work.TargetTimeTick
-		t.dirty = true
-		result.DurableTimeTick = work.TargetTimeTick
 	}
 
 	nextDurableTimeTick := maxTimeTick(t.meta.GetCheckpointTimeTick(), result.DurableTimeTick)
@@ -548,6 +556,27 @@ func (t *TransformLog) nextEntryAfter(ctx context.Context, after uint64) (*strea
 		}
 		if err := t.loadChunk(ctx, chunkToLoad); err != nil {
 			return nil, false, err
+		}
+	}
+}
+
+func (t *TransformLog) nextEntryAfterWithFrontier(ctx context.Context, after uint64) (*streamingpb.TransformLogEntry, bool, uint64, error) {
+	for {
+		t.mu.Lock()
+		entry, chunkToLoad, err := t.nextEntryAfterLocked(after)
+		frontier := t.latestTimeTickLocked()
+		t.mu.Unlock()
+		if err != nil {
+			return nil, false, frontier, err
+		}
+		if entry != nil {
+			return entry, true, frontier, nil
+		}
+		if chunkToLoad == nil {
+			return nil, false, frontier, nil
+		}
+		if err := t.loadChunk(ctx, chunkToLoad); err != nil {
+			return nil, false, frontier, err
 		}
 	}
 }
@@ -678,7 +707,7 @@ func (t *TransformLog) notifyStreamLocked() {
 }
 
 func (t *TransformLog) latestTimeTickLocked() uint64 {
-	return maxTimeTick(t.meta.GetCheckpointTimeTick(), t.buffer.DataTimeTick())
+	return maxTimeTick(maxTimeTick(t.meta.GetCheckpointTimeTick(), t.buffer.DataTimeTick()), t.syncUpTimeTick)
 }
 
 func validateChunk(chunk *streamingpb.TransformLogChunk, expectedChunkID uint64, previousTimeTick uint64) error {

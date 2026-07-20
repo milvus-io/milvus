@@ -1636,6 +1636,53 @@ func (_c *MockSegment_Reopen_Call) RunAndReturn(run func(context.Context, *query
 	return _c
 }
 
+// LoadIndex provides a mock function with given fields: ctx, loadInfo
+func (_m *MockSegment) LoadIndex(ctx context.Context, loadInfo *querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, loadInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, loadInfo)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_LoadIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadIndex'
+type MockSegment_LoadIndex_Call struct {
+	*mock.Call
+}
+
+// LoadIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - loadInfo *querypb.SegmentLoadInfo
+func (_e *MockSegment_Expecter) LoadIndex(ctx interface{}, loadInfo interface{}) *MockSegment_LoadIndex_Call {
+	return &MockSegment_LoadIndex_Call{Call: _e.mock.On("LoadIndex", ctx, loadInfo)}
+}
+
+func (_c *MockSegment_LoadIndex_Call) Run(run func(ctx context.Context, loadInfo *querypb.SegmentLoadInfo)) *MockSegment_LoadIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.SegmentLoadInfo))
+	})
+	return _c
+}
+
+func (_c *MockSegment_LoadIndex_Call) Return(_a0 error) *MockSegment_LoadIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_LoadIndex_Call) RunAndReturn(run func(context.Context, *querypb.SegmentLoadInfo) error) *MockSegment_LoadIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ResetIndexesLazyLoad provides a mock function with given fields: lazyState
 func (_m *MockSegment) ResetIndexesLazyLoad(lazyState bool) {
 	_m.Called(lazyState)

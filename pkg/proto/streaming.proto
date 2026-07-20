@@ -650,7 +650,7 @@ message TransformResponse {
     oneof response {
         CreateTransformSubscriptionResponse create = 1;
         TransformMessageBatch message_batch = 2;
-        TransformSubscriptionCaughtUp caught_up = 3;
+        TransformSubscriptionSyncUp sync_up = 3;
         TransformSubscriptionError subscription_error = 4;
         CloseTransformSubscriptionResponse close_subscription = 5;
         CloseTransformStreamResponse close_stream = 6;
@@ -676,15 +676,13 @@ message CloseTransformSubscriptionResponse {
     string vchannel = 2;
 }
 
-// TransformSubscriptionCaughtUp is a one-time barrier for a subscription's
-// initial replay range. It is not idle timetick synchronization.
-message TransformSubscriptionCaughtUp {
+// TransformSubscriptionSyncUp is a transform frontier event. After receiving
+// SyncUp(time_tick), all TransformLog entries with time_tick <= SyncUp.time_tick
+// have been delivered to this subscription.
+message TransformSubscriptionSyncUp {
     int64 subscription_id = 1;
     string vchannel = 2;
-
-    // Echoes the requested exclusive start point. It is not a latest TimeTick
-    // watermark.
-    uint64 start_after_time_tick = 3;
+    uint64 time_tick = 3;
 }
 
 // TransformSubscriptionError carries a StreamingError for one subscription on a
@@ -717,8 +715,6 @@ message TransformDeleteEntry {
     repeated TransformDeleteBlock blocks = 1;
 }
 
-message TransformBarrierEntry {}
-
 // TransformLogEntry is the durable and subscription replay unit.
 message TransformLogEntry {
     // Source WAL message TimeTick, also the MVCC TimeTick.
@@ -726,7 +722,6 @@ message TransformLogEntry {
 
     oneof entry {
         TransformDeleteEntry delete = 2;
-        TransformBarrierEntry barrier = 3;
     }
 }
 

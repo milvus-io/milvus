@@ -4,32 +4,20 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func settingsFromWALView(view walview.VChannelWALView) *viewpb.QueryViewSettings {
-	if view.Settings != nil {
-		return view.Settings
+func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
+	if len(fields) == 0 {
+		return nil
 	}
-	return settingsFromAlterLoadConfig(view.LoadConfig.GetHeader())
-}
-
-func settingsFromAlterLoadConfig(header *messagespb.AlterLoadConfigMessageHeader) *viewpb.QueryViewSettings {
-	if header == nil {
-		return &viewpb.QueryViewSettings{}
+	ids := make([]int64, 0, len(fields))
+	for _, field := range fields {
+		ids = append(ids, field.GetFieldId())
 	}
-	fields := make([]int64, 0, len(header.GetLoadFields()))
-	for _, field := range header.GetLoadFields() {
-		fields = append(fields, field.GetFieldId())
-	}
-	return &viewpb.QueryViewSettings{
-		RequiredPartitions: append([]int64{}, header.GetPartitionIds()...),
-		RequiredFields:     fields,
-	}
+	return ids
 }
 
 // Builder converts WAL-side growing state into queryable csegment-backed
@@ -118,12 +106,7 @@ func (r *Runtime) Truncate(minDataVersion qviews.DataVersion) {
 		r.hasTruncateDataVersion = true
 	}
 	segmentsToRelease := make([]*growingSegment, 0)
-	for segmentID, segment := range r.segments {
-		if segment.shouldRelease(r.truncateDataVersion) {
-			segmentsToRelease = append(segmentsToRelease, segment)
-			r.removeSegmentMetadataLocked(segmentID)
-		}
-	}
+	r.collectSegmentsToReleaseLocked(&segmentsToRelease)
 	r.mu.Unlock()
 	for _, segment := range segmentsToRelease {
 		segment.release()
@@ -140,6 +123,19 @@ func (r *Runtime) removeSegmentMetadataLocked(segmentID int64) {
 		if id == segmentID {
 			r.segmentIDs = append(r.segmentIDs[:i], r.segmentIDs[i+1:]...)
 			return
+		}
+	}
+}
+
+func (r *Runtime) collectSegmentsToReleaseLocked(segmentsToRelease *[]*growingSegment) {
+	if !r.hasTruncateDataVersion {
+		return
+	}
+	appliedGrowingTimeTick := r.appliedGrowingTimeTick.Load()
+	for segmentID, segment := range r.segments {
+		if segment.shouldReleaseAt(r.truncateDataVersion, appliedGrowingTimeTick) {
+			*segmentsToRelease = append(*segmentsToRelease, segment)
+			r.removeSegmentMetadataLocked(segmentID)
 		}
 	}
 }

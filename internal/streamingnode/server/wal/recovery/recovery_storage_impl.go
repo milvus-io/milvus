@@ -77,6 +77,12 @@ func WithQueryRuntimeModuleBuilders(builders ...queryresource.QueryRuntimeModule
 	}
 }
 
+func WithQueryViewLoadInfoProvider(provider queryresource.LoadInfoProvider) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) {
+		r.queryViewLoadInfoProvider = provider
+	}
+}
+
 func initialCheckpointFromLastTimeTickMessage(lastTimeTickMessage message.ImmutableMessage) *utility.WALCheckpoint {
 	point := utility.WALConsumeCheckpoint{
 		MessageID: lastTimeTickMessage.LastConfirmedMessageID(),
@@ -142,6 +148,7 @@ type recoveryStorageImpl struct {
 	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
 	pendingSalvageCheckpoint   *utility.ReplicateCheckpoint
 	queryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
+	queryViewLoadInfoProvider  queryresource.LoadInfoProvider
 }
 
 func (r *recoveryStorageImpl) installCheckpointManager(checkpoint *WALCheckpoint) {
@@ -197,6 +204,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		TransformLogMaterialRows:   uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
 		TransformLogMaterialBytes:  uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
 		QueryRuntimeModuleBuilders: r.queryRuntimeModuleBuilders,
+		QueryViewLoadInfoProvider:  r.queryViewLoadInfoProvider,
 	})
 	if err != nil {
 		return err

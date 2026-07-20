@@ -60,6 +60,18 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 			return context.Canceled
 		}
 	}
+	for _, flushed := range view.SegmentSnapshot.FlushedSegments {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		segment := newGrowingSegmentFromFlushed(collection, flushed)
+		if !r.addSegment(segment) {
+			segment.release()
+			return context.Canceled
+		}
+	}
 	deleteEntries, err := drainDeleteReplay(ctx, view.DeleteReplay)
 	if err != nil {
 		return err
@@ -79,11 +91,18 @@ func newCollection(view walview.VChannelWALView) (*segcore.CCollection, error) {
 	if view.Schema == nil {
 		return nil, nil
 	}
-	return segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+	req := &segcore.CreateCCollectionRequest{
 		CollectionID:  view.CollectionID,
 		Schema:        view.Schema,
-		LoadFieldList: settingsFromWALView(view).GetRequiredFields(),
-	})
+		LoadFieldList: loadFieldIDs(view.LoadFields),
+	}
+	if len(view.IndexInfos) > 0 {
+		indexMeta := segcore.ComposeCollectionIndexMeta(context.TODO(), view.IndexInfos, view.Schema)
+		if len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
+			req.IndexMeta = indexMeta
+		}
+	}
+	return segcore.CreateCCollection(req)
 }
 
 func validateWALViewSnapshot(view walview.VChannelWALView) error {
@@ -119,7 +138,7 @@ func drainDeleteReplay(ctx context.Context, scanner wal.TransformLogScanner) ([]
 			if event.Entry != nil {
 				entries = append(entries, event.Entry)
 			}
-			if event.CaughtUp != nil {
+			if event.SyncUp != nil {
 				return entries, scanner.Close()
 			}
 		case <-scanner.Done():

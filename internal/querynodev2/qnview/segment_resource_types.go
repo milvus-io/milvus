@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -76,6 +77,7 @@ type TransformSegment interface {
 type PhysicalSegmentManager interface {
 	Acquire(req AcquirePhysicalSegments)
 	Release(req ReleaseSegments)
+	ApplyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot)
 }
 
 type PhysicalSegmentResetter interface {
@@ -97,15 +99,80 @@ type AcquirePhysicalSegments struct {
 
 type QueryViewLoadMetadataProvider interface {
 	DescribeCollection(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
-	GetQueryViewSegmentLoadInfo(ctx context.Context, collectionID int64, segmentIDs ...int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error)
+	GetQueryViewLoadInfo(ctx context.Context, collectionID int64, version QueryViewLoadInfoVersion) (QueryViewLoadInfo, error)
+}
+
+// QueryViewLoadInfoVersion is bound to QueryCoord's collection-level
+// load-config snapshot. Segment-level load-info changes are tracked by
+// SegmentLoadInfoRevision.
+type QueryViewLoadInfoVersion uint64
+
+func QueryViewLoadInfoVersionFromProto(version uint64) QueryViewLoadInfoVersion {
+	return QueryViewLoadInfoVersion(version)
+}
+
+type QueryViewLoadInfo struct {
+	CollectionID int64
+	Version      QueryViewLoadInfoVersion
+	PartitionIDs []int64
+	LoadFields   []*messagespb.LoadFieldConfig
+	IndexInfos   []*indexpb.IndexInfo
+}
+
+type SegmentLoadInfoRevision struct {
+	Revision uint64
+}
+
+func (r SegmentLoadInfoRevision) Empty() bool {
+	return r.Revision == 0
+}
+
+type SegmentLoadInfoSnapshot struct {
+	CollectionID int64
+	SegmentID    int64
+	Revision     SegmentLoadInfoRevision
+	LoadInfo     *querypb.SegmentLoadInfo
+	IndexInfos   []*indexpb.IndexInfo
+}
+
+type SegmentLoadInfoSubscription struct {
+	CollectionID int64
+	SegmentID    int64
+	Revision     SegmentLoadInfoRevision
+}
+
+type SegmentLoadInfoWatcher interface {
+	Subscribe(subscription SegmentLoadInfoSubscription)
+	Unsubscribe(collectionID int64, segmentID int64)
+	Close()
+}
+
+type SegmentLoadInfoSnapshotHandler func(context.Context, SegmentLoadInfoSnapshot)
+
+type SegmentLoadInfoWatcherFactory interface {
+	NewSegmentLoadInfoWatcher(ctx context.Context, handler SegmentLoadInfoSnapshotHandler) SegmentLoadInfoWatcher
+}
+
+type SegmentUpdateAction uint8
+
+const (
+	SegmentUpdateNone   SegmentUpdateAction = 0
+	SegmentUpdateReopen SegmentUpdateAction = 1 << iota
+	SegmentUpdateLoadIndex
+)
+
+func (a SegmentUpdateAction) Has(flag SegmentUpdateAction) bool {
+	return a&flag != 0
 }
 
 type PhysicalSegmentLoader interface {
 	Load(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
+	Update(ctx context.Context, segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
 }
 
 type SegmentLoadScheduler interface {
 	Submit(task SegmentLoadTask)
+	Update(task SegmentUpdateTask)
 	Cancel(segmentID int64)
 }
 
@@ -123,7 +190,19 @@ type SegmentLoadTask struct {
 	SegmentID                   int64
 	Collection                  CollectionRuntime
 	TransformStartAfterTimeTick uint64
+	Snapshot                    SegmentLoadInfoSnapshot
 
 	OnLoaded        func(segment TransformSegment)
 	OnUnrecoverable func(error)
+}
+
+type SegmentUpdateTask struct {
+	Context    context.Context
+	Segment    TransformSegment
+	Collection CollectionRuntime
+	Snapshot   SegmentLoadInfoSnapshot
+	Current    SegmentLoadInfoRevision
+
+	OnUpdated func(SegmentLoadInfoRevision)
+	OnFailed  func(error)
 }

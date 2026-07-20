@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 func TestQueryRuntimeAdvanceRejectsNonMonotonicWatermark(t *testing.T) {
@@ -90,7 +89,6 @@ func testWALView(collectionID int64, vchannel string, version qviews.DataVersion
 	return walview.VChannelWALView{
 		CollectionID: collectionID,
 		VChannel:     vchannel,
-		LoadConfig:   &streamingpb.VChannelLoadConfig{},
 		SegmentSnapshot: walview.VisibleSegmentSnapshot{
 			CollectionID: collectionID,
 			VChannel:     vchannel,

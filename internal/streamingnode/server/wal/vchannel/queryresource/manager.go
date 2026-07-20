@@ -15,20 +15,21 @@ import (
 type ViewBuilder func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool)
 
 type Config struct {
-	Builders   []QueryRuntimeModuleBuilder
-	Scheduler  Scheduler
-	Dispatcher *Dispatcher
+	Builders         []QueryRuntimeModuleBuilder
+	Scheduler        Scheduler
+	Dispatcher       *Dispatcher
+	LoadInfoProvider LoadInfoProvider
 }
 
 type Manager struct {
 	mu sync.Mutex
 
-	builders   []QueryRuntimeModuleBuilder
-	scheduler  Scheduler
-	dispatcher *Dispatcher
+	builders         []QueryRuntimeModuleBuilder
+	scheduler        Scheduler
+	dispatcher       *Dispatcher
+	loadInfoProvider LoadInfoProvider
 
 	refs    map[qviews.QueryViewKey]struct{}
-	epoch   map[qviews.QueryViewKey]uint64
 	runtime *QueryRuntime
 	task    BuildTask
 	err     error
@@ -38,19 +39,19 @@ type Manager struct {
 
 func NewManager(config Config) *Manager {
 	return &Manager{
-		builders:   defaultQueryRuntimeModuleBuilders(config.Builders),
-		scheduler:  config.Scheduler,
-		dispatcher: config.Dispatcher,
-		refs:       make(map[qviews.QueryViewKey]struct{}),
-		epoch:      make(map[qviews.QueryViewKey]uint64),
-		changed:    make(chan struct{}),
+		builders:         defaultQueryRuntimeModuleBuilders(config.Builders),
+		scheduler:        config.Scheduler,
+		dispatcher:       config.Dispatcher,
+		loadInfoProvider: config.LoadInfoProvider,
+		refs:             make(map[qviews.QueryViewKey]struct{}),
+		changed:          make(chan struct{}),
 	}
 }
 
 // AcquireLocked registers a query view reference and starts runtime building
 // when needed. The caller should hold the owning VChannel state lock so build
 // observes a consistent DataView snapshot.
-func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) uint64 {
+func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	if req.Meta == nil || req.Meta.GetVersion() == nil || req.Meta.GetVersion().GetDataVersion() == nil {
 		panic("query view meta version is nil")
 	}
@@ -62,13 +63,11 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) u
 	if _, ok := m.refs[req.Key]; !ok {
 		m.assertAcquireMonotonic(req.Key.QueryViewVersion.DataVersion)
 		m.refs[req.Key] = struct{}{}
-		m.epoch[req.Key]++
 		if m.runtime == nil && m.task == nil {
 			m.startBuildLocked(req.Meta, build)
 		}
 		m.notifyChangedLocked()
 	}
-	return m.epoch[req.Key]
 }
 
 func (m *Manager) Release(req snview.ReleaseResource) {
@@ -126,16 +125,15 @@ func (m *Manager) Close() {
 	m.notifyChangedLocked()
 	runtime, task := m.takeRuntimeLocked()
 	m.refs = make(map[qviews.QueryViewKey]struct{})
-	m.epoch = make(map[qviews.QueryViewKey]uint64)
 	m.mu.Unlock()
 
 	cancelTask(task)
 	closeRuntime(runtime)
 }
 
-func (m *Manager) WaitReady(key qviews.QueryViewKey, epoch uint64, onReady func()) {
+func (m *Manager) WaitReady(key qviews.QueryViewKey, onReady func()) {
 	for {
-		runtime, task, changed, ok := m.runtimeForRef(key, epoch)
+		runtime, task, changed, ok := m.runtimeForRef(key)
 		if !ok {
 			return
 		}
@@ -154,12 +152,12 @@ func (m *Manager) WaitReady(key qviews.QueryViewKey, epoch uint64, onReady func(
 			}
 			continue
 		}
-		advance, ok := m.oldestDataVersionForRef(key, epoch)
+		advance, ok := m.oldestDataVersionForRef(key)
 		if !ok {
 			return
 		}
 		runtime.Advance(advance)
-		if onReady != nil && m.hasRef(key, epoch) {
+		if onReady != nil && m.hasRef(key) {
 			onReady()
 		}
 		return
@@ -199,7 +197,11 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		panic("failed to build vchannel query resource view")
 	}
 	task := newResourceBuildTask(context.Background(), func(ctx context.Context) (*QueryRuntime, error) {
-		if err := runtime.Initialize(ctx, view); err != nil {
+		resolved, err := m.resolveLoadInfo(ctx, view)
+		if err != nil {
+			return runtime, err
+		}
+		if err := runtime.Initialize(ctx, resolved); err != nil {
 			return runtime, err
 		}
 		return runtime, nil
@@ -209,6 +211,20 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 	m.err = nil
 	m.scheduler.Submit(task)
 	go m.finishBuild(task)
+}
+
+func (m *Manager) resolveLoadInfo(ctx context.Context, view walview.VChannelWALView) (walview.VChannelWALView, error) {
+	if view.LoadInfoVersion == 0 || m.loadInfoProvider == nil {
+		return view, nil
+	}
+	loadInfo, err := m.loadInfoProvider.QueryViewLoadInfo(ctx, view.CollectionID, view.LoadInfoVersion)
+	if err != nil {
+		return view, err
+	}
+	view.PartitionIDs = loadInfo.PartitionIDs
+	view.LoadFields = loadInfo.LoadFields
+	view.IndexInfos = loadInfo.IndexInfos
+	return view, nil
 }
 
 func (m *Manager) newModules() []QueryRuntimeModule {
@@ -259,12 +275,9 @@ func (m *Manager) finishBuild(task BuildTask) {
 	closeRuntime(runtime)
 }
 
-func (m *Manager) runtimeForRef(key qviews.QueryViewKey, epoch uint64) (*QueryRuntime, BuildTask, <-chan struct{}, bool) {
+func (m *Manager) runtimeForRef(key qviews.QueryViewKey) (*QueryRuntime, BuildTask, <-chan struct{}, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.epoch[key] != epoch {
-		return nil, nil, nil, false
-	}
 	if _, ok := m.refs[key]; !ok {
 		return nil, nil, nil, false
 	}
@@ -277,24 +290,18 @@ func (m *Manager) runtimeForRef(key qviews.QueryViewKey, epoch uint64) (*QueryRu
 	return m.runtime, m.task, nil, true
 }
 
-func (m *Manager) oldestDataVersionForRef(key qviews.QueryViewKey, epoch uint64) (qviews.DataVersion, bool) {
+func (m *Manager) oldestDataVersionForRef(key qviews.QueryViewKey) (qviews.DataVersion, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.epoch[key] != epoch {
-		return qviews.DataVersion{}, false
-	}
 	if _, ok := m.refs[key]; !ok {
 		return qviews.DataVersion{}, false
 	}
 	return minQueryViewDataVersion(m.refs)
 }
 
-func (m *Manager) hasRef(key qviews.QueryViewKey, epoch uint64) bool {
+func (m *Manager) hasRef(key qviews.QueryViewKey) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.epoch[key] != epoch {
-		return false
-	}
 	_, ok := m.refs[key]
 	return ok
 }

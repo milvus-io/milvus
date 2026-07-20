@@ -234,8 +234,8 @@ func (s *EventStream) recvLoop() {
 			s.handleCreate(resp.Create)
 		case *streamingpb.TransformResponse_MessageBatch:
 			s.handleMessageBatch(resp.MessageBatch)
-		case *streamingpb.TransformResponse_CaughtUp:
-			s.handleCaughtUp(resp.CaughtUp)
+		case *streamingpb.TransformResponse_SyncUp:
+			s.handleSyncUp(resp.SyncUp)
 		case *streamingpb.TransformResponse_SubscriptionError:
 			s.handleSubscriptionError(resp.SubscriptionError)
 		case *streamingpb.TransformResponse_CloseSubscription:
@@ -289,7 +289,7 @@ func (s *EventStream) handleMessageBatch(resp *streamingpb.TransformMessageBatch
 	}
 }
 
-func (s *EventStream) handleCaughtUp(resp *streamingpb.TransformSubscriptionCaughtUp) {
+func (s *EventStream) handleSyncUp(resp *streamingpb.TransformSubscriptionSyncUp) {
 	if resp == nil {
 		return
 	}
@@ -300,16 +300,16 @@ func (s *EventStream) handleCaughtUp(resp *streamingpb.TransformSubscriptionCaug
 	if err := sub.handle(wal.TransformLogStreamEvent{
 		SubscriptionID: resp.GetSubscriptionId(),
 		VChannel:       resp.GetVchannel(),
-		CaughtUp:       &wal.TransformLogCaughtUp{StartAfterTimeTick: resp.GetStartAfterTimeTick()},
+		SyncUp:         &wal.TransformLogSyncUp{TimeTick: resp.GetTimeTick()},
 	}); err != nil {
 		s.removeSubscription(resp.GetSubscriptionId())
 		sub.finish(err)
 	}
-	mlog.Debug(s.ctx, "handler transform log event stream received caught-up",
+	mlog.Debug(s.ctx, "handler transform log event stream received sync-up",
 		mlog.FieldPChannel(s.pchannel),
 		mlog.FieldVChannel(resp.GetVchannel()),
 		mlog.Int64("subscriptionID", resp.GetSubscriptionId()),
-		mlog.Uint64("startAfterTimeTick", resp.GetStartAfterTimeTick()),
+		mlog.Uint64("timeTick", resp.GetTimeTick()),
 	)
 }
 

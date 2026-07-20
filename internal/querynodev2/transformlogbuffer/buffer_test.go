@@ -275,7 +275,7 @@ func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *t
 
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 60}})
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 90}})
-	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
 	require.NoError(t, guard2.WaitTransformVisible(context.Background(), 90))
 
 	segment := &fakeSegment{id: 10, vchannel: "v1", startAfter: 80}
@@ -299,7 +299,7 @@ func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *t
 	}
 }
 
-func TestBufferRegistrationKeepsApplyingLiveEntriesAfterCaughtUp(t *testing.T) {
+func TestBufferRegistrationKeepsApplyingLiveEntriesAfterSyncUp(t *testing.T) {
 	streams := newFakeStreamManager()
 	buffer := New(streams)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
@@ -314,7 +314,7 @@ func TestBufferRegistrationKeepsApplyingLiveEntriesAfterCaughtUp(t *testing.T) {
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
-	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
 	require.NoError(t, reg.WaitCatchup(context.Background()))
 
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 60}})
@@ -408,7 +408,7 @@ func TestBufferRegisterSegmentDrainsEntriesArrivingDuringCatchupBeforeLiveAttach
 	})
 	stream.emit(wal.TransformLogStreamEvent{
 		VChannel: "p_1v0",
-		CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50},
+		SyncUp:   &wal.TransformLogSyncUp{TimeTick: 50},
 	})
 
 	close(applyBlock)
@@ -455,7 +455,7 @@ func TestGuardWaitTransformVisibleUsesVChannelFrontier(t *testing.T) {
 	case <-time.After(20 * time.Millisecond):
 	}
 
-	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 70}})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", SyncUp: &wal.TransformLogSyncUp{TimeTick: 70}})
 	require.NoError(t, <-waitDone)
 }
 
@@ -480,7 +480,7 @@ func TestGuardWaitTransformVisibleWaitsForLiveApply(t *testing.T) {
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
-	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: 50}})
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
 	require.NoError(t, reg.WaitCatchup(context.Background()))
 
 	waitDone := make(chan error, 1)
@@ -528,7 +528,7 @@ func TestGuardWaitTransformVisibleReturnsScannerError(t *testing.T) {
 	require.ErrorContains(t, <-waitDone, "transform log truncated")
 }
 
-func TestBufferRegisterSegmentFailsWhenScannerFailsBeforeCaughtUp(t *testing.T) {
+func TestBufferRegisterSegmentFailsWhenScannerFailsBeforeSyncUp(t *testing.T) {
 	streams := newFakeStreamManager()
 	buffer := New(streams)
 	_, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))

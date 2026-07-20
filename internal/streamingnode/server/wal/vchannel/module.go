@@ -51,6 +51,7 @@ type ModuleConfig struct {
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 	QueryResourceScheduler     queryresource.Scheduler
 	QueryRuntimeDispatcher     *queryresource.Dispatcher
+	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
 }
 
 // VChannelRecoveryModule owns all recovery_storage state for one vchannel.
@@ -100,9 +101,10 @@ func NewModule(config ModuleConfig) (*VChannelRecoveryModule, error) {
 		queryTransformLogStream:   config.TransformLogStream,
 	}
 	module.queryResources = queryresource.NewManager(queryresource.Config{
-		Builders:   config.QueryRuntimeModuleBuilders,
-		Scheduler:  config.QueryResourceScheduler,
-		Dispatcher: config.QueryRuntimeDispatcher,
+		Builders:         config.QueryRuntimeModuleBuilders,
+		Scheduler:        config.QueryResourceScheduler,
+		Dispatcher:       config.QueryRuntimeDispatcher,
+		LoadInfoProvider: config.QueryViewLoadInfoProvider,
 	})
 	module.onSegmentSealed = func(event walview.SegmentSealedEvent) {
 		module.observeQueryResourceEvent(context.Background(), walview.VChannelResourceEvent{SegmentSealed: &event})
@@ -551,13 +553,17 @@ func (m *VChannelRecoveryModule) visibleSnapshot(baseGrowingTimeTick uint64, dat
 	}
 	for _, view := range m.segments {
 		visible, ok := view.VisibleSnapshot(m.vchannel, dataVersion)
-		if !ok {
+		if ok {
+			if snapshot.CollectionID == 0 {
+				snapshot.CollectionID = visible.Assignment.GetCollectionId()
+			}
+			snapshot.Segments = append(snapshot.Segments, visible)
 			continue
 		}
-		if snapshot.CollectionID == 0 {
-			snapshot.CollectionID = visible.Assignment.GetCollectionId()
+		flushed, ok := view.FlushedSegmentSnapshot(m.vchannel, dataVersion)
+		if ok {
+			snapshot.FlushedSegments = append(snapshot.FlushedSegments, flushed)
 		}
-		snapshot.Segments = append(snapshot.Segments, visible)
 	}
 	return snapshot
 }

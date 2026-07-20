@@ -28,13 +28,15 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 			Properties:      []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
 			Schema:          &schemapb.CollectionSchema{Name: "coll"},
 		},
+		partitionIDs: []int64{10, 20},
+		loadFields:   []int64{100, 101},
 	}
 	manager := newQueryViewCollectionRuntimeManager(provider, collection)
 
 	guard, err := manager.Acquire(context.Background(), qviews.NewQueryViewAtQueryNode(
 		&viewpb.QueryViewMeta{
-			CollectionId: 1,
-			Settings:     &viewpb.QueryViewSettings{RequiredFields: []int64{100, 101}},
+			CollectionId:    1,
+			LoadInfoVersion: 7,
 		},
 		&viewpb.QueryViewOfQueryNode{
 			Partitions: []*viewpb.QueryViewOfPartition{
@@ -63,6 +65,38 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 	guard.Release()
 	assert.Equal(t, int64(1), collection.unrefCollection)
 	assert.Equal(t, uint32(1), collection.unrefCount)
+}
+
+func TestQueryViewCollectionRuntimeManager_AcquireUsesLoadInfoVersion(t *testing.T) {
+	collection := &fakeQVCollectionManager{}
+	provider := &fakeQVLoadMetadataProvider{
+		collection: &milvuspb.DescribeCollectionResponse{
+			CollectionID:    1,
+			DbName:          "db",
+			UpdateTimestamp: 9,
+			Schema:          &schemapb.CollectionSchema{Name: "coll"},
+		},
+		partitionIDs: []int64{10, 20},
+		loadFields:   []int64{100, 101, 102},
+	}
+	manager := newQueryViewCollectionRuntimeManager(provider, collection)
+
+	guard, err := manager.Acquire(context.Background(), qviews.NewQueryViewAtQueryNode(
+		&viewpb.QueryViewMeta{
+			CollectionId:    1,
+			LoadInfoVersion: 7,
+		},
+		&viewpb.QueryViewOfQueryNode{
+			Partitions: []*viewpb.QueryViewOfPartition{
+				{PartitionId: 10, SegmentIds: []int64{1}},
+			},
+		},
+	).(*qviews.QueryViewAtQueryNode))
+	require.NoError(t, err)
+	require.NotNil(t, guard)
+
+	assert.Equal(t, []int64{10, 20}, collection.putLoadMeta.GetPartitionIDs())
+	assert.Equal(t, []int64{100, 101, 102}, collection.putLoadMeta.GetLoadFields())
 }
 
 func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaRefsAndUnrefsCollection(t *testing.T) {

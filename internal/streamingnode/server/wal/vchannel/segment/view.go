@@ -437,6 +437,23 @@ func (info *SegmentView) VisibleSnapshot(vchannel string, dataVersion qviews.Dat
 	return visible, true
 }
 
+func (info *SegmentView) FlushedSegmentSnapshot(vchannel string, dataVersion qviews.DataVersion) (walview.FlushedSegment, bool) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetVchannel() != vchannel ||
+		info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED ||
+		info.meta.GetSealedAtDataVersion() == nil ||
+		qviews.FromProtoDataVersion(info.meta.GetSealedAtDataVersion()).GT(dataVersion) {
+		return walview.FlushedSegment{}, false
+	}
+	return walview.FlushedSegment{
+		SegmentID:           info.meta.GetSegmentId(),
+		PartitionID:         info.meta.GetPartitionId(),
+		FlushTimeTick:       info.meta.GetCheckpointTimeTick(),
+		SealedAtDataVersion: qviews.FromProtoDataVersion(info.meta.GetSealedAtDataVersion()),
+	}, true
+}
+
 func (info *SegmentView) visibleAtDataVersionLocked(dataVersion qviews.DataVersion) bool {
 	switch info.meta.GetState() {
 	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
