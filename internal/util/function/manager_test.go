@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,7 +74,7 @@ func TestEmbeddingFunctionSignatureIgnoresSchemaVersionAndUnrelatedSchema(t *tes
 	require.Equal(t, baseSignature, signature)
 }
 
-func TestEmbeddingFunctionSignatureChangesWhenRunnerInputsChange(t *testing.T) {
+func TestEmbeddingFunctionSignatureOnlyChecksFunctionSchema(t *testing.T) {
 	base := newBM25SignatureTestSchema()
 	baseSignature, err := EmbeddingFunctionSignature(base)
 	require.NoError(t, err)
@@ -86,13 +87,48 @@ func TestEmbeddingFunctionSignatureChangesWhenRunnerInputsChange(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, baseSignature, signature)
 
-	analyzerParamChanged := cloneCollectionSchema(base)
-	analyzerParamChanged.Fields[1].TypeParams = []*commonpb.KeyValuePair{
+	fieldNonFunctionMetadataChanged := cloneCollectionSchema(base)
+	fieldNonFunctionMetadataChanged.Fields[1].TypeParams = []*commonpb.KeyValuePair{
 		{Key: analyzerParams, Value: `{"tokenizer": "standard"}`},
+		{Key: "mmap.enabled", Value: "true"},
 	}
-	signature, err = EmbeddingFunctionSignature(analyzerParamChanged)
+	fieldNonFunctionMetadataChanged.Fields[1].IsPartitionKey = true
+	fieldNonFunctionMetadataChanged.Fields[1].IsClusteringKey = true
+	signature, err = EmbeddingFunctionSignature(fieldNonFunctionMetadataChanged)
+	require.NoError(t, err)
+	require.Equal(t, baseSignature, signature)
+
+	inputFieldTypeChanged := cloneCollectionSchema(base)
+	inputFieldTypeChanged.Fields[1].DataType = schemapb.DataType_Int64
+	signature, err = EmbeddingFunctionSignature(inputFieldTypeChanged)
 	require.NoError(t, err)
 	require.NotEqual(t, baseSignature, signature)
+}
+
+func TestFunctionRunnerManagerSameVersionOnlyChecksFunctionSchema(t *testing.T) {
+	manager, factory := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	base := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", base))
+	requireRunnerByOutput(t, manager, 1, "v1", 102)
+
+	fieldNonFunctionMetadataChanged := cloneCollectionSchema(base)
+	fieldNonFunctionMetadataChanged.Fields[1].TypeParams = []*commonpb.KeyValuePair{
+		{Key: analyzerParams, Value: `{"tokenizer": "standard"}`},
+		{Key: "mmap.enabled", Value: "true"},
+	}
+	fieldNonFunctionMetadataChanged.Fields[1].IsPartitionKey = true
+	fieldNonFunctionMetadataChanged.Fields[1].IsClusteringKey = true
+	require.NoError(t, manager.Update(1, "v1", fieldNonFunctionMetadataChanged))
+	require.Equal(t, int32(1), factory.buildCount.Load())
+
+	functionParamChanged := cloneCollectionSchema(base)
+	functionParamChanged.Functions[0].Params = []*commonpb.KeyValuePair{
+		{Key: "rebuild", Value: "true"},
+	}
+	err := manager.Update(1, "v1", functionParamChanged)
+	require.ErrorContains(t, err, "function runner metadata does not match schema version 1")
 }
 
 func TestEmbeddingOutputFieldIDsReturnsAllFunctionOutputs(t *testing.T) {
@@ -129,6 +165,13 @@ func TestHasEmbeddingFunctionsOnlyMatchesRunnerBackedFunctions(t *testing.T) {
 	require.False(t, HasEmbeddingFunctions(schema))
 }
 
+func TestWrapFunctionRunnerLifecycleError(t *testing.T) {
+	require.ErrorIs(t, wrapFunctionRunnerLifecycleError(1, errFunctionRunnerCollectionEntryRemoved), merr.ErrServiceUnavailable)
+	require.ErrorIs(t, wrapFunctionRunnerLifecycleError(1, errFunctionRunnerEntryRemoved), merr.ErrServiceUnavailable)
+	expectedErr := merr.WrapErrFunctionFailedMsg("mocked")
+	require.ErrorIs(t, wrapFunctionRunnerLifecycleError(1, expectedErr), expectedErr)
+}
+
 func TestFunctionRunnerManagerAllocRequiresSchema(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
@@ -138,7 +181,35 @@ func TestFunctionRunnerManagerAllocRequiresSchema(t *testing.T) {
 	requireFunctionRunnerEntryRemoved(t, manager, 1)
 }
 
-func TestFunctionRunnerManagerAllocSkipsSchemaWithoutEmbeddingFunctions(t *testing.T) {
+func TestFunctionRunnerManagerRejectsInvalidSchemaWithoutChangingState(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	invalidSchema := newBM25SignatureTestSchema()
+	invalidSchema.Functions[0].OutputFieldIds = []int64{999}
+	err := manager.Alloc(1, "v1", invalidSchema)
+	require.ErrorContains(t, err, "output field 999 not found")
+	requireFunctionRunnerEntryRemoved(t, manager, 1)
+
+	base := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", base))
+	baseRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
+
+	invalidUpdate := cloneCollectionSchema(base)
+	invalidUpdate.Version = 2
+	invalidUpdate.Functions[0].OutputFieldIds = []int64{999}
+	err = manager.Update(1, "v1", invalidUpdate)
+	require.ErrorContains(t, err, "output field 999 not found")
+
+	keyVersions, versionRunners, runnerCount := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"v1": base.GetVersion()}, keyVersions)
+	require.Contains(t, versionRunners, base.GetVersion())
+	require.NotContains(t, versionRunners, invalidUpdate.GetVersion())
+	require.Equal(t, 1, runnerCount)
+	require.Same(t, baseRunner, requireRunnerByOutput(t, manager, 1, "v1", 102))
+}
+
+func TestFunctionRunnerManagerAllocTracksSchemaWithoutEmbeddingFunctions(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
@@ -146,10 +217,13 @@ func TestFunctionRunnerManagerAllocSkipsSchemaWithoutEmbeddingFunctions(t *testi
 	schema.Functions = nil
 
 	require.NoError(t, manager.Alloc(1, "v1", schema))
-	requireFunctionRunnerEntryRemoved(t, manager, 1)
+	keyVersions, versionRunners, runnerCount := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"v1": schema.GetVersion()}, keyVersions)
+	require.Contains(t, versionRunners, schema.GetVersion())
+	require.Zero(t, runnerCount)
 }
 
-func TestFunctionRunnerManagerAllocSkipsSchemaWithoutRunnerBackedFunctions(t *testing.T) {
+func TestFunctionRunnerManagerAllocTracksSchemaWithoutRunnerBackedFunctions(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
@@ -165,17 +239,22 @@ func TestFunctionRunnerManagerAllocSkipsSchemaWithoutRunnerBackedFunctions(t *te
 	}
 
 	require.NoError(t, manager.Alloc(1, "v1", schema))
-	requireFunctionRunnerEntryRemoved(t, manager, 1)
+	keyVersions, versionRunners, runnerCount := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"v1": schema.GetVersion()}, keyVersions)
+	require.Contains(t, versionRunners, schema.GetVersion())
+	require.Zero(t, runnerCount)
 }
 
-func TestFunctionRunnerManagerUpdateCreatesEntryWhenEmbeddingFunctionAppears(t *testing.T) {
+func TestFunctionRunnerManagerUpdateBuildsRunnerWhenEmbeddingFunctionAppears(t *testing.T) {
 	manager, factory := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
 
 	schemaWithoutFunctions := cloneCollectionSchema(newBM25SignatureTestSchema())
 	schemaWithoutFunctions.Functions = nil
 	require.NoError(t, manager.Alloc(1, "v1", schemaWithoutFunctions))
-	requireFunctionRunnerEntryRemoved(t, manager, 1)
+	keyVersions, _, runnerCount := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"v1": schemaWithoutFunctions.GetVersion()}, keyVersions)
+	require.Zero(t, runnerCount)
 
 	schemaWithFunction := newBM25SignatureTestSchema()
 	schemaWithFunction.Version = 2
@@ -185,25 +264,28 @@ func TestFunctionRunnerManagerUpdateCreatesEntryWhenEmbeddingFunctionAppears(t *
 	require.Equal(t, map[string]int32{"v1": 2}, keyVersions)
 	require.Len(t, versionRunners, 1)
 	require.Equal(t, 1, runnerCount)
-	requireRunnerByOutput(t, manager, 1, schemaWithFunction.GetVersion(), 102)
+	requireRunnerByOutput(t, manager, 1, "v1", 102)
 	require.Equal(t, int32(1), factory.buildCount.Load())
 }
 
-func TestFunctionRunnerManagerUpdateReleasesKeyWhenEmbeddingFunctionsDisappear(t *testing.T) {
+func TestFunctionRunnerManagerUpdateRetainsSchemaWhenEmbeddingFunctionsDisappear(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
 
 	schema := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "v1", schema))
-	runner := requireRunnerByOutput(t, manager, 1, schema.GetVersion(), 102)
+	runner := requireRunnerByOutput(t, manager, 1, "v1", 102)
 
 	schemaWithoutFunctions := cloneCollectionSchema(schema)
 	schemaWithoutFunctions.Version = 2
 	schemaWithoutFunctions.Functions = nil
 	require.NoError(t, manager.Update(1, "v1", schemaWithoutFunctions))
 
-	requireFunctionRunnerEntryRemoved(t, manager, 1)
-	require.True(t, runner.isClosed())
+	require.Eventually(t, runner.isClosed, time.Second, time.Millisecond)
+	keyVersions, versionRunners, runnerCount := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"v1": schemaWithoutFunctions.GetVersion()}, keyVersions)
+	require.Contains(t, versionRunners, schemaWithoutFunctions.GetVersion())
+	require.Zero(t, runnerCount)
 }
 
 func TestFunctionRunnerManagerAllocTracksKeysBySchemaVersion(t *testing.T) {
@@ -219,7 +301,7 @@ func TestFunctionRunnerManagerAllocTracksKeysBySchemaVersion(t *testing.T) {
 	require.Len(t, versionRunners, 1)
 	require.Equal(t, 1, runnerCount)
 
-	baseRunner := requireRunnerByOutput(t, manager, 1, schema.GetVersion(), 102)
+	baseRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
 	require.Equal(t, int32(1), factory.buildCount.Load())
 
 	manager.Release(1, "v1")
@@ -245,11 +327,11 @@ func TestFunctionRunnerManagerReleaseWaitsForAllKeys(t *testing.T) {
 	delegatorVersion := functionRunnerKeyVersionSnapshot(t, manager, 1, "DELEGATOR-v1")
 	require.Equal(t, int32(1), delegatorVersion)
 
-	baseRunner := requireRunnerByOutput(t, manager, 1, schema.GetVersion(), 102)
+	baseRunner := requireRunnerByOutput(t, manager, 1, "WAL-v1", 102)
 	manager.Release(1, "WAL-v1")
 	require.False(t, baseRunner.isClosed())
 
-	ok, err := manager.RunWithAnalyzer(context.Background(), 1, schema.GetVersion(), 101, func(Analyzer) error {
+	ok, err := manager.RunWithAnalyzer(context.Background(), 1, "DELEGATOR-v1", 101, func(Analyzer) error {
 		return nil
 	})
 	require.NoError(t, err)
@@ -268,10 +350,10 @@ func TestFunctionRunnerManagerKeepsOldVersionUntilAllKeysAdvance(t *testing.T) {
 	changedOutput := newSchemaWithChangedOutput(base)
 	require.NoError(t, manager.Alloc(1, "WAL-v1", base))
 	require.NoError(t, manager.Alloc(1, "DELEGATOR-v1", base))
-	baseRunner := requireRunnerByOutput(t, manager, 1, base.GetVersion(), 102)
+	baseRunner := requireRunnerByOutput(t, manager, 1, "DELEGATOR-v1", 102)
 
 	require.NoError(t, manager.Update(1, "WAL-v1", changedOutput))
-	changedRunner := requireRunnerByOutput(t, manager, 1, changedOutput.GetVersion(), 104)
+	changedRunner := requireRunnerByOutput(t, manager, 1, "WAL-v1", 104)
 	require.False(t, baseRunner.isClosed())
 	require.False(t, changedRunner.isClosed())
 
@@ -281,7 +363,7 @@ func TestFunctionRunnerManagerKeepsOldVersionUntilAllKeysAdvance(t *testing.T) {
 	require.Equal(t, 2, runnerCount)
 
 	require.NoError(t, manager.Update(1, "DELEGATOR-v1", changedOutput))
-	require.True(t, baseRunner.isClosed())
+	require.Eventually(t, baseRunner.isClosed, time.Second, time.Millisecond)
 	require.False(t, changedRunner.isClosed())
 
 	_, versionRunners, runnerCount = functionRunnerEntrySnapshot(t, manager, 1)
@@ -302,14 +384,14 @@ func TestFunctionRunnerManagerUpdateReusesSameSignatureAcrossSchemaVersions(t *t
 
 	base := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "v1", base))
-	baseRunner := requireRunnerByOutput(t, manager, 1, base.GetVersion(), 102)
+	baseRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
 
 	schemaVersionChanged := cloneCollectionSchema(base)
 	schemaVersionChanged.Version = 2
 	require.NoError(t, manager.Update(1, "v1", schemaVersionChanged))
 
-	ok, err := manager.RunWithRunner(context.Background(), 1, schemaVersionChanged.GetVersion(), 102, func(functionType schemapb.FunctionType, runner FunctionRunner) error {
-		require.Equal(t, schemapb.FunctionType_BM25, functionType)
+	ok, err := manager.RunWithRunner(context.Background(), 1, "v1", 102, func(runner FunctionRunner) error {
+		require.Equal(t, schemapb.FunctionType_BM25, runner.GetSchema().GetType())
 		require.True(t, baseRunner == runner)
 		return nil
 	})
@@ -333,10 +415,10 @@ func TestFunctionRunnerManagerUpdateKeepsOldVersionUntilAllKeysAdvance(t *testin
 
 	require.NoError(t, manager.Alloc(1, "v1", base))
 	require.NoError(t, manager.Alloc(1, "v2", base))
-	baseRunner := requireRunnerByOutput(t, manager, 1, base.GetVersion(), 102)
+	baseRunner := requireRunnerByOutput(t, manager, 1, "v2", 102)
 
 	require.NoError(t, manager.Update(1, "v1", changedOutput))
-	changedRunner := requireRunnerByOutput(t, manager, 1, changedOutput.GetVersion(), 104)
+	changedRunner := requireRunnerByOutput(t, manager, 1, "v1", 104)
 	require.False(t, baseRunner.isClosed())
 	require.False(t, changedRunner.isClosed())
 
@@ -346,7 +428,7 @@ func TestFunctionRunnerManagerUpdateKeepsOldVersionUntilAllKeysAdvance(t *testin
 	require.Equal(t, 2, runnerCount)
 
 	oldBody := newBM25InsertRequest("old message")
-	changed, ok, err := manager.TryMaterialize(1, 1, oldBody)
+	changed, ok, err := manager.TryMaterialize(context.Background(), 1, 1, oldBody)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, ok)
@@ -354,7 +436,7 @@ func TestFunctionRunnerManagerUpdateKeepsOldVersionUntilAllKeysAdvance(t *testin
 	require.False(t, HasFieldData(oldBody.GetFieldsData(), 104))
 
 	newBody := newBM25InsertRequest("new message")
-	changed, ok, err = manager.TryMaterialize(1, 2, newBody)
+	changed, ok, err = manager.TryMaterialize(context.Background(), 1, 2, newBody)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, ok)
@@ -362,7 +444,7 @@ func TestFunctionRunnerManagerUpdateKeepsOldVersionUntilAllKeysAdvance(t *testin
 	require.True(t, HasFieldData(newBody.GetFieldsData(), 104))
 
 	require.NoError(t, manager.Update(1, "v2", changedOutput))
-	require.True(t, baseRunner.isClosed())
+	require.Eventually(t, baseRunner.isClosed, time.Second, time.Millisecond)
 	require.False(t, changedRunner.isClosed())
 
 	_, versionRunners, runnerCount = functionRunnerEntrySnapshot(t, manager, 1)
@@ -370,7 +452,7 @@ func TestFunctionRunnerManagerUpdateKeepsOldVersionUntilAllKeysAdvance(t *testin
 	require.Contains(t, versionRunners, int32(2))
 	require.Equal(t, 1, runnerCount)
 
-	changed, ok, err = manager.TryMaterialize(1, 1, newBM25InsertRequest("old message"))
+	changed, ok, err = manager.TryMaterialize(context.Background(), 1, 1, newBM25InsertRequest("old message"))
 	require.NoError(t, err)
 	require.False(t, changed)
 	require.False(t, ok)
@@ -382,25 +464,25 @@ func TestFunctionRunnerManagerUpdateBuildsOnlyAddedFunction(t *testing.T) {
 
 	base := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "v1", base))
-	baseRunner := requireRunnerByOutput(t, manager, 1, base.GetVersion(), 102)
+	baseRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
 
 	addedFunction := newSchemaWithAddedFunction(base)
 	require.NoError(t, manager.Update(1, "v1", addedFunction))
-	addedRunner := requireRunnerByOutput(t, manager, 1, addedFunction.GetVersion(), 104)
+	addedRunner := requireRunnerByOutput(t, manager, 1, "v1", 104)
 
 	require.Equal(t, int32(2), factory.buildCount.Load())
 	require.False(t, baseRunner.isClosed())
 	require.False(t, addedRunner.isClosed())
 
-	ok, err := manager.RunWithRunner(context.Background(), 1, addedFunction.GetVersion(), 102, func(functionType schemapb.FunctionType, runner FunctionRunner) error {
-		require.Equal(t, schemapb.FunctionType_BM25, functionType)
+	ok, err := manager.RunWithRunner(context.Background(), 1, "v1", 102, func(runner FunctionRunner) error {
+		require.Equal(t, schemapb.FunctionType_BM25, runner.GetSchema().GetType())
 		require.True(t, baseRunner == runner)
 		return nil
 	})
 	require.NoError(t, err)
 	require.True(t, ok)
-	ok, err = manager.RunWithRunner(context.Background(), 1, addedFunction.GetVersion(), 104, func(functionType schemapb.FunctionType, runner FunctionRunner) error {
-		require.Equal(t, schemapb.FunctionType_BM25, functionType)
+	ok, err = manager.RunWithRunner(context.Background(), 1, "v1", 104, func(runner FunctionRunner) error {
+		require.Equal(t, schemapb.FunctionType_BM25, runner.GetSchema().GetType())
 		require.True(t, addedRunner == runner)
 		return nil
 	})
@@ -408,23 +490,15 @@ func TestFunctionRunnerManagerUpdateBuildsOnlyAddedFunction(t *testing.T) {
 	require.True(t, ok)
 
 	body := newBM25InsertRequest("message")
-	changed, ok, err := manager.TryMaterialize(1, 2, body)
+	changed, ok, err := manager.TryMaterialize(context.Background(), 1, 2, body)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, ok)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
 	require.True(t, HasFieldData(body.GetFieldsData(), 104))
-
-	latestBody := newBM25InsertRequest("latest message")
-	changed, ok, err = manager.TryMaterialize(1, LatestFunctionRunnerVersion, latestBody)
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.True(t, ok)
-	require.True(t, HasFieldData(latestBody.GetFieldsData(), 102))
-	require.True(t, HasFieldData(latestBody.GetFieldsData(), 104))
 }
 
-func TestFunctionRunnerManagerReleaseRemovesInitializingEntry(t *testing.T) {
+func TestFunctionRunnerManagerReleaseRemovesNotReadyEntry(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
@@ -473,7 +547,7 @@ func TestFunctionRunnerManagerReleaseCloseDoesNotBlockManager(t *testing.T) {
 	})
 
 	require.NoError(t, manager.Alloc(1, "v1", schema))
-	requireRunnerByOutput(t, manager, 1, schema.GetVersion(), 102)
+	requireRunnerByOutput(t, manager, 1, "v1", 102)
 
 	releaseDone := make(chan struct{})
 	go func() {
@@ -513,6 +587,83 @@ func TestFunctionRunnerManagerReleaseCloseDoesNotBlockManager(t *testing.T) {
 	}
 }
 
+func TestFunctionRunnerManagerAllocRetriesAfterFinalRelease(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", schema))
+	requireRunnerByOutput(t, manager, 1, "v1", 102)
+
+	entry := manager.getEntry(1)
+	require.NotNil(t, entry)
+	entry.mu.Lock()
+	entryLocked := true
+	defer func() {
+		if entryLocked {
+			entry.mu.Unlock()
+		}
+	}()
+
+	releaseDone := make(chan struct{})
+	go func() {
+		manager.Release(1, "v1")
+		close(releaseDone)
+	}()
+
+	require.Eventually(t, func() bool {
+		if manager.mu.TryRLock() {
+			manager.mu.RUnlock()
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond)
+
+	allocDone := make(chan error, 1)
+	go func() {
+		allocDone <- manager.Alloc(1, "v2", schema)
+	}()
+
+	entry.mu.Unlock()
+	entryLocked = false
+	select {
+	case err := <-allocDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		require.Fail(t, "timed out waiting for alloc")
+	}
+	select {
+	case <-releaseDone:
+	case <-time.After(time.Second):
+		require.Fail(t, "timed out waiting for release")
+	}
+
+	require.NotSame(t, entry, manager.getEntry(1))
+	keyVersions, _, _ := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"v2": schema.GetVersion()}, keyVersions)
+	entry.mu.RLock()
+	require.True(t, entry.closed)
+	entry.mu.RUnlock()
+}
+
+func TestFunctionRunnerCollectionEntryCloseIsTerminal(t *testing.T) {
+	entry := newFunctionRunnerCollectionEntry(1)
+	entry.detachForClose()
+
+	schema := newBM25SignatureTestSchema()
+	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
+	require.NoError(t, err)
+	_, _, err = entry.ensureVersion("v1", schema, versionRunners, functionsBySignature)
+	require.ErrorIs(t, err, errFunctionRunnerCollectionEntryRemoved)
+
+	entry.mu.RLock()
+	defer entry.mu.RUnlock()
+	require.True(t, entry.closed)
+	require.Empty(t, entry.keyVersions)
+	require.Empty(t, entry.versionRunners)
+	require.Empty(t, entry.runners)
+}
+
 func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
@@ -533,8 +684,8 @@ func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose(t *testing.T)
 	releaseRun := make(chan struct{})
 	runDone := make(chan error, 1)
 	go func() {
-		_, err := manager.RunWithRunner(context.Background(), 1, schema.GetVersion(), 102, func(functionType schemapb.FunctionType, runner FunctionRunner) error {
-			if functionType != schemapb.FunctionType_BM25 {
+		_, err := manager.RunWithRunner(context.Background(), 1, "v1", 102, func(runner FunctionRunner) error {
+			if runner.GetSchema().GetType() != schemapb.FunctionType_BM25 {
 				return errors.New("unexpected function type")
 			}
 			close(runStarted)
@@ -571,6 +722,125 @@ func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose(t *testing.T)
 	}
 }
 
+func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentKeyUpdate(t *testing.T) {
+	manager := newFunctionRunnerManager()
+	t.Cleanup(manager.Close)
+
+	base := newBM25SignatureTestSchema()
+	changedOutput := newSchemaWithChangedOutput(base)
+	closeStarted := make(chan struct{})
+	var buildCount atomic.Int32
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+		runner, err := newTestFunctionRunner(schema, fn)
+		if err != nil {
+			return nil, err
+		}
+		if buildCount.Add(1) == 1 {
+			runner.closeStarted = closeStarted
+		}
+		return runner, nil
+	})
+	require.NoError(t, manager.Alloc(1, "v1", base))
+	baseRunner := requireRunnerByOutput(t, manager, 1, "v1", 102)
+
+	runStarted := make(chan struct{})
+	releaseRun := make(chan struct{})
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := manager.RunWithRunner(context.Background(), 1, "v1", 102, func(runner FunctionRunner) error {
+			require.Equal(t, schemapb.FunctionType_BM25, runner.GetSchema().GetType())
+			require.Same(t, baseRunner, runner)
+			close(runStarted)
+			<-releaseRun
+			return nil
+		})
+		runDone <- err
+	}()
+	<-runStarted
+
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- manager.Update(1, "v1", changedOutput)
+	}()
+
+	require.Eventually(t, func() bool {
+		return functionRunnerKeyVersionSnapshot(t, manager, 1, "v1") == changedOutput.GetVersion()
+	}, time.Second, time.Millisecond)
+	select {
+	case err := <-updateDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		require.Fail(t, "schema update was blocked by the active runner callback")
+	}
+	select {
+	case <-closeStarted:
+		require.Fail(t, "runner close started while callback was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseRun)
+	require.NoError(t, <-runDone)
+	select {
+	case <-closeStarted:
+	case <-time.After(time.Second):
+		require.Fail(t, "timed out waiting for runner close")
+	}
+	require.Eventually(t, baseRunner.isClosed, time.Second, time.Millisecond)
+	requireRunnerByOutput(t, manager, 1, "v1", 104)
+}
+
+func TestFunctionRunnerManagerInitScopedByEntry(t *testing.T) {
+	firstManager := newFunctionRunnerManager()
+	t.Cleanup(firstManager.Close)
+	secondManager := newFunctionRunnerManager()
+	t.Cleanup(secondManager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{})
+	var buildCount atomic.Int32
+	var firstOnce sync.Once
+	var secondOnce sync.Once
+	var releaseOnce sync.Once
+	releaseFirstBuild := func() {
+		releaseOnce.Do(func() {
+			close(releaseFirst)
+		})
+	}
+	t.Cleanup(releaseFirstBuild)
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+		count := buildCount.Add(1)
+		switch count {
+		case 1:
+			firstOnce.Do(func() {
+				close(firstStarted)
+			})
+			<-releaseFirst
+		case 2:
+			secondOnce.Do(func() {
+				close(secondStarted)
+			})
+		}
+		return newTestFunctionRunner(schema, fn)
+	})
+
+	require.NoError(t, firstManager.Alloc(1, "v1", schema))
+	<-firstStarted
+
+	require.NoError(t, secondManager.Alloc(1, "v1", schema))
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		require.FailNow(t, "second manager init was blocked by first manager init")
+	}
+	requireRunnerByOutput(t, secondManager, 1, "v1", 102)
+
+	releaseFirstBuild()
+	requireRunnerByOutput(t, firstManager, 1, "v1", 102)
+	require.Equal(t, int32(2), buildCount.Load())
+}
+
 func TestFunctionRunnerManagerRunWithAnalyzerUsesBM25Runner(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
@@ -579,7 +849,7 @@ func TestFunctionRunnerManagerRunWithAnalyzerUsesBM25Runner(t *testing.T) {
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 
 	var tokens [][]*milvuspb.AnalyzerToken
-	ok, err := manager.RunWithAnalyzer(context.Background(), 1, LatestFunctionRunnerVersion, 101, func(analyzer Analyzer) error {
+	ok, err := manager.RunWithAnalyzer(context.Background(), 1, "v1", 101, func(analyzer Analyzer) error {
 		var analyzeErr error
 		tokens, analyzeErr = analyzer.BatchAnalyze(false, false, []string{"hello world"})
 		return analyzeErr
@@ -590,7 +860,29 @@ func TestFunctionRunnerManagerRunWithAnalyzerUsesBM25Runner(t *testing.T) {
 	require.Equal(t, "hello world", tokens[0][0].GetToken())
 }
 
-func TestFunctionRunnerManagerRunWithRunnerLatestVersionUsesLatestSnapshot(t *testing.T) {
+func TestFunctionRunnerManagerRunWithAnalyzerUsesKeySchema(t *testing.T) {
+	manager := newFunctionRunnerManager()
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	schema.Functions = nil
+	schema.Fields[1].TypeParams = append(schema.Fields[1].TypeParams,
+		&commonpb.KeyValuePair{Key: "enable_analyzer", Value: "true"})
+	require.NoError(t, manager.Alloc(1, "v1", schema))
+
+	var tokens [][]*milvuspb.AnalyzerToken
+	ok, err := manager.RunWithAnalyzer(context.Background(), 1, "v1", 101, func(analyzer Analyzer) error {
+		var analyzeErr error
+		tokens, analyzeErr = analyzer.BatchAnalyze(false, false, []string{"hello world"})
+		return analyzeErr
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Len(t, tokens, 1)
+	require.NotEmpty(t, tokens[0])
+}
+
+func TestFunctionRunnerManagerRunWithRunnerUsesKeyVersion(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
 
@@ -600,13 +892,64 @@ func TestFunctionRunnerManagerRunWithRunnerLatestVersionUsesLatestSnapshot(t *te
 	changedOutput := newSchemaWithChangedOutput(base)
 	require.NoError(t, manager.Update(1, "v1", changedOutput))
 
-	ok, err := manager.RunWithRunner(context.Background(), 1, LatestFunctionRunnerVersion, 104, func(functionType schemapb.FunctionType, runner FunctionRunner) error {
-		require.Equal(t, schemapb.FunctionType_BM25, functionType)
+	ok, err := manager.RunWithRunner(context.Background(), 1, "v1", 104, func(runner FunctionRunner) error {
+		require.Equal(t, schemapb.FunctionType_BM25, runner.GetSchema().GetType())
 		require.Equal(t, int64(104), runner.GetOutputFields()[0].GetFieldID())
 		return nil
 	})
 	require.NoError(t, err)
 	require.True(t, ok)
+}
+
+func TestFunctionRunnerManagerRunWithRunnerAndAnalyzerMissing(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	base := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", base))
+
+	ok, err := manager.RunWithRunner(context.Background(), 1, "v1", 102, func(runner FunctionRunner) error {
+		require.Equal(t, schemapb.FunctionType_BM25, runner.GetSchema().GetType())
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	changedOutput := newSchemaWithChangedOutput(base)
+	require.NoError(t, manager.Update(1, "v1", changedOutput))
+	ok, err = manager.RunWithRunner(context.Background(), 1, "v1", 102, func(FunctionRunner) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, ok)
+	ok, err = manager.RunWithAnalyzer(context.Background(), 1, "v1", 101, func(Analyzer) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = manager.RunWithRunner(context.Background(), 1, "v1", 999, func(FunctionRunner) error {
+		return nil
+	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.False(t, ok)
+
+	ok, err = manager.RunWithAnalyzer(context.Background(), 1, "v1", 103, func(Analyzer) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, ok)
+	ok, err = manager.RunWithAnalyzer(context.Background(), 1, "v1", 999, func(Analyzer) error {
+		return nil
+	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.False(t, ok)
+
+	ok, err = manager.RunWithAnalyzer(context.Background(), 2, "v1", 101, func(Analyzer) error {
+		return nil
+	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.False(t, ok)
 }
 
 func TestFunctionRunnerManagerSchemaVersionZeroIsExplicit(t *testing.T) {
@@ -620,68 +963,89 @@ func TestFunctionRunnerManagerSchemaVersionZeroIsExplicit(t *testing.T) {
 	changedOutput := newSchemaWithChangedOutput(base)
 	changedOutput.Version = 1
 	require.NoError(t, manager.Alloc(1, "v1", changedOutput))
-	requireRunnerByOutput(t, manager, 1, base.GetVersion(), 102)
-	requireRunnerByOutput(t, manager, 1, changedOutput.GetVersion(), 104)
+	requireRunnerByOutput(t, manager, 1, "v0", 102)
+	requireRunnerByOutput(t, manager, 1, "v1", 104)
 
 	versionZeroBody := newBM25InsertRequest("version zero message")
-	changed, ok, err := manager.TryMaterialize(1, 0, versionZeroBody)
+	changed, ok, err := manager.TryMaterialize(context.Background(), 1, 0, versionZeroBody)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, ok)
 	require.True(t, HasFieldData(versionZeroBody.GetFieldsData(), 102))
 	require.False(t, HasFieldData(versionZeroBody.GetFieldsData(), 104))
+}
 
-	latestBody := newBM25InsertRequest("latest message")
-	changed, ok, err = manager.TryMaterialize(1, LatestFunctionRunnerVersion, latestBody)
+func TestFunctionRunnerManagerTryMaterializeInitializesRetainedVersion(t *testing.T) {
+	manager, factory := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	allocSchemaForTest(t, manager, 1, "v1", schema)
+
+	body := newBM25InsertRequest("message")
+	changed, ok, err := manager.TryMaterialize(context.Background(), 1, schema.GetVersion(), body)
 	require.NoError(t, err)
-	require.True(t, changed)
 	require.True(t, ok)
-	require.False(t, HasFieldData(latestBody.GetFieldsData(), 102))
-	require.True(t, HasFieldData(latestBody.GetFieldsData(), 104))
+	require.True(t, changed)
+	require.True(t, HasFieldData(body.GetFieldsData(), 102))
+	require.Equal(t, int32(1), factory.buildCount.Load())
+}
+
+func TestFunctionRunnerManagerTryMaterializeReportsMissingRunnerEntry(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	allocSchemaForTest(t, manager, 1, "v1", schema)
+	entry := manager.getEntry(1)
+	signature := firstEmbeddingSignature(t, schema)
+	entry.mu.Lock()
+	delete(entry.runners, signature)
+	entry.mu.Unlock()
+
+	changed, ok, err := manager.TryMaterialize(context.Background(), 1, schema.GetVersion(), newBM25InsertRequest("message"))
+	require.ErrorContains(t, err, "function runner entry not found")
+	require.True(t, ok)
+	require.False(t, changed)
 }
 
 func TestFunctionRunnerManagerMaterializeRequiresAllocation(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
 
-	changed, err := manager.Materialize(context.Background(), 1, newBM25SignatureTestSchema(), newBM25InsertRequest("message"))
+	schema := newBM25SignatureTestSchema()
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("message"))
 	require.ErrorContains(t, err, "not allocated")
 	require.False(t, changed)
 	requireFunctionRunnerEntryRemoved(t, manager, 1)
 }
 
-func TestFunctionRunnerManagerMaterializeNilSchemaUsesLatestSnapshot(t *testing.T) {
+func TestFunctionRunnerManagerMaterializeRejectsVersionMismatch(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
 
-	base := newBM25SignatureTestSchema()
-	require.NoError(t, manager.Alloc(1, "v1", base))
+	schema := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", schema))
 
-	changedOutput := newSchemaWithChangedOutput(base)
-	require.NoError(t, manager.Update(1, "v1", changedOutput))
-
-	body := newBM25InsertRequest("latest message")
-	changed, err := manager.Materialize(context.Background(), 1, nil, body)
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.False(t, HasFieldData(body.GetFieldsData(), 102))
-	require.True(t, HasFieldData(body.GetFieldsData(), 104))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion()+1, newBM25InsertRequest("message"))
+	require.ErrorContains(t, err, "schema version mismatch")
+	require.False(t, changed)
 }
 
-func TestFunctionRunnerManagerMaterializeNoEmbeddingFunctionDoesNotRequireAllocation(t *testing.T) {
+func TestFunctionRunnerManagerMaterializeNoEmbeddingFunction(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
 	schema := cloneCollectionSchema(newBM25SignatureTestSchema())
 	schema.Functions = nil
+	require.NoError(t, manager.Alloc(1, "v1", schema))
 
-	changed, err := manager.Materialize(context.Background(), 1, schema, newBM25InsertRequest("message"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("message"))
 	require.NoError(t, err)
 	require.False(t, changed)
-	requireFunctionRunnerEntryRemoved(t, manager, 1)
 }
 
-func TestFunctionRunnerManagerMaterializeNoRunnerBackedFunctionDoesNotRequireAllocation(t *testing.T) {
+func TestFunctionRunnerManagerMaterializeNoRunnerBackedFunction(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
@@ -695,14 +1059,14 @@ func TestFunctionRunnerManagerMaterializeNoRunnerBackedFunctionDoesNotRequireAll
 			OutputFieldIds: []int64{103},
 		},
 	}
+	require.NoError(t, manager.Alloc(1, "v1", schema))
 
-	changed, err := manager.Materialize(context.Background(), 1, schema, newBM25InsertRequest("message"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("message"))
 	require.NoError(t, err)
 	require.False(t, changed)
-	requireFunctionRunnerEntryRemoved(t, manager, 1)
 }
 
-func TestFunctionRunnerManagerMaterializeHonorsContextDuringForegroundInit(t *testing.T) {
+func TestFunctionRunnerManagerMaterializeHonorsContextForInitWaiter(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
@@ -719,11 +1083,11 @@ func TestFunctionRunnerManagerMaterializeHonorsContextDuringForegroundInit(t *te
 		<-release
 		return newTestFunctionRunner(schema, fn)
 	})
-	allocVChannelForTest(manager, 1, "v1", schema.GetVersion())
+	allocSchemaForTest(t, manager, 1, "v1", schema)
 
 	firstErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(context.Background(), 1, schema, newBM25InsertRequest("first"))
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
 		firstErr <- err
 	}()
 	<-started
@@ -731,16 +1095,68 @@ func TestFunctionRunnerManagerMaterializeHonorsContextDuringForegroundInit(t *te
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	changed, err := manager.Materialize(ctx, 1, schema, newBM25InsertRequest("second"))
+	changed, err := manager.Materialize(ctx, 1, "v1", schema.GetVersion(), newBM25InsertRequest("second"))
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, changed)
-	requireFunctionRunnerState(t, manager, 1, signature, functionRunnerStateInitializing)
+	requireFunctionRunnerReady(t, manager, 1, signature, false)
 
 	close(release)
 	require.NoError(t, <-firstErr)
 }
 
-func TestFunctionRunnerManagerMaterializeSingleflightsInitialBuild(t *testing.T) {
+func TestFunctionRunnerManagerMaterializeHonorsContextForInitCreator(t *testing.T) {
+	manager := newFunctionRunnerManager()
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var buildCount atomic.Int32
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	releaseBuild := func() {
+		releaseOnce.Do(func() {
+			close(release)
+		})
+	}
+	t.Cleanup(releaseBuild)
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+		buildCount.Add(1)
+		startedOnce.Do(func() {
+			close(started)
+		})
+		<-release
+		return newTestFunctionRunner(schema, fn)
+	})
+	allocSchemaForTest(t, manager, 1, "v1", schema)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstErr := make(chan error, 1)
+	go func() {
+		_, err := manager.Materialize(ctx, 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
+		firstErr <- err
+	}()
+	<-started
+
+	secondErr := make(chan error, 1)
+	go func() {
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("second"))
+		secondErr <- err
+	}()
+
+	cancel()
+	select {
+	case err := <-firstErr:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		require.FailNow(t, "init creator did not honor context cancellation")
+	}
+	releaseBuild()
+	require.NoError(t, <-secondErr)
+	require.Equal(t, int32(1), buildCount.Load())
+}
+
+func TestFunctionRunnerManagerMaterializeWaitsForInitialBuild(t *testing.T) {
 	manager := newFunctionRunnerManager()
 	t.Cleanup(manager.Close)
 
@@ -757,18 +1173,18 @@ func TestFunctionRunnerManagerMaterializeSingleflightsInitialBuild(t *testing.T)
 		<-release
 		return newTestFunctionRunner(schema, fn)
 	})
-	allocVChannelForTest(manager, 1, "v1", schema.GetVersion())
+	allocSchemaForTest(t, manager, 1, "v1", schema)
 
 	firstErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(context.Background(), 1, schema, newBM25InsertRequest("first"))
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
 		firstErr <- err
 	}()
 	<-started
 
 	secondErr := make(chan error, 1)
 	go func() {
-		_, err := manager.Materialize(context.Background(), 1, schema, newBM25InsertRequest("second"))
+		_, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("second"))
 		secondErr <- err
 	}()
 
@@ -776,6 +1192,72 @@ func TestFunctionRunnerManagerMaterializeSingleflightsInitialBuild(t *testing.T)
 	require.NoError(t, <-firstErr)
 	require.NoError(t, <-secondErr)
 	require.Equal(t, int32(1), buildCount.Load())
+}
+
+func TestFunctionRunnerManagerMaterializeLeasesInitializedRunners(t *testing.T) {
+	manager := newFunctionRunnerManager()
+	t.Cleanup(manager.Close)
+
+	schema := newSchemaWithAddedFunction(newBM25SignatureTestSchema())
+	secondBuildStarted := make(chan struct{})
+	releaseSecondBuild := make(chan struct{})
+	var releaseSecondBuildOnce sync.Once
+	releaseSecond := func() {
+		releaseSecondBuildOnce.Do(func() {
+			close(releaseSecondBuild)
+		})
+	}
+	t.Cleanup(releaseSecond)
+	var buildCount atomic.Int32
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+		if buildCount.Add(1) == 2 {
+			close(secondBuildStarted)
+			<-releaseSecondBuild
+		}
+		return newTestFunctionRunner(schema, fn)
+	})
+	allocSchemaForTest(t, manager, 1, "v1", schema)
+
+	entry := manager.getEntry(1)
+	require.NotNil(t, entry)
+	firstSignature := firstEmbeddingSignature(t, schema)
+	entry.mu.RLock()
+	firstRunnerEntry := entry.runners[firstSignature]
+	entry.mu.RUnlock()
+	require.NotNil(t, firstRunnerEntry)
+
+	body := newBM25InsertRequest("message")
+	materializeDone := make(chan error, 1)
+	go func() {
+		changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), body)
+		if err == nil && !changed {
+			err = errors.New("materialization unexpectedly reported no change")
+		}
+		materializeDone <- err
+	}()
+	<-secondBuildStarted
+
+	acquired := firstRunnerEntry.mu.TryLock()
+	if acquired {
+		firstRunnerEntry.mu.Unlock()
+	}
+	require.False(t, acquired, "initialized runner was not leased while the remaining runner initialized")
+
+	closeDone := make(chan struct{})
+	go func() {
+		firstRunnerEntry.Close()
+		close(closeDone)
+	}()
+
+	releaseSecond()
+	require.NoError(t, <-materializeDone)
+	require.True(t, HasFieldData(body.GetFieldsData(), 102))
+	require.True(t, HasFieldData(body.GetFieldsData(), 104))
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		require.FailNow(t, "runner close did not finish after materialization released its lease")
+	}
 }
 
 func TestFunctionRunnerManagerRetriesFailedInitOnNextRequest(t *testing.T) {
@@ -793,20 +1275,20 @@ func TestFunctionRunnerManagerRetriesFailedInitOnNextRequest(t *testing.T) {
 		}
 		return newTestFunctionRunner(schema, fn)
 	})
-	allocVChannelForTest(manager, 1, "v1", schema.GetVersion())
+	allocSchemaForTest(t, manager, 1, "v1", schema)
 
-	changed, err := manager.Materialize(context.Background(), 1, schema, newBM25InsertRequest("first"))
+	changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), newBM25InsertRequest("first"))
 	require.ErrorIs(t, err, expectedErr)
 	require.False(t, changed)
-	requireFunctionRunnerState(t, manager, 1, signature, functionRunnerStateFailed)
+	requireFunctionRunnerReady(t, manager, 1, signature, false)
 
 	body := newBM25InsertRequest("second")
-	changed, err = manager.Materialize(context.Background(), 1, schema, body)
+	changed, err = manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), body)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
 	require.Equal(t, int32(2), buildCount.Load())
-	requireFunctionRunnerState(t, manager, 1, signature, functionRunnerStateReady)
+	requireFunctionRunnerReady(t, manager, 1, signature, true)
 }
 
 func TestFunctionRunnerManagerAllocRetriesFailedInitOnNextRequest(t *testing.T) {
@@ -815,7 +1297,6 @@ func TestFunctionRunnerManagerAllocRetriesFailedInitOnNextRequest(t *testing.T) 
 
 	schema := newBM25SignatureTestSchema()
 	signature := firstEmbeddingSignature(t, schema)
-
 	var buildCount atomic.Int32
 	expectedErr := errors.New("mock recover init failed")
 	started := make(chan struct{})
@@ -836,15 +1317,16 @@ func TestFunctionRunnerManagerAllocRetriesFailedInitOnNextRequest(t *testing.T) 
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 	<-started
 	close(release)
-	requireFunctionRunnerStateEventually(t, manager, 1, signature, functionRunnerStateFailed)
 
-	body := newBM25InsertRequest("message")
-	changed, err := manager.Materialize(context.Background(), 1, schema, body)
-	require.NoError(t, err)
-	require.True(t, changed)
+	var body *msgpb.InsertRequest
+	require.Eventually(t, func() bool {
+		body = newBM25InsertRequest("message")
+		changed, err := manager.Materialize(context.Background(), 1, "v1", schema.GetVersion(), body)
+		return err == nil && changed
+	}, time.Second, 10*time.Millisecond)
 	require.True(t, HasFieldData(body.GetFieldsData(), 102))
 	require.Equal(t, int32(2), buildCount.Load())
-	requireFunctionRunnerState(t, manager, 1, signature, functionRunnerStateReady)
+	requireFunctionRunnerReady(t, manager, 1, signature, true)
 }
 
 func TestFunctionRunnerManagerAllocDoesNotStartWhenReady(t *testing.T) {
@@ -853,7 +1335,7 @@ func TestFunctionRunnerManagerAllocDoesNotStartWhenReady(t *testing.T) {
 
 	schema := newBM25SignatureTestSchema()
 	require.NoError(t, manager.Alloc(1, "v1", schema))
-	runner := requireRunnerByOutput(t, manager, 1, schema.GetVersion(), 102)
+	runner := requireRunnerByOutput(t, manager, 1, "v1", 102)
 
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 	require.Equal(t, int32(1), factory.buildCount.Load())
@@ -863,11 +1345,13 @@ func TestFunctionRunnerManagerAllocDoesNotStartWhenReady(t *testing.T) {
 	require.True(t, runner.isClosed())
 }
 
-func allocVChannelForTest(manager *functionRunnerManager, collectionID int64, vchannel string, schemaVersion int32) {
-	entry := manager.getOrCreateEntry(collectionID)
-	entry.mu.Lock()
-	defer entry.mu.Unlock()
-	entry.keyVersions[vchannel] = schemaVersion
+func allocSchemaForTest(t *testing.T, manager *functionRunnerManager, collectionID int64, key string, schema *schemapb.CollectionSchema) {
+	t.Helper()
+	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
+	require.NoError(t, err)
+	_, staleRunnerEntries, err := manager.getOrCreateEntry(collectionID).ensureVersion(key, schema, versionRunners, functionsBySignature)
+	require.NoError(t, err)
+	closeFunctionRunnerEntries(staleRunnerEntries)
 }
 
 func functionRunnerEntrySnapshot(
@@ -925,12 +1409,12 @@ func requireFunctionRunnerEntryRemoved(t *testing.T, manager *functionRunnerMana
 	require.NotContains(t, manager.entries, collectionID)
 }
 
-func requireFunctionRunnerState(
+func requireFunctionRunnerReady(
 	t *testing.T,
 	manager *functionRunnerManager,
 	collectionID int64,
 	signature string,
-	state functionRunnerState,
+	ready bool,
 ) {
 	t.Helper()
 
@@ -946,50 +1430,20 @@ func requireFunctionRunnerState(
 
 	runnerEntry.mu.RLock()
 	defer runnerEntry.mu.RUnlock()
-	require.Equal(t, state, runnerEntry.state)
-}
-
-func requireFunctionRunnerStateEventually(
-	t *testing.T,
-	manager *functionRunnerManager,
-	collectionID int64,
-	signature string,
-	state functionRunnerState,
-) {
-	t.Helper()
-
-	require.Eventually(t, func() bool {
-		manager.mu.RLock()
-		entry := manager.entries[collectionID]
-		manager.mu.RUnlock()
-		if entry == nil {
-			return false
-		}
-
-		entry.mu.RLock()
-		runnerEntry := entry.runners[signature]
-		entry.mu.RUnlock()
-		if runnerEntry == nil {
-			return false
-		}
-
-		runnerEntry.mu.RLock()
-		defer runnerEntry.mu.RUnlock()
-		return runnerEntry.state == state
-	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, ready, !runnerEntry.closed && runnerEntry.runner != nil)
 }
 
 func requireRunnerByOutput(
 	t *testing.T,
 	manager *functionRunnerManager,
 	collectionID int64,
-	schemaVersion int32,
+	key string,
 	outputFieldID int64,
 ) *testFunctionRunner {
 	t.Helper()
 
 	var testRunner *testFunctionRunner
-	ok, err := manager.RunWithRunner(context.Background(), collectionID, schemaVersion, outputFieldID, func(functionType schemapb.FunctionType, runner FunctionRunner) error {
+	ok, err := manager.RunWithRunner(context.Background(), collectionID, key, outputFieldID, func(runner FunctionRunner) error {
 		castRunner, ok := runner.(*testFunctionRunner)
 		require.True(t, ok)
 		testRunner = castRunner

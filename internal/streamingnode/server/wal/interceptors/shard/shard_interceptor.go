@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -102,7 +103,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.ReleaseFunctionRunners(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
+	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -177,7 +178,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
 	}
 	schemaVersion = correctSchemaVersion
-	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion, header.SchemaVersion != nil); err != nil {
 		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
 			mlog.Int64("collectionID", header.GetCollectionId()),
 			mlog.Int32("schemaVersion", schemaVersion),
@@ -304,8 +305,10 @@ func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg mes
 	if err != nil {
 		return msgID, err
 	}
-	if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
-		impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
+	if messageutil.IsSchemaChange(header) {
+		if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
+			impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
+		}
 	}
 	return msgID, nil
 }
@@ -377,7 +380,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.ReleaseFunctionRunners(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
+			function.GetManager().Release(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }

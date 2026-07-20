@@ -1140,10 +1140,10 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 		},
 	}
 
-	assert.NoError(t, function.AllocFunctionRunners(1, "v1", collSchema))
-	_, err := function.FillFunctionData(context.Background(), 1, collSchema, insertMsg.InsertRequest)
+	assert.NoError(t, function.GetManager().Alloc(1, "v1", collSchema))
+	_, err := function.GetManager().Materialize(context.Background(), 1, "v1", collSchema.GetVersion(), insertMsg.InsertRequest)
 	assert.NoError(t, err)
-	defer function.ReleaseFunctionRunners(1, "v1")
+	defer function.GetManager().Release(1, "v1")
 
 	result, err := PrepareInsert(collSchema, pkField, []*msgstream.InsertMsg{insertMsg})
 
