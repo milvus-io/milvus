@@ -289,6 +289,7 @@ func RegisterMixCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DiskQuota)
 
 	RegisterStreamingServiceClient(registry)
+	RegisterQV(registry)
 	RegisterQueryCoord(registry)
 	RegisterDataCoord(registry)
 	RegisterLoggingMetrics(registry)

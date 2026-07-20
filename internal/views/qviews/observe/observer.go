@@ -41,7 +41,7 @@ func (r *Registry) Observe(ctx context.Context, event Event) {
 	}
 }
 
-var defaultRegistry = NewRegistry(LogObserver{})
+var defaultRegistry = NewRegistry(LogObserver{}, NewMetricsObserver())
 
 func Register(observer Observer) {
 	defaultRegistry.Register(observer)
