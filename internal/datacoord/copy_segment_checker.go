@@ -375,7 +375,7 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	// previous round failed to persist.
 	err := c.copyMeta.UpdateJob(c.ctx, job.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting),
-		UpdateCopyJobProgress(0, int64(len(idMappings))))
+		UpdateCopyJobTotalSegments(int64(len(idMappings))))
 	if err != nil {
 		log.Warn(c.ctx, "failed to update job state to Executing", mlog.Err(err))
 		return

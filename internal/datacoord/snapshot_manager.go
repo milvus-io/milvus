@@ -1249,7 +1249,7 @@ func (sm *snapshotManager) createRestoreJob(
 			CollectionId: targetCollection,
 			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			IdMappings:   idMappings,
-			TimeoutTs:    uint64(time.Now().Add(jobTimeout).UnixNano()),
+			TimeoutTs:    CopyJobTimeoutTs(jobTimeout),
 			StartTs:      uint64(time.Now().UnixNano()),
 			Options: []*commonpb.KeyValuePair{
 				{Key: "copy_index", Value: "true"},

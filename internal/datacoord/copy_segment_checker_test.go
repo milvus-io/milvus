@@ -533,6 +533,55 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob() {
 	s.Equal("timeout", updatedJob.GetReason())
 }
 
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_FiresWithProductionTimeoutTs() {
+	// End-to-end unit check across the write site and the read site: the job
+	// creation path composes TimeoutTs via CopyJobTimeoutTs, and tryTimeoutJob
+	// must actually fire once that deadline has elapsed. Guards against the
+	// regression where the write site stored UnixNano while the reader decoded
+	// a hybrid TSO, so no job ever timed out.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			// Same composition as the creation path in snapshot_manager, with
+			// an already-elapsed deadline.
+			TimeoutTs: CopyJobTimeoutTs(-time.Minute),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.checker.tryTimeoutJob(job)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal("timeout", updatedJob.GetReason())
+}
+
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_NotElapsedKeepsExecuting() {
+	// A freshly composed production deadline must NOT trigger the timeout.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			TimeoutTs:    CopyJobTimeoutTs(time.Hour),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.checker.tryTimeoutJob(job)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
+}
+
 func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
