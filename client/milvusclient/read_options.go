@@ -199,7 +199,8 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 	case string:
 		result.Val = &schemapb.TemplateValue_StringVal{StringVal: v}
 	default:
-		if reflect.TypeOf(val).Kind() == reflect.Slice {
+		valueType := reflect.TypeOf(val)
+		if valueType != nil && valueType.Kind() == reflect.Slice {
 			return slice2TmplValue(val)
 		}
 		return nil, fmt.Errorf("unsupported template value type: %T", val)
