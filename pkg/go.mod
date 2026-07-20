@@ -17,7 +17,6 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/dave/jennifer v1.7.1
 	github.com/expr-lang/expr v1.15.7
-	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.1.0
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.174
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
@@ -71,6 +70,8 @@ require (
 
 require (
 	github.com/ebitengine/purego v0.9.0 // indirect
+	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
+	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.1.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
 )
 
