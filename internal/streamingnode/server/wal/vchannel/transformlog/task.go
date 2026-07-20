@@ -89,7 +89,7 @@ func (t *TransformLog) submitMaterializeTask(timetick uint64) {
 			name:     "materialize",
 			timetick: timetick,
 			precondition: scheduler.All(t.taskPrecondition(), scheduler.PreconditionFunc(func() bool {
-				return t.DataBarrierTimeTick() >= timetick
+				return t.LatestTimeTick() >= timetick
 			})),
 		},
 	}

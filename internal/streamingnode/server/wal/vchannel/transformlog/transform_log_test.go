@@ -17,12 +17,12 @@ import (
 	scheduler "github.com/milvus-io/milvus/pkg/v3/syncutil/preconditioned"
 )
 
-func TestReadDrainsCreationTailBeforeFutureAppends(t *testing.T) {
+func TestReadSyncsInitialFrontierBeforeFutureUpdates(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
 	manager := NewStreamManager("p1")
 	manager.Register("v1", transformLog)
 	for timeTick := uint64(1); timeTick <= 20; timeTick++ {
-		require.True(t, transformLog.appendBarrier(timeTick).Appended)
+		require.True(t, transformLog.syncUp(timeTick).Appended)
 	}
 
 	stream, err := manager.AcquireStream(context.Background(), "p1")
@@ -36,21 +36,14 @@ func TestReadDrainsCreationTailBeforeFutureAppends(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		return len(handler.events) == 16
-	}, time.Second, 10*time.Millisecond)
-	require.True(t, transformLog.appendBarrier(21).Appended)
+	syncUpEvent := recvStreamEvent(t, handler.events)
+	require.NotNil(t, syncUpEvent.SyncUp)
+	assert.Equal(t, uint64(20), syncUpEvent.SyncUp.TimeTick)
+	require.True(t, transformLog.syncUp(21).Appended)
 
-	for expected := uint64(1); expected <= 20; expected++ {
-		event := <-handler.events
-		require.NotNil(t, event.Entry)
-		assert.Equal(t, expected, event.Entry.GetTimeTick())
-	}
-	caughtUpEvent := <-handler.events
-	require.NotNil(t, caughtUpEvent.CaughtUp)
-	liveEvent := <-handler.events
-	require.NotNil(t, liveEvent.Entry)
-	assert.Equal(t, uint64(21), liveEvent.Entry.GetTimeTick())
+	liveEvent := recvStreamEvent(t, handler.events)
+	require.NotNil(t, liveEvent.SyncUp)
+	assert.Equal(t, uint64(21), liveEvent.SyncUp.TimeTick)
 }
 
 func TestObserveMessageOwnsAppendFlushAndMaterializeScheduling(t *testing.T) {
@@ -80,9 +73,10 @@ func TestReadStopsAtEndTimeTick(t *testing.T) {
 	transformLog := New(Config{VChannel: "v1"})
 	manager := NewStreamManager("p1")
 	manager.Register("v1", transformLog)
-	require.True(t, transformLog.appendBarrier(10).Appended)
-	require.True(t, transformLog.appendBarrier(20).Appended)
-	require.True(t, transformLog.appendBarrier(30).Appended)
+	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
+	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 20), appendOption{}).Appended)
+	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 30), appendOption{}).Appended)
+	require.True(t, transformLog.syncUp(40).Appended)
 
 	stream, err := manager.AcquireStream(context.Background(), "p1")
 	require.NoError(t, err)
@@ -102,8 +96,9 @@ func TestReadStopsAtEndTimeTick(t *testing.T) {
 	second := recvStreamEvent(t, handler.events)
 	require.NotNil(t, second.Entry)
 	assert.Equal(t, uint64(20), second.Entry.GetTimeTick())
-	caughtUp := recvStreamEvent(t, handler.events)
-	require.NotNil(t, caughtUp.CaughtUp)
+	syncUp := recvStreamEvent(t, handler.events)
+	require.NotNil(t, syncUp.SyncUp)
+	assert.Equal(t, uint64(20), syncUp.SyncUp.TimeTick)
 
 	require.Eventually(t, func() bool {
 		select {
@@ -213,7 +208,7 @@ func TestFlushWhileScannerDrainsDoesNotDuplicateEntries(t *testing.T) {
 	manager := NewStreamManager("p1")
 	manager.Register("v1", transformLog)
 	for timeTick := uint64(1); timeTick <= 20; timeTick++ {
-		require.True(t, transformLog.appendBarrier(timeTick).Appended)
+		require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, timeTick), appendOption{}).Appended)
 	}
 
 	stream, err := manager.AcquireStream(context.Background(), "p1")
@@ -238,8 +233,8 @@ func TestFlushWhileScannerDrainsDoesNotDuplicateEntries(t *testing.T) {
 		require.NotNil(t, event.Entry)
 		assert.Equal(t, expected, event.Entry.GetTimeTick())
 	}
-	caughtUp := <-handler.events
-	require.NotNil(t, caughtUp.CaughtUp)
+	syncUp := <-handler.events
+	require.NotNil(t, syncUp.SyncUp)
 }
 
 func TestConsumeDirtySnapshotKeepsStableInFlightView(t *testing.T) {
@@ -288,6 +283,7 @@ func TestMaterializeAdvancesMaterializedBarrierAfterSnapshotPersisted(t *testing
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
 	_, err := transformLog.flush(context.Background(), flushOption{TargetTimeTick: 20})
 	require.NoError(t, err)
+	require.True(t, transformLog.syncUp(20).Appended)
 
 	result, err := transformLog.materialize(context.Background(), materializeOption{TargetTimeTick: 20})
 	require.NoError(t, err)
@@ -334,17 +330,17 @@ func TestMaterializeSkipsBarrierEntries(t *testing.T) {
 		Store:        newMemoryStore(),
 		Materializer: materializer,
 	})
-	require.True(t, transformLog.appendBarrier(5).Appended)
+	require.True(t, transformLog.syncUp(5).Appended)
 	require.True(t, transformLog.append(newTransformLogTestDeleteMessage(t, 10), appendOption{}).Appended)
-	require.True(t, transformLog.appendBarrier(20).Appended)
-	_, err := transformLog.flush(context.Background(), flushOption{TargetTimeTick: 30})
+	require.True(t, transformLog.syncUp(20).Appended)
+	_, err := transformLog.flush(context.Background(), flushOption{TargetTimeTick: 20})
 	require.NoError(t, err)
 
-	result, err := transformLog.materialize(context.Background(), materializeOption{TargetTimeTick: 30})
+	result, err := transformLog.materialize(context.Background(), materializeOption{TargetTimeTick: 20})
 	require.NoError(t, err)
 	assert.True(t, result.Started)
 	assert.True(t, result.HasMaterializedSegments)
-	assert.Equal(t, uint64(30), result.MaterializedTimeTick)
+	assert.Equal(t, uint64(20), result.MaterializedTimeTick)
 	assert.Equal(t, uint64(1), result.MaterializedRows)
 	require.Len(t, materializer.requests, 1)
 	require.Len(t, materializer.requests[0].Entries, 1)
@@ -352,7 +348,7 @@ func TestMaterializeSkipsBarrierEntries(t *testing.T) {
 	require.NotNil(t, materializer.requests[0].Entries[0].GetDelete())
 }
 
-func TestFlushAdvancesCheckpointToFenceTimeTick(t *testing.T) {
+func TestFlushAdvancesCheckpointToLastDurableEntry(t *testing.T) {
 	transformLog := New(Config{
 		VChannel: "v1",
 		Store:    newMemoryStore(),
@@ -364,10 +360,10 @@ func TestFlushAdvancesCheckpointToFenceTimeTick(t *testing.T) {
 	result, err := transformLog.flush(context.Background(), flushOption{TargetTimeTick: 20})
 	require.NoError(t, err)
 	assert.True(t, result.Started)
-	assert.Equal(t, uint64(20), result.DurableTimeTick)
+	assert.Equal(t, uint64(10), result.DurableTimeTick)
 
 	snapshot := transformLog.SnapshotMeta()
-	assert.Equal(t, uint64(20), snapshot.GetCheckpointTimeTick())
+	assert.Equal(t, uint64(10), snapshot.GetCheckpointTimeTick())
 	require.Len(t, transformLog.chunks, 1)
 	require.Len(t, transformLog.chunks[0].entries, 1)
 	assert.Equal(t, uint64(10), transformLog.chunks[0].entries[0].GetTimeTick())
@@ -461,15 +457,6 @@ func testTransformLogDeleteEntry(timeTick uint64, pks ...int64) *streamingpb.Tra
 					},
 				},
 			},
-		},
-	}
-}
-
-func testTransformLogBarrierEntry(timeTick uint64) *streamingpb.TransformLogEntry {
-	return &streamingpb.TransformLogEntry{
-		TimeTick: timeTick,
-		Entry: &streamingpb.TransformLogEntry_Barrier{
-			Barrier: &streamingpb.TransformBarrierEntry{},
 		},
 	}
 }

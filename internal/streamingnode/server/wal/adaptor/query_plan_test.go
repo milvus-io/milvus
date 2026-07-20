@@ -37,6 +37,20 @@ type queryPlanTestResourceManager struct {
 	acquired []snview.AcquireResource
 }
 
+type queryPlanTestRuntimeProbe struct {
+	mayHaveVisibleGrowingSegments bool
+	growingTimetick               uint64
+	transformingTimetick          uint64
+	partitionIDs                  []int64
+}
+
+func (p *queryPlanTestRuntimeProbe) MayHaveVisibleGrowingSegments(growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool {
+	p.growingTimetick = growingTimetick
+	p.transformingTimetick = transformingTimetick
+	p.partitionIDs = append([]int64(nil), partitionIDs...)
+	return p.mayHaveVisibleGrowingSegments
+}
+
 func (m *queryPlanTestResourceManager) Acquire(req snview.AcquireResource) {
 	m.acquired = append(m.acquired, req)
 }
@@ -136,6 +150,7 @@ func TestWALAdaptorGetQueryPlanBuildsPlanFromLatestUpView(t *testing.T) {
 	assert.Equal(t, req.GetShardId(), plan.GetShardId())
 	assert.Equal(t, newQueryPlanTestMeta(viewpb.QueryViewState_QueryViewStateUp).GetVersion(), plan.GetVersion())
 	assert.NotSame(t, searchReq, plan.GetLegacySearchRequest())
+	assert.Equal(t, []int64{20}, plan.GetLegacySearchRequest().GetPartitionIDs())
 	require.Len(t, plan.GetWorkNodes(), 2)
 	assert.Equal(t, "by-dev-rootcoord-dml_0", plan.GetWorkNodes()[0].GetStreamingNode().GetPchannel())
 	assert.Equal(t, int64(2), plan.GetWorkNodes()[1].GetQueryNode().GetNodeId())
@@ -183,10 +198,59 @@ func TestBuildQueryPlanWorkNodesPrunesByPartitionAndIgnoreGrowing(t *testing.T) 
 		},
 	}
 
-	nodes := buildQueryPlanWorkNodes(view, req)
+	nodes := buildQueryPlanWorkNodes(view, queryPlanWorkNodeOptions{
+		ignoreGrowing: true,
+		partitionIDs:  req.GetPartitionIds(),
+	})
 
 	assert.Len(t, nodes, 1)
 	assert.Equal(t, int64(2), nodes[0].GetQueryNode().GetNodeId())
+}
+
+func TestBuildQueryPlanWorkNodesPrunesStreamingNodeWhenVisibleGrowingRuntimeIsEmpty(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{
+		Meta:          &viewpb.QueryViewMeta{Vchannel: queryPlanTestVChannel},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{
+			{
+				NodeId: 2,
+				Partitions: []*viewpb.QueryViewOfPartition{
+					{PartitionId: 20, SegmentIds: []int64{2001}},
+				},
+			},
+		},
+	}
+	probe := &queryPlanTestRuntimeProbe{mayHaveVisibleGrowingSegments: false}
+	mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 122}
+
+	nodes := buildQueryPlanWorkNodes(view, queryPlanWorkNodeOptions{
+		partitionIDs: []int64{20},
+		runtime:      probe,
+		mvcc:         mvcc,
+	})
+
+	require.Len(t, nodes, 1)
+	assert.Nil(t, nodes[0].GetStreamingNode())
+	assert.Equal(t, int64(2), nodes[0].GetQueryNode().GetNodeId())
+	assert.Equal(t, uint64(123), probe.growingTimetick)
+	assert.Equal(t, uint64(122), probe.transformingTimetick)
+	assert.Equal(t, []int64{20}, probe.partitionIDs)
+}
+
+func TestBuildQueryPlanWorkNodesKeepsStreamingNodeWhenRuntimeMayHaveGrowingSegments(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{
+		Meta:          &viewpb.QueryViewMeta{Vchannel: queryPlanTestVChannel},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+	probe := &queryPlanTestRuntimeProbe{mayHaveVisibleGrowingSegments: true}
+
+	nodes := buildQueryPlanWorkNodes(view, queryPlanWorkNodeOptions{
+		runtime: probe,
+		mvcc:    &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 122},
+	})
+
+	require.Len(t, nodes, 1)
+	assert.NotNil(t, nodes[0].GetStreamingNode())
 }
 
 func TestBuildQueryPlanWorkNodesIncludesStreamingAndNonEmptyQueryNodes(t *testing.T) {
@@ -209,7 +273,7 @@ func TestBuildQueryPlanWorkNodesIncludesStreamingAndNonEmptyQueryNodes(t *testin
 		},
 	}
 
-	nodes := buildQueryPlanWorkNodes(view, &viewpb.GetQueryPlanRequest{})
+	nodes := buildQueryPlanWorkNodes(view, queryPlanWorkNodeOptions{})
 
 	assert.Len(t, nodes, 2)
 	assert.NotNil(t, nodes[0].GetStreamingNode())

@@ -169,6 +169,71 @@ func TestRuntimeRejectsLiveInsertAfterFlush(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestRuntimeFlushedSegmentSkipsReplayUntilSafeToRelease(t *testing.T) {
+	initSegcoreForRuntimeTest(t)
+
+	schema := mock_segcore.GenTestCollectionSchema("snview-flushed-replay", schemapb.DataType_Int64, false)
+	runtime := newRuntime()
+	err := runtime.Prepare(context.Background(), walview.VChannelWALView{
+		CollectionID: 1,
+		VChannel:     "ch",
+		SegmentSnapshot: walview.VisibleSegmentSnapshot{
+			CollectionID:        1,
+			VChannel:            "ch",
+			DataVersion:         qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1},
+			BaseGrowingTimeTick: 30,
+			FlushedSegments: []walview.FlushedSegment{
+				{
+					SegmentID:           100,
+					PartitionID:         10,
+					FlushTimeTick:       50,
+					SealedAtDataVersion: qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer runtime.Close()
+
+	_, ok := runtime.Segment(100)
+	require.False(t, ok)
+	require.Equal(t, []int64{100}, runtime.SegmentIDs())
+
+	require.Panics(t, func() {
+		runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", 100, 2, 52, schema))
+	})
+
+	require.NotPanics(t, func() {
+		runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", 100, 2, 40, schema))
+	})
+	_, ok = runtime.Segment(100)
+	require.False(t, ok)
+	require.Equal(t, []int64{100}, runtime.SegmentIDs())
+
+	runtime.Truncate(qviews.DataVersion{StreamingVersion: 10, CompactVersion: 1})
+	require.Equal(t, []int64{100}, runtime.SegmentIDs())
+
+	runtime.applyLiveMessage(context.Background(), newTestRecoveryBarrierMessage(t, 51))
+	require.Empty(t, runtime.SegmentIDs())
+}
+
+func TestNewCollectionAppliesIndexMetaFromWALView(t *testing.T) {
+	initSegcoreForRuntimeTest(t)
+
+	schema := mock_segcore.GenTestCollectionSchema("snview-resource-index-meta", schemapb.DataType_Int64, false)
+	collection, err := newCollection(walview.VChannelWALView{
+		CollectionID: 1,
+		VChannel:     "ch",
+		Schema:       schema,
+		IndexInfos:   mock_segcore.GenTestIndexInfoList(1, schema),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, collection)
+	defer collection.Release()
+	require.NotNil(t, collection.IndexMeta())
+	require.NotEmpty(t, collection.IndexMeta().GetIndexMetas())
+}
+
 func TestRuntimeTruncateWatermarkAppliesToLateSegmentSealed(t *testing.T) {
 	runtime := newRuntime()
 	runtime.addSegment(newGrowingSegment(nil, 10, 0))

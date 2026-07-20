@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -245,10 +244,11 @@ type idfDiff struct {
 type oracleRuntime struct {
 	provider *Provider
 
-	collectionID int64
-	vchannel     string
-	settings     *viewpb.QueryViewSettings
-	schema       *schemapb.CollectionSchema
+	collectionID    int64
+	vchannel        string
+	partitionIDs    []int64
+	loadInfoVersion uint64
+	schema          *schemapb.CollectionSchema
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -274,25 +274,25 @@ func newOracleRuntime(
 	ctx context.Context,
 	provider *Provider,
 	walView walview.VChannelWALView,
-	settings *viewpb.QueryViewSettings,
 	initialResources []*datapb.StreamingNodeBM25Resource,
 ) (*oracleRuntime, error) {
 	runtimeCtx, cancel := context.WithCancel(context.Background())
 	r := &oracleRuntime{
-		provider:       provider,
-		collectionID:   walView.CollectionID,
-		vchannel:       walView.VChannel,
-		settings:       settings,
-		schema:         walView.Schema,
-		ctx:            runtimeCtx,
-		cancel:         cancel,
-		notify:         make(chan struct{}, 1),
-		closeCh:        make(chan struct{}),
-		currentVersion: walView.SegmentSnapshot.DataVersion,
-		currentStats:   newBM25StatsFromSchema(walView.Schema),
-		currentSealed:  make(map[int64]sealedContribution),
-		currentGrowing: make(map[int64]growingContribution),
-		growingStore:   newGrowingStatsStore(walView.Schema),
+		provider:        provider,
+		collectionID:    walView.CollectionID,
+		vchannel:        walView.VChannel,
+		partitionIDs:    append([]int64(nil), walView.PartitionIDs...),
+		loadInfoVersion: walView.LoadInfoVersion,
+		schema:          walView.Schema,
+		ctx:             runtimeCtx,
+		cancel:          cancel,
+		notify:          make(chan struct{}, 1),
+		closeCh:         make(chan struct{}),
+		currentVersion:  walView.SegmentSnapshot.DataVersion,
+		currentStats:    newBM25StatsFromSchema(walView.Schema),
+		currentSealed:   make(map[int64]sealedContribution),
+		currentGrowing:  make(map[int64]growingContribution),
+		growingStore:    newGrowingStatsStore(walView.Schema),
 	}
 	sealed, err := provider.acquireSealedContributions(ctx, initialResources)
 	if err != nil {
@@ -528,7 +528,7 @@ func (r *oracleRuntime) popPending() (qviews.DataVersion, bool) {
 }
 
 func (r *oracleRuntime) computeDiff(ctx context.Context, target qviews.DataVersion) (*idfDiff, error) {
-	resources, err := r.provider.getSealedBM25Resources(ctx, r.collectionID, r.vchannel, target, r.settings)
+	resources, err := r.provider.getSealedBM25Resources(ctx, r.collectionID, r.vchannel, target, r.partitionIDs, r.loadInfoVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -630,13 +630,15 @@ func (p *Provider) getSealedBM25Resources(
 	collectionID int64,
 	vchannel string,
 	dataVersion qviews.DataVersion,
-	settings *viewpb.QueryViewSettings,
+	partitionIDs []int64,
+	loadInfoVersion uint64,
 ) ([]*datapb.StreamingNodeBM25Resource, error) {
 	resp, err := p.client.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{
-		CollectionId: collectionID,
-		Vchannel:     vchannel,
-		DataVersion:  dataVersion.IntoProto(),
-		Settings:     settings,
+		CollectionId:    collectionID,
+		Vchannel:        vchannel,
+		DataVersion:     dataVersion.IntoProto(),
+		LoadInfoVersion: loadInfoVersion,
+		PartitionIds:    append([]int64(nil), partitionIDs...),
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err

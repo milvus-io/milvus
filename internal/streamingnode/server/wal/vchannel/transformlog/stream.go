@@ -151,6 +151,7 @@ type streamEvent struct {
 	kind           streamEventKind
 	subscriptionID int64
 	entry          *streamingpb.TransformLogEntry
+	timeTick       uint64
 	err            error
 }
 
@@ -321,11 +322,7 @@ func (s *transformLogStream) createSubscription(opt wal.TransformLogSubscription
 		transformLog.mu.Unlock()
 		return nil, errors.Wrap(wal.ErrTransformLogStartPointTruncated, "start point is truncated")
 	}
-	caughtUpTarget := transformLog.latestTimeTickLocked()
 	transformLog.mu.Unlock()
-	if opt.EndTimeTick > 0 && opt.EndTimeTick < caughtUpTarget {
-		caughtUpTarget = opt.EndTimeTick
-	}
 
 	subscriptionID := opt.SubscriptionID
 	if subscriptionID == 0 {
@@ -337,19 +334,18 @@ func (s *transformLogStream) createSubscription(opt wal.TransformLogSubscription
 	}
 	ctx, cancel := context.WithCancel(s.ctx) // #nosec G118 -- cancel is owned by streamSubscription.Close/finishSubscription.
 	sub := &streamSubscription{
-		stream:         s,
-		id:             subscriptionID,
-		vchannel:       opt.VChannel,
-		startAfter:     opt.StartAfterTimeTick,
-		end:            opt.EndTimeTick,
-		cursor:         opt.StartAfterTimeTick,
-		caughtUpTarget: caughtUpTarget,
-		handler:        opt.Handler,
-		log:            transformLog,
-		state:          subscriptionStateCatchingUp,
-		ctx:            ctx,
-		cancel:         cancel,
-		done:           make(chan struct{}),
+		stream:     s,
+		id:         subscriptionID,
+		vchannel:   opt.VChannel,
+		startAfter: opt.StartAfterTimeTick,
+		end:        opt.EndTimeTick,
+		cursor:     opt.StartAfterTimeTick,
+		handler:    opt.Handler,
+		log:        transformLog,
+		state:      subscriptionStateCatchingUp,
+		ctx:        ctx,
+		cancel:     cancel,
+		done:       make(chan struct{}),
 	}
 	s.subs[subscriptionID] = sub
 	select {
@@ -383,10 +379,13 @@ func (s *transformLogStream) handleEvent(event streamEvent) {
 		if err := sub.handler.Handle(wal.TransformLogStreamEvent{
 			SubscriptionID: sub.id,
 			VChannel:       sub.vchannel,
-			CaughtUp:       &wal.TransformLogCaughtUp{StartAfterTimeTick: sub.startAfter},
+			SyncUp:         &wal.TransformLogSyncUp{TimeTick: event.timeTick},
 		}); err != nil {
 			s.finishSubscription(sub, err, true)
 			return
+		}
+		if event.timeTick > sub.cursor {
+			sub.cursor = event.timeTick
 		}
 		if sub.end > 0 {
 			s.finishSubscription(sub, nil, false)
@@ -412,28 +411,24 @@ func (s *transformLogStream) catchupWorker() {
 func (s *transformLogStream) catchup(sub *streamSubscription) {
 	cursor := sub.startAfter
 	for {
-		entry, ok, err := sub.log.nextEntryAfter(sub.ctx, cursor)
+		entry, ok, frontier, err := sub.log.nextEntryAfterWithFrontier(sub.ctx, cursor)
 		if err != nil {
 			s.sendEvent(sub.ctx, streamEvent{kind: streamEventCatchupError, subscriptionID: sub.id, err: err})
 			return
 		}
 		if !ok {
-			s.sendEvent(sub.ctx, streamEvent{kind: streamEventCatchupDone, subscriptionID: sub.id})
+			s.sendEvent(sub.ctx, streamEvent{kind: streamEventCatchupDone, subscriptionID: sub.id, timeTick: sub.syncUpTarget(frontier)})
 			return
 		}
 		timeTick := entry.GetTimeTick()
-		if timeTick > sub.caughtUpTarget {
-			s.sendEvent(sub.ctx, streamEvent{kind: streamEventCatchupDone, subscriptionID: sub.id})
+		if sub.end > 0 && timeTick > sub.end {
+			s.sendEvent(sub.ctx, streamEvent{kind: streamEventCatchupDone, subscriptionID: sub.id, timeTick: sub.syncUpTarget(frontier)})
 			return
 		}
 		if !s.sendEvent(sub.ctx, streamEvent{kind: streamEventCatchupEntry, subscriptionID: sub.id, entry: entry}) {
 			return
 		}
 		cursor = timeTick
-		if cursor >= sub.caughtUpTarget {
-			s.sendEvent(sub.ctx, streamEvent{kind: streamEventCatchupDone, subscriptionID: sub.id})
-			return
-		}
 	}
 }
 
@@ -495,7 +490,7 @@ func (s *transformLogStream) dispatchVChannel(vchannel string) {
 			delete(s.byVChannel, vchannel)
 			return
 		}
-		entry, ok, err := log.nextEntryAfter(s.ctx, minCursor)
+		entry, ok, syncUpTimeTick, err := log.nextEntryAfterWithFrontier(s.ctx, minCursor)
 		if err != nil {
 			for _, sub := range subs {
 				s.finishSubscription(sub, err, true)
@@ -503,6 +498,27 @@ func (s *transformLogStream) dispatchVChannel(vchannel string) {
 			return
 		}
 		if !ok {
+			if syncUpTimeTick <= minCursor {
+				return
+			}
+			for _, sub := range subs {
+				if sub.state != subscriptionStateLive || syncUpTimeTick <= sub.cursor {
+					continue
+				}
+				if sub.end > 0 && syncUpTimeTick > sub.end {
+					s.finishSubscription(sub, nil, false)
+					continue
+				}
+				if err := sub.handler.Handle(wal.TransformLogStreamEvent{
+					SubscriptionID: sub.id,
+					VChannel:       sub.vchannel,
+					SyncUp:         &wal.TransformLogSyncUp{TimeTick: syncUpTimeTick},
+				}); err != nil {
+					s.finishSubscription(sub, err, true)
+					continue
+				}
+				sub.cursor = syncUpTimeTick
+			}
 			return
 		}
 		timeTick := entry.GetTimeTick()
@@ -587,22 +603,31 @@ func (s *transformLogStream) closedError() error {
 }
 
 type streamSubscription struct {
-	stream         *transformLogStream
-	id             int64
-	vchannel       string
-	startAfter     uint64
-	end            uint64
-	cursor         uint64
-	caughtUpTarget uint64
-	handler        wal.TransformLogEventHandler
-	log            *TransformLog
-	state          subscriptionState
-	ctx            context.Context
-	cancel         context.CancelFunc
-	done           chan struct{}
+	stream     *transformLogStream
+	id         int64
+	vchannel   string
+	startAfter uint64
+	end        uint64
+	cursor     uint64
+	handler    wal.TransformLogEventHandler
+	log        *TransformLog
+	state      subscriptionState
+	ctx        context.Context
+	cancel     context.CancelFunc
+	done       chan struct{}
 
 	errMu sync.Mutex
 	err   error
+}
+
+func (s *streamSubscription) syncUpTarget(frontier uint64) uint64 {
+	if frontier < s.startAfter {
+		frontier = s.startAfter
+	}
+	if s.end > 0 && frontier > s.end {
+		frontier = s.end
+	}
+	return frontier
 }
 
 func (s *streamSubscription) ID() int64 {

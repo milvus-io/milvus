@@ -190,11 +190,54 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, err
 	}
 
+	var runtime *queryresource.QueryRuntime
+	if w.viewResourceManager != nil {
+		runtime, _ = w.viewResourceManager.GetQueryRuntime(qviews.QueryViewKey{
+			ShardID:          shardID,
+			QueryViewVersion: lease.Version,
+		})
+	}
+	optimizer := queryresource.NewGlobalOptimizer(runtime)
 	plan := &viewpb.QueryPlan{
-		Version:   lease.Version.IntoProto(),
-		ShardId:   shardID.IntoProto(),
-		Mvcc:      mvcc,
-		WorkNodes: buildQueryPlanWorkNodes(lease.View, req),
+		Version: lease.Version.IntoProto(),
+		ShardId: shardID.IntoProto(),
+		Mvcc:    mvcc,
+	}
+	switch request := req.GetRequest().(type) {
+	case *viewpb.GetQueryPlanRequest_LegacySearchRequest:
+		if request.LegacySearchRequest == nil {
+			return nil, viewerror.NewUnknownError("query plan request misses legacy search request")
+		}
+		searchReq := proto.Clone(request.LegacySearchRequest).(*internalpb.SearchRequest)
+		fillSearchRequestPartitionIDs(searchReq, req.GetPartitionIds())
+		if err := optimizer.OptimizeSearch(ctx, searchReq); err != nil {
+			return nil, err
+		}
+		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: searchReq}
+		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
+			ignoreGrowing: searchReq.GetIgnoreGrowing(),
+			partitionIDs:  searchReq.GetPartitionIDs(),
+			runtime:       runtime,
+			mvcc:          mvcc,
+		})
+	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
+		if request.LegacyRetrieveRequest == nil {
+			return nil, viewerror.NewUnknownError("query plan request misses legacy retrieve request")
+		}
+		retrieveReq := proto.Clone(request.LegacyRetrieveRequest).(*internalpb.RetrieveRequest)
+		fillRetrieveRequestPartitionIDs(retrieveReq, req.GetPartitionIds())
+		if err := optimizer.OptimizeRetrieve(ctx, retrieveReq); err != nil {
+			return nil, err
+		}
+		plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: retrieveReq}
+		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
+			ignoreGrowing: retrieveReq.GetIgnoreGrowing(),
+			partitionIDs:  retrieveReq.GetPartitionIDs(),
+			runtime:       runtime,
+			mvcc:          mvcc,
+		})
+	default:
+		return nil, viewerror.NewUnknownError("query plan request misses legacy request")
 	}
 	mlog.Debug(ctx, "query view plan created",
 		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
@@ -204,37 +247,21 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 		mlog.Int("workNodeCount", len(plan.WorkNodes)),
 	)
-	var runtime *queryresource.QueryRuntime
-	if w.viewResourceManager != nil {
-		runtime, _ = w.viewResourceManager.GetQueryRuntime(qviews.QueryViewKey{
-			ShardID:          shardID,
-			QueryViewVersion: lease.Version,
-		})
-	}
-	optimizer := queryresource.NewGlobalOptimizer(runtime)
-	switch request := req.GetRequest().(type) {
-	case *viewpb.GetQueryPlanRequest_LegacySearchRequest:
-		if request.LegacySearchRequest == nil {
-			return nil, viewerror.NewUnknownError("query plan request misses legacy search request")
-		}
-		searchReq := proto.Clone(request.LegacySearchRequest).(*internalpb.SearchRequest)
-		if err := optimizer.OptimizeSearch(ctx, searchReq); err != nil {
-			return nil, err
-		}
-		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: searchReq}
-	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
-		if request.LegacyRetrieveRequest == nil {
-			return nil, viewerror.NewUnknownError("query plan request misses legacy retrieve request")
-		}
-		retrieveReq := proto.Clone(request.LegacyRetrieveRequest).(*internalpb.RetrieveRequest)
-		if err := optimizer.OptimizeRetrieve(ctx, retrieveReq); err != nil {
-			return nil, err
-		}
-		plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: retrieveReq}
-	default:
-		return nil, viewerror.NewUnknownError("query plan request misses legacy request")
-	}
 	return plan, nil
+}
+
+func fillSearchRequestPartitionIDs(req *internalpb.SearchRequest, partitionIDs []int64) {
+	if req == nil || len(req.GetPartitionIDs()) > 0 || len(partitionIDs) == 0 {
+		return
+	}
+	req.PartitionIDs = append([]int64(nil), partitionIDs...)
+}
+
+func fillRetrieveRequestPartitionIDs(req *internalpb.RetrieveRequest, partitionIDs []int64) {
+	if req == nil || len(req.GetPartitionIDs()) > 0 || len(partitionIDs) == 0 {
+		return
+	}
+	req.PartitionIDs = append([]int64(nil), partitionIDs...)
 }
 
 func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -265,9 +292,20 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 	}
 }
 
-func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, req *viewpb.GetQueryPlanRequest) []*viewpb.QueryPlanWorkNode {
+type queryPlanGrowingRuntime interface {
+	MayHaveVisibleGrowingSegments(growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool
+}
+
+type queryPlanWorkNodeOptions struct {
+	ignoreGrowing bool
+	partitionIDs  []int64
+	runtime       queryPlanGrowingRuntime
+	mvcc          *viewpb.QueryPlanMVCC
+}
+
+func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) []*viewpb.QueryPlanWorkNode {
 	nodes := make([]*viewpb.QueryPlanWorkNode, 0, 1+len(view.GetQueryNode()))
-	if view.GetStreamingNode() != nil && !queryPlanIgnoresGrowing(req) {
+	if queryPlanIncludesStreamingNode(view, options) {
 		nodes = append(nodes, &viewpb.QueryPlanWorkNode{
 			Node: &viewpb.QueryPlanWorkNode_StreamingNode{
 				StreamingNode: &viewpb.StreamingWorkNode{
@@ -277,7 +315,7 @@ func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, req *viewpb.GetQuery
 		})
 	}
 	for _, qn := range view.GetQueryNode() {
-		if !queryNodeHasSelectedSegments(qn, req.GetPartitionIds()) {
+		if !queryNodeHasSelectedSegments(qn, options.partitionIDs) {
 			continue
 		}
 		nodes = append(nodes, &viewpb.QueryPlanWorkNode{
@@ -289,14 +327,18 @@ func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, req *viewpb.GetQuery
 	return nodes
 }
 
-func queryPlanIgnoresGrowing(req *viewpb.GetQueryPlanRequest) bool {
-	if req.GetLegacySearchRequest() != nil {
-		return req.GetLegacySearchRequest().GetIgnoreGrowing()
+func queryPlanIncludesStreamingNode(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) bool {
+	if view.GetStreamingNode() == nil || options.ignoreGrowing {
+		return false
 	}
-	if req.GetLegacyRetrieveRequest() != nil {
-		return req.GetLegacyRetrieveRequest().GetIgnoreGrowing()
+	if options.runtime == nil || options.mvcc == nil {
+		return true
 	}
-	return false
+	return options.runtime.MayHaveVisibleGrowingSegments(
+		options.mvcc.GetGrowingTimetick(),
+		options.mvcc.GetTransformingTimetick(),
+		options.partitionIDs,
+	)
 }
 
 func queryNodeHasSelectedSegments(qn *viewpb.QueryViewOfQueryNode, partitionIDs []int64) bool {

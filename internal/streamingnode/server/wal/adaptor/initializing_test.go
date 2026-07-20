@@ -34,6 +34,10 @@ func newRecoveryBarrierWALImpls(appendFunc func(context.Context, message.Mutable
 	}
 }
 
+func newFirstTimeTickWALImpls(appendFunc func(context.Context, message.MutableMessage) (message.MessageID, error)) *recoveryBarrierWALImpls {
+	return newRecoveryBarrierWALImpls(appendFunc)
+}
+
 func (w *recoveryBarrierWALImpls) WALName() message.WALName {
 	return message.WALNameTest
 }

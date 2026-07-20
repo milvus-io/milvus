@@ -39,13 +39,54 @@ func (r *Runtime) WaitMVCCVisible(ctx context.Context, growingTimetick uint64, t
 	return ctx.Err()
 }
 
+func (r *Runtime) MayHaveVisibleGrowingSegments(growingTimetick uint64, transformTimetick uint64, partitionIDs []int64) bool {
+	if r == nil {
+		return true
+	}
+	selectedPartitions := selectedPartitionSet(partitionIDs)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || !r.mvccVisibleLocked(growingTimetick, transformTimetick) {
+		return true
+	}
+	for _, segmentID := range r.segmentIDs {
+		segment := r.segments[segmentID]
+		if segment == nil || !partitionSelected(selectedPartitions, segment.partitionID) {
+			continue
+		}
+		segment.mu.Lock()
+		candidate := !segment.released && segment.segment != nil
+		segment.mu.Unlock()
+		if candidate {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Runtime) mvccVisibleLocked(growingTimetick uint64, transformTimetick uint64) bool {
 	return r.appliedGrowingTimeTick.Load() >= growingTimetick &&
 		r.appliedTransformTimeTick.Load() >= transformTimetick
 }
 
 func (r *Runtime) markGrowingTimeTick(timetick uint64) {
-	r.markTimeTick(&r.appliedGrowingTimeTick, timetick)
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	advanced := advanceTimeTick(&r.appliedGrowingTimeTick, timetick)
+	if !advanced {
+		r.mu.Unlock()
+		return
+	}
+	segmentsToRelease := make([]*growingSegment, 0)
+	r.collectSegmentsToReleaseLocked(&segmentsToRelease)
+	r.mvccCond.Broadcast()
+	r.mu.Unlock()
+	for _, segment := range segmentsToRelease {
+		segment.release()
+	}
 }
 
 func (r *Runtime) markTransformTimeTick(timetick uint64) {

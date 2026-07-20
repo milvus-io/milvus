@@ -43,6 +43,7 @@ type PChannelManagerConfig struct {
 	OnSegmentSealed           func(walview.SegmentSealedEvent)
 
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
+	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
 }
 
 // PChannelRecoveryManager owns all vchannel recovery modules on one pchannel.
@@ -324,6 +325,7 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		OnSegmentSealed:            m.config.OnSegmentSealed,
 		TransformLogStream:         m.streamManager,
 		QueryRuntimeModuleBuilders: m.config.QueryRuntimeModuleBuilders,
+		QueryViewLoadInfoProvider:  m.config.QueryViewLoadInfoProvider,
 		QueryResourceScheduler:     m.queryScheduler,
 		QueryRuntimeDispatcher:     m.queryDispatcher,
 	})

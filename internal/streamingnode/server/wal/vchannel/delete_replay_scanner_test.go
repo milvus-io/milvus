@@ -36,8 +36,8 @@ func TestDeleteReplayScannerUsesTransformLogStreamManager(t *testing.T) {
 	second := recvDeleteReplayEvent(t, scanner.Chan())
 	require.NotNil(t, second.Entry)
 	assert.Equal(t, uint64(20), second.Entry.GetTimeTick())
-	caughtUp := recvDeleteReplayEvent(t, scanner.Chan())
-	require.NotNil(t, caughtUp.CaughtUp)
+	syncUp := recvDeleteReplayEvent(t, scanner.Chan())
+	require.NotNil(t, syncUp.SyncUp)
 
 	require.Eventually(t, func() bool {
 		select {

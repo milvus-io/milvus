@@ -30,7 +30,8 @@ type LoadConfigStore struct {
 	version uint64
 
 	// configs keeps the live in-memory snapshot per collection.
-	configs map[int64]*LoadConfig
+	configs  map[int64]*LoadConfig
+	versions map[int64]uint64
 
 	// snapshot is the resident immutable view returned to Balancer.
 	snapshot *LoadConfigSnapshot
@@ -67,16 +68,19 @@ func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCat
 	}
 
 	configs := make(map[int64]*LoadConfig, len(collections))
+	versions := make(map[int64]uint64, len(collections))
 	for _, info := range collections {
 		collID := info.GetCollectionID()
 		cfg := buildFromPersisted(info, partitions[collID], replicasByColl[collID])
 		configs[collID] = cfg
+		versions[collID] = 1
 	}
 
 	store := &LoadConfigStore{
-		catalog: catalog,
-		version: 1,
-		configs: configs,
+		catalog:  catalog,
+		version:  1,
+		configs:  configs,
+		versions: versions,
 	}
 	return store, nil
 }
@@ -127,6 +131,7 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 
 	s.replaceInMemoryLocked(cfg)
 	s.version++
+	s.versions[cfg.CollectionID] = s.version
 	return nil
 }
 
@@ -152,6 +157,7 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 
 	delete(s.configs, collectionID)
 	s.version++
+	delete(s.versions, collectionID)
 	return nil
 }
 
@@ -177,7 +183,7 @@ func (s *LoadConfigStore) Snapshot() *LoadConfigSnapshot {
 }
 
 func (s *LoadConfigStore) publishSnapshotLocked() {
-	s.snapshot = NewLoadConfigSnapshot(s.version, s.configs)
+	s.snapshot = NewLoadConfigSnapshotWithVersions(s.version, s.configs, s.versions)
 }
 
 // replaceInMemoryLocked swaps the live in-memory config for a collection.

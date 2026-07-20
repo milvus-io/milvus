@@ -16,10 +16,7 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, partitionIDs
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	selectedPartitions := make(map[int64]struct{}, len(partitionIDs))
-	for _, partitionID := range partitionIDs {
-		selectedPartitions[partitionID] = struct{}{}
-	}
+	selectedPartitions := selectedPartitionSet(partitionIDs)
 
 	r.mu.Lock()
 	if r.closed {
@@ -32,10 +29,8 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, partitionIDs
 		if segment == nil {
 			continue
 		}
-		if len(selectedPartitions) > 0 {
-			if _, ok := selectedPartitions[segment.partitionID]; !ok {
-				continue
-			}
+		if !partitionSelected(selectedPartitions, segment.partitionID) {
+			continue
 		}
 		csegment, ok := segment.pinIfNotReleased()
 		if !ok {
@@ -57,6 +52,25 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, partitionIDs
 	}
 	r.mu.Unlock()
 	return handles, nil
+}
+
+func selectedPartitionSet(partitionIDs []int64) map[int64]struct{} {
+	if len(partitionIDs) == 0 {
+		return nil
+	}
+	selectedPartitions := make(map[int64]struct{}, len(partitionIDs))
+	for _, partitionID := range partitionIDs {
+		selectedPartitions[partitionID] = struct{}{}
+	}
+	return selectedPartitions
+}
+
+func partitionSelected(selectedPartitions map[int64]struct{}, partitionID int64) bool {
+	if len(selectedPartitions) == 0 {
+		return true
+	}
+	_, ok := selectedPartitions[partitionID]
+	return ok
 }
 
 type growingSegmentHandle struct {

@@ -50,18 +50,18 @@ func TestEventStreamPublishesSubscriptionEventsOnSharedOutput(t *testing.T) {
 	require.Equal(t, uint64(21), event.Entry.GetTimeTick())
 
 	fakeStream.recv(&streamingpb.TransformResponse{
-		Response: &streamingpb.TransformResponse_CaughtUp{
-			CaughtUp: &streamingpb.TransformSubscriptionCaughtUp{
-				SubscriptionId:     sub1.ID(),
-				Vchannel:           "v1",
-				StartAfterTimeTick: 10,
+		Response: &streamingpb.TransformResponse_SyncUp{
+			SyncUp: &streamingpb.TransformSubscriptionSyncUp{
+				SubscriptionId: sub1.ID(),
+				Vchannel:       "v1",
+				TimeTick:       30,
 			},
 		},
 	})
 	event = recvEvent(t, handler1.events)
 	require.Equal(t, sub1.ID(), event.SubscriptionID)
 	require.Equal(t, "v1", event.VChannel)
-	require.Equal(t, uint64(10), event.CaughtUp.StartAfterTimeTick)
+	require.Equal(t, uint64(30), event.SyncUp.TimeTick)
 }
 
 func TestEventStreamReportsStreamErrorOnStreamOnly(t *testing.T) {

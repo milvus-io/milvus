@@ -179,8 +179,6 @@ func transformEntryFromMessage(msg message.ImmutableMessage, opt appendOption) *
 	switch messageutil.ClassifyTransformLogMessage(msg) {
 	case messageutil.TransformLogKindDelete:
 		return deleteTransformEntryFromMessage(msg, opt)
-	case messageutil.TransformLogKindBarrier:
-		return transformBarrierEntry(msg.TimeTick())
 	default:
 		return nil
 	}
@@ -235,18 +233,6 @@ func transformEntryFromDeletes(timeTick uint64, deletes []message.ImmutableDelet
 				Delete: &streamingpb.TransformDeleteEntry{
 					Blocks: blocks,
 				},
-			},
-		},
-	}
-}
-
-func transformBarrierEntry(timeTick uint64) *transformEntry {
-	return &transformEntry{
-		timeTick: timeTick,
-		entry: &streamingpb.TransformLogEntry{
-			TimeTick: timeTick,
-			Entry: &streamingpb.TransformLogEntry_Barrier{
-				Barrier: &streamingpb.TransformBarrierEntry{},
 			},
 		},
 	}

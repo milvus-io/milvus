@@ -136,6 +136,9 @@ type Server struct {
 
 	// query view runtime
 	qviewsRuntime *qviewsRuntime
+
+	// query view segment load info watch
+	segmentLoadInfoWatcher *queryViewSegmentLoadInfoWatcher
 }
 
 type FileResourceObserver interface {
@@ -146,9 +149,10 @@ type FileResourceObserver interface {
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:            ctx,
-		cancel:         cancel,
-		metricsRequest: metricsinfo.NewMetricsRequest(),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		metricsRequest:         metricsinfo.NewMetricsRequest(),
+		segmentLoadInfoWatcher: newQueryViewSegmentLoadInfoWatcher(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator

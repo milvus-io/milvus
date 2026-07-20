@@ -115,6 +115,10 @@ func (s *viewQueryGrowingSegment) DropIndex(context.Context, int64) error {
 	return merr.WrapErrServiceInternalMsg("view query growing segment does not support DropIndex")
 }
 
+func (s *viewQueryGrowingSegment) LoadIndex(context.Context, *querypb.SegmentLoadInfo) error {
+	return merr.WrapErrServiceInternalMsg("view query growing segment does not support LoadIndex")
+}
+
 func (s *viewQueryGrowingSegment) Insert(context.Context, []int64, []typeutil.Timestamp, *segcorepb.InsertRecord) error {
 	return merr.WrapErrServiceInternalMsg("view query growing segment does not support Insert")
 }

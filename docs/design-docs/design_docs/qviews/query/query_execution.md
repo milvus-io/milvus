@@ -10,6 +10,12 @@ or `QueryOnView` to every work node in the plan. Each node turns the requested
 QueryView version into concrete segment tasks, executes only those local tasks,
 and returns a node-local reduced result to Proxy.
 
+Phase 1 may omit a StreamingNode work node when it can prove that the selected
+growing runtime is already visible at the requested MVCC and has no growing
+segment candidates after request-scope filtering. This is only an optimization.
+Phase 2 task acquisition remains the correctness boundary for any node that is
+included in the plan.
+
 The first runnable implementation focuses on the primary path:
 
 - StreamingNode executes growing-side data for an `Up` QueryView.
@@ -169,13 +175,14 @@ First-version wait rules are view/runtime-level, not segment-level:
 
 | Node | Wait rule |
 |---|---|
-| StreamingNode | wait growing runtime visibility >= `mvcc.growing_timetick` |
+| StreamingNode | wait growing runtime visibility >= `mvcc.growing_timetick` and transform-equivalent visibility >= `mvcc.transforming_timetick` |
 | QueryNode | wait TransformBuffer visibility >= `mvcc.transforming_timetick` |
 
-StreamingNode consumes only `growing_timetick`. QueryNode consumes only
-`transforming_timetick`. If a WAL message must affect both nodes before a query
-can execute, Phase 1 advances both executor-local positions from that WAL
-message TimeTick.
+QueryNode consumes `transforming_timetick`. StreamingNode consumes the full
+`QueryPlanMVCC` through its growing runtime visibility contract so that
+growing-side data and transform-equivalent effects are both visible before
+execution. If a WAL message must affect both nodes before a query can execute,
+Phase 1 advances both executor-local positions from that WAL message TimeTick.
 
 After tasks are returned:
 
@@ -211,10 +218,20 @@ First-version `Acquire*SegmentTasks` behavior:
 8. Release the QueryView/runtime ref.
 9. Return concrete SN Search/Query segment tasks.
 
+StreamingNode task acquisition only returns queryable growing segment handles.
+Flushed segment markers retained by the growing runtime for WAL replay
+idempotency are not task candidates and are never exposed to schedulers.
+
+Phase 1 StreamingNode pruning and Phase 2 task acquisition must use the same
+request-scope filter for growing segment candidates. In the first implementation
+this scope is the request `partition_ids`. If Phase 1 could not prove the
+filtered candidate set was empty, Phase 2 may still acquire zero handles after
+waiting for MVCC; that is a valid empty local result, not an error.
+
 The growing runtime may internally apply TransformLog-equivalent effects such as
-Delete before advancing its applied growing visibility. That is an internal
-runtime contract; the task provider does not pass or wait on
-`mvcc.transforming_timetick` for StreamingNode execution.
+Delete before reporting MVCC visibility. That is an internal runtime contract;
+the task provider passes the full `QueryPlanMVCC` to the runtime and does not
+perform separate segment-level waits.
 
 Segments that have already been handed off to QueryNode are excluded according to
 the QueryView version and the growing runtime's DataVersion rules.

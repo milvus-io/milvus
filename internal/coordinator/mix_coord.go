@@ -974,8 +974,21 @@ func (s *mixCoordImpl) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetS
 	return s.queryCoordServer.GetLoadSegmentInfo(ctx, req)
 }
 
-func (s *mixCoordImpl) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	return s.datacoordServer.GetQueryViewSegmentLoadInfo(ctx, req)
+func (s *mixCoordImpl) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	return s.datacoordServer.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs)
+}
+
+func (s *mixCoordImpl) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	resp, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return resp, nil
+	}
+	resp.IndexInfoList = s.datacoordServer.GetQueryViewCollectionIndexInfos(req.GetCollectionID())
+	return resp, nil
+}
+
+func (s *mixCoordImpl) WatchQueryViewSegmentLoadInfo(stream querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
+	return s.queryCoordServer.WatchQueryViewSegmentLoadInfo(stream)
 }
 
 func (s *mixCoordImpl) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
@@ -1108,6 +1121,28 @@ func (s *mixCoordImpl) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRec
 }
 
 func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	if req.GetLoadInfoVersion() != 0 {
+		loadInfo, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{
+			CollectionID: req.GetCollectionId(),
+			Version:      req.GetLoadInfoVersion(),
+		})
+		if err := merr.CheckRPCCall(loadInfo, err); err != nil {
+			return &datapb.GetStreamingNodeQueryViewResourcesResponse{
+				Status:       merr.Status(err),
+				CollectionId: req.GetCollectionId(),
+				Vchannel:     req.GetVchannel(),
+				DataVersion:  req.GetDataVersion(),
+			}, nil
+		}
+		req = &datapb.GetStreamingNodeQueryViewResourcesRequest{
+			Base:            req.GetBase(),
+			CollectionId:    req.GetCollectionId(),
+			Vchannel:        req.GetVchannel(),
+			DataVersion:     req.GetDataVersion(),
+			LoadInfoVersion: req.GetLoadInfoVersion(),
+			PartitionIds:    append([]int64(nil), loadInfo.GetPartitionIDs()...),
+		}
+	}
 	return s.datacoordServer.GetStreamingNodeQueryViewResources(ctx, req)
 }
 

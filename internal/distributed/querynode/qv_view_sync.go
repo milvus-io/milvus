@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -146,30 +145,33 @@ func (p *lazyQueryViewLoadMetadataProvider) DescribeCollection(ctx context.Conte
 	return resp, nil
 }
 
-func (p *lazyQueryViewLoadMetadataProvider) GetQueryViewSegmentLoadInfo(ctx context.Context, collectionID int64, segmentIDs ...int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
-	var resp *querypb.GetQueryViewSegmentLoadInfoResponse
+func (p *lazyQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(ctx context.Context, collectionID int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
+	var resp *querypb.GetQueryViewLoadInfoResponse
 	err := retryQueryViewMetadataRPC(ctx, func(rpcCtx context.Context) error {
 		client, err := p.client(rpcCtx)
 		if err != nil {
-			return merr.Wrapf(err, "get query view segment load info for collection %d segments %v", collectionID, segmentIDs)
+			return merr.Wrapf(err, "get query view load info for collection %d", collectionID)
 		}
 		var callErr error
-		resp, callErr = client.GetQueryViewSegmentLoadInfo(rpcCtx, &querypb.GetQueryViewSegmentLoadInfoRequest{
+		resp, callErr = client.GetQueryViewLoadInfo(rpcCtx, &querypb.GetQueryViewLoadInfoRequest{
 			CollectionID: collectionID,
-			SegmentIDs:   segmentIDs,
+			Version:      uint64(version),
 		})
 		if err := merr.CheckRPCCall(resp, callErr); err != nil {
-			return merr.Wrapf(err, "get query view segment load info for collection %d segments %v", collectionID, segmentIDs)
+			return merr.Wrapf(err, "get query view load info for collection %d", collectionID)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return qnview.QueryViewLoadInfo{}, err
 	}
-	if len(resp.GetInfos()) == 0 && len(segmentIDs) > 0 {
-		return nil, nil, merr.WrapErrSegmentNotFound(segmentIDs[0], "no such segment load info in DataCoord")
-	}
-	return resp.GetInfos(), resp.GetIndexInfoList(), nil
+	return qnview.QueryViewLoadInfo{
+		CollectionID: resp.GetCollectionID(),
+		Version:      qnview.QueryViewLoadInfoVersionFromProto(resp.GetVersion()),
+		PartitionIDs: append([]int64(nil), resp.GetPartitionIDs()...),
+		LoadFields:   resp.GetLoadFields(),
+		IndexInfos:   resp.GetIndexInfoList(),
+	}, nil
 }
 
 func retryQueryViewMetadataRPC(ctx context.Context, fn func(context.Context) error) error {

@@ -1219,7 +1219,7 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		return resp, nil
 	}
 
-	segmentIDs := dataViewShardSegmentIDs(shard, req.GetSettings())
+	segmentIDs := dataViewShardSegmentIDs(shard, req.GetPartitionIds())
 	if len(segmentIDs) == 0 {
 		return resp, nil
 	}
@@ -1258,45 +1258,40 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 	return resp, nil
 }
 
-func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	resp := &querypb.GetQueryViewSegmentLoadInfoResponse{
-		Status: merr.Success(),
-	}
+func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return nil, nil, err
 	}
-	if req.GetCollectionID() == 0 {
-		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
-		return resp, nil
+	if collectionID == 0 {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("collection id is zero")
 	}
-	if len(req.GetSegmentIDs()) == 0 {
-		return resp, nil
+	if len(segmentIDs) == 0 {
+		return nil, nil, nil
 	}
 
-	indexInfos := s.queryViewCollectionIndexInfos(req.GetCollectionID())
-	segmentIndexes := s.meta.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
-	resp.IndexInfoList = indexInfos
-	resp.Infos = make([]*querypb.SegmentLoadInfo, 0, len(req.GetSegmentIDs()))
-	for _, segmentID := range req.GetSegmentIDs() {
+	indexInfos := s.queryViewCollectionIndexInfos(collectionID)
+	segmentIndexes := s.meta.indexMeta.GetSegmentsIndexes(collectionID, segmentIDs)
+	infos := make([]*querypb.SegmentLoadInfo, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
 		segment := s.meta.GetSegment(ctx, segmentID)
 		if segment == nil {
-			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, "missing segment info for query view"))
-			return resp, nil
+			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "missing segment info for query view")
 		}
-		if segment.GetCollectionID() != req.GetCollectionID() {
-			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, fmt.Sprintf("segment does not belong to collection %d", req.GetCollectionID())))
-			return resp, nil
+		if segment.GetCollectionID() != collectionID {
+			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, fmt.Sprintf("segment does not belong to collection %d", collectionID))
 		}
 		cloned := segment.Clone()
 		if err := binlog.DecompressBinLogs(cloned.SegmentInfo); err != nil {
-			resp.Status = merr.Status(err)
-			return resp, nil
+			return nil, nil, err
 		}
 		segmentutil.ReCalcRowCount(segment.SegmentInfo, cloned.SegmentInfo)
-		resp.Infos = append(resp.Infos, s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes[segmentID]))
+		infos = append(infos, s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes[segmentID]))
 	}
-	return resp, nil
+	return infos, indexInfos, nil
+}
+
+func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
+	return s.queryViewCollectionIndexInfos(collectionID)
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
@@ -1420,11 +1415,11 @@ func dataViewShard(dataView *viewpb.DataViewOfCollection, vchannel string) *view
 	return nil
 }
 
-func dataViewShardSegmentIDs(shard *viewpb.DataViewOfShard, settings *viewpb.QueryViewSettings) []int64 {
+func dataViewShardSegmentIDs(shard *viewpb.DataViewOfShard, partitionIDs []int64) []int64 {
 	if shard == nil {
 		return nil
 	}
-	requiredPartitions := typeutil.NewSet(settings.GetRequiredPartitions()...)
+	requiredPartitions := typeutil.NewSet(partitionIDs...)
 	loadsAllPartitions := len(requiredPartitions) == 0
 	segmentIDs := make([]int64, 0)
 	for _, partition := range shard.GetPartitions() {

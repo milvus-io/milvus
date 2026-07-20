@@ -1658,10 +1658,14 @@ func (coord *MixCoordMock) GetQueryNodeDistribution(ctx context.Context, in *que
 	}, nil
 }
 
-func (coord *MixCoordMock) GetQueryViewSegmentLoadInfo(ctx context.Context, in *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	return &querypb.GetQueryViewSegmentLoadInfoResponse{
+func (coord *MixCoordMock) GetQueryViewLoadInfo(ctx context.Context, in *querypb.GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return &querypb.GetQueryViewLoadInfoResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+func (coord *MixCoordMock) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
+	return nil, nil
 }
 
 func (coord *MixCoordMock) GetStreamingNodeQueryViewResources(ctx context.Context, in *datapb.GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {

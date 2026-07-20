@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -95,8 +95,7 @@ func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) 
 	}
 	r.mu.Unlock()
 
-	settings := queryViewSettingsFromWALView(walView)
-	if !hasLoadedBM25Function(walView.Schema, settings.GetRequiredFields()) {
+	if !hasLoadedBM25Function(walView.Schema, loadFieldIDs(walView.LoadFields)) {
 		r.mu.RLock()
 		closed := r.closed
 		r.mu.RUnlock()
@@ -109,7 +108,7 @@ func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) 
 	if err != nil {
 		return err
 	}
-	oracle, err := provider.buildOracle(ctx, walView, settings)
+	oracle, err := provider.buildOracle(ctx, walView)
 	if err != nil {
 		return err
 	}
@@ -147,37 +146,24 @@ func (r *Runtime) resolveProvider(ctx context.Context) (*Provider, error) {
 	}, nil
 }
 
-func (p *Provider) buildOracle(ctx context.Context, walView walview.VChannelWALView, settings *viewpb.QueryViewSettings) (*oracleRuntime, error) {
+func (p *Provider) buildOracle(ctx context.Context, walView walview.VChannelWALView) (*oracleRuntime, error) {
 	if p.client == nil {
 		return nil, errors.New("querycoord client is nil")
 	}
 
-	resources, err := p.getSealedBM25Resources(ctx, walView.CollectionID, walView.VChannel, walView.SegmentSnapshot.DataVersion, settings)
+	resources, err := p.getSealedBM25Resources(ctx, walView.CollectionID, walView.VChannel, walView.SegmentSnapshot.DataVersion, walView.PartitionIDs, walView.LoadInfoVersion)
 	if err != nil {
 		return nil, err
 	}
-	return newOracleRuntime(ctx, p, walView, settings, resources)
+	return newOracleRuntime(ctx, p, walView, resources)
 }
 
-func queryViewSettingsFromWALView(view walview.VChannelWALView) *viewpb.QueryViewSettings {
-	if view.Settings != nil {
-		return view.Settings
+func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
+	ids := make([]int64, 0, len(fields))
+	for _, field := range fields {
+		ids = append(ids, field.GetFieldId())
 	}
-	if view.LoadConfig == nil {
-		return &viewpb.QueryViewSettings{}
-	}
-	header := view.LoadConfig.GetHeader()
-	if header == nil {
-		return &viewpb.QueryViewSettings{}
-	}
-	fields := make([]int64, 0, len(header.GetLoadFields()))
-	for _, field := range header.GetLoadFields() {
-		fields = append(fields, field.GetFieldId())
-	}
-	return &viewpb.QueryViewSettings{
-		RequiredPartitions: append([]int64{}, header.GetPartitionIds()...),
-		RequiredFields:     fields,
-	}
+	return ids
 }
 
 func (r *Runtime) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {

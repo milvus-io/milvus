@@ -23,9 +23,18 @@ func (r *QueryRuntime) AcquireGrowingSegmentHandles(ctx context.Context, partiti
 	return runtime.AcquireGrowingSegmentHandles(ctx, partitionIDs)
 }
 
+func (r *QueryRuntime) MayHaveVisibleGrowingSegments(growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool {
+	runtime, ok := r.growingRuntime()
+	if !ok {
+		return true
+	}
+	return runtime.MayHaveVisibleGrowingSegments(growingTimetick, transformingTimetick, partitionIDs)
+}
+
 type growingRuntime interface {
 	WaitMVCCVisible(ctx context.Context, growingTimetick uint64, transformingTimetick uint64) error
 	AcquireGrowingSegmentHandles(ctx context.Context, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error)
+	MayHaveVisibleGrowingSegments(growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool
 }
 
 func (r *QueryRuntime) growingRuntime() (growingRuntime, bool) {

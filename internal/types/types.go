@@ -308,7 +308,7 @@ type MixCoord interface {
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error
 
-	GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error)
+	GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error)
 
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 

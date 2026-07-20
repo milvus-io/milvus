@@ -5288,28 +5288,97 @@ func (_c *MixCoord_GetLoadSegmentInfo_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// GetQueryViewSegmentLoadInfo provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) GetQueryViewSegmentLoadInfo(_a0 context.Context, _a1 *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	ret := _m.Called(_a0, _a1)
+// GetQueryViewSegmentLoadInfos provides a mock function with given fields: _a0, collectionID, segmentIDs
+func (_m *MixCoord) GetQueryViewSegmentLoadInfos(_a0 context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	ret := _m.Called(_a0, collectionID, segmentIDs)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetQueryViewSegmentLoadInfo")
+		panic("no return value specified for GetQueryViewSegmentLoadInfos")
 	}
 
-	var r0 *querypb.GetQueryViewSegmentLoadInfoResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error)); ok {
-		return rf(_a0, _a1)
+	var r0 []*querypb.SegmentLoadInfo
+	var r1 []*indexpb.IndexInfo
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error)); ok {
+		return rf(_a0, collectionID, segmentIDs)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest) *querypb.GetQueryViewSegmentLoadInfoResponse); ok {
-		r0 = rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) []*querypb.SegmentLoadInfo); ok {
+		r0 = rf(_a0, collectionID, segmentIDs)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*querypb.GetQueryViewSegmentLoadInfoResponse)
+			r0 = ret.Get(0).([]*querypb.SegmentLoadInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, int64, []int64) []*indexpb.IndexInfo); ok {
+		r1 = rf(_a0, collectionID, segmentIDs)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]*indexpb.IndexInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, int64, []int64) error); ok {
+		r2 = rf(_a0, collectionID, segmentIDs)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MixCoord_GetQueryViewSegmentLoadInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryViewSegmentLoadInfos'
+type MixCoord_GetQueryViewSegmentLoadInfos_Call struct {
+	*mock.Call
+}
+
+// GetQueryViewSegmentLoadInfos is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - collectionID int64
+//   - segmentIDs []int64
+func (_e *MixCoord_Expecter) GetQueryViewSegmentLoadInfos(_a0 interface{}, collectionID interface{}, segmentIDs interface{}) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
+	return &MixCoord_GetQueryViewSegmentLoadInfos_Call{Call: _e.mock.On("GetQueryViewSegmentLoadInfos", _a0, collectionID, segmentIDs)}
+}
+
+func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) Run(run func(_a0 context.Context, collectionID int64, segmentIDs []int64)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].([]int64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) Return(_a0 []*querypb.SegmentLoadInfo, _a1 []*indexpb.IndexInfo, _a2 error) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) RunAndReturn(run func(context.Context, int64, []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetQueryViewLoadInfo provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetQueryViewLoadInfo(_a0 context.Context, _a1 *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQueryViewLoadInfo")
+	}
+
+	var r0 *querypb.GetQueryViewLoadInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewLoadInfoRequest) *querypb.GetQueryViewLoadInfoResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.GetQueryViewLoadInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetQueryViewLoadInfoRequest) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -5318,31 +5387,77 @@ func (_m *MixCoord) GetQueryViewSegmentLoadInfo(_a0 context.Context, _a1 *queryp
 	return r0, r1
 }
 
-// MixCoord_GetQueryViewSegmentLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryViewSegmentLoadInfo'
-type MixCoord_GetQueryViewSegmentLoadInfo_Call struct {
+// MixCoord_GetQueryViewLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryViewLoadInfo'
+type MixCoord_GetQueryViewLoadInfo_Call struct {
 	*mock.Call
 }
 
-// GetQueryViewSegmentLoadInfo is a helper method to define mock.On call
+// GetQueryViewLoadInfo is a helper method to define mock.On call
 //   - _a0 context.Context
-//   - _a1 *querypb.GetQueryViewSegmentLoadInfoRequest
-func (_e *MixCoord_Expecter) GetQueryViewSegmentLoadInfo(_a0 interface{}, _a1 interface{}) *MixCoord_GetQueryViewSegmentLoadInfo_Call {
-	return &MixCoord_GetQueryViewSegmentLoadInfo_Call{Call: _e.mock.On("GetQueryViewSegmentLoadInfo", _a0, _a1)}
+//   - _a1 *querypb.GetQueryViewLoadInfoRequest
+func (_e *MixCoord_Expecter) GetQueryViewLoadInfo(_a0 interface{}, _a1 interface{}) *MixCoord_GetQueryViewLoadInfo_Call {
+	return &MixCoord_GetQueryViewLoadInfo_Call{Call: _e.mock.On("GetQueryViewLoadInfo", _a0, _a1)}
 }
 
-func (_c *MixCoord_GetQueryViewSegmentLoadInfo_Call) Run(run func(_a0 context.Context, _a1 *querypb.GetQueryViewSegmentLoadInfoRequest)) *MixCoord_GetQueryViewSegmentLoadInfo_Call {
+func (_c *MixCoord_GetQueryViewLoadInfo_Call) Run(run func(_a0 context.Context, _a1 *querypb.GetQueryViewLoadInfoRequest)) *MixCoord_GetQueryViewLoadInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*querypb.GetQueryViewSegmentLoadInfoRequest))
+		run(args[0].(context.Context), args[1].(*querypb.GetQueryViewLoadInfoRequest))
 	})
 	return _c
 }
 
-func (_c *MixCoord_GetQueryViewSegmentLoadInfo_Call) Return(_a0 *querypb.GetQueryViewSegmentLoadInfoResponse, _a1 error) *MixCoord_GetQueryViewSegmentLoadInfo_Call {
+func (_c *MixCoord_GetQueryViewLoadInfo_Call) Return(_a0 *querypb.GetQueryViewLoadInfoResponse, _a1 error) *MixCoord_GetQueryViewLoadInfo_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_GetQueryViewSegmentLoadInfo_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error)) *MixCoord_GetQueryViewSegmentLoadInfo_Call {
+func (_c *MixCoord_GetQueryViewLoadInfo_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error)) *MixCoord_GetQueryViewLoadInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WatchQueryViewSegmentLoadInfo provides a mock function with given fields: _a0
+func (_m *MixCoord) WatchQueryViewSegmentLoadInfo(_a0 querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WatchQueryViewSegmentLoadInfo")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_WatchQueryViewSegmentLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchQueryViewSegmentLoadInfo'
+type MixCoord_WatchQueryViewSegmentLoadInfo_Call struct {
+	*mock.Call
+}
+
+// WatchQueryViewSegmentLoadInfo is a helper method to define mock.On call
+//   - _a0 querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer
+func (_e *MixCoord_Expecter) WatchQueryViewSegmentLoadInfo(_a0 interface{}) *MixCoord_WatchQueryViewSegmentLoadInfo_Call {
+	return &MixCoord_WatchQueryViewSegmentLoadInfo_Call{Call: _e.mock.On("WatchQueryViewSegmentLoadInfo", _a0)}
+}
+
+func (_c *MixCoord_WatchQueryViewSegmentLoadInfo_Call) Run(run func(_a0 querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer)) *MixCoord_WatchQueryViewSegmentLoadInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer))
+	})
+	return _c
+}
+
+func (_c *MixCoord_WatchQueryViewSegmentLoadInfo_Call) Return(_a0 error) *MixCoord_WatchQueryViewSegmentLoadInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_WatchQueryViewSegmentLoadInfo_Call) RunAndReturn(run func(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error) *MixCoord_WatchQueryViewSegmentLoadInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

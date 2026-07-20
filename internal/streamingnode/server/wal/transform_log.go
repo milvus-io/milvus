@@ -26,12 +26,12 @@ type TransformLogScanner interface {
 }
 
 type TransformLogEvent struct {
-	Entry    *streamingpb.TransformLogEntry
-	CaughtUp *TransformLogCaughtUp
+	Entry  *streamingpb.TransformLogEntry
+	SyncUp *TransformLogSyncUp
 }
 
-type TransformLogCaughtUp struct {
-	StartAfterTimeTick uint64
+type TransformLogSyncUp struct {
+	TimeTick uint64
 }
 
 type TransformLogStreamManager interface {
@@ -68,7 +68,7 @@ type TransformLogStreamEvent struct {
 	SubscriptionID int64
 	VChannel       string
 	Entry          *streamingpb.TransformLogEntry
-	CaughtUp       *TransformLogCaughtUp
+	SyncUp         *TransformLogSyncUp
 	Err            error
 }
 

@@ -73,7 +73,7 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 		if segment == nil {
 			return nil
 		}
-		return segment.ensureCSegment()
+		return segment.ensureCSegment(msg.TimeTick())
 	case message.MessageTypeInsert:
 		return r.applyInsertMessage(ctx, msg)
 	case message.MessageTypeTxn:
@@ -89,7 +89,7 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 		if segment == nil {
 			return nil
 		}
-		segment.markFlushed()
+		segment.markFlushed(msg.TimeTick())
 		return nil
 	default:
 		return nil
@@ -169,12 +169,12 @@ func (r *Runtime) markSegmentSealed(segmentID int64, sealedAt qviews.DataVersion
 	if segment == nil {
 		return
 	}
-	segment.markFlushed()
+	segment.markFlushed(0)
 	segment.markSealed(sealedAt)
 
 	var release *growingSegment
 	r.mu.Lock()
-	if r.hasTruncateDataVersion && segment.shouldRelease(r.truncateDataVersion) {
+	if r.hasTruncateDataVersion && segment.shouldReleaseAt(r.truncateDataVersion, r.appliedGrowingTimeTick.Load()) {
 		r.removeSegmentMetadataLocked(segmentID)
 		release = segment
 	}

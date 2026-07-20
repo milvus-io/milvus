@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -115,8 +116,21 @@ func TestShardResolverImplIgnoresShardAssignmentsForUnknownPChannel(t *testing.T
 	defer resolver.Close()
 
 	vchannels, err := resolver.ResolveVChannels(context.Background(), 100)
-	require.NoError(t, err)
-	assert.Empty(t, vchannels)
+	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+	assert.Nil(t, vchannels)
+}
+
+func TestShardResolverImplReturnsNotLoadedForUnassignedCollection(t *testing.T) {
+	resolver := NewShardResolverImpl(&staticAssignmentWatcher{
+		assignments: []*types.VersionedStreamingNodeAssignments{
+			versionedAssignment(1, "localhost:1", "p0", 100, 0, 10),
+		},
+	})
+	defer resolver.Close()
+
+	vchannels, err := resolver.ResolveVChannels(context.Background(), 200)
+	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+	assert.Nil(t, vchannels)
 }
 
 func TestShardResolverImplReplacesCacheOnAssignmentUpdate(t *testing.T) {
