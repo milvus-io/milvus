@@ -74,6 +74,9 @@ func FillTermExpressionValue(expr *planpb.TermExpr, templateValues map[string]*p
 	array := value.GetArrayVal().GetArray()
 	values := make([]*planpb.GenericValue, len(array))
 	for i, e := range array {
+		if IsArray(e) {
+			return merr.WrapErrQueryPlanMsg("array values are not supported in term expression template variable {%s}", expr.GetTemplateVariableName())
+		}
 		castedValue, err := castValue(dataType, e)
 		if err != nil {
 			return err

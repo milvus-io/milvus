@@ -1167,6 +1167,9 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		array := elementValue.GetArrayVal().GetArray()
 		values = make([]*planpb.GenericValue, len(array))
 		for i, e := range array {
+			if IsArray(e) {
+				return merr.WrapErrParameterInvalidMsg("array values are not supported in term expressions")
+			}
 			castedValue, err := castValue(dataType, e)
 			if err != nil {
 				return merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be casted to %s", e.String(), dataType.String())
