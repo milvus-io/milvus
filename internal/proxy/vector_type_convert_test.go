@@ -151,7 +151,7 @@ func assertPlaceholderVectorsMatchFloat32(
 }
 
 func fp16BF16SchemaInfo(dataType schemapb.DataType, dim int64) *schemaInfo {
-	return newSchemaInfo(&schemapb.CollectionSchema{
+	return mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:  100,
@@ -296,7 +296,7 @@ func TestConvertPlaceholderGroupOverflowToFloat16Infinity(t *testing.T) {
 
 func TestNormalizeFp32ToFp16Bf16VectorFieldData(t *testing.T) {
 	newTestSchema := func(dataType schemapb.DataType) *schemaInfo {
-		return newSchemaInfo(&schemapb.CollectionSchema{
+		return mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:  100,

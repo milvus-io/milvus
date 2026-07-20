@@ -862,7 +862,7 @@ func TestValidateMultipleVectorFields(t *testing.T) {
 func TestFillFieldIDBySchema(t *testing.T) {
 	t.Run("column count mismatch", func(t *testing.T) {
 		collSchema := &schemapb.CollectionSchema{}
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 		columns := []*schemapb.FieldData{
 			{
 				FieldName: "TestFillFieldIDBySchema",
@@ -882,7 +882,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 				},
 			},
 		}
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 		columns := []*schemapb.FieldData{
 			{
 				FieldName: "TestFillFieldIDBySchema",
@@ -907,7 +907,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 				},
 			},
 		}
-		schema := newSchemaInfo(collSchema)
+		schema := mustNewSchemaInfo(collSchema)
 		columns := []*schemapb.FieldData{
 			{
 				FieldName: "FieldB",

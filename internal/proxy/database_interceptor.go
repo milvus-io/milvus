@@ -49,7 +49,14 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		}
 		return ctx, r
 	case *milvuspb.DescribeCollectionRequest:
-		if r.DbName == "" {
+		// Collection ids are cluster-unique, so an id-only describe does not use
+		// the database to resolve its target. Preserve an omitted db name here:
+		// filling it with the connection default would lose the distinction
+		// between "unknown until resolved by id" and an explicit default-db
+		// request. Name-based describes keep the historical empty => default
+		// behavior.
+		idOnly := r.GetCollectionID() > 0 && r.GetCollectionName() == ""
+		if r.DbName == "" && !idOnly {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
