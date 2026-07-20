@@ -399,6 +399,7 @@ func (p *delegatorGrowingSourceProvider) ClearReleasePrepared(segmentID int64) {
 	delete(p.releasePrepared, segmentID)
 	delete(p.releaseAllowed, segmentID)
 	delete(p.handoffAllowed, segmentID)
+	p.exitHandoffOnlyIfDrainedLocked()
 }
 
 func (p *delegatorGrowingSourceProvider) ReleasePreparedSegments() []int64 {
@@ -458,7 +459,14 @@ func (p *delegatorGrowingSourceProvider) tryReleaseRetainedLocked(segmentID int6
 		return nil, nil
 	}
 	delete(p.retained, segmentID)
+	p.exitHandoffOnlyIfDrainedLocked()
 	return p.unregisterIfInactiveLocked(), retained
+}
+
+func (p *delegatorGrowingSourceProvider) exitHandoffOnlyIfDrainedLocked() {
+	if p.handoffOnly && len(p.handoffAllowed) == 0 && len(p.retained) == 0 {
+		p.handoffOnly = false
+	}
 }
 
 func (p *delegatorGrowingSourceProvider) releaseRetained(registration *syncmgr.GrowingSourceRegistration, retained *retainedGrowingFlushSource) {
