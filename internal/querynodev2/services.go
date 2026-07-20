@@ -716,14 +716,11 @@ func (node *QueryNode) prepareReleaseManualFlush(ctx context.Context, collection
 	segmentIDs = lo.Uniq(lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
 		return segmentID > 0 && !syncmgr.DefaultGrowingSourceRegistry().IsReleasePrepared(channel, segmentID, 0)
 	}))
-	if len(segmentIDs) == 0 {
-		return false, nil
-	}
 	wal := streaming.WAL()
 	if wal == nil {
 		return false, merr.WrapErrServiceUnavailable("streaming WAL is not initialized")
 	}
-	return wal.PrepareReleaseManualFlush(ctx, collectionID, channel, segmentIDs)
+	return wal.Local().PrepareReleaseManualFlushIfLocal(ctx, collectionID, channel, segmentIDs)
 }
 
 func isReleaseManualFlushPrepareUnavailable(err error) bool {
@@ -731,12 +728,15 @@ func isReleaseManualFlushPrepareUnavailable(err error) bool {
 		return false
 	}
 	if errors.Is(err, merr.ErrServiceUnavailable) ||
+		errors.Is(err, merr.ErrChannelNotAvailable) ||
 		errors.Is(err, handler.ErrClientClosed) ||
+		errors.Is(err, handler.ErrReadOnlyWAL) ||
 		errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 		errors.Is(err, registry.ErrNoReleaseManualFlushPreparer) {
 		return true
 	}
-	return streamingstatus.AsStreamingError(err).IsOnShutdown()
+	streamingErr := streamingstatus.AsStreamingError(err)
+	return streamingErr.IsOnShutdown() || streamingErr.IsWrongStreamingNode()
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...

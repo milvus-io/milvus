@@ -21,10 +21,12 @@ import (
 	"context"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -242,19 +244,52 @@ func (sched *TaskScheduler) processTask(t Task) {
 	}()
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
-	mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()))
+	var (
+		indexTask  *indexBuildTask
+		costCPUNum int64
+		execStart  time.Time
+	)
+	if ibt, ok := t.(*indexBuildTask); ok {
+		indexTask = ibt
+		costCPUNum = taskcost.EstimateIndexBuildCPUNum(indexTask.IsVectorIndex())
+		// execStart carries a monotonic clock reading; CostTimeMs derived from
+		// it is immune to wall-clock steps. ExecStartMs/ExecEndMs stay wall-clock
+		// timestamps for external exposure.
+		execStart = time.Now()
+		indexTask.manager.StoreIndexTaskExecutionStart(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), taskcost.NowMs(), costCPUNum)
+		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()), mlog.Int64("costCPUNum", costCPUNum))
+	} else {
+		mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()))
+	}
+
 	pipelines := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err))
-			t.SetState(getStateFromError(err), err.Error())
+			if indexTask != nil {
+				costTimeMs := taskcost.ElapsedMs(execStart)
+				// End bookkeeping and final state must land in one critical
+				// section, so a concurrent QueryTask never sees a final cost
+				// paired with an in-progress state.
+				indexTask.SetStateWithCost(getStateFromError(err), err.Error(), taskcost.NowMs(), costTimeMs)
+				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
+			} else {
+				t.SetState(getStateFromError(err), err.Error())
+				mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err))
+			}
 			return
 		}
 	}
-	t.SetState(indexpb.JobState_JobStateFinished, "")
+	if indexTask != nil {
+		costTimeMs := taskcost.ElapsedMs(execStart)
+		indexTask.SetStateWithCost(indexpb.JobState_JobStateFinished, "", taskcost.NowMs(), costTimeMs)
+		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()), mlog.Int64("costTimeMs", costTimeMs), mlog.Int64("costCPUNum", costCPUNum))
+	} else {
+		t.SetState(indexpb.JobState_JobStateFinished, "")
+		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()))
+	}
 
 	// Publish filesystem metrics after index task completion
-	if indexTask, ok := t.(*indexBuildTask); ok {
+	if indexTask != nil {
 		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
 			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
 		}

@@ -11,7 +11,6 @@
 
 #include <folly/ExceptionWrapper.h>
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -60,7 +59,6 @@ SearchOnSealedIndex(const Schema& schema,
                     milvus::OpContext* op_context,
                     SearchResult& search_result) {
     auto topK = search_info.topk_;
-    auto round_decimal = search_info.round_decimal_;
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
@@ -138,15 +136,6 @@ SearchOnSealedIndex(const Schema& schema,
     if (!use_iterator) {
         vec_index->Query(
             dataset, search_info, search_bitset, op_context, search_result);
-        float* distances = search_result.distances_.data();
-        auto total_num = num_queries * topK;
-        if (round_decimal != -1) {
-            const float multiplier = pow(10.0, round_decimal);
-            for (int i = 0; i < total_num; i++) {
-                distances[i] =
-                    std::round(distances[i] * multiplier) / multiplier;
-            }
-        }
     }
     FinalizeVectorSearchOffsets(
         search_result,
@@ -187,7 +176,13 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
-    if (column->IsNullable()) {
+    // Nullable plain-vector chunks compact away NULL rows and therefore need
+    // physical/logical row mapping. VECTOR_ARRAY raw chunks keep one list
+    // offset per logical row; NULL and empty rows are represented by
+    // zero-length lists, so row mapping must not be built or applied here.
+    const bool needs_offset_mapping =
+        column->IsNullable() && data_type != DataType::VECTOR_ARRAY;
+    if (needs_offset_mapping) {
         column->BuildValidRowIds(op_context);
     }
 
@@ -203,7 +198,7 @@ SearchOnSealedColumn(const Schema& schema,
     TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     const auto has_offset_mapping =
-        offset_mapping.IsEnabled() && !is_element_level_search;
+        needs_offset_mapping && offset_mapping.IsEnabled();
     if (has_offset_mapping) {
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
@@ -289,6 +284,10 @@ SearchOnSealedColumn(const Schema& schema,
 
             offsets_pw = column->VectorArrayOffsets(op_context, i);
             raw_dataset.raw_data_offsets = offsets_pw.get();
+            if (raw_dataset.raw_data_offsets[chunk_size] == 0) {
+                offset += chunk_size;
+                continue;
+            }
         }
 
         if (use_vector_iterator) {

@@ -582,8 +582,18 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "channel not available",
+			err:  merr.WrapErrChannelNotAvailable("vchannel", "no local growing-source release handoff provider"),
+			want: true,
+		},
+		{
 			name: "handler client closed",
 			err:  handler.ErrClientClosed,
+			want: true,
+		},
+		{
+			name: "read only local wal",
+			err:  handler.ErrReadOnlyWAL,
 			want: true,
 		},
 		{
@@ -599,6 +609,16 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 		{
 			name: "streaming on shutdown",
 			err:  streamingstatus.NewOnShutdownError("wal is on shutdown"),
+			want: true,
+		},
+		{
+			name: "local wal channel not exist",
+			err:  streamingstatus.NewChannelNotExist("pchannel"),
+			want: true,
+		},
+		{
+			name: "local wal channel term unmatched",
+			err:  streamingstatus.NewUnmatchedChannelTerm("pchannel", 1, 2),
 			want: true,
 		},
 		{
@@ -2591,6 +2611,7 @@ func TestQueryNodeService(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
+	local.EXPECT().PrepareReleaseManualFlushIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
 	scanner := mock_streaming.NewMockScanner(t)

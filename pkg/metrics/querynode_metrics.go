@@ -141,6 +141,28 @@ var (
 			segmentLevelLabelName,
 		})
 
+	QueryNodeGrowingSourceRetainedBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_source_retained_bytes",
+			Help:      "estimated bytes of growing-source segments retained for release handoff",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
+
+	QueryNodeGrowingSourceRetainedSegments = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_source_retained_segments",
+			Help:      "number of growing-source segments retained for release handoff",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
+
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -265,6 +287,19 @@ var (
 			queryTypeLabelName,
 			reduceLevelName,
 			reduceType,
+		})
+
+	QueryNodeFunctionChainLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "function_chain_latency",
+			Help:      "query-level function chain execution latency in milliseconds",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			chainLevelLabelName,
+			statusLabelName,
 		})
 
 	QueryNodeLoadSegmentLatency = prometheus.NewHistogramVec(
@@ -971,6 +1006,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumCollections)
 	registry.MustRegister(QueryNodeNumPartitions)
 	registry.MustRegister(QueryNodeNumSegments)
+	registry.MustRegister(QueryNodeGrowingSourceRetainedBytes)
+	registry.MustRegister(QueryNodeGrowingSourceRetainedSegments)
 	registry.MustRegister(QueryNodeNumDmlChannels)
 	registry.MustRegister(QueryNodeNumDeltaChannels)
 	registry.MustRegister(QueryNodeSQCount)
@@ -981,6 +1018,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQSegmentLatency)
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
+	registry.MustRegister(QueryNodeFunctionChainLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
 	registry.MustRegister(QueryNodeReadTaskReadyNQ)

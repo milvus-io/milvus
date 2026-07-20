@@ -108,7 +108,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsE
 
 	s.Error(err)
 	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
-	// (must not be bucketed as fail_input).
+	// (must not be bucketed as a user-caused failure).
 	s.True(errors.Is(err, merr.ErrImportSysFailed))
 	s.Contains(err.Error(), "The number of jobs has reached the limit")
 }

@@ -939,7 +939,107 @@ func (s *FillExpressionValueSuite) assertNoUnfilledPlaceholder(e *planpb.Expr) {
 	case *planpb.Expr_BinaryArithExpr:
 		s.assertNoUnfilledPlaceholder(x.BinaryArithExpr.GetLeft())
 		s.assertNoUnfilledPlaceholder(x.BinaryArithExpr.GetRight())
+	case *planpb.Expr_RandomSampleExpr:
+		s.assertNoUnfilledPlaceholder(x.RandomSampleExpr.GetPredicate())
+	case *planpb.Expr_ElementFilterExpr:
+		s.assertNoUnfilledPlaceholder(x.ElementFilterExpr.GetElementExpr())
+		s.assertNoUnfilledPlaceholder(x.ElementFilterExpr.GetPredicate())
+	case *planpb.Expr_MatchExpr:
+		s.assertNoUnfilledPlaceholder(x.MatchExpr.GetPredicate())
 	}
+}
+
+// TestStructFilterWithTemplate regression-tests issue #51416. Struct filter
+// wrappers must propagate template metadata so their nested predicates are
+// filled before the plan reaches segcore.
+func (s *FillExpressionValueSuite) TestStructFilterWithTemplate() {
+	schemaH := newTestSchemaHelper(s.T())
+
+	cases := []struct {
+		name      string
+		templExpr string
+		values    map[string]*schemapb.TemplateValue
+	}{
+		{
+			"element filter integer template",
+			`element_filter(struct_array, $[sub_int] >= {min_score})`,
+			map[string]*schemapb.TemplateValue{
+				"min_score": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+			},
+		},
+		{
+			"element filter string template",
+			`element_filter(struct_array, $[sub_str] == {tag})`,
+			map[string]*schemapb.TemplateValue{
+				"tag": generateTemplateValue(schemapb.DataType_String, "blue"),
+			},
+		},
+		{
+			"element filter term template",
+			`element_filter(struct_array, $[sub_int] in {scores})`,
+			map[string]*schemapb.TemplateValue{
+				"scores": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{10, 20})),
+			},
+		},
+		{
+			"row template and inline element filter",
+			`Int64Field > {row_min} && element_filter(struct_array, $[sub_str] == "blue")`,
+			map[string]*schemapb.TemplateValue{
+				"row_min": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+			},
+		},
+		{
+			"inline row predicate and element filter template",
+			`Int64Field > 1 && element_filter(struct_array, $[sub_str] == {tag})`,
+			map[string]*schemapb.TemplateValue{
+				"tag": generateTemplateValue(schemapb.DataType_String, "blue"),
+			},
+		},
+		{
+			"match least integer template",
+			`MATCH_LEAST(struct_array, $[sub_int] >= {min_score}, threshold=1)`,
+			map[string]*schemapb.TemplateValue{
+				"min_score": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+			},
+		},
+		{
+			"match any string template",
+			`MATCH_ANY(struct_array, $[sub_str] == {tag})`,
+			map[string]*schemapb.TemplateValue{
+				"tag": generateTemplateValue(schemapb.DataType_String, "blue"),
+			},
+		},
+		{
+			"match compound template",
+			`MATCH_ALL(struct_array, $[sub_int] >= {min_score} && $[sub_str] == {tag})`,
+			map[string]*schemapb.TemplateValue{
+				"min_score": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+				"tag":       generateTemplateValue(schemapb.DataType_String, "blue"),
+			},
+		},
+	}
+
+	for _, c := range cases {
+		s.Run(c.name, func() {
+			expr, err := ParseExpr(schemaH, c.templExpr, c.values)
+			s.NoError(err, c.templExpr)
+			s.NotNil(expr)
+			s.assertNoUnfilledPlaceholder(expr)
+		})
+	}
+
+	s.Run("missing element filter template", func() {
+		expr, err := ParseExpr(schemaH, `element_filter(struct_array, $[sub_int] >= {min_score})`, nil)
+		s.Error(err)
+		s.Nil(expr)
+	})
+
+	s.Run("missing match template", func() {
+		expr, err := ParseExpr(schemaH, `MATCH_ANY(struct_array, $[sub_str] == {tag})`, nil)
+		s.Error(err)
+		s.Nil(expr)
+	})
 }
 
 // TestUnaryNotWithTemplate regression-tests issue #49141: templated

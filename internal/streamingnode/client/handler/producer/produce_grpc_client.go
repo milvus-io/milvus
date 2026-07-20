@@ -1,6 +1,8 @@
 package producer
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -11,7 +13,8 @@ type produceGrpcClient struct {
 }
 
 // SendProduceMessage sends the produce message to server.
-func (p *produceGrpcClient) SendProduceMessage(requestID int64, msg message.MutableMessage) error {
+func (p *produceGrpcClient) SendProduceMessage(ctx context.Context, requestID int64, msg message.MutableMessage) error {
+	message.OverwriteTraceContext(ctx, msg)
 	return p.Send(&streamingpb.ProduceRequest{
 		Request: &streamingpb.ProduceRequest_Produce{
 			Produce: &streamingpb.ProduceMessageRequest{

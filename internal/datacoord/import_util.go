@@ -145,6 +145,20 @@ func GetSegmentMaxSize(job ImportJob, meta *meta) int {
 	return int(getExpectedSegmentSize(meta, job.GetCollectionID(), job.GetSchema()))
 }
 
+func importStorageVersion(isL0Import bool) int64 {
+	if isL0Import {
+		return storage.StorageV2
+	}
+	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+		return storage.StorageV3
+	}
+	return storage.StorageV2
+}
+
+func importUseLoonFFI(isL0Import bool) bool {
+	return !isL0Import && paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()
+}
+
 func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta, segmentMaxSize int64) ([]int64, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(job.GetSchema())
 	if err != nil {
@@ -170,10 +184,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		segmentLevel = datapb.SegmentLevel_L0
 	}
 
-	storageVersion := storage.StorageV2
-	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		storageVersion = storage.StorageV3
-	}
+	storageVersion := importStorageVersion(isL0Import)
 
 	// alloc new segments
 	segments := make([]int64, 0)
@@ -350,10 +361,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return fileStat.GetImportFile()
 	})
 
-	storageVersion := storage.StorageV2
-	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		storageVersion = storage.StorageV3
-	}
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	storageVersion := importStorageVersion(isL0Import)
+	useLoonFFI := importUseLoonFFI(isL0Import)
 
 	req := &datapb.ImportRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -372,7 +382,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storageVersion,
 		PluginContext:   GetReadPluginContext(job.GetOptions()),
-		UseLoonFfi:      Params.CommonCfg.UseLoonFFI.GetAsBool(),
+		UseLoonFfi:      useLoonFFI,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil

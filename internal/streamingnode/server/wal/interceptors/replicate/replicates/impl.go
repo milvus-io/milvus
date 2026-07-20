@@ -111,6 +111,12 @@ func (impl *replicatesManagerImpl) BeginReplicateMessage(ctx context.Context, ms
 		}
 		return nil, ErrNotHandledByReplicateManager
 	}
+	if msg.IsUnreplicable() {
+		if rh != nil {
+			return nil, status.NewIgnoreOperation("wal unreplicable message cannot be replicated")
+		}
+		return nil, ErrNotHandledByReplicateManager
+	}
 
 	impl.mu.Lock()
 	defer func() {

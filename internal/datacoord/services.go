@@ -658,13 +658,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			mlog.Warn(context.TODO(), "failed to get segment, the segment not healthy", mlog.Err(err))
 			return merr.Status(err), nil
 		}
-		if err := s.validateTextSegmentStorage(req); err != nil {
+		incomingStorageVersion := req.GetStorageVersion()
+		if err := s.validateTextSegmentStorage(req, incomingStorageVersion); err != nil {
 			mlog.Warn(context.TODO(), "invalid TEXT segment storage format", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 
-		// Set storage version
-		operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
+		operators = append(operators, ValidateSaveBinlogStorageVersion(req.GetSegmentID(), incomingStorageVersion))
 
 		// Set segment state
 		if req.GetDropped() {
@@ -753,18 +753,18 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return merr.Success(), nil
 }
 
-func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest) error {
+func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest, storageVersion int64) error {
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 || req.GetDropped() {
 		return nil
 	}
 	if !s.meta.collectionHasTextFields(req.GetCollectionID()) {
 		return nil
 	}
-	if req.GetStorageVersion() < storage.StorageV3 {
+	if storageVersion < storage.StorageV3 {
 		return merr.WrapErrParameterInvalidMsg(
 			"TEXT segment %d must be saved with StorageV3 manifest, got storage version %d",
 			req.GetSegmentID(),
-			req.GetStorageVersion())
+			storageVersion)
 	}
 	if req.GetManifestPath() == "" {
 		return merr.WrapErrParameterInvalidMsg(
@@ -2246,6 +2246,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
@@ -2296,6 +2297,7 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 			Items: items,
 		}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "BatchUpdateManifest broadcast failed", mlog.Err(err))
@@ -2399,6 +2401,7 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "DropSnapshot broadcast failed", mlog.Err(err))
@@ -2756,6 +2759,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}).
 		WithBody(&message.RefreshExternalCollectionMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast()
 
 	if _, err := b.Broadcast(ctx, msg); err != nil {
@@ -2872,12 +2876,20 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	return err
 }
 
+// errRollbackImportNoVchannels marks a rollback that can never be delivered: the job
+// carries no vchannels, so there is no peer to address. A job's Vchannels are fixed at
+// creation, so retrying can never succeed — isPermanentRollbackErr classifies this as
+// permanent so GC proceeds instead of retaining the job forever. A plain sentinel
+// attached via errors.Mark, NOT a merr error: merr's errors.Is matches by error code,
+// which would make every ImportSysFailed error (mostly transient) match it.
+var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
+
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
 // Targets the job's data vchannels, matching the CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
+		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
 
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
@@ -2962,23 +2974,38 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 	)
 }
 
-// AbortImport aborts a 2PC import job that has not yet been committed.
-// It broadcasts a RollbackImport WAL message to cancel the job.
-// Returns an error if the job is already committed or committing.
+// AbortImport rolls back a 2PC import job that has not been committed by
+// broadcasting a RollbackImport WAL message. A job that has already Failed (for
+// example because its own import failed) is still abortable, so the control plane
+// can proactively release the peer cluster's replicated Uncommitted job instead of
+// waiting for the failed source's GC self-heal (see importChecker.checkGC).
+// Committing/Completed jobs are terminal and rejected.
+//
+// Behavior change for non-CDC clusters: aborting an already-Failed 2PC job used to
+// return an error; it now succeeds and (re)broadcasts a RollbackImport, which the
+// flusher no-ops. Repeated aborts on a real-failure source therefore re-broadcast
+// each time — harmless, but not deduplicated (there is no persisted "rolled back"
+// flag in this change; that idempotency is a follow-up).
 func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
 		func(job ImportJob) *commonpb.Status {
 			state := job.GetState()
+			// Idempotent only for a job that was previously Uncommitted and then
+			// user-aborted (its reason is rewritten to importJobReasonAbortedByUser). A
+			// source that failed on its own keeps its real failure reason, so this does
+			// NOT fire for it and each abort re-broadcasts (see the note above).
 			if state == internalpb.ImportJobState_Failed && job.GetReason() == importJobReasonAbortedByUser {
 				return merr.Success()
 			}
-			if state == internalpb.ImportJobState_Failed ||
-				state == internalpb.ImportJobState_Committing ||
+			// Committed states are truly terminal and cannot be rolled back.
+			if state == internalpb.ImportJobState_Committing ||
 				state == internalpb.ImportJobState_Completed {
 				return merr.Status(merr.WrapErrImportFailed(
 					fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", req.GetJobId(), state)))
 			}
-			return nil // proceed
+			// Uncommitted, or a Failed source (its own import failed) → broadcast the
+			// rollback so the peer cluster's replicated Uncommitted job is released.
+			return nil
 		},
 		func(ctx context.Context, job ImportJob) error {
 			mlog.Info(context.TODO(), "aborting import job via WAL broadcast")

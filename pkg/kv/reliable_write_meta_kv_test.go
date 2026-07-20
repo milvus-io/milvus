@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	tikverr "github.com/tikv/client-go/v2/error"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -124,4 +125,21 @@ func TestReliableWriteMetaKv(t *testing.T) {
 
 	_, err := rkv.CompareVersionAndSwap(ctx, "test", 0, "test")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestReliableWriteMetaKvDoesNotRetryUndeterminedWriteResult(t *testing.T) {
+	metaKV := mock_kv.NewMockMetaKv(t)
+	calls := atomic.NewInt32(0)
+	metaKV.EXPECT().Save(mock.Anything, "k", "v").RunAndReturn(
+		func(ctx context.Context, key, value string) error {
+			if calls.Inc() == 1 {
+				return errors.Wrap(tikverr.ErrResultUndetermined, "commit failed")
+			}
+			return nil
+		}).Maybe()
+
+	rkv := NewReliableWriteMetaKv(metaKV)
+	err := rkv.Save(context.Background(), "k", "v")
+	assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+	assert.Equal(t, int32(1), calls.Load())
 }

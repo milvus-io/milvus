@@ -90,6 +90,8 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/collections/add_function":         "AddCollectionFunction",
 	"/v2/vectordb/collections/alter_function":       "AlterCollectionFunction",
 	"/v2/vectordb/collections/drop_function":        "DropCollectionFunction",
+	"/v2/vectordb/collections/add_function_field":   "AlterCollectionSchema",
+	"/v2/vectordb/collections/drop_function_field":  "AlterCollectionSchema",
 	"/v2/vectordb/collections/drop_properties":      "AlterCollection",
 	"/v2/vectordb/collections/compact":              "ManualCompaction",
 	"/v2/vectordb/collections/get_compaction_state": "GetCompactionState",
@@ -206,6 +208,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+AddFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAddFunction{} }, wrapperTraceLog(h.addCollectionFunction))))
 	router.POST(CollectionCategory+AlterFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAlterFunction{} }, wrapperTraceLog(h.alterCollectionFunction))))
 	router.POST(CollectionCategory+DropFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionDropFunction{} }, wrapperTraceLog(h.dropCollectionFunction))))
+	router.POST(CollectionCategory+AddFunctionFieldAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAddFunctionField{} }, wrapperTraceLog(h.addCollectionFunctionField))))
+	router.POST(CollectionCategory+DropFunctionFieldAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionDropFunctionField{} }, wrapperTraceLog(h.dropCollectionFunctionField))))
 	router.POST(CollectionCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropCollectionPropertiesReq{} }, wrapperTraceLog(h.dropCollectionProperties))))
 	router.POST(CollectionCategory+CompactAction, timeoutMiddleware(wrapperPost(func() any { return &CompactReq{} }, wrapperTraceLog(h.compact))))
 	router.POST(CollectionCategory+CompactionStateAction, timeoutMiddleware(wrapperPost(func() any { return &GetCompactionStateReq{} }, wrapperTraceLog(h.getcompactionState))))
@@ -410,24 +414,26 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
 			metrics.TotalLabel,
+			metrics.CauseNA,
 			dbName,
 			collectionName,
 		).Inc()
-		label := requestutil.ParseMetricLabel(resp, err)
+		label, cause := requestutil.ParseMetricLabel(resp, err)
 		// set metrics for state code
 		metrics.ProxyFunctionCall.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
 			label,
+			cause,
 			dbName,
 			collectionName,
 		).Inc()
 
-		// Mirror the fail_input/fail_system metric split into the logs so a
-		// failed REST request can be filtered by error_type. System failures are
-		// logged at Warn (actionable); input failures at Info (expected user
-		// mistakes — keeping them at Warn would spam the logs).
-		if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+		// Mirror the metric's cause into the logs so a failed REST request can be
+		// filtered by error_type. System failures are logged at Warn (actionable);
+		// input failures at Info (expected user mistakes — keeping them at Warn
+		// would spam the logs).
+		if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
 			var status *commonpb.Status
 			switch r := resp.(type) {
 			case interface{ GetStatus() *commonpb.Status }:
@@ -436,7 +442,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				status = r
 			}
 			errType := merr.SystemError
-			if label == metrics.FailInputLabel {
+			if cause == metrics.CauseUser {
 				errType = merr.InputError
 			}
 			logger := mlog.With(
@@ -994,6 +1000,9 @@ func (h *HandlersV2) alterCollectionFunction(ctx context.Context, c *gin.Context
 	return resp, err
 }
 
+// dropCollectionFunction backs the deprecated /collections/drop_function endpoint,
+// which mapped to the legacy detach RPC. A function is coupled to its output field,
+// so the RPC is rejected; use /collections/drop_function_field instead.
 func (h *HandlersV2) dropCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionDropFunction)
 	req := &milvuspb.DropCollectionFunctionRequest{
@@ -1004,6 +1013,111 @@ func (h *HandlersV2) dropCollectionFunction(ctx context.Context, c *gin.Context,
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropCollectionFunction(reqCtx, req.(*milvuspb.DropCollectionFunctionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+// addCollectionFunctionField backs /collections/add_function_field: it attaches a
+// BM25/MinHash function together with its output field and index via AlterCollectionSchema.
+// A function is coupled to its output field, so both are added in one request.
+func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionAddFunctionField)
+	// The index always targets the newly-added output field; reject a mismatched
+	// indexParams.fieldName rather than silently building the index on outputField.
+	if httpReq.IndexParam.FieldName != httpReq.OutputField.FieldName {
+		err := merr.WrapErrParameterInvalidMsg(
+			"indexParams.fieldName %q must match outputField.fieldName %q",
+			httpReq.IndexParam.FieldName, httpReq.OutputField.FieldName)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	fieldSchema, err := httpReq.OutputField.GetProto(ctx)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	extraParams, err := convertToExtraParams(httpReq.IndexParam)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{
+							FieldSchema: fieldSchema,
+							IndexName:   httpReq.IndexParam.IndexName,
+							ExtraParams: extraParams,
+						},
+					},
+					FuncSchema: []*schemapb.FunctionSchema{fSchema},
+				},
+			},
+		},
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionSchema", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		r, callErr := h.proxy.AlterCollectionSchema(reqCtx, req.(*milvuspb.AlterCollectionSchemaRequest))
+		if callErr == nil {
+			callErr = merr.Error(r.GetAlterStatus())
+		}
+		return r, callErr
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+// dropCollectionFunctionField backs /collections/drop_function_field: it detaches a
+// function and drops its output field together via AlterCollectionSchema.
+func (h *HandlersV2) dropCollectionFunctionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionDropFunctionField)
+	req := &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{
+						FunctionName: httpReq.FunctionName,
+					},
+					DropFunctionOutputFields: true,
+				},
+			},
+		},
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionSchema", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		r, callErr := h.proxy.AlterCollectionSchema(reqCtx, req.(*milvuspb.AlterCollectionSchemaRequest))
+		if callErr == nil {
+			callErr = merr.Error(r.GetAlterStatus())
+		}
+		return r, callErr
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())

@@ -184,8 +184,8 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
             auto q = *(query.get() + i);
             auto last_dis = std::numeric_limits<float>::max();
             // we should see strict decreasing distances for brute force iterator.
-            while (it->HasNext()) {
-                auto [offset, dis] = it->Next();
+            while (it->HasNext().value()) {
+                auto [offset, dis] = it->Next().value();
                 ASSERT_LE(dis, last_dis);
                 last_dis = dis;
                 ASSERT_FLOAT_EQ(dis, base[offset].dot(q));

@@ -913,7 +913,7 @@ func TestProduceServerSendProduceResult_ContextCanceled(t *testing.T) {
 
 	// This should not block and should log warning
 	msgID := walimplstest.NewTestMessageID(1)
-	p.sendProduceResult(1, &wal.AppendResult{
+	p.sendProduceResult(context.Background(), 1, &wal.AppendResult{
 		MessageID:              msgID,
 		LastConfirmedMessageID: msgID,
 		TimeTick:               100,

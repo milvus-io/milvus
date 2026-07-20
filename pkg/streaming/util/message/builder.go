@@ -149,6 +149,12 @@ func (b *mutableMesasgeBuilder[H, B]) WithNotPersisted() *mutableMesasgeBuilder[
 	return b
 }
 
+// WithUnreplicable marks this concrete message as unsafe for cross-cluster replication.
+func (b *mutableMesasgeBuilder[H, B]) WithUnreplicable() *mutableMesasgeBuilder[H, B] {
+	b.WithProperty(messageUnreplicable, "")
+	return b
+}
+
 // WithBody creates a new builder with message body.
 func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H, B] {
 	b.body = body
@@ -464,6 +470,10 @@ func newImmutableTxnMesasgeFromWAL(
 		WithTxnContext(*commit.TxnContext()).
 		WithReplicateHeader(commit.ReplicateHeader()).
 		IntoImmutableMessage(commit.MessageID())
+	// The assembled txn message uses CommitTxn's trace as the txn-level trace.
+	if traceContext, ok := commit.Properties().Get(messageTraceContext); ok {
+		immutableMessage.(*immutableMessageImpl).properties.Set(messageTraceContext, traceContext)
+	}
 	return &immutableTxnMessageImpl{
 		immutableMessageImpl: *immutableMessage.(*immutableMessageImpl),
 		begin:                MustAsImmutableBeginTxnMessageV2(beginImmutable),

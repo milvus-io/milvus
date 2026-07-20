@@ -333,8 +333,10 @@ ChunkedSegmentSealedImpl::ReadTimestamp(
 }
 
 PinWrapper<const storagev2translator::PkIndexCell*>
-ChunkedSegmentSealedImpl::PinPkIndex(milvus::OpContext* op_ctx) const {
-    auto slot = *pk_index_slot_.rlock();
+ChunkedSegmentSealedImpl::PinPkIndex(
+    const std::shared_ptr<const RuntimeResourceState>& runtime,
+    milvus::OpContext* op_ctx) const {
+    auto slot = runtime != nullptr ? runtime->pk_index_slot : nullptr;
     if (!slot) {
         return PinWrapper<const storagev2translator::PkIndexCell*>(nullptr);
     }
@@ -424,13 +426,15 @@ ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
 
 bool
 ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
-    auto schema_snapshot = CaptureSchemaSnapshot();
+    auto snapshot = CapturePublishedState();
+    auto schema_snapshot = snapshot->schema;
+    auto runtime = snapshot->runtime;
     // Zero-storage pk2offset (VirtualPKOffsetMap) resolves PKs by bit-extract.
     // Skips PinPkIndex + sorted-pk binary search on the virtual PK column.
-    if (insert_record_.pk2offset_is_zero_storage()) {
-        return insert_record_.contain(pk);
+    if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
+        return runtime->virtual_pk2offset->contain(pk);
     }
-    auto pk_index = PinPkIndex(nullptr);
+    auto pk_index = PinPkIndex(runtime, nullptr);
     if (pk_index.get() != nullptr && pk_index.get()->has_pk2offset()) {
         return pk_index.get()->contain(pk);
     }
@@ -439,7 +443,7 @@ ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
         auto pk_field_id =
             schema_snapshot->get_primary_field_id().value_or(FieldId(-1));
         AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-        auto pk_column = get_column(pk_field_id);
+        auto pk_column = get_column(runtime, pk_field_id);
         if (pk_column != nullptr) {
             auto num_chunks = pk_column->num_chunks();
             auto all_chunks = pk_column->GetAllChunks(nullptr);
@@ -476,7 +480,7 @@ ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
             }
         }
     }
-    return insert_record_.contain(pk);
+    return false;
 }
 
 bool
@@ -566,48 +570,23 @@ ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
     init_storage_v1_timestamp_index(std::move(timestamps), num_rows, nullptr);
 }
 
-void
-ChunkedSegmentSealedImpl::init_storage_v1_pk_index(
-    FieldId field_id,
+std::shared_ptr<CacheSlot<storagev2translator::PkIndexCell>>
+ChunkedSegmentSealedImpl::BuildPkIndexSlot(
     const std::shared_ptr<ChunkedColumnInterface>& column,
     DataType data_type,
-    bool is_replace) {
-    auto schema_snapshot = CaptureSchemaSnapshot();
-    if (schema_snapshot->get_primary_field_id().value_or(FieldId(-1)) !=
-        field_id) {
-        return;
-    }
-    // Build compressed offset->pk for FillPrimaryKeys fast path
-    insert_record_.build_offset2pk(data_type, column.get());
-
-    if (!is_sorted_by_pk_) {
-        AssertInfo(field_id.get() != -1, "Primary key is -1");
-        if (!is_replace) {
-            AssertInfo(insert_record_.empty_pks(),
-                       "primary key records already exists, current "
-                       "field id {}",
-                       field_id.get());
-            insert_record_.insert_pks(data_type, column.get());
-            insert_record_.seal_pks();
-        }
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::init_storage_v2_pk_index(
-    FieldId field_id,
-    const std::shared_ptr<ChunkedColumnInterface>& column,
-    DataType data_type) {
-    auto schema_snapshot = CaptureSchemaSnapshot();
-    if (schema_snapshot->get_primary_field_id().value_or(FieldId(-1)) !=
-        field_id) {
-        return;
-    }
+    bool eager,
+    milvus::OpContext* op_ctx) const {
     std::unique_ptr<Translator<storagev2translator::PkIndexCell>> translator =
         std::make_unique<storagev2translator::PkIndexTranslator>(
             id_, column, data_type, is_sorted_by_pk_);
-    *pk_index_slot_.wlock() =
-        Manager::GetInstance().CreateCacheSlot(std::move(translator));
+    auto slot = Manager::GetInstance().CreateCacheSlot(std::move(translator));
+    if (eager) {
+        auto cell_holder = SemiInlineGet(slot->PinCells(op_ctx, {0}));
+        AssertInfo(cell_holder->get_cell_of(0) != nullptr,
+                   "primary key index cache is corrupted, segment {}",
+                   id_);
+    }
+    return slot;
 }
 
 bool
@@ -719,6 +698,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
                 info.num_rows,
                 info.dim);
     }
+    request.has_raw_data =
+        milvus::index::IndexFactory::CanUseIndexRawDataForField(
+            field_meta.get_data_type(), request.has_raw_data);
 
     // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,
     // not here. This avoids unsafe ManualEvictCache on column groups.
@@ -999,6 +981,8 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
     state->timestamps = current->timestamps;
     state->timestamp_index = current->timestamp_index;
     state->timestamp_index_slot = current->timestamp_index_slot;
+    state->pk_index_slot = current->pk_index_slot;
+    state->virtual_pk2offset = current->virtual_pk2offset;
     return state;
 }
 
@@ -1393,6 +1377,8 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     runtime->timestamps = current.timestamps;
     runtime->timestamp_index = current.timestamp_index;
     runtime->timestamp_index_slot = current.timestamp_index_slot;
+    runtime->pk_index_slot = current.pk_index_slot;
+    runtime->virtual_pk2offset = current.virtual_pk2offset;
     return ToConstRuntimeState(std::move(runtime));
 }
 
@@ -2119,9 +2105,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                 eager_fields.push_back(field_id);
                 continue;
             }
-            auto [has_warmup, warmup_str] = schema_snapshot->WarmupPolicy(
-                field_id, field_is_vector, /*is_index=*/false);
-            auto resolved = getCacheWarmupPolicy(has_warmup ? warmup_str : "",
+            auto warmup_str = resolve_field_data_warmup_policy(
+                field_id, segment_load_info, schema_snapshot);
+            auto resolved = getCacheWarmupPolicy(warmup_str,
                                                  field_is_vector,
                                                  /*is_index=*/false,
                                                  /*in_load_list=*/true);
@@ -2214,18 +2200,28 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         }
         return nullptr;
     };
+    auto pk_field_id = schema_snapshot->get_primary_field_id().value();
     int64_t num_rows = segment_load_info.GetNumOfRows();
     if (num_rows == 0) {
+        runtime->fields.erase(pk_field_id);
+        runtime->pk_index_slot.reset();
+        runtime->virtual_pk2offset.reset();
+        if (!schema_snapshot->IsExternalDataField(pk_field_id)) {
+            runtime->virtual_pk2offset =
+                std::make_shared<const VirtualPKOffsetMap>(id_, 0);
+        }
+        auto timestamps = std::make_shared<TimestampData>();
+        timestamps->InitFromOwnedData({});
+        runtime->timestamps = std::move(timestamps);
+        runtime->timestamp_index = std::make_shared<const TimestampIndex>();
+        runtime->timestamp_index_slot.reset();
         {
             std::unique_lock lck(mutex_);
             update_row_count(0);
-            // Initialize empty timestamps so system fields remain query-visible.
-            insert_record_.init_timestamps_from_owned({}, TimestampIndex());
         }
         return;
     }
 
-    auto pk_field_id = schema_snapshot->get_primary_field_id().value();
     if (!schema_snapshot->IsExternalDataField(pk_field_id)) {
         // 1. VirtualPKChunkedColumn for the synthetic primary key.
         //    This is lazy; data is only materialized if DataOfChunk/Span is called.
@@ -2237,7 +2233,9 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         //    Virtual PK = (seg_id << 32) | offset, so pk to offset is a simple
         //    bit-extract. This replaces the OffsetOrderedArray that would
         //    otherwise store num_rows (pk, offset) pairs (~17 GB for 1B rows).
-        insert_record_.set_virtual_pk_offset_map(id_, num_rows);
+        runtime->virtual_pk2offset =
+            std::make_shared<const VirtualPKOffsetMap>(id_, num_rows);
+        runtime->pk_index_slot.reset();
     } else {
         AssertInfo(
             get_runtime_column(pk_field_id) != nullptr,
@@ -2258,7 +2256,6 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
     } else {
         // Synthetic timestamps: constant mode (all 0; rows always visible).
         // No data is materialized, saving ~8 GB for 1B-row external tables.
-        insert_record_.init_timestamps_constant(num_rows, 0);
         auto timestamps = std::make_shared<TimestampData>();
         timestamps->InitConstant(num_rows, 0);
         runtime->timestamps = timestamps;
@@ -2286,6 +2283,27 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
 }
 
 namespace {
+
+// A column group or field-binlog group may contain multiple fields but has only
+// one translator warmup policy. Accumulate per-field policies into the most
+// aggressive group policy: sync > async > disable. Empty means no field has
+// provided an explicit warmup setting yet, so downstream logic may still fall
+// back to global config.
+void
+AccumulateWarmupPolicyForGroup(const std::string& policy,
+                               std::string& aggregated_warmup_policy) {
+    if (policy.empty()) {
+        return;
+    }
+
+    if (policy == "sync") {
+        aggregated_warmup_policy = "sync";
+    } else if (policy == "async" && aggregated_warmup_policy != "sync") {
+        aggregated_warmup_policy = "async";
+    } else if (policy == "disable" && aggregated_warmup_policy.empty()) {
+        aggregated_warmup_policy = "disable";
+    }
+}
 
 struct FileMetadataLoadResult {
     milvus_storage::RowGroupMetadataVector row_group_meta;
@@ -2483,6 +2501,11 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+        auto warmup_policy =
+            resolve_field_data_group_warmup_policy(field_metas,
+                                                   segment_load_info,
+                                                   schema_snapshot,
+                                                   info.warmup_policy);
 
         std::vector<FieldId> fields_for_stats;
         if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
@@ -2515,7 +2538,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
                 load_info.load_priority,
-                info.warmup_policy);
+                warmup_policy);
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -2550,7 +2573,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                         std::move(ts), num_rows, runtime);
                 } else {
                     init_storage_v2_timestamp_index(
-                        column, num_rows, info.warmup_policy, runtime);
+                        column, num_rows, warmup_policy, runtime);
                 }
                 if (runtime == nullptr) {
                     PublishSystemFieldStateLocked();
@@ -2631,6 +2654,11 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+        auto warmup_policy =
+            resolve_field_data_group_warmup_policy(field_metas,
+                                                   segment_load_info,
+                                                   schema_snapshot,
+                                                   info.warmup_policy);
 
         std::vector<FieldId> fields_for_stats;
         if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
@@ -2663,7 +2691,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
                 load_info.load_priority,
-                info.warmup_policy);
+                warmup_policy);
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -2826,6 +2854,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             auto field_meta = schema_snapshot->operator[](field_id);
+            auto warmup_policy =
+                resolve_field_data_warmup_policy(field_id,
+                                                 segment_load_info,
+                                                 schema_snapshot,
+                                                 info.warmup_policy);
             std::unique_ptr<Translator<milvus::Chunk>> translator =
                 std::make_unique<storagev1translator::ChunkTranslator>(
                     this->get_segment_id(),
@@ -2835,7 +2868,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     info.enable_mmap,
                     mmap_config.GetMmapPopulate(),
                     load_info.load_priority,
-                    info.warmup_policy);
+                    warmup_policy);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -3926,38 +3959,36 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     if (pks.empty()) {
         return;
     }
+    auto snapshot = CapturePublishedState();
+    auto runtime = snapshot->runtime;
     BitsetTypeView bitset_view(bitset);
 
     // See Contain() — same zero-storage pk2offset fast path.
-    if (insert_record_.pk2offset_is_zero_storage()) {
+    if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
         for (auto& pk : pks) {
-            insert_record_.search_pk_range(
-                pk, proto::plan::OpType::Equal, bitset_view);
+            runtime->virtual_pk2offset->find_range(
+                pk, proto::plan::OpType::Equal, bitset_view, [](int64_t) {
+                    return true;
+                });
         }
         return;
     }
 
     if (!is_sorted_by_pk_) {
-        auto pk_index = PinPkIndex(nullptr);
+        auto pk_index = PinPkIndex(runtime, nullptr);
         auto* pk_cell = pk_index.get();
-        AssertInfo(pk_cell != nullptr || !insert_record_.empty_pks(),
+        AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
         for (auto& pk : pks) {
-            if (pk_cell != nullptr) {
-                pk_cell->pk2offset().find_range(
-                    pk,
-                    proto::plan::OpType::Equal,
-                    bitset_view,
-                    [](int64_t offset) { return true; });
-            } else {
-                insert_record_.search_pk_range(
-                    pk, proto::plan::OpType::Equal, bitset_view);
-            }
+            pk_cell->pk2offset().find_range(
+                pk,
+                proto::plan::OpType::Equal,
+                bitset_view,
+                [](int64_t offset) { return true; });
         }
         return;
     }
 
-    auto snapshot = CapturePublishedState();
     auto schema_snapshot = snapshot->schema;
     auto pk_field_id =
         schema_snapshot->get_primary_field_id().value_or(FieldId(-1));
@@ -3992,9 +4023,9 @@ ChunkedSegmentSealedImpl::search_batch_pks(
         callback) const {
     // Helper to read a single timestamp by segment offset.
     // For import/CDC segments with commit_ts_ set: every row carries commit_ts_,
-    // so short-circuit without touching the raw timestamp column or insert_record_.
+    // so short-circuit without touching the raw timestamp column.
     // For StorageV2: pins the timestamp column and indexes into chunks.
-    // For StorageV1: reads from insert_record_ directly.
+    // PK lookup and timestamp data come from the same published runtime.
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     auto effective_commit_ts =
@@ -4008,14 +4039,14 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     // Avoid the sorted-PK column scan below: external segments synthesize PKs
     // with VirtualPKChunkedColumn, which intentionally does not support
     // GetAllChunks().
-    if (insert_record_.pk2offset_is_zero_storage()) {
+    if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
         auto timestamp_hit =
             include_same_ts
                 ? [](Timestamp lhs, Timestamp rhs) { return lhs <= rhs; }
                 : [](Timestamp lhs, Timestamp rhs) { return lhs < rhs; };
         for (size_t i = 0; i < pks.size(); i++) {
             auto timestamp = get_timestamp(i);
-            for (auto offset : insert_record_.pk2offset_->find(pks[i])) {
+            for (auto offset : runtime->virtual_pk2offset->find(pks[i])) {
                 auto insert_ts = read_ts(offset);
                 if (timestamp_hit(insert_ts, timestamp)) {
                     callback(SegOffset(offset), timestamp);
@@ -4027,17 +4058,18 @@ ChunkedSegmentSealedImpl::search_batch_pks(
 
     // handle unsorted case
     if (!is_sorted_by_pk_) {
-        auto pk_index = PinPkIndex(nullptr);
+        auto pk_index = PinPkIndex(runtime, nullptr);
         auto* pk_cell = pk_index.get();
+        if (pk_cell == nullptr || !pk_cell->has_pk2offset()) {
+            return;
+        }
         auto timestamp_hit =
             include_same_ts
                 ? [](Timestamp lhs, Timestamp rhs) { return lhs <= rhs; }
                 : [](Timestamp lhs, Timestamp rhs) { return lhs < rhs; };
         for (size_t i = 0; i < pks.size(); i++) {
             auto timestamp = get_timestamp(i);
-            auto offsets = pk_cell != nullptr
-                               ? pk_cell->pk2offset().find(pks[i])
-                               : insert_record_.pk2offset_->find(pks[i]);
+            auto offsets = pk_cell->pk2offset().find(pks[i]);
             for (auto offset : offsets) {
                 auto insert_ts = read_ts(offset);
                 if (timestamp_hit(insert_ts, timestamp)) {
@@ -4137,38 +4169,39 @@ ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
                                    proto::plan::OpType op,
                                    const PkType& pk,
                                    BitsetTypeView& bitset) const {
+    auto snapshot = CapturePublishedState();
+    auto runtime = snapshot->runtime;
     // See Contain() — same zero-storage pk2offset fast path.
-    if (insert_record_.pk2offset_is_zero_storage()) {
-        insert_record_.search_pk_range(pk, op, bitset);
+    if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
+        runtime->virtual_pk2offset->find_range(
+            pk, op, bitset, [](int64_t) { return true; });
         return;
     }
     if (!is_sorted_by_pk_) {
-        auto pk_index = PinPkIndex(op_ctx);
+        auto pk_index = PinPkIndex(runtime, op_ctx);
         auto* pk_cell = pk_index.get();
-        AssertInfo(pk_cell != nullptr || !insert_record_.empty_pks(),
+        AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
-        if (pk_cell != nullptr) {
-            pk_cell->pk2offset().find_range(
-                pk, op, bitset, [](int64_t offset) { return true; });
-        } else {
-            insert_record_.search_pk_range(pk, op, bitset);
-        }
+        pk_cell->pk2offset().find_range(
+            pk, op, bitset, [](int64_t offset) { return true; });
         return;
     }
 
-    search_sorted_pk_range(op_ctx, op, pk, bitset);
+    search_sorted_pk_range(op_ctx, op, pk, bitset, snapshot);
 }
 
 void
-ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
-                                                 proto::plan::OpType op,
-                                                 const PkType& pk,
-                                                 BitsetTypeView& bitset) const {
-    auto schema_snapshot = CaptureSchemaSnapshot();
+ChunkedSegmentSealedImpl::search_sorted_pk_range(
+    milvus::OpContext* op_ctx,
+    proto::plan::OpType op,
+    const PkType& pk,
+    BitsetTypeView& bitset,
+    const std::shared_ptr<const PublishedSegmentState>& snapshot) const {
+    auto schema_snapshot = snapshot->schema;
     auto pk_field_id =
         schema_snapshot->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-    auto pk_column = get_column(pk_field_id);
+    auto pk_column = get_column(snapshot->runtime, pk_field_id);
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
     switch (schema_snapshot->get_fields().at(pk_field_id).get_data_type()) {
@@ -4196,46 +4229,50 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
                                           const PkType& upper_pk,
                                           bool upper_inclusive,
                                           BitsetTypeView& bitset) const {
+    auto snapshot = CapturePublishedState();
+    auto runtime = snapshot->runtime;
     // See Contain() — same zero-storage pk2offset fast path.
-    if (insert_record_.pk2offset_is_zero_storage()) {
-        insert_record_.search_pk_binary_range(
-            lower_pk, lower_inclusive, upper_pk, upper_inclusive, bitset);
+    if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
+        auto lower_op = lower_inclusive ? proto::plan::OpType::GreaterEqual
+                                        : proto::plan::OpType::GreaterThan;
+        auto upper_op = upper_inclusive ? proto::plan::OpType::LessEqual
+                                        : proto::plan::OpType::LessThan;
+        BitsetType upper_result(bitset.size());
+        auto upper_view = upper_result.view();
+        runtime->virtual_pk2offset->find_range(
+            lower_pk, lower_op, bitset, [](int64_t) { return true; });
+        runtime->virtual_pk2offset->find_range(
+            upper_pk, upper_op, upper_view, [](int64_t) { return true; });
+        bitset &= upper_result;
         return;
     }
     if (!is_sorted_by_pk_) {
-        auto pk_index = PinPkIndex(op_ctx);
+        auto pk_index = PinPkIndex(runtime, op_ctx);
         auto* pk_cell = pk_index.get();
-        AssertInfo(pk_cell != nullptr || !insert_record_.empty_pks(),
+        AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
-        if (pk_cell != nullptr) {
-            auto lower_op = lower_inclusive ? proto::plan::OpType::GreaterEqual
-                                            : proto::plan::OpType::GreaterThan;
-            auto upper_op = upper_inclusive ? proto::plan::OpType::LessEqual
-                                            : proto::plan::OpType::LessThan;
-            BitsetType upper_result(bitset.size());
-            auto upper_view = upper_result.view();
-            pk_cell->pk2offset().find_range(
-                lower_pk, lower_op, bitset, [](int64_t offset) {
-                    return true;
-                });
-            pk_cell->pk2offset().find_range(
-                upper_pk, upper_op, upper_view, [](int64_t offset) {
-                    return true;
-                });
-            bitset &= upper_result;
-        } else {
-            insert_record_.search_pk_binary_range(
-                lower_pk, lower_inclusive, upper_pk, upper_inclusive, bitset);
-        }
+        auto lower_op = lower_inclusive ? proto::plan::OpType::GreaterEqual
+                                        : proto::plan::OpType::GreaterThan;
+        auto upper_op = upper_inclusive ? proto::plan::OpType::LessEqual
+                                        : proto::plan::OpType::LessThan;
+        BitsetType upper_result(bitset.size());
+        auto upper_view = upper_result.view();
+        pk_cell->pk2offset().find_range(
+            lower_pk, lower_op, bitset, [](int64_t offset) { return true; });
+        pk_cell->pk2offset().find_range(
+            upper_pk, upper_op, upper_view, [](int64_t offset) {
+                return true;
+            });
+        bitset &= upper_result;
         return;
     }
 
     // For sorted segments, use binary search
-    auto schema_snapshot = CaptureSchemaSnapshot();
+    auto schema_snapshot = snapshot->schema;
     auto pk_field_id =
         schema_snapshot->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-    auto pk_column = get_column(pk_field_id);
+    auto pk_column = get_column(runtime, pk_field_id);
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
     switch (schema_snapshot->get_fields().at(pk_field_id).get_data_type()) {
@@ -4269,15 +4306,16 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
 ChunkedSegmentSealedImpl::find_first_n(int64_t limit,
                                        const BitsetTypeView& bitset) const {
+    auto runtime = CaptureRuntimeResourceState();
+    if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
+        return runtime->virtual_pk2offset->find_first_n(limit, bitset);
+    }
     if (!is_sorted_by_pk_) {
-        auto pk_index = PinPkIndex(nullptr);
+        auto pk_index = PinPkIndex(runtime, nullptr);
         auto* pk_cell = pk_index.get();
-        AssertInfo(pk_cell != nullptr || !insert_record_.empty_pks(),
+        AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
-        if (pk_cell != nullptr) {
-            return pk_cell->pk2offset().find_first_n(limit, bitset);
-        }
-        return insert_record_.pk2offset_->find_first_n(limit, bitset);
+        return pk_cell->pk2offset().find_first_n(limit, bitset);
     }
     if (limit == Unlimited || limit == NoLimit) {
         limit = num_rows_.value();
@@ -4313,9 +4351,18 @@ ChunkedSegmentSealedImpl::find_first_n_element(
     const BitsetTypeView& element_bitset,
     const IArrayOffsets* array_offsets,
     const std::optional<QueryIteratorCursor>& cursor) const {
+    auto snapshot = CapturePublishedState();
+    auto runtime = snapshot->runtime;
+    if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
+        return runtime->virtual_pk2offset->find_first_n_element(
+            limit, element_bitset, array_offsets, cursor);
+    }
     if (!is_sorted_by_pk_) {
-        // Not sorted by PK, use pk2offset_ to iterate in PK order
-        return insert_record_.pk2offset_->find_first_n_element(
+        auto pk_index = PinPkIndex(runtime, nullptr);
+        auto* pk_cell = pk_index.get();
+        AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
+                   "primary key index is not ready");
+        return pk_cell->pk2offset().find_first_n_element(
             limit, element_bitset, array_offsets, cursor);
     }
 
@@ -4332,11 +4379,11 @@ ChunkedSegmentSealedImpl::find_first_n_element(
     // already been returned.
     std::optional<int64_t> cursor_doc_offset;
     if (cursor.has_value()) {
-        auto schema_snapshot = CaptureSchemaSnapshot();
+        auto schema_snapshot = snapshot->schema;
         auto pk_field_id =
             schema_snapshot->get_primary_field_id().value_or(FieldId(-1));
         AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-        auto pk_column = get_column(pk_field_id);
+        auto pk_column = get_column(runtime, pk_field_id);
         AssertInfo(pk_column != nullptr, "primary key column not loaded");
         switch (schema_snapshot->get_fields().at(pk_field_id).get_data_type()) {
             case DataType::INT64:
@@ -4408,31 +4455,50 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       mmap_descriptor_(storage::MmapManager::GetInstance()
                            .GetMmapChunkManager()
                            ->Register()),
-      insert_record_(*schema, MAX_ROW_COUNT),
       id_(segment_id),
       col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
-          &insert_record_,
-          [this, schema](
-              const std::vector<PkType>& pks,
-              const Timestamp* timestamps,
-              const std::function<void(const SegOffset offset,
-                                       const Timestamp ts)>& callback) {
-              if (commit_ts_ != 0) {
+          nullptr,
+          [this](const std::vector<PkType>& pks,
+                 const Timestamp* timestamps,
+                 const std::function<void(const SegOffset offset,
+                                          const Timestamp ts)>& callback) {
+              auto snapshot = CapturePublishedState();
+              auto runtime = snapshot->runtime;
+              auto schema = snapshot->schema;
+              if (snapshot->commit_ts != 0) {
                   // For import segments with commit_ts, row timestamps are
-                  // overwritten to commit_ts. Skip the timestamp filter in
-                  // PK search so that deletes with ts < commit_ts can still
-                  // find the matching rows. Pass the original delete
-                  // timestamp to the callback for correct storage.
+                  // overwritten to commit_ts. Filter with the same published
+                  // snapshot used for PK lookup, so pre-commit and
+                  // same-timestamp deletes never reach DeletedRecord.
+                  auto delete_is_after_insert = [&](size_t i) {
+                      return timestamps[i] > snapshot->commit_ts;
+                  };
                   if (!is_sorted_by_pk_) {
-                      auto pk_index = PinPkIndex(nullptr);
+                      if (runtime != nullptr &&
+                          runtime->virtual_pk2offset != nullptr) {
+                          for (size_t i = 0; i < pks.size(); i++) {
+                              if (!delete_is_after_insert(i)) {
+                                  continue;
+                              }
+                              for (auto offset :
+                                   runtime->virtual_pk2offset->find(pks[i])) {
+                                  callback(SegOffset(offset), timestamps[i]);
+                              }
+                          }
+                          return;
+                      }
+                      auto pk_index = PinPkIndex(runtime, nullptr);
                       auto* pk_cell = pk_index.get();
+                      if (pk_cell == nullptr || !pk_cell->has_pk2offset()) {
+                          return;
+                      }
                       for (size_t i = 0; i < pks.size(); i++) {
-                          auto offsets =
-                              pk_cell != nullptr
-                                  ? pk_cell->pk2offset().find(pks[i])
-                                  : insert_record_.pk2offset_->find(pks[i]);
+                          if (!delete_is_after_insert(i)) {
+                              continue;
+                          }
+                          auto offsets = pk_cell->pk2offset().find(pks[i]);
                           for (auto offset : offsets) {
                               callback(SegOffset(offset), timestamps[i]);
                           }
@@ -4441,7 +4507,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                       auto pk_field_id =
                           schema->get_primary_field_id().value_or(FieldId(-1));
                       AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-                      auto runtime = CaptureRuntimeResourceState();
                       auto pk_column = get_column(runtime, pk_field_id);
                       AssertInfo(pk_column != nullptr,
                                  "primary key column not loaded");
@@ -4461,6 +4526,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                                   auto num_rows_until_chunk =
                                       pk_column->GetNumRowsUntilChunk(i);
                                   for (size_t j = 0; j < pks.size(); j++) {
+                                      if (!delete_is_after_insert(j)) {
+                                          continue;
+                                      }
                                       auto target = std::get<int64_t>(pks[j]);
                                       auto it = std::lower_bound(
                                           src, src + chunk_row_num, target);
@@ -4485,6 +4553,9 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                                   auto string_chunk =
                                       static_cast<StringChunk*>(pw.get());
                                   for (size_t j = 0; j < pks.size(); ++j) {
+                                      if (!delete_is_after_insert(j)) {
+                                          continue;
+                                      }
                                       auto& target =
                                           std::get<std::string>(pks[j]);
                                       auto offset =
@@ -4521,11 +4592,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
               }
           },
           segment_id) {
-    deleted_record_.set_get_insert_timestamp_func(
-        [this](int64_t row_id) -> Timestamp {
-            return ReadTimestamp(
-                row_id, CaptureRuntimeResourceState(), EffectiveCommitTs());
-        });
     auto load_info = std::make_shared<const SegmentLoadInfo>(
         milvus::proto::segcore::SegmentLoadInfo(), schema);
     std::atomic_store(&published_state_,
@@ -4956,9 +5022,7 @@ ChunkedSegmentSealedImpl::ClearData() {
         ngram_indexings_.withWLock([&](auto& ngram_indexings) {
             cancel_and_clear_ngram_indexings(ngram_indexings);
         });
-        insert_record_.clear();
         timestamp_index_slot_.wlock()->reset();
-        pk_index_slot_.wlock()->reset();
         fields_.wlock()->clear();
         variable_fields_avg_size_.clear();
         stats_.mem_size = 0;
@@ -5863,23 +5927,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
     // Fast path for int64 PK field: use compressed offset2pk index
     auto pk_field_id = snapshot->schema->get_primary_field_id();
-    auto pk_index = PinPkIndex(op_ctx);
+    auto pk_index = PinPkIndex(snapshot->runtime, op_ctx);
     if (pk_field_id.has_value() && pk_field_id.value() == field_id &&
         field_meta.get_data_type() == DataType::INT64 &&
-        (pk_index.get() != nullptr ? pk_index.get()->has_int64_pk_index()
-                                   : insert_record_.has_int64_pk_index())) {
+        pk_index.get() != nullptr && pk_index.get()->has_int64_pk_index()) {
         auto ret = fill_with_empty(field_id, count);
         auto* output = ret->mutable_scalars()
                            ->mutable_long_data()
                            ->mutable_data()
                            ->mutable_data();
-        if (pk_index.get() != nullptr) {
-            pk_index.get()->bulk_get_int64_pks_by_offsets(
-                seg_offsets, count, output);
-        } else {
-            insert_record_.bulk_get_int64_pks_by_offsets(
-                seg_offsets, count, output);
-        }
+        pk_index.get()->bulk_get_int64_pks_by_offsets(
+            seg_offsets, count, output);
         return ret;
     }
 
@@ -6184,7 +6242,9 @@ SegcoreError
 ChunkedSegmentSealedImpl::Delete(int64_t size,
                                  const IdArray* ids,
                                  const Timestamp* timestamps_raw) {
-    auto schema_snapshot = CaptureSchemaSnapshot();
+    auto snapshot = CapturePublishedState();
+    auto schema_snapshot = snapshot->schema;
+    auto runtime = snapshot->runtime;
     auto field_id =
         schema_snapshot->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
@@ -6197,20 +6257,23 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
     for (int i = 0; i < size; i++) {
         ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
     }
-    // if insert record is empty (may be only-load meta but not data for lru-cache at go side),
-    // filtering may cause the deletion lost, skip the filtering to avoid it.
-    auto pk_index = PinPkIndex(nullptr);
-    auto has_pk_index = pk_index.get() != nullptr ? !pk_index.get()->empty_pks()
-                                                  : !insert_record_.empty_pks();
+    // If PK state is unavailable (for example, only metadata is loaded by the
+    // Go-side cache), filtering could lose deletions, so preserve them all.
+    auto pk_index = PinPkIndex(runtime, nullptr);
+    auto virtual_pk2offset =
+        runtime != nullptr ? runtime->virtual_pk2offset : nullptr;
+    auto has_pk_index =
+        virtual_pk2offset != nullptr ||
+        (pk_index.get() != nullptr && !pk_index.get()->empty_pks());
     if (has_pk_index) {
         auto end = std::remove_if(
             ordering.begin(),
             ordering.end(),
             [&](const std::tuple<Timestamp, PkType>& record) {
-                if (pk_index.get() != nullptr) {
-                    return !pk_index.get()->contain(std::get<1>(record));
+                if (virtual_pk2offset != nullptr) {
+                    return !virtual_pk2offset->contain(std::get<1>(record));
                 }
-                return !insert_record_.contain(std::get<1>(record));
+                return !pk_index.get()->contain(std::get<1>(record));
             });
         size = end - ordering.begin();
         ordering.resize(size);
@@ -6364,6 +6427,91 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
         mask[i] = val > timestamp;
     });
     bitset_chunk |= mask;
+}
+
+std::string
+ChunkedSegmentSealedImpl::resolve_field_data_warmup_policy(
+    FieldId field_id,
+    const SegmentLoadInfo& segment_load_info,
+    const SchemaPtr& schema_snapshot,
+    const std::string& explicit_warmup_policy) const {
+    // System fields do not carry user-field warmup settings and are not
+    // represented in user-field bitsets. They should not affect group warmup
+    // aggregation.
+    if (SystemProperty::Instance().IsSystem(field_id)) {
+        return explicit_warmup_policy;
+    }
+
+    // "Has index" here means an index is usable now:
+    // - SegmentLoadInfo covers DataCoord-built index files loaded with segment
+    //   metadata.
+    // - published_state_.binlog_index_bitset covers interim indexes already
+    //   generated from raw binlog data.
+    // Do not predict whether an interim index may be generated later. Before an
+    // index exists, raw vector data is the search-critical representation and
+    // follows vector-index warmup.
+    bool has_index = segment_load_info.HasIndexInfo(field_id);
+    if (!has_index) {
+        auto snapshot = CapturePublishedState();
+        has_index = snapshot != nullptr &&
+                    get_bit_if_present(snapshot->binlog_index_bitset, field_id);
+    }
+
+    const auto& field_meta = schema_snapshot->operator[](field_id);
+    auto is_vector = IsVectorDataType(field_meta.get_data_type());
+
+    // explicit_warmup_policy is the field-data override carried by the current
+    // load request. It is normally authoritative. The only exception is vector
+    // raw data without a usable index: QueryCoord may have propagated
+    // warmup.vectorField=disable into the field TypeParams, but in this state
+    // the raw vector column is effectively the index/search path and must use
+    // vector-index warmup instead.
+    if (!explicit_warmup_policy.empty() && (!is_vector || has_index)) {
+        return explicit_warmup_policy;
+    }
+
+    if (is_vector && !has_index) {
+        auto [has_index_warmup, index_warmup_policy] =
+            schema_snapshot->CollectionWarmupPolicy(/*is_vector=*/true,
+                                                    /*is_index=*/true);
+        if (has_index_warmup) {
+            return index_warmup_policy;
+        }
+
+        switch (milvus::cachinglayer::Manager::GetInstance()
+                    .getVectorIndexCacheWarmupPolicy()) {
+            case CacheWarmupPolicy::CacheWarmupPolicy_Sync:
+                return "sync";
+            case CacheWarmupPolicy::CacheWarmupPolicy_Async:
+                return "async";
+            case CacheWarmupPolicy::CacheWarmupPolicy_Disable:
+                return "disable";
+            default:
+                return "";
+        }
+    }
+
+    auto [has_field_warmup, field_warmup_policy] =
+        schema_snapshot->WarmupPolicy(field_id, is_vector, /*is_index=*/false);
+    return has_field_warmup ? field_warmup_policy : "";
+}
+
+std::string
+ChunkedSegmentSealedImpl::resolve_field_data_group_warmup_policy(
+    const std::unordered_map<FieldId, FieldMeta>& field_metas,
+    const SegmentLoadInfo& segment_load_info,
+    const SchemaPtr& schema_snapshot,
+    const std::string& explicit_warmup_policy) const {
+    std::string aggregated_warmup_policy;
+    for (const auto& field_meta_pair : field_metas) {
+        AccumulateWarmupPolicyForGroup(
+            resolve_field_data_warmup_policy(field_meta_pair.first,
+                                             segment_load_info,
+                                             schema_snapshot,
+                                             explicit_warmup_policy),
+            aggregated_warmup_policy);
+    }
+    return aggregated_warmup_policy;
 }
 
 bool
@@ -6600,13 +6748,16 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         }
     }
 
-    if (schema_snapshot->get_primary_field_id().value_or(FieldId(-1)) ==
-        field_id) {
-        if (segment_load_info.GetStorageVersion() >= STORAGE_V2) {
-            init_storage_v2_pk_index(field_id, column, data_type);
-        } else {
-            init_storage_v1_pk_index(field_id, column, data_type, is_replace);
-        }
+    std::shared_ptr<CacheSlot<storagev2translator::PkIndexCell>> pk_index_slot;
+    const bool is_primary_field =
+        schema_snapshot->get_primary_field_id().value_or(FieldId(-1)) ==
+        field_id;
+    if (is_primary_field) {
+        pk_index_slot =
+            BuildPkIndexSlot(column,
+                             data_type,
+                             segment_load_info.GetStorageVersion() < STORAGE_V2,
+                             op_ctx);
     }
 
     generate_interim_index(field_id, num_rows, column, op_ctx, committer);
@@ -6640,6 +6791,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             const std::shared_ptr<ChunkedColumnInterface>& old_column,
             const PublishedSegmentState& state_snapshot) {
             prepare_array_offsets(target_runtime);
+
+            if (is_primary_field) {
+                target_runtime.pk_index_slot = pk_index_slot;
+                target_runtime.virtual_pk2offset.reset();
+            }
 
             if (is_replace) {
                 if (old_column && !enable_mmap) {
@@ -6942,8 +7098,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.fields_to_fill_default.empty()) {
-        FillDefaultValueFields(
-            diff.fields_to_fill_default, schema_snapshot, committer);
+        FillDefaultValueFields(diff.fields_to_fill_default,
+                               segment_load_info,
+                               schema_snapshot,
+                               committer);
     }
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
@@ -7234,9 +7392,11 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
 }
 
 void
-ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta,
-                                           const SchemaPtr& schema_snapshot,
-                                           RuntimeResourceState& runtime) {
+ChunkedSegmentSealedImpl::fill_empty_field(
+    const FieldMeta& field_meta,
+    const SchemaPtr& schema_snapshot,
+    const SegmentLoadInfo& segment_load_info,
+    RuntimeResourceState& runtime) {
     auto field_id = field_meta.get_id();
     auto data_type = field_meta.get_data_type();
     LOG_INFO(
@@ -7258,18 +7418,14 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta,
             ->GetRootPath();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto load_info_snapshot = CaptureLoadInfoSnapshot();
-    auto field_data_info =
-        FieldDataInfo(field_id.get(),
-                      size,
-                      mmap_dir_path,
-                      false,
-                      load_info_snapshot->GetInsertChannel());
+    auto field_data_info = FieldDataInfo(field_id.get(),
+                                         size,
+                                         mmap_dir_path,
+                                         false,
+                                         segment_load_info.GetInsertChannel());
 
-    auto [field_has_warmup, field_warmup_policy] =
-        schema_snapshot->WarmupPolicy(
-            field_id, IsVectorDataType(data_type), /*is_index=*/false);
-    std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
+    auto warmup_policy = resolve_field_data_warmup_policy(
+        field_id, segment_load_info, schema_snapshot);
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(),
@@ -7289,16 +7445,6 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta,
         field_meta.get_data_type(),
         field_id.get(),
         id_);
-}
-
-void
-ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
-    auto runtime = CloneMutableRuntimeResourceState();
-    fill_empty_field(field_meta, CaptureSchemaSnapshot(), *runtime);
-    EnsureArrayOffsetsForStructField(
-        field_meta, num_rows_.value_or(0), *runtime);
-    PublishFieldDataReadyLocked(field_meta.get_id(),
-                                ToConstRuntimeState(std::move(runtime)));
 }
 
 void
@@ -7325,6 +7471,7 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
 void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids,
+    const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     RuntimeResourceState* runtime,
     PublishedSegmentState* staged_state) {
@@ -7352,7 +7499,8 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             continue;
         }
         const auto& field_meta = schema_snapshot->operator[](field_id);
-        fill_empty_field(field_meta, schema_snapshot, *target_runtime);
+        fill_empty_field(
+            field_meta, schema_snapshot, segment_load_info, *target_runtime);
         EnsureArrayOffsetsForStructField(
             field_meta, num_rows_.value_or(0), *target_runtime);
         filled_fields.push_back(field_id);
@@ -7373,15 +7521,17 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
 void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids) {
-    FillDefaultValueFields(field_ids, CaptureSchemaSnapshot(), nullptr);
+    auto snapshot = CapturePublishedState();
+    FillDefaultValueFields(
+        field_ids, *snapshot->load_info, snapshot->schema, nullptr);
 }
 
 void
 ChunkedSegmentSealedImpl::FillDefaultValueFields(
     const std::vector<FieldId>& field_ids,
+    const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     StagedStateCommitter& committer) {
-    auto snapshot = CapturePublishedState();
     const auto* staged_state = committer.staged_state();
 
     std::vector<std::pair<FieldMeta, std::shared_ptr<ChunkedColumnInterface>>>
@@ -7423,20 +7573,15 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         int64_t size = num_rows_.value();
         AssertInfo(size > 0,
                    "Chunked Sealed segment must have more than 0 row");
-        auto load_info_snapshot = staged_state->load_info != nullptr
-                                      ? staged_state->load_info
-                                      : snapshot->load_info;
         auto field_data_info =
             FieldDataInfo(field_id.get(),
                           size,
                           mmap_dir_path,
                           false,
-                          load_info_snapshot->GetInsertChannel());
+                          segment_load_info.GetInsertChannel());
 
-        auto [field_has_warmup, field_warmup_policy] =
-            schema_snapshot->WarmupPolicy(
-                field_id, IsVectorDataType(data_type), /*is_index=*/false);
-        std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
+        auto warmup_policy = resolve_field_data_warmup_policy(
+            field_id, segment_load_info, schema_snapshot);
         std::unique_ptr<Translator<milvus::Chunk>> translator =
             std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
                 get_segment_id(),
@@ -7761,17 +7906,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+    auto aggregated_warmup_policy = resolve_field_data_group_warmup_policy(
+        field_metas, segment_load_info, schema_snapshot);
 
     // assumption: vector field occupies whole column group
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
-    bool has_warmup_setting = false;
-    std::string aggregated_warmup_policy = "disable";
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
         }
+
         // if field has mmap setting, use it
         // - mmap setting at collection level, then all field are the same
         // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
@@ -7779,24 +7925,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
-
-        // if field has warmup setting, use it
-        // - warmup setting at collection level, uses appropriate key based on field type
-        // - warmup setting at field level, use the most aggressive policy (sync > async > disable)
-        // Note: this is for field data loading, not index (is_index = false)
-        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
-        auto [field_has_warmup, field_warmup_policy] =
-            schema_snapshot->WarmupPolicy(
-                field_id, field_is_vector, /*is_index=*/false);
-        if (field_has_warmup) {
-            has_warmup_setting = true;
-            if (field_warmup_policy == "sync") {
-                aggregated_warmup_policy = "sync";
-            } else if (field_warmup_policy == "async" &&
-                       aggregated_warmup_policy != "sync") {
-                aggregated_warmup_policy = "async";
-            }
-        }
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -7841,8 +7969,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     // Determine warmup policy: use per-field settings if any,
     // otherwise pass empty string to fall back to global config
-    std::string warmup_policy =
-        has_warmup_setting ? aggregated_warmup_policy : "";
+    std::string warmup_policy = aggregated_warmup_policy;
 
     // Multiple lazy entries can share the same column-group index (one per
     // field), so the translator cache key must be disambiguated by the
@@ -7933,12 +8060,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     }
 
     auto field_metas = schema_snapshot->get_field_metas(milvus_field_ids);
+    auto aggregated_warmup_policy = resolve_field_data_group_warmup_policy(
+        field_metas, segment_load_info, schema_snapshot);
 
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
-    bool has_warmup_setting = false;
-    std::string aggregated_warmup_policy = "disable";
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -7947,20 +8074,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_snapshot->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
-
-        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
-        auto [field_has_warmup, field_warmup_policy] =
-            schema_snapshot->WarmupPolicy(
-                field_id, field_is_vector, /*is_index=*/false);
-        if (field_has_warmup) {
-            has_warmup_setting = true;
-            if (field_warmup_policy == "sync") {
-                aggregated_warmup_policy = "sync";
-            } else if (field_warmup_policy == "async" &&
-                       aggregated_warmup_policy != "sync") {
-                aggregated_warmup_policy = "async";
-            }
-        }
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -7998,8 +8111,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             .GetChunkManager()
             ->GetRootPath();
 
-    std::string warmup_policy =
-        has_warmup_setting ? aggregated_warmup_policy : "";
+    std::string warmup_policy = aggregated_warmup_policy;
 
     std::string cache_key_suffix;
     if (!eager_load) {
@@ -8286,8 +8398,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         bool mmap_enabled = false;
         bool is_vector = false;
 
-        bool has_warmup_setting = false;
-        std::string aggregated_warmup_policy = "disable";
+        std::string aggregated_warmup_policy;
         for (const auto& child_field_id : fields_to_load) {
             auto& field_meta = schema_snapshot->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
@@ -8314,20 +8425,10 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                 index_has_raw_data = false;
             }
 
-            auto [field_has_warmup, field_warmup_policy] =
-                schema_snapshot->WarmupPolicy(
-                    child_field_id,
-                    IsVectorDataType(field_meta.get_data_type()),
-                    /*is_index=*/false);
-            if (field_has_warmup) {
-                has_warmup_setting = true;
-                if (field_warmup_policy == "sync") {
-                    aggregated_warmup_policy = "sync";
-                } else if (field_warmup_policy == "async" &&
-                           aggregated_warmup_policy != "sync") {
-                    aggregated_warmup_policy = "async";
-                }
-            }
+            AccumulateWarmupPolicyForGroup(
+                resolve_field_data_warmup_policy(
+                    child_field_id, segment_load_info, schema_snapshot),
+                aggregated_warmup_policy);
         }
 
         auto group_id = field_binlog.fieldid();
@@ -8376,8 +8477,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
 
         // Determine group warmup policy: use per-field settings if any,
         // otherwise fall back to global warmup policy
-        field_binlog_info.warmup_policy =
-            has_warmup_setting ? aggregated_warmup_policy : "";
+        field_binlog_info.warmup_policy = aggregated_warmup_policy;
 
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;

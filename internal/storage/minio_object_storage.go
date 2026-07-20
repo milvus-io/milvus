@@ -76,8 +76,17 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 }
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
-	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minio.PutObjectOptions{})
+	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minioObjectStorage.putObjectOptions())
 	return mapObjectStorageError(objectName, err)
+}
+
+func (minioObjectStorage *MinioObjectStorage) putObjectOptions() minio.PutObjectOptions {
+	if !paramtable.Get().MinioCfg.DisableAWSChunkedEncoding.GetAsBool() {
+		return minio.PutObjectOptions{}
+	}
+	return minio.PutObjectOptions{
+		DisableContentSha256: true,
+	}
 }
 
 func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {

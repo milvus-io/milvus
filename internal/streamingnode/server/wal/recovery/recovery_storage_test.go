@@ -215,7 +215,7 @@ func TestRecoveryStorageManualFlushMarksSegmentsFlushed(t *testing.T) {
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(2))
 
-	r.handleManualFlush(message.MustAsImmutableManualFlushMessageV2(msg))
+	r.handleManualFlush(context.Background(), message.MustAsImmutableManualFlushMessageV2(msg))
 	segment := r.segments[segmentID]
 	snapshot, shouldBeRemoved := segment.ConsumeDirtyAndGetSnapshot()
 	require.NotNil(t, snapshot)

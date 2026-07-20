@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/cdc/meta"
+	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -74,21 +75,26 @@ func (r *replicateManager) CreateReplicator(channel *meta.ReplicateChannel) {
 func (r *replicateManager) RemoveReplicator(key string, modRevision int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.removeReplicatorInternal(key, modRevision)
+	channel, removed := r.removeReplicatorInternal(key, modRevision)
+	if removed && channel != nil {
+		replicatestream.DeleteLastReplicatedTimeTick(channel.Value)
+	}
 }
 
-func (r *replicateManager) removeReplicatorInternal(key string, modRevision int64) {
+func (r *replicateManager) removeReplicatorInternal(key string, modRevision int64) (*meta.ReplicateChannel, bool) {
 	logger := mlog.With(mlog.String("key", key), mlog.Int64("modRevision", modRevision))
 	repKey := buildReplicatorKey(key, modRevision)
 	replicator, ok := r.replicators[repKey]
 	if !ok {
 		logger.Info(r.ctx, "replicator not found, skip remove")
-		return
+		return nil, false
 	}
+	channel := r.replicatorChannels[repKey]
 	replicator.StopReplication()
 	delete(r.replicators, repKey)
 	delete(r.replicatorChannels, repKey)
 	logger.Info(r.ctx, "removed replicator for replicate pchannel")
+	return channel, true
 }
 
 func (r *replicateManager) RemoveOutdatedReplicators(aliveChannels []*meta.ReplicateChannel) {
@@ -102,6 +108,14 @@ func (r *replicateManager) RemoveOutdatedReplicators(aliveChannels []*meta.Repli
 	for repKey := range r.replicators {
 		if _, ok := alivesMap[repKey]; !ok {
 			channel := r.replicatorChannels[repKey]
+			if channel == nil {
+				continue
+			}
+			// No lag-series deletion here: a replicate pchannel key is only
+			// deleted after the replicator's in-band removal path
+			// (handleAlterReplicateConfigMessage) confirmed the removal and
+			// deleted the series; out-of-band key deletions are covered by
+			// the etcd DELETE event path (RemoveReplicator).
 			r.removeReplicatorInternal(channel.Key, channel.ModRevision)
 		}
 	}

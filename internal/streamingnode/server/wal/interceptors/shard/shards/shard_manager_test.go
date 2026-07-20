@@ -494,7 +494,7 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int32(4), ver)
 	assert.True(t, m.collections[104].HasTextField())
-	assert.True(t, m.collections[104].UseGrowingSourceFlush())
+	assert.True(t, m.collections[104].AllowGrowingSourceFlush())
 
 	// Test 3: Create collection without schema (legacy), then check version
 	createMsgNoSchema := message.NewCreateCollectionMessageBuilderV1().
@@ -835,17 +835,17 @@ func TestCollectionInfoSchemaVersion(t *testing.T) {
 	assert.Equal(t, int32(3), ci.SchemaVersion())
 }
 
-func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
+func TestCollectionInfoAllowGrowingSourceFlush(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-	assert.False(t, (*CollectionInfo)(nil).UseGrowingSourceFlush())
+	assert.False(t, (*CollectionInfo)(nil).AllowGrowingSourceFlush())
 	ci := &CollectionInfo{}
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{}
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -854,12 +854,12 @@ func TestCollectionInfoUseGrowingSourceFlush(t *testing.T) {
 		},
 	}
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.True(t, ci.UseGrowingSourceFlush())
+	assert.True(t, ci.AllowGrowingSourceFlush())
 }
 
-func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
+func TestCollectionInfoAllowGrowingSourceFlush_TextField(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
@@ -877,9 +877,10 @@ func TestCollectionInfoUseGrowingSourceFlush_TextField(t *testing.T) {
 		},
 	}
 	assert.True(t, ci.HasTextField())
-	assert.False(t, ci.UseGrowingSourceFlush())
+	assert.False(t, ci.AllowGrowingSourceFlush())
+	assert.True(t, ci.RequiresStorageV3())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.True(t, ci.UseGrowingSourceFlush())
+	assert.True(t, ci.AllowGrowingSourceFlush())
 }
 
 func TestCollectionInfoRuntimeFlushSize(t *testing.T) {

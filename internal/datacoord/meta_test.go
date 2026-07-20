@@ -1950,6 +1950,161 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Nil(mutation)
 	})
 
+	suite.Run("in-place result with matching base manifest is adopted", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest, // == current pointer and advances it, adopt
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.EqualValues(1, infos[0].GetID())
+		suite.Equal(resultManifest, infos[0].GetManifestPath())
+	})
+
+	suite.Run("in-place result with stale base manifest is rejected", func() {
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		// pointer advanced past the result's base
+		old.ManifestPath = packed.MarshalManifestPath("/data/segments/1", 11)
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					Manifest:       packed.MarshalManifestPath("/data/segments/1", 12),
+					BaseManifest:   packed.MarshalManifestPath("/data/segments/1", 10), // stale, != current v11
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.Error(err)
+		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	// Defensive: base == current only claims the pointer has not drifted; it does
+	// not independently validate the worker's result. A buggy worker that reports
+	// the matching base but produces a result that does not advance the current
+	// manifest on the same base path (rollback / equal version / different base
+	// path / unparsable) must be rejected, not adopted.
+	suite.Run("in-place result on current base that does not advance is rejected", func() {
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		cases := map[string]string{
+			"rollback":       packed.MarshalManifestPath("/data/segments/1", 9),
+			"different base": packed.MarshalManifestPath("/data/segments/2", 12),
+			"unparsable":     "not-a-manifest",
+		}
+		for name, resultManifest := range cases {
+			suite.Run(name, func() {
+				segs := makeSegments(1, commonpb.SegmentState_Flushed)
+				old := segs.GetSegment(1)
+				old.StorageVersion = storage.StorageV3
+				old.ManifestPath = currentManifest
+				m := &meta{
+					catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+					segments: segs,
+				}
+				task := &datapb.CompactionTask{
+					InputSegments: []int64{1},
+					Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+					Schema:        &schemapb.CollectionSchema{Version: 3},
+				}
+				result := &datapb.CompactionPlanResult{
+					Segments: []*datapb.CompactionSegment{
+						{
+							SegmentID:      1,
+							NumOfRows:      5,
+							Manifest:       resultManifest,
+							BaseManifest:   currentManifest, // == current pointer, but result does not advance it
+							StorageVersion: storage.StorageV3,
+						},
+					},
+				}
+				infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+				suite.Error(err)
+				suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+				suite.Nil(infos)
+				suite.Nil(mutation)
+			})
+		}
+	})
+
+	suite.Run("in-place result already at current manifest is idempotently adopted", func() {
+		// Crash-replay: an adoption already succeeded (segment is at the
+		// materialized manifest) but the task state was lost before meta_saved.
+		// Replaying the same result — stale base, but manifest already == current
+		// — must be accepted, not rejected, so the already-succeeded task is not
+		// spuriously failed.
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = "base/manifest-12" // already adopted the materialized manifest
+		old.SchemaVersion = 3
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+					Manifest:       "base/manifest-12", // == current pointer
+					BaseManifest:   "base/manifest-10", // stale base, but result already current
+					StorageVersion: storage.StorageV3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.Equal("base/manifest-12", infos[0].GetManifestPath())
+	})
+
 	suite.Run("replacement result without preallocated ID rejected", func() {
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
@@ -2384,6 +2539,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2430,6 +2586,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     segment.GetBinlogs(),
 					Manifest:       manifestPath,
+					BaseManifest:   manifestPath,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2465,6 +2622,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     segment.GetBinlogs(),
 					Manifest:       manifestPath,
+					BaseManifest:   manifestPath,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2566,6 +2724,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					SegmentID:      1,
 					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
 				},
 			},
@@ -2818,6 +2977,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchema
 				SegmentID:      1,
 				InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
 				Manifest:       manifestPath,
+				BaseManifest:   manifestPath,
 				StorageVersion: storage.StorageV3,
 			},
 		},

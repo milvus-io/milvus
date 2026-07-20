@@ -21,10 +21,10 @@ import (
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -449,7 +449,10 @@ func indexAndLoadCollectionWithScalarAndVector(ctx context.Context, t *testing.T
 // --- E2E Tests ---
 
 func TestExternalCollectionSnapshotRestoreAndAccess(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -553,7 +556,10 @@ func TestExternalCollectionSnapshotRestoreAndAccess(t *testing.T) {
 //  4. Wait for refresh to complete
 //  5. Verify the generated segment count and total row count
 func TestRefreshExternalCollectionAndVerifySegments(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -837,7 +843,10 @@ func TestExternalCollectionParquetCompressionCodecs(t *testing.T) {
 //  7. Query with filter and output fields
 //  8. Search with vector
 func TestExternalCollectionLoadAndQuery(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1082,7 +1091,10 @@ indexAndLoad:
 }
 
 func TestExternalCollectionNullableFloatVectorTakeOutput(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1330,7 +1342,10 @@ func TestExternalCollectionSparseVectorCurrentlyRejected(t *testing.T) {
 //  2. Remove data1, add data2 (ids 2000-2299) → 800 rows
 //  3. Verify: data0 intact, data1 gone, data2 present
 func TestExternalCollectionIncrementalRefresh(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600) // 10 min for two refresh+load cycles
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1491,7 +1506,10 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 // adding an external field to an already refreshed external collection patches
 // existing same-fragment segments and returns correct values for the new field.
 func TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1637,7 +1655,10 @@ func assertExternalScoreRows(t *testing.T, result client.ResultSet, expected map
 // TestExternalCollectionMultipleDataTypes tests external collections with various data types:
 // Bool, Int8, Int16, Int32, Int64, Float, Double, VarChar, FloatVector
 func TestExternalCollectionMultipleDataTypes(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2077,7 +2098,10 @@ func mapToEnvSlice(m map[string]string) []string {
 //  6. Query with filter
 //  7. Search with vector
 func TestExternalCollectionLanceFormat(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600) // 10 min for lance operations
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2371,7 +2395,10 @@ func buildVortexMultiTypeExternalSchema(collName, externalSource, externalSpec s
 //  6. Query with filter
 //  7. Search with vector
 func TestExternalCollectionVortexFormat(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2598,7 +2625,10 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 // Vortex 0.56.0 cannot write Arrow FixedSizeBinary, so binary/half/int8 vector
 // fields remain covered by the parquet and lance multi-type tests.
 func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2642,7 +2672,10 @@ func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
 // format. Exercises the same multi-type schema and shared
 // refresh/index/load/query/search verification across the lance bridge.
 func TestExternalCollectionMultipleDataTypesLance(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2687,7 +2720,10 @@ func TestExternalCollectionMultipleDataTypesLance(t *testing.T) {
 // types regardless of the output schema.  Vortex and Lance require schema-level
 // changes to support float32 list vectors (tracked separately).
 func TestExternalCollectionFloat32ListVector(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)

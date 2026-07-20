@@ -78,7 +78,7 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(i.method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), i.method,
-		metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		metrics.TotalLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName()).Inc()
 
 	resp, err := i.onCall(ctx, request)
 	if err != nil {
@@ -86,7 +86,7 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	}
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), i.method,
-		metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		metrics.SuccessLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), i.method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return resp, err
@@ -229,6 +229,12 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		return nil, err
 	}
 
+	// prefer the actual database resolved by the coordinator and carried in the
+	// cache, the request db name may be empty/default when querying by collection id
+	if c.dbName != "" {
+		resp.DbName = c.dbName
+	}
+	resp.DbId = c.dbID
 	resp.CollectionID = c.collID
 	resp.UpdateTimestamp = c.updateTimestamp
 	resp.UpdateTimestampStr = fmt.Sprintf("%d", c.updateTimestamp)
@@ -275,7 +281,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 			mlog.Err(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+			metrics.AbandonLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName()).Inc()
 		return nil, err
 	}
 
@@ -289,8 +295,9 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 			mlog.Uint64("BeginTS", dct.BeginTs()),
 			mlog.Uint64("EndTS", dct.EndTs()))
 
+		failStatus, failCause := failMetricLabel(err)
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			failMetricLabel(err), request.GetDbName(), request.GetCollectionName()).Inc()
+			failStatus, failCause, request.GetDbName(), request.GetCollectionName()).Inc()
 
 		return nil, err
 	}

@@ -70,6 +70,7 @@
 class CollectSingleJsonStatsInfoAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
+class JsonStatsProjectionTestAccessor;
 
 namespace milvus::index {
 class JsonKeyStats : public ScalarIndex<std::string> {
@@ -720,6 +721,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;
     friend class ::CollectSingleJsonStatsInfoAccessor;
+    friend class ::JsonStatsProjectionTestAccessor;
 };
 
 }  // namespace milvus::index

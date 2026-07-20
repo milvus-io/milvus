@@ -221,6 +221,7 @@ func getFieldSchema(fieldName string) []byte {
 	fieldSchema := &schemapb.FieldSchema{
 		Name:     fieldName,
 		DataType: schemapb.DataType_Int64,
+		Nullable: true,
 	}
 	schemaBytes, _ := proto.Marshal(fieldSchema)
 	return schemaBytes

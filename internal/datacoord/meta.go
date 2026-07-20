@@ -1073,6 +1073,25 @@ func SetStorageVersion(segmentID int64, version int64) UpdateOperator {
 	}
 }
 
+func ValidateSaveBinlogStorageVersion(segmentID int64, incoming int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			modPack.err = merr.WrapErrSegmentNotFound(segmentID)
+			return false
+		}
+
+		current := segment.GetStorageVersion()
+		if incoming != current {
+			modPack.err = merr.WrapErrDataIntegrityMsg(
+				"segment %d storage version mismatch, current=%d incoming=%d",
+				segmentID, current, incoming)
+			return false
+		}
+		return true
+	}
+}
+
 func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -3345,13 +3364,32 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if currentManifest == "" {
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction input segment should contain a StorageV3 manifest")
 	}
-	if currentManifest != resultManifest {
-		manifestCompare, err := packed.CompareManifestPath(resultManifest, currentManifest)
-		if err != nil {
-			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump compaction result manifest is not comparable with current manifest: %v", err)
+	// Optimistic-concurrency CAS on the manifest pointer. Adopt the in-place
+	// result only when it is a valid successor of the current pointer:
+	//   - result == current: idempotent replay of an adoption whose task state
+	//     was lost to a crash after AlterSegments but before meta_saved.
+	//   - base == current AND result strictly newer on the same base path: a
+	//     fresh forward commit built on the current pointer.
+	// Reject anything else — a stale base (a concurrent stats/index/bump commit
+	// advanced the pointer), a rollback, a different base path, or an unparsable
+	// result — so the task re-triggers and rebuilds on the current manifest
+	// instead of overwriting the concurrent commit (mirrors the stats path's
+	// errStatsResultStale). The check also self-heals a lost result: the pointer
+	// stays put, so the retry re-pins the same base.
+	baseManifest := resultSegment.GetBaseManifest()
+	if baseManifest == "" {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump result missing base manifest")
+	}
+	if resultManifest != currentManifest {
+		if baseManifest != currentManifest {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result base manifest %s no longer matches current %s", baseManifest, currentManifest)
 		}
-		if manifestCompare <= 0 {
-			return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction result manifest is not newer than current manifest")
+		cmp, err := packed.CompareManifestPath(resultManifest, currentManifest)
+		if err != nil {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s not comparable with current %s: %v", resultManifest, currentManifest, err)
+		}
+		if cmp <= 0 {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result manifest %s does not advance current %s", resultManifest, currentManifest)
 		}
 	}
 
