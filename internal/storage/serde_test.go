@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/bitutil"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -116,7 +117,7 @@ func TestSerDe(t *testing.T) {
 			serdeMap[dt].serialize(builder, v, schemapb.DataType_None)
 			// assert.True(t, ok)
 			a := builder.NewArray()
-			got, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
+			got, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false, false)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("deserialize() got = %v, want %v", got, tt.want)
 			}
@@ -152,14 +153,14 @@ func TestSerDeCopy(t *testing.T) {
 			a := builder.NewArray()
 
 			// Test deserialize with shouldCopy parameter
-			copy, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, true)
+			copy, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, true, false)
 			if err != nil {
 				t.Errorf("deserialize() failed for %s: %v", tt.name, err)
 			}
 			if !reflect.DeepEqual(copy, tt.v) {
 				t.Errorf("deserialize() got = %v, want %v", copy, tt.v)
 			}
-			ref, _ := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
+			ref, _ := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false, false)
 			// check the unsafe pointers of copy and ref are different
 			switch v := copy.(type) {
 			case []byte:
@@ -452,7 +453,7 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 			defer arr.Release()
 
 			for i, expectedVector := range tt.vectors {
-				result, err := entry.deserialize(arr, i, tt.elementType, tt.dim, false)
+				result, err := entry.deserialize(arr, i, tt.elementType, tt.dim, false, false)
 				assert.NoError(t, err)
 
 				if expectedVector == nil {
@@ -568,7 +569,7 @@ func TestArrayOfVectorEmptyArray(t *testing.T) {
 			defer arr.Release()
 
 			// Deserialize and verify
-			result, err := entry.deserialize(arr, 0, tt.elementType, tt.dim, false)
+			result, err := entry.deserialize(arr, 0, tt.elementType, tt.dim, false, false)
 			assert.NoError(t, err)
 			assert.NotNil(t, result)
 
@@ -1242,4 +1243,308 @@ func TestBuildRecord_NullableArrayOfVector(t *testing.T) {
 	assert.True(t, rebuiltRecord.Column(100).IsValid(0))
 	assert.True(t, rebuiltRecord.Column(100).IsNull(1))
 	assert.True(t, rebuiltRecord.Column(100).IsValid(2))
+}
+
+func TestBuildRecord_ElementNullableArrayRoundTrip(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:         100,
+				Name:            "arr",
+				DataType:        schemapb.DataType_Array,
+				ElementType:     schemapb.DataType_Int64,
+				ElementNullable: true,
+			},
+		},
+	}
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &ArrayFieldData{
+				ElementType:     schemapb.DataType_Int64,
+				ElementNullable: true,
+				NullableData: []*schemapb.NullableScalarArrayValue{
+					{
+						Data: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 0}},
+							},
+						},
+						ValidData: []bool{true, false},
+					},
+					{
+						Data: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{20}},
+							},
+						},
+						ValidData: []bool{true},
+					},
+				},
+			},
+		},
+	}
+
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	require.NoError(t, err)
+	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer recordBuilder.Release()
+
+	require.NoError(t, BuildRecord(recordBuilder, insertData, schema))
+	record := recordBuilder.NewRecord()
+	defer record.Release()
+
+	entry := serdeMap[schemapb.DataType_Array]
+	value, err := entry.deserialize(record.Column(0), 0, schemapb.DataType_Int64, 0, true, true)
+	require.NoError(t, err)
+	row := value.(*schemapb.NullableScalarArrayValue)
+	assert.Equal(t, []bool{true, false}, row.GetValidData())
+	assert.Equal(t, []int64{10, 0}, row.GetData().GetLongData().GetData())
+}
+
+func TestBuildRecord_ElementNullableArrayOfVectorRoundTrip(t *testing.T) {
+	dim := 4
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:         100,
+				Name:            "vec_arr",
+				DataType:        schemapb.DataType_ArrayOfVector,
+				ElementType:     schemapb.DataType_FloatVector,
+				ElementNullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+				},
+			},
+		},
+	}
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				ElementType:     schemapb.DataType_FloatVector,
+				ElementNullable: true,
+				Dim:             int64(dim),
+				NullableData: []*schemapb.NullableVectorArrayValue{
+					{
+						Data:      makeFloatVec(dim, 1, 2, 3, 4, 5, 6, 7, 8),
+						ValidData: []bool{true, false, true},
+					},
+				},
+			},
+		},
+	}
+
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	require.NoError(t, err)
+	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer recordBuilder.Release()
+
+	require.NoError(t, BuildRecord(recordBuilder, insertData, schema))
+	record := recordBuilder.NewRecord()
+	defer record.Release()
+
+	entry := serdeMap[schemapb.DataType_ArrayOfVector]
+	value, err := entry.deserialize(record.Column(0), 0, schemapb.DataType_FloatVector, dim, true, true)
+	require.NoError(t, err)
+	row := value.(*schemapb.NullableVectorArrayValue)
+	assert.Equal(t, []bool{true, false, true}, row.GetValidData())
+	assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, row.GetData().GetFloatVector().GetData())
+}
+
+func TestBuildRecordRejectsElementNullableMismatch(t *testing.T) {
+	t.Run("array", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:         100,
+					Name:            "arr",
+					DataType:        schemapb.DataType_Array,
+					ElementType:     schemapb.DataType_Int64,
+					ElementNullable: true,
+				},
+			},
+		}
+		insertData := &InsertData{
+			Data: map[FieldID]FieldData{
+				100: &ArrayFieldData{
+					ElementType:     schemapb.DataType_Int64,
+					ElementNullable: false,
+					Data: []*schemapb.ScalarField{
+						{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		arrowSchema, err := ConvertToArrowSchema(schema, false)
+		require.NoError(t, err)
+		recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer recordBuilder.Release()
+
+		err = BuildRecord(recordBuilder, insertData, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "element_nullable mismatch")
+	})
+
+	t.Run("array of vector", func(t *testing.T) {
+		dim := 4
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:         100,
+					Name:            "vec_arr",
+					DataType:        schemapb.DataType_ArrayOfVector,
+					ElementType:     schemapb.DataType_FloatVector,
+					ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			},
+		}
+		insertData := &InsertData{
+			Data: map[FieldID]FieldData{
+				100: &VectorArrayFieldData{
+					ElementType:     schemapb.DataType_FloatVector,
+					ElementNullable: false,
+					Dim:             int64(dim),
+					Data: []*schemapb.VectorField{
+						makeFloatVec(dim, 1, 2, 3, 4),
+					},
+				},
+			},
+		}
+
+		arrowSchema, err := ConvertToArrowSchema(schema, false)
+		require.NoError(t, err)
+		recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer recordBuilder.Release()
+
+		err = BuildRecord(recordBuilder, insertData, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "element_nullable mismatch")
+	})
+
+	t.Run("array reverse", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:     100,
+					Name:        "arr",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		insertData := &InsertData{
+			Data: map[FieldID]FieldData{
+				100: &ArrayFieldData{
+					ElementType:     schemapb.DataType_Int64,
+					ElementNullable: true,
+					NullableData: []*schemapb.NullableScalarArrayValue{
+						{
+							Data: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1}},
+								},
+							},
+							ValidData: []bool{true},
+						},
+					},
+				},
+			},
+		}
+
+		arrowSchema, err := ConvertToArrowSchema(schema, false)
+		require.NoError(t, err)
+		recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer recordBuilder.Release()
+
+		err = BuildRecord(recordBuilder, insertData, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "element_nullable mismatch")
+	})
+
+	t.Run("array of vector reverse", func(t *testing.T) {
+		dim := 4
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:     100,
+					Name:        "vec_arr",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			},
+		}
+		insertData := &InsertData{
+			Data: map[FieldID]FieldData{
+				100: &VectorArrayFieldData{
+					ElementType:     schemapb.DataType_FloatVector,
+					ElementNullable: true,
+					Dim:             int64(dim),
+					NullableData: []*schemapb.NullableVectorArrayValue{
+						{
+							Data:      makeFloatVec(dim, 1, 2, 3, 4),
+							ValidData: []bool{true},
+						},
+					},
+				},
+			},
+		}
+
+		arrowSchema, err := ConvertToArrowSchema(schema, false)
+		require.NoError(t, err)
+		recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer recordBuilder.Release()
+
+		err = BuildRecord(recordBuilder, insertData, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "element_nullable mismatch")
+	})
+}
+
+func TestBuildRecord_ElementNullableArrayOfVectorRejectsMissingTypedData(t *testing.T) {
+	dim := 4
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:         100,
+				Name:            "vec_arr",
+				DataType:        schemapb.DataType_ArrayOfVector,
+				ElementType:     schemapb.DataType_FloatVector,
+				ElementNullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+				},
+			},
+		},
+	}
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				ElementType:     schemapb.DataType_FloatVector,
+				ElementNullable: true,
+				Dim:             int64(dim),
+				NullableData: []*schemapb.NullableVectorArrayValue{
+					{ValidData: []bool{false}},
+				},
+			},
+		},
+	}
+
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	require.NoError(t, err)
+	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer recordBuilder.Release()
+
+	err = BuildRecord(recordBuilder, insertData, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires typed vector data")
 }

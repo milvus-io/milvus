@@ -631,7 +631,16 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
-		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetArrayData().GetData())
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+			break
+		}
+		arrayData := fieldData.GetScalars().GetArrayData()
+		if fieldSchema.GetElementNullable() {
+			fieldNumRows = getNumRowsOfScalarField(arrayData.GetNullableData())
+		} else {
+			fieldNumRows = getNumRowsOfScalarField(arrayData.GetData())
+		}
 	case schemapb.DataType_JSON:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().GetData())
 	case schemapb.DataType_Geometry:
@@ -699,7 +708,12 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		if len(fieldData.GetValidData()) > 0 {
 			fieldNumRows = uint64(len(fieldData.GetValidData()))
 		} else {
-			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
+			vectorArray := fieldData.GetVectors().GetVectorArray()
+			if fieldSchema.GetElementNullable() && len(vectorArray.GetNullableData()) > 0 {
+				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetNullableData())
+			} else {
+				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetData())
+			}
 		}
 	default:
 		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldSchema.GetDataType())
@@ -731,7 +745,16 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.ScalarField_StringData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
 		case *schemapb.ScalarField_ArrayData:
-			fieldNumRows = getNumRowsOfScalarField(scalarField.GetArrayData().Data)
+			if len(fieldData.GetValidData()) > 0 {
+				fieldNumRows = uint64(len(fieldData.GetValidData()))
+				break
+			}
+			arrayData := scalarField.GetArrayData()
+			if len(arrayData.GetNullableData()) > 0 {
+				fieldNumRows = getNumRowsOfScalarField(arrayData.GetNullableData())
+			} else {
+				fieldNumRows = getNumRowsOfScalarField(arrayData.GetData())
+			}
 		case *schemapb.ScalarField_JsonData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetJsonData().Data)
 		case *schemapb.ScalarField_GeometryData:
@@ -781,7 +804,12 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 				return 0, err
 			}
 		case *schemapb.VectorField_VectorArray:
-			fieldNumRows = getNumRowsOfArrayVectorField(vectorField.GetVectorArray().Data)
+			vectorArray := vectorField.GetVectorArray()
+			if len(vectorArray.GetNullableData()) > 0 {
+				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetNullableData())
+			} else {
+				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetData())
+			}
 		default:
 			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", vectorFieldType)
 		}

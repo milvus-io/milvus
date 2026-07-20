@@ -266,11 +266,21 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 			res += len(str)
 		}
 	case schemapb.DataType_Array:
-		for _, array := range column.GetScalars().GetArrayData().GetData() {
-			res += CalcScalarSize(&schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{Scalars: array},
-				Type:  column.GetScalars().GetArrayData().GetElementType(),
-			})
+		arrayData := column.GetScalars().GetArrayData()
+		if len(arrayData.GetNullableData()) > 0 {
+			for _, array := range arrayData.GetNullableData() {
+				res += CalcScalarSize(&schemapb.FieldData{
+					Field: &schemapb.FieldData_Scalars{Scalars: array.GetData()},
+					Type:  arrayData.GetElementType(),
+				})
+			}
+		} else {
+			for _, array := range arrayData.GetData() {
+				res += CalcScalarSize(&schemapb.FieldData{
+					Field: &schemapb.FieldData_Scalars{Scalars: array},
+					Type:  arrayData.GetElementType(),
+				})
+			}
 		}
 	case schemapb.DataType_JSON:
 		for _, str := range column.GetScalars().GetJsonData().GetData() {
@@ -331,14 +341,26 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			}
 			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
 		case schemapb.DataType_Array:
-			if rowOffset >= len(fs.GetScalars().GetArrayData().GetData()) {
-				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+			arrayData := fs.GetScalars().GetArrayData()
+			if len(arrayData.GetNullableData()) > 0 {
+				if rowOffset >= len(arrayData.GetNullableData()) {
+					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+				}
+				array := arrayData.GetNullableData()[rowOffset]
+				res += CalcScalarSize(&schemapb.FieldData{
+					Field: &schemapb.FieldData_Scalars{Scalars: array.GetData()},
+					Type:  arrayData.GetElementType(),
+				})
+			} else {
+				if rowOffset >= len(arrayData.GetData()) {
+					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+				}
+				array := arrayData.GetData()[rowOffset]
+				res += CalcScalarSize(&schemapb.FieldData{
+					Field: &schemapb.FieldData_Scalars{Scalars: array},
+					Type:  arrayData.GetElementType(),
+				})
 			}
-			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
-			res += CalcScalarSize(&schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{Scalars: array},
-				Type:  fs.GetScalars().GetArrayData().GetElementType(),
-			})
 		case schemapb.DataType_JSON:
 			if rowOffset >= len(fs.GetScalars().GetJsonData().GetData()) {
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
@@ -379,10 +401,20 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			}
 		case schemapb.DataType_ArrayOfVector:
 			arrayVector := fs.GetVectors().GetVectorArray()
-			if int(fieldIdx) >= len(arrayVector.GetData()) {
-				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+			if len(arrayVector.GetNullableData()) > 0 {
+				if int(fieldIdx) >= len(arrayVector.GetNullableData()) {
+					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+				}
+				array := arrayVector.GetNullableData()[fieldIdx]
+				if array != nil && array.GetData() != nil {
+					res += calcVectorSize(array.GetData(), arrayVector.GetElementType())
+				}
+			} else {
+				if int(fieldIdx) >= len(arrayVector.GetData()) {
+					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
+				}
+				res += calcVectorSize(arrayVector.GetData()[fieldIdx], arrayVector.GetElementType())
 			}
-			res += calcVectorSize(arrayVector.GetData()[fieldIdx], arrayVector.GetElementType())
 		default:
 			panic("Unknown data type:" + fs.GetType().String())
 		}
@@ -874,12 +906,15 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 					},
 				}
 			case *schemapb.ScalarField_ArrayData:
-				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{
-					ArrayData: &schemapb.ArrayArray{
-						Data:        make([]*schemapb.ScalarField, 0, topK),
-						ElementType: scalarField.GetArrayData().GetElementType(),
-					},
+				arrayData := &schemapb.ArrayArray{
+					ElementType: scalarField.GetArrayData().GetElementType(),
 				}
+				if len(scalarField.GetArrayData().GetNullableData()) > 0 {
+					arrayData.NullableData = make([]*schemapb.NullableScalarArrayValue, 0, topK)
+				} else {
+					arrayData.Data = make([]*schemapb.ScalarField, 0, topK)
+				}
+				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{ArrayData: arrayData}
 			}
 			fd.Field = scalar
 		case *schemapb.FieldData_Vectors:
@@ -922,6 +957,17 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				vectors.Vectors.Data = &schemapb.VectorField_Int8Vector{
 					Int8Vector: make([]byte, 0, topK*dim),
 				}
+			case *schemapb.VectorField_VectorArray:
+				vectorArray := &schemapb.VectorArray{
+					Dim:         vectorField.GetVectorArray().GetDim(),
+					ElementType: vectorField.GetVectorArray().GetElementType(),
+				}
+				if len(vectorField.GetVectorArray().GetNullableData()) > 0 {
+					vectorArray.NullableData = make([]*schemapb.NullableVectorArrayValue, 0, topK)
+				} else {
+					vectorArray.Data = make([]*schemapb.VectorField, 0, topK)
+				}
+				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{VectorArray: vectorArray}
 			}
 			fd.Field = vectors
 		case *schemapb.FieldData_StructArrays:
@@ -1128,6 +1174,20 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.StringData.Data[idx]))
 			case *schemapb.ScalarField_ArrayData:
+				if len(srcScalar.ArrayData.GetNullableData()) > 0 {
+					if dstScalar.GetArrayData() == nil {
+						dstScalar.Data = &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								NullableData: []*schemapb.NullableScalarArrayValue{srcScalar.ArrayData.GetNullableData()[idx]},
+								ElementType:  srcScalar.ArrayData.ElementType,
+							},
+						}
+					} else {
+						dstScalar.GetArrayData().NullableData = append(dstScalar.GetArrayData().NullableData, srcScalar.ArrayData.GetNullableData()[idx])
+					}
+					appendSize += int64(unsafe.Sizeof(srcScalar.ArrayData.GetNullableData()[idx]))
+					break
+				}
 				if dstScalar.GetArrayData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
@@ -1291,6 +1351,20 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 					appendSize += int64(unsafe.Sizeof(srcVector.Int8Vector[fieldIdx*dim : (fieldIdx+1)*dim]))
 				}
 			case *schemapb.VectorField_VectorArray:
+				if len(srcVector.VectorArray.GetNullableData()) > 0 {
+					if dstVector.GetVectorArray() == nil {
+						dstVector.Data = &schemapb.VectorField_VectorArray{
+							VectorArray: &schemapb.VectorArray{
+								NullableData: []*schemapb.NullableVectorArrayValue{srcVector.VectorArray.GetNullableData()[fieldIdx]},
+								Dim:          srcVector.VectorArray.Dim,
+								ElementType:  srcVector.VectorArray.ElementType,
+							},
+						}
+					} else {
+						dstVector.GetVectorArray().NullableData = append(dstVector.GetVectorArray().NullableData, srcVector.VectorArray.GetNullableData()[fieldIdx])
+					}
+					break
+				}
 				if dstVector.GetVectorArray() == nil {
 					dstVector.Data = &schemapb.VectorField_VectorArray{
 						VectorArray: &schemapb.VectorArray{
@@ -1398,15 +1472,26 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			}
 		case *schemapb.ScalarField_ArrayData:
 			if dstScalar.GetArrayData() == nil {
+				arrayData := &schemapb.ArrayArray{
+					ElementType: srcScalar.ArrayData.ElementType,
+				}
+				if len(srcScalar.ArrayData.GetNullableData()) > 0 {
+					arrayData.NullableData = make([]*schemapb.NullableScalarArrayValue, 0, len(dataIndices))
+				} else {
+					arrayData.Data = make([]*schemapb.ScalarField, 0, len(dataIndices))
+				}
 				dstScalar.Data = &schemapb.ScalarField_ArrayData{
-					ArrayData: &schemapb.ArrayArray{
-						Data:        make([]*schemapb.ScalarField, 0, len(dataIndices)),
-						ElementType: srcScalar.ArrayData.ElementType,
-					},
+					ArrayData: arrayData,
 				}
 			}
-			for _, idx := range dataIndices {
-				dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data[idx])
+			if len(srcScalar.ArrayData.GetNullableData()) > 0 {
+				for _, idx := range dataIndices {
+					dstScalar.GetArrayData().NullableData = append(dstScalar.GetArrayData().NullableData, srcScalar.ArrayData.GetNullableData()[idx])
+				}
+			} else {
+				for _, idx := range dataIndices {
+					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data[idx])
+				}
 			}
 		case *schemapb.ScalarField_JsonData:
 			if dstScalar.GetJsonData() == nil {
@@ -1536,16 +1621,27 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 				return
 			}
 			if dstVector.GetVectorArray() == nil {
+				vectorArray := &schemapb.VectorArray{
+					Dim:         srcVector.VectorArray.Dim,
+					ElementType: srcVector.VectorArray.ElementType,
+				}
+				if len(srcVector.VectorArray.GetNullableData()) > 0 {
+					vectorArray.NullableData = make([]*schemapb.NullableVectorArrayValue, 0, len(dataIndices))
+				} else {
+					vectorArray.Data = make([]*schemapb.VectorField, 0, len(dataIndices))
+				}
 				dstVector.Data = &schemapb.VectorField_VectorArray{
-					VectorArray: &schemapb.VectorArray{
-						Data:        make([]*schemapb.VectorField, 0, len(dataIndices)),
-						Dim:         srcVector.VectorArray.Dim,
-						ElementType: srcVector.VectorArray.ElementType,
-					},
+					VectorArray: vectorArray,
 				}
 			}
-			for _, idx := range dataIndices {
-				dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
+			if len(srcVector.VectorArray.GetNullableData()) > 0 {
+				for _, idx := range dataIndices {
+					dstVector.GetVectorArray().NullableData = append(dstVector.GetVectorArray().NullableData, srcVector.VectorArray.GetNullableData()[idx])
+				}
+			} else {
+				for _, idx := range dataIndices {
+					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
+				}
 			}
 		}
 	case *schemapb.FieldData_StructArrays:
@@ -1605,6 +1701,12 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetDoubleData().Data = dstScalar.GetDoubleData().Data[:len(dstScalar.GetDoubleData().Data)-1]
 			case *schemapb.ScalarField_StringData:
 				dstScalar.GetStringData().Data = dstScalar.GetStringData().Data[:len(dstScalar.GetStringData().Data)-1]
+			case *schemapb.ScalarField_ArrayData:
+				if len(dstScalar.GetArrayData().GetNullableData()) > 0 {
+					dstScalar.GetArrayData().NullableData = dstScalar.GetArrayData().NullableData[:len(dstScalar.GetArrayData().NullableData)-1]
+				} else {
+					dstScalar.GetArrayData().Data = dstScalar.GetArrayData().Data[:len(dstScalar.GetArrayData().Data)-1]
+				}
 			case *schemapb.ScalarField_JsonData:
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
@@ -1633,6 +1735,12 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 			case *schemapb.VectorField_Int8Vector:
 				dstInt8Vector := dstVector.Data.(*schemapb.VectorField_Int8Vector)
 				dstInt8Vector.Int8Vector = dstInt8Vector.Int8Vector[:len(dstInt8Vector.Int8Vector)-int(dim)]
+			case *schemapb.VectorField_VectorArray:
+				if len(dstVector.GetVectorArray().GetNullableData()) > 0 {
+					dstVector.GetVectorArray().NullableData = dstVector.GetVectorArray().NullableData[:len(dstVector.GetVectorArray().NullableData)-1]
+				} else {
+					dstVector.GetVectorArray().Data = dstVector.GetVectorArray().Data[:len(dstVector.GetVectorArray().Data)-1]
+				}
 			}
 		}
 	}
@@ -2407,14 +2515,23 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				}
 			case *schemapb.ScalarField_ArrayData:
 				if dstScalar.GetArrayData() == nil {
+					arrayData := &schemapb.ArrayArray{
+						ElementType: srcScalar.ArrayData.ElementType,
+					}
+					if len(srcScalar.ArrayData.GetNullableData()) > 0 {
+						arrayData.NullableData = srcScalar.ArrayData.GetNullableData()
+					} else {
+						arrayData.Data = srcScalar.ArrayData.Data
+					}
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
-						ArrayData: &schemapb.ArrayArray{
-							Data:        srcScalar.ArrayData.Data,
-							ElementType: srcScalar.ArrayData.ElementType,
-						},
+						ArrayData: arrayData,
 					}
 				} else {
-					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data...)
+					if len(srcScalar.ArrayData.GetNullableData()) > 0 {
+						dstScalar.GetArrayData().NullableData = append(dstScalar.GetArrayData().NullableData, srcScalar.ArrayData.GetNullableData()...)
+					} else {
+						dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data...)
+					}
 				}
 			case *schemapb.ScalarField_JsonData:
 				if dstScalar.GetJsonData() == nil {
@@ -2514,15 +2631,24 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				}
 			case *schemapb.VectorField_VectorArray:
 				if dstVector.GetVectorArray() == nil {
+					vectorArray := &schemapb.VectorArray{
+						Dim:         srcVector.VectorArray.Dim,
+						ElementType: srcVector.VectorArray.ElementType,
+					}
+					if len(srcVector.VectorArray.GetNullableData()) > 0 {
+						vectorArray.NullableData = srcVector.VectorArray.GetNullableData()
+					} else {
+						vectorArray.Data = srcVector.VectorArray.Data
+					}
 					dstVector.Data = &schemapb.VectorField_VectorArray{
-						VectorArray: &schemapb.VectorArray{
-							Dim:         srcVector.VectorArray.Dim,
-							ElementType: srcVector.VectorArray.ElementType,
-							Data:        srcVector.VectorArray.Data,
-						},
+						VectorArray: vectorArray,
 					}
 				} else {
-					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
+					if len(srcVector.VectorArray.GetNullableData()) > 0 {
+						dstVector.GetVectorArray().NullableData = append(dstVector.GetVectorArray().NullableData, srcVector.VectorArray.GetNullableData()...)
+					} else {
+						dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
+					}
 				}
 			case nil:
 				// nullable vector field where all rows are null — no vector data to merge
