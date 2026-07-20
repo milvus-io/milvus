@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -70,6 +71,11 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
 			}},
+			// An empty-list template parameter is valid and behaves like the
+			// inline `[]` literal. See issue #51617.
+			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
+				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			}},
 		}
 		schemaH := newTestSchemaHelper(s.T())
 		for _, c := range testcases {
@@ -105,9 +111,6 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			}},
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"age": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
-			}},
-			{`Int64Field in {empty_list}`, map[string]*schemapb.TemplateValue{
-				"empty_list": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
 			}},
 		}
 
@@ -1092,6 +1095,120 @@ func (s *FillExpressionValueSuite) TestUnaryNotWithTemplate() {
 			s.NoError(err, c.templExpr)
 			s.NotNil(expr)
 			s.assertNoUnfilledPlaceholder(expr)
+		})
+	}
+}
+
+// templateFilledValueCount returns the number of concrete values a filled
+// term / json-contains expression holds, and whether the expression is one of
+// those list-bearing kinds.
+func templateFilledValueCount(expr *planpb.Expr) (int, bool) {
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		return len(e.TermExpr.GetValues()), true
+	case *planpb.Expr_JsonContainsExpr:
+		return len(e.JsonContainsExpr.GetElements()), true
+	case *planpb.Expr_UnaryExpr:
+		// `NOT IN` wraps the term in a logical-NOT unary expression.
+		return templateFilledValueCount(e.UnaryExpr.GetChild())
+	default:
+		return 0, false
+	}
+}
+
+// TestEmptyListTemplate covers issue #51617: an empty-list expression template
+// parameter must be accepted and behave exactly like its inline `[]` literal
+// across every list-consuming operation (IN / NOT IN, array_contains_all /
+// array_contains_any, json_contains_all / json_contains_any). Before the fix
+// the empty list failed plan creation with
+// "unknown template variable value type: <nil>".
+func (s *FillExpressionValueSuite) TestEmptyListTemplate() {
+	schemaH := newTestSchemaHelper(s.T())
+	emptyList := func() map[string]*schemapb.TemplateValue {
+		return map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+		}
+	}
+	cases := []struct {
+		templateExpr string
+		inlineExpr   string
+	}{
+		{`Int64Field in {v}`, `Int64Field in []`},
+		{`Int64Field not in {v}`, `Int64Field not in []`},
+		{`array_contains_all(ArrayField, {v})`, `array_contains_all(ArrayField, [])`},
+		{`array_contains_any(ArrayField, {v})`, `array_contains_any(ArrayField, [])`},
+		{`json_contains_all(JSONField, {v})`, `json_contains_all(JSONField, [])`},
+		{`json_contains_any(JSONField, {v})`, `json_contains_any(JSONField, [])`},
+	}
+	for _, c := range cases {
+		s.Run(c.templateExpr, func() {
+			tmplExpr, err := ParseExpr(schemaH, c.templateExpr, emptyList())
+			s.NoError(err, c.templateExpr)
+			s.NotNil(tmplExpr, c.templateExpr)
+
+			inlineExpr, err := ParseExpr(schemaH, c.inlineExpr, nil)
+			s.NoError(err, c.inlineExpr)
+			s.NotNil(inlineExpr, c.inlineExpr)
+
+			// The filled template plan must carry no concrete values, exactly
+			// like the inline empty-list literal.
+			tmplCount, ok := templateFilledValueCount(tmplExpr)
+			s.True(ok, "unexpected expr kind for %s", c.templateExpr)
+			s.Equal(0, tmplCount, "empty-list template %s should fill to zero values", c.templateExpr)
+
+			inlineCount, _ := templateFilledValueCount(inlineExpr)
+			s.Equal(inlineCount, tmplCount, "template %s and inline %s must agree on value count",
+				c.templateExpr, c.inlineExpr)
+		})
+	}
+}
+
+// TestEmptyListTemplateEqualsInline is a stricter check that the filled plan for
+// an empty-list template is structurally identical to the inline `[]` plan once
+// the residual template-variable name (the only expected difference) is cleared.
+func (s *FillExpressionValueSuite) TestEmptyListTemplateEqualsInline() {
+	schemaH := newTestSchemaHelper(s.T())
+	// normalize clears the fields that legitimately differ between a filled
+	// template plan and its inline equivalent and have no effect for an empty
+	// element list: the residual template-variable name, the is-template
+	// bookkeeping flag, and the elements-same-type hint (irrelevant with zero
+	// elements). Everything else — column info, operator, (empty) elements —
+	// must match.
+	normalize := func(expr *planpb.Expr) {
+		expr.IsTemplate = false
+		switch e := expr.GetExpr().(type) {
+		case *planpb.Expr_TermExpr:
+			e.TermExpr.TemplateVariableName = ""
+		case *planpb.Expr_JsonContainsExpr:
+			e.JsonContainsExpr.TemplateVariableName = ""
+			e.JsonContainsExpr.ElementsSameType = false
+		}
+	}
+	cases := []struct {
+		templateExpr string
+		inlineExpr   string
+	}{
+		{`Int64Field in {v}`, `Int64Field in []`},
+		{`array_contains_all(ArrayField, {v})`, `array_contains_all(ArrayField, [])`},
+		{`json_contains_any(JSONField, {v})`, `json_contains_any(JSONField, [])`},
+	}
+	for _, c := range cases {
+		s.Run(c.templateExpr, func() {
+			tmplExpr, err := ParseExpr(schemaH, c.templateExpr, map[string]*schemapb.TemplateValue{
+				"v": generateTemplateValue(schemapb.DataType_Array, &schemapb.TemplateArrayValue{}),
+			})
+			s.NoError(err, c.templateExpr)
+			s.NotNil(tmplExpr, c.templateExpr)
+
+			inlineExpr, err := ParseExpr(schemaH, c.inlineExpr, nil)
+			s.NoError(err, c.inlineExpr)
+			s.NotNil(inlineExpr, c.inlineExpr)
+
+			normalize(tmplExpr)
+			normalize(inlineExpr)
+			s.True(proto.Equal(tmplExpr, inlineExpr),
+				"empty-list template %s should equal inline %s\n got:  %v\n want: %v",
+				c.templateExpr, c.inlineExpr, tmplExpr, inlineExpr)
 		})
 	}
 }

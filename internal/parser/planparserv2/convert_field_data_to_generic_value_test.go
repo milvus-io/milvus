@@ -183,6 +183,36 @@ func Test_ConvertToGenericValue(t *testing.T) {
 	}
 }
 
+// Test_ConvertToGenericValue_EmptyArray verifies that an empty-list template
+// parameter (a TemplateArrayValue whose typed data oneof is unset, which is how
+// an empty list is encoded on the wire) converts to the same empty-array
+// GenericValue produced for the inline `[]` literal by
+// ParserVisitor.VisitEmptyArray: an empty, same-type array with an unknown
+// (None) element type. See issue #51617.
+func Test_ConvertToGenericValue_EmptyArray(t *testing.T) {
+	input := map[string]*schemapb.TemplateValue{
+		"empty": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{},
+			},
+		},
+	}
+	expect := map[string]*planpb.GenericValue{
+		"empty": {
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{
+					Array:       nil,
+					SameType:    true,
+					ElementType: schemapb.DataType_None,
+				},
+			},
+		},
+	}
+	output, err := UnmarshalExpressionValues(input)
+	assert.Nil(t, err)
+	assert.EqualValues(t, expect, output)
+}
+
 func generateTemplateValue(dataType schemapb.DataType, data interface{}) *schemapb.TemplateValue {
 	switch dataType {
 	case schemapb.DataType_Bool:

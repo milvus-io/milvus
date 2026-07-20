@@ -90,6 +90,15 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 			arrayValues[i] = parsedValue
 		}
 		elementType = schemapb.DataType_JSON
+	case nil:
+		// An empty list carries no typed elements, so the TemplateArrayValue's
+		// data oneof is left unset and GetData() is nil. Mirror the inline `[]`
+		// literal (ParserVisitor.VisitEmptyArray): an empty, same-type array
+		// with an unknown (None) element type. This keeps parameterized empty
+		// lists behaving identically to inline ones across IN / NOT IN,
+		// array_contains_*, and json_contains_*. See issue #51617.
+		arrayValues = nil
+		elementType = schemapb.DataType_None
 	default:
 		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type: %v", templateValue.GetData())
 	}
