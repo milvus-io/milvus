@@ -17,14 +17,18 @@
 package milvusclient
 
 import (
+	"encoding/json"
 	"fmt"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 // CreateCollectionOption is the interface builds CreateCollectionRequest.
@@ -429,6 +433,228 @@ func (opt *getCollectionStatsOption) Request() *milvuspb.GetCollectionStatistics
 
 func NewGetCollectionStatsOption(collectionName string) *getCollectionStatsOption {
 	return &getCollectionStatsOption{collectionName: collectionName}
+}
+
+type alterCollectionSchemaOption interface {
+	Request() *milvuspb.AlterCollectionSchemaRequest
+	Validate() error
+}
+
+func newAlterCollectionSchemaAddRequest(collectionName string, field *schemapb.FieldSchema, function *schemapb.FunctionSchema) *milvuspb.AlterCollectionSchemaRequest {
+	addRequest := &milvuspb.AlterCollectionSchemaRequest_AddRequest{}
+	if field != nil {
+		addRequest.FieldInfos = []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{FieldSchema: field}}
+	}
+	if function != nil {
+		addRequest.FuncSchema = []*schemapb.FunctionSchema{function}
+	}
+	return &milvuspb.AlterCollectionSchemaRequest{
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{AddRequest: addRequest},
+		},
+	}
+}
+
+func newAlterCollectionSchemaDropRequest(collectionName string, dropRequest *milvuspb.AlterCollectionSchemaRequest_DropRequest) *milvuspb.AlterCollectionSchemaRequest {
+	return &milvuspb.AlterCollectionSchemaRequest{
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{DropRequest: dropRequest},
+		},
+	}
+}
+
+type AddFunctionFieldOption interface {
+	alterCollectionSchemaOption
+	isAddFunctionFieldOption()
+}
+
+type addFunctionFieldOption struct {
+	collectionName string
+	fieldSch       *entity.Field
+	function       *entity.Function
+	boundIndex     index.Index
+	indexName      string
+}
+
+func (*addFunctionFieldOption) isAddFunctionFieldOption() {}
+
+func (opt *addFunctionFieldOption) Request() *milvuspb.AlterCollectionSchemaRequest {
+	req := newAlterCollectionSchemaAddRequest(opt.collectionName, opt.fieldSch.ProtoMessage(), opt.function.ProtoMessage())
+	fieldInfo := req.GetAction().GetAddRequest().GetFieldInfos()[0]
+	fieldInfo.IndexName = opt.indexName
+	fieldInfo.ExtraParams = entity.MapKvPairs(opt.boundIndex.Params())
+	return req
+}
+
+func getBoundIndexType(params map[string]string) (string, error) {
+	indexType := params[index.IndexTypeKey]
+	legacyParams, hasLegacyParams := params[index.ParamsKey]
+	if !hasLegacyParams {
+		return indexType, nil
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(legacyParams), &decoded); err != nil {
+		return "", merr.WrapErrParameterInvalidErr(err, "invalid legacy bound index params")
+	}
+	legacyIndexType := ""
+	if rawIndexType, ok := decoded[index.IndexTypeKey]; ok {
+		var valid bool
+		legacyIndexType, valid = rawIndexType.(string)
+		if !valid || legacyIndexType == "" {
+			return "", merr.WrapErrParameterInvalidMsg("legacy bound index param %q must be a non-empty string", index.IndexTypeKey)
+		}
+	}
+	for key := range decoded {
+		if _, duplicated := params[key]; duplicated {
+			return "", merr.WrapErrParameterInvalidMsg("duplicated bound index param %q", key)
+		}
+	}
+	if indexType == "" {
+		indexType = legacyIndexType
+	}
+	return indexType, nil
+}
+
+func (opt *addFunctionFieldOption) Validate() error {
+	if opt == nil {
+		return merr.WrapErrParameterMissingMsg("add function field option is nil")
+	}
+	if opt.collectionName == "" {
+		return merr.WrapErrParameterMissingMsg("collection name is required")
+	}
+	if opt.fieldSch == nil {
+		return merr.WrapErrParameterMissingMsg("field schema is required")
+	}
+	if opt.fieldSch.Name == "" {
+		return merr.WrapErrParameterMissingMsg("field name is required")
+	}
+	if opt.function == nil {
+		return merr.WrapErrParameterMissingMsg("function schema is required")
+	}
+	if opt.function.Name == "" {
+		return merr.WrapErrParameterMissingMsg("function name is required")
+	}
+	switch opt.function.Type {
+	case entity.FunctionTypeBM25:
+		if opt.fieldSch.DataType != entity.FieldTypeSparseVector {
+			return merr.WrapErrParameterInvalidMsg("add function field requires SparseFloatVector output field for BM25, got %s", opt.fieldSch.DataType.String())
+		}
+	case entity.FunctionTypeMinHash:
+		if opt.fieldSch.DataType != entity.FieldTypeBinaryVector {
+			return merr.WrapErrParameterInvalidMsg("add function field requires BinaryVector output field for MinHash, got %s", opt.fieldSch.DataType.String())
+		}
+	default:
+		return merr.WrapErrParameterInvalidMsg("add function field only supports BM25 and MinHash, got %s", opt.function.Type.String())
+	}
+	if lo.IsNil(opt.boundIndex) {
+		return merr.WrapErrParameterMissingMsg("bound index option is required")
+	}
+	indexType, err := getBoundIndexType(opt.boundIndex.Params())
+	if err != nil {
+		return err
+	}
+	if indexType == "" {
+		return merr.WrapErrParameterMissingMsg("explicit index type is required for the bound index")
+	}
+	return nil
+}
+
+func (opt *addFunctionFieldOption) WithIndexName(indexName string) *addFunctionFieldOption {
+	opt.indexName = indexName
+	return opt
+}
+
+func NewAddFunctionFieldOption(collectionName string, field *entity.Field, function *entity.Function, boundIndex index.Index) *addFunctionFieldOption {
+	return &addFunctionFieldOption{collectionName: collectionName, fieldSch: field, function: function, boundIndex: boundIndex}
+}
+
+type DropCollectionFieldOption interface {
+	alterCollectionSchemaOption
+	isDropCollectionFieldOption()
+}
+
+type dropCollectionFieldOption struct {
+	collectionName string
+	fieldName      string
+	fieldID        int64
+	byID           bool
+}
+
+func (*dropCollectionFieldOption) isDropCollectionFieldOption() {}
+
+func (opt *dropCollectionFieldOption) Request() *milvuspb.AlterCollectionSchemaRequest {
+	dropRequest := &milvuspb.AlterCollectionSchemaRequest_DropRequest{}
+	if opt.byID {
+		dropRequest.Identifier = &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{FieldId: opt.fieldID}
+	} else {
+		dropRequest.Identifier = &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: opt.fieldName}
+	}
+	return newAlterCollectionSchemaDropRequest(opt.collectionName, dropRequest)
+}
+
+func (opt *dropCollectionFieldOption) Validate() error {
+	if opt == nil {
+		return merr.WrapErrParameterMissingMsg("drop collection field option is nil")
+	}
+	if opt.collectionName == "" {
+		return merr.WrapErrParameterMissingMsg("collection name is required")
+	}
+	if opt.byID {
+		if opt.fieldID <= 0 {
+			return merr.WrapErrParameterInvalidMsg("field id must be greater than 0")
+		}
+		return nil
+	}
+	if opt.fieldName == "" {
+		return merr.WrapErrParameterMissingMsg("field name is required")
+	}
+	return nil
+}
+
+func NewDropCollectionFieldOption(collectionName, fieldName string) *dropCollectionFieldOption {
+	return &dropCollectionFieldOption{collectionName: collectionName, fieldName: fieldName}
+}
+
+func NewDropCollectionFieldByIDOption(collectionName string, fieldID int64) *dropCollectionFieldOption {
+	return &dropCollectionFieldOption{collectionName: collectionName, fieldID: fieldID, byID: true}
+}
+
+type DropFunctionFieldOption interface {
+	alterCollectionSchemaOption
+	isDropFunctionFieldOption()
+}
+
+type dropFunctionFieldOption struct {
+	collectionName string
+	functionName   string
+}
+
+func (*dropFunctionFieldOption) isDropFunctionFieldOption() {}
+
+func (opt *dropFunctionFieldOption) Request() *milvuspb.AlterCollectionSchemaRequest {
+	return newAlterCollectionSchemaDropRequest(opt.collectionName, &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+		Identifier:               &milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName{FunctionName: opt.functionName},
+		DropFunctionOutputFields: true,
+	})
+}
+
+func (opt *dropFunctionFieldOption) Validate() error {
+	if opt == nil {
+		return merr.WrapErrParameterMissingMsg("drop function field option is nil")
+	}
+	if opt.collectionName == "" {
+		return merr.WrapErrParameterMissingMsg("collection name is required")
+	}
+	if opt.functionName == "" {
+		return merr.WrapErrParameterMissingMsg("function name is required")
+	}
+	return nil
+}
+
+func NewDropFunctionFieldOption(collectionName, functionName string) *dropFunctionFieldOption {
+	return &dropFunctionFieldOption{collectionName: collectionName, functionName: functionName}
 }
 
 type AddCollectionFieldOption interface {

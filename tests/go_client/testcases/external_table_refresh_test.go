@@ -20,7 +20,10 @@ import (
 	miniogo "github.com/minio/minio-go/v7"
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
@@ -1551,7 +1554,21 @@ func TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData(t *testing.T)
 		WithNullable(true).
 		WithExternalField("score")
 	err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, scoreField))
-	common.CheckErr(t, err, true)
+	require.ErrorContains(t, err, "alter collection schema operation is not supported for external collection")
+
+	// Keep the server-side external add-field and refresh coverage on the legacy
+	// RPC. The public Go SDK routes AddCollectionField through AlterCollectionSchema,
+	// which intentionally rejects external collections.
+	fieldSchema, err := proto.Marshal(scoreField.ProtoMessage())
+	require.NoError(t, err)
+	status, err := mc.GetService().AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		CollectionName: collName,
+		Schema:         fieldSchema,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode(), status.GetReason())
+	require.Zero(t, status.GetCode(), status.GetReason())
 
 	described, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
