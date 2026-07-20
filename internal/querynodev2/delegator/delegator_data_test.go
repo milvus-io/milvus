@@ -1221,6 +1221,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners() {
 	ctx := context.Background()
+	s.delegator.Start()
 	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
 	err := s.delegator.syncCollectionIndexMeta(ctx, &querypb.LoadSegmentsRequest{
 		CollectionID:  s.collectionID,
@@ -1239,7 +1240,6 @@ func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaUpdatesFunctionRunners()
 	})
 	s.Require().NoError(err)
 	s.True(ok)
-
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
