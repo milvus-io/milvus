@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -377,6 +378,26 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 		WrapCopySegmentTaskLog(t, mlog.String("reason", reason))...)
 }
 
+// isCopyTaskLostOnWorker reports whether a QueryCopySegment error means the
+// worker-side task is confirmed lost, as opposed to a transient transport error.
+//
+// Confirmed-loss signals (audited against every construction site on the
+// QueryCopySegment path):
+//   - merr.ErrNodeNotFound: the node manager no longer knows the assigned
+//     DataNode (its session was removed after a restart/replacement), so its
+//     in-memory task manager — and the task with it — is gone.
+//   - merr.ErrImportSysFailed: on this RPC the code is produced only by the
+//     DataNode's task-not-found branch (importv2.WrapTaskNotFoundError when the
+//     queried task is absent from its task manager), i.e. the DataNode is alive
+//     but restarted and lost the task.
+//
+// Everything else (gRPC transport errors, node briefly not serving/not ready,
+// response decode failures) may coexist with a still-running worker task and
+// must be retried by polling, not by re-dispatching.
+func isCopyTaskLostOnWorker(err error) bool {
+	return errors.Is(err, merr.ErrNodeNotFound) || errors.Is(err, merr.ErrImportSysFailed)
+}
+
 // QueryTaskOnWorker polls the DataNode for task execution status.
 //
 // Process flow:
@@ -388,12 +409,15 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 //  3. Update task state accordingly
 //
 // Failure handling:
-// - A query RPC error is transient (network blip) or means the assigned node is gone (DataNode restart/replacement, NodeNotFound)
-// - Either way, reset the task to Pending so the scheduler re-dispatches it to a live node, mirroring the import pipeline
-// - This is the only way a node restart gets retried: the scheduler only re-dispatches Pending(Init) tasks, never ones left InProgress
-// - Worker failure responses trigger immediate failure
-// - Task failure immediately marks parent job as failed (fail-fast)
-// - Enables quick feedback to user without waiting for timeout
+//   - A query RPC error is either a transient transport failure or a confirmed loss of the
+//     worker-side task; the two must be handled differently (see isCopyTaskLostOnWorker):
+//     confirmed loss resets the task to Pending for re-dispatch, transient errors keep the
+//     task InProgress so the next check round simply queries again
+//   - Re-dispatch is the only way a node restart gets retried: the scheduler only
+//     re-dispatches Pending(Init) tasks, never ones left InProgress
+//   - Worker failure responses trigger immediate failure
+//   - Task failure immediately marks parent job as failed (fail-fast)
+//   - Enables quick feedback to user without waiting for timeout
 //
 // Success handling:
 // - Calls SyncCopySegmentTask to update segment metadata
@@ -412,21 +436,35 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	resp, err := cluster.QueryCopySegment(nodeID, req)
 	// Handle RPC error separately to avoid nil resp dereference.
-	// A query error is transient (network blip) or means the assigned node is
-	// gone (DataNode restart/replacement -> NodeNotFound). Either way, failing
-	// the whole restore is wrong: reset the task to Pending so the scheduler
-	// re-dispatches it to a live node, matching the import pipeline. Leaving it
-	// InProgress would make the scheduler poll the same (possibly dead) node
-	// forever, since only Pending tasks are re-dispatched.
 	if err != nil {
+		if !isCopyTaskLostOnWorker(err) {
+			// Transient transport failure (network blip, RPC timeout, node briefly
+			// not ready). The worker-side task may well still be running, so keep
+			// the task InProgress and let the next check round query again.
+			// Resetting here would re-dispatch a task that is possibly still
+			// executing on a live node, starting a concurrent duplicate copy.
+			mlog.Warn(context.TODO(), "transient error querying copy segment task on datanode, will retry",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+			return
+		}
+		// Confirmed loss: the worker-side task no longer exists (DataNode
+		// restarted/replaced, or its in-memory task manager lost the task).
+		// Leaving the task InProgress would make the scheduler poll a dead
+		// node until the job-level timeout, since only Pending tasks are
+		// re-dispatched. Reset to Pending with NullNodeID so the scheduler
+		// re-dispatches it to a live node.
+		// Re-dispatch is idempotent: target binlog paths are deterministic
+		// transforms of the source paths (same content on overwrite), and each
+		// dispatch allocates fresh buildIDs, so index files from a partial
+		// earlier attempt are never referenced by meta and are removed by GC.
 		if resetErr := t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
 			UpdateCopyTaskNodeID(NullNodeID)); resetErr != nil {
-			mlog.Warn(context.TODO(), "failed to reset copy segment task to pending after query error",
+			mlog.Warn(context.TODO(), "failed to reset copy segment task to pending after worker loss",
 				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resetErr))...)
 			return
 		}
-		mlog.Info(context.TODO(), "reset copy segment task to pending due to query error, will re-dispatch",
+		mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
