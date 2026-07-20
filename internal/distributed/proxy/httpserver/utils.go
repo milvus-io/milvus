@@ -3259,8 +3259,15 @@ func RequestHandlerFunc(c *gin.Context) {
 	c.Next()
 }
 
-func generateTemplateArrayData(list []interface{}) *schemapb.TemplateArrayValue {
-	dtype := getTemplateArrayType(list)
+func generateTemplateArrayData(list []interface{}) (*schemapb.TemplateArrayValue, error) {
+	if len(list) == 0 {
+		return &schemapb.TemplateArrayValue{}, nil
+	}
+
+	dtype, err := getTemplateArrayType(list)
+	if err != nil {
+		return nil, err
+	}
 	var data *schemapb.TemplateArrayValue
 	switch dtype {
 	case schemapb.DataType_Bool:
@@ -3314,7 +3321,11 @@ func generateTemplateArrayData(list []interface{}) *schemapb.TemplateArrayValue 
 	case schemapb.DataType_Array:
 		result := make([]*schemapb.TemplateArrayValue, len(list))
 		for i, item := range list {
-			result[i] = generateTemplateArrayData(item.([]interface{}))
+			arrayData, err := generateTemplateArrayData(item.([]interface{}))
+			if err != nil {
+				return nil, err
+			}
+			result[i] = arrayData
 		}
 		data = &schemapb.TemplateArrayValue{
 			Data: &schemapb.TemplateArrayValue_ArrayData{
@@ -3327,9 +3338,8 @@ func generateTemplateArrayData(list []interface{}) *schemapb.TemplateArrayValue 
 		result := make([][]byte, len(list))
 		for i, item := range list {
 			bytes, err := json.Marshal(item)
-			// won't happen
 			if err != nil {
-				panic(fmt.Sprintf("marshal data(%v) fail, please check it!", item))
+				return nil, merr.WrapErrParameterInvalidErr(err, "failed to marshal exprParams array value")
 			}
 			result[i] = bytes
 		}
@@ -3340,52 +3350,65 @@ func generateTemplateArrayData(list []interface{}) *schemapb.TemplateArrayValue 
 				},
 			},
 		}
-	// won't happen
 	default:
-		panic(fmt.Sprintf("Unexpected data(%v) type when generateTemplateArrayData, please check it!", list))
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported exprParams array value type %s", dtype.String())
 	}
-	return data
+	return data, nil
 }
 
-func getTemplateArrayType(value []interface{}) schemapb.DataType {
-	dtype := getTemplateType(value[0])
+func getTemplateArrayType(value []interface{}) (schemapb.DataType, error) {
+	if len(value) == 0 {
+		return schemapb.DataType_None, nil
+	}
+
+	dtype, err := getTemplateType(value[0])
+	if err != nil {
+		return schemapb.DataType_None, err
+	}
 
 	for _, v := range value {
-		if getTemplateType(v) != dtype {
-			return schemapb.DataType_JSON
+		itemType, err := getTemplateType(v)
+		if err != nil {
+			return schemapb.DataType_None, err
+		}
+		if itemType != dtype {
+			return schemapb.DataType_JSON, nil
 		}
 	}
-	return dtype
+	return dtype, nil
 }
 
-func getTemplateType(value interface{}) schemapb.DataType {
+func getTemplateType(value interface{}) (schemapb.DataType, error) {
 	switch v := value.(type) {
 	case bool:
-		return schemapb.DataType_Bool
+		return schemapb.DataType_Bool, nil
 	case string:
-		return schemapb.DataType_String
+		return schemapb.DataType_String, nil
 	case float64:
 		// note: all passed number is float64 type
 		// if field type is float64, but value in ExpressionTemplate is int64, it's ok to use TemplateValue_Int64Val to store it
 		// it will convert to float64 in ./internal/parser/planparserv2/utils.go, Line 233
 		if v == math.Trunc(v) && v >= math.MinInt64 && v <= math.MaxInt64 {
-			return schemapb.DataType_Int64
+			return schemapb.DataType_Int64, nil
 		}
-		return schemapb.DataType_Float
+		return schemapb.DataType_Float, nil
 	// it won't happen
 	// case int64:
 	case []interface{}:
-		return schemapb.DataType_Array
+		return schemapb.DataType_Array, nil
 	default:
-		panic(fmt.Sprintf("Unexpected data(%v) when getTemplateType, please check it!", value))
+		return schemapb.DataType_None, merr.WrapErrParameterInvalidMsg("unsupported exprParams value type %T", value)
 	}
 }
 
-func generateExpressionTemplate(params map[string]interface{}) map[string]*schemapb.TemplateValue {
+func generateExpressionTemplate(params map[string]interface{}) (map[string]*schemapb.TemplateValue, error) {
 	expressionTemplate := make(map[string]*schemapb.TemplateValue, len(params))
 
 	for name, value := range params {
-		dtype := getTemplateType(value)
+		dtype, err := getTemplateType(value)
+		if err != nil {
+			return nil, err
+		}
 		var data *schemapb.TemplateValue
 		switch dtype {
 		case schemapb.DataType_Bool:
@@ -3413,17 +3436,21 @@ func generateExpressionTemplate(params map[string]interface{}) map[string]*schem
 				},
 			}
 		case schemapb.DataType_Array:
+			arrayData, err := generateTemplateArrayData(value.([]interface{}))
+			if err != nil {
+				return nil, err
+			}
 			data = &schemapb.TemplateValue{
 				Val: &schemapb.TemplateValue_ArrayVal{
-					ArrayVal: generateTemplateArrayData(value.([]interface{})),
+					ArrayVal: arrayData,
 				},
 			}
 		default:
-			panic(fmt.Sprintf("Unexpected data(%v) when generateExpressionTemplate, please check it!", data))
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported exprParams value type %s", dtype.String())
 		}
 		expressionTemplate[name] = data
 	}
-	return expressionTemplate
+	return expressionTemplate, nil
 }
 
 func WrapErrorToResponse(err error) *milvuspb.BoolResponse {
