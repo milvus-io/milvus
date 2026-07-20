@@ -30,9 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -192,6 +194,40 @@ func (s *L0ImportSuite) TestL0Import() {
 	deltaLog := actual.GetBinlogs()[0]
 	s.Equal(int64(s.delCnt), deltaLog.GetEntriesNum())
 	// s.Equal(s.deleteData.Size(), deltaLog.GetMemorySize())
+}
+
+func (s *L0ImportSuite) TestL0ImportStorageV3InitializesManifest() {
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).
+		Return(conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil)
+
+	req := &datapb.ImportRequest{
+		JobID:          1,
+		TaskID:         2,
+		CollectionID:   s.collectionID,
+		PartitionIDs:   []int64{s.partitionID},
+		Vchannels:      []string{s.channel},
+		Schema:         s.schema,
+		Files:          []*internalpb.ImportFile{{Paths: []string{"dummy-prefix"}}},
+		IDRange:        &datapb.IDRange{Begin: 10, End: 20},
+		StorageVersion: storage.StorageV3,
+		UseLoonFfi:     true,
+		StorageConfig:  &indexpb.StorageConfig{RootPath: "files"},
+		RequestSegments: []*datapb.ImportRequestSegment{{
+			SegmentID:   s.segmentID,
+			PartitionID: s.partitionID,
+			Vchannel:    s.channel,
+		}},
+	}
+	task := NewL0ImportTask(req, s.manager, s.syncMgr, s.cm).(*L0ImportTask)
+
+	err := conc.AwaitAll(task.Execute()...)
+	s.NoError(err)
+	segment, ok := task.metaCaches[s.channel].GetSegmentByID(s.segmentID)
+	s.True(ok)
+	basePath, version, err := packed.UnmarshalManifestPath(segment.ManifestPath())
+	s.NoError(err)
+	s.Equal("files/insert_log/1/2/3", basePath)
+	s.Equal(packed.ManifestEarliest, version)
 }
 
 func TestL0Import(t *testing.T) {
