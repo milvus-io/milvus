@@ -149,23 +149,24 @@ func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
 	suite.Nil(out)
 }
 
-func (suite *DeleteNodeSuite) TestUpdateSchemaErrorPanics() {
+func (suite *DeleteNodeSuite) TestUpdateSchemaErrorDoesNotPanic() {
 	manager := &segments.Manager{
 		Collection: segments.NewMockCollectionManager(suite.T()),
 		Segment:    segments.NewMockSegmentManager(suite.T()),
 	}
 	delegator := delegator.NewMockShardDelegator(suite.T())
 	schema := &schemapb.CollectionSchema{Version: 2}
-	expectedErr := merr.WrapErrFunctionFailedMsg("invalid function metadata")
+	expectedErr := merr.WrapErrServiceUnavailableMsg("delegator is not ready")
 	delegator.EXPECT().UpdateSchema(mock.Anything, schema, uint64(10)).Return(expectedErr).Once()
+	delegator.EXPECT().UpdateTSafe(uint64(10)).Return().Once()
 
 	node := newDeleteNode(suite.collectionID, suite.channel, manager, delegator, 8)
-	suite.PanicsWithError(expectedErr.Error(), func() {
-		node.Operate(&deleteNodeMsg{
+	suite.NotPanics(func() {
+		suite.Nil(node.Operate(&deleteNodeMsg{
 			schema:          schema,
 			schemaBarrierTs: 10,
 			timeRange:       TimeRange{timestampMax: 10},
-		})
+		}))
 	})
 }
 

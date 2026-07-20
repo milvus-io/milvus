@@ -2558,7 +2558,7 @@ func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestUpdateSchemaReturnsInvalidFunctionMetadata(t *testing.T) {
+func TestUpdateSchemaPanicsOnInvalidFunctionMetadata(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	workerManager := cluster.NewMockManager(t)
@@ -2579,10 +2579,14 @@ func TestUpdateSchemaReturnsInvalidFunctionMetadata(t *testing.T) {
 	invalidFunction.OutputFieldIds = []int64{999}
 	invalidSchema := newFunctionRuntimeTestSchemaWithVersion(1, invalidFunction)
 	collectionManager := segments.NewMockCollectionManager(t)
+	collectionManager.EXPECT().UpdateSchema(int64(1000), invalidSchema, uint64(100)).Return(nil).Once()
 	sd.collectionManager = collectionManager
 
-	err := sd.UpdateSchema(context.Background(), invalidSchema, 100)
-	require.ErrorContains(t, err, "output field 999 not found")
+	_, expectedErr := function.EmbeddingOutputFieldIDs(invalidSchema)
+	require.Error(t, expectedErr)
+	require.PanicsWithError(t, expectedErr.Error(), func() {
+		_ = sd.UpdateSchema(context.Background(), invalidSchema, 100)
+	})
 }
 
 func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {

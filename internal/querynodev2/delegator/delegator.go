@@ -1261,10 +1261,6 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		)
 		return nil
 	}
-	if _, err := function.EmbeddingOutputFieldIDs(schema); err != nil {
-		return err
-	}
-
 	oldSet := newBM25FunctionSet(sd.collection.Schema())
 	newSet := newBM25FunctionSet(schema)
 	idfOracle := sd.getIDFOracle()
@@ -1329,7 +1325,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	// Publish the manager schema after the delegator schema update. Queries use
 	// the previous function schema until this point.
 	if err := function.GetManager().Update(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
-		return err
+		// Runner construction failures are retried asynchronously by the manager.
+		// A synchronous error here means the internal function metadata is invalid.
+		panic(err)
 	}
 	if idfOracle == nil && len(newSet) > 0 {
 		// StreamingNode schema changes flush and fence old growings before UpdateSchema and new-schema inserts.
