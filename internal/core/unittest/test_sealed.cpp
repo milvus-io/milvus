@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <array>
 #include <optional>
 #include <gtest/gtest.h>
 
@@ -16,6 +17,7 @@
 #include "common/Common.h"
 #include "common/Types.h"
 #include "index/IndexFactory.h"
+#include "index/StringIndexSort.h"
 #include "knowhere/version.h"
 #include "knowhere/comp/index_param.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -42,6 +44,62 @@ class SealedTest : public ::testing::TestWithParam<Param> {
     SetUp() override {
     }
 };
+
+TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text_fid = schema->AddDebugVarcharField(FieldName("text"),
+                                                 DataType::VARCHAR,
+                                                 /*max_length=*/65535,
+                                                 /*nullable=*/true,
+                                                 /*enable_match=*/true,
+                                                 /*enable_analyzer=*/true,
+                                                 analyzer_params,
+                                                 std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+
+    std::vector<std::string> values = {
+        "alpha", "unused", "alpha", "beta", "unused", "gamma"};
+    std::array<bool, 6> valid = {true, false, true, true, false, true};
+
+    auto scalar_index = index::CreateStringIndexSort({});
+    scalar_index->Build(values.size(), values.data(), valid.data());
+
+    LoadIndexInfo load_info;
+    load_info.field_id = text_fid.get();
+    load_info.field_type = DataType::VARCHAR;
+    load_info.index_params = GenIndexParams(scalar_index.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("nullable-text", std::move(scalar_index));
+
+    auto dataset = DataGen(schema, values.size());
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 51599);
+    LoadGeneratedDataIntoSegment(
+        dataset, segment.get(), false, {text_fid.get()});
+    segment->LoadIndex(load_info);
+
+    ASSERT_NO_THROW(segment->CreateTextIndex(text_fid));
+    auto text_index = segment->GetTextIndex(nullptr, text_fid);
+
+    auto nulls = text_index.get()->IsNull();
+    ASSERT_EQ(nulls.size(), values.size());
+    EXPECT_FALSE(nulls[0]);
+    EXPECT_TRUE(nulls[1]);
+    EXPECT_FALSE(nulls[2]);
+    EXPECT_FALSE(nulls[3]);
+    EXPECT_TRUE(nulls[4]);
+    EXPECT_FALSE(nulls[5]);
+
+    auto alpha = text_index.get()->MatchQuery("alpha", 1);
+    ASSERT_EQ(alpha.size(), values.size());
+    EXPECT_TRUE(alpha[0]);
+    EXPECT_FALSE(alpha[1]);
+    EXPECT_TRUE(alpha[2]);
+    EXPECT_FALSE(alpha[3]);
+    EXPECT_FALSE(alpha[4]);
+    EXPECT_FALSE(alpha[5]);
+}
 
 TEST(Sealed, without_predicate) {
     auto schema = std::make_shared<Schema>();
