@@ -465,6 +465,9 @@ func TestAny2TmplValue(t *testing.T) {
 
 		_, err = any2TmplValue([]struct{}{})
 		assert.Error(t, err)
+
+		_, err = any2TmplValue(nil)
+		assert.EqualError(t, err, "unsupported template value type: <nil>")
 	})
 }
 
