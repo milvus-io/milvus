@@ -2245,7 +2245,6 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientSnapshotBase):
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/51414", strict=True)
     def test_snapshot_restores_struct_array_semantics_and_indexes(self):
         """
         target: verify snapshot restores Struct Array schema, nullability, nested indexes, and both search modes
