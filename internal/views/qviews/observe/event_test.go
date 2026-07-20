@@ -268,6 +268,115 @@ func TestEventLogLevel(t *testing.T) {
 	}
 }
 
+func TestEventTriggerInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    Event
+		expected string
+	}{
+		{
+			name: "coord report ready",
+			event: CoordViewReportAppliedEvent{
+				ViewStateTransition: ViewStateTransition{
+					View: testQueryViewKey(),
+					From: qviews.QueryViewStatePreparing,
+					To:   qviews.QueryViewStateReady,
+				},
+				ReportedState: qviews.QueryViewStateReady,
+			},
+			expected: "reportReady",
+		},
+		{
+			name: "coord report unrecoverable",
+			event: CoordViewReportAppliedEvent{
+				ViewStateTransition: ViewStateTransition{
+					View: testQueryViewKey(),
+					From: qviews.QueryViewStatePreparing,
+					To:   qviews.QueryViewStateUnrecoverable,
+				},
+				ReportedState: qviews.QueryViewStateUnrecoverable,
+			},
+			expected: "reportUnrecoverable",
+		},
+		{
+			name: "preempt",
+			event: CoordViewPreemptedEvent{
+				ViewStateTransition: ViewStateTransition{
+					View: testQueryViewKey(),
+					From: qviews.QueryViewStatePreparing,
+					To:   qviews.QueryViewStateUnrecoverable,
+				},
+			},
+			expected: "preempt",
+		},
+		{
+			name: "event without transition trigger",
+			event: CoordViewCreatedEvent{
+				View:  testQueryViewKey(),
+				State: qviews.QueryViewStatePreparing,
+			},
+			expected: "",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.event.TriggerInfo(); got != test.expected {
+				t.Fatalf("TriggerInfo() = %q, want %q", got, test.expected)
+			}
+		})
+	}
+}
+
+func TestEventComponentInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    Event
+		expected string
+	}{
+		{
+			name: "coord event",
+			event: CoordViewReportAppliedEvent{
+				ViewStateTransition: ViewStateTransition{
+					View: testQueryViewKey(),
+					From: qviews.QueryViewStatePreparing,
+					To:   qviews.QueryViewStateReady,
+				},
+				ReportedState: qviews.QueryViewStateReady,
+			},
+			expected: "coord",
+		},
+		{
+			name: "query node event",
+			event: QueryNodeSegmentsReadyEvent{
+				ViewStateTransition: ViewStateTransition{
+					View: testQueryViewKey(),
+					From: qviews.QueryViewStatePreparing,
+					To:   qviews.QueryViewStateReady,
+				},
+			},
+			expected: "queryNode",
+		},
+		{
+			name: "streaming node event",
+			event: StreamingNodeResourceReadyEvent{
+				ViewStateTransition: ViewStateTransition{
+					View: testQueryViewKey(),
+					From: qviews.QueryViewStatePreparing,
+					To:   qviews.QueryViewStateReady,
+				},
+			},
+			expected: "streamingNode",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.event.ComponentInfo(); got != test.expected {
+				t.Fatalf("ComponentInfo() = %q, want %q", got, test.expected)
+			}
+		})
+	}
+}
+
 func TestCoordSyncViewBatchEventMarshalLogObject(t *testing.T) {
 	view := testQueryViewKey()
 	event := CoordSyncViewBatchEvent{
