@@ -404,6 +404,19 @@ message AlterAliasMessageHeader {
     int64 collection_id = 3;
     string collection_name = 4;
     string alias = 5;
+    // The collection the alias pointed to BEFORE this alter. Sentinel-encoded:
+    //   > 0  the known old target -- cache expiration evicts it by id;
+    //   == 0 UNKNOWN: either a new AlterAlias whose broadcast could not resolve
+    //        the old target, OR an older producer that predates this field. The
+    //        proxy falls back to an O(N) holder scan, so 0 is the safe default;
+    //   < 0  the "no old target" sentinel that CreateAlias sets -- it provably
+    //        has none, so it must NOT trigger the scan. A CreateAlias producer
+    //        MUST use this, NOT 0 (0 would O(N)-scan every create).
+    // Carried in the header -- computed once under the broadcaster's database
+    // lock -- so cache expiration can evict the old target by id even when a
+    // concurrent describe has already re-pointed the proxy's alias resolution to
+    // the new target, and so replaying the message stays deterministic.
+    int64 old_collection_id = 6;
 }
 
 // AlterAliasMessageBody is the body of alter alias message.

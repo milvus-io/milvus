@@ -2128,8 +2128,6 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
-
-	MetaCacheGCTimeInterval ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2716,15 +2714,6 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.QueryNodePoolingSize.Init(base.mgr)
-
-	p.MetaCacheGCTimeInterval = ParamItem{
-		Key:          "proxy.metaCacheGCTimeInterval",
-		Version:      "2.6.13",
-		Doc:          "the time interval for meta cache GC, in seconds",
-		DefaultValue: "300",
-		Export:       true,
-	}
-	p.MetaCacheGCTimeInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

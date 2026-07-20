@@ -4582,6 +4582,15 @@ func TestProxy_RelatedPrivilege(t *testing.T) {
 	}
 	ctx := GetContext(context.Background(), "root:123456")
 
+	// OperatePrivilege resolves the collection alias before granting (default
+	// ResolveAliasForPrivilege on); pin globalMetaCache to a mock that resolves
+	// "col1" as-is, so the test does not depend on leftover global cache state.
+	originCache := globalMetaCache
+	metaCache := NewMockCache(t)
+	metaCache.EXPECT().ResolveCollectionAlias(mock.Anything, mock.Anything, "col1").Return("col1", nil).Maybe()
+	globalMetaCache = metaCache
+	defer func() { globalMetaCache = originCache }()
+
 	t.Run("related privilege grpc error", func(t *testing.T) {
 		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}

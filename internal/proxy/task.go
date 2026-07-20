@@ -1742,15 +1742,7 @@ func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
 func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result = &milvuspb.DescribeCollectionResponse{
-		Status: merr.Success(),
-		Schema: &schemapb.CollectionSchema{
-			Name:              "",
-			Description:       "",
-			AutoID:            false,
-			Fields:            make([]*schemapb.FieldSchema, 0),
-			Functions:         make([]*schemapb.FunctionSchema, 0),
-			StructArrayFields: make([]*schemapb.StructArrayFieldSchema, 0),
-		},
+		Status:               merr.Success(),
 		CollectionID:         0,
 		VirtualChannelNames:  nil,
 		PhysicalChannelNames: nil,
@@ -1764,32 +1756,19 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		t.result.Status = result.Status
-
-		// compatibility with PyMilvus existing implementation
-		err := merr.Error(t.result.GetStatus())
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			// nolint
-			t.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			// nolint
-			t.result.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", t.GetDbName(), t.GetCollectionName())
-			t.result.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
-		}
+	if !merr.Ok(result.GetStatus()) {
+		t.result.Status = describeCollectionErrorStatus(
+			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
 	}
+	if t.result.CollectionName == "" {
+		t.result.CollectionName = result.GetCollectionName()
+	}
 
-	t.result.Schema.Name = result.Schema.Name
-	t.result.Schema.Description = result.Schema.Description
-	t.result.Schema.AutoID = result.Schema.AutoID
-	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
-	t.result.Schema.ExternalSource = result.Schema.ExternalSource
-	// Pass spec through unredacted; the public proxy.DescribeCollection
-	// entry point applies RedactExternalSpec uniformly across cached and
-	// remote provider paths so internal-only callers of this task path
-	// (if any) still observe raw creds for FFI auth.
-	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
-	t.result.Schema.EnableNamespace = result.Schema.EnableNamespace
+	t.result.Schema, err = projectDescribeCollectionSchema(result.GetSchema(), false)
+	if err != nil {
+		return err
+	}
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
@@ -1799,61 +1778,13 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.ConsistencyLevel = result.ConsistencyLevel
 	t.result.Aliases = result.Aliases
 	t.result.Properties = result.Properties
-	t.result.DbName = result.GetDbName()
+	if result.GetDbName() != "" {
+		t.result.DbName = result.GetDbName()
+	}
 	t.result.DbId = result.GetDbId()
 	t.result.NumPartitions = result.NumPartitions
 	t.result.UpdateTimestamp = result.UpdateTimestamp
-	t.result.UpdateTimestampStr = result.UpdateTimestampStr
-	copyFieldSchema := func(field *schemapb.FieldSchema) *schemapb.FieldSchema {
-		return &schemapb.FieldSchema{
-			FieldID:          field.FieldID,
-			Name:             field.Name,
-			IsPrimaryKey:     field.IsPrimaryKey,
-			AutoID:           field.AutoID,
-			Description:      field.Description,
-			DataType:         field.DataType,
-			TypeParams:       field.TypeParams,
-			IndexParams:      field.IndexParams,
-			IsDynamic:        field.IsDynamic,
-			IsPartitionKey:   field.IsPartitionKey,
-			IsClusteringKey:  field.IsClusteringKey,
-			DefaultValue:     field.DefaultValue,
-			ElementType:      field.ElementType,
-			Nullable:         field.Nullable,
-			IsFunctionOutput: field.IsFunctionOutput,
-			ExternalField:    field.GetExternalField(),
-		}
-	}
-
-	for _, field := range result.Schema.Fields {
-		if field.IsDynamic || field.Name == common.NamespaceFieldName {
-			continue
-		}
-		if field.FieldID >= common.StartOfUserFieldID {
-			t.result.Schema.Fields = append(t.result.Schema.Fields, copyFieldSchema(field))
-		}
-	}
-
-	for i, structArrayField := range result.Schema.StructArrayFields {
-		t.result.Schema.StructArrayFields = append(t.result.Schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
-			FieldID:     structArrayField.FieldID,
-			Name:        structArrayField.Name,
-			Description: structArrayField.Description,
-			Fields:      make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
-			Nullable:    structArrayField.Nullable,
-		})
-		for _, field := range structArrayField.Fields {
-			t.result.Schema.StructArrayFields[i].Fields = append(t.result.Schema.StructArrayFields[i].Fields, copyFieldSchema(field))
-		}
-	}
-
-	for _, function := range result.Schema.Functions {
-		t.result.Schema.Functions = append(t.result.Schema.Functions, proto.Clone(function).(*schemapb.FunctionSchema))
-	}
-
-	if err := restoreStructFieldNames(t.result.Schema); err != nil {
-		return merr.WrapErrParameterInvalidMsg("failed to restore struct field names: %v", err)
-	}
+	t.result.UpdateTimestampStr = strconv.FormatUint(result.UpdateTimestamp, 10)
 
 	return nil
 }
