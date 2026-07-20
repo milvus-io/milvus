@@ -131,6 +131,9 @@ func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) error
 	if event.Entry != nil {
 		h.sub.advance(event.Entry.GetTimeTick())
 	}
+	if event.SyncUp != nil {
+		h.sub.advance(event.SyncUp.TimeTick)
+	}
 	return nil
 }
 

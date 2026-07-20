@@ -239,6 +239,27 @@ func TestSnapshot_CoalescesMultipleMutations(t *testing.T) {
 	require.Same(t, s2, store.Snapshot())
 }
 
+func TestSnapshot_TracksLoadInfoVersionPerCollection(t *testing.T) {
+	store, catalog := newTestStore(t)
+
+	expectFullSave(catalog, 2)
+	cfg1 := sampleConfig()
+	cfg2 := sampleConfig()
+	cfg2.CollectionID = 101
+	cfg2.Replicas = []*ReplicaAssignment{
+		{ReplicaID: 2000, ResourceGroup: "rg2"},
+	}
+
+	require.NoError(t, store.Put(context.Background(), cfg1))
+	first := store.Snapshot()
+	assert.Equal(t, uint64(2), first.ConfigVersion(cfg1.CollectionID))
+
+	require.NoError(t, store.Put(context.Background(), cfg2))
+	second := store.Snapshot()
+	assert.Equal(t, uint64(2), second.ConfigVersion(cfg1.CollectionID))
+	assert.Equal(t, uint64(3), second.ConfigVersion(cfg2.CollectionID))
+}
+
 func TestRecoverLoadConfigStore_EmptyState(t *testing.T) {
 	catalog := mocks.NewQueryCoordCatalog(t)
 	catalog.EXPECT().GetCollections(mock.Anything).Return(nil, nil).Once()

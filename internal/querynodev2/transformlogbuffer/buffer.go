@@ -181,14 +181,14 @@ func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) error {
 		)
 		h.buffer.onEntry(event.Entry)
 	}
-	if event.CaughtUp != nil {
-		mlog.Debug(context.TODO(), "querynode transform log buffer received caught-up",
+	if event.SyncUp != nil {
+		mlog.Debug(context.TODO(), "querynode transform log buffer received sync-up",
 			mlog.FieldPChannel(h.buffer.pchannel),
 			mlog.FieldVChannel(h.buffer.vchannel),
 			mlog.Int64("subscriptionID", event.SubscriptionID),
-			mlog.Uint64("startAfterTimeTick", event.CaughtUp.StartAfterTimeTick),
+			mlog.Uint64("timeTick", event.SyncUp.TimeTick),
 		)
-		h.buffer.onCaughtUp()
+		h.buffer.onSyncUp(event.SyncUp.TimeTick)
 	}
 	return nil
 }
@@ -230,7 +230,7 @@ type vchannelBuffer struct {
 	entries          []*streamingpb.TransformLogEntry
 	live             map[int64]*registration
 	pending          map[int64]*registration
-	caughtUp         bool
+	syncUp           bool
 	err              error
 }
 
@@ -391,7 +391,7 @@ func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.Tra
 		}
 	}
 	if len(batch) == 0 {
-		if !b.caughtUp {
+		if !b.syncUp {
 			return nil, false, b.visibilityNotify, nil
 		}
 		delete(b.pending, reg.segment.ID())
@@ -432,7 +432,7 @@ func (b *vchannelBuffer) waitTransformVisible(ctx context.Context, timetick uint
 				mlog.Uint64("targetTimeTick", timetick),
 				mlog.Uint64("visibleTimeTick", b.visibleTimeTick),
 				mlog.Uint64("retentionStart", b.retentionStart),
-				mlog.Bool("caughtUp", b.caughtUp),
+				mlog.Bool("syncUp", b.syncUp),
 			)
 		}
 		notify := b.visibilityNotify
@@ -447,7 +447,7 @@ func (b *vchannelBuffer) waitTransformVisible(ctx context.Context, timetick uint
 				mlog.Uint64("targetTimeTick", timetick),
 				mlog.Uint64("visibleTimeTick", b.visibleTimeTick),
 				mlog.Uint64("retentionStart", b.retentionStart),
-				mlog.Bool("caughtUp", b.caughtUp),
+				mlog.Bool("syncUp", b.syncUp),
 				mlog.Err(ctx.Err()),
 			)
 			return ctx.Err()
@@ -567,14 +567,15 @@ func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
 	b.mu.Unlock()
 }
 
-func (b *vchannelBuffer) onCaughtUp() {
+func (b *vchannelBuffer) onSyncUp(timeTick uint64) {
 	b.mu.Lock()
-	if b.caughtUp {
-		b.mu.Unlock()
-		return
+	if timeTick > b.visibleTimeTick {
+		b.visibleTimeTick = timeTick
 	}
-	b.caughtUp = true
-	mlog.Debug(context.TODO(), "querynode transform log buffer marked caught-up",
+	if !b.syncUp {
+		b.syncUp = true
+	}
+	mlog.Debug(context.TODO(), "querynode transform log buffer marked sync-up",
 		mlog.FieldPChannel(b.pchannel),
 		mlog.FieldVChannel(b.vchannel),
 		mlog.Uint64("visibleTimeTick", b.visibleTimeTick),

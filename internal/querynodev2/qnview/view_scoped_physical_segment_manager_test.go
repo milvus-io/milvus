@@ -301,6 +301,123 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForInFlightLoadCallback(t 
 	assert.True(t, segment.released)
 }
 
+func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpdates(t *testing.T) {
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	scheduler := &fakeSegmentLoadScheduler{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithScheduler(scheduler)
+	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
+
+	mgr.Acquire(AcquirePhysicalSegments{
+		Key:        key,
+		Meta:       meta,
+		View:       view,
+		Collection: runtime,
+		OnLoaded:   func([]TransformSegment) {},
+		OnUnrecoverable: func() {
+			t.Fatal("unexpected unrecoverable")
+		},
+	})
+	require.Eventually(t, func() bool {
+		return len(scheduler.tasks) == 1
+	}, time.Second, 10*time.Millisecond)
+	scheduler.tasks[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+		Revision:     SegmentLoadInfoRevision{Revision: 10},
+		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, CollectionID: testCollectionID},
+	})
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+		Revision:     SegmentLoadInfoRevision{Revision: 11},
+		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, CollectionID: testCollectionID},
+	})
+
+	require.Eventually(t, func() bool {
+		return len(scheduler.updates) == 1
+	}, time.Second, 10*time.Millisecond)
+	scheduler.updates[0].OnUpdated(SegmentLoadInfoRevision{Revision: 10})
+	require.Eventually(t, func() bool {
+		return len(scheduler.updates) == 2
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, uint64(11), scheduler.updates[1].Snapshot.Revision.Revision)
+}
+
+func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease(t *testing.T) {
+	scheduler := &fakeSegmentLoadScheduler{}
+	watcher := &fakeSegmentLoadInfoWatcher{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(scheduler, watcher)
+
+	loadedCh := make(chan []TransformSegment, 1)
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
+	}
+	req := AcquirePhysicalSegments{
+		Key:        qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey(),
+		Meta:       meta,
+		View:       view,
+		Collection: &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
+		OnLoaded: func(segments []TransformSegment) {
+			loadedCh <- segments
+		},
+		OnUnrecoverable: func() {
+			t.Fatal("unexpected unrecoverable")
+		},
+	}
+
+	mgr.Acquire(req)
+	require.Empty(t, scheduler.tasks)
+	require.Len(t, watcher.subscriptions, 1)
+	assert.Equal(t, SegmentLoadInfoSubscription{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+	}, watcher.subscriptions[0])
+
+	revision := SegmentLoadInfoRevision{Revision: 10}
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+		Revision:     revision,
+		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
+	})
+
+	require.Len(t, scheduler.tasks, 1)
+	assert.Equal(t, revision, scheduler.tasks[0].Snapshot.Revision)
+	scheduler.tasks[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+
+	select {
+	case loaded := <-loadedCh:
+		require.Len(t, loaded, 1)
+		assert.Equal(t, int64(1000), loaded[0].ID())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for watched segment load")
+	}
+	require.Len(t, watcher.subscriptions, 2)
+	assert.Equal(t, revision, watcher.subscriptions[1].Revision)
+
+	droppedCh := make(chan struct{}, 1)
+	mgr.Release(ReleaseSegments{
+		Key:       req.Key,
+		OnDropped: func() { droppedCh <- struct{}{} },
+	})
+	select {
+	case <-droppedCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for release")
+	}
+	require.Len(t, watcher.unsubscriptions, 1)
+	assert.Equal(t, SegmentLoadInfoSubscription{CollectionID: testCollectionID, SegmentID: 1000}, watcher.unsubscriptions[0])
+}
+
 func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRelease(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
 	view := &viewpb.QueryViewOfQueryNode{
@@ -418,23 +535,18 @@ func TestViewScopedPhysicalSegmentManager_CancelsOnlyLastRefTasksOnMixedRelease(
 	}
 }
 
-func TestViewScopedPhysicalSegmentManager_AcquireFetchesMetadataLoadsAndReports(t *testing.T) {
+func TestViewScopedPhysicalSegmentManager_AcquireWatchesSnapshotsLoadsAndReports(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-	provider := &fakeQueryViewLoadMetadataProvider{
-		loadInfos: []*querypb.SegmentLoadInfo{
-			{SegmentID: 1000, PartitionID: 10},
-			{SegmentID: 1001, PartitionID: 10},
-			{SegmentID: 2000, PartitionID: 20},
-		},
-	}
+	provider := &fakeQueryViewLoadMetadataProvider{}
 	loader := &fakePhysicalLoader{
 		loadFn: func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
 			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
 		},
 	}
-	mgr := NewViewScopedPhysicalSegmentManager(provider, loader)
+	watcher := &fakeSegmentLoadInfoWatcher{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
 
 	loadedCh := make(chan []TransformSegment, 3)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -442,13 +554,19 @@ func TestViewScopedPhysicalSegmentManager_AcquireFetchesMetadataLoadsAndReports(
 		OnLoaded:        func(loaded []TransformSegment) { loadedCh <- loaded },
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
+	assert.ElementsMatch(t, []SegmentLoadInfoSubscription{
+		{CollectionID: testCollectionID, SegmentID: 1000},
+		{CollectionID: testCollectionID, SegmentID: 1001},
+		{CollectionID: testCollectionID, SegmentID: 2000},
+	}, watcher.subscriptions)
+	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
 
 	require.Eventually(t, func() bool {
 		return len(loadedCh) == 3
 	}, time.Second, 10*time.Millisecond)
 	assert.False(t, provider.describeCalled)
+	assert.Empty(t, provider.loadInfoCalled)
 	require.Len(t, loader.loadInfos, 3)
-	assert.ElementsMatch(t, []int64{1000, 1001, 2000}, provider.loadInfoCalled)
 }
 
 func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *testing.T) {
@@ -458,18 +576,14 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-	provider := &fakeQueryViewLoadMetadataProvider{
-		loadInfos: []*querypb.SegmentLoadInfo{
-			{SegmentID: 1000, PartitionID: 10},
-			{SegmentID: 1001, PartitionID: 10},
-		},
-	}
+	provider := &fakeQueryViewLoadMetadataProvider{}
 	loader := &fakePhysicalLoader{
 		loadFn: func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
 			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
 		},
 	}
-	mgr := NewViewScopedPhysicalSegmentManager(provider, loader)
+	watcher := &fakeSegmentLoadInfoWatcher{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
 
 	loadedCh := make(chan []TransformSegment, 2)
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -477,6 +591,7 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 		OnLoaded:        func(loaded []TransformSegment) { loadedCh <- loaded },
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
+	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10, 1001: 10})
 
 	require.Eventually(t, func() bool {
 		return len(loadedCh) == 2
@@ -484,7 +599,7 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 	require.Len(t, loader.loadInfos, 2)
 	loadedSegments := []int64{loader.loadInfos[0].GetSegmentID(), loader.loadInfos[1].GetSegmentID()}
 	assert.ElementsMatch(t, []int64{1000, 1001}, loadedSegments)
-	assert.ElementsMatch(t, []int64{1000, 1001}, provider.loadInfoCalled)
+	assert.Empty(t, provider.loadInfoCalled)
 }
 
 func TestViewScopedPhysicalSegmentManager_ReleaseAfterLastView(t *testing.T) {
@@ -494,23 +609,19 @@ func TestViewScopedPhysicalSegmentManager_ReleaseAfterLastView(t *testing.T) {
 	meta2 := buildHandlerTestMeta(2)
 	view2 := buildHandlerTestQNView(1)
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view2).QueryViewKey()
-	provider := &fakeQueryViewLoadMetadataProvider{
-		loadInfos: []*querypb.SegmentLoadInfo{
-			{SegmentID: 1000, PartitionID: 10},
-			{SegmentID: 1001, PartitionID: 10},
-			{SegmentID: 2000, PartitionID: 20},
-		},
-	}
+	provider := &fakeQueryViewLoadMetadataProvider{}
 	loader := &fakePhysicalLoader{
 		loadFn: func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
 			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
 		},
 	}
-	mgr := NewViewScopedPhysicalSegmentManager(provider, loader)
+	watcher := &fakeSegmentLoadInfoWatcher{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
 
 	ready1 := make(chan []TransformSegment, 3)
 	ready2 := make(chan []TransformSegment, 1)
 	mgr.Acquire(AcquirePhysicalSegments{Key: key1, Meta: meta1, View: view1, OnLoaded: func(loaded []TransformSegment) { ready1 <- loaded }, OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") }})
+	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
 	require.Eventually(t, func() bool {
 		return len(ready1) == 3
 	}, time.Second, 10*time.Millisecond)
@@ -536,11 +647,10 @@ func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *tes
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
 	}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-	provider := &fakeQueryViewLoadMetadataProvider{
-		loadInfos: []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}},
-	}
+	provider := &fakeQueryViewLoadMetadataProvider{}
 	loader := &fakePhysicalLoader{loaded: &fakeTransformSegment{id: 1000, partitionID: 10}}
-	mgr := NewViewScopedPhysicalSegmentManager(provider, loader)
+	watcher := &fakeSegmentLoadInfoWatcher{}
+	mgr := NewViewScopedPhysicalSegmentManagerWithSchedulerAndWatcher(NewQueryViewSegmentLoadScheduler(provider, loader), watcher)
 
 	loadedCh := make(chan []TransformSegment, 1)
 	unrecoverableCh := make(chan struct{}, 1)
@@ -549,6 +659,7 @@ func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *tes
 		OnLoaded:        func(loaded []TransformSegment) { loadedCh <- loaded },
 		OnUnrecoverable: func() { unrecoverableCh <- struct{}{} },
 	})
+	applySegmentLoadSnapshots(mgr, map[int64]int64{1000: 10})
 
 	select {
 	case got := <-loadedCh:
@@ -558,5 +669,20 @@ func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *tes
 		t.Fatal("missing index should not make query view unrecoverable")
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for load callback")
+	}
+}
+
+func applySegmentLoadSnapshots(mgr *ViewScopedPhysicalSegmentManager, segments map[int64]int64) {
+	for segmentID, partitionID := range segments {
+		mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+			CollectionID: testCollectionID,
+			SegmentID:    segmentID,
+			Revision:     SegmentLoadInfoRevision{Revision: uint64(segmentID)},
+			LoadInfo: &querypb.SegmentLoadInfo{
+				SegmentID:    segmentID,
+				PartitionID:  partitionID,
+				CollectionID: testCollectionID,
+			},
+		})
 	}
 }

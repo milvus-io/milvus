@@ -2,15 +2,14 @@ package qnview
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type QueryViewSegmentLoadScheduler struct {
-	meta      QueryViewLoadMetadataProvider
 	loader    PhysicalSegmentLoader
 	estimator SegmentResourceEstimator
 }
@@ -21,7 +20,6 @@ func NewQueryViewSegmentLoadScheduler(meta QueryViewLoadMetadataProvider, loader
 		estimator = estimators[0]
 	}
 	return &QueryViewSegmentLoadScheduler{
-		meta:      meta,
 		loader:    loader,
 		estimator: estimator,
 	}
@@ -29,6 +27,10 @@ func NewQueryViewSegmentLoadScheduler(meta QueryViewLoadMetadataProvider, loader
 
 func (s *QueryViewSegmentLoadScheduler) Submit(task SegmentLoadTask) {
 	go s.load(task)
+}
+
+func (s *QueryViewSegmentLoadScheduler) Update(task SegmentUpdateTask) {
+	go s.update(task)
 }
 
 func (s *QueryViewSegmentLoadScheduler) Cancel(int64) {}
@@ -51,24 +53,21 @@ func (s *QueryViewSegmentLoadScheduler) load(task SegmentLoadTask) {
 }
 
 func (s *QueryViewSegmentLoadScheduler) loadMissing(ctx context.Context, task SegmentLoadTask) (TransformSegment, error) {
-	loadInfos, indexes, err := s.meta.GetQueryViewSegmentLoadInfo(ctx, task.Meta.GetCollectionId(), task.SegmentID)
+	loadInfo, indexes, err := s.loadInfo(ctx, task)
 	if err != nil {
 		return nil, err
-	}
-	if len(loadInfos) != 1 {
-		return nil, fmt.Errorf("segment load info should contain exactly one segment, got %d", len(loadInfos))
 	}
 	if err := updateCollectionIndexMeta(ctx, task.Collection, indexes); err != nil {
 		return nil, err
 	}
-	reservation, err := s.reserve(ctx, loadInfos[0], task.Collection)
+	reservation, err := s.reserve(ctx, loadInfo, task.Collection)
 	if err != nil {
 		return nil, err
 	}
 	if reservation != nil {
 		defer reservation.Release()
 	}
-	segment, err := s.loader.Load(ctx, loadInfos[0], task.Collection)
+	segment, err := s.loader.Load(ctx, loadInfo, task.Collection)
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +78,49 @@ func (s *QueryViewSegmentLoadScheduler) loadMissing(ctx context.Context, task Se
 		}
 	}
 	return segment, nil
+}
+
+func (s *QueryViewSegmentLoadScheduler) loadInfo(ctx context.Context, task SegmentLoadTask) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	if task.Snapshot.LoadInfo != nil {
+		return task.Snapshot.LoadInfo, task.Snapshot.IndexInfos, nil
+	}
+	return nil, nil, merr.WrapErrServiceInternalMsg("query view segment load requires watch snapshot, segmentID=%d", task.SegmentID)
+}
+
+func (s *QueryViewSegmentLoadScheduler) update(task SegmentUpdateTask) {
+	ctx := task.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	action := classifySegmentUpdate(task.Current, task.Snapshot.Revision)
+	if action == SegmentUpdateNone {
+		if task.OnUpdated != nil {
+			task.OnUpdated(task.Current)
+		}
+		return
+	}
+	if err := updateCollectionIndexMeta(ctx, task.Collection, task.Snapshot.IndexInfos); err != nil {
+		if task.OnFailed != nil {
+			task.OnFailed(err)
+		}
+		return
+	}
+	if err := s.loader.Update(ctx, task.Segment, task.Collection, task.Snapshot, action); err != nil {
+		if task.OnFailed != nil {
+			task.OnFailed(err)
+		}
+		return
+	}
+	if task.OnUpdated != nil {
+		task.OnUpdated(task.Snapshot.Revision)
+	}
+}
+
+func classifySegmentUpdate(current, next SegmentLoadInfoRevision) SegmentUpdateAction {
+	if next.Empty() || current == next {
+		return SegmentUpdateNone
+	}
+	return SegmentUpdateReopen | SegmentUpdateLoadIndex
 }
 
 func (s *QueryViewSegmentLoadScheduler) reserve(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, error) {

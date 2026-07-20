@@ -236,6 +236,8 @@ func (m fakePhysicalSegmentManager) Release(req ReleaseSegments) {
 	m.release(req)
 }
 
+func (m fakePhysicalSegmentManager) ApplyLoadInfoSnapshot(context.Context, SegmentLoadInfoSnapshot) {}
+
 type instantTransformRegistration struct{}
 
 func (instantTransformRegistration) WaitCatchup(context.Context) error {
@@ -306,35 +308,23 @@ func (p *fakeQueryViewLoadMetadataProvider) DescribeCollection(context.Context, 
 	return p.collection, p.err
 }
 
-func (p *fakeQueryViewLoadMetadataProvider) GetQueryViewSegmentLoadInfo(_ context.Context, _ int64, segmentIDs ...int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
-	p.mu.Lock()
-	p.loadInfoCalled = append(p.loadInfoCalled, segmentIDs...)
-	p.mu.Unlock()
-	if p.err != nil || len(segmentIDs) == 0 {
-		return p.loadInfos, p.loadIndexInfos, p.err
-	}
-	keep := make(map[int64]struct{}, len(segmentIDs))
-	for _, segmentID := range segmentIDs {
-		keep[segmentID] = struct{}{}
-	}
-	loadInfos := make([]*querypb.SegmentLoadInfo, 0, len(segmentIDs))
-	for _, info := range p.loadInfos {
-		if _, ok := keep[info.GetSegmentID()]; ok {
-			loadInfos = append(loadInfos, info)
-		}
-	}
-	return loadInfos, p.loadIndexInfos, nil
+func (p *fakeQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(context.Context, int64, QueryViewLoadInfoVersion) (QueryViewLoadInfo, error) {
+	return QueryViewLoadInfo{IndexInfos: p.loadIndexInfos}, p.err
 }
 
 type fakePhysicalLoader struct {
-	mu          sync.Mutex
-	loadInfos   []*querypb.SegmentLoadInfo
-	collections []CollectionRuntime
-	released    []int64
-	loaded      TransformSegment
-	loadErr     error
-	releaseErr  error
-	loadFn      func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
+	mu              sync.Mutex
+	loadInfos       []*querypb.SegmentLoadInfo
+	collections     []CollectionRuntime
+	updateSnapshots []SegmentLoadInfoSnapshot
+	updateActions   []SegmentUpdateAction
+	released        []int64
+	loaded          TransformSegment
+	loadErr         error
+	updateErr       error
+	releaseErr      error
+	loadFn          func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
+	updateFn        func(segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
 }
 
 func (l *fakePhysicalLoader) Load(_ context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
@@ -346,6 +336,18 @@ func (l *fakePhysicalLoader) Load(_ context.Context, info *querypb.SegmentLoadIn
 		return l.loadFn(info, collection)
 	}
 	return l.loaded, l.loadErr
+}
+
+func (l *fakePhysicalLoader) Update(_ context.Context, segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error {
+	l.mu.Lock()
+	l.updateSnapshots = append(l.updateSnapshots, snapshot)
+	l.updateActions = append(l.updateActions, action)
+	l.collections = append(l.collections, collection)
+	l.mu.Unlock()
+	if l.updateFn != nil {
+		return l.updateFn(segment, collection, snapshot, action)
+	}
+	return l.updateErr
 }
 
 func (l *fakePhysicalLoader) Release(_ context.Context, segmentIDs []int64) error {
@@ -383,6 +385,7 @@ func (e *fakeSegmentResourceEstimator) Reserve(_ context.Context, info *querypb.
 
 type fakeSegmentLoadScheduler struct {
 	tasks    []SegmentLoadTask
+	updates  []SegmentUpdateTask
 	canceled []int64
 }
 
@@ -390,6 +393,28 @@ func (s *fakeSegmentLoadScheduler) Submit(task SegmentLoadTask) {
 	s.tasks = append(s.tasks, task)
 }
 
+func (s *fakeSegmentLoadScheduler) Update(task SegmentUpdateTask) {
+	s.updates = append(s.updates, task)
+}
+
 func (s *fakeSegmentLoadScheduler) Cancel(segmentID int64) {
 	s.canceled = append(s.canceled, segmentID)
 }
+
+type fakeSegmentLoadInfoWatcher struct {
+	subscriptions   []SegmentLoadInfoSubscription
+	unsubscriptions []SegmentLoadInfoSubscription
+}
+
+func (w *fakeSegmentLoadInfoWatcher) Subscribe(subscription SegmentLoadInfoSubscription) {
+	w.subscriptions = append(w.subscriptions, subscription)
+}
+
+func (w *fakeSegmentLoadInfoWatcher) Unsubscribe(collectionID int64, segmentID int64) {
+	w.unsubscriptions = append(w.unsubscriptions, SegmentLoadInfoSubscription{
+		CollectionID: collectionID,
+		SegmentID:    segmentID,
+	})
+}
+
+func (w *fakeSegmentLoadInfoWatcher) Close() {}

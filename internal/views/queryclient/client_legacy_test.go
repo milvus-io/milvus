@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -76,7 +77,13 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 		}},
 		&legacyServiceClient{
 			queryResults: map[string]*internalpb.RetrieveResults{
-				shardID.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 201}},
+				shardID.VChannel: {
+					Status: merr.Success(),
+					Base:   &commonpb.MsgBase{SourceID: 201},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+					},
+				},
 			},
 		},
 		&legacyResolver{
@@ -99,6 +106,79 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 	require.Len(t, result.Results, 1)
 	require.Equal(t, int64(201), result.Results[0].GetBase().GetSourceID())
 	require.Len(t, result.Plans, 1)
+}
+
+func TestLegacyClientQuerySkipsEmptyDownstreamResults(t *testing.T) {
+	collectionID := int64(100)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	queryNode := qviews.NewQueryNode(11)
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardID.VChannel: legacyQueryPlan(shardID, queryNode),
+		}},
+		&legacyServiceClient{
+			queryResults: map[string]*internalpb.RetrieveResults{
+				shardID.VChannel: {Status: merr.Success(), CostAggregation: &internalpb.CostAggregation{}},
+			},
+		},
+		&legacyResolver{
+			vchannels: []string{shardID.VChannel},
+			replicas: map[string]*resolver.ShardReplicas{
+				shardID.VChannel: {VChannel: shardID.VChannel, PrimaryShardID: shardID, ShardIDs: []qviews.ShardID{shardID}},
+			},
+		},
+		fixedReplicaPicker{shardID: shardID},
+	)
+
+	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID:     collectionID,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		},
+	})
+	require.NoError(t, err)
+
+	require.Empty(t, result.Results)
+	require.Len(t, result.Plans, 1)
+}
+
+func TestLegacyClientQueryDoesNotDispatchWhenPlanHasNoWorkNodes(t *testing.T) {
+	collectionID := int64(100)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	service := &legacyServiceClient{
+		queryResults: map[string]*internalpb.RetrieveResults{
+			shardID.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 201}},
+		},
+	}
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardID.VChannel: legacyQueryPlanWithoutWorkNodes(shardID),
+		}},
+		service,
+		&legacyResolver{
+			vchannels: []string{shardID.VChannel},
+			replicas: map[string]*resolver.ShardReplicas{
+				shardID.VChannel: {VChannel: shardID.VChannel, PrimaryShardID: shardID, ShardIDs: []qviews.ShardID{shardID}},
+			},
+		},
+		fixedReplicaPicker{shardID: shardID},
+	)
+
+	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID:     collectionID,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		},
+	})
+	require.NoError(t, err)
+
+	require.Empty(t, result.Results)
+	require.Len(t, result.Plans, 1)
+	require.Zero(t, service.queryCallCount)
 }
 
 func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
@@ -160,8 +240,9 @@ func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *vi
 }
 
 type legacyServiceClient struct {
-	searchResults map[string]*internalpb.SearchResults
-	queryResults  map[string]*internalpb.RetrieveResults
+	searchResults  map[string]*internalpb.SearchResults
+	queryResults   map[string]*internalpb.RetrieveResults
+	queryCallCount int
 }
 
 func (c *legacyServiceClient) SearchOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
@@ -171,6 +252,7 @@ func (c *legacyServiceClient) SearchOnView(_ context.Context, _ qviews.WorkNode,
 }
 
 func (c *legacyServiceClient) QueryOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+	c.queryCallCount++
 	return &viewpb.QueryOnViewResponse{
 		LegacyResults: c.queryResults[req.GetShardId().GetVchannel()],
 	}, nil
@@ -204,6 +286,17 @@ func legacyQueryPlan(shardID qviews.ShardID, node qviews.QueryNode) *viewpb.Quer
 		},
 		WorkNodes: []*viewpb.QueryPlanWorkNode{
 			{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: node.ID}}},
+		},
+	}
+}
+
+func legacyQueryPlanWithoutWorkNodes(shardID qviews.ShardID) *viewpb.QueryPlan {
+	return &viewpb.QueryPlan{
+		ShardId: shardID.IntoProto(),
+		Version: &viewpb.QueryViewVersion{QueryVersion: 1},
+		Mvcc:    &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90},
+		Request: &viewpb.QueryPlan_LegacyRetrieveRequest{
+			LegacyRetrieveRequest: &internalpb.RetrieveRequest{},
 		},
 	}
 }
