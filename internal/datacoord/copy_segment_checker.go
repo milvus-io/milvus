@@ -297,6 +297,23 @@ func (c *copySegmentChecker) LogTaskStats() {
 func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 
+	// Step 0: Re-read the cached job. The `job` argument is a snapshot taken
+	// before this function ran, but tasks of a Pending job can already be
+	// dispatched (the inspector does not filter by job state) and a concurrent
+	// failure (markTaskAndJobFailed) may have moved the job to a terminal
+	// state and released its snapshot pin. Creating more tasks for such a job
+	// would be wasted work at best.
+	current := c.copyMeta.GetJob(c.ctx, job.GetJobId())
+	if current == nil {
+		log.Info(c.ctx, "job no longer exists, skip pending check")
+		return
+	}
+	if current.GetState() != datapb.CopySegmentJobState_CopySegmentJobPending {
+		log.Info(c.ctx, "job is no longer pending, skip pending check",
+			mlog.String("currentState", current.GetState().String()))
+		return
+	}
+
 	// Step 1: Validate job has segment mappings
 	idMappings := job.GetIdMappings()
 	if len(idMappings) == 0 {
@@ -373,11 +390,20 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	// Step 5: Update job state to Executing. This also runs when all segments
 	// were already covered (groups is empty), retrying a transition that a
 	// previous round failed to persist.
-	err := c.copyMeta.UpdateJob(c.ctx, job.GetJobId(),
+	// The transition is state-guarded (Pending -> Executing only): a task
+	// dispatched during Step 4 can fail concurrently, and markTaskAndJobFailed
+	// then moves the job to Failed and releases its snapshot pin. An
+	// unconditional update here would resurrect that Failed job as Executing.
+	updated, err := c.copyMeta.UpdateJobInState(c.ctx, job.GetJobId(),
+		datapb.CopySegmentJobState_CopySegmentJobPending,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting),
 		UpdateCopyJobTotalSegments(int64(len(idMappings))))
 	if err != nil {
 		log.Warn(c.ctx, "failed to update job state to Executing", mlog.Err(err))
+		return
+	}
+	if !updated {
+		log.Info(c.ctx, "job left Pending state concurrently, skip transition to Executing")
 		return
 	}
 	log.Info(c.ctx, "copy segment job started",

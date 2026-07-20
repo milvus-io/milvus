@@ -289,6 +289,46 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_AllTasksExistTransitionsTo
 	s.Len(s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID), 1)
 }
 
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_StaleSnapshotDoesNotResurrectFailedJob() {
+	// Regression test: checkPendingJob receives a job snapshot taken before it
+	// runs, while tasks of a Pending job can already be dispatched and fail
+	// concurrently — markTaskAndJobFailed then moves the job to Failed and
+	// releases its snapshot pin. The checker, still holding the stale Pending
+	// snapshot, must neither create more tasks nor resurrect the job as
+	// Executing.
+	// AddJob + the concurrent Failed transition each persist once; the stale
+	// checkPendingJob call must not persist anything (and must not AllocID —
+	// the allocator mock has no expectation and would fail the test).
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	staleJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), staleJob))
+
+	// Concurrent failure path moves the cached job to Failed. The cached entry
+	// is replaced with a Failed clone; `staleJob` keeps its Pending state and
+	// plays the stale snapshot below.
+	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("task failed concurrently")))
+
+	s.checker.checkPendingJob(staleJob)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal("task failed concurrently", updatedJob.GetReason())
+	s.Empty(s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID))
+}
+
 func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_UpdateProgress() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)

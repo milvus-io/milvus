@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -526,6 +528,52 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_TransientRPCErrorKeepsInPro
 		s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			copyMeta.GetJob(context.Background(), 100).GetState())
 	}
+}
+
+func (s *CopySegmentTaskSuite) TestScheduler_OneOffTransientErrorDoesNotRedispatch() {
+	// Regression test at the global-scheduler level: a one-off transport error
+	// while querying an InProgress copy-segment task must NOT trigger a second
+	// CreateCopySegment dispatch. The task stays in runningTasks (InProgress on
+	// the same node) and is simply queried again on the next check tick.
+	cluster := session.NewMockCluster(s.T())
+	var queries atomic.Int32
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(nodeID int64, req *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {
+			s.EqualValues(10, nodeID)
+			if queries.Add(1) == 1 {
+				return nil, errors.New("one-off transport error")
+			}
+			return &datapb.QueryCopySegmentResponse{
+				TaskID: 1001,
+				State:  datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+			}, nil
+		})
+	var creates atomic.Int32
+	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64) error {
+			creates.Add(1)
+			return nil
+		}).Maybe()
+	// Only reached if the task is wrongly reset to Pending and re-scheduled.
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		10: {NodeID: 10, AvailableSlots: 16},
+	}).Maybe()
+
+	copyTask := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyTask.task.Load().NodeId = 10
+	newCopySegmentTaskTestMeta(s.T(), copyTask)
+
+	scheduler := task2.NewGlobalTaskScheduler(context.Background(), cluster)
+	scheduler.Enqueue(copyTask)
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	// The task must survive the transient error and keep being polled on the
+	// same node across multiple check ticks.
+	s.Eventually(func() bool { return queries.Load() >= 3 }, 10*time.Second, 20*time.Millisecond)
+	s.EqualValues(0, creates.Load())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, copyTask.GetState())
+	s.EqualValues(10, copyTask.GetNodeId())
 }
 
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NodeGoneResetsToPending() {

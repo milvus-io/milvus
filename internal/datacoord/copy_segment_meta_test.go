@@ -294,6 +294,47 @@ func (s *CopySegmentMetaSuite) TestUpdateJob_Success() {
 	s.Equal("executing", updatedJob.GetReason())
 }
 
+func (s *CopySegmentMetaSuite) TestUpdateJobInState_AppliesOnlyWhenStateMatches() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// Expected state mismatch (job is Failed, expected Pending): the update
+	// must be skipped without touching the catalog, so a stale caller cannot
+	// resurrect a terminal job.
+	updated, err := s.copyMeta.UpdateJobInState(context.TODO(), 100,
+		datapb.CopySegmentJobState_CopySegmentJobPending,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.False(updated)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		s.copyMeta.GetJob(context.TODO(), 100).GetState())
+
+	// Missing job: skipped, no error.
+	updated, err = s.copyMeta.UpdateJobInState(context.TODO(), 999,
+		datapb.CopySegmentJobState_CopySegmentJobPending,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.False(updated)
+
+	// Matching expected state: the update applies.
+	updated, err = s.copyMeta.UpdateJobInState(context.TODO(), 100,
+		datapb.CopySegmentJobState_CopySegmentJobFailed,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.True(updated)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		s.copyMeta.GetJob(context.TODO(), 100).GetState())
+}
+
 func (s *CopySegmentMetaSuite) TestUpdateJob_NotFound() {
 	// Try to update non-existent job (should not error, just no-op)
 	err := s.copyMeta.UpdateJob(context.TODO(), 999,
