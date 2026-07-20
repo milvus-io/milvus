@@ -241,9 +241,11 @@ TEST(FieldDataLoadingOverheadUpperBound, UsesPoolBoundWhenBudgetDisabled) {
 
     budget.SetCapacityBytes(0);
     SetFieldDataLoadBatchTargetBytes(64);
-    high_pool.Resize(2);
-    low_pool.Resize(3);
-    constexpr int64_t max_load_tasks = 5;
+    auto high_load_tasks = std::max<size_t>(2, high_pool.GetThreadNum());
+    auto low_load_tasks = std::max<size_t>(3, low_pool.GetThreadNum());
+    high_pool.Resize(static_cast<int>(high_load_tasks));
+    low_pool.Resize(static_cast<int>(low_load_tasks));
+    auto max_load_tasks = high_load_tasks + low_load_tasks;
 
     auto upper_bound =
         FieldDataLoadingOverheadUpperBound(/*max_memory_overhead=*/128);
