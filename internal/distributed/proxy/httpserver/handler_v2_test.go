@@ -3826,6 +3826,150 @@ func TestDML(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
+func TestEmptyArrayExprParamsForwardedToProxy(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	hasEmptyTemplate := func(values map[string]*schemapb.TemplateValue) bool {
+		value, ok := values["ids"]
+		return ok && value.GetArrayVal() != nil && value.GetArrayVal().GetData() == nil
+	}
+	describeResponse := &milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}
+
+	t.Run("query", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(describeResponse, nil).Once()
+		mp.EXPECT().Query(mock.Anything, mock.MatchedBy(func(req *milvuspb.QueryRequest) bool {
+			return hasEmptyTemplate(req.GetExprTemplateValues())
+		})).Return(&milvuspb.QueryResults{Status: commonSuccessStatus}, nil).Once()
+
+		testcase := requestBodyTestCase{
+			path:        versionalV2(EntityCategory, QueryAction),
+			requestBody: []byte(`{"collectionName":"book","filter":"book_id in {ids}","exprParams":{"ids":[]},"limit":10}`),
+		}
+		sendReqAndVerify(t, initHTTPServerV2(mp, false), testcase.path, http.MethodPost, testcase)
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(describeResponse, nil).Once()
+		mp.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRequest) bool {
+			return hasEmptyTemplate(req.GetExprTemplateValues())
+		})).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Once()
+
+		testcase := requestBodyTestCase{
+			path:        versionalV2(EntityCategory, DeleteAction),
+			requestBody: []byte(`{"collectionName":"book","filter":"book_id in {ids}","exprParams":{"ids":[]}}`),
+		}
+		sendReqAndVerify(t, initHTTPServerV2(mp, false), testcase.path, http.MethodPost, testcase)
+	})
+
+	t.Run("search", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(describeResponse, nil).Once()
+		mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+			return hasEmptyTemplate(req.GetExprTemplateValues())
+		})).Return(&milvuspb.SearchResults{
+			Status:  commonSuccessStatus,
+			Results: &schemapb.SearchResultData{TopK: 0},
+		}, nil).Once()
+
+		testcase := requestBodyTestCase{
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: []byte(`{"collectionName":"book","data":[[0.1,0.2]],"filter":"book_id in {ids}","exprParams":{"ids":[]},"limit":3}`),
+		}
+		sendReqAndVerify(t, initHTTPServerV2(mp, false), testcase.path, http.MethodPost, testcase)
+	})
+
+	t.Run("hybrid search", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(describeResponse, nil).Once()
+		mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+			return len(req.GetRequests()) == 1 && hasEmptyTemplate(req.GetRequests()[0].GetExprTemplateValues())
+		})).Return(&milvuspb.SearchResults{
+			Status:  commonSuccessStatus,
+			Results: &schemapb.SearchResultData{TopK: 0},
+		}, nil).Once()
+
+		testcase := requestBodyTestCase{
+			path: versionalV2(EntityCategory, HybridSearchAction),
+			requestBody: []byte(`{"collectionName":"book","search":[` +
+				`{"data":[[0.1,0.2]],"annsField":"book_intro","filter":"book_id in {ids}","exprParams":{"ids":[]},"metricType":"L2","limit":3}` +
+				`],"rerank":{"strategy":"rrf","params":{}}}`),
+		}
+		sendReqAndVerify(t, initHTTPServerV2(mp, false), testcase.path, http.MethodPost, testcase)
+	})
+}
+
+func TestInvalidExprParamsRejectBeforeProxyDispatch(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testCases := []struct {
+		name        string
+		path        string
+		body        string
+		proxyMethod string
+	}{
+		{
+			name:        "query null",
+			path:        versionalV2(EntityCategory, QueryAction),
+			body:        `{"collectionName":"book","filter":"book_id in {ids}","exprParams":{"ids":null},"limit":10}`,
+			proxyMethod: "Query",
+		},
+		{
+			name:        "delete object",
+			path:        versionalV2(EntityCategory, DeleteAction),
+			body:        `{"collectionName":"book","filter":"book_id in {ids}","exprParams":{"ids":{"nested":"value"}}}`,
+			proxyMethod: "Delete",
+		},
+		{
+			name:        "search null",
+			path:        versionalV2(EntityCategory, SearchAction),
+			body:        `{"collectionName":"book","data":[[0.1,0.2]],"filter":"book_id in {ids}","exprParams":{"ids":null},"limit":3}`,
+			proxyMethod: "Search",
+		},
+		{
+			name: "hybrid search object",
+			path: versionalV2(EntityCategory, HybridSearchAction),
+			body: `{"collectionName":"book","search":[` +
+				`{"data":[[0.1,0.2]],"annsField":"book_intro","filter":"book_id in {ids}","exprParams":{"ids":{"nested":"value"}},"metricType":"L2","limit":3}` +
+				`],"rerank":{"strategy":"rrf","params":{}}}`,
+			proxyMethod: "HybridSearch",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionName: DefaultCollectionName,
+				Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+				ShardsNum:      ShardNumDefault,
+				Status:         &StatusSuccess,
+			}, nil).Once()
+
+			req := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewReader([]byte(testCase.body)))
+			w := httptest.NewRecorder()
+			initHTTPServerV2(mp, false).ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "unsupported exprParams value type")
+			mp.AssertNotCalled(t, testCase.proxyMethod, mock.Anything, mock.Anything)
+		})
+	}
+}
+
 func TestQueryOrderByFields(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit

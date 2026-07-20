@@ -3202,8 +3202,46 @@ func TestGenerateExpressionTemplate(t *testing.T) {
 		},
 	}
 	for i, template := range expressionTemplates {
-		actual := generateExpressionTemplate(template)
-		assert.Equal(t, actual, ans[i])
+		actual, err := generateExpressionTemplate(template)
+		require.NoError(t, err)
+		assert.Equal(t, ans[i], actual)
+	}
+
+	t.Run("empty array", func(t *testing.T) {
+		actual, err := generateExpressionTemplate(map[string]interface{}{"empty": []interface{}{}})
+		require.NoError(t, err)
+		expected := map[string]*schemapb.TemplateValue{
+			"empty": {
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: &schemapb.TemplateArrayValue{},
+				},
+			},
+		}
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("nested empty arrays", func(t *testing.T) {
+		actual, err := generateExpressionTemplate(map[string]interface{}{
+			"nested": []interface{}{[]interface{}{float64(1)}, []interface{}{}},
+		})
+		require.NoError(t, err)
+
+		arrays := actual["nested"].GetArrayVal().GetArrayData().GetData()
+		require.Len(t, arrays, 2)
+		assert.Equal(t, []int64{1}, arrays[0].GetLongData().GetData())
+		assert.Nil(t, arrays[1].GetData())
+	})
+
+	for name, value := range map[string]interface{}{
+		"null":              nil,
+		"object":            map[string]interface{}{"nested": "value"},
+		"array with null":   []interface{}{nil},
+		"array with object": []interface{}{map[string]interface{}{"nested": "value"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := generateExpressionTemplate(map[string]interface{}{"value": value})
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
 	}
 }
 
