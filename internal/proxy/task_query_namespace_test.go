@@ -71,7 +71,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 				},
 				EnableNamespace: true,
 			}
-			return newSchemaInfo(schema), nil
+			return mustNewSchemaInfo(schema), nil
 		}).Build()
 
 		// Capture plan to verify namespace by mocking plan creation inside createPlan
@@ -94,7 +94,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		ns := "ns-1"
 		task.request.Namespace = &ns
 		// Pre-set schema for namespace check before cache fetch inside PreExecute
-		task.schema = newSchemaInfo(&schemapb.CollectionSchema{
+		task.schema = mustNewSchemaInfo(&schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
@@ -127,7 +127,7 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, consistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(schema), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(schema), nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionsIndex).Return(partitionNames, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitions).Return(partitionIDs, nil).Build()
 		mockey.Mock(validatePartitionTag).Return(nil).Build()

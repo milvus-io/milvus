@@ -132,80 +132,86 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
 	defer sp.End()
-	mlog.Info(context.TODO(), "received request to invalidate collection meta cache")
+	mlog.Info(ctx, "received request to invalidate collection meta cache")
 
 	dbName := request.DbName
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
+	deprecateShardCaches := func(names ...string) {
+		seen := make(map[string]struct{}, len(names))
+		for _, name := range names {
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+		}
+	}
 
 	if globalMetaCache != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
-			// remove collection by name first, otherwise the drop collection remove version will be failed.
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
-				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
+			aliasOperation := msgType == commonpb.MsgType_CreateAlias ||
+				msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias
+			aliasName = globalMetaCache.InvalidateCollectionMeta(
+				ctx, request.GetDbName(), collectionName, collectionID, aliasOperation)
+			deprecateShardCaches(append(aliasName, collectionName)...)
+			if aliasOperation && collectionName != "" {
+				if request.CollectionID == UniqueID(0) && msgType != commonpb.MsgType_DropAlias {
+					// An alias-DDL broadcast with no target id (id==0) means
+					// the old target could not be precisely located, so fall
+					// back to scanning for cached holders of the alias --
+					// otherwise a concurrent-describe race could leave the old
+					// target's Aliases list stale with no healing event. Two
+					// sources reach here, so this is a PERMANENT safety net,
+					// not upgrade-window compat: (a) an old rootcoord that
+					// predates old_collection_id, and (b) a new rootcoord that
+					// could not resolve the pre-alter AlterAlias target (a meta
+					// inconsistency). DropAlias is EXCLUDED: it legitimately
+					// carries no id in every version (its single-target hint
+					// resolution is race-free -- nothing re-points an alias
+					// concurrently with its drop), so scanning there would
+					// reintroduce a permanent O(N) stall on the normal path.
+					globalMetaCache.RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
 				}
 			}
-			// Invalidate alias cache for alias operations
-			if msgType == commonpb.MsgType_CreateAlias || msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias {
-				if collectionName != "" {
-					globalMetaCache.RemoveAlias(ctx, request.GetDbName(), collectionName)
-				}
-			}
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache with collection name", mlog.String("type", request.GetBase().GetMsgType().String()))
+			mlog.Info(ctx, "complete to invalidate collection meta cache with collection name", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
-				}
+				aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
+				deprecateShardCaches(aliasName...)
 			}
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
+			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
 			if request.GetPartitionName() == "" {
-				mlog.Warn(context.TODO(), "invalidate collection meta cache failed. partitionName is empty")
-				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+				err := merr.WrapErrServiceInternalMsg("partition cache invalidation received empty partition name")
+				mlog.Warn(ctx, "failed to invalidate partition meta cache", mlog.Err(err),
+					mlog.FieldDbName(request.GetDbName()),
+					mlog.FieldCollectionName(collectionName),
+					mlog.FieldCollectionID(collectionID))
+				return merr.Status(err), nil
 			}
-			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName(), request.GetBase().GetTimestamp())
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
+			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
+			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
-			fallthrough
-		case commonpb.MsgType_AlterDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+		case commonpb.MsgType_AlterDatabase:
+			globalMetaCache.RemoveDatabaseInfo(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
-				}
-			}
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
-			}
-			mlog.Info(context.TODO(), "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
+			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			deprecateShardCaches(append(aliasName, collectionName)...)
+			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		default:
-			mlog.Warn(context.TODO(), "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
-				for _, name := range aliasName {
-					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
-				}
-			}
-
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
-				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
+			mlog.Warn(ctx, "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
+			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			deprecateShardCaches(append(aliasName, collectionName)...)
 		}
 	}
 
@@ -223,7 +229,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 		DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 	}
-	mlog.Info(context.TODO(), "complete to invalidate collection meta cache")
+	mlog.Info(ctx, "complete to invalidate collection meta cache")
 
 	return merr.Success(), nil
 }
@@ -854,16 +860,6 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 	resp, err := interceptor.Call(ctx, request)
-	// Single-point redaction at the API edge. The persisted spec carries
-	// extfs credentials (access_key_id / access_key_value / ssl_ca_cert)
-	// that internal callers (refresh / load) need raw via the same
-	// mixCoord.DescribeCollection RPC; redacting at source would break
-	// FFI auth. Sanitize here so every provider path (cached / remote)
-	// converges through one spot — adding a new provider does not
-	// re-introduce the leak.
-	if resp != nil && resp.GetSchema() != nil {
-		resp.Schema.ExternalSpec = externalspec.RedactExternalSpec(resp.Schema.ExternalSpec)
-	}
 	return resp, err
 }
 
