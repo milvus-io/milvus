@@ -217,6 +217,15 @@ func canFoldBoolDomainToConstant(col *planpb.ColumnInfo) bool {
 }
 
 func hasMissingPathNotEqualSemantics(col *planpb.ColumnInfo, values ...*planpb.GenericValue) bool {
+	if col != nil && col.GetDataType() == schemapb.DataType_JSON {
+		for _, value := range values {
+			switch valueCaseWithNil(value) {
+			case "array", "nil", "other":
+				return true
+			}
+		}
+		return false
+	}
 	return hasMissingPathSemantics(col)
 }
 
