@@ -147,8 +147,50 @@ EquivExprs() {
         // the shape discriminating (a ~10 m radius would select nothing and
         // the ON-vs-OFF comparison would degenerate to 0 == 0).
         R"expr(st_dwithin(geo, "POINT(0 0)", 5000000) and st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))"))expr",
+        // (11) SELECTIVE scalar upstream. Every `age >= 0` above selects all N
+        // rows: DataGen fills a non-random INT64 field with `data[i] = i /
+        // repeat_count` and repeat_count defaults to 1 (DataGen.h), so the
+        // predicate is a tautology and `survivors &= pre` in the Refine node
+        // (GISConjunctExpr.cpp) is a permanent no-op in the scalar direction.
+        // This shape makes the scalar mask actually prune, so the AND of
+        // scalars and B_coarse is exercised for real.
+        // Kept in sync with kSelectiveAgeThreshold below.
+        R"expr(age >= 900 and st_intersects(geo, "POLYGON((-50 -50, 50 -50, 50 50, -50 50, -50 -50))"))expr",
     };
     return exprs;
+}
+
+// Row threshold used by shape (11); with the standard N=1000 segments in this
+// file it leaves 100 of 1000 rows for Refine.
+constexpr int64_t kSelectiveAgeThreshold = 900;
+
+// Shape (11)'s scalar mask only proves anything if it is genuinely selective
+// AND the geometry predicate keeps some of what survives. Pin both ends:
+// a result of 0 or N would make the ON-vs-OFF comparison degenerate to
+// "0 == 0" / "all == all" and stop discriminating, exactly like the
+// tautological `age >= 0` shapes it was added to compensate for.
+void
+AssertSelectiveShapeIsDiscriminating(const std::shared_ptr<Schema>& schema,
+                                     ScopedSchemaHandle& handle,
+                                     const SegmentInternalInterface* seg,
+                                     int64_t N) {
+    const auto& e = EquivExprs().back();
+    GISSplitFusionGuard on(true);
+    auto res = RunFilter(schema, handle, seg, N, e);
+    ASSERT_EQ(res.size(), static_cast<size_t>(N));
+    auto hits = res.count();
+    EXPECT_GT(hits, 0u) << "selective shape selected nothing, it no longer "
+                           "discriminates: "
+                        << e;
+    EXPECT_LT(hits, static_cast<size_t>(N))
+        << "selective shape selected every row, the scalar mask is not "
+           "pruning: "
+        << e;
+    // The scalar predicate alone bounds the result: rows with age < threshold
+    // can never survive, so anything above this means the mask was dropped.
+    EXPECT_LE(hits, static_cast<size_t>(N - kSelectiveAgeThreshold))
+        << "more rows survived than the scalar predicate admits; "
+           "`survivors &= pre` is not being applied";
 }
 
 // For each shape, assert the fusion-ON bitset equals the fusion-OFF baseline on
@@ -202,6 +244,23 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionOnVsOff) {
     ScopedSchemaHandle handle(*schema);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);
+}
+
+// ON-vs-OFF equivalence is blind to how much work Refine does -- making it
+// evaluate every active row keeps every result bit identical. It is equally
+// blind to an over-inclusive (even all-ones) coarse bitmap, because Refine
+// re-evaluates the exact predicate and the conjunction ANDs once more at the
+// end. So equivalence alone cannot tell "pruning works" from "pruning silently
+// degraded to a full scan". This pins the one part that IS observable from
+// outside the operator: the scalar mask must actually reach Refine.
+TEST(GISCoarseRefineExprTest, SelectiveScalarMaskActuallyPrunes) {
+    auto schema = MakeGISSchema();
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
+    ScopedSchemaHandle handle(*schema);
+
+    AssertSelectiveShapeIsDiscriminating(schema, handle, seg.get(), N);
 }
 
 // Same equivalence, but with enableGeometryCache ON so the segment is loaded

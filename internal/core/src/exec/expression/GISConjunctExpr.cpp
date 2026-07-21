@@ -23,6 +23,7 @@
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "knowhere/dataset.h"
+#include "log/Log.h"
 #include "pb/schema.pb.h"
 
 namespace milvus {
@@ -53,6 +54,20 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
             : nullptr;
     if (scalar_index == nullptr) {
         p.coarse = TargetBitmap(active_count_, true);
+        p.degraded = GISGroupState::Pred::CoarseDegrade::kIndexUnusable;
+        // Runs once per segment per predicate (guarded by coarse_done), never
+        // on the row-level path. Warn rather than stay silent: results remain
+        // correct but this segment loses all R-Tree pruning, and nothing else
+        // in the pipeline reports it -- a persistently unusable index would
+        // otherwise look exactly like a healthy one that is merely slow.
+        LOG_WARN(
+            "GIS coarse pruning degraded to full scan: field {} reports an "
+            "index but the pin yielded no usable string index "
+            "(num_index_chunk={}, pinned={}); results stay correct via Refine, "
+            "R-Tree pruning is lost for this segment",
+            st_->field_id.get(),
+            num_index_chunk_,
+            pinned_index_.size());
         return;
     }
 
@@ -111,8 +126,15 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             } else {
                 // No R-Tree index: coarse degenerates to the full set; the
                 // Refine node still prunes via bitmap_input and fuses
-                // construction.
+                // construction. Expected, so this is DEBUG -- but it must be
+                // distinguishable from the kIndexUnusable warning above, which
+                // looks identical from the outside.
                 p.coarse = TargetBitmap(active_count_, true);
+                p.degraded = GISGroupState::Pred::CoarseDegrade::kNoIndex;
+                LOG_DEBUG(
+                    "GIS coarse pruning unavailable: field {} has no geometry "
+                    "index, coarse degenerates to the full set",
+                    st_->field_id.get());
             }
             if (st_->is_and) {
                 cand &= p.coarse;
@@ -125,6 +147,18 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             // active_count_-bit bitmap per predicate for the whole query life.
             p.coarse = TargetBitmap{};
         }
+        st_->coarse_selected = static_cast<int64_t>(cand.count());
+        // Once per segment. The whole point of split-fusion is that this ratio
+        // is well below 1; an all-ones coarse still returns correct results, so
+        // without this line a permanently degraded deployment is
+        // indistinguishable from a healthy one.
+        LOG_DEBUG(
+            "GIS coarse pruning: field {} selected {}/{} rows as candidates "
+            "({} predicates)",
+            st_->field_id.get(),
+            st_->coarse_selected,
+            active_count_,
+            st_->preds.size());
         st_->coarse_candidates =
             std::make_shared<TargetBitmap>(std::move(cand));
         st_->coarse_done = true;
@@ -234,6 +268,10 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         std::vector<int64_t> hit_abs;
         hit_local.reserve(survivors.count());
         hit_abs.reserve(survivors.count());
+        // Accumulated across batches: the number of rows this node actually
+        // builds a geometry for and evaluates. This is the pruning contract
+        // made observable -- see GISGroupState::refined_rows.
+        st_->refined_rows += static_cast<int64_t>(survivors.count());
         for (int64_t i = 0; i < real_batch_size; ++i) {
             if (survivors[i]) {
                 hit_local.emplace_back(i);
