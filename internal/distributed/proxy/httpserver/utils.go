@@ -3357,10 +3357,6 @@ func generateTemplateArrayData(list []interface{}) (*schemapb.TemplateArrayValue
 }
 
 func getTemplateArrayType(value []interface{}) (schemapb.DataType, error) {
-	if len(value) == 0 {
-		return schemapb.DataType_None, nil
-	}
-
 	dtype, err := getTemplateType(value[0])
 	if err != nil {
 		return schemapb.DataType_None, err
