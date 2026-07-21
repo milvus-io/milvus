@@ -105,7 +105,7 @@ func TestEmbeddingFunctionSignatureOnlyChecksFunctionSchema(t *testing.T) {
 	require.NotEqual(t, baseSignature, signature)
 }
 
-func TestFunctionRunnerManagerSameVersionOnlyChecksFunctionSchema(t *testing.T) {
+func TestFunctionRunnerManagerUpdateOnlyAdvancesSchemaVersion(t *testing.T) {
 	manager, factory := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)
 
@@ -113,22 +113,22 @@ func TestFunctionRunnerManagerSameVersionOnlyChecksFunctionSchema(t *testing.T) 
 	require.NoError(t, manager.Alloc(1, "v1", base))
 	requireRunnerByOutput(t, manager, 1, "v1", 102)
 
-	fieldNonFunctionMetadataChanged := cloneCollectionSchema(base)
-	fieldNonFunctionMetadataChanged.Fields[1].TypeParams = []*commonpb.KeyValuePair{
-		{Key: analyzerParams, Value: `{"tokenizer": "standard"}`},
-		{Key: "mmap.enabled", Value: "true"},
-	}
-	fieldNonFunctionMetadataChanged.Fields[1].IsPartitionKey = true
-	fieldNonFunctionMetadataChanged.Fields[1].IsClusteringKey = true
-	require.NoError(t, manager.Update(1, "v1", fieldNonFunctionMetadataChanged))
+	sameVersionInvalid := cloneCollectionSchema(base)
+	sameVersionInvalid.Functions[0].OutputFieldIds = []int64{999}
+	require.NoError(t, manager.Update(1, "v1", sameVersionInvalid))
 	require.Equal(t, int32(1), factory.buildCount.Load())
 
-	functionParamChanged := cloneCollectionSchema(base)
-	functionParamChanged.Functions[0].Params = []*commonpb.KeyValuePair{
-		{Key: "rebuild", Value: "true"},
-	}
-	err := manager.Update(1, "v1", functionParamChanged)
-	require.ErrorContains(t, err, "function runner metadata does not match schema version 1")
+	staleVersionInvalid := cloneCollectionSchema(base)
+	staleVersionInvalid.Version = 0
+	staleVersionInvalid.Functions[0].OutputFieldIds = []int64{999}
+	require.NoError(t, manager.Update(1, "v1", staleVersionInvalid))
+	require.Equal(t, int32(1), factory.buildCount.Load())
+
+	newVersionInvalid := cloneCollectionSchema(base)
+	newVersionInvalid.Version = 2
+	newVersionInvalid.Functions[0].OutputFieldIds = []int64{999}
+	err := manager.Update(1, "v1", newVersionInvalid)
+	require.ErrorContains(t, err, "output field 999 not found")
 }
 
 func TestEmbeddingOutputFieldIDsReturnsAllFunctionOutputs(t *testing.T) {
