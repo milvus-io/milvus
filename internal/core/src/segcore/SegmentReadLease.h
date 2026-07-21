@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -24,6 +25,7 @@
 #include <utility>
 
 #include <folly/CancellationToken.h>
+#include <folly/ScopeGuard.h>
 
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
@@ -160,26 +162,32 @@ class PublishLease {
 
 class SegmentReadGate {
  public:
-    SegmentReadGate() : state_(std::make_shared<SegmentReadGateState>()) {
+    static constexpr auto kDefaultPublishDrainTimeout =
+        std::chrono::seconds(30);
+
+    explicit SegmentReadGate(std::chrono::milliseconds publish_drain_timeout =
+                                 kDefaultPublishDrainTimeout)
+        : state_(std::make_shared<SegmentReadGateState>()),
+          publish_drain_timeout_(publish_drain_timeout) {
+        AssertInfo(publish_drain_timeout_ > std::chrono::milliseconds::zero(),
+                   "segment publish drain timeout must be positive");
     }
 
     std::shared_ptr<SegmentReadLease>
     AcquireRead(const folly::CancellationToken& cancel_token,
                 int64_t segment_id) const {
         auto lease = std::shared_ptr<SegmentReadLease>(new SegmentReadLease());
-        std::unique_lock<std::mutex> lock(state_->mutex);
-        bool recorded_block = false;
-        while (state_->writer_pending || state_->writer_active) {
-            if (!recorded_block) {
-                ++state_->blocked_readers_total;
-                recorded_block = true;
-            }
-            if (cancel_token.isCancellationRequested()) {
-                ThrowInfo(ErrorCode::FollyCancel,
-                          "read lease acquisition cancelled for segment {}",
-                          segment_id);
-            }
-            state_->cv.wait_for(lock, std::chrono::milliseconds(10));
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        if (cancel_token.isCancellationRequested()) {
+            ThrowInfo(ErrorCode::FollyCancel,
+                      "read lease acquisition cancelled for segment {}",
+                      segment_id);
+        }
+        if (state_->writer_pending || state_->writer_active) {
+            ++state_->blocked_readers_total;
+            ThrowInfo(ErrorCode::FollyOtherException,
+                      "segment read gate busy for segment {}",
+                      segment_id);
         }
         ++state_->active_readers;
         lease->state_ = state_;
@@ -192,22 +200,59 @@ class SegmentReadGate {
         AssertInfo(!state_->writer_pending && !state_->writer_active,
                    "concurrent publisher entered segment {} read gate",
                    segment_id);
+
+        auto cancellation_requested = [&] {
+            return op_ctx != nullptr &&
+                   op_ctx->cancellation_token.isCancellationRequested();
+        };
+        if (cancellation_requested()) {
+            ThrowInfo(ErrorCode::FollyCancel,
+                      "publication drain cancelled for segment {}",
+                      segment_id);
+        }
+
         state_->writer_pending = true;
+        auto rollback_pending = folly::makeGuard([&] {
+            state_->writer_pending = false;
+            if (lock.owns_lock()) {
+                lock.unlock();
+            }
+            state_->cv.notify_all();
+        });
+
+        const auto deadline =
+            std::chrono::steady_clock::now() + publish_drain_timeout_;
 
         while (state_->active_readers != 0) {
-            if (op_ctx != nullptr &&
-                op_ctx->cancellation_token.isCancellationRequested()) {
-                state_->writer_pending = false;
-                lock.unlock();
-                state_->cv.notify_all();
+            if (cancellation_requested()) {
                 ThrowInfo(ErrorCode::FollyCancel,
                           "publication drain cancelled for segment {}",
                           segment_id);
             }
-            state_->cv.wait_for(lock, std::chrono::milliseconds(10));
+            const auto wakeup = std::min(deadline,
+                                         std::chrono::steady_clock::now() +
+                                             std::chrono::milliseconds(10));
+            state_->cv.wait_until(lock, wakeup);
+            if (std::chrono::steady_clock::now() >= deadline &&
+                state_->active_readers != 0) {
+                ThrowInfo(ErrorCode::FollyOtherException,
+                          "publication drain timed out for segment {} after "
+                          "{} ms",
+                          segment_id,
+                          publish_drain_timeout_.count());
+            }
+        }
+
+        // This is the cancellation linearization point. Once writer_active is
+        // set below, a later cancellation may not prevent publication.
+        if (cancellation_requested()) {
+            ThrowInfo(ErrorCode::FollyCancel,
+                      "publication drain cancelled for segment {}",
+                      segment_id);
         }
 
         state_->writer_active = true;
+        rollback_pending.dismiss();
         return PublishLease(state_);
     }
 
@@ -237,6 +282,7 @@ class SegmentReadGate {
 
  private:
     std::shared_ptr<SegmentReadGateState> state_;
+    std::chrono::milliseconds publish_drain_timeout_;
 };
 
 }  // namespace milvus::segcore

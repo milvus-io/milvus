@@ -28,8 +28,10 @@ package segcore
 import "C"
 
 import (
+	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -39,6 +41,17 @@ import (
 )
 
 type CStatus = C.CStatus
+
+const segmentReadGateBusyMessage = "segment read gate busy"
+
+// IsSegmentReadGateBusy reports the narrowly-scoped FollyOtherException used
+// by sealed-segment read admission while an online publisher is draining.
+// FollyOtherException is shared by other async failures, so both the typed
+// code and the stable message marker are required before retrying.
+func IsSegmentReadGateBusy(err error) bool {
+	return errors.Is(err, merr.ErrSegcoreFollyOtherException) &&
+		strings.Contains(err.Error(), segmentReadGateBusyMessage)
+}
 
 // ConsumeCStatusIntoError consumes the CStatus and returns the error
 func ConsumeCStatusIntoError(status *C.CStatus) error {

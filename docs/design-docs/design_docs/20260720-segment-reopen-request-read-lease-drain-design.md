@@ -33,8 +33,12 @@ the serving consistency boundary for sealed segments to a
   `DeleteSearchResult`.
 - Reduce, export, and output-field fill reuse the lease already owned by the
   original `SearchResult`. They do not acquire a new lease.
-- Before publication, Reopen marks a writer as pending, blocks new read-lease
-  acquisition, and waits for all existing request leases to be released.
+- Before publication, Reopen marks a writer as pending. New sealed read-lease
+  acquisition fails fast while the publisher is pending or active, and Reopen
+  waits for all existing request leases to be released.
+- QueryNode releases every partial `SearchResult` from a rejected attempt, then
+  retries the complete sealed segment batch with jitter under the request
+  context. Growing searches are not retried by this mechanism.
 - After the drain completes, Reopen atomically publishes the complete metadata
   and runtime snapshot exactly once.
 
@@ -79,8 +83,9 @@ This can be made logically valid with strict row-mapping invariants, but
 resources created from S0. The ownership model then becomes part of every
 escaped resource.
 
-Because Reopen is infrequent and publication is allowed to block queries, this
-design extends read protection through the entire `SearchResult` lifetime.
+Because Reopen is infrequent and publication is allowed to temporarily reject
+and retry new sealed searches, this design extends read protection through the
+entire `SearchResult` lifetime.
 
 ---
 
@@ -90,15 +95,16 @@ design extends read protection through the entire `SearchResult` lifetime.
 
 1. One sealed search request observes one `PublishedSegmentState`.
 2. Reopen drains all old search requests before publishing.
-3. Once a writer is pending, new searches cannot bypass it.
+3. Once a writer is pending, new sealed searches fail admission and cannot
+   bypass it; QueryNode retries only after releasing the entire attempt.
 4. Growing segments do not receive a new operation gate.
 5. Reopen preparation remains non-blocking for readers; only final publication
    performs the drain.
 6. Reopen performs one externally visible publication.
 7. `LazyCheckSchema` remains available as a transitional mechanism but runs
    before gate acquisition.
-8. Cancellation and error paths cannot leak a lease or leave the read gate
-   closed.
+8. Cancellation, timeout, and error paths cannot leak a lease or leave the read
+   gate closed.
 
 ### 3.2 Engineering Goals
 
@@ -200,7 +206,7 @@ Prepare S1 while the gate is open
         ↓
 writer_pending = true
         ↓
-block new search leases
+reject new sealed search leases
         ↓
 wait for active_readers == 0
         ↓
@@ -309,10 +315,18 @@ Read acquisition:
 
 ```text
 lock gate mutex
-wait until !writer_pending && !writer_active
+if writer_pending || writer_active:
+    increment rejection counter
+    return the narrow transient gate-busy error
 active_readers++
 unlock gate mutex
 ```
+
+Read admission must not wait inside one segment while the same QueryNode
+attempt retains leases from other segments. Otherwise two requests that visit
+segments in opposite orders can retain partial leases and deadlock two
+publishers. The retry boundary is therefore the complete sealed segment batch,
+not one segment or one goroutine.
 
 Read release:
 
@@ -330,12 +344,24 @@ Writer acquisition:
 
 ```text
 lock gate mutex
+check cancellation
 writer_pending = true
-record newly blocked readers
-wait until active_readers == 0 && !writer_active
+wait, with cancellation polling and a bounded deadline, until
+    active_readers == 0 && !writer_active
+check cancellation again
 writer_active = true
 unlock gate mutex
 ```
+
+The second cancellation check is the cancellation linearization point. A
+cancellation observed by that check aborts publication and reopens the gate.
+Cancellation arriving after the check may not prevent publication and does not
+roll back a publication that has already been admitted.
+
+The production drain deadline defaults to 30 seconds, including callers that
+do not provide an `OpContext`. Cancellation or timeout clears
+`writer_pending`, wakes waiters, discards the staged state, and leaves the old
+snapshot active.
 
 Writer release:
 
@@ -647,10 +673,15 @@ acquisition could begin a drain while the caller still owns an old mutex.
 
 Writer wait must be cancellation-aware:
 
-- cancellation before atomic store clears writer pending, wakes readers,
-  discards staged state, and keeps the old snapshot active;
-- publication is committed once atomic store completes and cannot be rolled
-  back;
+- cancellation is checked before setting writer pending, while draining, and
+  once more after the final reader leaves;
+- cancellation observed by the final pre-publication check clears writer
+  pending, wakes readers, discards staged state, and keeps the old snapshot
+  active;
+- that final check is the cancellation linearization point; cancellation
+  arriving later may not prevent publication and does not roll it back;
+- a bounded drain timeout applies even when `OpContext` is null and follows the
+  same rollback path;
 - cancellation cleanup cannot hold locks required by active requests.
 
 ---
@@ -729,19 +760,29 @@ defer DeleteSearchResults(results)
 Go defers execute in LIFO order, so successful requests release
 `SearchResult` and its lease before unpinning the segment.
 
-The error path must be strengthened:
+For a multi-segment sealed attempt, fail-fast admission may leave successful
+partial results from other goroutines. The error path must therefore release
+all non-null results only after all attempt goroutines have completed, then
+retry the complete segment batch:
 
 ```go
-defer segmentManager.Segment.Unpin(searchedSegments)
-defer segments.DeleteSearchResults(results)
-
-if err != nil {
-    return err
+for {
+    results, err := searchSegmentsAttempt(...)
+    if err == nil {
+        return results, nil
+    }
+    DeleteSearchResults(nonNil(results))
+    if !isSealedReadGateBusy(err) {
+        return nil, err
+    }
+    waitJitteredBackoff(ctx)
 }
 ```
 
-Alternatively, `SearchHistorical` and `SearchStreaming` must guarantee that
-partial results are released before returning an error.
+The gate-busy classifier must require both the Segcore
+`FollyOtherException` code and the stable `segment read gate busy` marker so
+unrelated 2037 errors are not retried. Growing searches and other errors return
+immediately.
 
 The final contract must guarantee lease release for:
 
@@ -794,6 +835,8 @@ Responsibilities:
 - use scoped leases for retrieve;
 - audit direct read C APIs;
 - release the lease through `DeleteSearchResult` destruction.
+- expose cancellable async index-drop entry points so the request context
+  reaches online publication drain.
 
 ### 15.5 search_result_export_c.cpp
 
@@ -808,10 +851,13 @@ Responsibilities:
 - audit move, copy, and destruction behavior;
 - add a cache cell pin only if required by the iterator audit.
 
-### 15.7 search_task.go
+### 15.7 search.go and services.go
 
 - guarantee result deletion before segment unpin;
-- harden partial-result error cleanup.
+- release all partial results before whole-batch gate retry;
+- use bounded jittered retry under the request context;
+- propagate `DropIndex` publication cancellation/timeout instead of returning
+  success.
 
 ---
 
@@ -879,7 +925,7 @@ Normal read-lease acquire/release must not emit INFO logs per query.
 
 1. Reopen remains blocked after Search returns.
 2. Reopen completes after `DeleteSearchResult`.
-3. New Search cannot bypass a pending writer.
+3. New sealed Search fails fast and cannot bypass a pending writer.
 4. Reduce/fill under an existing lease completes after writer pending.
 5. Growing Search does not increment the active lease count.
 
@@ -908,7 +954,8 @@ Normal read-lease acquire/release must not emit INFO logs per query.
 1. Empty results hold and release a lease.
 2. Filter-only results release their lease.
 3. Group-by and iterator results release their lease.
-4. Partial-result errors release all leases.
+4. Partial-result errors release all leases before retrying the complete sealed
+   segment batch.
 5. A multi-segment request owns one lease per sealed segment result.
 6. Duplicate result release cannot decrement the gate twice.
 
@@ -927,6 +974,9 @@ Normal read-lease acquire/release must not emit INFO logs per query.
 5. Reopen drain cancellation.
 6. Intentionally delayed SearchResult release.
 7. Segment release racing with result release.
+8. Two multi-segment requests visiting segments in opposite orders while both
+   segments publish.
+9. Null-context publisher drain timeout.
 
 ---
 
@@ -939,7 +989,7 @@ Reopen waits for the slowest outstanding `SearchResult`.
 This is accepted because:
 
 - Reopen is infrequent;
-- publication may block readers;
+- publication may temporarily reject and retry new sealed readers;
 - request-level consistency materially simplifies correctness.
 
 Mitigations:
@@ -949,13 +999,16 @@ Mitigations:
 - result leak detection;
 - drain-wait alerts.
 
-### 19.2 Localized Query Stall After Writer Pending
+### 19.2 Localized Query Retry After Writer Pending
 
-Once a writer is pending, new searches are blocked. If an old request does not
-finish, the segment experiences head-of-line blocking.
+Once a writer is pending, new sealed searches fail admission. QueryNode cleans
+up the full attempt and retries the complete segment batch with jitter. This
+avoids retaining partial cross-segment leases, but can increase retry traffic
+while a long-lived old request is draining.
 
-The implementation must not force publication by ignoring a live lease,
-because that would reintroduce mixed-snapshot and resource-lifetime risks.
+The publisher has a bounded wait and returns cancellation/timeout instead of
+forcing publication by ignoring a live lease, which would reintroduce
+mixed-snapshot and resource-lifetime risks.
 
 ### 19.3 Lazy Reopen on the Search Executor
 

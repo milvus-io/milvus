@@ -123,10 +123,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadSegmentMeta(
         const milvus::proto::segcore::LoadSegmentMeta& segment_meta) override;
     void
-    DropIndex(const FieldId field_id) override;
+    DropIndex(const FieldId field_id,
+              milvus::OpContext* op_ctx = nullptr) override;
     void
     DropJSONIndex(const FieldId field_id,
-                  const std::string& nested_path) override;
+                  const std::string& nested_path,
+                  milvus::OpContext* op_ctx = nullptr) override;
     void
     DropFieldData(const FieldId field_id) override;
     bool
@@ -1632,12 +1634,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     template <typename Mutator>
     void
-    MutatePublishedStateLocked(Mutator&& mutator) {
+    MutatePublishedStateLocked(Mutator&& mutator,
+                               milvus::OpContext* op_ctx = nullptr) {
         auto current = CapturePublishedState();
         auto next = ClonePublishedState(current);
         mutator(*next);
         NormalizePublishedState(*next);
-        PublishStateOnline(std::move(next));
+        PublishStateOnline(std::move(next), op_ctx);
     }
 
     static bool
@@ -1805,7 +1808,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     PublishIndexDroppedLocked(
         FieldId field_id,
-        const std::shared_ptr<const RuntimeResourceState>& runtime = nullptr);
+        const std::shared_ptr<const RuntimeResourceState>& runtime = nullptr,
+        milvus::OpContext* op_ctx = nullptr);
 
     void
     PublishRuntimeStateLocked(
@@ -1862,7 +1866,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     DropIndex(const FieldId field_id,
               const SchemaPtr& schema_snapshot,
-              RuntimeResourceState* runtime = nullptr);
+              RuntimeResourceState* runtime = nullptr,
+              milvus::OpContext* op_ctx = nullptr);
 
     void
     DropFieldData(
