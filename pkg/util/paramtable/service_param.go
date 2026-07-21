@@ -815,7 +815,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.client.segmentAppend.maxBatchBytes",
 		Version:      "2.6.0",
 		DefaultValue: "2000000",
-		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB; whichever of maxBatchEntries/maxBatchBytes is hit first bounds the batch. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.",
+		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.",
 		Export:       true,
 	}
 	p.AppendMaxBatchBytes.Init(base.mgr)
