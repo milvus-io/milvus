@@ -50,16 +50,13 @@ func TestConfigValidate(t *testing.T) {
 		{"InvalidPersistInterval", 0, 100, 5 * time.Second, false, 0, 0, 0, true},
 		{"InvalidMaxDirtyMessages", 10 * time.Second, 0, 5 * time.Second, false, 0, 0, 0, true},
 		{"InvalidGracefulTimeout", 10 * time.Second, 100, 0, false, 0, 0, 0, true},
-		// Idempotency enabled requires a positive snapshot interval, otherwise the
-		// window background task never persists and the windows grow without bound.
+		// Invalid idempotency parameter combinations are repaired by
+		// sanitizeIdempotency (see TestSanitizeIdempotencyFallsBack), not rejected
+		// by validate: they are runtime-tunable operator knobs and a panic here
+		// would crash-loop every WAL open on the node.
 		{"IdempotencyEnabledValidConfig", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 10 * time.Minute, 0, false},
-		{"IdempotencyEnabledZeroSnapshotInterval", 10 * time.Second, 100, 5 * time.Second, true, 0, 10 * time.Minute, 0, true},
-		{"IdempotencyEnabledNegativeSnapshotInterval", 10 * time.Second, 100, 5 * time.Second, true, -1, 10 * time.Minute, 0, true},
-		// Idempotency enabled requires a positive window TTL or max entries, otherwise
-		// the live in-memory window has no bound.
-		{"IdempotencyEnabledWindowTTLOnly", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 10 * time.Minute, 0, false},
-		{"IdempotencyEnabledMaxEntriesOnly", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 0, 100, false},
-		{"IdempotencyEnabledNoTTLNoMaxEntries", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 0, 0, true},
+		{"IdempotencyEnabledZeroSnapshotInterval", 10 * time.Second, 100, 5 * time.Second, true, 0, 10 * time.Minute, 0, false},
+		{"IdempotencyEnabledNoTTLNoMaxEntries", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 0, 0, false},
 		// Disabled idempotency tolerates fully non-positive window config.
 		{"IdempotencyDisabledUnboundedWindow", 10 * time.Second, 100, 5 * time.Second, false, 0, 0, 0, false},
 	}
@@ -83,4 +80,37 @@ func TestConfigValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSanitizeIdempotencyFallsBack(t *testing.T) {
+	paramtable.Init()
+
+	// Both knobs invalid: fall back to the parameter defaults with a warning.
+	cfg := &config{idempotencyEnabled: true, idempotencySnapshotInterval: 0, idempotencyWindowTTL: 0, idempotencyMaxEntries: 0}
+	cfg.sanitizeIdempotency()
+	assert.Equal(t, 10*time.Second, cfg.idempotencySnapshotInterval)
+	assert.Equal(t, 10*time.Minute, cfg.idempotencyWindowTTL)
+
+	// An explicit max entry cap makes windowTTL: 0s a valid "count-capped only"
+	// configuration; nothing is rewritten.
+	cfg = &config{idempotencyEnabled: true, idempotencySnapshotInterval: 5 * time.Second, idempotencyWindowTTL: 0, idempotencyMaxEntries: 100}
+	cfg.sanitizeIdempotency()
+	assert.Equal(t, time.Duration(0), cfg.idempotencyWindowTTL)
+	assert.Equal(t, 5*time.Second, cfg.idempotencySnapshotInterval)
+
+	// Disabled idempotency is left untouched.
+	cfg = &config{idempotencyEnabled: false}
+	cfg.sanitizeIdempotency()
+	assert.Zero(t, cfg.idempotencyWindowTTL)
+	assert.Zero(t, cfg.idempotencySnapshotInterval)
+
+	// End-to-end: an operator explicitly setting windowTTL: 0s while
+	// maxEntriesPerWindow stays at its 0 default must not panic the WAL open.
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyWindowTTL.Key, "0s")
+	defer params.Reset(params.StreamingCfg.IdempotencyWindowTTL.Key)
+	assert.NotPanics(t, func() {
+		cfg := newConfig()
+		assert.Equal(t, 10*time.Minute, cfg.idempotencyWindowTTL)
+	})
 }

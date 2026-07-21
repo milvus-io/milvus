@@ -4,7 +4,21 @@ package recovery
 // window snapshot checkpoint and the flusher checkpoint, both supplied by the
 // caller (windowManager no longer reaches into recoveryStorageImpl for them).
 func (m *windowManager) effectivePersistCheckpoint(snapshot *RecoverySnapshot, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
-	return clampPersistCheckpoint(snapshot.Checkpoint, m.pchannelWindowCheckpointForPersist(snapshot), flusherCheckpoint)
+	return clampPersistCheckpoint(snapshot.Checkpoint, m.pchannelWindowCheckpointForPersist(snapshot), m.flusherClampCheckpoint(flusherCheckpoint))
+}
+
+// flusherClampCheckpoint gates the flusher term of the persist clamp on the
+// idempotency feature: only window replay (which must re-observe messages the
+// flusher has not sealed yet) needs the consume checkpoint held back to the
+// flusher position. Without idempotency this clamp would just pin the persisted
+// consume checkpoint to the slowest vchannel's flusher and blow up the WAL span
+// replayed on restart — WAL truncation takes its own min against the flusher
+// separately (simpleTruncateCheckpoint), so it never needed this clamp.
+func (m *windowManager) flusherClampCheckpoint(flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
+	if !m.cfg.idempotencyEnabled {
+		return nil
+	}
+	return flusherCheckpoint
 }
 
 // clampPersistCheckpoint lowers base to the earliest (by timetick) of itself, the
@@ -51,7 +65,7 @@ func (m *windowManager) markConsumeCheckpointPersisted(checkpoint *WALCheckpoint
 }
 
 func (m *windowManager) effectivePersistCheckpointUnsafe(checkpoint, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
-	return clampPersistCheckpoint(checkpoint, m.pchannelWindowCheckpointForPersistUnsafe(), flusherCheckpoint)
+	return clampPersistCheckpoint(checkpoint, m.pchannelWindowCheckpointForPersistUnsafe(), m.flusherClampCheckpoint(flusherCheckpoint))
 }
 
 func (m *windowManager) pchannelWindowCheckpointForPersist(snapshot *RecoverySnapshot) *WALCheckpoint {

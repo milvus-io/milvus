@@ -16,9 +16,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// When idempotency is disabled, window-store recovery is pure overhead: the
-// window cache is never consulted, so the recovery path must not read catalog
-// meta or bootstrap a fresh chunk into object storage for every pchannel.
+// When idempotency is disabled, window-store recovery is skipped: the window
+// cache is never consulted, so the recovery path must not bootstrap any state.
+// It only probes the catalog to drop a store left behind by an earlier enabled
+// run; with nothing persisted, no writes happen at all.
 func TestRecoverWindowsSkipsWhenIdempotencyDisabled(t *testing.T) {
 	ctx := context.Background()
 	params := paramtable.Get()
@@ -46,6 +47,46 @@ func TestRecoverWindowsSkipsWhenIdempotencyDisabled(t *testing.T) {
 	require.Empty(t, rs.windowManager.idempotencyWindows())
 	require.False(t, rs.windowManager.activeViewsInitialized)
 	require.Nil(t, catalogState.storeMeta)
+	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 0, false)
+}
+
+// Disabling idempotency drops any window store left behind by an earlier
+// enabled run: while disabled nothing is recorded into the store, checkpoints
+// advance freely and the WAL truncates past the stored SourceCheckpoint, so a
+// kept store would rewind recovery to a truncated position on re-enable.
+func TestRecoverWindowsDropsStaleStoreWhenIdempotencyDisabled(t *testing.T) {
+	ctx := context.Background()
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
+	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+
+	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	// A store persisted by an earlier enabled run: one chunk, the pchannel meta,
+	// and one vchannel window meta.
+	footer, _, _ := writeTestPChannelWindowChunk(t, ctx, "p1", 0, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(10),
+		TimeTick:  10,
+	}, nil)
+	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+	catalogState.windowMetas["v1"] = &streamingpb.VChannelWindowMeta{Pchannel: "p1", Vchannel: "v1"}
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	checkpoint, err := rs.windowManager.recoverWindows(ctx, "p1", rs.checkpoint, rs.vchannels)
+	require.NoError(t, err)
+	// The checkpoint is returned unchanged: no window replay rewind while disabled.
+	require.Equal(t, uint64(100), checkpoint.TimeTick)
+	// The stale store is fully dropped: both metas and the chunk are gone, so a
+	// later re-enable bootstraps from the then-current checkpoint.
+	require.Nil(t, catalogState.storeMeta)
+	require.Empty(t, catalogState.windowMetas)
 	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 0, false)
 }
 

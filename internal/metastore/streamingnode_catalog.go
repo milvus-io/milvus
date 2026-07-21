@@ -30,6 +30,10 @@ type StreamingNodeCataLog interface {
 	// SavePChannelWindowMeta saves pchannel-level physical window metadata.
 	SavePChannelWindowMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta) error
 
+	// RemovePChannelWindowMeta removes pchannel-level physical window metadata.
+	// Removing a non-existent meta is a no-op.
+	RemovePChannelWindowMeta(ctx context.Context, pchannelName string) error
+
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 

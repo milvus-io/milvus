@@ -6,8 +6,72 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
+
+// dropWindowStoreForDisabledIdempotency wipes the durable idempotency window
+// store while the feature is disabled. With idempotency off, nothing is
+// recorded into the store, the consume checkpoint advances freely and the WAL
+// gets truncated past the stored SourceCheckpoint — so the persisted store is
+// stale by definition and, worse, on re-enable its SourceCheckpoint would
+// rewind recovery to a position that may no longer exist in the WAL. Dropping
+// it makes a later re-enable bootstrap cleanly from the then-current
+// checkpoint (losing window dedup state across the disabled period, which is
+// inherent to disabling the feature).
+//
+// Deletion order is chosen for crash safety of the recover path: vchannel
+// window metas first (recovery treats "vchannel metas without pchannel meta"
+// as an error, so the pchannel meta must outlive them), then the pchannel
+// meta, then the chunk objects. A crash before the meta removal is retried on
+// the next disabled open; a crash after it only leaks unreferenced chunk
+// objects. Best-effort: failures only log — recovery with idempotency disabled
+// must never block on window-store IO — and the next open retries.
+func (m *windowManager) dropWindowStoreForDisabledIdempotency(ctx context.Context, pchannel string) {
+	logger := m.Logger().With(mlog.String("op", "dropWindowStoreForDisabledIdempotency"))
+	catalog := resource.Resource().StreamingNodeCatalog()
+	metaPB, err := catalog.GetPChannelWindowMeta(ctx, pchannel)
+	if err != nil {
+		logger.Warn(ctx, "failed to probe pchannel window meta; a stale idempotency window store (if any) is kept", mlog.Err(err))
+		return
+	}
+	windowMetas, err := catalog.ListVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency)
+	if err != nil {
+		logger.Warn(ctx, "failed to list vchannel window metas; a stale idempotency window store (if any) is kept", mlog.Err(err))
+		return
+	}
+	meta := pchannelWindowStoreMetaFromCatalog(metaPB)
+	if meta == nil && len(windowMetas) == 0 {
+		return
+	}
+
+	if len(windowMetas) > 0 {
+		vchannels := make([]string, 0, len(windowMetas))
+		for _, windowMeta := range windowMetas {
+			vchannels = append(vchannels, windowMeta.GetVchannel())
+		}
+		if err := catalog.RemoveVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency, vchannels); err != nil {
+			logger.Warn(ctx, "failed to remove stale vchannel window metas", mlog.Err(err))
+			return
+		}
+	}
+	if meta == nil {
+		return
+	}
+	if err := catalog.RemovePChannelWindowMeta(ctx, pchannel); err != nil {
+		logger.Warn(ctx, "failed to remove stale pchannel window meta", mlog.Err(err))
+		return
+	}
+	if err := m.deletePChannelWindowChunks(ctx, logger, meta.MinAvailableGeneration, meta.LatestGeneration+1, meta.LatestGeneration+1); err != nil {
+		logger.Warn(ctx, "failed to delete stale pchannel window chunks; unreferenced chunk objects leak", mlog.Err(err))
+		return
+	}
+	logger.Info(ctx, "dropped stale idempotency window store while idempotency is disabled",
+		mlog.String("pchannel", pchannel),
+		mlog.Int("vchannelWindowMetas", len(windowMetas)),
+		mlog.Uint64("latestGeneration", meta.LatestGeneration),
+	)
+}
 
 type pchannelWindowCleanBoundary struct {
 	canClean                 bool

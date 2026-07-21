@@ -43,12 +43,18 @@ const (
 //
 // The window store is a rebuildable cache, not a source of truth, so this must
 // never block normal WAL recovery:
-//   - when idempotency is disabled it skips recovery/bootstrap entirely, so
-//     pchannels that never use idempotency pay no catalog/object-storage IO;
+//   - when idempotency is disabled it skips recovery/bootstrap; it only probes
+//     the catalog to drop a store left behind by an earlier enabled run (a
+//     pchannel that never used idempotency pays one catalog read, no writes);
 //   - when the durable window store is corrupted it logs, drops the corrupted
 //     cache, and continues with an empty window set rather than failing.
 func (m *windowManager) recoverWindows(ctx context.Context, pchannel string, checkpoint *WALCheckpoint, vchannels map[string]*vchannelRecoveryInfo) (*WALCheckpoint, error) {
 	if !m.cfg.idempotencyEnabled {
+		// Any window store persisted by an earlier enabled run is stale while the
+		// feature is off (checkpoints advance and the WAL truncates past its
+		// SourceCheckpoint); drop it so a later re-enable bootstraps from the
+		// then-current checkpoint instead of rewinding to a truncated position.
+		m.dropWindowStoreForDisabledIdempotency(ctx, pchannel)
 		return checkpoint, nil
 	}
 	windowInfo, err := m.recoverWindowInfoFromMeta(ctx, pchannel, checkpoint, vchannels)

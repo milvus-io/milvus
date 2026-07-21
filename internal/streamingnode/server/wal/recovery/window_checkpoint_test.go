@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestEffectivePersistCheckpointUsesPChannelWindowAndFlushOnly(t *testing.T) {
@@ -46,6 +47,33 @@ func TestEffectivePersistCheckpointUsesPChannelWindowAndFlushOnly(t *testing.T) 
 	checkpoint := rs.windowManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
 	require.Equal(t, uint64(100), checkpoint.TimeTick)
 	require.True(t, rmq.NewRmqID(100).EQ(checkpoint.MessageID))
+}
+
+// The flusher clamp on the persisted consume checkpoint exists only for window
+// replay. With idempotency disabled the checkpoint must not be pinned to the
+// slowest vchannel's flusher — that would force every restart to replay the
+// whole flusher-to-consume WAL span through recovery for no benefit (WAL
+// truncation takes its own min against the flusher separately).
+func TestEffectivePersistCheckpointNotFlusherClampedWhenIdempotencyDisabled(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
+	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
+	rs.vchannels = map[string]*vchannelRecoveryInfo{
+		"v1": {
+			meta: &streamingpb.VChannelMeta{
+				Vchannel: "v1",
+				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			},
+			flusherCheckpoint: testRecoveryCheckpoint(100, 100),
+		},
+	}
+	snapshot := &RecoverySnapshot{Checkpoint: testRecoveryCheckpoint(120, 120)}
+
+	checkpoint := rs.windowManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
+	require.Equal(t, uint64(120), checkpoint.TimeTick)
+	require.True(t, rmq.NewRmqID(120).EQ(checkpoint.MessageID))
 }
 
 func TestEffectivePersistCheckpointPreservesReplicateAndAlterState(t *testing.T) {
