@@ -36,28 +36,12 @@ func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, sc
 	})
 }
 
-type legacySchemaShardManager struct {
-	shards.ShardManager
-}
-
-func (m *legacySchemaShardManager) GetCollectionSchema(int64, int32) (*schemapb.CollectionSchema, error) {
-	return nil, shards.ErrCollectionSchemaNotFound
-}
-
-type noFunctionSchemaShardManager struct {
-	shards.ShardManager
-}
-
-func (m *noFunctionSchemaShardManager) GetCollectionSchema(int64, int32) (*schemapb.CollectionSchema, error) {
-	return &schemapb.CollectionSchema{Version: 0}, nil
-}
-
 func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing.T) {
 	collectionID := int64(99000)
 	vchannel := "v1"
 	shardManager := mock_shards.NewMockShardManager(t)
 	impl := &shardInterceptor{
-		shardManager: &noFunctionSchemaShardManager{ShardManager: shardManager},
+		shardManager: shardManager,
 	}
 	msg := message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
@@ -66,7 +50,7 @@ func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing
 		MustBuildMutable()
 
 	insertMsg := message.MustAsMutableInsertMessageV1(msg)
-	err := impl.materializeFunctionFields(context.Background(), insertMsg, collectionID, 0, false)
+	err := impl.materializeFunctionFields(context.Background(), insertMsg, collectionID, function.LatestFunctionRunnerVersion)
 	assert.NoError(t, err)
 }
 
@@ -389,9 +373,8 @@ func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
 
 func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T) {
 	b := NewInterceptorBuilder()
-	baseManager := mock_shards.NewMockShardManager(t)
-	baseManager.EXPECT().Logger().Return(mlog.With()).Maybe()
-	shardManager := &legacySchemaShardManager{ShardManager: baseManager}
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
@@ -408,8 +391,8 @@ func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T)
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().WithTimeTick(1)
 
-	baseManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(0), nil)
-	baseManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(function.LatestFunctionRunnerVersion, nil)
+	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
 	})
