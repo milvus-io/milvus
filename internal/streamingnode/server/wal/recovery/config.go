@@ -55,12 +55,12 @@ func (cfg *config) validate() error {
 	// persists and evicts window entries; a non-positive snapshot interval disables
 	// its ticker, so the in-memory windows would grow without bound until OOM.
 	if cfg.idempotencyEnabled && cfg.idempotencySnapshotInterval <= 0 {
-		return errors.New("idempotency snapshot interval must be greater than 0 when idempotency is enabled")
+		return status.NewInvalidArgument("idempotency snapshot interval must be greater than 0 when idempotency is enabled")
 	}
 	// The live interceptor window only evicts on a positive TTL or a positive max
 	// entries cap; with both non-positive it would grow without bound per key.
 	if cfg.idempotencyEnabled && cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxEntries <= 0 {
-		return errors.New("idempotency window TTL or max entries per window must be greater than 0 when idempotency is enabled")
+		return status.NewInvalidArgument("idempotency window TTL or max entries per window must be greater than 0 when idempotency is enabled")
 	}
 	return nil
 }

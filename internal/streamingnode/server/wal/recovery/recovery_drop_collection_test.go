@@ -104,7 +104,7 @@ func TestConsumeDirtySnapshotRemovesDroppedVChannelWindow(t *testing.T) {
 	assert.Contains(t, rs.windowManager.idempotencyWindows(), "v1")
 
 	// Drop the collection: the vchannel becomes DROPPED.
-	rs.handleDropCollection(buildDropCollectionMsg("v1", 100, 50, 50))
+	rs.handleDropCollection(context.Background(), buildDropCollectionMsg("v1", 100, 50, 50))
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v1"].meta.State)
 
 	// Reclaim the dropped vchannel via a dirty snapshot consume.

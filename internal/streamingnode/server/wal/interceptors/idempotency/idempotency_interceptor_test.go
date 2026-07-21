@@ -97,8 +97,10 @@ func TestInterceptorDuplicateReturnsInsertIDs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// The duplicate path decodes the stored entry, so the extra is a distinct
+	// instance with identical content, not the original header pointer.
 	extra := utility.GetExtraAppendResult(ctx).Extra.(*messagespb.IdempotentInsertResult)
-	require.Same(t, insertResult, extra)
+	require.True(t, proto.Equal(insertResult, extra))
 	require.Equal(t, []uint32{1, 0}, extra.GetRowOffsets())
 	require.Equal(t, []int64{101, 100}, extra.GetIds().GetIntId().GetData())
 }
