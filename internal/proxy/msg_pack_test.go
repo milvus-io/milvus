@@ -34,6 +34,128 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
+func TestGenInsertMsgsByPartitionRejectsSingleOversizedRow(t *testing.T) {
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "64"))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+
+	t.Run("only row", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+		msgs, _, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
+		assert.Nil(t, msgs)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Contains(t, err.Error(), "single row at offset 0")
+		assert.False(t, merr.Status(err).GetRetriable())
+	})
+
+	t.Run("row at limit", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 64))
+		msgs, _, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
+		assert.Nil(t, msgs)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
+	t.Run("later row", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest("small", strings.Repeat("x", 1024))
+		msgs, _, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
+		assert.Nil(t, msgs)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Contains(t, err.Error(), "single row at offset 1")
+	})
+}
+
+func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "64"))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, Params.Save(Params.KafkaCfg.ProducerMessageMaxBytes.Key, "2048"))
+	defer Params.Reset(Params.KafkaCfg.ProducerMessageMaxBytes.Key)
+
+	t.Run("kafka allows row above pulsar split threshold", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+		msgs, _, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
+		assert.NoError(t, err)
+		assert.Len(t, msgs, 1)
+	})
+
+	t.Run("kafka rejects row at its own limit", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 2048))
+		msgs, _, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
+		assert.Nil(t, msgs)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
+	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
+		t.Run(walName.String()+" has no single row limit", func(t *testing.T) {
+			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+			msgs, _, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, walName)
+			assert.NoError(t, err)
+			assert.Len(t, msgs, 1)
+		})
+	}
+}
+
+func TestGenInsertMsgsByPartitionSplitsMultipleRows(t *testing.T) {
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "512"))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+
+	insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 300), strings.Repeat("y", 300))
+	msgs, _, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 2)
+	for _, msg := range msgs {
+		assert.Equal(t, uint64(1), msg.(*msgstream.InsertMsg).GetNumRows())
+	}
+}
+
+func newVarCharInsertMsgForPackTest(rows ...string) *msgstream.InsertMsg {
+	hashValues := make([]uint32, len(rows))
+	timestamps := make([]uint64, len(rows))
+	rowIDs := make([]int64, len(rows))
+	for i := range rows {
+		hashValues[i] = 1
+		timestamps[i] = 1
+		rowIDs[i] = int64(i + 1)
+	}
+
+	return &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			Ctx:        context.Background(),
+			HashValues: hashValues,
+		},
+		InsertRequest: &msgpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Insert,
+				SourceID: paramtable.GetNodeID(),
+			},
+			DbName:         "default",
+			CollectionName: "test_collection",
+			PartitionName:  "test_partition",
+			NumRows:        uint64(len(rows)),
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_VarChar,
+					FieldId:   101,
+					FieldName: "large_text",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: rows},
+							},
+						},
+					},
+				},
+			},
+			Timestamps: timestamps,
+			RowIDs:     rowIDs,
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+		},
+	}
+	msgs, msgRowOffsets, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1)
+	assert.Equal(t, uint64(1), msgs[0].(*msgstream.InsertMsg).GetNumRows())
+	assert.Equal(t, [][]int{{0}}, msgRowOffsets)
+}
+
 func TestRepackInsertData(t *testing.T) {
 	nb := 10
 	hash := testutils.GenerateHashKeys(nb)
