@@ -171,7 +171,11 @@ func parseStructArrayData(fieldName string, structArray *schemapb.StructArrayFie
 		}
 		fields = append(fields, field)
 	}
-	return NewColumnStructArray(fieldName, fields), nil
+	column := NewColumnStructArray(fieldName, fields)
+	if err := column.ValidateNullable(); err != nil {
+		return nil, errors.Wrapf(err, "invalid struct array %q", fieldName)
+	}
+	return column, nil
 }
 
 // parseVectorArrayData converts schemapb.VectorArray (per-row list of vectors) into the
