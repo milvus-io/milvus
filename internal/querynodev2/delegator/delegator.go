@@ -1385,7 +1385,7 @@ func (sd *shardDelegator) Close() {
 		idfOracle.Close()
 	}
 
-	sd.releaseFunctionRunners()
+	function.GetManager().Release(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
 
 	// clean up l0 segment in delete buffer
 	start := time.Now()
@@ -1397,10 +1397,6 @@ func (sd *shardDelegator) Close() {
 	if sd.postLoadConfigHandler != nil {
 		paramtable.Get().Unwatch(paramtable.Get().QueryNodeCfg.DelegatorPostLoadConcurrencyFactor.Key, sd.postLoadConfigHandler)
 	}
-}
-
-func (sd *shardDelegator) releaseFunctionRunners() {
-	function.GetManager().Release(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
 }
 
 func delegatorFunctionRunnerKey(vchannel string) string {
