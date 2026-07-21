@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -204,6 +205,42 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 	}}
 
 	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
+}
+
+func (suite *UtilSuite) TestCalculateIndexTaskSlot() {
+	pt := paramtable.Get()
+	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
+	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
+	suite.NoError(pt.Save(heavyKey, "64"))
+	suite.NoError(pt.Save(scalarKey, "16"))
+	defer pt.Reset(heavyKey)
+	defer pt.Reset(scalarKey)
+
+	const mib = int64(1024 * 1024)
+	testCases := []struct {
+		name         string
+		fieldSize    int64
+		wantFMIndex  int64
+		wantInverted int64
+	}{
+		{name: "small", fieldSize: 5 * mib, wantFMIndex: 1, wantInverted: 1},
+		{name: "medium", fieldSize: 50 * mib, wantFMIndex: 4, wantInverted: 1},
+		{name: "large_below_512mb", fieldSize: 200 * mib, wantFMIndex: 16, wantInverted: 4},
+		{name: "exactly_512mb", fieldSize: 512 * mib, wantFMIndex: 16, wantInverted: 4},
+		{name: "above_512mb", fieldSize: 512*mib + 1, wantFMIndex: 64, wantInverted: 16},
+		{name: "one_gib", fieldSize: 1024 * mib, wantFMIndex: 128, wantInverted: 32},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			suite.Equal(tc.wantFMIndex, calculateIndexTaskSlot(tc.fieldSize, indexparamcheck.IndexFMINDEX))
+			suite.Equal(tc.wantInverted, calculateIndexTaskSlot(tc.fieldSize, indexparamcheck.IndexINVERTED))
+		})
+	}
+
+	// Existing vector indexes must keep using the same heavy curve after the
+	// helper switched from an isVectorIndex boolean to the concrete index type.
+	suite.Equal(int64(16), calculateIndexTaskSlot(200*mib, "HNSW"))
 }
 
 func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {

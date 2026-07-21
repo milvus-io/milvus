@@ -237,7 +237,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
 	fieldSize := segment.getFieldBinlogSize(fieldID)
-	taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
+	taskSlot := calculateIndexTaskSlot(fieldSize, indexType)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
 	if isVectorIndex && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -301,10 +301,9 @@ func (i *indexInspector) reloadFromMeta() {
 
 			indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
 			indexType := GetIndexType(indexParams)
-			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
 			fieldSize := segment.getFieldBinlogSize(fieldID)
-			taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
+			taskSlot := calculateIndexTaskSlot(fieldSize, indexType)
 
 			i.scheduler.Enqueue(newIndexBuildTask(
 				model.CloneSegmentIndex(segIndex),

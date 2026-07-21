@@ -124,14 +124,25 @@ const (
 	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
 	//   the existing INVERTED / NGRAM)
 	// - On-disk file format is unchanged from v3
+	//
+	// Scalar index engine version 5:
+	// - FMINDEX scalar index (exact LIKE prefix/infix/suffix on VARCHAR).
+	//   An older QueryNode does not recognize FMINDEX and would fail to load
+	//   such a segment, so creation is gated on the whole cluster reporting >= 5
+	//   (see MinScalarIndexVersionForFMINDEX).
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(4)
-	MaximumScalarIndexEngineVersion = int32(4)
+	CurrentScalarIndexEngineVersion = int32(5)
+	MaximumScalarIndexEngineVersion = int32(5)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
 	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
 	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
+
+	// MinScalarIndexVersionForFMINDEX is the minimum scalar index engine version
+	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
+	// lower version would break rolling upgrade (old QueryNodes cannot load it).
+	MinScalarIndexVersionForFMINDEX = int32(5)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.

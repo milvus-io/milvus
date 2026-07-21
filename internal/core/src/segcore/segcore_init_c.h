@@ -41,6 +41,10 @@ SegcoreSetEnableGeometryCache(const bool);
 void
 SegcoreSetNlist(const int64_t);
 
+// FM-index count-first guard threshold (queryNode.fmindexCostRatio).
+void
+SegcoreSetFMIndexCostRatio(const float);
+
 void
 SegcoreSetNprobe(const int64_t);
 

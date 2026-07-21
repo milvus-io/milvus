@@ -94,6 +94,13 @@ SegcoreSetNlist(const int64_t value) {
 }
 
 extern "C" void
+SegcoreSetFMIndexCostRatio(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_fmindex_cost_ratio(value);
+}
+
+extern "C" void
 SegcoreSetNprobe(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

@@ -210,6 +210,10 @@ include( GNUInstallDirs )
 include( FetchContent )
 
 include_directories( thirdparty )
+# Header-only FM-index (vendored under thirdparty/fmindex, exempt from the src
+# clang-format check). The extra root preserves the "index/fmindex/..." include
+# prefix the headers and the wrapper use, so nothing else needs to change.
+include_directories( thirdparty/fmindex )
 
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set( FETCHCONTENT_QUIET OFF )

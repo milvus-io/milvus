@@ -11,4 +11,6 @@
 
 add_source_at_current_directory_recursively()
 add_library(milvus_index OBJECT ${SOURCE_FILES})
-target_link_libraries(milvus_index PUBLIC milvus_conan_deps)
+# libsais (PUBLIC) propagates its include dir so the vendored FM-index sources
+# under fmindex/ can #include "libsais.h"; milvus_core links the objects (below).
+target_link_libraries(milvus_index PUBLIC milvus_conan_deps libsais)

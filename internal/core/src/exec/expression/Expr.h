@@ -2280,9 +2280,14 @@ class SegmentExpr : public Expr {
         return PinnedIndexIsNested();
     }
 
+    // Ask the pinned scalar index whether `op` should run through it or fall
+    // back to the raw-data scan. Pass the concrete query literal in `pattern`
+    // when the caller has one (string pattern ops): an index with a cheap
+    // per-literal cost bound (FMINDEX's count-first guard) uses it to decline
+    // degenerate high-hit literals whose enumeration would lose to the scan.
     template <typename T>
     bool
-    CanUseIndexForOp(OpType op) const {
+    CanUseIndexForOp(OpType op, const std::string& pattern = "") const {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
@@ -2296,7 +2301,7 @@ class SegmentExpr : public Expr {
                    num_index_chunk_);
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         AssertInfo(scalar_index != nullptr, "invalid scalar index type");
-        return scalar_index->ShouldUseOp(op);
+        return scalar_index->ShouldUseOp(op, pattern);
     }
 
     template <typename T>

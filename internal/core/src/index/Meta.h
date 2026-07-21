@@ -60,6 +60,12 @@ constexpr const char* INDEX_NON_ENCODING = "index.nonEncoding";
 constexpr const char* NGRAM_INDEX_TYPE = "NGRAM";
 constexpr const char* MIN_GRAM = "min_gram";
 constexpr const char* MAX_GRAM = "max_gram";
+constexpr const char* FMINDEX_INDEX_TYPE = "FMINDEX";
+// FM-index build param: suffix-array sampling rate (space vs. locate latency).
+constexpr const char* FM_SA_SAMPLE_RATE = "fm_sa_sample_rate";
+// FM-index build param: rank-directory block granularity in bytes (power-of-two
+// multiple of 8 in [8, 128]); larger shrinks resident directory RAM. Default 64.
+constexpr const char* FM_BLOCK_BYTES = "fm_block_bytes";
 
 constexpr const char* JSON_KEY_STATS_INDEX_TYPE = "JsonKeyStats";
 // index meta

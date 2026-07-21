@@ -19,6 +19,7 @@ package paramtable
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -3551,6 +3552,7 @@ type queryNodeConfig struct {
 	KnowhereFetchThreadPoolSize   ParamItem `refreshable:"true"`
 	KnowhereThreadPoolSize        ParamItem `refreshable:"true"`
 	ChunkRows                     ParamItem `refreshable:"false"`
+	FmindexCostRatio              ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex    ParamItem `refreshable:"false"`
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
@@ -4175,6 +4177,31 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.ChunkRows.Init(base.mgr)
+
+	p.FmindexCostRatio = ParamItem{
+		Key:          "queryNode.fmindexCostRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.001",
+		Formatter: func(v string) string {
+			// The value is pushed to segcore as a C float (float32), and the C++
+			// setter asserts it is in (0, 1]. Validate the NARROWED value so a
+			// bad config never crashes the query node at init:
+			//   - NaN must be rejected explicitly (ParseFloat accepts "NaN", and
+			//     both NaN<=0 and NaN>1 are false, so it would slip through);
+			//   - a tiny-but-positive float64 like 1e-50 underflows to 0.0f as a
+			//     float32 and would trip the `ratio > 0` assert — checking the
+			//     float32 value (not the float64) catches it.
+			ratio := getAsFloat(v)
+			f := float32(ratio)
+			if math.IsNaN(ratio) || math.IsInf(ratio, 0) || f <= 0 || f > 1 {
+				return "0.001"
+			}
+			return v
+		},
+		Doc:    `FM-index count-first guard threshold. An FMINDEX-accelerated LIKE prefix/infix/suffix runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (both paths are exact, this only picks the cheaper one). Normalized by tokens (bytes), not rows, so it is row-length invariant. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.`,
+		Export: true,
+	}
+	p.FmindexCostRatio.Init(base.mgr)
 
 	p.EnableInterminSegmentIndex = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.enableIndex",

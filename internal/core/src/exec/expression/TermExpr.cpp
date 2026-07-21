@@ -1254,6 +1254,18 @@ PhyTermFilterExpr::DetermineExecPath() {
     // ARRAY type cannot use scalar index
     if (data_type == DataType::ARRAY) {
         exec_path_ = ExprExecPath::RawData;
+        return;
+    }
+
+    // IN / NOT IN is a disjunction of equalities. Ask the pinned string index
+    // whether it wants the equality op (represented as Equal): FMINDEX declines
+    // it (a term set of exact values is better served by the scan / an equality
+    // index), while INVERTED and the others accept it (base default). FMINDEX is
+    // VARCHAR-only, so only the string path needs the check.
+    if ((data_type == DataType::VARCHAR || data_type == DataType::TEXT) &&
+        !SegmentExpr::CanUseIndexForOp<std::string>(
+            proto::plan::OpType::Equal)) {
+        exec_path_ = ExprExecPath::RawData;
     }
 }
 

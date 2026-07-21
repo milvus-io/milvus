@@ -20,6 +20,7 @@
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -277,11 +278,12 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
+    } catch (milvus::SegcoreError& e) {
+        return milvus::FailureCStatus(&e);
+    } catch (std::bad_alloc& e) {
+        return milvus::FailureCStatus(milvus::MemAllocateFailed, e.what());
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
 
