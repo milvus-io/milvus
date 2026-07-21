@@ -198,6 +198,9 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 			}
 			columns = append(columns, col)
 		}
+		if sch.EnableDynamicField && len(dynamicNames) > 0 {
+			dynamicColumn = column.NewColumnJSONBytes("", nil)
+		}
 	}
 
 	// extra name found and not json output
