@@ -299,6 +299,68 @@ func (s *StructArraySuite) TestParseTopLevelArrayOfStruct() {
 	s.Equal([]int32{1, 2}, val.(map[string]any)["x"])
 }
 
+func (s *StructArraySuite) TestParseNullableStructArray() {
+	validData := []bool{true, false, true}
+	intSub := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "id",
+		ValidData: validData,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_Int64,
+				Data: []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}}},
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+				},
+			}},
+		}},
+	}
+	strSub := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "tag",
+		ValidData: validData,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_VarChar,
+				Data: []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}},
+					{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+					{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+				},
+			}},
+		}},
+	}
+	top := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "clips",
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{intSub, strSub},
+		}},
+	}
+
+	col, err := FieldDataColumn(top, 0, -1)
+	s.Require().NoError(err)
+	s.True(col.Nullable())
+	s.Equal(3, col.Len())
+	value, err := col.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+
+	sliced := col.Slice(1, -1)
+	s.True(sliced.Nullable())
+	s.Equal(2, sliced.Len())
+	value, err = sliced.Get(0)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = sliced.Get(1)
+	s.Require().NoError(err)
+	s.NotNil(value)
+	isNull, err := sliced.IsNull(1)
+	s.Require().NoError(err)
+	s.False(isNull)
+}
+
 func (s *StructArraySuite) TestParseVectorArrayDataErrors() {
 	mkFD := func(elemType schemapb.DataType, dim int64, rows []*schemapb.VectorField) *schemapb.FieldData {
 		return &schemapb.FieldData{
