@@ -23,6 +23,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
@@ -221,6 +224,39 @@ func TestFlushMsgHandler_HandlSchemaChange(t *testing.T) {
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	err = handler.HandleSchemaChange(context.Background(), im)
+	assert.NoError(t, err)
+}
+
+func TestFlushMsgHandler_HandleAlterCollectionSchemaChangeFlushesChannel(t *testing.T) {
+	vchannel := "ch-0"
+	timeTick := uint64(1000)
+
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId:      0,
+			FlushedSegmentIds: []int64{1, 2},
+			UpdateMask:        &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{
+				Schema: &schemapb.CollectionSchema{Name: "test"},
+			},
+		}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
+	msg.WithTimeTick(timeTick)
+
+	msgID := mock_message.NewMockMessageID(t)
+	im := message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(msgID))
+
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(mock.Anything, vchannel, []int64{1, 2}).Return(nil).Once()
+	wbMgr.EXPECT().FlushChannel(mock.Anything, vchannel, timeTick).Return(nil).Once()
+
+	handler := newMsgHandler(wbMgr)
+	err := handler.HandleAlterCollection(context.Background(), im)
 	assert.NoError(t, err)
 }
 
