@@ -195,8 +195,9 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 // Cost is O(rows * subFields), negligible compared with reading the data.
 func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
 	type subColumn struct {
-		name string
-		data storage.FieldData
+		name      string
+		data      storage.FieldData
+		validData []bool
 	}
 	for _, structField := range schema.GetStructArrayFields() {
 		subFields := structField.GetFields()
@@ -204,13 +205,39 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 		var firstAbsent string
 		for _, subField := range subFields {
 			fieldData, ok := data.Data[subField.GetFieldID()]
-			if !ok || fieldData == nil || fieldData.RowNum() == 0 {
+			if !ok || fieldData == nil {
 				if firstAbsent == "" {
 					firstAbsent = subField.GetName()
 				}
 				continue
 			}
-			columns = append(columns, subColumn{name: subField.GetName(), data: fieldData})
+
+			var validData []bool
+			if fieldData.GetNullable() {
+				switch fd := fieldData.(type) {
+				case *storage.ArrayFieldData:
+					validData = fd.ValidData
+				case *storage.VectorArrayFieldData:
+					validData = fd.ValidData
+				default:
+					return merr.WrapErrImportSysFailedMsg(
+						"unexpected nullable column type '%s' for sub-field '%s' of struct field '%s'",
+						fieldData.GetDataType().String(), subField.GetName(), structField.GetName())
+				}
+				if len(validData) != fieldData.RowNum() {
+					return merr.WrapErrImportSysFailedMsg(
+						"nullable sub-field '%s' of struct field '%s' has invalid ValidData length %d, expected %d",
+						subField.GetName(), structField.GetName(), len(validData), fieldData.RowNum())
+				}
+			}
+
+			if fieldData.RowNum() == 0 {
+				if firstAbsent == "" {
+					firstAbsent = subField.GetName()
+				}
+				continue
+			}
+			columns = append(columns, subColumn{name: subField.GetName(), data: fieldData, validData: validData})
 		}
 		// A struct must be supplied whole: either all sub-fields present or all
 		// absent. A partial set is malformed input — the absent sub-fields get
@@ -226,10 +253,6 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 				"struct field '%s' has a partial sub-field set: sub-field '%s' is present but sub-field '%s' is missing; provide all sub-fields or none",
 				structField.GetName(), columns[0].name, firstAbsent)
 		}
-		if len(columns) < 2 {
-			continue
-		}
-
 		ref := columns[0]
 		rows := ref.data.RowNum()
 		for _, col := range columns[1:] {
@@ -241,7 +264,7 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 		}
 
 		for i := 0; i < rows; i++ {
-			refValid := structSubFieldRowValid(ref.data, i)
+			refValid := !ref.data.GetNullable() || ref.validData[i]
 			refCount := -1
 			if refValid {
 				var err error
@@ -251,7 +274,7 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 				}
 			}
 			for _, col := range columns[1:] {
-				valid := structSubFieldRowValid(col.data, i)
+				valid := !col.data.GetNullable() || col.validData[i]
 				if valid != refValid {
 					return merr.WrapErrImportFailedMsg(
 						"struct field '%s' has inconsistent sub-field null-ness at row %d, sub-field '%s' valid=%t, sub-field '%s' valid=%t",
@@ -275,36 +298,19 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 	return nil
 }
 
-// structSubFieldRowValid reports whether row i of a struct sub-field column is
-// valid (non-null).
-func structSubFieldRowValid(fieldData storage.FieldData, i int) bool {
-	if !fieldData.GetNullable() {
-		return true
-	}
-	var validData []bool
-	switch fd := fieldData.(type) {
-	case *storage.ArrayFieldData:
-		validData = fd.ValidData
-	case *storage.VectorArrayFieldData:
-		validData = fd.ValidData
-	default:
-		// struct sub-fields are always Array or ArrayOfVector columns;
-		// fall back to the interface-level null representation
-		return fieldData.GetRow(i) != nil
-	}
-	if i >= len(validData) {
-		return true
-	}
-	return validData[i]
-}
-
 // structSubFieldRowElementCount returns the number of struct elements in row i
 // of a struct sub-field column: the array length for scalar Array sub-fields,
 // or the number of vectors for ArrayOfVector sub-fields.
 func structSubFieldRowElementCount(fieldData storage.FieldData, i int, structName, subFieldName string) (int, error) {
 	switch fd := fieldData.(type) {
 	case *storage.ArrayFieldData:
-		return scalarFieldElementCount(fd.Data[i]), nil
+		count, ok := scalarFieldElementCount(fd.Data[i])
+		if !ok {
+			return 0, merr.WrapErrImportFailedMsg(
+				"invalid scalar array data at row %d of sub-field '%s' of struct field '%s': missing or unsupported scalar payload",
+				i, subFieldName, structName)
+		}
+		return count, nil
 	case *storage.VectorArrayFieldData:
 		row := fd.Data[i]
 		var payloadLen, width int
@@ -343,31 +349,33 @@ func structSubFieldRowElementCount(fieldData storage.FieldData, i int, structNam
 	}
 }
 
-// scalarFieldElementCount returns the number of elements held by one Array row.
-func scalarFieldElementCount(sf *schemapb.ScalarField) int {
+// scalarFieldElementCount returns the number of elements held by one Array row
+// and whether its scalar payload type is recognized. A typed empty payload is
+// valid and returns (0, true); a nil or unset payload returns (0, false).
+func scalarFieldElementCount(sf *schemapb.ScalarField) (int, bool) {
 	switch d := sf.GetData().(type) {
 	case *schemapb.ScalarField_BoolData:
-		return len(d.BoolData.GetData())
+		return len(d.BoolData.GetData()), true
 	case *schemapb.ScalarField_IntData:
-		return len(d.IntData.GetData())
+		return len(d.IntData.GetData()), true
 	case *schemapb.ScalarField_LongData:
-		return len(d.LongData.GetData())
+		return len(d.LongData.GetData()), true
 	case *schemapb.ScalarField_FloatData:
-		return len(d.FloatData.GetData())
+		return len(d.FloatData.GetData()), true
 	case *schemapb.ScalarField_DoubleData:
-		return len(d.DoubleData.GetData())
+		return len(d.DoubleData.GetData()), true
 	case *schemapb.ScalarField_StringData:
-		return len(d.StringData.GetData())
+		return len(d.StringData.GetData()), true
 	case *schemapb.ScalarField_BytesData:
-		return len(d.BytesData.GetData())
+		return len(d.BytesData.GetData()), true
 	case *schemapb.ScalarField_ArrayData:
-		return len(d.ArrayData.GetData())
+		return len(d.ArrayData.GetData()), true
 	case *schemapb.ScalarField_JsonData:
-		return len(d.JsonData.GetData())
+		return len(d.JsonData.GetData()), true
 	case *schemapb.ScalarField_TimestamptzData:
-		return len(d.TimestamptzData.GetData())
+		return len(d.TimestamptzData.GetData()), true
 	default:
-		return 0
+		return 0, false
 	}
 }
 

@@ -411,6 +411,15 @@ func Test_CheckStructArrayConsistency(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("typed empty arrays are valid", func(t *testing.T) {
+		insertData := buildConsistentData()
+		insertData.Data[intSubID].(*storage.ArrayFieldData).Data[0] = longRow()
+		insertData.Data[strSubID].(*storage.ArrayFieldData).Data[0] = strRow()
+		insertData.Data[vecSubID].(*storage.VectorArrayFieldData).Data[0] = vecRow(0)
+		err := CheckStructArrayConsistency(schema, insertData)
+		assert.NoError(t, err)
+	})
+
 	t.Run("no struct fields in schema", func(t *testing.T) {
 		plainSchema := &schemapb.CollectionSchema{
 			Fields: schema.GetFields(),
@@ -424,6 +433,18 @@ func Test_CheckStructArrayConsistency(t *testing.T) {
 		delete(insertData.Data, intSubID)
 		delete(insertData.Data, strSubID)
 		delete(insertData.Data, vecSubID)
+		err := CheckStructArrayConsistency(schema, insertData)
+		assert.NoError(t, err)
+	})
+
+	t.Run("zero-row struct columns are absent", func(t *testing.T) {
+		insertData := buildConsistentData()
+		intData := insertData.Data[intSubID].(*storage.ArrayFieldData)
+		intData.Data, intData.ValidData = nil, nil
+		strData := insertData.Data[strSubID].(*storage.ArrayFieldData)
+		strData.Data, strData.ValidData = nil, nil
+		vecData := insertData.Data[vecSubID].(*storage.VectorArrayFieldData)
+		vecData.Data, vecData.ValidData = nil, nil
 		err := CheckStructArrayConsistency(schema, insertData)
 		assert.NoError(t, err)
 	})
@@ -463,6 +484,102 @@ func Test_CheckStructArrayConsistency(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrImportFailed)
 		assert.Contains(t, err.Error(), "row 1")
 		assert.Contains(t, err.Error(), "null-ness")
+	})
+
+	t.Run("invalid nullable valid data length", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			fieldName string
+			mutate    func(*storage.InsertData)
+		}{
+			{
+				name:      "empty scalar mask",
+				fieldName: typeutil.ConcatStructFieldName(structName, "sub_int"),
+				mutate: func(insertData *storage.InsertData) {
+					fieldData := insertData.Data[intSubID].(*storage.ArrayFieldData)
+					fieldData.ValidData = nil
+				},
+			},
+			{
+				name:      "long vector mask",
+				fieldName: typeutil.ConcatStructFieldName(structName, "sub_vec"),
+				mutate: func(insertData *storage.InsertData) {
+					fieldData := insertData.Data[vecSubID].(*storage.VectorArrayFieldData)
+					fieldData.ValidData = append(fieldData.ValidData, true)
+				},
+			},
+			{
+				name:      "non-empty mask for zero-row column",
+				fieldName: typeutil.ConcatStructFieldName(structName, "sub_str"),
+				mutate: func(insertData *storage.InsertData) {
+					fieldData := insertData.Data[strSubID].(*storage.ArrayFieldData)
+					fieldData.Data = nil
+					fieldData.ValidData = []bool{true}
+				},
+			},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				insertData := buildConsistentData()
+				test.mutate(insertData)
+				err := CheckStructArrayConsistency(schema, insertData)
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+				assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+				assert.Contains(t, err.Error(), "ValidData length")
+				assert.Contains(t, err.Error(), test.fieldName)
+			})
+		}
+	})
+
+	t.Run("single sub-field still validates nullable mask", func(t *testing.T) {
+		singleFieldSchema := &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID:  110,
+					Name:     structName,
+					Nullable: true,
+					Fields:   []*schemapb.FieldSchema{schema.GetStructArrayFields()[0].GetFields()[0]},
+				},
+			},
+		}
+		insertData := &storage.InsertData{
+			Data: map[int64]storage.FieldData{
+				intSubID: &storage.ArrayFieldData{
+					ElementType: schemapb.DataType_Int64,
+					Data:        []*schemapb.ScalarField{longRow(1)},
+					Nullable:    true,
+				},
+			},
+		}
+		err := CheckStructArrayConsistency(singleFieldSchema, insertData)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		assert.Contains(t, err.Error(), "ValidData length")
+	})
+
+	t.Run("invalid scalar array payload", func(t *testing.T) {
+		tests := []struct {
+			name string
+			row  *schemapb.ScalarField
+		}{
+			{name: "nil payload", row: nil},
+			{name: "unset payload", row: &schemapb.ScalarField{}},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				insertData := buildConsistentData()
+				insertData.Data[intSubID].(*storage.ArrayFieldData).Data[0] = test.row
+				err := CheckStructArrayConsistency(schema, insertData)
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrImportFailed)
+				assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+				assert.Contains(t, err.Error(), "row 0")
+				assert.Contains(t, err.Error(), typeutil.ConcatStructFieldName(structName, "sub_int"))
+				assert.Contains(t, err.Error(), "missing or unsupported scalar payload")
+			})
+		}
 	})
 
 	t.Run("misaligned sub-field row count", func(t *testing.T) {
