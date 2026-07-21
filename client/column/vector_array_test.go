@@ -67,20 +67,30 @@ func (s *VectorArraySuite) TestFloatVectorArrayBasic() {
 	_, err = col.GetAsBool(0)
 	s.Error(err)
 
-	// Nullable helpers are no-ops / zero-valued for vector arrays.
+	// Nullable rows use logical indexes while payload rows stay compact.
 	isNull, err := col.IsNull(0)
 	s.NoError(err)
 	s.False(isNull)
 	s.Error(col.AppendNull())
 	col.SetNullable(true)
-	s.False(col.Nullable())
+	s.True(col.Nullable())
+	s.NoError(col.AppendNull())
+	s.Equal(3, col.Len())
+	s.Equal(2, col.ValidCount())
+	isNull, err = col.IsNull(2)
+	s.NoError(err)
+	s.True(isNull)
+	v, err = col.Get(2)
+	s.NoError(err)
+	s.Nil(v)
 	s.NoError(col.ValidateNullable())
 	col.CompactNullableValues()
 
 	// AppendValue via both canonical shapes.
 	s.NoError(col.AppendValue([]entity.FloatVector{entity.FloatVector([]float32{2.1, 2.2, 2.3, 2.4})}))
 	s.NoError(col.AppendValue([][]float32{{3.1, 3.2, 3.3, 3.4}}))
-	s.Equal(4, col.Len())
+	s.Equal(5, col.Len())
+	s.Equal(4, col.ValidCount())
 
 	// AppendValue rejects bad shapes.
 	s.Error(col.AppendValue([]int{1, 2, 3}))
@@ -94,6 +104,7 @@ func (s *VectorArraySuite) TestFloatVectorArrayBasic() {
 	s.EqualValues(dim, va.GetDim())
 	s.Equal(schemapb.DataType_FloatVector, va.GetElementType())
 	s.Equal(4, len(va.GetData()))
+	s.Equal([]bool{true, true, false, true, true}, fd.GetValidData())
 }
 
 func (s *VectorArraySuite) TestFloat16VectorArrayBasic() {
