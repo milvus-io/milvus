@@ -460,6 +460,28 @@ func (s *StructArraySuite) TestParseCompactNullableScalarStructArray() {
 	s.Equal([]string{"third"}, value.(map[string]any)["tag"])
 }
 
+func (s *StructArraySuite) TestParseNullableStructArrayEmptySlice() {
+	source := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	source.SetNullable(true)
+	s.Require().NoError(source.AppendValue(map[string]any{
+		"age":       []int64{10},
+		"embedding": [][]float32{{0.1, 0.2}},
+	}))
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, 0)
+	s.Require().NoError(err)
+	s.True(parsed.Nullable())
+	s.Zero(parsed.Len())
+	s.Require().NoError(parsed.ValidateNullable())
+	for _, fieldData := range parsed.FieldData().GetStructArrays().GetFields() {
+		s.NotNil(fieldData.ValidData)
+		s.Empty(fieldData.GetValidData())
+	}
+}
+
 func (s *StructArraySuite) TestAppendToParsedSparseNullableScalarStructArray() {
 	validData := []bool{true, false, true}
 	age, err := NewNullableColumnInt64Array(
