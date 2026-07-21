@@ -68,6 +68,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t column_group_index,
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
+    const std::vector<std::string>& projected_columns,
+    bool full_projection,
     bool use_mmap,
     bool mmap_populate,
     const std::string& mmap_dir_path,
@@ -130,20 +132,198 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                               DataType::ARRAY;
                                    })),
       load_priority_(load_priority) {
-    auto chunk_size_result = chunk_reader_->get_chunk_size();
-    if (!chunk_size_result.ok()) {
-        throw std::runtime_error(
-            fmt::format("get row group size failed: {}",
-                        chunk_size_result.status().ToString()));
-    }
-    const auto& row_group_sizes = chunk_size_result.ValueOrDie();
-
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         throw std::runtime_error(fmt::format("get row group rows failed: {}",
                                              rows_result.status().ToString()));
     }
     const auto& row_group_rows = rows_result.ValueOrDie();
+
+    enum class SizeEstimateSource {
+        PROJECTED_COLUMNS,
+        SAMPLED_FALLBACK,
+        TOTAL_FALLBACK,
+        LAST_RESORT,
+    };
+
+    std::vector<uint64_t> row_group_sizes(row_group_rows.size(), 0);
+    std::vector<uint64_t> projected_row_group_sizes(row_group_rows.size(), 0);
+    std::string projected_estimate_error;
+    bool projected_estimate_available = !projected_columns.empty();
+    if (!projected_estimate_available) {
+        projected_estimate_error = "projection contains no columns";
+    }
+
+    if (projected_estimate_available && full_projection) {
+        // Full projections cover the whole column group. Use the aggregate
+        // estimate directly to avoid a linear name scan for every projected
+        // column in wide groups such as JSON shredding output.
+        auto total_size_result = chunk_reader_->get_chunk_estimated_size();
+        if (!total_size_result.ok()) {
+            projected_estimate_available = false;
+            projected_estimate_error = total_size_result.status().ToString();
+        } else {
+            const auto& total_sizes = total_size_result.ValueOrDie();
+            if (total_sizes.size() != projected_row_group_sizes.size()) {
+                projected_estimate_available = false;
+                projected_estimate_error = fmt::format(
+                    "row group count mismatched, expected {}, actual {}",
+                    projected_row_group_sizes.size(),
+                    total_sizes.size());
+            } else {
+                projected_row_group_sizes = total_sizes;
+            }
+        }
+    } else if (projected_estimate_available) {
+        // FIXME: milvus-storage resolves each column name with a linear scan,
+        // so a P-column projection costs O(P * N). Each projected reader also
+        // retains group-wide per-row-group size metadata; one lazy reader per
+        // column makes an N-column group O(N^2 * R) in retained metadata.
+        // Share indexed immutable metadata across projected readers.
+        for (const auto& column_name : projected_columns) {
+            auto column_size_result =
+                chunk_reader_->get_chunk_column_estimated_size(column_name);
+            if (!column_size_result.ok()) {
+                projected_estimate_available = false;
+                projected_estimate_error =
+                    fmt::format("column {}: {}",
+                                column_name,
+                                column_size_result.status().ToString());
+                break;
+            }
+            const auto& column_sizes = column_size_result.ValueOrDie();
+            if (column_sizes.size() != projected_row_group_sizes.size()) {
+                projected_estimate_available = false;
+                projected_estimate_error = fmt::format(
+                    "column {} row group count mismatched, expected {}, "
+                    "actual {}",
+                    column_name,
+                    projected_row_group_sizes.size(),
+                    column_sizes.size());
+                break;
+            }
+            for (size_t i = 0; i < projected_row_group_sizes.size(); ++i) {
+                projected_row_group_sizes[i] += column_sizes[i];
+            }
+        }
+    }
+
+    SizeEstimateSource size_estimate_source;
+    std::string total_estimate_error;
+    if (projected_estimate_available) {
+        // TODO: Lance single-page variable-width estimates can be lower than
+        // decoded Arrow memory. Add a per-projected-field sampled safety floor
+        // once that metadata is propagated; fallback_bytes_per_row currently
+        // covers the whole column group and would erase projection savings.
+        row_group_sizes = std::move(projected_row_group_sizes);
+        size_estimate_source = SizeEstimateSource::PROJECTED_COLUMNS;
+        LOG_DEBUG(
+            "[StorageV2] translator {} uses projected column size estimates "
+            "(columns={}, row_groups={})",
+            key_,
+            projected_columns.size(),
+            row_group_sizes.size());
+    } else if (fallback_bytes_per_row > 0) {
+        const auto fallback = static_cast<uint64_t>(fallback_bytes_per_row);
+        for (size_t i = 0; i < row_group_rows.size(); ++i) {
+            if (row_group_rows[i] >
+                std::numeric_limits<uint64_t>::max() / fallback) {
+                throw std::runtime_error(fmt::format(
+                    "fallback row group size exceeds the uint64_t range, "
+                    "rows {}, bytes per row {}",
+                    row_group_rows[i],
+                    fallback_bytes_per_row));
+            }
+            row_group_sizes[i] = row_group_rows[i] * fallback;
+        }
+        size_estimate_source = SizeEstimateSource::SAMPLED_FALLBACK;
+        LOG_WARN(
+            "[StorageV2] translator {} cannot use projected column size "
+            "estimates ({}); using sampled fallback "
+            "(bytes_per_row={}, row_groups={})",
+            key_,
+            projected_estimate_error,
+            fallback_bytes_per_row,
+            row_group_sizes.size());
+    } else {
+        auto total_size_result = chunk_reader_->get_chunk_estimated_size();
+        if (total_size_result.ok() &&
+            total_size_result.ValueOrDie().size() == row_group_sizes.size()) {
+            row_group_sizes = total_size_result.ValueOrDie();
+            size_estimate_source = SizeEstimateSource::TOTAL_FALLBACK;
+            LOG_WARN(
+                "[StorageV2] translator {} cannot use projected column size "
+                "estimates ({}); using total chunk estimates "
+                "(row_groups={})",
+                key_,
+                projected_estimate_error,
+                row_group_sizes.size());
+        } else {
+            total_estimate_error =
+                total_size_result.ok()
+                    ? fmt::format(
+                          "row group count mismatched, expected {}, actual {}",
+                          row_group_sizes.size(),
+                          total_size_result.ValueOrDie().size())
+                    : total_size_result.status().ToString();
+            size_estimate_source = SizeEstimateSource::LAST_RESORT;
+        }
+    }
+
+    // A zero estimate for live rows can mean that a projected field is absent
+    // from an older fragment after schema evolution. Replace it before cell
+    // grouping so a positive row group in the same cell cannot mask the
+    // missing reservation or distort ComputeRowGroupsPerCell.
+    constexpr uint64_t kLastResortBytesPerRow = 4096;
+    const auto positive_fallback_bytes_per_row =
+        fallback_bytes_per_row > 0
+            ? static_cast<uint64_t>(fallback_bytes_per_row)
+            : kLastResortBytesPerRow;
+    size_t live_row_groups = 0;
+    size_t positive_fallback_row_groups = 0;
+    for (size_t i = 0; i < row_group_sizes.size(); ++i) {
+        if (row_group_rows[i] == 0) {
+            continue;
+        }
+        ++live_row_groups;
+        if (row_group_sizes[i] != 0) {
+            continue;
+        }
+        if (row_group_rows[i] > std::numeric_limits<uint64_t>::max() /
+                                    positive_fallback_bytes_per_row) {
+            throw std::runtime_error(fmt::format(
+                "positive fallback row group size exceeds the uint64_t "
+                "range, rows {}, bytes per row {}",
+                row_group_rows[i],
+                positive_fallback_bytes_per_row));
+        }
+        row_group_sizes[i] =
+            row_group_rows[i] * positive_fallback_bytes_per_row;
+        ++positive_fallback_row_groups;
+    }
+    if (positive_fallback_row_groups > 0) {
+        if (size_estimate_source == SizeEstimateSource::LAST_RESORT) {
+            LOG_WARN(
+                "[StorageV2] translator {} cannot use projected column size "
+                "estimates ({}) or total chunk estimates ({}), and has no "
+                "sampled bytes_per_row; using 4KB/row last-resort estimate "
+                "for {}/{} live row groups",
+                key_,
+                projected_estimate_error,
+                total_estimate_error,
+                positive_fallback_row_groups,
+                live_row_groups);
+        } else {
+            LOG_WARN(
+                "[StorageV2] translator {} replaces zero size estimates for "
+                "{}/{} live row groups with a positive fallback "
+                "(bytes_per_row={})",
+                key_,
+                positive_fallback_row_groups,
+                live_row_groups,
+                positive_fallback_bytes_per_row);
+        }
+    }
 
     // Merge row groups into group chunks(cache cells). Derive row-groups-
     // per-cell from the runtime-configurable target byte size so avg cell
@@ -169,43 +349,15 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     meta_.chunk_memory_size_.reserve(num_cells);
 
     int64_t cumulative_rows = 0;
-    int64_t last_resort_cells = 0;
     for (size_t cell_id = 0; cell_id < num_cells; ++cell_id) {
         auto [start, end] = meta_.get_row_group_range(cell_id);
         int64_t cell_size = 0;
-        int64_t cell_rows = 0;
         for (size_t i = start; i < end; ++i) {
-            cell_rows += static_cast<int64_t>(row_group_rows[i]);
             cumulative_rows += static_cast<int64_t>(row_group_rows[i]);
             cell_size += static_cast<int64_t>(row_group_sizes[i]);
         }
-        // External segments (fallback_bytes_per_row > 0): always prefer the
-        // DataNode-sampled Arrow bytes/row over format metadata. The
-        // metadata reports disk/encoded size which varies by format
-        // (parquet=uncompressed column chunk size, iceberg/vortex=often 0)
-        // and is not a reliable proxy for in-memory Arrow buffer size.
-        //
-        // Non-external: use format metadata; only if it reports zero
-        // (e.g. Vortex without size stats) fall back to a 4KB/row
-        // last-resort estimate.
-        if (fallback_bytes_per_row > 0 && cell_rows > 0) {
-            cell_size = cell_rows * fallback_bytes_per_row;
-        } else if (cell_size == 0 && cell_rows > 0) {
-            constexpr int64_t kLastResortBytesPerRow = 4096;
-            cell_size = cell_rows * kLastResortBytesPerRow;
-            ++last_resort_cells;
-        }
         meta_.num_rows_until_chunk_.push_back(cumulative_rows);
         meta_.chunk_memory_size_.push_back(cell_size);
-    }
-    if (last_resort_cells > 0) {
-        LOG_WARN(
-            "[StorageV2] translator {}: {}/{} cells had zero memory_size "
-            "from format metadata and no sampled bytes_per_row; using "
-            "4KB/row last-resort estimate",
-            key_,
-            last_resort_cells,
-            num_cells);
     }
 
     LOG_INFO(
