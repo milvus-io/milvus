@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/zilliztech/woodpecker/common/config"
 	wpMetrics "github.com/zilliztech/woodpecker/common/metrics"
@@ -87,16 +88,19 @@ func (b *builderImpl) getWpConfig() (*config.Configuration, error) {
 
 func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) error {
 	// set the rootPath as the prefix for wp object storage
-	wpConfig.Woodpecker.Meta.Prefix = paramtable.Get().WoodpeckerCfg.MetaPrefix.GetValue()
+	wpConfig.Woodpecker.Meta.Prefix = cfg.MetaPrefix.GetValue()
 	wpConfig.Etcd.RootPath = paramtable.Get().EtcdCfg.RootPath.GetValue()
 	// logClient
 	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
-	// GetAsInt/GetAsSize return 0 on a parse failure (e.g. a typo like "1,000"), and
-	// woodpecker reads maxBatchBytes==0 as "no byte limit" and clamps maxBatchEntries<=0
-	// to 1 (silently disabling batching). On an invalid value keep woodpecker's built-in
-	// default (already populated by NewConfiguration: 1000 / 2000000) and warn.
+	// GetAsInt/GetAsSize return 0 on a parse failure (e.g. a typo like "1,000"),
+	// indistinguishable from an explicit 0 by return value alone. maxBatchEntries<=0
+	// would be clamped by woodpecker to 1 (silently disabling batching), so any
+	// non-positive value keeps woodpecker's built-in default (already populated by
+	// NewConfiguration: 1000 / 2000000) with a warn. maxBatchBytes==0 is legal
+	// ("no byte limit"), so an explicit "0" is passed through and only a real
+	// parse failure falls back.
 	if v := cfg.AppendMaxBatchEntries.GetAsInt(); v > 0 {
 		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchEntries = v
 	} else {
@@ -105,6 +109,8 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	}
 	if v := cfg.AppendMaxBatchBytes.GetAsSize(); v > 0 {
 		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchBytes = config.NewByteSize(v)
+	} else if strings.TrimSpace(cfg.AppendMaxBatchBytes.GetValue()) == "0" {
+		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchBytes = config.NewByteSize(0)
 	} else {
 		mlog.Warn(context.TODO(), "invalid woodpecker maxBatchBytes, keeping woodpecker built-in default",
 			mlog.String("value", cfg.AppendMaxBatchBytes.GetValue()))
