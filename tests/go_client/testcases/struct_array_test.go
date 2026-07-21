@@ -231,21 +231,29 @@ func TestStructArrayNullableInsertNil(t *testing.T) {
 	// A null vector produces an empty result set while a valid vector produces a
 	// non-empty one. The empty slice must retain every struct sub-column's
 	// nullable state.
-	searchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
-		column.NewColumnInt64("id", []int64{0, 1})).
+	emptySearchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
+		column.NewColumnInt64("id", []int64{0})).
 		WithANNSField("normal_vector").
 		WithOutputFields("clips").
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
-	require.Len(t, searchResults, 2)
-	require.NoError(t, searchResults[0].Err)
-	require.Zero(t, searchResults[0].ResultCount)
-	emptyClips := searchResults[0].GetColumn("clips")
+	require.Len(t, emptySearchResults, 1)
+	require.NoError(t, emptySearchResults[0].Err)
+	require.Zero(t, emptySearchResults[0].ResultCount)
+	emptyClips := emptySearchResults[0].GetColumn("clips")
 	require.NotNil(t, emptyClips)
 	require.True(t, emptyClips.Nullable())
 	require.Zero(t, emptyClips.Len())
-	require.NoError(t, searchResults[1].Err)
-	require.Greater(t, searchResults[1].ResultCount, 0)
+
+	validSearchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
+		column.NewColumnInt64("id", []int64{1})).
+		WithANNSField("normal_vector").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Len(t, validSearchResults, 1)
+	require.NoError(t, validSearchResults[0].Err)
+	require.Greater(t, validSearchResults[0].ResultCount, 0)
 }
 
 // TestStructArrayCreateEmbListHNSWIndexCosine ports test_create_emb_list_hnsw_index_cosine.
