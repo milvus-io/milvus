@@ -37,8 +37,10 @@ const (
 	searchGateRetryMaxBackoff     = 100 * time.Millisecond
 )
 
-type searchResultsCleanup func([]*SearchResult)
-type searchGateRetryWait func(context.Context, int) error
+type (
+	searchResultsCleanup func([]*SearchResult)
+	searchGateRetryWait  func(context.Context, int) error
+)
 
 func waitSearchGateRetry(ctx context.Context, retryCount int) error {
 	shift := min(max(retryCount-1, 0), 5)

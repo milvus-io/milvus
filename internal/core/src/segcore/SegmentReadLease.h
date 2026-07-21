@@ -194,6 +194,46 @@ class SegmentReadGate {
         return lease;
     }
 
+    std::shared_ptr<SegmentReadLease>
+    AcquireReadBlocking(const folly::CancellationToken& cancel_token,
+                        int64_t segment_id) const {
+        auto lease = std::shared_ptr<SegmentReadLease>(new SegmentReadLease());
+        std::unique_lock<std::mutex> lock(state_->mutex);
+        auto cancellation_requested = [&] {
+            return cancel_token.isCancellationRequested();
+        };
+        if (cancellation_requested()) {
+            ThrowInfo(ErrorCode::FollyCancel,
+                      "read lease acquisition cancelled for segment {}",
+                      segment_id);
+        }
+
+        bool recorded_block = false;
+        while (state_->writer_pending || state_->writer_active) {
+            if (!recorded_block) {
+                ++state_->blocked_readers_total;
+                recorded_block = true;
+            }
+            if (cancellation_requested()) {
+                ThrowInfo(ErrorCode::FollyCancel,
+                          "read lease acquisition cancelled for segment {}",
+                          segment_id);
+            }
+            state_->cv.wait_for(lock, std::chrono::milliseconds(10));
+        }
+
+        // Do not admit a reader if cancellation raced the publisher release.
+        if (cancellation_requested()) {
+            ThrowInfo(ErrorCode::FollyCancel,
+                      "read lease acquisition cancelled for segment {}",
+                      segment_id);
+        }
+
+        ++state_->active_readers;
+        lease->state_ = state_;
+        return lease;
+    }
+
     PublishLease
     AcquirePublish(milvus::OpContext* op_ctx, int64_t segment_id) const {
         std::unique_lock<std::mutex> lock(state_->mutex);

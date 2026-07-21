@@ -28,12 +28,12 @@ package segcore
 import "C"
 
 import (
-	"errors"
 	"math"
 	"reflect"
 	"strings"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/cgoconverter"

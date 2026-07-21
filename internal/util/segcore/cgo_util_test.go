@@ -1,10 +1,10 @@
 package segcore
 
 import (
-	"errors"
 	"runtime"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 

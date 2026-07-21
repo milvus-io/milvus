@@ -102,7 +102,7 @@ type ServiceSuite struct {
 func TestDropIndexPropagatesSegmentError(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
 	segment := segments.NewMockSegment(t)
-	dropErr := merr.SegcoreError(2038, "publication drain cancelled")
+	dropErr := merr.SegcoreError(2038, "publication drain canceled")
 
 	segmentManager.EXPECT().GetAndPinBy(mock.Anything).
 		Return([]segments.Segment{segment}, nil).Once()

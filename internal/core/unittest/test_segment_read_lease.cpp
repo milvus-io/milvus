@@ -186,6 +186,79 @@ TEST(SegmentReadGateTest, NullContextPublisherTimesOutAndReopensGate) {
     EXPECT_TRUE(next_reader->valid());
 }
 
+TEST(SegmentReadGateTest, ScopedReaderWaitsForActivePublisher) {
+    SegmentReadGate gate;
+    auto first_reader = gate.AcquireRead(folly::CancellationToken(), 106);
+
+    std::atomic<bool> writer_acquired{false};
+    std::atomic<bool> release_writer{false};
+    std::thread writer([&] {
+        auto publish_lease = gate.AcquirePublish(nullptr, 106);
+        writer_acquired.store(true, std::memory_order_release);
+        while (!release_writer.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        publish_lease.MarkPublished();
+    });
+
+    EXPECT_TRUE(WaitUntil([&] { return gate.WriterPending(); }));
+    first_reader.reset();
+    EXPECT_TRUE(WaitUntil(
+        [&] { return writer_acquired.load(std::memory_order_acquire); }));
+
+    std::atomic<bool> scoped_reader_acquired{false};
+    std::thread scoped_reader([&] {
+        auto lease = gate.AcquireReadBlocking(folly::CancellationToken(), 106);
+        scoped_reader_acquired.store(true, std::memory_order_release);
+    });
+
+    EXPECT_TRUE(WaitUntil([&] { return gate.BlockedReadersTotal() == 1; }));
+    EXPECT_FALSE(scoped_reader_acquired.load(std::memory_order_acquire));
+
+    release_writer.store(true, std::memory_order_release);
+    writer.join();
+    scoped_reader.join();
+
+    EXPECT_TRUE(scoped_reader_acquired.load(std::memory_order_acquire));
+    EXPECT_EQ(gate.ActiveReaders(), 0);
+    EXPECT_EQ(gate.PublishedGeneration(), 1);
+}
+
+TEST(SegmentReadGateTest, ScopedReaderWaitCanBeCancelled) {
+    SegmentReadGate gate;
+    auto first_reader = gate.AcquireRead(folly::CancellationToken(), 107);
+
+    std::thread writer(
+        [&] { auto publish_lease = gate.AcquirePublish(nullptr, 107); });
+    EXPECT_TRUE(WaitUntil([&] { return gate.WriterPending(); }));
+
+    folly::CancellationSource cancellation_source;
+    std::atomic<bool> cancelled{false};
+    std::thread scoped_reader([&] {
+        try {
+            auto lease =
+                gate.AcquireReadBlocking(cancellation_source.getToken(), 107);
+        } catch (const SegcoreError& error) {
+            cancelled.store(error.get_error_code() == ErrorCode::FollyCancel,
+                            std::memory_order_release);
+        }
+    });
+
+    EXPECT_TRUE(WaitUntil([&] { return gate.BlockedReadersTotal() == 1; }));
+    cancellation_source.requestCancellation();
+    scoped_reader.join();
+
+    EXPECT_TRUE(cancelled.load(std::memory_order_acquire));
+    EXPECT_TRUE(gate.WriterPending());
+    EXPECT_EQ(gate.ActiveReaders(), 1);
+
+    first_reader.reset();
+    writer.join();
+
+    EXPECT_FALSE(gate.WriterPending());
+    EXPECT_EQ(gate.ActiveReaders(), 0);
+}
+
 TEST(SegmentReadGateTest, CrossSegmentRequestsReleaseAndRetryWithoutDeadlock) {
     SegmentReadGate first_gate;
     SegmentReadGate second_gate;
