@@ -517,7 +517,7 @@ func (pw *PackedManifestRecordWriter) Close() error {
 // storage, and appends StatEntry records onto updates so the surrounding
 // commit registers inserts + stats atomically. Leaves pw.statsLog and
 // pw.bm25StatsLog nil so callers know stats are embedded in the manifest.
-func (pw *PackedManifestRecordWriter) appendV3Stats(updates *packed.ManifestUpdates) error {
+func (pw *packedBinlogRecordWriterBase) appendV3Stats(updates *packed.ManifestUpdates) error {
 	statsBlob, pkFieldID, err := pw.pkCollector.SerializeBlob(pw.rowNum)
 	if err != nil {
 		return err
@@ -709,7 +709,7 @@ func (pw *PackedTextManifestRecordWriter) finalizeBinlogs() {
 // pattern as PackedManifestRecordWriter.Close.
 func (pw *PackedTextManifestRecordWriter) Close() error {
 	if pw.writer == nil {
-		return pw.writeStats()
+		return nil
 	}
 	out, err := pw.writer.Close()
 	if err != nil {
@@ -720,16 +720,20 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 	}
 	pw.finalizeBinlogs()
 	if out == nil {
-		return pw.writeStats()
+		return nil
 	}
 
+	updates := &packed.ManifestUpdates{NewFiles: out}
+	if err := pw.appendV3Stats(updates); err != nil {
+		return err
+	}
 	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig,
-		&packed.ManifestUpdates{NewFiles: out})
+		updates)
 	if err != nil {
 		return merr.Wrap(err, "PackedTextManifestRecordWriter.Close commit")
 	}
 	pw.manifest = newManifest
-	return pw.writeStats()
+	return nil
 }
 
 // NewPackedTextManifestRecordWriter creates a new BinlogRecordWriter for TEXT column compaction.
