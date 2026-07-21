@@ -125,7 +125,8 @@ func (s *WriteSuite) TestInsert() {
 			}, nil
 		}).Once()
 
-		result, err := s.client.Insert(WithIdempotencyKey(ctx, "key-1"), NewColumnBasedInsertOption(collName).
+		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
+			WithIdempotencyKey("key-1").
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
@@ -435,6 +436,17 @@ func (s *WriteSuite) TestUpsert() {
 		}
 	})
 
+	s.Run("idempotency_key_not_supported", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collName, s.schema)
+
+		_, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
+			WithInt64Column("id", []int64{1}).
+			WithIdempotencyKey("key-1"))
+		s.ErrorIs(err, merr.ErrParameterInvalid)
+		s.ErrorContains(err, "only supported for Insert")
+	})
+
 	s.Run("failure", func() {
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
@@ -510,20 +522,25 @@ func (s *WriteSuite) TestDelete() {
 	})
 }
 
-func TestWithIdempotencyKey(t *testing.T) {
-	ctx := WithIdempotencyKey(context.Background(), "key-1")
+func TestWithIdempotencyKeyContext(t *testing.T) {
+	parent := context.Background()
+	ctx := withIdempotencyKey(parent, "key-1")
 	md, ok := metadata.FromOutgoingContext(ctx)
 	assert.True(t, ok)
 	assert.Equal(t, []string{"key-1"}, md.Get(idempotencyKeyHeader))
 
+	// the parent context is never mutated — the key lives on the child only
+	_, ok = metadata.FromOutgoingContext(parent)
+	assert.False(t, ok)
+
 	// setting again overwrites instead of appending
-	ctx = WithIdempotencyKey(ctx, "key-2")
+	ctx = withIdempotencyKey(ctx, "key-2")
 	md, _ = metadata.FromOutgoingContext(ctx)
 	assert.Equal(t, []string{"key-2"}, md.Get(idempotencyKeyHeader))
 
 	// empty key clears it without touching other metadata
 	ctx = metadata.AppendToOutgoingContext(ctx, "other-key", "other-value")
-	ctx = WithIdempotencyKey(ctx, "")
+	ctx = withIdempotencyKey(ctx, "")
 	md, _ = metadata.FromOutgoingContext(ctx)
 	assert.Empty(t, md.Get(idempotencyKeyHeader))
 	assert.Equal(t, []string{"other-value"}, md.Get("other-key"))
