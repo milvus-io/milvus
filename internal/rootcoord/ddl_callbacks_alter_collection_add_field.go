@@ -100,22 +100,23 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, coll.VirtualChannelNames...)
 	// broadcast the put collection v2 message.
+	header := &messagespb.AlterCollectionMessageHeader{
+		DbId:         coll.DBID,
+		CollectionId: coll.CollectionID,
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
+		},
+		CacheExpirations: cacheExpirations,
+	}
 	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			DbId:         coll.DBID,
-			CollectionId: coll.CollectionID,
-			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
-			},
-			CacheExpirations: cacheExpirations,
-		}).
+		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
 				Schema:     schema,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
