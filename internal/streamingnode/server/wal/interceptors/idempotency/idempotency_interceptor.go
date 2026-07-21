@@ -77,6 +77,17 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 		return append(ctx, msg)
 	}
 
+	// Replicated messages bypass the idempotency window entirely: the replicate
+	// stream has its own exactly-once delivery (source-timetick checkpoints),
+	// and the idempotency key inside a replicated header belongs to the SOURCE
+	// cluster's window history. Deduplicating against the local window would
+	// silently drop replicated writes (divergence) whenever the key happens to
+	// sit in this cluster's window — e.g. after a demotion, or after the source
+	// evicted the key by TTL and a client legally re-issued it.
+	if msg.ReplicateHeader() != nil {
+		return append(ctx, msg)
+	}
+
 	if isTxnMessage(msg) {
 		return impl.appendTxnMessage(ctx, msg, append)
 	}
