@@ -132,7 +132,13 @@ func parseScalarData[T any, COL Column, NCOL Column](
 			data = data[valueStart:valueEnd]
 		}
 		ncol, err := nullableCreator(name, data, selectedValidData, WithSparseNullableMode[T](sparseMode))
-		return ncol, err
+		if err != nil {
+			return nil, err
+		}
+		// An empty nullable slice has no validity bits, but it must retain the
+		// nullable schema state for its parent struct array.
+		ncol.SetNullable(true)
+		return ncol, ncol.ValidateNullable()
 	}
 
 	data = data[start:end]
