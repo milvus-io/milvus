@@ -150,8 +150,7 @@
 namespace milvus::segcore {
 using namespace milvus::cachinglayer;
 
-constexpr auto kCollectionSchemaVersionNotReady =
-    static_cast<ErrorCode>(2046);
+constexpr auto kCollectionSchemaVersionNotReady = static_cast<ErrorCode>(2046);
 
 static std::string
 FormatFieldIds(const std::vector<FieldId>& field_ids) {
