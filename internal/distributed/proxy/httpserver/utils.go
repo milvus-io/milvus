@@ -23,6 +23,7 @@ import (
 	"math"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -489,6 +490,13 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				rawValue := gjson.Get(data.Raw, structField.GetName())
 				if partialUpdate && !rawValue.Exists() {
 					continue
+				}
+				if structField.GetNullable() {
+					if rawValue.Type == gjson.Null {
+						validDataMap[structField.GetName()] = append(validDataMap[structField.GetName()], false)
+						continue
+					}
+					validDataMap[structField.GetName()] = append(validDataMap[structField.GetName()], true)
 				}
 				structRow, err := parseStructArrayRow(rawValue.Raw, structField)
 				if err != nil {
@@ -1290,8 +1298,29 @@ func encodeEmbListQuery(vecs []gjson.Result, elemType schemapb.DataType, dim int
 }
 
 func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, perRow []structArrayRow) (*schemapb.FieldData, error) {
-	if len(perRow) == 0 {
+	return buildStructArrayFieldDataInternal(structSchema, perRow, nil)
+}
+
+func buildNullableStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, perRow []structArrayRow, validData []bool) (*schemapb.FieldData, error) {
+	return buildStructArrayFieldDataInternal(structSchema, perRow, validData)
+}
+
+func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSchema, perRow []structArrayRow, validData []bool) (*schemapb.FieldData, error) {
+	if len(perRow) == 0 && len(validData) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("struct array field %s has no rows", structSchema.GetName())
+	}
+	if len(validData) > 0 {
+		validCount := 0
+		for _, valid := range validData {
+			if valid {
+				validCount++
+			}
+		}
+		if validCount != len(perRow) {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"struct array field %s has %d valid rows but %d payload rows",
+				structSchema.GetName(), validCount, len(perRow))
+		}
 	}
 	subs := structSchema.GetFields()
 	subFieldData := make([]*schemapb.FieldData, 0, len(subs))
@@ -1320,6 +1349,7 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 				Type:      schemapb.DataType_Array,
 				FieldName: short,
 				FieldId:   sub.GetFieldID(),
+				ValidData: validData,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_ArrayData{ArrayData: arrayArray},
@@ -1353,6 +1383,7 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 				Type:      schemapb.DataType_ArrayOfVector,
 				FieldName: short,
 				FieldId:   sub.GetFieldID(),
+				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Dim: dim,
@@ -1381,13 +1412,44 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.
 	if len(subs) == 0 {
 		return []map[string]interface{}{}, nil
 	}
+	rowIndices := make([]int, len(subs))
+	rowValid := true
+	expectedValidData := subs[0].GetValidData()
+	for idx, sub := range subs {
+		if !slices.Equal(expectedValidData, sub.GetValidData()) {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"struct array field %s sub-field %s has inconsistent valid data",
+				fd.GetFieldName(), sub.GetFieldName())
+		}
+		accessor, err := newFieldDataRowAccessor(sub)
+		if err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err,
+				"invalid struct array field %s sub-field %s", fd.GetFieldName(), sub.GetFieldName())
+		}
+		dataIdx, valid, err := accessor.rowIndex(int64(rowIdx))
+		if err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err,
+				"read struct array field %s sub-field %s", fd.GetFieldName(), sub.GetFieldName())
+		}
+		if idx == 0 {
+			rowValid = valid
+		} else if valid != rowValid {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"struct array field %s sub-field %s has inconsistent null state at row %d",
+				fd.GetFieldName(), sub.GetFieldName(), rowIdx)
+		}
+		rowIndices[idx] = int(dataIdx)
+	}
+	if !rowValid {
+		return nil, nil
+	}
 
 	subDims, err := structArraySubDims(fd.GetFieldName(), schema)
 	if err != nil {
 		return nil, err
 	}
 
-	elemCount, err := structSubElemCount(subs[0], rowIdx, subDims)
+	elemCount, err := structSubElemCount(subs[0], rowIndices[0], subDims)
 	if err != nil {
 		return nil, err
 	}
@@ -1395,15 +1457,16 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.
 	for i := 0; i < elemCount; i++ {
 		out[i] = make(map[string]interface{}, len(subs))
 	}
-	for _, sub := range subs {
+	for subIdx, sub := range subs {
+		dataIdx := rowIndices[subIdx]
 		short := structFieldShortName(sub.GetFieldName())
 		switch sub.GetType() {
 		case schemapb.DataType_Array:
 			rowData := sub.GetScalars().GetArrayData().GetData()
-			if rowIdx >= len(rowData) {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, rowIdx)
+			if dataIdx >= len(rowData) {
+				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
 			}
-			values := scalarArrayToInterfaces(rowData[rowIdx])
+			values := scalarArrayToInterfaces(rowData[dataIdx])
 			if len(values) != elemCount {
 				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s element count mismatch: expect %d got %d",
 					short, elemCount, len(values))
@@ -1416,14 +1479,14 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.
 			if va == nil {
 				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s has no vector array", short)
 			}
-			if rowIdx >= len(va.GetData()) {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, rowIdx)
+			if dataIdx >= len(va.GetData()) {
+				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
 			}
 			dim, ok := subDims[short]
 			if !ok || dim <= 0 {
 				return nil, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
 			}
-			values, err := vectorFieldToInterfaces(va.GetData()[rowIdx], va.GetElementType(), dim)
+			values, err := vectorFieldToInterfaces(va.GetData()[dataIdx], va.GetElementType(), dim)
 			if err != nil {
 				return nil, err
 			}
@@ -2203,9 +2266,21 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		})
 	}
 	for _, structField := range sch.GetStructArrayFields() {
+		validData, hasValidData := validDataMap[structField.GetName()]
+		if hasValidData && len(validData) != rowsLen {
+			return nil, merr.WrapErrParameterInvalidMsg("struct field %s valid data has length %d, expected %d",
+				structField.GetName(), len(validData), rowsLen)
+		}
 		perRow := make([]structArrayRow, 0, rowsLen)
 		for rowIdx, row := range rows {
 			val, ok := row[structField.GetName()]
+			if hasValidData && !validData[rowIdx] {
+				if ok {
+					return nil, merr.WrapErrParameterInvalidMsg("row %d struct field %s is null but contains data",
+						rowIdx, structField.GetName())
+				}
+				continue
+			}
 			if !ok {
 				if partialUpdate {
 					continue
@@ -2219,10 +2294,16 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 			perRow = append(perRow, sr)
 		}
-		if len(perRow) == 0 {
+		if len(perRow) == 0 && !hasValidData {
 			continue
 		}
-		structFieldData, err := buildStructArrayFieldData(structField, perRow)
+		var structFieldData *schemapb.FieldData
+		var err error
+		if hasValidData {
+			structFieldData, err = buildNullableStructArrayFieldData(structField, perRow, validData)
+		} else {
+			structFieldData, err = buildStructArrayFieldData(structField, perRow)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -2424,6 +2505,8 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_Array:
 		return int64(len(fieldData.GetScalars().GetArrayData().GetData())), nil
+	case schemapb.DataType_ArrayOfVector:
+		return int64(len(fieldData.GetVectors().GetVectorArray().GetData())), nil
 	case schemapb.DataType_JSON:
 		return int64(len(fieldData.GetScalars().GetJsonData().GetData())), nil
 	case schemapb.DataType_Geometry:
@@ -2470,6 +2553,9 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		subs := fieldData.GetStructArrays().GetFields()
 		if len(subs) == 0 {
 			return 0, nil
+		}
+		if len(subs[0].GetValidData()) > 0 {
+			return int64(len(subs[0].GetValidData())), nil
 		}
 		switch subs[0].GetType() {
 		case schemapb.DataType_Array:
