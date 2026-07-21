@@ -204,7 +204,7 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 		s.NoError(err)
 	})
 
-	s.Run("text_schema_uses_v3_manifest_when_ffi_enabled", func() {
+	s.Run("text_schema_uses_v3_manifest_with_writer_buffer_when_ffi_enabled", func() {
 		param.Save(param.CommonCfg.UseLoonFFI.Key, "true")
 		defer param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
 
@@ -224,7 +224,7 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 
 		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
 		s.Require().NoError(err)
-		s.True(wb.AllowGrowingSourceFlush())
+		s.False(wb.AllowGrowingSourceFlush())
 
 		mc.EXPECT().GetSegmentByID(int64(2004)).Return(nil, false).Once()
 		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {

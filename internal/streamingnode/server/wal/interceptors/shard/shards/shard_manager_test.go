@@ -494,7 +494,8 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int32(4), ver)
 	assert.True(t, m.collections[104].HasTextField())
-	assert.True(t, m.collections[104].AllowGrowingSourceFlush())
+	assert.True(t, m.collections[104].RequiresStorageV3())
+	assert.False(t, m.collections[104].AllowGrowingSourceFlush())
 
 	// Test 3: Create collection without schema (legacy), then check version
 	createMsgNoSchema := message.NewCreateCollectionMessageBuilderV1().
@@ -880,6 +881,8 @@ func TestCollectionInfoAllowGrowingSourceFlush_TextField(t *testing.T) {
 	assert.False(t, ci.AllowGrowingSourceFlush())
 	assert.True(t, ci.RequiresStorageV3())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	assert.False(t, ci.AllowGrowingSourceFlush())
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
 	assert.True(t, ci.AllowGrowingSourceFlush())
 }
 

@@ -120,7 +120,7 @@ func AllowGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled
 	if !storageV3Enabled {
 		return false
 	}
-	return HasTextField(schema) || enableGrowingSourceFlush
+	return enableGrowingSourceFlush
 }
 
 // UseGrowingSourceFlush is kept for compatibility. Prefer
