@@ -23,7 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -218,19 +218,18 @@ var retryableCode typeutil.Set[int32] = typeutil.NewSet(
 // 	)
 // }
 
-// ParseMetricLabel determines the final Prometheus status label based on the
-// response and error. It implements the composite-label scheme: the coarse
-// "fail"/"rejected" values are split into fine-grained labels (fail_input /
-// fail_system / rejected_system) so monitoring can tell the responsible party
-// apart. The split is encoded into the existing status label's value domain
-// (additive cardinality) rather than a new dimension label (which would be
-// multiplicative). Retryability takes priority over classification.
-func ParseMetricLabel(resp any, err error) string {
+// ParseMetricLabel determines the Prometheus status and cause labels of a
+// finished request. The status domain is the coarse outcome and is deliberately
+// the same one pre-2.6.19 emitted, so a query written against it keeps its
+// meaning; cause is an orthogonal dimension naming the responsible party, which
+// Prometheus aggregates away for consumers that only ask for the status.
+// Retryability takes priority over classification.
+func ParseMetricLabel(resp any, err error) (status string, cause string) {
 	// A response carrying a non-OK status means the request was PROCESSED and
-	// failed (fail_*), and takes priority over a non-nil err: the REST v2
-	// wrappers reconstruct err = merr.Error(status) from that same response,
-	// which previously routed every processed REST failure into the rejected_*
-	// buckets and left the fail_* series blind to the entire REST surface.
+	// failed, and takes priority over a non-nil err: the REST v2 wrappers
+	// reconstruct err = merr.Error(status) from that same response, which
+	// otherwise routes every processed REST failure into the rejected buckets
+	// and leaves the fail series blind to the entire REST surface.
 	var st *commonpb.Status
 	switch resp := resp.(type) {
 	case interface{ GetStatus() *commonpb.Status }:
@@ -239,48 +238,48 @@ func ParseMetricLabel(resp any, err error) string {
 		st = resp
 	}
 	if st != nil && !merr.Ok(st) {
-		// Client cancellation is neither party's failure.
+		// Client cancellation is neither party's failure, but it stays a "fail"
+		// like it was before the cause dimension existed; cause is what lets a
+		// consumer exclude it.
 		if st.GetCode() == merr.CanceledCode {
-			return metrics.CancelLabel
+			return metrics.FailLabel, metrics.CauseCancel
 		}
-		// Retryability takes priority over input/system classification.
+		// Retryability takes priority over classification.
 		if retryableCode.Contain(st.GetCode()) {
-			return metrics.RetryLabel
+			return metrics.RetryLabel, metrics.CauseNA
 		}
 
 		// Hard failure: classify by responsible party. merr.Status already
 		// stamps the InputError flag into ExtraInfo, so read it directly instead
 		// of reconstructing the whole milvusError (this is the proxy hot path).
 		if st.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
-			return metrics.FailInputLabel
+			return metrics.FailLabel, metrics.CauseUser
 		}
-		return metrics.FailSystemLabel
+		return metrics.FailLabel, metrics.CauseSystem
 	}
 
 	// No usable response status: err is the interceptor-level outcome (context
 	// cancellation, flow control, transport issues, auth/privilege rejection)
 	// — the request was rejected around processing. Classify merr first: a
-	// merr error has no GRPCStatus(), so status.Code(err) degrades to
+	// merr error has no GRPCStatus(), so grpcstatus.Code(err) degrades to
 	// codes.Unknown and would misbucket user input errors as system
 	// rejections. The auth/privilege interceptors deliberately return raw gRPC
 	// codes (not merr, to keep SDK retry behavior correct); those are the
 	// caller's fault, so bucket them as a user-side rejection. Everything else
 	// is a system-side rejection.
 	if err != nil {
-		// Client cancellation is neither party's failure; don't count it as a
-		// system rejection.
 		if errors.Is(err, context.Canceled) {
-			return metrics.CancelLabel
+			return metrics.RejectedLabel, metrics.CauseCancel
 		}
 		if merr.GetErrorType(err) == merr.InputError {
-			return metrics.RejectedUserLabel
+			return metrics.RejectedLabel, metrics.CauseUser
 		}
-		switch status.Code(err) {
+		switch grpcstatus.Code(err) {
 		case codes.Unauthenticated, codes.PermissionDenied, codes.InvalidArgument:
-			return metrics.RejectedUserLabel
+			return metrics.RejectedLabel, metrics.CauseUser
 		default:
-			return metrics.RejectedSystemLabel
+			return metrics.RejectedLabel, metrics.CauseSystem
 		}
 	}
-	return metrics.SuccessLabel
+	return metrics.SuccessLabel, metrics.CauseNA
 }
