@@ -34,20 +34,36 @@ func requireAlterCollectionAckSyncUp(t *testing.T, msg message.BroadcastMutableM
 	require.True(t, msg.BroadcastHeader().AckSyncUp)
 }
 
-func expectAlterCollectionAckSyncUpBroadcast(t *testing.T) *mock_broadcaster.MockBroadcastAPI {
+func requireAlterCollectionNoAckSyncUp(t *testing.T, msg message.BroadcastMutableMessage) {
+	t.Helper()
+	require.Equal(t, message.MessageTypeAlterCollection, msg.MessageType())
+	require.False(t, msg.BroadcastHeader().AckSyncUp)
+}
+
+func expectAlterCollectionBroadcast(t *testing.T, requireBroadcast func(*testing.T, message.BroadcastMutableMessage)) *mock_broadcaster.MockBroadcastAPI {
 	t.Helper()
 	bc := mock_broadcaster.NewMockBroadcastAPI(t)
 	bc.EXPECT().Close().Maybe()
 	bc.EXPECT().Broadcast(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, msg message.BroadcastMutableMessage) {
-			requireAlterCollectionAckSyncUp(t, msg)
+			requireBroadcast(t, msg)
 		}).
 		Return(&types.BroadcastAppendResult{}, nil).
 		Once()
 	return bc
 }
 
-func TestAlterCollectionPropertyBroadcastUsesAckSyncUp(t *testing.T) {
+func expectAlterCollectionAckSyncUpBroadcast(t *testing.T) *mock_broadcaster.MockBroadcastAPI {
+	t.Helper()
+	return expectAlterCollectionBroadcast(t, requireAlterCollectionAckSyncUp)
+}
+
+func expectAlterCollectionNoAckSyncUpBroadcast(t *testing.T) *mock_broadcaster.MockBroadcastAPI {
+	t.Helper()
+	return expectAlterCollectionBroadcast(t, requireAlterCollectionNoAckSyncUp)
+}
+
+func TestAlterCollectionPropertyBroadcastSkipsAckSyncUp(t *testing.T) {
 	streaming.SetupNoopWALForTest()
 	defer streaming.SetWALForTest(nil)
 
@@ -62,7 +78,7 @@ func TestAlterCollectionPropertyBroadcastUsesAckSyncUp(t *testing.T) {
 		},
 	}
 
-	bc := expectAlterCollectionAckSyncUpBroadcast(t)
+	bc := expectAlterCollectionNoAckSyncUpBroadcast(t)
 	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(bc, nil).Build()
 	defer lockMocker.UnPatch()
 
@@ -147,7 +163,7 @@ func TestAlterCollectionSchemaBroadcastUsesAckSyncUp(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestRenameCollectionBroadcastUsesAckSyncUp(t *testing.T) {
+func TestRenameCollectionBroadcastSkipsAckSyncUp(t *testing.T) {
 	streaming.SetupNoopWALForTest()
 	defer streaming.SetWALForTest(nil)
 
@@ -164,7 +180,7 @@ func TestRenameCollectionBroadcastUsesAckSyncUp(t *testing.T) {
 	meta.EXPECT().ListAliases(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return(nil, nil).Maybe()
 	core := newTestCore(withMeta(meta), withValidMixCoord())
 
-	bc := expectAlterCollectionAckSyncUpBroadcast(t)
+	bc := expectAlterCollectionNoAckSyncUpBroadcast(t)
 	lockMocker := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).
 		To(func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return bc, nil
@@ -248,7 +264,6 @@ func TestAlterCollectionSchemaAckCallbackWaitsForChannelCheckpoint(t *testing.T)
 
 func TestAlterCollectionNonSchemaAckCallbackSkipsChannelCheckpoint(t *testing.T) {
 	mixCoord := imocks.NewMixCoord(t)
-	mixCoord.EXPECT().WaitForChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil).Once()

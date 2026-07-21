@@ -137,11 +137,11 @@ func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.
 
 func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
 	vchannel := putCollectionMsg.VChannel()
-	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, putCollectionMsg.Header().FlushedSegmentIds); err != nil {
+	if err := impl.wbMgr.SealSegments(ctx, vchannel, putCollectionMsg.Header().FlushedSegmentIds); err != nil {
 		return errors.Wrap(err, "failed to seal segments")
 	}
 	if messageutil.IsSchemaChange(putCollectionMsg.Header()) {
-		if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, putCollectionMsg.TimeTick()); err != nil {
+		if err := impl.wbMgr.FlushChannel(ctx, vchannel, putCollectionMsg.TimeTick()); err != nil {
 			return errors.Wrap(err, "failed to flush channel")
 		}
 	}
