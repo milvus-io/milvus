@@ -34,9 +34,17 @@ type columnStructArray struct {
 }
 
 func NewColumnStructArray(name string, fields []Column) Column {
+	nullable := false
+	for _, field := range fields {
+		if field.Nullable() {
+			nullable = true
+			break
+		}
+	}
 	return &columnStructArray{
-		fields: fields,
-		name:   name,
+		fields:   fields,
+		name:     name,
+		nullable: nullable,
 	}
 }
 
@@ -74,8 +82,9 @@ func (c *columnStructArray) Slice(start, end int) Column {
 		fields[idx] = subField.Slice(start, end)
 	}
 	return &columnStructArray{
-		name:   c.name,
-		fields: fields,
+		name:     c.name,
+		fields:   fields,
+		nullable: c.nullable,
 	}
 }
 
@@ -198,9 +207,46 @@ func (c *columnStructArray) SetNullable(nullable bool) {
 }
 
 func (c *columnStructArray) ValidateNullable() error {
+	if c.nullable && len(c.fields) == 0 {
+		return errors.New("nullable struct array requires at least one sub-field")
+	}
 	for _, field := range c.fields {
 		if err := field.ValidateNullable(); err != nil {
-			return err
+			return errors.Wrapf(err, "struct array sub-field %q", field.Name())
+		}
+		if field.Nullable() != c.nullable {
+			return errors.Newf("struct array sub-field %q nullable %t does not match parent nullable %t",
+				field.Name(), field.Nullable(), c.nullable)
+		}
+	}
+	if len(c.fields) == 0 {
+		return nil
+	}
+
+	rowCount := c.fields[0].Len()
+	for _, field := range c.fields[1:] {
+		if field.Len() != rowCount {
+			return errors.Newf("struct array sub-field %q length %d does not match length %d",
+				field.Name(), field.Len(), rowCount)
+		}
+	}
+	if !c.nullable {
+		return nil
+	}
+	for row := 0; row < rowCount; row++ {
+		expected, err := c.fields[0].IsNull(row)
+		if err != nil {
+			return errors.Wrapf(err, "struct array sub-field %q row %d", c.fields[0].Name(), row)
+		}
+		for _, field := range c.fields[1:] {
+			actual, err := field.IsNull(row)
+			if err != nil {
+				return errors.Wrapf(err, "struct array sub-field %q row %d", field.Name(), row)
+			}
+			if actual != expected {
+				return errors.Newf("struct array sub-field %q null state at row %d does not match sub-field %q",
+					field.Name(), row, c.fields[0].Name())
+			}
 		}
 	}
 	return nil
