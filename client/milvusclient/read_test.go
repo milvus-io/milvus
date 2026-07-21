@@ -396,6 +396,26 @@ func (s *ReadSuite) TestQuery() {
 		s.Require().NoError(clips.ValidateNullable())
 	})
 
+	s.Run("empty dynamic field", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		schema := entity.NewSchema().WithDynamicFieldEnabled(true).
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true))
+		s.setupCache(collectionName, schema)
+
+		s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+			s.Equal([]string{"dynamic_key"}, qr.GetOutputFields())
+			return &milvuspb.QueryResults{}, nil
+		}).Once()
+
+		rs, err := s.client.Query(ctx, NewQueryOption(collectionName).
+			WithFilter("ID < 0").
+			WithOutputFields("dynamic_key"))
+		s.Require().NoError(err)
+		dynamic := rs.GetColumn("dynamic_key")
+		s.Require().NotNil(dynamic)
+		s.Zero(dynamic.Len())
+	})
+
 	s.Run("bad_request", func() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collectionName, s.schema)
