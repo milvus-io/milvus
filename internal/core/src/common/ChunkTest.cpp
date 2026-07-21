@@ -53,6 +53,30 @@
 
 using namespace milvus;
 
+namespace {
+
+std::shared_ptr<arrow::BinaryArray>
+BuildBinaryArray(const std::vector<std::optional<std::string>>& values) {
+    arrow::BinaryBuilder builder;
+    for (const auto& value : values) {
+        arrow::Status status;
+        if (value.has_value()) {
+            status = builder.Append(value->data(),
+                                    static_cast<int32_t>(value->size()));
+        } else {
+            status = builder.AppendNull();
+        }
+        EXPECT_TRUE(status.ok());
+    }
+
+    std::shared_ptr<arrow::Array> array;
+    auto status = builder.Finish(&array);
+    EXPECT_TRUE(status.ok());
+    return std::static_pointer_cast<arrow::BinaryArray>(array);
+}
+
+}  // namespace
+
 TEST(chunk, test_int64_field) {
     FixedVector<int64_t> data = {1, 2, 3, 4, 5};
     auto field_data = milvus::storage::CreateFieldData(storage::DataType::INT64,
@@ -225,6 +249,50 @@ TEST(chunk, test_variable_field_nullable) {
     }
 }
 
+TEST(chunk, test_variable_field_sliced_binary_batches) {
+    auto batch1 = BuildBinaryArray({std::string("skip-a"),
+                                    std::string("alpha"),
+                                    std::nullopt,
+                                    std::string("beta"),
+                                    std::string("skip-b")});
+    auto batch2 = BuildBinaryArray({std::string("skip-c"),
+                                    std::string("gamma"),
+                                    std::string(""),
+                                    std::string("delta"),
+                                    std::string("skip-d")});
+
+    arrow::ArrayVector array_vec{
+        std::static_pointer_cast<arrow::Array>(batch1)->Slice(1, 3),
+        std::static_pointer_cast<arrow::Array>(batch2)->Slice(1, 3),
+    };
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::STRING,
+                         true,
+                         std::nullopt);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+    auto [views, valid] = string_chunk->StringViews(std::nullopt);
+
+    std::vector<std::optional<std::string_view>> expected = {
+        std::string_view("alpha"),
+        std::nullopt,
+        std::string_view("beta"),
+        std::string_view("gamma"),
+        std::string_view(""),
+        std::string_view("delta"),
+    };
+    ASSERT_EQ(views.size(), expected.size());
+    ASSERT_EQ(valid.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(valid[i], expected[i].has_value());
+        if (expected[i].has_value()) {
+            EXPECT_EQ(views[i], expected[i].value());
+        }
+    }
+}
+
 TEST(chunk, test_json_field) {
     auto row_num = 100;
     FixedVector<Json> data;
@@ -341,6 +409,91 @@ TEST(chunk, test_json_field) {
             auto len = 11;
             EXPECT_THROW(json_chunk->StringViews(std::make_pair(start, len)),
                          milvus::SegcoreError);
+        }
+    }
+}
+
+TEST(chunk, test_json_field_sliced_binary_batches) {
+    auto batch1 = BuildBinaryArray({std::string(R"({"skip":0})"),
+                                    std::string(R"({"k":"a"})"),
+                                    std::nullopt,
+                                    std::string(R"({"k":"b"})"),
+                                    std::string(R"({"skip":1})")});
+    auto batch2 = BuildBinaryArray({std::string(R"({"skip":2})"),
+                                    std::string(R"({"k":"c"})"),
+                                    std::string(R"({"k":""})"),
+                                    std::string(R"({"k":"d"})"),
+                                    std::string(R"({"skip":3})")});
+
+    arrow::ArrayVector array_vec{
+        std::static_pointer_cast<arrow::Array>(batch1)->Slice(1, 3),
+        std::static_pointer_cast<arrow::Array>(batch2)->Slice(1, 3),
+    };
+
+    FieldMeta field_meta(
+        FieldName("a"), milvus::FieldId(1), DataType::JSON, true, std::nullopt);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto json_chunk = static_cast<JSONChunk*>(chunk.get());
+    auto [views, valid] = json_chunk->StringViews(std::nullopt);
+
+    std::vector<std::optional<std::string_view>> expected = {
+        std::string_view(R"({"k":"a"})"),
+        std::nullopt,
+        std::string_view(R"({"k":"b"})"),
+        std::string_view(R"({"k":"c"})"),
+        std::string_view(R"({"k":""})"),
+        std::string_view(R"({"k":"d"})"),
+    };
+    ASSERT_EQ(views.size(), expected.size());
+    ASSERT_EQ(valid.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(valid[i], expected[i].has_value());
+        if (expected[i].has_value()) {
+            EXPECT_EQ(views[i], expected[i].value());
+        }
+    }
+}
+
+TEST(chunk, test_geometry_field_sliced_binary_batches) {
+    auto batch1 = BuildBinaryArray({std::string("skip-a"),
+                                    std::string("wkb-a"),
+                                    std::nullopt,
+                                    std::string("wkb-b"),
+                                    std::string("skip-b")});
+    auto batch2 = BuildBinaryArray({std::string("skip-c"),
+                                    std::string("wkb-c"),
+                                    std::string(""),
+                                    std::string("wkb-d"),
+                                    std::string("skip-d")});
+
+    arrow::ArrayVector array_vec{
+        std::static_pointer_cast<arrow::Array>(batch1)->Slice(1, 3),
+        std::static_pointer_cast<arrow::Array>(batch2)->Slice(1, 3),
+    };
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::GEOMETRY,
+                         true,
+                         std::nullopt);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto geometry_chunk = static_cast<GeometryChunk*>(chunk.get());
+    auto [views, valid] = geometry_chunk->StringViews(std::nullopt);
+
+    std::vector<std::optional<std::string_view>> expected = {
+        std::string_view("wkb-a"),
+        std::nullopt,
+        std::string_view("wkb-b"),
+        std::string_view("wkb-c"),
+        std::string_view(""),
+        std::string_view("wkb-d"),
+    };
+    ASSERT_EQ(views.size(), expected.size());
+    ASSERT_EQ(valid.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(valid[i], expected[i].has_value());
+        if (expected[i].has_value()) {
+            EXPECT_EQ(views[i], expected[i].value());
         }
     }
 }
