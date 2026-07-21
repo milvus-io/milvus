@@ -248,6 +248,25 @@ func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchem
 	assert.True(t, ok)
 }
 
+func TestShardInterceptorRejectsCreateCollectionWithoutSchema(t *testing.T) {
+	shardManager := mock_shards.NewMockShardManager(t)
+	impl := &shardInterceptor{shardManager: shardManager}
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("by-dev-rootcoord-dml_0_99004v0").
+		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 99004}).
+		WithBody(&msgpb.CreateCollectionRequest{}).
+		MustBuildMutable()
+
+	appended := false
+	msgID, err := impl.handleCreateCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return rmq.NewRmqID(1), nil
+	})
+	assert.ErrorContains(t, err, "does not contain collection schema")
+	assert.Nil(t, msgID)
+	assert.False(t, appended)
+}
+
 func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *testing.T) {
 	collectionID := int64(99002)
 	vchannel := "by-dev-rootcoord-dml_0_99002v0"
@@ -479,7 +498,7 @@ func TestShardInterceptor(t *testing.T) {
 			CollectionId: 1,
 			PartitionIds: []int64{1},
 		}).
-		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Version: 0}}).
 		MustBuildMutable()
 	shardManager.EXPECT().CheckIfCollectionCanBeCreated(mock.Anything).Return(nil)
 	shardManager.EXPECT().CreateCollection(mock.Anything).Return()
