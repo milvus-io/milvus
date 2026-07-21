@@ -11,6 +11,8 @@
 package storage
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -26,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // TestPackedManifestRecordWriter_CloseWithoutWrite verifies the no-data
@@ -75,11 +78,62 @@ func TestPackedTextManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// No Write before Close. The text writer's nil-handling path must
-	// fall through to writeStats() and exit cleanly.
+	// exit cleanly without producing legacy stats.
 	require.NoError(t, w.Close())
 
 	_, _, _, manifestPath, _ := w.GetLogs()
 	assert.Empty(t, manifestPath, "no Write means no manifest should be produced")
+}
+
+func TestPackedTextManifestRecordWriter_AppendsV3StatsToManifest(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	schema := genCollectionSchemaWithBM25()
+	collectionID := UniqueID(10)
+	partitionID := UniqueID(20)
+	segmentID := UniqueID(30)
+
+	w, err := NewPackedTextManifestRecordWriter(collectionID, partitionID, segmentID, schema,
+		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
+		allocator.NewLocalAllocator(1000, 1<<20),
+		1024, 0, 0, nil, cfg, nil, "")
+	require.NoError(t, err)
+
+	value := &Value{
+		PK:        NewVarCharPrimaryKey("0"),
+		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
+		Value:     genRowWithBM25(0),
+	}
+	rec, err := ValueSerializer([]*Value{value}, schema)
+	require.NoError(t, err)
+	require.NoError(t, w.Write(rec))
+	require.NoError(t, w.Close())
+
+	_, statsLog, bm25Logs, manifestPath, _ := w.GetLogs()
+	require.NotEmpty(t, manifestPath)
+
+	stats, err := packed.GetManifestStats(manifestPath, cfg)
+	require.NoError(t, err)
+
+	bfKey := "bloom_filter.100"
+	bfStat, ok := stats[bfKey]
+	require.True(t, ok, "TEXT manifest writer must register PK BF stats under %q", bfKey)
+	require.NotEmpty(t, bfStat.Paths)
+	bfMemorySize, err := strconv.ParseInt(bfStat.Metadata["memory_size"], 10, 64)
+	require.NoError(t, err)
+	require.Positive(t, bfMemorySize)
+	assert.True(t, strings.Contains(bfStat.Paths[0], "/_stats/bloom_filter.100/"))
+	assert.NotContains(t, bfStat.Paths[0], "stats_log")
+
+	bm25Key := "bm25.102"
+	bm25Stat, ok := stats[bm25Key]
+	require.True(t, ok, "TEXT manifest writer must register BM25 stats under %q", bm25Key)
+	require.NotEmpty(t, bm25Stat.Paths)
+	assert.True(t, strings.Contains(bm25Stat.Paths[0], "/_stats/bm25.102/"))
+	assert.NotContains(t, bm25Stat.Paths[0], "stats_log")
+
+	assert.Nil(t, statsLog, "V3 manifest stats must not be returned as legacy PK statslog")
+	assert.Empty(t, bm25Logs, "V3 manifest stats must not be returned as legacy BM25 statslog")
 }
 
 func TestPackedManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) {
