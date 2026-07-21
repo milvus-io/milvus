@@ -2346,6 +2346,12 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 		s.meta = meta
+		err = meta.UpdateChannelCheckpoint(ctx, channelName, &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       []byte{0},
+			Timestamp:   flushTs - 1,
+		})
+		assert.NoError(t, err)
 
 		// WatchChannelCheckpoint will wait indefinitely, so we use a context with timeout
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
