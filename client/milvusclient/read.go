@@ -180,6 +180,25 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 
 		columns = append(columns, col)
 	}
+	if len(fieldDataList) == 0 {
+		seen := make(map[string]struct{}, len(outputFields))
+		for _, fieldName := range outputFields {
+			if _, ok := seen[fieldName]; ok {
+				continue
+			}
+			seen[fieldName] = struct{}{}
+
+			field := schemaFields[fieldName]
+			if field == nil || field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct {
+				continue
+			}
+			col, err := newEmptyStructArrayColumn(field)
+			if err != nil {
+				return nil, err
+			}
+			columns = append(columns, col)
+		}
+	}
 
 	// extra name found and not json output
 	if len(dynamicNames) > 0 && dynamicColumn == nil {
@@ -196,6 +215,27 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	}
 
 	return columns, nil
+}
+
+func newEmptyStructArrayColumn(field *entity.Field) (column.Column, error) {
+	if field.StructSchema == nil {
+		return nil, errors.Newf("struct array field %q has no struct schema", field.Name)
+	}
+
+	subColumns := make([]column.Column, 0, len(field.StructSchema.Fields))
+	for _, subField := range field.StructSchema.Fields {
+		subColumn, err := newStructSubColumn(subField)
+		if err != nil {
+			return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
+		}
+		subColumns = append(subColumns, subColumn)
+	}
+	col := column.NewColumnStructArray(field.Name, subColumns)
+	col.SetNullable(field.Nullable)
+	if err := col.ValidateNullable(); err != nil {
+		return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
+	}
+	return col, nil
 }
 
 func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {

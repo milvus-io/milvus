@@ -221,6 +221,24 @@ func (s *ReadSuite) TestParseEmptyNullableStructArrayFromWire() {
 	s.Require().NoError(columns[0].ValidateNullable())
 }
 
+func (s *ReadSuite) TestParseEmptyNullableStructArrayWithoutFieldData() {
+	schema := entity.NewSchema().WithField(entity.NewField().
+		WithName("clips").
+		WithDataType(entity.FieldTypeArray).
+		WithElementType(entity.FieldTypeStruct).
+		WithNullable(true).
+		WithStructSchema(entity.NewStructSchema().
+			WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeInt64)).
+			WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2))))
+
+	columns, err := s.client.parseSearchResult(schema, []string{"clips"}, nil, 0, 0, 0)
+	s.Require().NoError(err)
+	s.Require().Len(columns, 1)
+	s.True(columns[0].Nullable())
+	s.Zero(columns[0].Len())
+	s.Require().NoError(columns[0].ValidateNullable())
+}
+
 // TestSearch_TextMatch tests the text match search functionality.
 // It tests the minimum_should_match parameter in the expression.
 func (s *ReadSuite) TestSearch_TextMatch() {
