@@ -283,6 +283,13 @@ func (c *columnVectorArrayBase[T]) rebuildIndexMapping() {
 	}
 }
 
+func (c *columnVectorArrayBase[T]) setNullableData(validData []bool, sparseMode bool) error {
+	c.nullable = true
+	c.validData = validData
+	c.sparseMode = sparseMode
+	return c.ValidateNullable()
+}
+
 func countValid(validData []bool) int {
 	count := 0
 	for _, valid := range validData {
