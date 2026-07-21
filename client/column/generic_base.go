@@ -249,10 +249,14 @@ func (c *genericColumnBase[T]) SetNullable(nullable bool) {
 	if c.nullable && c.validData == nil {
 		// set valid flag for all exisiting values
 		c.validData = lo.RepeatBy(len(c.values), func(_ int) bool { return true })
+		if !c.sparseMode {
+			_ = c.validateNullableCompact()
+		}
 	}
 
 	if !c.nullable {
 		c.validData = nil
+		c.indexMapping = nil
 	}
 }
 
