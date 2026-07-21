@@ -131,6 +131,18 @@ func TestFunctionRunnerManagerUpdateOnlyAdvancesSchemaVersion(t *testing.T) {
 	require.ErrorContains(t, err, "output field 999 not found")
 }
 
+func TestBuildFunctionRunnerVersionCachesFieldIDs(t *testing.T) {
+	schema := newBM25SignatureTestSchema()
+	version, _, err := buildFunctionRunnerVersion(schema)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]struct{}{
+		100: {},
+		101: {},
+		102: {},
+		103: {},
+	}, version.fieldIDs)
+}
+
 func TestEmbeddingOutputFieldIDsReturnsAllFunctionOutputs(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{

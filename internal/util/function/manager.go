@@ -105,6 +105,7 @@ type functionRunnerVersion struct {
 	schema                  *schemapb.CollectionSchema
 	signatures              []string
 	outputFieldIDs          []int64
+	fieldIDs                map[int64]struct{}
 	outputFieldSignatures   map[int64]string
 	analyzerFieldSignatures map[int64]string
 }
@@ -578,8 +579,12 @@ func buildFunctionRunnerVersion(schema *schemapb.CollectionSchema) (*functionRun
 		schema:                  proto.Clone(schema).(*schemapb.CollectionSchema),
 		signatures:              make([]string, 0, len(functions)),
 		outputFieldIDs:          make([]int64, 0, len(functions)),
+		fieldIDs:                make(map[int64]struct{}),
 		outputFieldSignatures:   make(map[int64]string),
 		analyzerFieldSignatures: make(map[int64]string),
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		versionRunners.fieldIDs[field.GetFieldID()] = struct{}{}
 	}
 	functionsBySignature := make(map[string]*schemapb.FunctionSchema, len(functions))
 	for _, fn := range functions {
@@ -726,7 +731,7 @@ func (e *functionRunnerCollectionEntry) RunWithRunner(
 	}
 	signature, ok := versionRunners.outputFieldSignatures[outputFieldID]
 	if !ok {
-		fieldExists := typeutil.GetField(versionRunners.schema, outputFieldID) != nil
+		_, fieldExists := versionRunners.fieldIDs[outputFieldID]
 		e.mu.RUnlock()
 		if !fieldExists {
 			return false, merr.WrapErrServiceUnavailableMsg("field %d is not available in function runner schema for key %s at schema version %d", outputFieldID, key, schemaVersion)
