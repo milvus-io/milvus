@@ -2513,6 +2513,11 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
+	key := delegatorFunctionRunnerKey("test-channel")
+	require.NoError(t, function.GetManager().Alloc(1000, key, newFunctionRuntimeTestSchema()))
+	t.Cleanup(func() {
+		function.GetManager().Release(1000, key)
+	})
 	worker := cluster.NewMockWorker(t)
 	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
 	workerManager := cluster.NewMockManager(t)
@@ -2538,7 +2543,6 @@ func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 	err := sd.UpdateSchema(context.Background(), newSchema, 100)
 	require.NoError(t, err)
 
-	key := delegatorFunctionRunnerKey("test-channel")
 	ok, err := function.GetManager().RunWithRunner(context.Background(), 1000, key, 102, func(runner function.FunctionRunner) error {
 		assert.Equal(t, schemapb.FunctionType_BM25, runner.GetSchema().GetType())
 		return nil
@@ -2561,6 +2565,11 @@ func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 func TestUpdateSchemaPanicsOnInvalidFunctionMetadata(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
+	key := delegatorFunctionRunnerKey("test-channel")
+	require.NoError(t, function.GetManager().Alloc(1000, key, newFunctionRuntimeTestSchema()))
+	t.Cleanup(func() {
+		function.GetManager().Release(1000, key)
+	})
 	worker := cluster.NewMockWorker(t)
 	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
 	workerManager := cluster.NewMockManager(t)
