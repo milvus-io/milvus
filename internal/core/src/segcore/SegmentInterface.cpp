@@ -768,8 +768,11 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
     }
 }
 
-const SkipIndex&
+std::shared_ptr<const SkipIndex>
 SegmentInternalInterface::GetSkipIndex() const {
+    if (auto* sealed = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
+        return sealed->GetSkipIndexSnapshot();
+    }
     return skip_index_;
 }
 
