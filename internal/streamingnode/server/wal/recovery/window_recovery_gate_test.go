@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -88,6 +89,96 @@ func TestRecoverWindowsDropsStaleStoreWhenIdempotencyDisabled(t *testing.T) {
 	require.Nil(t, catalogState.storeMeta)
 	require.Empty(t, catalogState.windowMetas)
 	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 0, false)
+}
+
+// A persist writes the chunk before the pchannel meta, so a crash in between
+// leaves an orphan chunk above LatestGeneration. Dropping the store must reap
+// that orphan too: a chunk kept behind outlives the metas that referenced the
+// store, and permanently fails the write-if-absent of the same generation once
+// idempotency is re-enabled.
+func TestRecoverWindowsDropsOrphanChunksWhenIdempotencyDisabled(t *testing.T) {
+	ctx := context.Background()
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
+	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+
+	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	footer, _, _ := writeTestPChannelWindowChunk(t, ctx, "p1", 0, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(10),
+		TimeTick:  10,
+	}, nil)
+	// The meta only ever referenced generation 0; generation 1 is the orphan of a
+	// persist that crashed after writing the chunk.
+	writeTestPChannelWindowChunk(t, ctx, "p1", 1, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(20),
+		TimeTick:  20,
+	}, nil)
+	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	_, err := rs.windowManager.recoverWindows(ctx, "p1", rs.checkpoint, rs.vchannels)
+	require.NoError(t, err)
+	require.Nil(t, catalogState.storeMeta)
+	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 0, false)
+	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 1, false)
+}
+
+// The chunk removal of a drop is best-effort, so re-enabling idempotency can find
+// chunks that no catalog meta references any more. Bootstrap must reap them:
+// otherwise generation 0 fails write-if-absent with a payload mismatch, which is
+// retried until the context dies and hangs the WAL open, and a leftover at a
+// higher generation would be adopted by the orphan probe (rewinding recovery to
+// an already-truncated source checkpoint) or wedge the persist that later reaches
+// that generation.
+func TestBootstrapReapsChunksLeftByIncompleteDrop(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
+	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
+
+	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
+
+	// Leftovers of a store whose metas are already gone: generation 0 carries a
+	// different payload than the one bootstrap is about to write, and generation 3
+	// sits above a gap, at a generation the store writes again later.
+	writeTestPChannelWindowChunk(t, ctx, "p1", 0, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(10),
+		TimeTick:  10,
+	}, nil)
+	writeTestPChannelWindowChunk(t, ctx, "p1", 3, chunkManager, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(40),
+		TimeTick:  40,
+	}, nil)
+
+	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
+		MessageID: rmq.NewRmqID(100),
+		TimeTick:  100,
+	})
+	rs.vchannels = newVChannelRecoveryInfoFromVChannelMeta([]*streamingpb.VChannelMeta{
+		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+	})
+	rs.SetLogger(resource.Resource().Logger())
+
+	checkpoint, err := rs.windowManager.recoverWindows(ctx, "p1", rs.checkpoint, rs.vchannels)
+	require.NoError(t, err)
+	// The store is bootstrapped from the current checkpoint, not from the stale
+	// leftovers, and no leftover chunk survives.
+	require.Equal(t, uint64(100), checkpoint.TimeTick)
+	require.NotNil(t, catalogState.storeMeta)
+	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
+	require.Equal(t, uint64(100), catalogState.storeMeta.GetSourceCheckpointTimetick())
+	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", 3, false)
 }
 
 // Window lifecycle (creation) belongs on vchannel events, not the per-message
