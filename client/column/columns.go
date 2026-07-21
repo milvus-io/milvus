@@ -95,7 +95,7 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	nullableCreator func(string, []T, []bool, ...ColumnOption[T]) (NCOL, error),
 ) (Column, error) {
 	logicalLen := len(data)
-	if len(validData) > 0 {
+	if validData != nil {
 		logicalLen = len(validData)
 	}
 	if start < 0 {
@@ -111,7 +111,7 @@ func parseScalarData[T any, COL Column, NCOL Column](
 		start = end
 	}
 
-	if len(validData) > 0 {
+	if validData != nil {
 		validCount := countValid(validData)
 		sparseMode := false
 		switch len(data) {
