@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"math"
-	"sort"
 
 	"github.com/cockroachdb/errors"
 
@@ -23,7 +22,11 @@ func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 		return errors.New("id allocator is required to stabilize auto id shard assignment")
 	}
 
-	channelNames = stableAutoIDChannelOrder(channelNames)
+	// The routing base must stay exactly the channel list returned by the channel
+	// manager: PK routing is index-based (HashPK2Channels only uses len(channels),
+	// then channelNames[idx]), and delete / the delete leg of upsert hash against
+	// that same unpermuted list. Reordering it here would map a PK to a different
+	// vchannel than delete later picks for the very same PK.
 	it.vChannels = channelNames
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
 	if err := reassignAutoIDByOffsetChannels(
@@ -51,14 +54,6 @@ func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 	return nil
 }
 
-func stableAutoIDChannelOrder(channelNames []vChan) []vChan {
-	// AutoID retry routing is based on row offset, so it must not inherit
-	// nondeterminism from the channel manager's return order.
-	ordered := append([]vChan(nil), channelNames...)
-	sort.Strings(ordered)
-	return ordered
-}
-
 func replacePrimaryFieldData(it *insertTask, primaryFieldSchema *schemapb.FieldSchema, primaryFieldData *schemapb.FieldData) {
 	for idx, fieldData := range it.insertMsg.GetFieldsData() {
 		if fieldData.GetFieldId() == primaryFieldSchema.GetFieldID() || fieldData.GetFieldName() == primaryFieldSchema.GetName() {
@@ -83,8 +78,12 @@ func reassignAutoIDByOffsetChannels(
 	if allocFunc == nil {
 		return errors.New("id allocator is nil")
 	}
-	channelNames = stableAutoIDChannelOrder(channelNames)
 
+	// Retry stability comes from the offset bucketing alone: offset%numChannels is
+	// evaluated against the caller's channel order, which is the collection's stored
+	// vchannel list. That order must not be permuted here, otherwise the resulting
+	// PK->vchannel map diverges from the one delete uses; see
+	// reassignAutoIDForStableIdempotency.
 	required := make([]int, numChannels)
 	for offset := range rowIDs {
 		required[offset%numChannels]++
