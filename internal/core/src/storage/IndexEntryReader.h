@@ -147,12 +147,26 @@ class IndexEntryReader {
         EncryptedEntryMeta enc;
     };
 
+    struct CachedTail {
+        size_t offset = 0;
+        std::vector<uint8_t> data;
+    };
+
+    struct ReadContext {
+        // Immutable after Open returns; worker tasks may read it concurrently.
+        std::shared_ptr<milvus::InputStream> input;
+        CachedTail cached_tail;
+
+        size_t
+        ReadAt(void* data, size_t offset, size_t size) const;
+    };
+
     IndexEntryReader() = default;
 
     void
     ReadFooterAndDirectory();
     void
-    ValidateMagic();
+    ValidateMagic(const uint8_t* magic) const;
     void
     CheckCancelled(const std::string& operation) const;
 
@@ -238,8 +252,8 @@ class IndexEntryReader {
     void
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
 
-    std::shared_ptr<milvus::InputStream> input_;
-    int64_t file_size_ = 0;
+    std::shared_ptr<ReadContext> read_ctx_;
+    size_t file_size_ = 0;
     int64_t collection_id_ = 0;
     ThreadPoolPriority priority_ = ThreadPoolPriority::HIGH;
     folly::CancellationToken cancellation_token_;

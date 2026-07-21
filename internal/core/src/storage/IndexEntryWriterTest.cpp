@@ -23,9 +23,11 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -40,6 +42,7 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
@@ -306,6 +309,98 @@ class TrackingDelayedInputStream : public milvus::InputStream {
     std::atomic<size_t> max_active_reads_{0};
 };
 
+class CountingInputStream : public milvus::InputStream {
+ public:
+    struct ReadCall {
+        size_t offset;
+        size_t size;
+    };
+
+    explicit CountingInputStream(std::vector<uint8_t> data)
+        : data_(std::move(data)) {
+    }
+
+    size_t
+    Size() const override {
+        return data_.size();
+    }
+
+    bool
+    Seek(int64_t offset) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (offset < 0 || static_cast<uint64_t>(offset) > data_.size()) {
+            return false;
+        }
+        position_ = static_cast<size_t>(offset);
+        return true;
+    }
+
+    size_t
+    Tell() const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return position_;
+    }
+
+    bool
+    Eof() const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return position_ >= data_.size();
+    }
+
+    size_t
+    Read(void* ptr, size_t size) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        size_t bytes_read = CopyAt(ptr, position_, size);
+        position_ += bytes_read;
+        return bytes_read;
+    }
+
+    size_t
+    ReadAt(void* ptr, size_t offset, size_t size) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        read_calls_.push_back({offset, size});
+        return CopyAt(ptr, offset, size);
+    }
+
+    size_t
+    Read(int, size_t) override {
+        return 0;
+    }
+
+    size_t
+    ReadCount() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return read_calls_.size();
+    }
+
+    size_t
+    ReadCount(size_t offset, size_t size) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return std::count_if(
+            read_calls_.begin(), read_calls_.end(), [&](const ReadCall& call) {
+                return call.offset == offset && call.size == size;
+            });
+    }
+
+ private:
+    size_t
+    CopyAt(void* ptr, size_t offset, size_t size) const {
+        if (offset > data_.size()) {
+            return 0;
+        }
+        size_t bytes_read = std::min(size, data_.size() - offset);
+        if (bytes_read > 0) {
+            std::memcpy(ptr, data_.data() + offset, bytes_read);
+        }
+        return bytes_read;
+    }
+
+    std::vector<uint8_t> data_;
+    mutable std::mutex mutex_;
+    size_t position_{0};
+    std::vector<ReadCall> read_calls_;
+};
+
 }  // namespace
 
 namespace {
@@ -332,6 +427,93 @@ VerifyPattern(const std::vector<uint8_t>& data, size_t expected_size) {
         ASSERT_EQ(data[i], static_cast<uint8_t>(i % 256))
             << "Mismatch at byte " << i;
     }
+}
+
+struct PackedFileImage {
+    std::vector<uint8_t> bytes;
+    std::unordered_map<std::string, std::pair<size_t, size_t>> entry_ranges;
+    size_t meta_offset = 0;
+    size_t meta_size = 0;
+    size_t directory_size = 0;
+};
+
+PackedFileImage
+BuildPackedFileImage(
+    const std::vector<std::pair<std::string, std::vector<uint8_t>>>& entries,
+    const std::string& meta,
+    size_t prefix_padding = 0) {
+    PackedFileImage image;
+    image.bytes.insert(image.bytes.end(),
+                       MILVUS_V3_MAGIC,
+                       MILVUS_V3_MAGIC + MILVUS_V3_MAGIC_SIZE);
+    image.bytes.insert(image.bytes.end(), prefix_padding, uint8_t{0});
+
+    nlohmann::json directory;
+    directory["entries"] = nlohmann::json::array();
+    for (const auto& [name, data] : entries) {
+        size_t absolute_offset = image.bytes.size();
+        size_t data_region_offset = absolute_offset - MILVUS_V3_MAGIC_SIZE;
+        image.bytes.insert(image.bytes.end(), data.begin(), data.end());
+        image.entry_ranges.emplace(
+            name, std::make_pair(absolute_offset, data.size()));
+        directory["entries"].push_back(
+            {{"name", name},
+             {"offset", data_region_offset},
+             {"size", data.size()},
+             {"crc32", Crc32cToHex(Crc32cValue(data.data(), data.size()))}});
+    }
+
+    image.meta_offset = image.bytes.size();
+    image.meta_size = meta.size();
+    image.bytes.insert(image.bytes.end(), meta.begin(), meta.end());
+    directory["entries"].push_back(
+        {{"name", MILVUS_V3_META_ENTRY_NAME},
+         {"offset", image.meta_offset - MILVUS_V3_MAGIC_SIZE},
+         {"size", meta.size()},
+         {"crc32", Crc32cToHex(Crc32cValue(meta.data(), meta.size()))}});
+
+    std::string directory_data = directory.dump();
+    image.directory_size = directory_data.size();
+    image.bytes.insert(
+        image.bytes.end(), directory_data.begin(), directory_data.end());
+
+    if (meta.size() > std::numeric_limits<uint32_t>::max() ||
+        directory_data.size() > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("Packed test image footer size overflow");
+    }
+    uint8_t footer[MILVUS_V3_FOOTER_SIZE] = {};
+    uint16_t version = MILVUS_V3_FORMAT_VERSION;
+    uint32_t meta_size = static_cast<uint32_t>(meta.size());
+    uint32_t directory_size = static_cast<uint32_t>(directory_data.size());
+    std::memcpy(footer, &version, sizeof(version));
+    std::memcpy(footer + 24, &meta_size, sizeof(meta_size));
+    std::memcpy(footer + 28, &directory_size, sizeof(directory_size));
+    image.bytes.insert(
+        image.bytes.end(), footer, footer + MILVUS_V3_FOOTER_SIZE);
+    return image;
+}
+
+PackedFileImage
+BuildExactSizePackedFile(size_t target_size) {
+    size_t prefix_padding = 0;
+    for (size_t attempt = 0; attempt < 32; ++attempt) {
+        auto image = BuildPackedFileImage(
+            {{"payload", std::vector<uint8_t>{0x5a}}}, "{}", prefix_padding);
+        if (image.bytes.size() == target_size) {
+            return image;
+        }
+        if (image.bytes.size() < target_size) {
+            prefix_padding += target_size - image.bytes.size();
+        } else {
+            size_t excess = image.bytes.size() - target_size;
+            if (prefix_padding < excess) {
+                throw std::runtime_error(
+                    "Packed test image is larger than target size");
+            }
+            prefix_padding -= excess;
+        }
+    }
+    throw std::runtime_error("Failed to build exact-size packed index image");
 }
 
 }  // namespace
@@ -820,6 +1002,171 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesToFilesMultiRangeParallel) {
 // =============================================================================
 // Edge Case Tests: Directory Table and Meta Entry size boundaries
 // =============================================================================
+
+TEST(IndexEntryReaderTailCacheTest, ExactTailBoundaryReadCounts) {
+    constexpr size_t kTailSize = 64 * 1024;
+    for (const auto& [file_size, expected_reads] :
+         std::vector<std::pair<size_t, size_t>>{
+             {kTailSize - 1, 1}, {kTailSize, 1}, {kTailSize + 1, 2}}) {
+        SCOPED_TRACE(file_size);
+        auto image = BuildExactSizePackedFile(file_size);
+        auto input = std::make_shared<CountingInputStream>(image.bytes);
+
+        auto reader = IndexEntryReader::Open(input, image.bytes.size());
+
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(input->ReadCount(), expected_reads);
+    }
+}
+
+TEST(IndexEntryReaderTailCacheTest,
+     FullCoverageHitsButPartialOverlapFallsBack) {
+    auto full_hit_image = BuildPackedFileImage(
+        {{"late", std::vector<uint8_t>(32, 0x31)}}, "{}", 70 * 1024);
+    auto full_hit_input =
+        std::make_shared<CountingInputStream>(full_hit_image.bytes);
+    auto full_hit_reader =
+        IndexEntryReader::Open(full_hit_input, full_hit_image.bytes.size());
+    size_t reads_before_full_hit = full_hit_input->ReadCount();
+
+    auto full_hit_entry = full_hit_reader->ReadEntry("late");
+
+    EXPECT_EQ(full_hit_entry.data, std::vector<uint8_t>(32, 0x31));
+    EXPECT_EQ(full_hit_input->ReadCount(), reads_before_full_hit);
+
+    auto partial_image = BuildPackedFileImage(
+        {{"overlap", std::vector<uint8_t>(70 * 1024, 0x42)}}, "{}");
+    auto partial_input =
+        std::make_shared<CountingInputStream>(partial_image.bytes);
+    auto partial_reader =
+        IndexEntryReader::Open(partial_input, partial_image.bytes.size());
+    size_t reads_before_partial = partial_input->ReadCount();
+    const auto [entry_offset, entry_size] =
+        partial_image.entry_ranges.at("overlap");
+
+    auto partial_entry = partial_reader->ReadEntry("overlap");
+
+    EXPECT_EQ(partial_entry.data, std::vector<uint8_t>(70 * 1024, 0x42));
+    EXPECT_EQ(partial_input->ReadCount(), reads_before_partial + 1);
+    EXPECT_EQ(partial_input->ReadCount(entry_offset, entry_size), 1);
+}
+
+TEST(IndexEntryReaderTailCacheTest, ExpandedDirectoryRetainsOnlyFinalTail) {
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> entries;
+    entries.reserve(1200);
+    for (size_t i = 0; i < 1200; ++i) {
+        entries.emplace_back("long_directory_entry_name_" +
+                                 std::string(40, 'x') + std::to_string(i),
+                             std::vector<uint8_t>{});
+    }
+    auto image = BuildPackedFileImage(entries, "{}");
+    ASSERT_GT(image.directory_size, 64 * 1024);
+    auto input = std::make_shared<CountingInputStream>(image.bytes);
+
+    auto reader = IndexEntryReader::Open(input, image.bytes.size());
+
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(input->ReadCount(image.meta_offset, image.meta_size), 1);
+}
+
+TEST(IndexEntryReaderTailCacheTest, ExpandedMetaRetainsOnlyFinalTail) {
+    std::string meta =
+        nlohmann::json({{"large", std::string(70 * 1024, 'm')}}).dump();
+    auto image = BuildPackedFileImage({}, meta);
+    ASSERT_GT(image.meta_size + image.directory_size + MILVUS_V3_FOOTER_SIZE,
+              64 * 1024);
+    auto input = std::make_shared<CountingInputStream>(image.bytes);
+
+    auto reader = IndexEntryReader::Open(input, image.bytes.size());
+
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->GetMeta<std::string>("large"),
+              std::string(70 * 1024, 'm'));
+    EXPECT_EQ(input->ReadCount(image.meta_offset, image.meta_size), 1);
+}
+
+TEST(IndexEntryReaderTailCacheTest, CorruptMagicReportsMagicError) {
+    for (size_t prefix_padding : {size_t{0}, size_t{70 * 1024}}) {
+        SCOPED_TRACE(prefix_padding);
+        auto image = BuildPackedFileImage({}, "{}", prefix_padding);
+        image.bytes[0] ^= 0xff;
+        auto input = std::make_shared<CountingInputStream>(image.bytes);
+
+        try {
+            IndexEntryReader::Open(input, image.bytes.size());
+            FAIL() << "expected invalid magic error";
+        } catch (const milvus::SegcoreError& e) {
+            EXPECT_NE(std::string(e.what()).find("Invalid V3 magic number"),
+                      std::string::npos);
+        }
+        EXPECT_EQ(input->ReadCount(), 1);
+        if (prefix_padding != 0) {
+            EXPECT_EQ(input->ReadCount(0, MILVUS_V3_MAGIC_SIZE), 1);
+            EXPECT_EQ(
+                input->ReadCount(image.bytes.size() - 64 * 1024, 64 * 1024), 0);
+        }
+    }
+}
+
+TEST(IndexEntryReaderTailCacheTest, NonV3FileReportsMagicBeforeFooterErrors) {
+    std::vector<uint8_t> bytes(128, 0xa5);
+    auto input = std::make_shared<CountingInputStream>(std::move(bytes));
+
+    try {
+        IndexEntryReader::Open(input, input->Size());
+        FAIL() << "expected invalid magic error";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find("Invalid V3 magic number"),
+                  std::string::npos);
+    }
+    EXPECT_EQ(input->ReadCount(), 1);
+}
+
+TEST(IndexEntryReaderTailCacheTest, ShortTailReadStillFails) {
+    auto image = BuildPackedFileImage({}, "{}");
+    auto input = std::make_shared<CountingInputStream>(image.bytes);
+
+    EXPECT_ANY_THROW(IndexEntryReader::Open(input, image.bytes.size() + 1));
+    EXPECT_EQ(input->ReadCount(), 1);
+}
+
+TEST(IndexEntryReaderTailCacheTest, PreCancelledOpenDoesNotRead) {
+    auto image = BuildPackedFileImage({}, "{}");
+    folly::CancellationSource source;
+    source.requestCancellation();
+
+    for (int64_t file_size :
+         {static_cast<int64_t>(image.bytes.size()), int64_t{39}}) {
+        SCOPED_TRACE(file_size);
+        auto input = std::make_shared<CountingInputStream>(image.bytes);
+
+        try {
+            IndexEntryReader::Open(input,
+                                   file_size,
+                                   0,
+                                   milvus::ThreadPoolPriority::HIGH,
+                                   source.getToken());
+            FAIL() << "expected cancellation error";
+        } catch (const milvus::SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(input->ReadCount(), 0);
+    }
+}
+
+TEST(IndexEntryReaderTailCacheTest, InvalidSignedAndSmallSizesDoNotRead) {
+    auto image = BuildPackedFileImage({}, "{}");
+    for (int64_t invalid_size : {std::numeric_limits<int64_t>::min(),
+                                 int64_t{-1},
+                                 int64_t{0},
+                                 int64_t{39}}) {
+        SCOPED_TRACE(invalid_size);
+        auto input = std::make_shared<CountingInputStream>(image.bytes);
+
+        EXPECT_ANY_THROW(IndexEntryReader::Open(input, invalid_size));
+        EXPECT_EQ(input->ReadCount(), 0);
+    }
+}
 
 TEST_F(IndexEntryWriterV3Test, LargeDirectoryTableNeedsSecondIO) {
     // Create many entries with long names to make directory table > 64KB
