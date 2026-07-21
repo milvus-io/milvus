@@ -104,6 +104,9 @@ func (c *columnStructArray) AppendValue(value any) error {
 	if !ok {
 		return errors.Newf("struct array AppendValue expects map[string]any, got %T", value)
 	}
+	if row == nil {
+		return c.AppendNull()
+	}
 	// pre-check all keys exist before mutating any sub-column.
 	for _, sub := range c.fields {
 		if _, present := row[sub.Name()]; !present {
