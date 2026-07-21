@@ -282,7 +282,6 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 return raw;
             }
         } else {
-            // null is not supported for indexed fields
             AssertInfo(index_ptr_.get() != nullptr,
                        "indexed field {} has no valid index pointer",
                        field_id_.get());
@@ -294,7 +293,13 @@ class SealedDataGetter : public DataGetter<OutputType> {
                        "ScalarIndex<OutputType>",
                        field_id_.get());
             auto raw = chunk_index->Reverse_Lookup(idx);
-            AssertInfo(raw.has_value(), "field data not found");
+            // A null row has no value in the index (Reverse_Lookup ==
+            // nullopt). Return nullopt so it forms a distinct null group,
+            // consistent with the from-data getter branches above — instead
+            // of asserting and failing the whole group-by query.
+            if (!raw.has_value()) {
+                return std::nullopt;
+            }
             return raw.value();
         }
     }
