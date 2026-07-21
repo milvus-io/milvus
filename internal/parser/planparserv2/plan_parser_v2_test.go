@@ -2694,8 +2694,6 @@ func Test_ArrayExpr(t *testing.T) {
 		`ArrayField % 3 == 1`,
 		`ArrayField + 3 == 1`,
 		`ArrayField in [1,2,3]`,
-		`ArrayField in [[1,2,3]]`,
-		`ArrayField in [[]]`,
 		`ArrayField[0] in [1, "abc",3.3]`,
 		`0 < ArrayField < 100`,
 		`100 > ArrayField > 0`,

@@ -57,6 +57,15 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 					})),
 			}},
 
+			{`ArrayField in {list}`, map[string]*schemapb.TemplateValue{
+				"list": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Array,
+						[]*schemapb.TemplateArrayValue{
+							generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)}),
+							generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(4), int64(5), int64(6)}),
+							generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(7), int64(8), int64(9)}),
+						})),
+			}},
 			{`ArrayField[0] in {list}`, map[string]*schemapb.TemplateValue{
 				"list": generateTemplateValue(schemapb.DataType_Array,
 					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)})),
@@ -100,23 +109,6 @@ func (s *FillExpressionValueSuite) TestTermExpr() {
 			{"Int64Field not in {not_list}", map[string]*schemapb.TemplateValue{
 				"age": generateTemplateValue(schemapb.DataType_Int64, int64(33)),
 			}},
-			{`ArrayField in {list}`, map[string]*schemapb.TemplateValue{
-				"list": generateTemplateValue(schemapb.DataType_Array,
-					generateTemplateArrayValue(schemapb.DataType_Array,
-						[]*schemapb.TemplateArrayValue{
-							generateTemplateArrayValue(schemapb.DataType_Int64, []int64{int64(1), int64(2), int64(3)}),
-						})),
-			}},
-			{`ArrayField in {list}`, map[string]*schemapb.TemplateValue{
-				"list": generateTemplateValue(schemapb.DataType_Array,
-					generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{{}})),
-			}},
-			{`JSONField["arr"] not in {list}`, map[string]*schemapb.TemplateValue{
-				"list": generateTemplateValue(schemapb.DataType_Array,
-					generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{
-						generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2}),
-					})),
-			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -138,6 +130,10 @@ func (s *FillExpressionValueSuite) TestEmptyArrayTemplate() {
 		{`Int64Field >= {minimum}`, map[string]*schemapb.TemplateValue{
 			"minimum": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
 			"unused":  emptyArray,
+		}},
+		{`ArrayField in {values}`, map[string]*schemapb.TemplateValue{
+			"values": generateTemplateValue(schemapb.DataType_Array,
+				generateTemplateArrayValue(schemapb.DataType_Array, []*schemapb.TemplateArrayValue{{}})),
 		}},
 	}
 
