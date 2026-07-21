@@ -42,6 +42,18 @@ struct GISGroupState {
         bool has_index{false};
         // Per-predicate R-Tree coarse bitmap (segment-level, computed once).
         TargetBitmap coarse;
+        // Why this predicate's coarse bitmap ended up all-ones, if it did.
+        // An all-ones coarse is always CORRECT -- Refine still evaluates the
+        // exact predicate -- but it prunes nothing, so the pruning gain
+        // silently drops to zero. ON/OFF equivalence tests cannot see this
+        // (they are only sensitive to coarse UNDER-inclusion), which is why
+        // the reason is recorded rather than left implicit.
+        enum class CoarseDegrade {
+            kNone = 0,       // R-Tree answered; coarse is a real candidate set
+            kNoIndex,        // no geometry index on this field (expected)
+            kIndexUnusable,  // index reported present but the pin yielded nothing
+        };
+        CoarseDegrade degraded{CoarseDegrade::kNone};
     };
 
     FieldId field_id;
@@ -57,6 +69,20 @@ struct GISGroupState {
     // per-segment batch execution is single-threaded, so this guard needs no
     // atomicity -- it is only read/written inside PhyGISCoarseConjunctExpr::Eval.
     bool coarse_done{false};
+
+    // --- pruning observability -------------------------------------------
+    // The point of split-fusion is that Refine only evaluates survivors. That
+    // contract is invisible to ON/OFF equivalence tests: making Refine
+    // evaluate every active row keeps every result bit identical and only
+    // costs performance. These counters make the contract assertable (and
+    // greppable in production).
+    //
+    // Rows set in B_coarse after combining every predicate.
+    int64_t coarse_selected{0};
+    // Rows Refine actually evaluated the exact predicate for, i.e. survivors
+    // of (scalars AND B_coarse). Must stay well below active_count for a
+    // selective query, otherwise pruning is not happening.
+    int64_t refined_rows{0};
 };
 
 using GISGroupStatePtr = std::shared_ptr<GISGroupState>;
