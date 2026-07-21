@@ -109,6 +109,9 @@ func (c *columnStructArray) FieldData() *schemapb.FieldData {
 // If any sub-field append fails, previously appended sub-fields are rolled back to their pre-call
 // lengths so sub-columns stay in lock-step.
 func (c *columnStructArray) AppendValue(value any) error {
+	if value == nil {
+		return c.AppendNull()
+	}
 	row, ok := value.(map[string]any)
 	if !ok {
 		return errors.Newf("struct array AppendValue expects map[string]any, got %T", value)
