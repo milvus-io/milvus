@@ -94,24 +94,38 @@ func (c *genericColumnBase[T]) Slice(start, end int) Column {
 	return c.slice(start, end)
 }
 
-// WARNING: this methods works only for sparse mode column
 func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	l := c.Len()
+	if start < 0 {
+		start = 0
+	}
 	if start > l {
 		start = l
 	}
 	if end == -1 || end > l {
 		end = l
 	}
+	if start > end {
+		start = end
+	}
+
+	valueStart, valueEnd := start, end
+	if c.nullable && !c.sparseMode {
+		valueStart = countValid(c.validData[:start])
+		valueEnd = valueStart + countValid(c.validData[start:end])
+	}
 	result := &genericColumnBase[T]{
 		name:       c.name,
 		fieldType:  c.fieldType,
-		values:     c.values[start:end],
+		values:     c.values[valueStart:valueEnd],
 		nullable:   c.nullable,
 		sparseMode: c.sparseMode,
 	}
 	if c.nullable {
 		result.validData = c.validData[start:end]
+		if !c.sparseMode {
+			_ = result.validateNullableCompact()
+		}
 	}
 	return result
 }
