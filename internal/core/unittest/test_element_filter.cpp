@@ -4585,7 +4585,11 @@ TEST(ElementFilterSealed, NonNativeFilterOnElementLevelSearch) {
                                              3);
         auto plan = CreateSearchPlanByExpr(
             schema, plan_bytes.data(), plan_bytes.size());
-        auto ph_group_raw = CreatePlaceholderGroupForType(1, dim, 1024);
+        // CreatePlaceholderGroupForType is a member of the parameterized
+        // fixtures above; this is a plain TEST, and the vector field is
+        // VECTOR_FLOAT, so build the element-level group directly.
+        auto ph_group_raw = CreatePlaceholderGroup<milvus::FloatVector>(
+            1, dim, 1024, /*element_level=*/true);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         return segment->Search(plan.get(), ph_group.get(), 1L << 63);
