@@ -1221,3 +1221,116 @@ TEST_P(ExprTest, TestGeometryNullExprOnGrowingWithRTreeIndex) {
         }
     }
 }
+
+// Follow-up coverage for issue #51237's review: the regression test above only
+// exercises NullExpr. Real spatial predicates on a growing segment take a
+// different route -- GISFunctionFilterExpr::EvalForIndexSegment()'s growing
+// branch -- and every other growing GIS case in this file builds its segment
+// with empty index meta, so HasIndex() is false and they all take the raw-data
+// path. That left "spatial predicate + geometry index on a growing segment"
+// with no coverage at all.
+//
+// Pin it by differential comparison: the same rows and the same predicate over
+// two growing segments, one carrying the RTREE index and one without. The
+// index only prunes candidates, so both must select exactly the same rows.
+TEST_P(ExprTest, TestGeometrySpatialExprOnGrowingWithRTreeIndex) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    // Small batch so the batched slicing path runs more than once and
+    // current_index_chunk_pos_ advances past 0.
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } batch_guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(128);
+
+    auto make_schema = [] {
+        auto schema = std::make_shared<Schema>();
+        auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+        schema->AddDebugField(
+            "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+        schema->AddDebugField("geometry", DataType::GEOMETRY, true);
+        schema->set_primary_field_id(int64_fid);
+        return schema;
+    };
+
+    auto schema = make_schema();
+    const auto geo_fid = schema->get_field_id(FieldName("geometry"));
+    const int64_t N = 1000;
+    // One dataset, inserted into both segments, so any difference is the
+    // index path and nothing else.
+    auto dataset =
+        DataGen(schema, N, 42, 0, 1, 10, 1, false, true, true /*random_valid*/);
+
+    auto build_segment = [&](bool with_rtree_index) {
+        std::shared_ptr<CollectionIndexMeta> index_meta;
+        if (with_rtree_index) {
+            std::map<std::string, std::string> index_params = {
+                {"index_type", "RTREE"}};
+            std::map<std::string, std::string> type_params = {};
+            FieldIndexMeta geo_index_meta(
+                geo_fid, std::move(index_params), std::move(type_params));
+            std::map<FieldId, FieldIndexMeta> metas = {
+                {geo_fid, geo_index_meta}};
+            index_meta =
+                std::make_shared<CollectionIndexMeta>(100000, std::move(metas));
+        } else {
+            index_meta = std::make_shared<CollectionIndexMeta>(
+                100000, std::map<FieldId, FieldIndexMeta>{});
+        }
+
+        auto config = SegcoreConfig::default_config();
+        config.set_chunk_rows(128);
+        config.set_enable_interim_segment_index(true);
+        auto seg = CreateGrowingSegment(schema, index_meta, 1, config);
+        auto* impl = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+        auto offset = impl->PreInsert(N);
+        impl->Insert(offset,
+                     N,
+                     dataset.row_ids_.data(),
+                     dataset.timestamps_.data(),
+                     dataset.raw_);
+        return seg;
+    };
+
+    auto indexed_seg = build_segment(true);
+    auto raw_seg = build_segment(false);
+    ASSERT_TRUE(
+        dynamic_cast<SegmentGrowingImpl*>(indexed_seg.get())->HasIndex(geo_fid))
+        << "the indexed segment must actually carry the growing R-Tree, "
+           "otherwise this degenerates into comparing two raw-data runs";
+    ASSERT_FALSE(
+        dynamic_cast<SegmentGrowingImpl*>(raw_seg.get())->HasIndex(geo_fid));
+
+    // A viewport large enough to keep a meaningful subset -- an empty result
+    // on both sides would compare 0 == 0 and pin nothing.
+    const std::string viewport =
+        "POLYGON((-50 -50, 50 -50, 50 50, -50 50, -50 -50))";
+    for (auto op : {proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+                    proto::plan::GISFunctionFilterExpr_GISOp_Within}) {
+        auto run = [&](SegmentInternalInterface* seg) {
+            auto expr = std::make_shared<expr::GISFunctionFilterExpr>(
+                expr::ColumnInfo(geo_fid, DataType::GEOMETRY, {}, true),
+                op,
+                viewport);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expr);
+            return ExecuteQueryExpr(plan, seg, N, MAX_TIMESTAMP);
+        };
+
+        auto indexed = run(indexed_seg.get());
+        auto raw = run(raw_seg.get());
+        ASSERT_EQ(indexed.size(), static_cast<size_t>(N));
+        ASSERT_EQ(raw.size(), static_cast<size_t>(N));
+        for (int64_t i = 0; i < N; i++) {
+            ASSERT_EQ(indexed[i], raw[i])
+                << "row " << i << " differs between the growing R-Tree path "
+                << "and the raw-data path, op "
+                << GISFunctionFilterExpr_GISOp_Name(op);
+        }
+    }
+}
