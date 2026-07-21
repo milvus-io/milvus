@@ -3978,13 +3978,15 @@ func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_ArrayOfVector, subs[1].GetType())
 	assert.Len(t, subs[1].GetVectors().GetVectorArray().GetData(), 2)
 
-	extracted0, err := extractStructArrayRow(fd, 0, buildStructArrayTestSchema())
+	accessor, err := newStructArrayRowAccessor(fd, buildStructArrayTestSchema())
+	require.NoError(t, err)
+	extracted0, err := accessor.row(0)
 	require.NoError(t, err)
 	require.Len(t, extracted0, 2)
 	assert.EqualValues(t, int32(1), extracted0[0]["sub_int"])
 	assert.EqualValues(t, []float32{0.1, 0.2, 0.3, 0.4}, extracted0[0]["sub_vec"])
 
-	extracted1, err := extractStructArrayRow(fd, 1, buildStructArrayTestSchema())
+	extracted1, err := accessor.row(1)
 	require.NoError(t, err)
 	require.Len(t, extracted1, 1)
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])
@@ -4533,12 +4535,14 @@ func TestStructArrayFieldDataErrorPaths(t *testing.T) {
 }
 
 func TestExtractStructArrayRowErrorPaths(t *testing.T) {
-	empty, err := extractStructArrayRow(&schemapb.FieldData{
+	accessor, err := newStructArrayRowAccessor(&schemapb.FieldData{
 		Type: schemapb.DataType_ArrayOfStruct,
 		Field: &schemapb.FieldData_StructArrays{
 			StructArrays: &schemapb.StructArrayField{},
 		},
-	}, 0, buildStructArrayTestSchema())
+	}, buildStructArrayTestSchema())
+	require.NoError(t, err)
+	empty, err := accessor.row(0)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 
@@ -4548,7 +4552,9 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 	fd, err := buildStructArrayFieldData(schema.GetStructArrayFields()[0], []structArrayRow{row})
 	require.NoError(t, err)
 
-	_, err = extractStructArrayRow(fd, 2, schema)
+	accessor, err = newStructArrayRowAccessor(fd, schema)
+	require.NoError(t, err)
+	_, err = accessor.row(2)
 	assert.Error(t, err)
 
 	mismatch := &schemapb.FieldData{
@@ -4582,13 +4588,17 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 			}},
 		},
 	}
-	_, err = extractStructArrayRow(mismatch, 0, schema)
+	accessor, err = newStructArrayRowAccessor(mismatch, schema)
+	require.NoError(t, err)
+	_, err = accessor.row(0)
 	assert.Error(t, err)
 
 	missingDimSchema := &schemapb.CollectionSchema{
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "my_struct"}},
 	}
-	_, err = extractStructArrayRow(mismatch, 0, missingDimSchema)
+	accessor, err = newStructArrayRowAccessor(mismatch, missingDimSchema)
+	require.NoError(t, err)
+	_, err = accessor.row(0)
 	assert.Error(t, err)
 
 	unsupported := &schemapb.FieldData{
@@ -4611,7 +4621,9 @@ func TestExtractStructArrayRowErrorPaths(t *testing.T) {
 			}},
 		},
 	}
-	_, err = extractStructArrayRow(unsupported, 0, schema)
+	accessor, err = newStructArrayRowAccessor(unsupported, schema)
+	require.NoError(t, err)
+	_, err = accessor.row(0)
 	assert.Error(t, err)
 }
 
