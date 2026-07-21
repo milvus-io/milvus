@@ -63,4 +63,13 @@ func TestSetCustomWpConfigBatchParams(t *testing.T) {
 		require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
 		assert.Equal(t, 1000, wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchEntries)
 	})
+
+	// maxBatchEntries=1 is the documented escape hatch that disables batching
+	// (woodpecker takes the single-op path when maxBatchEntries <= 1); pin it so
+	// a future guard refactor (e.g. v > 1) can't silently break it.
+	t.Run("EntriesOneDisablesBatching", func(t *testing.T) {
+		wpConfig := setup(t, "1", "2000000")
+		require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+		assert.Equal(t, 1, wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchEntries)
+	})
 }
