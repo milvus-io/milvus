@@ -210,9 +210,14 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // For regular array types (INT32, FLOAT, etc.)
-            auto* raw_data = static_cast<const ArrayView*>(data->Data());
+            // Regular nullable ARRAY FieldData is dense: invalid rows retain
+            // their physical Array slot but contribute no logical elements.
+            auto* raw_data = static_cast<const Array*>(data->Data());
             for (int64_t i = 0; i < num_rows; ++i) {
+                if (data->IsNullable() && !data->is_valid(i)) {
+                    array_lengths[offset + i] = 0;
+                    continue;
+                }
                 array_lengths[offset + i] = raw_data[i].length();
             }
         }
