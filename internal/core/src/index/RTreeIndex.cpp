@@ -585,6 +585,13 @@ RTreeIndex<T>::Query(const DatasetPtr& dataset) {
     QueryCandidates(op, geometry, candidate_offsets);
 
     // 2) Build initial bitmap from candidates
+    // Count() reports the row space (max(total_num_rows_, indexed)), so a
+    // candidate below the row count can no longer be clipped away. The bound
+    // stays as a guard for the benign race only: on a growing index a writer
+    // may publish a higher offset between the Count() snapshot above and
+    // QueryCandidates() returning. Such a row is not yet visible to this
+    // query's timestamp, so dropping it is correct -- not an invariant
+    // violation, which is why this stays silent rather than asserting.
     TargetBitmap res(this->Count());
     for (auto off : candidate_offsets) {
         if (off >= 0 && off < res.size()) {

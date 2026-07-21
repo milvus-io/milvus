@@ -13,6 +13,7 @@
 
 #include <folly/SharedMutex.h>
 #include <stdint.h>
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -87,6 +88,7 @@ class RTreeIndex : public ScalarIndex<T> {
         // the shared lock and snapshot wrapper_ before dereferencing it.
         std::shared_ptr<RTreeIndexWrapper> wrapper;
         int64_t null_count = 0;
+        int64_t total_num_rows = 0;
         {
             std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
             if (is_built_) {
@@ -94,8 +96,18 @@ class RTreeIndex : public ScalarIndex<T> {
             }
             wrapper = wrapper_;
             null_count = static_cast<int64_t>(null_offset_.size());
+            total_num_rows = total_num_rows_;
         }
-        return wrapper ? wrapper->count() + null_count : 0;
+        // Callers size row-addressed bitmaps by Count() (see Query()), so it
+        // must report the row space, not how many rows happen to be indexed.
+        // AddGeometry() is offset-addressed and keeps total_num_rows_ at
+        // max(row_offset) + 1, so with sparse or out-of-order offsets it
+        // outgrows wrapper->count() + nulls -- returning the smaller value
+        // would make Query() clip live candidates. Keep the max so neither
+        // counter can under-report.
+        auto indexed_count =
+            wrapper ? wrapper->count() + null_count : null_count;
+        return std::max(total_num_rows, indexed_count);
     }
 
     // BuildWithRawDataForUT should be only used in ut. Only string is supported.

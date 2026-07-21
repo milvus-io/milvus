@@ -1449,3 +1449,60 @@ TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriterIsNullBounds) {
         EXPECT_EQ(final_not_null[off], !is_null_row(off)) << "offset " << off;
     }
 }
+
+// Count() feeds the bitmap size in Query(), so on a growing index it must
+// report the row space rather than how many rows happen to be indexed.
+// AddGeometry() is offset-addressed and keeps total_num_rows_ at
+// max(row_offset) + 1, so a sparse or out-of-order offset set makes the two
+// diverge: before the fix Count() returned wrapper->count() + nulls, and every
+// candidate at or above that value was silently clipped by the bound in
+// Query(), turning live rows into false negatives.
+TEST_F(RTreeIndexTest, GrowingSparseOffsetsQueryDropsNoCandidate) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    // Three rows at sparse offsets, inserted out of order. Only 3 entries are
+    // indexed, but the row space runs to 101.
+    const std::vector<int64_t> offsets = {100, 0, 50};
+    for (auto off : offsets) {
+        rtree.AddGeometry(CreatePointWKB(1.0, 1.0), off, true);
+    }
+
+    EXPECT_EQ(rtree.Count(), 101)
+        << "Count() must span the row space, not the indexed-entry count";
+
+    auto ds = std::make_shared<milvus::Dataset>();
+    ds->Set(milvus::index::OPERATOR_TYPE,
+            ::milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects);
+    ds->Set(milvus::index::MATCH_VALUE,
+            CreateGeometryFromWkt("POLYGON((0 0, 0 2, 2 2, 2 0, 0 0))"));
+    auto res = rtree.Query(ds);
+
+    ASSERT_EQ(res.size(), 101u);
+    for (auto off : offsets) {
+        EXPECT_TRUE(res[off])
+            << "candidate at offset " << off << " was clipped away";
+    }
+    EXPECT_EQ(res.count(), offsets.size());
+}
+
+// The null path maintains total_num_rows_ too, so a growing index holding
+// nothing but sparse nulls must still report the full row space.
+TEST_F(RTreeIndexTest, GrowingSparseNullOffsetsCountSpansRowSpace) {
+    field_meta_.field_schema.set_nullable(true);
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    rtree.AddGeometry(std::string(), 30, false);
+    rtree.AddGeometry(std::string(), 5, false);
+
+    EXPECT_EQ(rtree.Count(), 31);
+
+    auto is_null = rtree.IsNull();
+    ASSERT_EQ(is_null.size(), 31u);
+    EXPECT_TRUE(is_null[30]);
+    EXPECT_TRUE(is_null[5]);
+    EXPECT_FALSE(is_null[0]);
+}
