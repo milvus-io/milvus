@@ -267,6 +267,25 @@ func TestShardInterceptorRejectsCreateCollectionWithoutSchema(t *testing.T) {
 	assert.False(t, appended)
 }
 
+func TestShardInterceptorRejectsInvalidLegacySchemaBeforeAppend(t *testing.T) {
+	shardManager := mock_shards.NewMockShardManager(t)
+	impl := &shardInterceptor{shardManager: shardManager}
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("by-dev-rootcoord-dml_0_99005v0").
+		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 99005}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: []byte{0xff}}).
+		MustBuildMutable()
+
+	appended := false
+	assert.Panics(t, func() {
+		_, _ = impl.handleCreateCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			appended = true
+			return rmq.NewRmqID(1), nil
+		})
+	})
+	assert.False(t, appended)
+}
+
 func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *testing.T) {
 	collectionID := int64(99002)
 	vchannel := "by-dev-rootcoord-dml_0_99002v0"
