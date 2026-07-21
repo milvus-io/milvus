@@ -603,6 +603,16 @@ class SegmentExpr : public Expr {
                                               std::move(valid_res));
     }
 
+    // Candidate evaluator contract:
+    // - every logical candidate position advances the evaluator exactly once;
+    // - data == nullptr means the reader already decided the candidate result
+    //   (for example SkipIndex pruning or a NULL reverse lookup), so the
+    //   evaluator must only advance position-indexed state by size and return;
+    // - result and validity for a null batch are owned by the reader.
+    //
+    // This contract keeps callback-local bitmap_input cursors aligned across
+    // raw-data, element-level, and scalar-index-only candidate paths.
+
     // when we have scalar index and index contains raw data, could go with index chunk by offsets
     template <typename T, typename BatchEvaluator, typename... ValTypes>
     int64_t
@@ -1052,6 +1062,11 @@ class SegmentExpr : public Expr {
                       "Json element type is not supported for "
                       "element-level filtering");
 
+        auto array_offsets = segment_->GetArrayOffsets(field_id_);
+        AssertInfo(array_offsets != nullptr,
+                   "ArrayOffsets not found for field {}",
+                   field_id_.get());
+
         int64_t processed_rows = 0;
         int64_t processed_elems = 0;
 
@@ -1092,16 +1107,16 @@ class SegmentExpr : public Expr {
                     auto [data_vec, valid_data] = pw.get();
 
                     for (size_t j = 0; j < static_cast<size_t>(size); j++) {
-                        auto elem_count = data_vec[j].length();
-                        bool is_row_valid = !valid_data.data() || valid_data[j];
+                        const bool is_row_valid =
+                            !valid_data.data() || valid_data[j];
+                        // ArrayOffsets defines a NULL array row as having zero
+                        // logical elements even when its physical payload is
+                        // non-empty. Keep the flattened result aligned with
+                        // that logical address space.
+                        const auto elem_count =
+                            is_row_valid ? data_vec[j].length() : 0;
 
-                        if (!is_row_valid) {
-                            // Row is invalid, mark all elements as false
-                            for (size_t k = 0; k < elem_count; k++) {
-                                res[processed_elems + k] =
-                                    valid_res[processed_elems + k] = false;
-                            }
-                        } else {
+                        if (is_row_valid) {
                             // Row is valid, process array elements
                             if constexpr (std::is_same_v<ElementType,
                                                          std::string_view> ||
@@ -1178,16 +1193,15 @@ class SegmentExpr : public Expr {
                     }
 
                     for (size_t j = 0; j < static_cast<size_t>(size); j++) {
-                        auto elem_count = data[j].length();
-                        bool is_row_valid = !valid_data || valid_data[j];
+                        const bool is_row_valid = !valid_data || valid_data[j];
+                        // ArrayOffsets defines a NULL array row as having zero
+                        // logical elements even when its physical payload is
+                        // non-empty. Keep the flattened result aligned with
+                        // that logical address space.
+                        const auto elem_count =
+                            is_row_valid ? data[j].length() : 0;
 
-                        if (!is_row_valid) {
-                            // Row is invalid, mark all elements as false
-                            for (size_t k = 0; k < elem_count; k++) {
-                                res[processed_elems + k] =
-                                    valid_res[processed_elems + k] = false;
-                            }
-                        } else {
+                        if (is_row_valid) {
                             // Row is valid, process array elements
                             if constexpr (std::is_same_v<ElementType,
                                                          std::string_view> ||
@@ -1254,59 +1268,31 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
-                // Chunk is skipped. Preserve NULL validity and advance the
-                // evaluator once for every logical element so callbacks that
-                // index bitmap_input with a local cursor stay aligned.
-                const auto skipped_start = processed_elems;
-                if (segment_->type() == SegmentType::Sealed) {
-                    auto pw = segment_->get_batch_views<ArrayView>(
-                        op_ctx_, field_id_, i, data_pos, size);
-                    auto [data_vec, valid_data] = pw.get();
-
-                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
-                        auto elem_count = data_vec[j].length();
-                        const bool row_valid =
-                            !valid_data.data() || valid_data[j];
-                        if (!row_valid) {
-                            for (size_t k = 0; k < elem_count; k++) {
-                                res[processed_elems + k] =
-                                    valid_res[processed_elems + k] = false;
-                            }
-                        }
-                        processed_elems += elem_count;
-                    }
-                } else {
-                    auto pw =
-                        segment_->chunk_data<Array>(op_ctx_, field_id_, i);
-                    auto chunk = pw.get();
-                    const Array* data = chunk.data() + data_pos;
-                    const bool* valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += data_pos;
-                    }
-
-                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
-                        auto elem_count = data[j].length();
-                        const bool row_valid = !valid_data || valid_data[j];
-                        if (!row_valid) {
-                            for (size_t k = 0; k < elem_count; k++) {
-                                res[processed_elems + k] =
-                                    valid_res[processed_elems + k] = false;
-                            }
-                        }
-                        processed_elems += elem_count;
-                    }
-                }
-                const auto skipped_elems = processed_elems - skipped_start;
+                // Chunk is skipped. ArrayOffsets is the source of truth for
+                // the logical element address space: nullable rows contribute
+                // zero elements even if storage retains a physical payload.
+                // Derive the skipped span without inspecting that payload.
+                const int64_t row_start =
+                    segment_->is_chunked()
+                        ? segment_->num_rows_until_chunk(field_id_, i) +
+                              data_pos
+                        : static_cast<int64_t>(i) * size_per_chunk_ + data_pos;
+                const auto start_range =
+                    array_offsets->ElementIDRangeOfRow(row_start);
+                const auto end_range =
+                    array_offsets->ElementIDRangeOfRow(row_start + size);
+                const auto skipped_elems =
+                    int64_t{end_range.first - start_range.first};
                 if (skipped_elems > 0) {
                     evaluate_batch(nullptr,
                                    nullptr,
                                    nullptr,
                                    skipped_elems,
-                                   res + skipped_start,
-                                   valid_res + skipped_start,
+                                   res + processed_elems,
+                                   valid_res + processed_elems,
                                    values...);
                 }
+                processed_elems += skipped_elems;
             }
 
             processed_rows += size;
