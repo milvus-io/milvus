@@ -10,10 +10,9 @@ import (
 	miniogo "github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -140,12 +139,17 @@ func TestFileResourceCRUDAndValidation(t *testing.T) {
 func TestFileResourceEmptyNameRejected(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createFileResourceMilvusClient(ctx, t)
+	assertMissingParameter := func(err error) {
+		require.Error(t, err)
+		require.Equal(t, int32(1101), client.ErrorCode(err))
+		require.ErrorContains(t, err, "missing parameter")
+	}
 
 	err := mc.AddFileResource(ctx, client.NewAddFileResourceOption("", "unused.txt"))
-	require.ErrorIs(t, err, merr.ErrParameterMissing)
+	assertMissingParameter(err)
 
 	err = mc.RemoveFileResource(ctx, client.NewRemoveFileResourceOption(""))
-	require.ErrorIs(t, err, merr.ErrParameterMissing)
+	assertMissingParameter(err)
 }
 
 func TestFileResourceRemoteAnalyzerAndCollectionLifecycle(t *testing.T) {
