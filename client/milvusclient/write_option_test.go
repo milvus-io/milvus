@@ -165,6 +165,32 @@ func (s *ColumnBasedDataOptionSuite) TestWithNullableStructArrayColumn() {
 	s.Len(subs[1].GetVectors().GetVectorArray().GetData(), 2)
 }
 
+func (s *ColumnBasedDataOptionSuite) TestWithNullableStructArrayColumnRejectsNilSubField() {
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("clip_emb").WithDataType(entity.FieldTypeFloatVector).WithDim(2))
+	collSchema := entity.NewSchema().WithName("c").
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(16).
+			WithStructSchema(structSchema).
+			WithNullable(true))
+
+	opt := NewColumnBasedInsertOption("c").
+		WithInt64Column("id", []int64{1, 2}).
+		WithStructArrayColumn("clips", structSchema, []map[string]any{
+			nil,
+			{"clip_str": nil, "clip_emb": [][]float32{{0.1, 0.2}}},
+		})
+
+	_, err := opt.InsertRequest(&entity.Collection{Schema: collSchema})
+	s.Require().Error(err)
+	s.Contains(err.Error(), "clip_str")
+}
+
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnDeferredError() {
 	structSchema := entity.NewStructSchema().
 		WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64))
