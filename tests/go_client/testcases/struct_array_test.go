@@ -228,6 +228,16 @@ func TestStructArrayNullableInsertNil(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, value)
 
+	emptyQueryResult, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id < 0").WithOutputFields("clips").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Zero(t, emptyQueryResult.ResultCount)
+	emptyQueryClips := emptyQueryResult.GetColumn("clips")
+	require.NotNil(t, emptyQueryClips)
+	require.True(t, emptyQueryClips.Nullable())
+	require.Zero(t, emptyQueryClips.Len())
+	require.NoError(t, emptyQueryClips.ValidateNullable())
+
 	// A null vector produces an empty result set while a valid vector produces a
 	// non-empty one. The empty slice must retain every struct sub-column's
 	// nullable state.
