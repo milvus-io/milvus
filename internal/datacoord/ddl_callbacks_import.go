@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -88,7 +89,7 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
-func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) error {
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
@@ -109,14 +110,14 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		return err
 	}
 
-	if err := s.validateImportReplication(ctx, options); err != nil {
+	if err := s.validateImportReplication(ctx, options, schema); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (s *Server) validateImportReplication(ctx context.Context, options []*commonpb.KeyValuePair) error {
+func (s *Server) validateImportReplication(ctx context.Context, options []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) error {
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
@@ -137,6 +138,14 @@ func (s *Server) validateImportReplication(ctx context.Context, options []*commo
 	}
 	if importutilv2.IsAutoCommit(options) {
 		return merr.WrapErrOperationNotSupportedMsg("auto_commit=true import in replicating cluster is not supported")
+	}
+	if !importutilv2.IsBackup(options) {
+		for _, field := range schema.GetFields() {
+			if typeutil.IsAutoPKField(field) {
+				return merr.WrapErrOperationNotSupportedMsg(
+					"autoID primary key import in replicating cluster is not supported; primary keys would be assigned independently on each cluster")
+			}
+		}
 	}
 	return nil
 }
@@ -187,7 +196,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	})
 
 	// Validate the request before broadcasting
-	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
+	if err := s.validateImportRequest(ctx, msgFiles, options, schema); err != nil {
 		return merr.Wrap(err, "failed to validate import request")
 	}
 
