@@ -680,7 +680,7 @@ func TestFunctionRunnerCollectionEntryCloseIsTerminal(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
 	require.NoError(t, err)
-	_, _, err = entry.ensureVersion("v1", schema, versionRunners, functionsBySignature)
+	_, _, err = entry.ensureVersion("v1", schema, versionRunners, functionsBySignature, true)
 	require.ErrorIs(t, err, errFunctionRunnerCollectionEntryRemoved)
 
 	entry.mu.RLock()
@@ -1405,7 +1405,7 @@ func allocSchemaForTest(t *testing.T, manager *functionRunnerManager, collection
 	t.Helper()
 	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
 	require.NoError(t, err)
-	_, staleRunnerEntries, err := manager.getOrCreateEntry(collectionID).ensureVersion(key, schema, versionRunners, functionsBySignature)
+	_, staleRunnerEntries, err := manager.getOrCreateEntry(collectionID).ensureVersion(key, schema, versionRunners, functionsBySignature, true)
 	require.NoError(t, err)
 	closeFunctionRunnerEntries(staleRunnerEntries)
 }
