@@ -160,6 +160,32 @@ func (s *StructArraySuite) TestSlice() {
 	s.Equal([]bool{false, true}, m["flag"])
 }
 
+func (s *StructArraySuite) TestNullableVectorRows() {
+	column := NewColumnStructArray("clips", []Column{
+		NewColumnInt64Array("id", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	column.SetNullable(true)
+
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{10},
+		"embedding": [][]float32{{0.1, 0.2}},
+	}))
+	s.Require().NoError(column.AppendNull())
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{},
+		"embedding": [][]float32{},
+	}))
+
+	fields := column.FieldData().GetStructArrays().GetFields()
+	s.Require().Len(fields, 2)
+	for _, fieldData := range fields {
+		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
+	}
+	s.Len(fields[0].GetScalars().GetArrayData().GetData(), 2)
+	s.Len(fields[1].GetVectors().GetVectorArray().GetData(), 2)
+}
+
 func (s *StructArraySuite) TestAppendValue() {
 	intCol := NewColumnInt32Array("a", nil)
 	strCol := NewColumnVarCharArray("b", nil)
