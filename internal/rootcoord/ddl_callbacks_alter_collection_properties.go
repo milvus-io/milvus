@@ -210,7 +210,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: udpates,
 		}).
-		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -323,22 +323,23 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		return err
 	}
 	// broadcast the put collection v2 message.
+	header := &messagespb.AlterCollectionMessageHeader{
+		DbId:         coll.DBID,
+		CollectionId: coll.CollectionID,
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
+		},
+		CacheExpirations: cacheExpirations,
+	}
 	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			DbId:         coll.DBID,
-			CollectionId: coll.CollectionID,
-			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
-			},
-			CacheExpirations: cacheExpirations,
-		}).
+		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
 				Schema:     schema,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -381,26 +382,27 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 	if err != nil {
 		return err
 	}
-	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			DbId:         coll.DBID,
-			CollectionId: coll.CollectionID,
-			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{
-					message.FieldMaskCollectionSchema,
-					message.FieldMaskCollectionProperties,
-				},
+	header := &messagespb.AlterCollectionMessageHeader{
+		DbId:         coll.DBID,
+		CollectionId: coll.CollectionID,
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{
+				message.FieldMaskCollectionSchema,
+				message.FieldMaskCollectionProperties,
 			},
-			CacheExpirations: cacheExpirations,
-			DroppedFieldIds:  []int64{dynamicFieldID},
-		}).
+		},
+		CacheExpirations: cacheExpirations,
+		DroppedFieldIds:  []int64{dynamicFieldID},
+	}
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
 				Schema:     schema,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := bc.Broadcast(ctx, msg); err != nil {
 		return err
@@ -453,6 +455,13 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 		ReplicaNumber:  int32(newReplicaNumber),
 		ResourceGroups: newResourceGroups,
 	}
+}
+
+func alterCollectionBroadcastOptions(header *messagespb.AlterCollectionMessageHeader) []message.OptBuildBroadcast {
+	if messageutil.IsSchemaChange(header) {
+		return []message.OptBuildBroadcast{message.OptBuildBroadcastAckSyncUp()}
+	}
+	return nil
 }
 
 func waitForAlterCollectionSchemaChangeFlush(ctx context.Context, mixCoord types.MixCoord, result message.BroadcastResultAlterCollectionMessageV2) error {

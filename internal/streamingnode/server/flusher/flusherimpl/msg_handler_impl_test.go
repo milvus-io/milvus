@@ -230,6 +230,11 @@ func TestFlushMsgHandler_HandlSchemaChange(t *testing.T) {
 func TestFlushMsgHandler_HandleAlterCollectionSchemaChangeFlushesChannel(t *testing.T) {
 	vchannel := "ch-0"
 	timeTick := uint64(1000)
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "alter-collection")
+	ctxMatcher := mock.MatchedBy(func(ctx context.Context) bool {
+		return ctx.Value(contextKey{}) == "alter-collection"
+	})
 
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithBroadcast([]string{vchannel}).
@@ -252,8 +257,38 @@ func TestFlushMsgHandler_HandleAlterCollectionSchemaChangeFlushesChannel(t *test
 	im := message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(msgID))
 
 	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(ctxMatcher, vchannel, []int64{1, 2}).Return(nil).Once()
+	wbMgr.EXPECT().FlushChannel(ctxMatcher, vchannel, timeTick).Return(nil).Once()
+
+	handler := newMsgHandler(wbMgr)
+	err := handler.HandleAlterCollection(ctx, im)
+	assert.NoError(t, err)
+}
+
+func TestFlushMsgHandler_HandleAlterCollectionNonSchemaChangeSkipsFlushChannel(t *testing.T) {
+	vchannel := "ch-0"
+	timeTick := uint64(1000)
+
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId:      0,
+			FlushedSegmentIds: []int64{1, 2},
+			UpdateMask:        &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionProperties}},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{},
+		}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
+	msg.WithTimeTick(timeTick)
+
+	msgID := mock_message.NewMockMessageID(t)
+	im := message.MustAsImmutableAlterCollectionMessageV2(msg.IntoImmutableMessage(msgID))
+
+	wbMgr := writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, vchannel, []int64{1, 2}).Return(nil).Once()
-	wbMgr.EXPECT().FlushChannel(mock.Anything, vchannel, timeTick).Return(nil).Once()
 
 	handler := newMsgHandler(wbMgr)
 	err := handler.HandleAlterCollection(context.Background(), im)
