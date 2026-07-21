@@ -459,6 +459,14 @@ func (m *functionRunnerManager) Update(
 	if schema == nil {
 		return merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
+	if entry := m.getEntry(collectionID); entry != nil {
+		entry.mu.RLock()
+		version, ok := entry.keyVersions[key]
+		entry.mu.RUnlock()
+		if ok && version >= schema.GetVersion() {
+			return nil
+		}
+	}
 	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
 	if err != nil {
 		return err
