@@ -336,6 +336,24 @@ TEST(JsonIndexTest, TestJsonContains) {
             EXPECT_TRUE(result[id]);
         }
     }
+
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("4");
+    auto mixed_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+        false,
+        std::vector<proto::plan::GenericValue>{int_value, string_value});
+    auto mixed_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, mixed_expr);
+    auto mixed_result = query::ExecuteQueryExpr(
+        mixed_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(mixed_result.count(), 3);
+    EXPECT_TRUE(mixed_result[17]);
+    EXPECT_TRUE(mixed_result[18]);
+    EXPECT_TRUE(mixed_result[24]);
 }
 
 TEST(JsonIndexTest, TestJsonCast) {

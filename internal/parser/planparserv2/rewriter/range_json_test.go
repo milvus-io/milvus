@@ -86,6 +86,25 @@ func TestRewrite_JSON_NestedPath_NonNullable_ContradictionsKeepPredicate(t *test
 	}
 }
 
+func TestRewrite_JSON_RootValue_DynamicTypeKeepsThreeValuedPredicates(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	for _, exprStr := range []string{
+		`JSONField in [1, 2] or JSONField != 1`,
+		`JSONField in [1, 2] and JSONField == 3`,
+		`JSONField > 100 and JSONField < 50`,
+		`not (JSONField > 100 and JSONField < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr),
+			"JSON type mismatch can be UNKNOWN, so the predicate must not fold to false: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr),
+			"JSON type mismatch can be UNKNOWN, so the predicate must not fold to true: %s", exprStr)
+	}
+}
+
 func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteAllowed(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 

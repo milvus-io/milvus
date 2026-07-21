@@ -213,7 +213,8 @@ func hasMissingPathSemantics(col *planpb.ColumnInfo) bool {
 }
 
 func canFoldBoolDomainToConstant(col *planpb.ColumnInfo) bool {
-	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
+	return col != nil && col.GetDataType() != schemapb.DataType_JSON &&
+		!hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
 }
 
 func hasMissingPathNotEqualSemantics(col *planpb.ColumnInfo, values ...*planpb.GenericValue) bool {
