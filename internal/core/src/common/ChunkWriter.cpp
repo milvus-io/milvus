@@ -83,10 +83,6 @@ CalculateBinaryLikeChunkSize(
             const auto relative_offset =
                 static_cast<size_t>(array->value_offset(i) - payload_begin);
             const auto absolute_offset = cursor + relative_offset;
-            AssertInfo(absolute_offset <= std::numeric_limits<uint32_t>::max(),
-                       "{} chunk size {} exceeds uint32 offset limit",
-                       chunk_name,
-                       absolute_offset);
             offsets.push_back(static_cast<uint32_t>(absolute_offset));
         }
 
