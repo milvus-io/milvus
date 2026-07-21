@@ -72,7 +72,8 @@ class TestRestfulStructArrayNullable(TestBase):
                     "fieldName": "normal_vector",
                     "indexName": "normal_vector",
                     "metricType": "L2",
-                    "indexType": "FLAT",
+                    "indexType": "HNSW",
+                    "params": {"M": 16, "efConstruction": 200},
                 }
             ],
             "params": {"consistencyLevel": "Strong"},
@@ -153,7 +154,7 @@ class TestRestfulStructArrayNullable(TestBase):
                 "annsField": "normal_vector",
                 "limit": len(rows),
                 "outputFields": ["id", "doc_tag", "profile"],
-                "searchParams": {"metricType": "L2", "params": {}},
+                "searchParams": {"metricType": "L2", "params": {"ef": 64}},
             }
         )
         assert rsp["code"] == 0
@@ -206,7 +207,7 @@ class TestRestfulStructArrayNullable(TestBase):
                 "annsField": "normal_vector",
                 "limit": len(rows),
                 "outputFields": ["id", "profile"],
-                "searchParams": {"metricType": "L2", "params": {}},
+                "searchParams": {"metricType": "L2", "params": {"ef": 64}},
             }
         )
         assert rsp["code"] == 0
@@ -239,7 +240,8 @@ class TestRestfulStructArrayNullable(TestBase):
                     "fieldName": "normal_vector",
                     "indexName": "normal_vector",
                     "metricType": "L2",
-                    "indexType": "FLAT",
+                    "indexType": "HNSW",
+                    "params": {"M": 16, "efConstruction": 200},
                 }
             ],
             "params": {"consistencyLevel": "Strong"},
@@ -294,7 +296,8 @@ class TestRestfulStructArrayNullable(TestBase):
                     "fieldName": "normal_vector",
                     "indexName": "normal_vector",
                     "metricType": "L2",
-                    "indexType": "FLAT",
+                    "indexType": "HNSW",
+                    "params": {"M": 16, "efConstruction": 200},
                 }
             ],
             "params": {"consistencyLevel": "Strong"},
