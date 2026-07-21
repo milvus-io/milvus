@@ -76,6 +76,44 @@ func (s *StructArraySuite) TestBasic() {
 	s.Equal([]int32{4, 5, 6}, m["int_field"])
 }
 
+func (s *StructArraySuite) TestNullableScalarRows() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnVarCharArray("tag", nil),
+	})
+	column.SetNullable(true)
+
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"age": []int64{10, 11},
+		"tag": []string{"a", "b"},
+	}))
+	s.Require().NoError(column.AppendNull())
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"age": []int64{},
+		"tag": []string{},
+	}))
+
+	s.True(column.Nullable())
+	s.Equal(3, column.Len())
+	s.Equal(2, column.ValidCount())
+
+	isNull, err := column.IsNull(1)
+	s.Require().NoError(err)
+	s.True(isNull)
+	value, err := column.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+
+	isNull, err = column.IsNull(2)
+	s.Require().NoError(err)
+	s.False(isNull, "an empty struct array is distinct from null")
+
+	for _, fieldData := range column.FieldData().GetStructArrays().GetFields() {
+		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
+		s.Equal(2, len(fieldData.GetScalars().GetArrayData().GetData()))
+	}
+}
+
 func (s *StructArraySuite) TestVectorSubField() {
 	dim := 4
 	rows := [][][]float32{
