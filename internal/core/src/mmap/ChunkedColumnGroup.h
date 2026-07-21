@@ -385,6 +385,23 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    ArrayLengths(milvus::OpContext* op_ctx,
+                 int64_t chunk_id,
+                 std::optional<std::pair<int64_t, int64_t>> offset_len =
+                     std::nullopt) const override {
+        if (!IsChunkedArrayColumnDataType(data_type_)) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] ArrayLengths only supported for "
+                      "ChunkedArrayColumn");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        return PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>(
+            std::move(chunk_wrapper),
+            static_cast<ArrayChunk*>(chunk.get())->Lengths(offset_len));
+    }
+
     PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(milvus::OpContext* op_ctx,
                      int64_t chunk_id,
@@ -401,6 +418,23 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
             std::move(chunk_wrapper),
             static_cast<VectorArrayChunk*>(chunk.get())->Views(offset_len));
+    }
+
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    VectorArrayLengths(milvus::OpContext* op_ctx,
+                       int64_t chunk_id,
+                       std::optional<std::pair<int64_t, int64_t>> offset_len =
+                           std::nullopt) const override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] VectorArrayLengths only supported for "
+                      "ChunkedVectorArrayColumn");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        return PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>(
+            std::move(chunk_wrapper),
+            static_cast<VectorArrayChunk*>(chunk.get())->Lengths(offset_len));
     }
 
     PinWrapper<const size_t*>

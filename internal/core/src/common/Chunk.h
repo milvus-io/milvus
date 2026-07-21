@@ -430,6 +430,43 @@ class ArrayChunk : public Chunk {
                          offsets_ptr);
     }
 
+    int64_t
+    Length(int idx) const {
+        int idx_off = 2 * idx;
+        return offsets_lens_[idx_off + 1];
+    }
+
+    std::pair<std::vector<int64_t>, FixedVector<bool>>
+    Lengths(std::optional<std::pair<int64_t, int64_t>> offset_len =
+                std::nullopt) const {
+        int64_t start_offset = 0;
+        int64_t len = row_nums_;
+        if (offset_len.has_value()) {
+            start_offset = offset_len->first;
+            len = offset_len->second;
+            AssertInfo(
+                start_offset >= 0 && len > 0 && start_offset <= row_nums_ - len,
+                "Retrieve array lengths with out-of-bound offset:{}, "
+                "len:{}, row_nums:{}, wrong",
+                start_offset,
+                len,
+                row_nums_);
+        }
+
+        std::vector<int64_t> lengths;
+        lengths.reserve(len);
+        auto end_offset = start_offset + len;
+        for (auto i = start_offset; i < end_offset; i++) {
+            lengths.emplace_back(Length(i));
+        }
+        if (nullable_) {
+            FixedVector<bool> res_valid(valid_.begin() + start_offset,
+                                        valid_.begin() + end_offset);
+            return {std::move(lengths), std::move(res_valid)};
+        }
+        return {std::move(lengths), {}};
+    }
+
     std::pair<std::vector<ArrayView>, FixedVector<bool>>
     ViewsByOffsets(const FixedVector<int32_t>& offsets) {
         std::vector<ArrayView> views;
@@ -550,6 +587,47 @@ class VectorArrayChunk : public Chunk {
         auto data_ptr = data_ + offset;
         return VectorArrayView(
             data_ptr, dim_, len, next_offset - offset, element_type_);
+    }
+
+    int64_t
+    Length(int64_t idx) const {
+        AssertInfo(idx >= 0 && idx < row_nums_,
+                   "VectorArrayChunk::Length offset {} out of range, "
+                   "rows {}",
+                   idx,
+                   row_nums_);
+        return offsets_lens_[2 * idx + 1];
+    }
+
+    std::pair<std::vector<int64_t>, FixedVector<bool>>
+    Lengths(std::optional<std::pair<int64_t, int64_t>> offset_len =
+                std::nullopt) const {
+        int64_t start_offset = 0;
+        int64_t len = row_nums_;
+        if (offset_len.has_value()) {
+            start_offset = offset_len->first;
+            len = offset_len->second;
+            AssertInfo(
+                start_offset >= 0 && len > 0 && start_offset <= row_nums_ - len,
+                "Retrieve vector array lengths with out-of-bound offset:{}, "
+                "len:{}, row_nums:{}, wrong",
+                start_offset,
+                len,
+                row_nums_);
+        }
+
+        std::vector<int64_t> lengths;
+        lengths.reserve(len);
+        auto end_offset = start_offset + len;
+        for (int64_t i = start_offset; i < end_offset; i++) {
+            lengths.emplace_back(Length(i));
+        }
+        if (nullable_) {
+            FixedVector<bool> res_valid(valid_.begin() + start_offset,
+                                        valid_.begin() + end_offset);
+            return {std::move(lengths), std::move(res_valid)};
+        }
+        return {std::move(lengths), {}};
     }
 
     std::pair<std::vector<VectorArrayView>, FixedVector<bool>>

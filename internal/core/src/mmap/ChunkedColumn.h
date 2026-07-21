@@ -303,6 +303,15 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "ArrayViews only supported for ArrayChunkedColumn");
     }
 
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    ArrayLengths(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayLengths only supported for ArrayChunkedColumn");
+    }
+
     PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
@@ -311,6 +320,16 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         ThrowInfo(
             ErrorCode::Unsupported,
             "VectorArrayViews only supported for ChunkedVectorArrayColumn");
+    }
+
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    VectorArrayLengths(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        ThrowInfo(
+            ErrorCode::Unsupported,
+            "VectorArrayLengths only supported for ChunkedVectorArrayColumn");
     }
 
     PinWrapper<const size_t*>
@@ -696,6 +715,19 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
             std::move(ca), static_cast<ArrayChunk*>(chunk)->Views(offset_len));
     }
 
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    ArrayLengths(milvus::OpContext* op_ctx,
+                 int64_t chunk_id,
+                 std::optional<std::pair<int64_t, int64_t>> offset_len =
+                     std::nullopt) const override {
+        auto ca = SemiInlineGet(
+            slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>(
+            std::move(ca),
+            static_cast<ArrayChunk*>(chunk)->Lengths(offset_len));
+    }
+
     PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
@@ -743,6 +775,19 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
             std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
             std::move(ca),
             static_cast<VectorArrayChunk*>(chunk)->Views(offset_len));
+    }
+
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    VectorArrayLengths(milvus::OpContext* op_ctx,
+                       int64_t chunk_id,
+                       std::optional<std::pair<int64_t, int64_t>> offset_len =
+                           std::nullopt) const override {
+        auto ca = SemiInlineGet(
+            slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>(
+            std::move(ca),
+            static_cast<VectorArrayChunk*>(chunk)->Lengths(offset_len));
     }
 
     PinWrapper<const size_t*>

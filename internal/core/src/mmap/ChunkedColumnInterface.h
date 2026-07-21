@@ -108,9 +108,21 @@ class ChunkedColumnInterface {
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    virtual PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    ArrayLengths(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
     virtual PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
+    virtual PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    VectorArrayLengths(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;

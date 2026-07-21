@@ -428,6 +428,22 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename ViewType>
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    chunk_array_lengths(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        std::optional<std::pair<int64_t, int64_t>> offset_len =
+                            std::nullopt) const {
+        if constexpr (std::is_same_v<ViewType, ArrayView>) {
+            return chunk_array_lengths_impl(
+                op_ctx, field_id, chunk_id, offset_len);
+        } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
+            return chunk_vector_array_lengths_impl(
+                op_ctx, field_id, chunk_id, offset_len);
+        }
+    }
+
+    template <typename ViewType>
     PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
     get_batch_views(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -765,9 +781,23 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    virtual PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    chunk_array_lengths_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
     virtual PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     chunk_vector_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
+    virtual PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    chunk_vector_array_lengths_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,

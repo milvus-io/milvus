@@ -3294,6 +3294,22 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
               "chunk_array_view_impl only used for chunk column field ");
 }
 
+PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+ChunkedSegmentSealedImpl::chunk_array_lengths_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    auto snapshot = CapturePublishedState();
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(snapshot->runtime, field_id)) {
+        return column->ArrayLengths(op_ctx, chunk_id, offset_len);
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_array_lengths_impl only used for chunk column field ");
+}
+
 PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
 ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
@@ -3308,6 +3324,23 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_vector_array_view_impl only used for chunk column field ");
+}
+
+PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+ChunkedSegmentSealedImpl::chunk_vector_array_lengths_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    auto snapshot = CapturePublishedState();
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(snapshot->runtime, field_id)) {
+        return column->VectorArrayLengths(op_ctx, chunk_id, offset_len);
+    }
+    ThrowInfo(
+        ErrorCode::UnexpectedError,
+        "chunk_vector_array_lengths_impl only used for chunk column field ");
 }
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>

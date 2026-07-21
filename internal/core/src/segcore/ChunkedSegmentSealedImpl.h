@@ -621,8 +621,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    chunk_array_lengths_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+
     PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     chunk_vector_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+
+    PinWrapper<std::pair<std::vector<int64_t>, FixedVector<bool>>>
+    chunk_vector_array_lengths_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,

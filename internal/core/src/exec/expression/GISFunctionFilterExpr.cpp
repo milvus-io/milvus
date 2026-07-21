@@ -40,67 +40,24 @@
 namespace milvus {
 namespace exec {
 
-#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(_DataType, method)       \
-    auto execute_sub_batch = [this](const _DataType* data,                  \
-                                    const bool* valid_data,                 \
-                                    const int32_t* offsets,                 \
-                                    const int32_t* segment_offsets,         \
-                                    const int size,                         \
-                                    TargetBitmapView res,                   \
-                                    TargetBitmapView valid_res,             \
-                                    const Geometry& right_source) {         \
-        AssertInfo(segment_offsets != nullptr,                              \
-                   "segment_offsets should not be nullptr");                \
-        auto* geometry_cache =                                              \
-            SimpleGeometryCacheManager::Instance().GetCache(                \
-                this->segment_->get_segment_id(), field_id_);               \
-        if (geometry_cache) {                                               \
-            auto cache_lock = geometry_cache->AcquireReadLock();            \
-            for (int i = 0; i < size; ++i) {                                \
-                if (valid_data != nullptr && !valid_data[i]) {              \
-                    res[i] = valid_res[i] = false;                          \
-                    continue;                                               \
-                }                                                           \
-                auto absolute_offset = segment_offsets[i];                  \
-                auto cached_geometry =                                      \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);     \
-                AssertInfo(cached_geometry != nullptr,                      \
-                           "cached geometry is nullptr");                   \
-                res[i] = cached_geometry->method(right_source);             \
-            }                                                               \
-        } else {                                                            \
-            GEOSContextHandle_t ctx_ = GEOS_init_r();                       \
-            for (int i = 0; i < size; ++i) {                                \
-                if (valid_data != nullptr && !valid_data[i]) {              \
-                    res[i] = valid_res[i] = false;                          \
-                    continue;                                               \
-                }                                                           \
-                res[i] = Geometry(ctx_, data[i].data(), data[i].size())     \
-                             .method(right_source);                         \
-            }                                                               \
-            GEOS_finish_r(ctx_);                                            \
-        }                                                                   \
-    };                                                                      \
-    int64_t processed_size = ProcessDataChunks<_DataType, true>(            \
-        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source); \
-    AssertInfo(processed_size == real_batch_size,                           \
-               "internal error: expr processed rows {} not equal "          \
-               "expect batch size {}",                                      \
-               processed_size,                                              \
-               real_batch_size);                                            \
-    return res_vec;
-// Specialized macro for distance-based operations (ST_DWITHIN)
-#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(_DataType, method) \
-    auto execute_sub_batch = [this](const _DataType* data,                     \
-                                    const bool* valid_data,                    \
-                                    const int32_t* offsets,                    \
-                                    const int32_t* segment_offsets,            \
-                                    const int size,                            \
-                                    TargetBitmapView res,                      \
-                                    TargetBitmapView valid_res,                \
-                                    const Geometry& right_source) {            \
+#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(_DataType, method)          \
+    int processed_cursor = 0;                                                  \
+    auto execute_sub_batch = [this, &bitmap_input, &processed_cursor](         \
+                                 const _DataType* data,                        \
+                                 const bool* valid_data,                       \
+                                 const int32_t* offsets,                       \
+                                 const int32_t* segment_offsets,               \
+                                 const int size,                               \
+                                 TargetBitmapView res,                         \
+                                 TargetBitmapView valid_res,                   \
+                                 const Geometry& right_source) {               \
         AssertInfo(segment_offsets != nullptr,                                 \
                    "segment_offsets should not be nullptr");                   \
+        if (data == nullptr) {                                                 \
+            processed_cursor += size;                                          \
+            return;                                                            \
+        }                                                                      \
+        bool has_bitmap_input = !bitmap_input.empty();                         \
         auto* geometry_cache =                                                 \
             SimpleGeometryCacheManager::Instance().GetCache(                   \
                 this->segment_->get_segment_id(), field_id_);                  \
@@ -109,6 +66,73 @@ namespace exec {
             for (int i = 0; i < size; ++i) {                                   \
                 if (valid_data != nullptr && !valid_data[i]) {                 \
                     res[i] = valid_res[i] = false;                             \
+                    continue;                                                  \
+                }                                                              \
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) { \
+                    continue;                                                  \
+                }                                                              \
+                auto absolute_offset = segment_offsets[i];                     \
+                auto cached_geometry =                                         \
+                    geometry_cache->GetByOffsetUnsafe(absolute_offset);        \
+                AssertInfo(cached_geometry != nullptr,                         \
+                           "cached geometry is nullptr");                      \
+                res[i] = cached_geometry->method(right_source);                \
+            }                                                                  \
+        } else {                                                               \
+            GEOSContextHandle_t ctx_ = GEOS_init_r();                          \
+            for (int i = 0; i < size; ++i) {                                   \
+                if (valid_data != nullptr && !valid_data[i]) {                 \
+                    res[i] = valid_res[i] = false;                             \
+                    continue;                                                  \
+                }                                                              \
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) { \
+                    continue;                                                  \
+                }                                                              \
+                res[i] = Geometry(ctx_, data[i].data(), data[i].size())        \
+                             .method(right_source);                            \
+            }                                                                  \
+            GEOS_finish_r(ctx_);                                               \
+        }                                                                      \
+        processed_cursor += size;                                              \
+    };                                                                         \
+    int64_t processed_size = ProcessDataChunks<_DataType, true>(               \
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);    \
+    AssertInfo(processed_size == real_batch_size,                              \
+               "internal error: expr processed rows {} not equal "             \
+               "expect batch size {}",                                         \
+               processed_size,                                                 \
+               real_batch_size);                                               \
+    return res_vec;
+// Specialized macro for distance-based operations (ST_DWITHIN)
+#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(_DataType, method) \
+    int processed_cursor = 0;                                                  \
+    auto execute_sub_batch = [this, &bitmap_input, &processed_cursor](         \
+                                 const _DataType* data,                        \
+                                 const bool* valid_data,                       \
+                                 const int32_t* offsets,                       \
+                                 const int32_t* segment_offsets,               \
+                                 const int size,                               \
+                                 TargetBitmapView res,                         \
+                                 TargetBitmapView valid_res,                   \
+                                 const Geometry& right_source) {               \
+        AssertInfo(segment_offsets != nullptr,                                 \
+                   "segment_offsets should not be nullptr");                   \
+        if (data == nullptr) {                                                 \
+            processed_cursor += size;                                          \
+            return;                                                            \
+        }                                                                      \
+        bool has_bitmap_input = !bitmap_input.empty();                         \
+        auto* geometry_cache =                                                 \
+            SimpleGeometryCacheManager::Instance().GetCache(                   \
+                this->segment_->get_segment_id(), field_id_);                  \
+        if (geometry_cache) {                                                  \
+            auto cache_lock = geometry_cache->AcquireReadLock();               \
+            for (int i = 0; i < size; ++i) {                                   \
+                if (valid_data != nullptr && !valid_data[i]) {                 \
+                    res[i] = valid_res[i] = false;                             \
+                    continue;                                                  \
+                }                                                              \
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) { \
                     continue;                                                  \
                 }                                                              \
                 auto absolute_offset = segment_offsets[i];                     \
@@ -126,11 +150,15 @@ namespace exec {
                     res[i] = valid_res[i] = false;                             \
                     continue;                                                  \
                 }                                                              \
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) { \
+                    continue;                                                  \
+                }                                                              \
                 res[i] = Geometry(ctx_, data[i].data(), data[i].size())        \
                              .method(right_source, expr_->distance_);          \
             }                                                                  \
             GEOS_finish_r(ctx_);                                               \
         }                                                                      \
+        processed_cursor += size;                                              \
     };                                                                         \
     int64_t processed_size = ProcessDataChunks<_DataType, true>(               \
         execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);    \
@@ -142,53 +170,67 @@ namespace exec {
     return res_vec;
 
 // Macro for unary operations (like IsValid) that don't need a right_source
-#define GEOMETRY_EXECUTE_SUB_BATCH_UNARY(_DataType, method)                  \
-    auto execute_sub_batch = [this](const _DataType* data,                   \
-                                    const bool* valid_data,                  \
-                                    const int32_t* offsets,                  \
-                                    const int32_t* segment_offsets,          \
-                                    const int size,                          \
-                                    TargetBitmapView res,                    \
-                                    TargetBitmapView valid_res) {            \
-        AssertInfo(segment_offsets != nullptr,                               \
-                   "segment_offsets should not be nullptr");                 \
-        auto* geometry_cache =                                               \
-            SimpleGeometryCacheManager::Instance().GetCache(                 \
-                this->segment_->get_segment_id(), field_id_);                \
-        if (geometry_cache) {                                                \
-            auto cache_lock = geometry_cache->AcquireReadLock();             \
-            for (int i = 0; i < size; ++i) {                                 \
-                if (valid_data != nullptr && !valid_data[i]) {               \
-                    res[i] = valid_res[i] = false;                           \
-                    continue;                                                \
-                }                                                            \
-                auto absolute_offset = segment_offsets[i];                   \
-                auto cached_geometry =                                       \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);      \
-                AssertInfo(cached_geometry != nullptr,                       \
-                           "cached geometry is nullptr");                    \
-                res[i] = cached_geometry->method();                          \
-            }                                                                \
-        } else {                                                             \
-            GEOSContextHandle_t ctx_ = GEOS_init_r();                        \
-            for (int i = 0; i < size; ++i) {                                 \
-                if (valid_data != nullptr && !valid_data[i]) {               \
-                    res[i] = valid_res[i] = false;                           \
-                    continue;                                                \
-                }                                                            \
-                res[i] =                                                     \
-                    Geometry(ctx_, data[i].data(), data[i].size()).method(); \
-            }                                                                \
-            GEOS_finish_r(ctx_);                                             \
-        }                                                                    \
-    };                                                                       \
-    int64_t processed_size = ProcessDataChunks<_DataType, true>(             \
-        execute_sub_batch, std::nullptr_t{}, res, valid_res);                \
-    AssertInfo(processed_size == real_batch_size,                            \
-               "internal error: expr processed rows {} not equal "           \
-               "expect batch size {}",                                       \
-               processed_size,                                               \
-               real_batch_size);                                             \
+#define GEOMETRY_EXECUTE_SUB_BATCH_UNARY(_DataType, method)                    \
+    int processed_cursor = 0;                                                  \
+    auto execute_sub_batch = [this, &bitmap_input, &processed_cursor](         \
+                                 const _DataType* data,                        \
+                                 const bool* valid_data,                       \
+                                 const int32_t* offsets,                       \
+                                 const int32_t* segment_offsets,               \
+                                 const int size,                               \
+                                 TargetBitmapView res,                         \
+                                 TargetBitmapView valid_res) {                 \
+        AssertInfo(segment_offsets != nullptr,                                 \
+                   "segment_offsets should not be nullptr");                   \
+        if (data == nullptr) {                                                 \
+            processed_cursor += size;                                          \
+            return;                                                            \
+        }                                                                      \
+        bool has_bitmap_input = !bitmap_input.empty();                         \
+        auto* geometry_cache =                                                 \
+            SimpleGeometryCacheManager::Instance().GetCache(                   \
+                this->segment_->get_segment_id(), field_id_);                  \
+        if (geometry_cache) {                                                  \
+            auto cache_lock = geometry_cache->AcquireReadLock();               \
+            for (int i = 0; i < size; ++i) {                                   \
+                if (valid_data != nullptr && !valid_data[i]) {                 \
+                    res[i] = valid_res[i] = false;                             \
+                    continue;                                                  \
+                }                                                              \
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) { \
+                    continue;                                                  \
+                }                                                              \
+                auto absolute_offset = segment_offsets[i];                     \
+                auto cached_geometry =                                         \
+                    geometry_cache->GetByOffsetUnsafe(absolute_offset);        \
+                AssertInfo(cached_geometry != nullptr,                         \
+                           "cached geometry is nullptr");                      \
+                res[i] = cached_geometry->method();                            \
+            }                                                                  \
+        } else {                                                               \
+            GEOSContextHandle_t ctx_ = GEOS_init_r();                          \
+            for (int i = 0; i < size; ++i) {                                   \
+                if (valid_data != nullptr && !valid_data[i]) {                 \
+                    res[i] = valid_res[i] = false;                             \
+                    continue;                                                  \
+                }                                                              \
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) { \
+                    continue;                                                  \
+                }                                                              \
+                res[i] =                                                       \
+                    Geometry(ctx_, data[i].data(), data[i].size()).method();   \
+            }                                                                  \
+            GEOS_finish_r(ctx_);                                               \
+        }                                                                      \
+        processed_cursor += size;                                              \
+    };                                                                         \
+    int64_t processed_size = ProcessDataChunks<_DataType, true>(               \
+        execute_sub_batch, std::nullptr_t{}, res, valid_res);                  \
+    AssertInfo(processed_size == real_batch_size,                              \
+               "internal error: expr processed rows {} not equal "             \
+               "expect batch size {}",                                         \
+               processed_size,                                                 \
+               real_batch_size);                                               \
     return res_vec;
 
 void
@@ -212,12 +254,12 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     if (exec_path_ == ExprExecPath::ScalarIndex) {
         result = EvalForIndexSegment();
     } else {
-        result = EvalForDataSegment();
+        result = EvalForDataSegment(context);
     }
 }
 
 VectorPtr
-PhyGISFunctionFilterExpr::EvalForDataSegment() {
+PhyGISFunctionFilterExpr::EvalForDataSegment(EvalCtx& context) {
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -227,6 +269,7 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
+    const auto& bitmap_input = context.get_bitmap_input();
 
     if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
         if (segment_->type() == SegmentType::Growing &&
