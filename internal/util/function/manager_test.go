@@ -342,6 +342,33 @@ func TestFunctionRunnerManagerReleaseWaitsForAllKeys(t *testing.T) {
 	require.True(t, baseRunner.isClosed())
 }
 
+func TestFunctionRunnerManagerUpdateDoesNotRegisterMissingKey(t *testing.T) {
+	manager, factory := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	base := newBM25SignatureTestSchema()
+	changedOutput := newSchemaWithChangedOutput(base)
+	require.NoError(t, manager.Update(1, "DELEGATOR-v1", changedOutput))
+	requireFunctionRunnerEntryRemoved(t, manager, 1)
+	require.Zero(t, factory.buildCount.Load())
+
+	require.NoError(t, manager.Alloc(1, "WAL-v1", base))
+	require.NoError(t, manager.Alloc(1, "DELEGATOR-v1", base))
+	baseRunner := requireRunnerByOutput(t, manager, 1, "WAL-v1", 102)
+	require.Equal(t, int32(1), factory.buildCount.Load())
+
+	manager.Release(1, "DELEGATOR-v1")
+	require.NoError(t, manager.Update(1, "DELEGATOR-v1", changedOutput))
+
+	keyVersions, versionRunners, runnerCount := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"WAL-v1": 1}, keyVersions)
+	require.Contains(t, versionRunners, int32(1))
+	require.NotContains(t, versionRunners, int32(2))
+	require.Equal(t, 1, runnerCount)
+	require.Equal(t, int32(1), factory.buildCount.Load())
+	require.False(t, baseRunner.isClosed())
+}
+
 func TestFunctionRunnerManagerKeepsOldVersionUntilAllKeysAdvance(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)

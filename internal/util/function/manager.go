@@ -42,10 +42,11 @@ type FunctionRunnerManager interface {
 	// collection recovery.
 	Alloc(collectionID int64, key string, schema *schemapb.CollectionSchema) error
 
-	// Update moves a lifecycle key to a newer schema version and asynchronously
-	// initializes any missing function runners required by that version. Schema
-	// snapshots without runner-backed functions are still retained so analyzer
-	// execution can be resolved entirely by lifecycle key.
+	// Update moves an allocated lifecycle key to a newer schema version and
+	// asynchronously initializes any missing function runners required by that
+	// version. It is a no-op if Alloc has not registered the key or the key has
+	// already been released. Schema snapshots without runner-backed functions are
+	// still retained so analyzer execution can be resolved entirely by lifecycle key.
 	// Invalid function metadata is returned synchronously. Runners for older
 	// versions are kept until no key uses those versions.
 	Update(collectionID int64, key string, schema *schemapb.CollectionSchema) error
@@ -137,6 +138,7 @@ func (e *functionRunnerCollectionEntry) allocOrUpdate(
 	versionRunners *functionRunnerVersion,
 	functionsBySignature map[string]*schemapb.FunctionSchema,
 	operation string,
+	allowKeyRegistration bool,
 ) error {
 	schemaVersion := schema.GetVersion()
 	warnInitFailure := func(err error) {
@@ -147,7 +149,7 @@ func (e *functionRunnerCollectionEntry) allocOrUpdate(
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
 	}
-	runnerEntries, staleRunnerEntries, err := e.ensureVersion(key, schema, versionRunners, functionsBySignature)
+	runnerEntries, staleRunnerEntries, err := e.ensureVersion(key, schema, versionRunners, functionsBySignature, allowKeyRegistration)
 	if err != nil {
 		return err
 	}
@@ -464,19 +466,25 @@ func (m *functionRunnerManager) Update(
 	if schema == nil {
 		return merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
-	if entry := m.getEntry(collectionID); entry != nil {
-		entry.mu.RLock()
-		version, ok := entry.keyVersions[key]
-		entry.mu.RUnlock()
-		if ok && version >= schema.GetVersion() {
-			return nil
-		}
+	entry := m.getEntry(collectionID)
+	if entry == nil {
+		return nil
+	}
+	entry.mu.RLock()
+	version, ok := entry.keyVersions[key]
+	entry.mu.RUnlock()
+	if !ok || version >= schema.GetVersion() {
+		return nil
 	}
 	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
 	if err != nil {
 		return err
 	}
-	return m.allocOrUpdate(collectionID, key, schema, versionRunners, functionsBySignature, "update")
+	err = entry.allocOrUpdate(key, schema, versionRunners, functionsBySignature, "update", false)
+	if errors.Is(err, errFunctionRunnerCollectionEntryRemoved) {
+		return nil
+	}
+	return err
 }
 
 func (m *functionRunnerManager) allocOrUpdate(
@@ -489,7 +497,7 @@ func (m *functionRunnerManager) allocOrUpdate(
 ) error {
 	for {
 		entry := m.getOrCreateEntry(collectionID)
-		err := entry.allocOrUpdate(key, schema, versionRunners, functionsBySignature, operation)
+		err := entry.allocOrUpdate(key, schema, versionRunners, functionsBySignature, operation, true)
 		// Final Release may close an entry after it was read from the manager.
 		// Retry registration against the current collection entry only in that case.
 		if errors.Is(err, errFunctionRunnerCollectionEntryRemoved) {
@@ -504,12 +512,17 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 	schema *schemapb.CollectionSchema,
 	versionRunners *functionRunnerVersion,
 	functionsBySignature map[string]*schemapb.FunctionSchema,
+	allowKeyRegistration bool,
 ) ([]*functionRunnerEntry, []*functionRunnerEntry, error) {
 	schemaVersion := schema.GetVersion()
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
 		return nil, nil, errFunctionRunnerCollectionEntryRemoved
+	}
+	if _, ok := e.keyVersions[key]; !ok && !allowKeyRegistration {
+		e.mu.Unlock()
+		return nil, nil, nil
 	}
 	existingVersion, ok := e.versionRunners[schemaVersion]
 	if ok {
