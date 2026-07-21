@@ -482,6 +482,24 @@ func (s *StructArraySuite) TestParseNullableStructArrayEmptySlice() {
 	}
 }
 
+func (s *StructArraySuite) TestParseNullableStructArrayEmptyRows() {
+	source := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	source.SetNullable(true)
+	for _, fieldData := range source.FieldData().GetStructArrays().GetFields() {
+		s.NotNil(fieldData.ValidData)
+		s.Empty(fieldData.GetValidData())
+	}
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.True(parsed.Nullable())
+	s.Zero(parsed.Len())
+	s.Require().NoError(parsed.ValidateNullable())
+}
+
 func (s *StructArraySuite) TestAppendToParsedSparseNullableScalarStructArray() {
 	validData := []bool{true, false, true}
 	age, err := NewNullableColumnInt64Array(
