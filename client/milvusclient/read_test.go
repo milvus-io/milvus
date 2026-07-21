@@ -9,9 +9,11 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
@@ -189,6 +191,34 @@ func (s *ReadSuite) TestSearch() {
 		}))
 		s.Error(err)
 	})
+}
+
+func (s *ReadSuite) TestParseEmptyNullableStructArrayFromWire() {
+	schema := entity.NewSchema().WithField(entity.NewField().
+		WithName("clips").
+		WithDataType(entity.FieldTypeArray).
+		WithElementType(entity.FieldTypeStruct).
+		WithNullable(true))
+	source := column.NewColumnStructArray("clips", []column.Column{
+		column.NewColumnInt64Array("label", nil),
+		column.NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	source.SetNullable(true)
+
+	wire, err := proto.Marshal(source.FieldData())
+	s.Require().NoError(err)
+	decoded := &schemapb.FieldData{}
+	s.Require().NoError(proto.Unmarshal(wire, decoded))
+	for _, subField := range decoded.GetStructArrays().GetFields() {
+		s.Nil(subField.ValidData)
+	}
+
+	columns, err := s.client.parseSearchResult(schema, []string{"clips"}, []*schemapb.FieldData{decoded}, 0, 0, 0)
+	s.Require().NoError(err)
+	s.Require().Len(columns, 1)
+	s.True(columns[0].Nullable())
+	s.Zero(columns[0].Len())
+	s.Require().NoError(columns[0].ValidateNullable())
 }
 
 // TestSearch_TextMatch tests the text match search functionality.

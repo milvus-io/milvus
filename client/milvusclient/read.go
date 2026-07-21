@@ -141,6 +141,10 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 	schemaFieldSet := typeutil.NewSet(lo.Map(sch.Fields, func(f *entity.Field, _ int) string {
 		return f.Name
 	})...)
+	schemaFields := make(map[string]*entity.Field, len(sch.Fields))
+	for _, field := range sch.Fields {
+		schemaFields[field.Name] = field
+	}
 	dynamicNames := outputSet.Complement(schemaFieldSet)
 
 	columns := make([]column.Column, 0, len(outputFields))
@@ -149,6 +153,12 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 		col, err := column.FieldDataColumn(fieldData, from, to)
 		if err != nil {
 			return nil, err
+		}
+		if field := schemaFields[fieldData.GetFieldName()]; field != nil && field.Nullable && !col.Nullable() {
+			col.SetNullable(true)
+			if err := col.ValidateNullable(); err != nil {
+				return nil, errors.Wrapf(err, "restore nullable state for field %q", fieldData.GetFieldName())
+			}
 		}
 
 		// if output data contains dynamic json, setup dynamicColumn
