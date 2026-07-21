@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -843,6 +844,53 @@ func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
 	}
 
 	assert.NoError(t, segment.Reopen(context.Background(), loadInfo))
+}
+
+func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
+	paramtable.Init()
+
+	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	schema.Version = 1
+
+	collection := &Collection{}
+	collection.setSchema(schema, 1, 100, 101)
+
+	csegment := mock_segcore.NewMockCSegment(t)
+	csegment.EXPECT().
+		Reopen(mock.Anything, mock.AnythingOfType("*segcore.ReopenRequest")).
+		Return(merr.WrapErrCollectionSchemaVersionNotReady("collection_v1", 0, 1))
+
+	oldLoadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  10,
+		SegmentID:     20,
+		PartitionID:   30,
+		InsertChannel: "by-dev-rootcoord-dml_0_10v0",
+		DataVersion:   1,
+	}
+	newLoadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  oldLoadInfo.GetCollectionID(),
+		SegmentID:     oldLoadInfo.GetSegmentID(),
+		PartitionID:   oldLoadInfo.GetPartitionID(),
+		InsertChannel: oldLoadInfo.GetInsertChannel(),
+		DataVersion:   2,
+	}
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			loadInfo:           atomic.NewPointer(oldLoadInfo),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       csegment,
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+
+	err := segment.Reopen(context.Background(), newLoadInfo)
+	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
 }
 
 // TestBaseSegment_SkipGrowingBF tests that skipGrowingBF bypasses PK candidate checks.

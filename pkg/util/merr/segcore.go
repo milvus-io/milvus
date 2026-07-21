@@ -83,11 +83,12 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	// pretend-finished code is C++ ClusterSkip 2033. Keep generic so a failed
 	// build retries instead of being reported as JobStateFinished.
 	2002: {sentinel: ErrSegcore},
-	2037: {sentinel: ErrSegcoreFollyOtherException, retriable: true}, // FollyOtherException (folly async failure; retry/reroute)
-	2038: {sentinel: ErrSegcoreFollyCancel},                          // FollyCancel (cancellation; not a pretend-finished signal — sentinel identity preserved, scheduler retries)
-	2039: {sentinel: ErrSegcoreOutOfRange},                           // OutOfRange (internal bounds bug, not a signal)
-	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},      // GcpNativeError (object storage; transient)
-	2099: {sentinel: KnowhereError},                                  // KnowhereError
+	2037: {sentinel: ErrSegcoreFollyOtherException, retriable: true},      // FollyOtherException (folly async failure; retry/reroute)
+	2038: {sentinel: ErrSegcoreFollyCancel},                               // FollyCancel (cancellation; not a pretend-finished signal — sentinel identity preserved, scheduler retries)
+	2039: {sentinel: ErrSegcoreOutOfRange},                                // OutOfRange (internal bounds bug, not a signal)
+	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},           // GcpNativeError (object storage; transient)
+	2046: {sentinel: ErrCollectionSchemaVersionNotReady, retriable: true}, // CollectionSchemaVersionNotReady (stale QueryNode schema snapshot; retry with fresh schema)
+	2099: {sentinel: KnowhereError},                                       // KnowhereError
 
 	// Wrapper-path special cases (preserve existing errors.Is behavior that
 	// datanode/index/scheduler.go relies on):
@@ -143,6 +144,8 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2030: {sentinel: ErrSegcore},                   // UnistdError: syscall failure
 	2035: {sentinel: ErrSegcore},                   // MemAllocateSizeNotMatch: size logic bug (not OOM)
 	2041: {sentinel: ErrSegcore},                   // TextIndexNotFound
+	2044: {sentinel: ErrSegcore},                   // StorageError: permanent storage fallback
+	2045: {sentinel: ErrSegcore, retriable: true},  // StorageTransientError: transient storage fallback
 }
 
 // classifySegcoreError converts a C++ segcore error code + message into a

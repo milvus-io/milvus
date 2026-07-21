@@ -150,6 +150,9 @@
 namespace milvus::segcore {
 using namespace milvus::cachinglayer;
 
+constexpr auto kCollectionSchemaVersionNotReady =
+    static_cast<ErrorCode>(2046);
+
 static std::string
 FormatFieldIds(const std::vector<FieldId>& field_ids) {
     std::vector<int64_t> ids;
@@ -7293,13 +7296,12 @@ ChunkedSegmentSealedImpl::Reopen(
     auto current_schema = current->schema;
     if (new_schema && new_schema->get_schema_version() <
                           current_schema->get_schema_version()) {
-        LOG_WARN(
-            "Skip stale reopen segment {}, current schema version {}, incoming "
-            "schema version {}",
-            id_,
-            current_schema->get_schema_version(),
-            new_schema->get_schema_version());
-        return;
+        ThrowInfo(kCollectionSchemaVersionNotReady,
+                  "stale reopen segment {}, current schema version {}, "
+                  "incoming schema version {}",
+                  id_,
+                  current_schema->get_schema_version(),
+                  new_schema->get_schema_version());
     }
 
     auto target_schema = new_schema ? std::move(new_schema) : current_schema;

@@ -3965,7 +3965,12 @@ TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
     proto::segcore::SegmentLoadInfo stale_proto =
         sealed->TestGetSegmentLoadInfo()->GetProto();
     milvus::OpContext op_ctx;
-    EXPECT_NO_THROW(sealed->Reopen(&op_ctx, stale_proto, stale_schema));
+    try {
+        sealed->Reopen(&op_ctx, stale_proto, stale_schema);
+        FAIL() << "stale reopen should fail";
+    } catch (SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), static_cast<ErrorCode>(2046));
+    }
 
     auto snapshot = sealed->TestGetLoadInfoSnapshot();
     EXPECT_TRUE(snapshot->HasFieldInSchema(new_field));
