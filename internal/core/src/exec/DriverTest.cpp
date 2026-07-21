@@ -21,11 +21,11 @@
 
 #include <gtest/gtest.h>
 #include <memory>
-#include <mutex>
 #include <string>
 
 #include "folly/CancellationToken.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
+#include "folly/synchronization/Baton.h"
 #include "knowhere/comp/index_param.h"
 
 #include "common/EasyAssert.h"
@@ -233,12 +233,11 @@ TEST(DriverTest, AsyncConsumePreservesSegcoreErrorCode) {
             return new int(0);  // unreachable: the call above throws
         });
 
-    std::mutex mu;
-    mu.lock();
+    folly::Baton<> baton;
     future->registerReadyCallback(
-        [](CLockedGoMutex* m) { ((std::mutex*)(m))->unlock(); },
-        (CLockedGoMutex*)(&mu));
-    mu.lock();
+        [](CLockedGoMutex* b) { reinterpret_cast<folly::Baton<>*>(b)->post(); },
+        reinterpret_cast<CLockedGoMutex*>(&baton));
+    baton.wait();
     ASSERT_TRUE(future->isReady());
 
     auto [r, s] = future->leakyGet();
@@ -298,12 +297,13 @@ TEST(DriverTest, AsyncDriverCancellationCountsDuringMetric) {
                 return new int(0);  // unreachable: the driver throws above
             });
 
-        std::mutex mu;
-        mu.lock();
+        folly::Baton<> baton;
         future->registerReadyCallback(
-            [](CLockedGoMutex* m) { ((std::mutex*)(m))->unlock(); },
-            (CLockedGoMutex*)(&mu));
-        mu.lock();
+            [](CLockedGoMutex* b) {
+                reinterpret_cast<folly::Baton<>*>(b)->post();
+            },
+            reinterpret_cast<CLockedGoMutex*>(&baton));
+        baton.wait();
         auto [r, s] = future->leakyGet();
         EXPECT_EQ(r, nullptr);
         EXPECT_EQ(s.error_code,

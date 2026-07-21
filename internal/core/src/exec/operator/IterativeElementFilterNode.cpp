@@ -90,13 +90,13 @@ PhyIterativeElementFilterNode::GetOutput() {
     milvus::SearchResult search_result = query_context_->get_search_result();
 
     if (!search_result.element_level_) {
-        ThrowInfo(ExprInvalid,
+        ThrowInfo(UnexpectedError,
                   "PhyIterativeElementFilterNode expects element-level search "
                   "result");
     }
 
     if (!search_result.vector_iterators_.has_value()) {
-        ThrowInfo(ExprInvalid,
+        ThrowInfo(UnexpectedError,
                   "PhyIterativeElementFilterNode expects vector_iterators in "
                   "search result");
     }
