@@ -261,7 +261,7 @@ var (
 	// import job orchestration (job not found / no vchannels / restore /
 	// job-count backpressure) and object-storage IO failures in the readers.
 	// These are the operator's concern, not the caller's, so they stay
-	// SystemError and must not be bucketed as fail_input.
+	// SystemError and must not be bucketed as a user-caused failure.
 	ErrImportSysFailed = newMilvusError("importing data failed on server side", 2101, false)
 
 	// Search/Query related

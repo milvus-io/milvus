@@ -474,7 +474,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool)
 			// Client-caused conflict, same family as the "one distinct index per
 			// field" case above: return an input-class error rather than
 			// ServiceInternal (code 5, "never return out of Milvus") so the
-			// caller is not blamed with a system error / counted as fail_system.
+			// caller is not blamed with a system error / counted as a system-caused failure.
 			return 0, merr.WrapErrParameterInvalidMsg("%s", errMsg)
 		}
 	}
