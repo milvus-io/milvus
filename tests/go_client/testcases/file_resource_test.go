@@ -136,20 +136,18 @@ func TestFileResourceCRUDAndValidation(t *testing.T) {
 	require.NoError(t, mc.RemoveFileResource(ctx, client.NewRemoveFileResourceOption(name)))
 }
 
-func TestFileResourceEmptyNameRejected(t *testing.T) {
+func TestFileResourceEmptyNameCompatibility(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createFileResourceMilvusClient(ctx, t)
-	assertMissingParameter := func(err error) {
-		require.Error(t, err)
-		require.Equal(t, int32(1101), client.ErrorCode(err))
-		require.ErrorContains(t, err, "missing parameter")
-	}
 
 	err := mc.AddFileResource(ctx, client.NewAddFileResourceOption("", "unused.txt"))
-	assertMissingParameter(err)
+	require.Error(t, err)
+	require.Equal(t, int32(1101), client.ErrorCode(err))
+	require.ErrorContains(t, err, "missing parameter")
 
-	err = mc.RemoveFileResource(ctx, client.NewRemoveFileResourceOption(""))
-	assertMissingParameter(err)
+	// Empty names were accepted by older releases. Keep removal available so
+	// an upgraded cluster can clean up a legacy empty-name resource.
+	require.NoError(t, mc.RemoveFileResource(ctx, client.NewRemoveFileResourceOption("")))
 }
 
 func TestFileResourceRemoteAnalyzerAndCollectionLifecycle(t *testing.T) {

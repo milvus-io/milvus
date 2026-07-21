@@ -122,7 +122,7 @@ func TestFileResourceHandlerV2(t *testing.T) {
 		resources := response[HTTPReturnData].([]interface{})
 		require.Len(t, resources, 1)
 		resource := resources[0].(map[string]interface{})
-		assert.EqualValues(t, 100, resource["id"])
+		assert.Equal(t, "100", resource["id"])
 		assert.Equal(t, "synonyms", resource["name"])
 		assert.Equal(t, "files/synonyms.txt", resource["path"])
 	})
@@ -132,6 +132,61 @@ func TestFileResourceHandlerV2(t *testing.T) {
 		assert.EqualValues(t, 0, response[HTTPReturnCode])
 		assert.Empty(t, response[HTTPReturnData])
 	})
+}
+
+func TestFileResourceHandlerV2FormatsInt64IDs(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	const resourceID int64 = 9007199254740993
+	testCases := []struct {
+		name        string
+		allowInt64  string
+		expectedRaw string
+	}{
+		{
+			name:        "default string",
+			expectedRaw: `"9007199254740993"`,
+		},
+		{
+			name:        "allow int64",
+			allowInt64:  "true",
+			expectedRaw: "9007199254740993",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			mockProxy := mocks.NewMockProxy(t)
+			mockProxy.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(&milvuspb.ListFileResourcesResponse{
+				Status: merr.Success(),
+				Resources: []*milvuspb.FileResourceInfo{
+					{Id: resourceID, Name: "synonyms", Path: "files/synonyms.txt"},
+				},
+			}, nil).Once()
+			server := initHTTPServerV2(mockProxy, false)
+
+			req := httptest.NewRequest(http.MethodPost, versionalV2(FileResourceCategory, ListAction), bytes.NewBufferString(`{}`))
+			if testCase.allowInt64 != "" {
+				req.Header.Set(HTTPHeaderAllowInt64, testCase.allowInt64)
+			}
+			recorder := httptest.NewRecorder()
+			server.ServeHTTP(recorder, req)
+			require.Equal(t, http.StatusOK, recorder.Code)
+
+			response := struct {
+				Code int32 `json:"code"`
+				Data []struct {
+					ID json.RawMessage `json:"id"`
+				} `json:"data"`
+			}{}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.EqualValues(t, 0, response.Code)
+			require.Len(t, response.Data, 1)
+			assert.Equal(t, testCase.expectedRaw, string(response.Data[0].ID))
+		})
+	}
 }
 
 func TestFileResourceHandlerV2PropagatesErrors(t *testing.T) {
