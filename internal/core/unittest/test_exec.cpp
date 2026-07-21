@@ -925,7 +925,8 @@ TEST(TaskTest, SkipIndexWithBitmapInputAlignment) {
 
     // Verify SkipIndex is working before running the expression:
     // Check if chunk 0 can be skipped for float > 60
-    auto& skip_index = segment->GetSkipIndex();
+    auto skip_index_owner = segment->GetSkipIndex();
+    const auto& skip_index = *skip_index_owner;
     bool chunk0_can_skip = skip_index.CanSkipUnaryRange<float>(
         float_fid, 0, proto::plan::OpType::GreaterThan, 60.0f);
     bool chunk1_can_skip = skip_index.CanSkipUnaryRange<float>(
