@@ -171,7 +171,7 @@ func TestStructArrayNullableInsertNil(t *testing.T) {
 		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128))
 	schema := entity.NewSchema().WithName(collName).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
-		WithField(entity.NewField().WithName("normal_vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim))).
+		WithField(entity.NewField().WithName("normal_vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)).WithNullable(true)).
 		WithField(entity.NewField().
 			WithName("clips").
 			WithDataType(entity.FieldTypeArray).
@@ -186,9 +186,13 @@ func TestStructArrayNullableInsertNil(t *testing.T) {
 		nil,
 		{"embedding": [][]float32{hp.RandFloatVector(dim)}, "label": []string{"valid"}},
 	}
+	secondVector := make([]float32, dim)
+	secondVector[1] = 1
+	normalVectors, err := column.NewNullableColumnFloatVector("normal_vector", dim,
+		[][]float32{secondVector}, []bool{false, true})
+	require.NoError(t, err)
 	res, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
-		WithInt64Column("id", []int64{0, 1}).
-		WithFloatVectorColumn("normal_vector", dim, [][]float32{hp.RandFloatVector(dim), hp.RandFloatVector(dim)}).
+		WithColumns(column.NewColumnInt64("id", []int64{0, 1}), normalVectors).
 		WithStructArrayColumn("clips", structSchema, rows))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, 2, res.InsertCount)
@@ -223,6 +227,25 @@ func TestStructArrayNullableInsertNil(t *testing.T) {
 	value, err = validResult.GetColumn("clips").Get(0)
 	require.NoError(t, err)
 	require.NotNil(t, value)
+
+	// A null vector produces an empty result set while a valid vector produces a
+	// non-empty one. The empty slice must retain every struct sub-column's
+	// nullable state.
+	searchResults, err := mc.Search(ctx, client.NewSearchByIDsOption(collName, 10,
+		column.NewColumnInt64("id", []int64{0, 1})).
+		WithANNSField("normal_vector").
+		WithOutputFields("clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Len(t, searchResults, 2)
+	require.NoError(t, searchResults[0].Err)
+	require.Zero(t, searchResults[0].ResultCount)
+	emptyClips := searchResults[0].GetColumn("clips")
+	require.NotNil(t, emptyClips)
+	require.True(t, emptyClips.Nullable())
+	require.Zero(t, emptyClips.Len())
+	require.NoError(t, searchResults[1].Err)
+	require.Greater(t, searchResults[1].ResultCount, 0)
 }
 
 // TestStructArrayCreateEmbListHNSWIndexCosine ports test_create_emb_list_hnsw_index_cosine.
