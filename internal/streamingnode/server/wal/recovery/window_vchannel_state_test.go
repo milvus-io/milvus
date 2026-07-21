@@ -342,6 +342,81 @@ func TestCommittedWriteRecordFromTxnMessageWithIdempotency(t *testing.T) {
 	require.True(t, message.MustUnmarshalMessageID(record.SourceMessageID).EQ(rmq.NewRmqID(103)))
 }
 
+// testReplicateHeader marks a message as replicated from another cluster.
+func testReplicateHeader(msgID int64) *message.ReplicateHeader {
+	return &message.ReplicateHeader{
+		ClusterID:              "source-cluster",
+		MessageID:              rmq.NewRmqID(msgID),
+		LastConfirmedMessageID: rmq.NewRmqID(msgID - 1),
+		TimeTick:               uint64(msgID),
+		VChannel:               "v1",
+	}
+}
+
+func TestVChannelWindowSkipsReplicatedIdempotencyKey(t *testing.T) {
+	state := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(1, 1))
+
+	// A native keyed insert materializes a window entry.
+	state.observeMessage(newTestIdempotentCommittedInsertMessage(t, "v1", "native-key", 10))
+	require.Contains(t, state.entries, "native-key")
+
+	// A replicated insert preserves the SOURCE cluster's key; it must be
+	// recorded as a keyless committed write: no window entry, while checkpoint
+	// bookkeeping still advances.
+	replicated := newTestIdempotentInsertMessage(t, "v1", "replicated-key", nil).
+		WithReplicateHeader(testReplicateHeader(5)).
+		WithTimeTick(20).
+		WithLastConfirmed(rmq.NewRmqID(19)).
+		IntoImmutableMessage(rmq.NewRmqID(20))
+	state.observeMessage(replicated)
+
+	require.NotContains(t, state.entries, "replicated-key")
+	require.Len(t, state.entries, 1)
+	require.Equal(t, uint64(20), state.snapshotCheckpointTimetick)
+	// The keyless record is still staged for persistence, so a restart replays
+	// it without materializing an entry either.
+	require.NotEmpty(t, state.pendingRecords)
+	require.Nil(t, state.pendingRecords[len(state.pendingRecords)-1].Idempotency)
+}
+
+func TestCommittedWriteRecordSkipsReplicatedTxnCommitKey(t *testing.T) {
+	txnCtx := message.TxnContext{TxnID: 1, Keepalive: 10}
+	begin := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnCtx).
+		WithTimeTick(100).
+		WithLastConfirmed(rmq.NewRmqID(99)).
+		IntoImmutableMessage(rmq.NewRmqID(100))
+	beginMsg, err := message.AsImmutableBeginTxnMessageV2(begin)
+	require.NoError(t, err)
+
+	body := newTestIdempotentInsertMessage(t, "v1", "", nil).
+		WithTxnContext(txnCtx).WithTimeTick(101).IntoImmutableMessage(rmq.NewRmqID(101))
+	commit := message.NewCommitTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnCtx).
+		WithReplicateHeader(testReplicateHeader(102)).
+		WithTimeTick(103).
+		WithLastConfirmed(rmq.NewRmqID(102)).
+		IntoImmutableMessage(rmq.NewRmqID(103))
+	commitMsg, err := message.AsImmutableCommitTxnMessageV2(commit)
+	require.NoError(t, err)
+
+	txnMsg, err := message.NewImmutableTxnMessageBuilder(beginMsg).Add(body).Build(commitMsg)
+	require.NoError(t, err)
+
+	// The replicated commit's key must not surface on the committed-write record.
+	record, ok := newCommittedWriteRecordFromMessage("p1", txnMsg)
+	require.True(t, ok)
+	require.Nil(t, record.Idempotency)
+}
+
 func TestCommittedWriteRecordWithoutDIDDoesNotEnterDIDWindow(t *testing.T) {
 	extra := &messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{1},

@@ -72,6 +72,106 @@ func TestInterceptorDuplicateDoesNotAppend(t *testing.T) {
 	require.True(t, firstLastConfirmed.EQ(extra.LastConfirmedMessageID))
 }
 
+// withTestReplicateHeader marks msg as replicated from another cluster, the way
+// the replicate stream server does before appending to the local WAL.
+func withTestReplicateHeader(msg message.MutableMessage) message.MutableMessage {
+	return msg.WithReplicateHeader(&message.ReplicateHeader{
+		ClusterID:              "source-cluster",
+		MessageID:              newTestMessageID(1),
+		LastConfirmedMessageID: newTestMessageID(1),
+		TimeTick:               1,
+		VChannel:               "v1",
+	})
+}
+
+func TestInterceptorBypassesReplicatedInsert(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+
+	// Seed the window: a native owner append records key-1.
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	appendCount := 0
+	_, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-1"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(10), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, appendCount)
+
+	// A replicated insert carrying the SAME key must bypass the window and reach
+	// the WAL: the key belongs to the source cluster's history, and deduplicating
+	// it locally would silently drop the replicated write.
+	replicatedID := newTestMessageID(11)
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	msgID, err := interceptor.DoAppend(ctx, withTestReplicateHeader(newIdempotentInsertMessage(t, "v1", "key-1")), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		return replicatedID, nil
+	})
+	require.NoError(t, err)
+	require.True(t, replicatedID.EQ(msgID))
+	require.Equal(t, 2, appendCount)
+
+	// A replicated insert with a fresh key must leave no trace in the window: a
+	// later native insert reusing that key is still the owner and appends.
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err = interceptor.DoAppend(ctx, withTestReplicateHeader(newIdempotentInsertMessage(t, "v1", "key-2")), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		return newTestMessageID(12), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, appendCount)
+
+	nativeID := newTestMessageID(13)
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	msgID, err = interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-2"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, 200)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(12))
+		return nativeID, nil
+	})
+	require.NoError(t, err)
+	require.True(t, nativeID.EQ(msgID))
+	require.Equal(t, 4, appendCount)
+}
+
+func TestInterceptorBypassesReplicatedTxnCommit(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	txnCtx := message.TxnContext{TxnID: 1, Keepalive: 10}
+
+	newCommit := func() message.MutableMessage {
+		return message.NewCommitTxnMessageBuilderV2().
+			WithVChannel("v1").
+			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithBody(&message.CommitTxnMessageBody{}).
+			MustBuildMutable().
+			WithTxnContext(txnCtx)
+	}
+
+	appendCount := 0
+	append := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(int64(10 + appendCount)), nil
+	}
+
+	// Native commit seeds the window with txn-key ...
+	_, err := interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), newCommit(), append)
+	require.NoError(t, err)
+	require.Equal(t, 1, appendCount)
+
+	// ... and a duplicate native commit short-circuits (sanity check).
+	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), newCommit(), append)
+	require.NoError(t, err)
+	require.Equal(t, 1, appendCount)
+
+	// A replicated commit with the same key must bypass the window and append.
+	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), withTestReplicateHeader(newCommit()), append)
+	require.NoError(t, err)
+	require.Equal(t, 2, appendCount)
+}
+
 func TestInterceptorDuplicateReturnsInsertIDs(t *testing.T) {
 	interceptor := newInterceptor(WindowConfig{})
 	insertResult := &messagespb.IdempotentInsertResult{
