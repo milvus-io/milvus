@@ -263,7 +263,11 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 			return err
 		}
 
-		columns, err := c.parseSearchResult(collection.Schema, resp.GetOutputFields(), resp.GetFieldsData(), 0, 0, -1)
+		outputFields := resp.GetOutputFields()
+		if len(outputFields) == 0 {
+			outputFields = req.GetOutputFields()
+		}
+		columns, err := c.parseSearchResult(collection.Schema, outputFields, resp.GetFieldsData(), 0, 0, -1)
 		if err != nil {
 			return err
 		}
