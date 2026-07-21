@@ -283,6 +283,11 @@ func (c *catalog) SavePChannelWindowMeta(ctx context.Context, pchannelName strin
 	return c.metaKV.Save(ctx, buildPChannelWindowMetaKey(pchannelName), string(data))
 }
 
+// RemovePChannelWindowMeta removes the pchannel-level physical window metadata.
+func (c *catalog) RemovePChannelWindowMeta(ctx context.Context, pchannelName string) error {
+	return c.metaKV.Remove(ctx, buildPChannelWindowMetaKey(pchannelName))
+}
+
 func normalizeVChannelWindowMeta(pchannelName string, viewType string, vchannelName string, meta *streamingpb.VChannelWindowMeta) (*streamingpb.VChannelWindowMeta, string, error) {
 	if meta == nil {
 		return nil, "", errors.New("nil vchannel window meta")

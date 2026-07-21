@@ -1,9 +1,11 @@
 package recovery
 
 import (
+	"context"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -23,10 +25,53 @@ func newConfig() *config {
 		idempotencyMaxEntries:       params.StreamingCfg.IdempotencyMaxEntriesPerWindow.GetAsInt(),
 		idempotencySnapshotInterval: params.StreamingCfg.IdempotencySnapshotInterval.GetAsDurationByParse(),
 	}
+	cfg.sanitizeIdempotency()
 	if err := cfg.validate(); err != nil {
 		panic(err)
 	}
 	return cfg
+}
+
+// sanitizeIdempotency repairs invalid combinations of the runtime-tunable
+// idempotency parameters by falling back to their defaults with a warning,
+// instead of panicking the WAL open into a crash loop over an operator typo
+// (e.g. windowTTL: 0s with maxEntriesPerWindow left at its 0 default). The
+// same fallback is applied by the idempotency interceptor builder — keep both
+// in sync.
+func (cfg *config) sanitizeIdempotency() {
+	if !cfg.idempotencyEnabled {
+		return
+	}
+	params := paramtable.Get()
+	// A non-positive snapshot interval would disable the only task that persists
+	// and evicts recovery-side window entries, growing memory without bound.
+	if cfg.idempotencySnapshotInterval <= 0 {
+		fallback := defaultDuration(&params.StreamingCfg.IdempotencySnapshotInterval)
+		mlog.Warn(context.TODO(), "non-positive idempotency snapshot interval; falling back to default",
+			mlog.Duration("configured", cfg.idempotencySnapshotInterval),
+			mlog.Duration("fallback", fallback))
+		cfg.idempotencySnapshotInterval = fallback
+	}
+	// With neither a TTL nor a max entry cap the live window would grow without
+	// bound per key; fall back to the default TTL.
+	if cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxEntries <= 0 {
+		fallback := defaultDuration(&params.StreamingCfg.IdempotencyWindowTTL)
+		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max entry cap; falling back to default TTL",
+			mlog.Duration("configuredTTL", cfg.idempotencyWindowTTL),
+			mlog.Duration("fallbackTTL", fallback))
+		cfg.idempotencyWindowTTL = fallback
+	}
+}
+
+// defaultDuration parses a ParamItem's declared default; the defaults are
+// compile-time literals, so a parse failure is unreachable (paramtable itself
+// panics on it in the regular read path).
+func defaultDuration(item *paramtable.ParamItem) time.Duration {
+	fallback, err := time.ParseDuration(item.DefaultValue)
+	if err != nil {
+		panic(err)
+	}
+	return fallback
 }
 
 // config is the configuration for the recovery module.
@@ -51,16 +96,9 @@ func (cfg *config) validate() error {
 	if cfg.gracefulTimeout <= 0 {
 		return status.NewInvalidArgument("graceful timeout must be greater than 0")
 	}
-	// When idempotency is enabled the window background task is the only thing that
-	// persists and evicts window entries; a non-positive snapshot interval disables
-	// its ticker, so the in-memory windows would grow without bound until OOM.
-	if cfg.idempotencyEnabled && cfg.idempotencySnapshotInterval <= 0 {
-		return status.NewInvalidArgument("idempotency snapshot interval must be greater than 0 when idempotency is enabled")
-	}
-	// The live interceptor window only evicts on a positive TTL or a positive max
-	// entries cap; with both non-positive it would grow without bound per key.
-	if cfg.idempotencyEnabled && cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxEntries <= 0 {
-		return status.NewInvalidArgument("idempotency window TTL or max entries per window must be greater than 0 when idempotency is enabled")
-	}
+	// The idempotency parameter combinations are repaired by sanitizeIdempotency
+	// (fallback + warning) instead of validated here: they are runtime-tunable
+	// operator knobs, and a panic here would put every WAL open on this node into
+	// a crash loop over a config typo.
 	return nil
 }

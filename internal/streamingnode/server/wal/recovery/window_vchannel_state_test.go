@@ -127,6 +127,18 @@ func newTestPChannelWindowCatalog(t *testing.T) (*mock_metastore.MockStreamingNo
 		state.storeMeta = proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
 		return nil
 	}).Maybe()
+	catalog.EXPECT().RemoveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, vchannels []string) error {
+		state.operations = append(state.operations, "remove-vchannel-window-metas")
+		for _, vchannel := range vchannels {
+			delete(state.windowMetas, vchannel)
+		}
+		return nil
+	}).Maybe()
+	catalog.EXPECT().RemovePChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) error {
+		state.operations = append(state.operations, "remove-pchannel-window-meta")
+		state.storeMeta = nil
+		return nil
+	}).Maybe()
 	return catalog, state
 }
 
