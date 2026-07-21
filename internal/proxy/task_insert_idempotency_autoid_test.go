@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestReassignAutoIDByOffsetChannelsRoutesEachOffsetToStableBucket(t *testing.T) {
@@ -57,10 +58,12 @@ func TestReassignAutoIDByOffsetChannelsSupportsVarCharPrimary(t *testing.T) {
 	requireOffsetRoutesToModuloChannels(t, ids, channels)
 }
 
-func TestReassignAutoIDByOffsetChannelsIgnoresInputChannelOrder(t *testing.T) {
-	canonicalChannels := []string{"ch0", "ch1", "ch2"}
-	firstRowIDs := nonMatchingRowIDsForOffsets(t, canonicalChannels, 6, 1000)
-	secondRowIDs := nonMatchingRowIDsForOffsets(t, canonicalChannels, 6, 900000)
+func TestReassignAutoIDByOffsetChannelsRoutesAgainstGivenChannelOrder(t *testing.T) {
+	// The collection's stored vchannel order is not lexicographic in general, and it
+	// is the order delete hashes against, so the routing must follow it as given.
+	channels := []string{"ch2", "ch0", "ch1"}
+	firstRowIDs := nonMatchingRowIDsForOffsets(t, channels, 6, 1000)
+	secondRowIDs := nonMatchingRowIDsForOffsets(t, channels, 6, 900000)
 	newRangeAlloc := func(nextID int64) func(uint32) (int64, int64, error) {
 		return func(count uint32) (int64, int64, error) {
 			begin := nextID
@@ -72,14 +75,14 @@ func TestReassignAutoIDByOffsetChannelsIgnoresInputChannelOrder(t *testing.T) {
 	require.NoError(t, reassignAutoIDByOffsetChannels(
 		firstRowIDs,
 		schemapb.DataType_Int64,
-		[]string{"ch2", "ch0", "ch1"},
+		channels,
 		0,
 		newRangeAlloc(100000),
 	))
 	require.NoError(t, reassignAutoIDByOffsetChannels(
 		secondRowIDs,
 		schemapb.DataType_Int64,
-		[]string{"ch1", "ch2", "ch0"},
+		channels,
 		0,
 		newRangeAlloc(500000),
 	))
@@ -91,11 +94,11 @@ func TestReassignAutoIDByOffsetChannelsIgnoresInputChannelOrder(t *testing.T) {
 		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: secondRowIDs}},
 	}
 	require.NotEqual(t, firstRowIDs, secondRowIDs, "retry auto IDs should be allowed to differ")
-	requireOffsetRoutesToModuloChannels(t, firstIDs, canonicalChannels)
-	requireOffsetRoutesToModuloChannels(t, secondIDs, canonicalChannels)
+	requireOffsetRoutesToModuloChannels(t, firstIDs, channels)
+	requireOffsetRoutesToModuloChannels(t, secondIDs, channels)
 	require.Equal(t,
-		rowChannelsByPK(firstIDs, canonicalChannels),
-		rowChannelsByPK(secondIDs, canonicalChannels),
+		rowChannelsByPK(firstIDs, channels),
+		rowChannelsByPK(secondIDs, channels),
 	)
 }
 
@@ -213,7 +216,7 @@ func TestInsertTaskReassignAutoIDForStableIdempotency(t *testing.T) {
 	require.Equal(t, 1, pkFields, "existing primary field should be replaced, not appended")
 }
 
-func TestInsertTaskReassignAutoIDForStableIdempotencyIgnoresVChannelOrder(t *testing.T) {
+func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
 	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
@@ -232,25 +235,25 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyIgnoresVChannelOrder(t *tes
 	require.NoError(t, err)
 	globalMetaCache = newInsertTaskIdempotencyMockCache(t, schema, true)
 	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
-	canonicalChannels := []string{"ch0", "ch1", "ch2"}
+	// The stored vchannel order follows pchannel load at allocation time, so it is
+	// not lexicographic; the insert must route against it verbatim.
+	storedChannels := []string{"ch2", "ch0", "ch1"}
 
 	var firstRowIDs []int64
 	var firstRoutes []string
 	var firstKey string
-	for idx, channelOrder := range [][]string{
-		{"ch2", "ch0", "ch1"},
-		{"ch1", "ch2", "ch0"},
-	} {
+	for idx := 0; idx < 2; idx++ {
 		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(UniqueID(100)).Return(channelOrder, nil)
+		chMgr.EXPECT().getVChannels(UniqueID(100)).Return(slices.Clone(storedChannels), nil)
 		task := newInsertTaskForIdempotencyAutoIDTest(idAllocator, chMgr)
 
 		require.NoError(t, task.PreExecute(ctx))
-		require.Equal(t, canonicalChannels, task.vChannels)
+		require.Equal(t, storedChannels, task.vChannels)
 		require.Equal(t, task.insertMsg.GetRowIDs(), task.result.GetIDs().GetIntId().GetData())
-		requireOffsetRoutesToModuloChannels(t, task.result.GetIDs(), canonicalChannels)
+		requireOffsetRoutesToModuloChannels(t, task.result.GetIDs(), storedChannels)
+		requireInsertRoutesMatchDeleteRoutes(t, task.result.GetIDs(), task.vChannels)
 
-		routes := rowChannelsByPK(task.result.GetIDs(), canonicalChannels)
+		routes := rowChannelsByPK(task.result.GetIDs(), storedChannels)
 		if idx == 0 {
 			firstRowIDs = slices.Clone(task.insertMsg.GetRowIDs())
 			firstRoutes = slices.Clone(routes)
@@ -261,6 +264,22 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyIgnoresVChannelOrder(t *tes
 		require.Equal(t, firstKey, task.idempotencyKey)
 		require.Equal(t, firstRoutes, routes)
 	}
+}
+
+// requireInsertRoutesMatchDeleteRoutes asserts that every PK produced by the
+// idempotent autoID assignment lands on the vchannel that a later delete of that
+// same PK would target: delete hashes against the vchannel list from
+// chMgr.getVChannels and indexes it directly (task_delete.go), so the insert must
+// use the very same list, unpermuted.
+func requireInsertRoutesMatchDeleteRoutes(t *testing.T, ids *schemapb.IDs, vChannels []string) {
+	t.Helper()
+	hashValues, err := typeutil.HashPK2Channels(ids, vChannels)
+	require.NoError(t, err)
+	deleteRoutes := make([]string, 0, len(hashValues))
+	for _, key := range hashValues {
+		deleteRoutes = append(deleteRoutes, vChannels[key])
+	}
+	require.Equal(t, deleteRoutes, rowChannelsByPK(ids, vChannels))
 }
 
 func TestInsertTaskReassignAutoIDForStableIdempotencyErrors(t *testing.T) {
