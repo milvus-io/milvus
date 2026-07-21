@@ -698,8 +698,8 @@ type WoodpeckerConfig struct {
 	// client
 	AppendQueueSize         ParamItem `refreshable:"true"`
 	AppendMaxRetries        ParamItem `refreshable:"true"`
-	AppendMaxBatchEntries   ParamItem `refreshable:"true"`
-	AppendMaxBatchBytes     ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries   ParamItem `refreshable:"false"`
+	AppendMaxBatchBytes     ParamItem `refreshable:"false"`
 	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
 	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
 	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
@@ -742,7 +742,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.meta.prefix",
 		Version:      "2.6.0",
 		DefaultValue: "woodpecker",
-		Doc:          "The Prefix of the metadata provider. default is woodpecker.",
+		Doc:          "The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.",
 		Export:       true,
 	}
 	p.MetaPrefix.Init(base.mgr)
@@ -778,7 +778,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.client.segmentAppend.maxBatchBytes",
 		Version:      "2.6.0",
 		DefaultValue: "2000000",
-		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB; whichever of maxBatchEntries/maxBatchBytes is hit first bounds the batch. Ignored when maxBatchEntries <= 1.",
+		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB; whichever of maxBatchEntries/maxBatchBytes is hit first bounds the batch. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.",
 		Export:       true,
 	}
 	p.AppendMaxBatchBytes.Init(base.mgr)
