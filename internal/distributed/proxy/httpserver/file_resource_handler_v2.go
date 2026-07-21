@@ -19,6 +19,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -64,10 +65,11 @@ func (h *HandlersV2) listFileResources(ctx context.Context, c *gin.Context, anyR
 		return h.proxy.ListFileResources(reqCtx, req.(*milvuspb.ListFileResourcesRequest))
 	})
 	if err == nil {
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		resources := make([]gin.H, 0, len(resp.(*milvuspb.ListFileResourcesResponse).GetResources()))
 		for _, resource := range resp.(*milvuspb.ListFileResourcesResponse).GetResources() {
 			resources = append(resources, gin.H{
-				"id":   resource.GetId(),
+				"id":   formatRESTInt64(resource.GetId(), allowInt64),
 				"name": resource.GetName(),
 				"path": resource.GetPath(),
 			})

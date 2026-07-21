@@ -165,7 +165,7 @@ class TestFileResourceOperations(TestBase):
         matches = [resource for resource in rsp["data"] if resource["name"] == resource_name]
         assert len(matches) == 1, rsp
         assert matches[0]["path"] == path
-        assert isinstance(matches[0]["id"], int)
+        assert isinstance(matches[0]["id"], str)
 
         rsp = self._add_file_resource(resource_name, path)
         assert rsp["code"] == 0, rsp
