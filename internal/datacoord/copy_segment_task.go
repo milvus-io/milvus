@@ -457,11 +457,25 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		// transforms of the source paths (same content on overwrite), and each
 		// dispatch allocates fresh buildIDs, so index files from a partial
 		// earlier attempt are never referenced by meta and are removed by GC.
-		if resetErr := t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
+		//
+		// The reset is state-guarded (task still InProgress, parent job still
+		// active): this response can arrive long after the query was issued, and
+		// in the meantime another task may have failed the parent job. Reviving
+		// the task to Pending then would let the scheduler issue one more
+		// dispatch for an already-dead job before checkFailedJob converges it
+		// back to Failed.
+		applied, resetErr := t.copyMeta.UpdateTaskInStateIfJobActive(context.TODO(), t.GetTaskId(),
+			datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
-			UpdateCopyTaskNodeID(NullNodeID)); resetErr != nil {
+			UpdateCopyTaskNodeID(NullNodeID))
+		if resetErr != nil {
 			mlog.Warn(context.TODO(), "failed to reset copy segment task to pending after worker loss",
 				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resetErr))...)
+			return
+		}
+		if !applied {
+			mlog.Info(context.TODO(), "skip resetting copy segment task after worker loss: task left InProgress or job no longer active",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 			return
 		}
 		mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch",

@@ -1126,3 +1126,41 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 
 	// Verify: Ref count is released even on failure
 }
+
+// TestTryTimeoutJob_DoesNotOverwriteTerminalJob is the regression test for the
+// review nit on tryTimeoutJob: `job` is the snapshot captured before the checker
+// round began. In Start(), checkCopyingJob(job) runs first and may finish the
+// job (-> Completed) in that same round; tryTimeoutJob(job) then runs with the
+// still-Executing snapshot and, once the deadline has elapsed, would flip the
+// just-Completed job to Failed. The transition must be conditional on the
+// current state, not the snapshot's.
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_DoesNotOverwriteTerminalJob() {
+	// AddJob + the concurrent Completed transition. The timeout transition must
+	// not reach the catalog.
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	staleJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			TimeoutTs:    CopyJobTimeoutTs(-time.Minute),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), staleJob))
+
+	// A concurrent path (finishJob in the same checker round) completes the job
+	// after the snapshot was taken.
+	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
+		UpdateCopyJobTotalRows(123)))
+
+	// tryTimeoutJob still holds the stale Executing snapshot with an elapsed deadline.
+	s.checker.tryTimeoutJob(staleJob)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
+	s.NotEqual("timeout", updatedJob.GetReason())
+	s.Equal(int64(123), updatedJob.GetTotalRows())
+}

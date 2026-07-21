@@ -1565,3 +1565,36 @@ func TestAssembleCopySegmentRequest_RedispatchAllocatesFreshBuildIDs(t *testing.
 // embeddedAllocator: named type for mockey interface-method patching; avoids a
 // go1.26 `go vet` printf-pass panic on method expressions of anonymous structs.
 type embeddedAllocator struct{ allocator.Allocator }
+
+// TestQueryTaskOnWorker_WorkerLossDoesNotResetWhenJobTerminal is the regression
+// test for the review nit on the worker-loss reset path: the reset must be
+// conditional on the parent job still being active. A confirmed-loss response
+// can land long after the query was issued, by which time another task may have
+// failed the job. Reviving this task to Pending would let the scheduler issue
+// one more dispatch for an already-dead job before checkFailedJob converges it
+// back to Failed.
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossDoesNotResetWhenJobTerminal() {
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
+		nil,
+		merr.WrapErrNodeNotFound(10),
+	)
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().NodeId = 10
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	// Parent job already failed (fail-fast triggered by a sibling task).
+	s.NoError(copyMeta.AddJob(context.Background(),
+		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobFailed)))
+
+	task.QueryTaskOnWorker(cluster)
+
+	// The task must stay InProgress on its original node: not revived to
+	// Pending, so the scheduler cannot re-dispatch it. checkFailedJob will
+	// converge it to Failed on the next round.
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
+	s.EqualValues(10, updatedTask.GetNodeId())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		copyMeta.GetJob(context.Background(), 100).GetState())
+}
