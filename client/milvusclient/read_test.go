@@ -365,6 +365,37 @@ func (s *ReadSuite) TestQuery() {
 		s.NotNil(rs.sch)
 	})
 
+	s.Run("empty nullable struct array", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		structSchema := entity.NewStructSchema().
+			WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeInt64)).
+			WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2))
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().
+				WithName("clips").
+				WithDataType(entity.FieldTypeArray).
+				WithElementType(entity.FieldTypeStruct).
+				WithNullable(true).
+				WithStructSchema(structSchema))
+		s.setupCache(collectionName, schema)
+
+		s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+			s.Equal([]string{"clips"}, qr.GetOutputFields())
+			return &milvuspb.QueryResults{}, nil
+		}).Once()
+
+		rs, err := s.client.Query(ctx, NewQueryOption(collectionName).
+			WithFilter("ID < 0").
+			WithOutputFields("clips"))
+		s.Require().NoError(err)
+		clips := rs.GetColumn("clips")
+		s.Require().NotNil(clips)
+		s.True(clips.Nullable())
+		s.Zero(clips.Len())
+		s.Require().NoError(clips.ValidateNullable())
+	})
+
 	s.Run("bad_request", func() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collectionName, s.schema)
