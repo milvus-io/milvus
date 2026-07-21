@@ -266,6 +266,26 @@ func (s *VectorArraySuite) TestParseNullableVectorArrayData() {
 	s.Nil(value)
 }
 
+func (s *VectorArraySuite) TestParseCompactNullableVectorArrayData() {
+	source := NewColumnFloatVectorArray("emb", 2, nil)
+	source.SetNullable(true)
+	s.Require().NoError(source.AppendValue([][]float32{{0.1, 0.2}}))
+	s.Require().NoError(source.AppendNull())
+	s.Require().NoError(source.AppendValue([][]float32{}))
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.True(parsed.Nullable())
+	s.Equal(3, parsed.Len())
+	s.Equal(2, parsed.ValidCount())
+	value, err := parsed.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+	isNull, err := parsed.IsNull(2)
+	s.Require().NoError(err)
+	s.False(isNull)
+}
+
 func (s *VectorArraySuite) TestParseVectorArrayDataByteTypes() {
 	dim := 4
 	// Build a single payload holding 2 inner vectors of `dim*2` bytes each.
