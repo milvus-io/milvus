@@ -149,6 +149,27 @@ func (s *StructArraySuite) TestNullableCompactSlice() {
 	}
 }
 
+func (s *StructArraySuite) TestSetNullableWithExistingRows() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("id", [][]int64{{10}, {20}}),
+		NewColumnVarCharArray("tag", [][]string{{"a"}, {"b"}}),
+	})
+	column.SetNullable(true)
+
+	var value any
+	var err error
+	s.NotPanics(func() {
+		value, err = column.Get(0)
+	})
+	s.Require().NoError(err)
+	s.Equal([]int64{10}, value.(map[string]any)["id"])
+	s.Require().NoError(column.AppendNull())
+	s.Equal(3, column.Len())
+	value, err = column.Get(2)
+	s.Require().NoError(err)
+	s.Nil(value)
+}
+
 func (s *StructArraySuite) TestVectorSubField() {
 	dim := 4
 	rows := [][][]float32{
