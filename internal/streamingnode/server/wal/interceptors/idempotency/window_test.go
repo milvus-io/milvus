@@ -39,6 +39,34 @@ func TestDIDWindowBeginCompleteAndDuplicate(t *testing.T) {
 	assert.Equal(t, uint64(100), duplicate.Entry.GetCommitTimetick())
 }
 
+// Complete order is append-completion order, not commit-timetick order: the
+// idempotency interceptor is outermost while the timetick is assigned by the
+// inner timetick interceptor, so concurrent appends on one vchannel can
+// complete out of order. commitOrder must stay sorted by commit timetick —
+// eviction and the evicted watermark read its head as "oldest", and the
+// recovery-side window sorts its entries the same way.
+func TestWindowCommitOrderSortedByCommitTimetick(t *testing.T) {
+	window := NewWindow(WindowConfig{})
+	completeKey(t, window, "a", 100)
+	completeKey(t, window, "b", 90)
+	completeKey(t, window, "c", 95)
+
+	require.Equal(t, []IdempotencyKey{"b", "c", "a"}, window.commitOrder)
+	// The watermark points at the oldest retained commit timetick, regardless of
+	// completion order.
+	require.Equal(t, uint64(90), window.EvictedWatermarkTT())
+
+	// Count-cap eviction drops the oldest entry by commit timetick ("b"), not
+	// the first-completed one ("a").
+	capped := NewWindow(WindowConfig{MaxEntries: 2})
+	completeKey(t, capped, "a", 100)
+	completeKey(t, capped, "b", 90)
+	completeKey(t, capped, "c", 95)
+	require.NotContains(t, capped.entries, IdempotencyKey("b"))
+	require.Contains(t, capped.entries, IdempotencyKey("a"))
+	require.Contains(t, capped.entries, IdempotencyKey("c"))
+}
+
 func TestDIDWindowSameKeyAlwaysDuplicate(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 

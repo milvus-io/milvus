@@ -161,7 +161,7 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 	}
 	delete(w.inflight, pending.Key)
 	w.entries[pending.Key] = entry
-	w.commitOrder = append(w.commitOrder, pending.Key)
+	w.insertCommitOrderLocked(pending.Key, entry.GetCommitTimetick())
 	evicted := 0
 	if w.windowTTL > 0 {
 		evicted = w.evictLocked(tsoutil.ComposeTSByTimeWithLogical(w.now().Add(-w.windowTTL), 0))
@@ -215,6 +215,32 @@ func (w *Window) Evict(evictBeforeTT uint64, msg message.MutableMessage) int {
 	observeWindowEviction(msg, evicted)
 	observeWindowEntries(msg, len(w.entries))
 	return evicted
+}
+
+// insertCommitOrderLocked keeps commitOrder sorted by commit timetick.
+// Completion order is NOT commit-timetick order: this interceptor is outermost,
+// the timetick is assigned by the inner timetick interceptor, and concurrent
+// appends on one vchannel may complete out of order. Eviction and the evicted
+// watermark both read commitOrder head as "oldest", and the recovery-side
+// window sorts its entries, so the live window must keep the same invariant.
+// Entries arrive near-sorted, so the tail walk is O(1) amortized.
+func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
+	i := len(w.commitOrder)
+	for i > 0 {
+		prev, ok := w.entries[w.commitOrder[i-1]]
+		if ok && prev.GetCommitTimetick() <= commitTT {
+			break
+		}
+		if !ok {
+			// Stale key without an entry cannot be compared; keep walking past it.
+			i--
+			continue
+		}
+		i--
+	}
+	w.commitOrder = append(w.commitOrder, "")
+	copy(w.commitOrder[i+1:], w.commitOrder[i:])
+	w.commitOrder[i] = key
 }
 
 func (w *Window) evictLocked(evictBeforeTT uint64) int {
