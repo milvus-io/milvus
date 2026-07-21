@@ -19,6 +19,7 @@
 #include <arrow/array/array_primitive.h>
 #include <arrow/c/bridge.h>
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -139,6 +140,17 @@ ComputeScorerScoresOnPreparedChunks(
     float* const* output_score_chunks,
     bool* const* output_has_score_chunks,
     const folly::CancellationToken& cancel_token = folly::CancellationToken()) {
+    // Nothing to score: skip the whole setup. Bailing out here matters for a
+    // non-native filter (text match, GIS) -- otherwise it would scan the whole
+    // segment to build a bitset no chunk ever consumes.
+    auto has_offsets = std::any_of(
+        scorer_offset_chunks.begin(),
+        scorer_offset_chunks.end(),
+        [](const auto& scorer_offsets) { return !scorer_offsets.empty(); });
+    if (!has_offsets) {
+        return;
+    }
+
     auto active_count = segment->get_active_count(timestamp);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         DEAFULT_QUERY_ID,
