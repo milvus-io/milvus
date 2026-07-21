@@ -1407,26 +1407,57 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 	}, nil
 }
 
-func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.CollectionSchema) ([]map[string]interface{}, error) {
+type structArrayRowAccessor struct {
+	fieldData    *schemapb.FieldData
+	subFields    []*schemapb.FieldData
+	subAccessors []*fieldDataRowAccessor
+	subDims      map[string]int64
+}
+
+func newStructArrayRowAccessor(fd *schemapb.FieldData, schema *schemapb.CollectionSchema) (*structArrayRowAccessor, error) {
 	subs := fd.GetStructArrays().GetFields()
-	if len(subs) == 0 {
-		return []map[string]interface{}{}, nil
+	accessor := &structArrayRowAccessor{
+		fieldData: fd,
+		subFields: subs,
 	}
-	rowIndices := make([]int, len(subs))
-	rowValid := true
+	if len(subs) == 0 {
+		return accessor, nil
+	}
+
 	expectedValidData := subs[0].GetValidData()
-	for idx, sub := range subs {
+	accessor.subAccessors = make([]*fieldDataRowAccessor, 0, len(subs))
+	for _, sub := range subs {
 		if !slices.Equal(expectedValidData, sub.GetValidData()) {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"struct array field %s sub-field %s has inconsistent valid data",
 				fd.GetFieldName(), sub.GetFieldName())
 		}
-		accessor, err := newFieldDataRowAccessor(sub)
+		subAccessor, err := newFieldDataRowAccessor(sub)
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalErr(err,
 				"invalid struct array field %s sub-field %s", fd.GetFieldName(), sub.GetFieldName())
 		}
-		dataIdx, valid, err := accessor.rowIndex(int64(rowIdx))
+		accessor.subAccessors = append(accessor.subAccessors, subAccessor)
+	}
+
+	var err error
+	accessor.subDims, err = structArraySubDims(fd.GetFieldName(), schema)
+	if err != nil {
+		return nil, err
+	}
+	return accessor, nil
+}
+
+func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{}, error) {
+	fd := accessor.fieldData
+	subs := accessor.subFields
+	if len(subs) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+	rowIndices := make([]int, len(subs))
+	rowValid := true
+	for idx, sub := range subs {
+		dataIdx, valid, err := accessor.subAccessors[idx].rowIndex(int64(rowIdx))
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalErr(err,
 				"read struct array field %s sub-field %s", fd.GetFieldName(), sub.GetFieldName())
@@ -1444,12 +1475,7 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.
 		return nil, nil
 	}
 
-	subDims, err := structArraySubDims(fd.GetFieldName(), schema)
-	if err != nil {
-		return nil, err
-	}
-
-	elemCount, err := structSubElemCount(subs[0], rowIndices[0], subDims)
+	elemCount, err := structSubElemCount(subs[0], rowIndices[0], accessor.subDims)
 	if err != nil {
 		return nil, err
 	}
@@ -1482,7 +1508,7 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.
 			if dataIdx >= len(va.GetData()) {
 				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
 			}
-			dim, ok := subDims[short]
+			dim, ok := accessor.subDims[short]
 			if !ok || dim <= 0 {
 				return nil, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
 			}
@@ -2667,12 +2693,20 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 		return []map[string]interface{}{}, nil
 	}
 	fieldDataAccessors := make([]*fieldDataRowAccessor, 0, columnNum)
-	for _, fieldData := range fieldDataList {
+	structArrayAccessors := make([]*structArrayRowAccessor, columnNum)
+	for idx, fieldData := range fieldDataList {
 		accessor, err := newFieldDataRowAccessor(fieldData)
 		if err != nil {
 			return nil, err
 		}
 		fieldDataAccessors = append(fieldDataAccessors, accessor)
+		if fieldData.GetType() == schemapb.DataType_ArrayOfStruct {
+			structAccessor, err := newStructArrayRowAccessor(fieldData, collectionSchema)
+			if err != nil {
+				return nil, err
+			}
+			structArrayAccessors[idx] = structAccessor
+		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
@@ -2778,7 +2812,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[dataIdx]
 					}
 				case schemapb.DataType_ArrayOfStruct:
-					structRow, err := extractStructArrayRow(fieldDataList[j], int(dataIdx), collectionSchema)
+					structRow, err := structArrayAccessors[j].row(int(dataIdx))
 					if err != nil {
 						return nil, err
 					}
