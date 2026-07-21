@@ -164,6 +164,54 @@ class TestRestfulStructArrayNullable(TestBase):
             assert hit["doc_tag"] == expected["doc_tag"]
             assert_profile_equal(hit["profile"], expected["profile"])
 
+    def test_rest_v2_nullable_struct_array_insert_query_search(self):
+        """
+        target: test REST v2 nullable Struct Array data round trip
+        method: insert null, non-empty, and empty Struct Array rows, then query and search them
+        expected: REST preserves null separately from an empty Struct Array
+        """
+        name = gen_collection_name()
+        self.name = name
+        self._create_struct_array_collection(name, struct_nullable=True)
+
+        rows = [
+            {"id": 1, "normal_vector": gen_vector(1), "doc_tag": "null", "profile": None},
+            {"id": 2, "normal_vector": gen_vector(2), "doc_tag": "valid", "profile": gen_profile(2)},
+            {"id": 3, "normal_vector": gen_vector(3), "doc_tag": "empty", "profile": []},
+        ]
+        expected = {row["id"]: row["profile"] for row in rows}
+
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": rows})
+        assert rsp["code"] == 0
+        assert rsp["data"]["insertCount"] == len(rows)
+
+        rsp = self.collection_client.flush(name)
+        assert rsp["code"] == 0
+
+        rsp = self.vector_client.vector_query(
+            {
+                "collectionName": name,
+                "filter": "id >= 0",
+                "outputFields": ["id", "profile"],
+                "limit": len(rows),
+            }
+        )
+        assert rsp["code"] == 0
+        assert {row["id"]: row["profile"] for row in rsp["data"]} == expected
+
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": name,
+                "data": [gen_vector(2)],
+                "annsField": "normal_vector",
+                "limit": len(rows),
+                "outputFields": ["id", "profile"],
+                "searchParams": {"metricType": "L2", "params": {}},
+            }
+        )
+        assert rsp["code"] == 0
+        assert {hit["id"]: hit["profile"] for hit in rsp["data"]} == expected
+
     def test_rest_v2_add_struct_array_field_rejected(self):
         """
         target: test REST v2 dynamic add rejects unsupported Struct Array field shape
