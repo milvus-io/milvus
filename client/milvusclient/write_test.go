@@ -24,8 +24,10 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -98,6 +100,45 @@ func (s *WriteSuite) TestInsert() {
 				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 			})).
 			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
+		s.NoError(err)
+		s.EqualValues(3, result.InsertCount)
+	})
+
+	s.Run("with_idempotency_key", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collName, s.schema)
+
+		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+			md, ok := metadata.FromIncomingContext(ctx)
+			s.Require().True(ok)
+			s.Equal([]string{"key-1"}, md.Get(idempotencyKeyHeader))
+			return &milvuspb.MutationResult{
+				Status:    merr.Success(),
+				InsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+			}, nil
+		}).Once()
+
+		result, err := s.client.Insert(WithIdempotencyKey(ctx, "key-1"), NewColumnBasedInsertOption(collName).
+			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithFloat16VectorColumn("fp16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
+			})).
+			WithInt64Column("id", []int64{1, 2, 3}))
 		s.NoError(err)
 		s.EqualValues(3, result.InsertCount)
 	})
@@ -394,17 +435,6 @@ func (s *WriteSuite) TestUpsert() {
 		}
 	})
 
-	s.Run("idempotency_key_not_supported", func() {
-		collName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.setupCache(collName, s.schema)
-
-		_, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
-			WithInt64Column("id", []int64{1}).
-			WithIdempotencyKey("key-1"))
-		s.ErrorIs(err, merr.ErrParameterInvalid)
-		s.ErrorContains(err, "only supported for Insert")
-	})
-
 	s.Run("failure", func() {
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
@@ -478,6 +508,25 @@ func (s *WriteSuite) TestDelete() {
 			})
 		}
 	})
+}
+
+func TestWithIdempotencyKey(t *testing.T) {
+	ctx := WithIdempotencyKey(context.Background(), "key-1")
+	md, ok := metadata.FromOutgoingContext(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, []string{"key-1"}, md.Get(idempotencyKeyHeader))
+
+	// setting again overwrites instead of appending
+	ctx = WithIdempotencyKey(ctx, "key-2")
+	md, _ = metadata.FromOutgoingContext(ctx)
+	assert.Equal(t, []string{"key-2"}, md.Get(idempotencyKeyHeader))
+
+	// empty key clears it without touching other metadata
+	ctx = metadata.AppendToOutgoingContext(ctx, "other-key", "other-value")
+	ctx = WithIdempotencyKey(ctx, "")
+	md, _ = metadata.FromOutgoingContext(ctx)
+	assert.Empty(t, md.Get(idempotencyKeyHeader))
+	assert.Equal(t, []string{"other-value"}, md.Get("other-key"))
 }
 
 func TestWrite(t *testing.T) {

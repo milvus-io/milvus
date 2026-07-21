@@ -21,13 +21,34 @@ import (
 	"math"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
+
+// WithIdempotencyKey returns a context that carries an idempotency key to the
+// server via gRPC metadata (the "idempotency-key" header). Only Insert honors
+// the key, and only when idempotent write is enabled both globally
+// (streaming.idempotency.enabled) and on the target collection; all other
+// operations ignore it. Calling it again overwrites the previous key; an empty
+// key clears it.
+func WithIdempotencyKey(ctx context.Context, key string) context.Context {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		md = metadata.New(nil)
+	} else {
+		md = md.Copy()
+	}
+	if key == "" {
+		md.Delete(idempotencyKeyHeader)
+	} else {
+		md.Set(idempotencyKeyHeader, key)
+	}
+	return metadata.NewOutgoingContext(ctx, md)
+}
 
 type InsertResult struct {
 	InsertCount int64
@@ -113,11 +134,6 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 		}
 		req, err := option.UpsertRequest(collection)
 		if err != nil {
-			// Only the idempotency-key-on-Upsert rejection short-circuits; other
-			// parameter errors fall through to the schema-mismatch retry as before.
-			if errors.Is(err, errIdempotencyKeyUnsupportedForDML) {
-				return collection.UpdateTimestamp, err
-			}
 			// return schema mismatch err to retry with newer schema
 			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}
