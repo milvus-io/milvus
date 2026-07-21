@@ -114,6 +114,21 @@ func (s *StructArraySuite) TestNullableScalarRows() {
 	}
 }
 
+func (s *StructArraySuite) TestAppendValueWithUntypedNil() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnVarCharArray("tag", nil),
+	})
+	column.SetNullable(true)
+
+	var value any
+	s.Require().NoError(column.AppendValue(value))
+	s.Equal(1, column.Len())
+	isNull, err := column.IsNull(0)
+	s.Require().NoError(err)
+	s.True(isNull)
+}
+
 func (s *StructArraySuite) TestNullableCompactSlice() {
 	column := NewColumnStructArray("profile", []Column{
 		NewColumnInt64Array("id", nil),
@@ -415,6 +430,76 @@ func (s *StructArraySuite) TestParseNullableStructArray() {
 	isNull, err := sliced.IsNull(1)
 	s.Require().NoError(err)
 	s.False(isNull)
+}
+
+func (s *StructArraySuite) TestParseCompactNullableScalarStructArray() {
+	source := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("age", nil),
+		NewColumnVarCharArray("tag", nil),
+	})
+	source.SetNullable(true)
+	s.Require().NoError(source.AppendValue(map[string]any{
+		"age": []int64{10},
+		"tag": []string{"first"},
+	}))
+	s.Require().NoError(source.AppendNull())
+	s.Require().NoError(source.AppendValue(map[string]any{
+		"age": []int64{30},
+		"tag": []string{"third"},
+	}))
+
+	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.Equal(3, parsed.Len())
+	value, err := parsed.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = parsed.Get(2)
+	s.Require().NoError(err)
+	s.Equal([]int64{30}, value.(map[string]any)["age"])
+	s.Equal([]string{"third"}, value.(map[string]any)["tag"])
+}
+
+func (s *StructArraySuite) TestAppendToParsedSparseNullableScalarStructArray() {
+	validData := []bool{true, false, true}
+	age, err := NewNullableColumnInt64Array(
+		"age",
+		[][]int64{{10}, nil, {30}},
+		validData,
+		WithSparseNullableMode[[]int64](true),
+	)
+	s.Require().NoError(err)
+	tag, err := NewNullableColumnVarCharArray(
+		"tag",
+		[][]string{{"first"}, nil, {"third"}},
+		validData,
+		WithSparseNullableMode[[]string](true),
+	)
+	s.Require().NoError(err)
+
+	parsed, err := FieldDataColumn(NewColumnStructArray("profile", []Column{age, tag}).FieldData(), 0, -1)
+	s.Require().NoError(err)
+	s.Require().NoError(parsed.AppendNull())
+	s.Require().NoError(parsed.ValidateNullable())
+	s.Require().NoError(parsed.AppendValue(map[string]any{
+		"age": []int64{50},
+		"tag": []string{"fifth"},
+	}))
+	s.Require().NoError(parsed.ValidateNullable())
+	s.Equal(5, parsed.Len())
+	value, err := parsed.Get(3)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = parsed.Get(4)
+	s.Require().NoError(err)
+	s.Equal([]int64{50}, value.(map[string]any)["age"])
+	s.Equal([]string{"fifth"}, value.(map[string]any)["tag"])
+
+	parsed.CompactNullableValues()
+	s.Require().NoError(parsed.ValidateNullable())
+	value, err = parsed.Get(4)
+	s.Require().NoError(err)
+	s.Equal([]int64{50}, value.(map[string]any)["age"])
 }
 
 func (s *StructArraySuite) TestParseNullableStructArrayRejectsMismatchedMasks() {
