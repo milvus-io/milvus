@@ -213,7 +213,7 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	// rolling upgrades, where a legacy collection may still have Schema == nil when
 	// an old proxy writes.
 	if header.SchemaVersion == nil {
-		return latestCollectionSchemaVersion, nil
+		return collectionInfo.SchemaVersion(), nil
 	}
 
 	if collectionInfo.Schema == nil || collectionInfo.Schema.GetSchema() == nil {

@@ -391,7 +391,7 @@ func TestShardInterceptorAllowsLegacyInsertWithoutCollectionSchema(t *testing.T)
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().WithTimeTick(1)
 
-	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(function.LatestFunctionRunnerVersion, nil)
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(0), nil)
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 	msgID, err := i.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		return rmq.NewRmqID(1), nil
