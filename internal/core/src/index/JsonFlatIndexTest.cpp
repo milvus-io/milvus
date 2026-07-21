@@ -912,8 +912,8 @@ class JsonFlatIndexExprTest : public ::testing::Test {
         load_index_info.field_type = DataType::JSON;
         load_index_info.index_params = {{JSON_PATH, json_index_path},
                                         {JSON_CAST_TYPE, "JSON"}};
-        load_index_info.cache_index =
-            CreateTestCacheIndex("", std::move(json_index_));
+        load_index_info.cache_index = CreateTestCacheIndex(
+            "", std::move(json_index_), &observed_index_pin_ctx_);
         segment_->LoadIndex(load_index_info);
         auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                       .GetRemoteChunkManager();
@@ -933,6 +933,7 @@ class JsonFlatIndexExprTest : public ::testing::Test {
     std::vector<std::string> json_data_;
     std::unique_ptr<index::JsonFlatIndex> json_index_;
     segcore::SegmentSealedUPtr segment_;
+    OpContext* observed_index_pin_ctx_{nullptr};
 };
 
 class JsonFlatIndexContainsExprTest : public ::testing::Test {
@@ -1288,6 +1289,7 @@ TEST_F(JsonFlatIndexExprTest, JSONArrayEqualityFallsBackToRawData) {
 
     EXPECT_EQ(final.count(), 1);
     EXPECT_TRUE(final[6]);
+    EXPECT_EQ(observed_index_pin_ctx_, nullptr);
 }
 
 TEST_F(JsonFlatIndexExprTest,

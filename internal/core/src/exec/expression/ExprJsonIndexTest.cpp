@@ -536,6 +536,7 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
     const std::vector<std::string> json_strs = {R"({"a": 9007199254740992})",
                                                 R"({"a": 9007199254740993})",
                                                 R"({"a": 9007199254740994})",
+                                                R"({"a": 9007199254740992.0})",
                                                 R"({"a": "abc"})",
                                                 R"({})",
                                                 R"({"a": null})",
@@ -551,7 +552,7 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
     std::fill(valid_data,
               valid_data + json_field->ValidDataSize(),
               static_cast<uint8_t>(0));
-    valid_data[0] = 0b00111111;
+    valid_data[0] = 0b01111111;
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -593,14 +594,14 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
     proto::plan::GenericValue value;
     value.set_int64_val(9007199254740993LL);
     const std::vector<bool> numeric_valid = {
-        true, true, true, false, false, false, false};
+        true, true, true, true, false, false, false, false};
     auto equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
         proto::plan::OpType::Equal,
         value,
         std::vector<proto::plan::GenericValue>());
     check(evaluate(equal_expr),
-          {false, true, false, false, false, false, false},
+          {false, true, false, false, false, false, false, false},
           numeric_valid);
 
     auto term_expr = std::make_shared<expr::TermFilterExpr>(
@@ -608,7 +609,7 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
         std::vector<proto::plan::GenericValue>{value},
         false);
     check(evaluate(term_expr),
-          {false, true, false, false, false, false, false},
+          {false, true, false, false, false, false, false, false},
           numeric_valid);
 
     auto greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
@@ -617,7 +618,7 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
         value,
         std::vector<proto::plan::GenericValue>());
     check(evaluate(greater_expr),
-          {false, false, true, false, false, false, false},
+          {false, false, true, false, false, false, false, false},
           numeric_valid);
 
     auto between_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
@@ -627,7 +628,7 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
         true,
         true);
     check(evaluate(between_expr),
-          {false, true, false, false, false, false, false},
+          {false, true, false, false, false, false, false, false},
           numeric_valid);
 }
 

@@ -105,6 +105,44 @@ func TestRewrite_JSON_RootValue_DynamicTypeKeepsThreeValuedPredicates(t *testing
 	}
 }
 
+func TestRewrite_JSON_InWithRangeUsesLiteralType(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper,
+		`JSONField["v"] in [1, 2, 3] and JSONField["v"] >= 2`, nil)
+	require.NoError(t, err)
+	term := expr.GetTermExpr()
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 2)
+	require.Equal(t, []int64{2, 3}, []int64{
+		term.GetValues()[0].GetInt64Val(),
+		term.GetValues()[1].GetInt64Val(),
+	})
+}
+
+func TestRewrite_JSON_InWithRangePreservesLargeInt64Precision(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper,
+		`JSONField["v"] in [9007199254740992, 9007199254740993] and JSONField["v"] >= 9007199254740993`, nil)
+	require.NoError(t, err)
+	term := expr.GetTermExpr()
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 1)
+	require.Equal(t, int64(9007199254740993), term.GetValues()[0].GetInt64Val())
+}
+
+func TestRewrite_JSON_InWithRangeTypeMismatchSkipsOptimization(t *testing.T) {
+	helper := buildSchemaHelperWithJSON(t)
+
+	expr, err := parser.ParseExpr(helper,
+		`JSONField["v"] in [1, 2] and JSONField["v"] >= "2"`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr.GetBinaryExpr())
+	require.NotNil(t, findTermExpr(expr))
+	require.NotNil(t, findUnaryRangeExpr(expr, planpb.OpType_GreaterEqual))
+}
+
 func TestRewrite_JSON_NestedPath_ScalarNotEqualRewriteAllowed(t *testing.T) {
 	helper := buildSchemaHelperWithJSON(t)
 
