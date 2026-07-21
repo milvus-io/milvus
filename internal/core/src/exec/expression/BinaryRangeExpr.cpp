@@ -15,9 +15,11 @@
 // limitations under the License.
 
 #include "BinaryRangeExpr.h"
+
 #include <utility>
 
 #include "common/ScopedTimer.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "query/Utils.h"
 #include "index/json_stats/JsonKeyStats.h"
 namespace milvus {
@@ -86,8 +88,18 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       proto::plan::GenericValue::ValCase::kFloatVal) &&
                  (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
                   upper_type == proto::plan::GenericValue::ValCase::kFloatVal));
+            const auto has_unsafe_int_bound =
+                is_numeric &&
+                ((lower_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+                  !IsInt64SafeForJsonDoubleIndex(
+                      expr_->lower_val_.int64_val())) ||
+                 (upper_type == proto::plan::GenericValue::ValCase::kInt64Val &&
+                  !IsInt64SafeForJsonDoubleIndex(
+                      expr_->upper_val_.int64_val())));
 
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (has_unsafe_int_bound) {
+                result = ExecRangeVisitorImplForJsonPreciseNumeric(context);
+            } else if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 if (is_numeric) {
                     // Convert both bounds to double for index path
                     proto::plan::GenericValue double_lower_val;
@@ -177,6 +189,98 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
+}
+
+VectorPtr
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
+    EvalCtx& context) {
+    const auto& bitmap_input = context.get_bitmap_input();
+    auto* input = context.get_offset_input();
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto lower_bound = expr_->lower_val_;
+    auto upper_bound = expr_->upper_val_;
+    const auto lower_inclusive = expr_->lower_inclusive_;
+    const auto upper_inclusive = expr_->upper_inclusive_;
+
+    size_t processed_cursor = 0;
+    auto execute_sub_batch =
+        [
+            pointer,
+            lower_bound,
+            upper_bound,
+            lower_inclusive,
+            upper_inclusive,
+            &bitmap_input,
+            &processed_cursor
+        ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+        const bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = offsets ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+
+            auto number = data[offset].at_numeric(pointer);
+            if (number.error()) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            auto lower_comparison =
+                CompareJsonNumberToBound(number.value(), lower_bound);
+            auto upper_comparison =
+                CompareJsonNumberToBound(number.value(), upper_bound);
+            if (!lower_comparison.has_value() ||
+                !upper_comparison.has_value()) {
+                res[i] = false;
+                continue;
+            }
+            const auto lower_matches = lower_inclusive ? *lower_comparison >= 0
+                                                       : *lower_comparison > 0;
+            const auto upper_matches = upper_inclusive ? *upper_comparison <= 0
+                                                       : *upper_comparison < 0;
+            res[i] = lower_matches && upper_matches;
+        }
+        processed_cursor += size;
+    };
+
+    int64_t processed_size;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+    } else {
+        processed_size = ProcessDataChunks<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
 }
 
 template <typename T>

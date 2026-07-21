@@ -313,6 +313,103 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     EXPECT_TRUE(final[11]);
 }
 
+TEST(JsonIndexTest, LargeInt64LiteralFallsBackToPreciseRawComparison) {
+    constexpr int64_t kLargeInt = 9007199254740993LL;
+    auto json_strs = std::vector<std::string>{
+        R"({"a": 9007199254740992})",
+        R"({"a": 9007199254740993})",
+        R"({"a": 9007199254740994})",
+        R"({"a": 9007199254740992.0})",
+        R"({"a": 9007199254740994.0})",
+        R"({"a": "9007199254740993"})",
+        R"({"b": 9007199254740993})",
+    };
+
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+    auto seg = CreateSealedSegment(schema);
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    for (auto& json : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json));
+    }
+    json_field->add_json_data(jsons);
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("DOUBLE"),
+            .json_path = "/a",
+        },
+        file_manager_ctx);
+    using JsonIndex = index::JsonInvertedIndex<double>;
+    auto json_index = std::unique_ptr<JsonIndex>(
+        static_cast<JsonIndex*>(inv_index.release()));
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
+
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("large_int_json", std::move(json_index));
+    seg->LoadIndex(load_index_info);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(kLargeInt);
+    auto evaluate_unary = [&](proto::plan::OpType op) {
+        auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+            op,
+            value,
+            std::vector<proto::plan::GenericValue>());
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           unary_expr);
+        return ExecuteQueryExpr(
+            plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    };
+
+    auto equal = evaluate_unary(proto::plan::OpType::Equal);
+    EXPECT_EQ(equal.count(), 1);
+    EXPECT_TRUE(equal[1]);
+
+    auto greater = evaluate_unary(proto::plan::OpType::GreaterThan);
+    EXPECT_EQ(greater.count(), 2);
+    EXPECT_TRUE(greater[2]);
+    EXPECT_TRUE(greater[4]);
+
+    auto binary_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        value,
+        value,
+        true,
+        true);
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       binary_expr);
+    auto singleton =
+        ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(singleton.count(), 1);
+    EXPECT_TRUE(singleton[1]);
+}
+
 class JsonIndexExistsTest : public ::testing::TestWithParam<std::string> {};
 
 INSTANTIATE_TEST_SUITE_P(JsonIndexExistsTestParams,
