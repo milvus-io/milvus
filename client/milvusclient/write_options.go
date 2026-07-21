@@ -314,6 +314,12 @@ func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, r
 		subColumns = append(subColumns, subColumn)
 	}
 	structCol := column.NewColumnStructArray(colName, subColumns)
+	for _, row := range rows {
+		if row == nil {
+			structCol.SetNullable(true)
+			break
+		}
+	}
 	for i, row := range rows {
 		if err := structCol.AppendValue(row); err != nil {
 			return nil, errors.Wrapf(err, "row %d", i)
