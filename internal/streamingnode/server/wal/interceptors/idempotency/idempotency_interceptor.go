@@ -28,6 +28,11 @@ type idempotencyInterceptor struct {
 
 	windows                *typeutil.ConcurrentMap[string, *Window]
 	txnInsertResultBuffers *idempotencyutils.TxnInsertResultBuffers
+	// txnActive reports whether a txn session is still tracked by the txn
+	// manager; a duplicate commit only synthesizes a rollback for a txn that is
+	// positively known to be still open. nil means "unknown" and skips the
+	// rollback (the txn then falls back to keepalive expiry as before).
+	txnActive idempotencyutils.TxnActiveChecker
 }
 
 func (impl *idempotencyInterceptor) Name() string {
@@ -60,6 +65,7 @@ func newIdempotencyInterceptorWithParam(config WindowConfig, param *interceptors
 	return &idempotencyInterceptor{
 		windows:                typeutil.NewConcurrentMap[string, *Window](),
 		txnInsertResultBuffers: idempotencyutils.NewTxnInsertResultBuffers(currentTimeTick, txnActive),
+		txnActive:              txnActive,
 		config:                 config,
 	}
 }
@@ -160,11 +166,6 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil
 	case BeginDecisionWait:
-		// A duplicate commit must NOT touch the txn buffer here: it is keyed by
-		// (vchannel, txnID), identical to the in-flight owner's, and the owner
-		// consumes it via Build then drops it via the defer above. Removing it
-		// from a duplicate races the owner's Build and can blank out the committed
-		// entry's insert IDs.
 		result := begin.Pending.Wait(ctx, msg)
 		if result.Err != nil {
 			return nil, result.Err
@@ -172,14 +173,56 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 		mlog.Debug(ctx, "idempotency duplicate hit",
 			mlog.String("vchannel", msg.VChannel()),
 			mlog.String("idempotency_key", string(key)))
+		// Removing the buffer here cannot blank out the committed entry's insert
+		// IDs even when the duplicate shares the owner's txnID: Wait only returns
+		// after the owner completed, and the owner consumed the buffer via Build
+		// before appending. For a client retry (its own txnID) this reclaims the
+		// retried bodies' buffer instead of waiting for lazy expiry.
+		defer impl.txnInsertResultBuffers.Remove(msg)
+		impl.resolveRetriedTxnAfterDuplicate(ctx, msg, append)
 		return fillDuplicateResult(ctx, result.Entry)
 	case BeginDecisionDuplicate:
 		mlog.Debug(ctx, "idempotency duplicate hit",
 			mlog.String("vchannel", msg.VChannel()),
 			mlog.String("idempotency_key", string(key)))
+		defer impl.txnInsertResultBuffers.Remove(msg)
+		impl.resolveRetriedTxnAfterDuplicate(ctx, msg, append)
 		return fillDuplicateResult(ctx, begin.Entry)
 	default:
 		return nil, status.NewInner("unknown idempotency begin decision: %d", begin.Decision)
+	}
+}
+
+// resolveRetriedTxnAfterDuplicate closes the transaction whose commit was
+// short-circuited by a duplicate hit. The retried txn's BeginTxn and body
+// messages have already been appended under a new txnID, so without an explicit
+// resolution the txn session lingers until keepalive expiry, stalling
+// last-confirmed / checkpoint advancement and accumulating WAL garbage per
+// retry. A RollbackTxn is appended through the inner chain (the timetick
+// interceptor closes the session; the scanner discards the uncommitted bodies).
+// The rollback is synthesized only for a txn positively known to be still open
+// — a concurrent duplicate commit sharing the owner's txnID was already closed
+// by the owner's commit and must not be rolled back. Failure is non-fatal: the
+// txn then falls back to keepalive expiry as before.
+func (impl *idempotencyInterceptor) resolveRetriedTxnAfterDuplicate(ctx context.Context, msg message.MutableMessage, append interceptors.Append) {
+	txnCtx := msg.TxnContext()
+	if txnCtx == nil {
+		return
+	}
+	if impl.txnActive == nil || !impl.txnActive(txnCtx.TxnID) {
+		return
+	}
+	rollback := message.NewRollbackTxnMessageBuilderV2().
+		WithVChannel(msg.VChannel()).
+		WithHeader(&message.RollbackTxnMessageHeader{}).
+		WithBody(&message.RollbackTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(*txnCtx)
+	if _, err := append(ctx, rollback); err != nil {
+		mlog.Warn(ctx, "failed to rollback retried txn after idempotency duplicate hit; txn falls back to keepalive expiry",
+			mlog.String("vchannel", msg.VChannel()),
+			mlog.Int64("txnID", int64(txnCtx.TxnID)),
+			mlog.Err(err))
 	}
 }
 
@@ -351,6 +394,10 @@ func fillDuplicateResult(ctx context.Context, entry *streamingpb.WindowEntry) (m
 	if extra := utility.GetExtraAppendResult(ctx); extra != nil {
 		extra.TimeTick = entry.GetCommitTimetick()
 		extra.LastConfirmedMessageID = lastConfirmed
+		// A duplicate response never carries a txn context; clear whatever an
+		// intervening inner append (e.g. the synthesized retried-txn rollback)
+		// left behind.
+		extra.TxnCtx = nil
 		// Always overwrite Extra so a duplicate without an insert result does not
 		// leak whatever value the ExtraAppendResult already carried into this
 		// append's result.

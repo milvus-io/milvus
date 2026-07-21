@@ -172,6 +172,83 @@ func TestInterceptorBypassesReplicatedTxnCommit(t *testing.T) {
 	require.Equal(t, 2, appendCount)
 }
 
+func TestInterceptorDuplicateTxnCommitRollsBackRetriedTxn(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	ownerTxn := message.TxnContext{TxnID: 1, Keepalive: 10}
+	retryTxn := message.TxnContext{TxnID: 2, Keepalive: 10}
+
+	newCommit := func(txnCtx message.TxnContext) message.MutableMessage {
+		return message.NewCommitTxnMessageBuilderV2().
+			WithVChannel("v1").
+			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithBody(&message.CommitTxnMessageBody{}).
+			MustBuildMutable().
+			WithTxnContext(txnCtx)
+	}
+	newBody := func(txnCtx message.TxnContext, id int64) message.MutableMessage {
+		return newIdempotentInsertMessageWithInsertResult(t, "v1", "", &messagespb.IdempotentInsertResult{
+			RowOffsets: []uint32{0},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{id}}},
+			},
+		}).WithTxnContext(txnCtx)
+	}
+
+	var appended []message.MutableMessage
+	appendWithTT := func(tt uint64) func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appended = append(appended, msg)
+			utility.ReplaceAppendResultTimeTick(ctx, tt)
+			utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+			return newTestMessageID(int64(10 + len(appended))), nil
+		}
+	}
+
+	// Owner txn commits the key.
+	_, err := interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), newBody(ownerTxn, 100), appendWithTT(100))
+	require.NoError(t, err)
+	ownerID, err := interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), newCommit(ownerTxn), appendWithTT(100))
+	require.NoError(t, err)
+	require.Len(t, appended, 2)
+
+	// Client retry: a fresh txnID re-appends the body, then its commit hits the
+	// duplicate path. The interceptor must roll back the retried txn through the
+	// inner chain, reclaim its body buffer, and return the owner's result. Model
+	// the txn manager: the owner's txn was closed by its commit, the retried txn
+	// session is still open.
+	interceptor.txnActive = func(txnID message.TxnID) bool { return txnID == retryTxn.TxnID }
+	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), newBody(retryTxn, 100), appendWithTT(999))
+	require.NoError(t, err)
+	require.Len(t, appended, 3)
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	retryCommit := newCommit(retryTxn)
+	msgID, err := interceptor.DoAppend(ctx, retryCommit, appendWithTT(999))
+	require.NoError(t, err)
+	require.True(t, ownerID.EQ(msgID))
+
+	require.Len(t, appended, 4)
+	rollback := appended[3]
+	require.Equal(t, message.MessageTypeRollbackTxn, rollback.MessageType())
+	require.Equal(t, message.TxnID(2), rollback.TxnContext().TxnID)
+	require.Equal(t, "v1", rollback.VChannel())
+
+	// The duplicate response carries the owner's commit facts, not the rollback's.
+	extra := utility.GetExtraAppendResult(ctx)
+	require.Equal(t, uint64(100), extra.TimeTick)
+	require.Nil(t, extra.TxnCtx)
+
+	// The retried txn's insert-result buffer is reclaimed immediately.
+	require.Nil(t, interceptor.txnInsertResultBuffers.Build(retryCommit))
+
+	// When the txn session is already resolved (e.g. a concurrent duplicate that
+	// shares the owner's txnID), no rollback is synthesized.
+	interceptor.txnActive = func(message.TxnID) bool { return false }
+	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), newCommit(message.TxnContext{TxnID: 3, Keepalive: 10}), appendWithTT(999))
+	require.NoError(t, err)
+	require.Len(t, appended, 4)
+}
+
 func TestInterceptorDuplicateReturnsInsertIDs(t *testing.T) {
 	interceptor := newInterceptor(WindowConfig{})
 	insertResult := &messagespb.IdempotentInsertResult{
