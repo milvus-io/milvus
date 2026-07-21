@@ -3,9 +3,12 @@ package recovery
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -190,6 +193,14 @@ func writePChannelWindowChunkIfAbsent(ctx context.Context, chunkKey string, payl
 }
 
 func buildPChannelWindowChunkKey(pchannel string, generation uint64) string {
+	return buildPChannelWindowChunkPrefix(pchannel) +
+		pchannelWindowChunkObjectPrefix + strconv.FormatUint(generation, 10) + pchannelWindowChunkObjectExt
+}
+
+// buildPChannelWindowChunkPrefix returns the object prefix holding every chunk of
+// the pchannel's window store. The trailing separator keeps the prefix from
+// matching a sibling whose name merely starts with "chunks".
+func buildPChannelWindowChunkPrefix(pchannel string) string {
 	root := paramtable.Get().MinioCfg.RootPath.GetValue()
 	return path.Join(
 		root,
@@ -197,8 +208,31 @@ func buildPChannelWindowChunkKey(pchannel string, generation uint64) string {
 		"window-store",
 		sanitizeWindowStorePathPart(pchannel),
 		"chunks",
-		pchannelWindowChunkObjectPrefix+strconv.FormatUint(generation, 10)+pchannelWindowChunkObjectExt,
-	)
+	) + "/"
+}
+
+// removeAllPChannelWindowChunks deletes every chunk object of the pchannel's
+// window store. It is only correct where no catalog meta references a chunk any
+// more: dropping the store while idempotency is disabled, and bootstrapping a
+// store whose catalog meta is missing. There a leftover chunk is pure garbage
+// that must not survive, because the store writes those generations again and
+// writePChannelWindowChunkIfAbsent rejects a same-key-different-payload chunk
+// with an unretriable corruption error that retryOperationWithBackoff then
+// retries forever.
+//
+// A prefix removal (rather than a walk over [MinAvailableGeneration,
+// LatestGeneration]) is what makes that guarantee hold: it also reaps orphans
+// above LatestGeneration left by a persist that wrote the chunk but crashed
+// before saving the meta, and any chunk left behind by an earlier partial
+// removal.
+func removeAllPChannelWindowChunks(ctx context.Context, pchannel string) error {
+	prefix := buildPChannelWindowChunkPrefix(pchannel)
+	// A store that was never written has no chunk directory at all: object
+	// storage lists nothing, local storage reports the missing directory.
+	if err := resource.Resource().ChunkManager().RemoveWithPrefix(ctx, prefix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return errors.Wrapf(err, "failed to remove pchannel window chunks with prefix %s", prefix)
+	}
+	return nil
 }
 
 func sanitizeWindowStorePathPart(value string) string {

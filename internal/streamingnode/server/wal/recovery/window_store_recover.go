@@ -167,6 +167,22 @@ func (m *windowManager) bootstrapPChannelWindowStore(ctx context.Context, pchann
 	}
 	chunkKey := buildPChannelWindowChunkKey(pchannel, footer.Generation)
 	logger := m.Logger().With(mlog.String("op", "bootstrapPChannelWindowStore"), mlog.Uint64("generation", footer.Generation))
+	// Bootstrap only runs with no catalog meta and no vchannel window metas, so
+	// nothing references any chunk of this pchannel: whatever is left under the
+	// chunk prefix is garbage from a store dropped while idempotency was disabled
+	// (its chunk removal is best-effort) or from an earlier bootstrap that wrote
+	// the chunk and crashed before saving the meta. Reap it before writing
+	// generation 0, otherwise a leftover chunk either fails the write-if-absent
+	// below with a payload mismatch -- an unretriable error that
+	// retryOperationWithBackoff retries forever, hanging the WAL open -- or gets
+	// adopted by the orphan probe of
+	// recoverIdempotencyWindowsFromPChannelWindowStore, rewinding recovery to an
+	// already-truncated source checkpoint.
+	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
+		return removeAllPChannelWindowChunks(ctx, pchannel)
+	}); err != nil {
+		return nil, err
+	}
 	if err := retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
 		return writePChannelWindowChunkIfAbsent(ctx, chunkKey, chunkPayload)
 	}); err != nil {

@@ -25,8 +25,10 @@ import (
 // as an error, so the pchannel meta must outlive them), then the pchannel
 // meta, then the chunk objects. A crash before the meta removal is retried on
 // the next disabled open; a crash after it only leaks unreferenced chunk
-// objects. Best-effort: failures only log — recovery with idempotency disabled
-// must never block on window-store IO — and the next open retries.
+// objects, which the next bootstrap reaps (removeAllPChannelWindowChunks) —
+// leaked bytes never wedge a later re-enable. Best-effort: failures only log —
+// recovery with idempotency disabled must never block on window-store IO — and
+// the next open retries.
 func (m *windowManager) dropWindowStoreForDisabledIdempotency(ctx context.Context, pchannel string) {
 	logger := m.Logger().With(mlog.String("op", "dropWindowStoreForDisabledIdempotency"))
 	catalog := resource.Resource().StreamingNodeCatalog()
@@ -55,21 +57,26 @@ func (m *windowManager) dropWindowStoreForDisabledIdempotency(ctx context.Contex
 			return
 		}
 	}
-	if meta == nil {
-		return
+	if meta != nil {
+		if err := catalog.RemovePChannelWindowMeta(ctx, pchannel); err != nil {
+			logger.Warn(ctx, "failed to remove stale pchannel window meta", mlog.Err(err))
+			return
+		}
 	}
-	if err := catalog.RemovePChannelWindowMeta(ctx, pchannel); err != nil {
-		logger.Warn(ctx, "failed to remove stale pchannel window meta", mlog.Err(err))
-		return
-	}
-	if err := m.deletePChannelWindowChunks(ctx, logger, meta.MinAvailableGeneration, meta.LatestGeneration+1, meta.LatestGeneration+1); err != nil {
+	// Remove every chunk of the store, not just [MinAvailableGeneration,
+	// LatestGeneration]: a persist writes the chunk before the meta, so a crash in
+	// between leaves an orphan at LatestGeneration+1 that a generation-range walk
+	// would keep. The enabled recover path reaps such orphans itself; the drop
+	// path must too, otherwise the leftover chunk survives into a later re-enable
+	// and permanently fails the write-if-absent of that generation.
+	if err := removeAllPChannelWindowChunks(ctx, pchannel); err != nil {
 		logger.Warn(ctx, "failed to delete stale pchannel window chunks; unreferenced chunk objects leak", mlog.Err(err))
 		return
 	}
 	logger.Info(ctx, "dropped stale idempotency window store while idempotency is disabled",
 		mlog.String("pchannel", pchannel),
 		mlog.Int("vchannelWindowMetas", len(windowMetas)),
-		mlog.Uint64("latestGeneration", meta.LatestGeneration),
+		mlog.Bool("hasPChannelWindowMeta", meta != nil),
 	)
 }
 
