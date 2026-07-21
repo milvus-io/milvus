@@ -1954,11 +1954,43 @@ class SegmentExpr : public Expr {
                 std::move(*cached_index_chunk_res_),
                 std::move(*cached_index_chunk_valid_res_));
         } else {
-            // Normal index or row-level result: batch by rows directly
+            // Normal index or row-level result: batch by rows directly.
+            //
+            // Slice by active_count_ for the same reason as
+            // ProcessIndexChunksForValid(): the cached bitmap is
+            // segment-global (a scalar index always has exactly one chunk),
+            // while size_per_chunk_ is the raw-data chunk granularity
+            // (segcore.chunkRows) and is unrelated to it. On a sealed segment
+            // the two agree -- size_per_chunk() == get_row_count() -- which is
+            // why bounding by size_per_chunk_ has not broken yet; today only
+            // sealed segments reach here, because on growing segments
+            // HasIndex() is true only for vector/geometry fields and real
+            // geometry predicates take the dedicated branch in
+            // GISFunctionFilterExpr::EvalForIndexSegment(). The moment a
+            // scalar field gains an interim index on growing, or geometry is
+            // routed through ProcessIndexChunks, size_per_chunk_ would
+            // over-run the bitmap exactly as in issue #51237.
+            //
+            // The old third min term was also subtly wrong on its own: it
+            // clamped against the bitmap's FULL length rather than the length
+            // remaining after data_pos, so a bitmap shorter than the row count
+            // combined with data_pos > 0 made append() read past its end.
+            // Assert coverage instead, mirroring the sibling function.
             auto data_pos = current_index_chunk_pos_;
-            auto size =
-                std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                         int64_t(cached_index_chunk_res_->size()));
+            auto size = std::min(active_count_ - data_pos, batch_size_);
+            AssertInfo(
+                int64_t(cached_index_chunk_res_->size()) >= data_pos + size,
+                "index bitmap covers {} rows, batch needs rows [{}, {})",
+                cached_index_chunk_res_->size(),
+                data_pos,
+                data_pos + size);
+            AssertInfo(
+                int64_t(cached_index_chunk_valid_res_->size()) >=
+                    data_pos + size,
+                "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+                cached_index_chunk_valid_res_->size(),
+                data_pos,
+                data_pos + size);
 
             result.append(*cached_index_chunk_res_, data_pos, size);
             valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
