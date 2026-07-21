@@ -43,7 +43,8 @@ class TestMilvusClientEmptyArrayTemplate(TestMilvusClientV2Base):
             index_params=index_params,
             consistency_level="Strong",
         )
-        client.insert(
+        self.insert(
+            client,
             collection_name,
             [
                 {"id": 1, "tags": [], "metadata": {"values": []}, "vector": [0.0, 0.0]},
@@ -55,8 +56,8 @@ class TestMilvusClientEmptyArrayTemplate(TestMilvusClientV2Base):
                 },
             ],
         )
-        client.flush(collection_name)
-        client.load_collection(collection_name)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
 
         query_cases = [
             ("id in {values}", "id in []", []),
@@ -75,34 +76,38 @@ class TestMilvusClientEmptyArrayTemplate(TestMilvusClientV2Base):
             ),
         ]
         for template, inline, expected_ids in query_cases:
-            inline_rows = client.query(
+            inline_rows = self.query(
+                client,
                 collection_name,
                 filter=inline,
                 output_fields=["id"],
                 limit=10,
-            )
-            template_rows = client.query(
+            )[0]
+            template_rows = self.query(
+                client,
                 collection_name,
                 filter=template,
                 filter_params={"values": []},
                 output_fields=["id"],
                 limit=10,
-            )
+            )[0]
             assert sorted(row["id"] for row in inline_rows) == expected_ids
             assert sorted(row["id"] for row in template_rows) == expected_ids
 
-        unused_param_rows = client.query(
+        unused_param_rows = self.query(
+            client,
             collection_name,
             filter="id >= {minimum}",
             filter_params={"minimum": 1, "unused": []},
             output_fields=["id"],
             limit=10,
-        )
+        )[0]
         assert sorted(row["id"] for row in unused_param_rows) == [1, 2]
 
         empty_filter = "id in {values}"
         empty_params = {"values": []}
-        search_result = client.search(
+        search_result = self.search(
+            client,
             collection_name,
             data=[[0.0, 0.0]],
             anns_field="vector",
@@ -111,7 +116,7 @@ class TestMilvusClientEmptyArrayTemplate(TestMilvusClientV2Base):
             filter_params=empty_params,
             output_fields=["id"],
             limit=2,
-        )[0]
+        )[0][0]
         assert search_result == []
 
         hybrid_request = AnnSearchRequest(
@@ -122,24 +127,27 @@ class TestMilvusClientEmptyArrayTemplate(TestMilvusClientV2Base):
             expr=empty_filter,
             expr_params=empty_params,
         )
-        hybrid_result = client.hybrid_search(
+        hybrid_result = self.hybrid_search(
+            client,
             collection_name,
             [hybrid_request],
             WeightedRanker(1.0),
             limit=2,
             output_fields=["id"],
-        )[0]
+        )[0][0]
         assert hybrid_result == []
 
-        client.delete(
+        self.delete(
+            client,
             collection_name,
             filter=empty_filter,
             filter_params=empty_params,
         )
-        remaining_rows = client.query(
+        remaining_rows = self.query(
+            client,
             collection_name,
             filter="id >= 1",
             output_fields=["id"],
             limit=10,
-        )
+        )[0]
         assert sorted(row["id"] for row in remaining_rows) == [1, 2]
