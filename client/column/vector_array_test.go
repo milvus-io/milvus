@@ -220,6 +220,52 @@ func (s *VectorArraySuite) TestParseVectorArrayDataFloatSuccess() {
 	s.Equal(dim, fv.Dim())
 }
 
+func (s *VectorArraySuite) TestParseNullableVectorArrayData() {
+	dim := 2
+	row := func(data []float32) *schemapb.VectorField {
+		return &schemapb.VectorField{
+			Dim:  int64(dim),
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: data}},
+		}
+	}
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: "emb",
+		ValidData: []bool{true, false, true},
+		Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+			Dim: int64(dim),
+			Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+				Dim:         int64(dim),
+				ElementType: schemapb.DataType_FloatVector,
+				Data: []*schemapb.VectorField{
+					row([]float32{0.1, 0.2}),
+					row(nil),
+					row(nil),
+				},
+			}},
+		}},
+	}
+
+	col, err := FieldDataColumn(fd, 0, -1)
+	s.Require().NoError(err)
+	s.True(col.Nullable())
+	s.Equal(3, col.Len())
+	s.Equal(2, col.ValidCount())
+	value, err := col.Get(1)
+	s.Require().NoError(err)
+	s.Nil(value)
+	isNull, err := col.IsNull(2)
+	s.Require().NoError(err)
+	s.False(isNull, "an empty vector array is distinct from null")
+
+	sliced := col.Slice(1, -1)
+	s.True(sliced.Nullable())
+	s.Equal(2, sliced.Len())
+	value, err = sliced.Get(0)
+	s.Require().NoError(err)
+	s.Nil(value)
+}
+
 func (s *VectorArraySuite) TestParseVectorArrayDataByteTypes() {
 	dim := 4
 	// Build a single payload holding 2 inner vectors of `dim*2` bytes each.
