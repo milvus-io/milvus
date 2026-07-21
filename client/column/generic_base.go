@@ -221,7 +221,10 @@ func (c *genericColumnBase[T]) AppendNull() error {
 	}
 
 	c.validData = append(c.validData, false)
-	if !c.sparseMode {
+	if c.sparseMode {
+		var zero T
+		c.values = append(c.values, zero)
+	} else {
 		c.indexMapping = append(c.indexMapping, -1)
 	}
 	return nil
@@ -317,6 +320,7 @@ func (c *genericColumnBase[T]) CompactNullableValues() {
 		cnt++
 	}
 	c.values = c.values[0:cnt]
+	c.sparseMode = false
 }
 
 func (c *genericColumnBase[T]) ValidCount() int {

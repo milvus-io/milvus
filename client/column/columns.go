@@ -94,16 +94,48 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	creator func(string, []T) COL,
 	nullableCreator func(string, []T, []bool, ...ColumnOption[T]) (NCOL, error),
 ) (Column, error) {
-	if end < 0 {
-		end = len(data)
-	}
-	data = data[start:end]
+	logicalLen := len(data)
 	if len(validData) > 0 {
-		validData = validData[start:end]
-		ncol, err := nullableCreator(name, data, validData, WithSparseNullableMode[T](true))
+		logicalLen = len(validData)
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start > logicalLen {
+		start = logicalLen
+	}
+	if end < 0 || end > logicalLen {
+		end = logicalLen
+	}
+	if start > end {
+		start = end
+	}
+
+	if len(validData) > 0 {
+		validCount := countValid(validData)
+		sparseMode := false
+		switch len(data) {
+		case logicalLen:
+			sparseMode = true
+		case validCount:
+		default:
+			return nil, fmt.Errorf("scalar field %q payload row count %d does not match logical row count %d or valid count %d",
+				name, len(data), logicalLen, validCount)
+		}
+
+		selectedValidData := validData[start:end]
+		if sparseMode {
+			data = data[start:end]
+		} else {
+			valueStart := countValid(validData[:start])
+			valueEnd := valueStart + countValid(selectedValidData)
+			data = data[valueStart:valueEnd]
+		}
+		ncol, err := nullableCreator(name, data, selectedValidData, WithSparseNullableMode[T](sparseMode))
 		return ncol, err
 	}
 
+	data = data[start:end]
 	return creator(name, data), nil
 }
 
