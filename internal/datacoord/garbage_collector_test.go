@@ -2318,7 +2318,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 			s.T().Fatal("pause signal was not delivered to meta worker")
 		}
 
-		// Deliberately never close signal.done: cancelling only now makes the inner
+		// Deliberately never close signal.done: canceling only now makes the inner
 		// select take its timeout arm, with no dependency on wall-clock ordering.
 		cancel()
 
