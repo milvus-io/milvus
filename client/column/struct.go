@@ -28,8 +28,9 @@ import (
 // "array-of-X" column (e.g. ColumnInt32Array, ColumnFloatVectorArray) so that one entry
 // in the column corresponds to one row's variable-length list of struct elements.
 type columnStructArray struct {
-	fields []Column
-	name   string
+	fields   []Column
+	name     string
+	nullable bool
 }
 
 func NewColumnStructArray(name string, fields []Column) Column {
@@ -125,6 +126,14 @@ func (c *columnStructArray) AppendValue(value any) error {
 }
 
 func (c *columnStructArray) Get(idx int) (any, error) {
+	isNull, err := c.IsNull(idx)
+	if err != nil {
+		return nil, err
+	}
+	if isNull {
+		return nil, nil
+	}
+
 	m := make(map[string]any)
 	for _, field := range c.fields {
 		v, err := field.Get(idx)
@@ -153,19 +162,36 @@ func (c *columnStructArray) GetAsBool(idx int) (bool, error) {
 }
 
 func (c *columnStructArray) IsNull(idx int) (bool, error) {
-	return false, nil
+	if idx < 0 || idx >= c.Len() {
+		return false, errors.Newf("index %d out of range[0, %d)", idx, c.Len())
+	}
+	if !c.nullable {
+		return false, nil
+	}
+	return c.fields[0].IsNull(idx)
 }
 
 func (c *columnStructArray) AppendNull() error {
-	return errors.New("struct array column does not support AppendNull")
+	if !c.nullable {
+		return errors.New("append null to not nullable struct array column")
+	}
+	for _, field := range c.fields {
+		if err := field.AppendNull(); err != nil {
+			return errors.Wrapf(err, "struct array AppendNull: sub-field %q", field.Name())
+		}
+	}
+	return nil
 }
 
 func (c *columnStructArray) Nullable() bool {
-	return false
+	return c.nullable
 }
 
 func (c *columnStructArray) SetNullable(nullable bool) {
-	// Shall not be set
+	c.nullable = nullable
+	for _, field := range c.fields {
+		field.SetNullable(nullable)
+	}
 }
 
 func (c *columnStructArray) ValidateNullable() error {
@@ -184,5 +210,8 @@ func (c *columnStructArray) CompactNullableValues() {
 }
 
 func (c *columnStructArray) ValidCount() int {
-	return c.Len()
+	if len(c.fields) == 0 {
+		return 0
+	}
+	return c.fields[0].ValidCount()
 }
