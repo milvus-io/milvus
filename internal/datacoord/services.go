@@ -2178,6 +2178,22 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 	return nil
 }
 
+// WaitForChannelCheckpoint waits until every channel checkpoint reaches its target timestamp.
+func (s *Server) WaitForChannelCheckpoint(ctx context.Context, flushTsList map[string]uint64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+
+	mlog.Info(ctx, "receive WaitForChannelCheckpoint request")
+	for channelName, flushTs := range flushTsList {
+		if err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs); err != nil {
+			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.String("channelName", channelName), mlog.Err(err))
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil

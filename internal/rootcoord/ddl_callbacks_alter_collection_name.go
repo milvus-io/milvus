@@ -94,7 +94,7 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 		WithBody(&message.AlterCollectionMessageBody{
 			Updates: updates,
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
