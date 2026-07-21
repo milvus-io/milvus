@@ -417,6 +417,38 @@ func (s *StructArraySuite) TestParseNullableStructArray() {
 	s.False(isNull)
 }
 
+func (s *StructArraySuite) TestParseNullableStructArrayRejectsMismatchedMasks() {
+	newSubField := func(name string, validData []bool) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: name,
+			ValidData: validData,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int64,
+					Data: []*schemapb.ScalarField{
+						{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}},
+						{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+					},
+				}},
+			}},
+		}
+	}
+	top := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "clips",
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{
+				newSubField("left", []bool{true, false}),
+				newSubField("right", []bool{false, true}),
+			},
+		}},
+	}
+
+	_, err := FieldDataColumn(top, 0, -1)
+	s.Error(err)
+}
+
 func (s *StructArraySuite) TestParseVectorArrayDataErrors() {
 	mkFD := func(elemType schemapb.DataType, dim int64, rows []*schemapb.VectorField) *schemapb.FieldData {
 		return &schemapb.FieldData{
