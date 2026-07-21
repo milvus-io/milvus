@@ -1099,7 +1099,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.EnableGrowingSourceFlush = ParamItem{
 		Key:          "common.storage.enableGrowingSourceFlush",
 		Version:      "3.0.0",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Doc:          "enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path",
 		Export:       true,
 	}
