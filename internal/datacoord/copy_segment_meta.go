@@ -509,8 +509,11 @@ func isTerminalCopyJobState(state datapb.CopySegmentJobState) bool {
 // Locking strategy: the state-mutate section takes m.mu; the Unpin call (an etcd
 // roundtrip via snapshotMeta.SaveSnapshot) runs AFTER releasing m.mu to avoid
 // blocking all copy-segment job operations on an external write. Double-unpin is
-// prevented because only one caller observes the `!wasTerminal → isTerminal`
-// transition under m.mu; every subsequent caller sees wasTerminal=true.
+// prevented by the terminal-state guard above: the first caller flips the job to
+// a terminal state under m.mu, so every later caller returns at the guard and
+// never reaches the Unpin call. Past the guard prevJob is therefore always
+// non-terminal and wasTerminal is always false; the `!wasTerminal` term in
+// shouldUnpin is kept only as a local invariant assertion.
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
 	if current, ok := m.jobs[jobID]; ok && isTerminalCopyJobState(current.GetState()) {
