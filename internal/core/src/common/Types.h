@@ -85,8 +85,8 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
-    DECIMAL = 27,      // Fixed-point exact numeric, stored as its unscaled int64
-                       // representation (e.g. "19.99" at scale 4 -> 199900)
+    DECIMAL = 27,  // Fixed-point exact numeric, stored as its unscaled int64
+                   // representation (e.g. "19.99" at scale 4 -> 199900)
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -1604,9 +1604,8 @@ using RowTypePtr = std::shared_ptr<const RowType>;
             case milvus::DataType::TIMESTAMPTZ:                               \
                 return PREFIX<milvus::DataType::TIMESTAMPTZ> SUFFIX(          \
                     __VA_ARGS__);                                             \
-            case milvus::DataType::DECIMAL:                                  \
-                return PREFIX<milvus::DataType::DECIMAL> SUFFIX(              \
-                    __VA_ARGS__);                                             \
+            case milvus::DataType::DECIMAL:                                   \
+                return PREFIX<milvus::DataType::DECIMAL> SUFFIX(__VA_ARGS__); \
             case milvus::DataType::FLOAT:                                     \
                 return PREFIX<milvus::DataType::FLOAT> SUFFIX(__VA_ARGS__);   \
             case milvus::DataType::DOUBLE:                                    \

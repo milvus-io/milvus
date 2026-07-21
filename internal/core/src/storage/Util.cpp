@@ -646,9 +646,8 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
             return std::make_shared<arrow::Int64Scalar>(
                 default_value.timestamptz_data());
         case DataType::DECIMAL:
-            return std::make_shared<arrow::Int64Scalar>(
-                DecodeDecimalUnscaled(default_value.bytes_data(),
-                                      field_meta.get_decimal_scale()));
+            return std::make_shared<arrow::Int64Scalar>(DecodeDecimalUnscaled(
+                default_value.bytes_data(), field_meta.get_decimal_scale()));
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:

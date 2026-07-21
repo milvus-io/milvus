@@ -63,10 +63,9 @@ DecodeDecimalUnscaled(std::string_view literal, int64_t scale) {
                               literal));
     }
     if (static_cast<int64_t>(frac_part.size()) > scale) {
-        ThrowInfo(UnexpectedError,
-                  fmt::format("decimal literal {} exceeds scale {}",
-                              literal,
-                              scale));
+        ThrowInfo(
+            UnexpectedError,
+            fmt::format("decimal literal {} exceeds scale {}", literal, scale));
     }
 
     // Pad the fractional part with trailing zeros up to `scale` digits, so
@@ -103,8 +102,8 @@ EncodeDecimalText(int64_t unscaled, int64_t scale) {
     bool negative = unscaled < 0;
     // Note: std::abs(INT64_MIN) is UB; unscaled is bounded well within int64
     // range by MaxDecimalPrecision (18 digits), so this is safe in practice.
-    uint64_t magnitude =
-        negative ? static_cast<uint64_t>(-unscaled) : static_cast<uint64_t>(unscaled);
+    uint64_t magnitude = negative ? static_cast<uint64_t>(-unscaled)
+                                  : static_cast<uint64_t>(unscaled);
     std::string digits = std::to_string(magnitude);
 
     if (static_cast<int64_t>(digits.size()) < scale + 1) {
