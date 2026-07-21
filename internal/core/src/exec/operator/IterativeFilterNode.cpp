@@ -308,8 +308,30 @@ PhyIterativeFilterNode::GetOutput() {
                             }
                         }
                     }
+                } else if (element_level) {
+                    // element_level_ is a property of the placeholder, not of
+                    // the filter expression, so an element-level search whose
+                    // filter cannot consume offset input (text match, GIS)
+                    // legitimately reaches this fallback. The segment-wide
+                    // bitset is indexed by doc offset and already holds the
+                    // verdict for every doc, so no doc_eval_cache is needed --
+                    // map each element back to its doc and test that bit.
+                    for (size_t i = 0; i < offsets.size(); ++i) {
+                        auto [doc_id, elem_idx] = element_to_doc_mapping[i];
+                        if (bitset[doc_id] > 0) {
+                            topk_binsert(search_result,
+                                         nq_index * unity_topk,
+                                         topk,
+                                         large_is_better,
+                                         distances[i],
+                                         doc_id,
+                                         elem_idx);
+                            if (topk == unity_topk) {
+                                break;
+                            }
+                        }
+                    }
                 } else {
-                    Assert(!element_level);
                     for (auto i = 0; i < offsets.size(); ++i) {
                         if (bitset[offsets[i]] > 0) {
                             topk_binsert(search_result,
