@@ -82,9 +82,11 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 		return msgID, err
 	}
 	impl.shardManager.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	if schema := createCollectionMsg.MustBody().GetCollectionSchema(); schema != nil {
-		impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
-	}
+	// Legacy CreateCollection messages keep the schema in the serialized Schema
+	// field instead of CollectionSchema. Resolve both formats so Alloc always
+	// registers the WAL lifecycle key before later schema updates.
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(createCollectionMsg.MustBody())
+	impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
 	return msgID, nil
 }
 

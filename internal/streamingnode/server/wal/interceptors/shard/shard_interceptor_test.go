@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -189,6 +190,62 @@ func TestShardInterceptorUpdateFunctionRunnersRetainsSchemaWhenFunctionsDropped(
 	assert.NotPanics(t, func() {
 		impl.allocFunctionRunners(collectionID+1, vchannel+"-alloc", invalidSchema)
 	})
+}
+
+func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchema(t *testing.T) {
+	collectionID := int64(99003)
+	vchannel := "by-dev-rootcoord-dml_0_99003v0"
+	key := walFunctionRunnerKey(vchannel)
+	schema := &schemapb.CollectionSchema{
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "analyzer_params", Value: "{}"},
+				},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "bm25",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		}},
+	}
+	legacySchema, err := proto.Marshal(schema)
+	require.NoError(t, err)
+
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().CheckIfCollectionCanBeCreated(collectionID).Return(nil).Once()
+	shardManager.EXPECT().CreateCollection(mock.Anything).Return().Once()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
+	impl := &shardInterceptor{shardManager: shardManager}
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel(vchannel).
+		WithHeader(&messagespb.CreateCollectionMessageHeader{
+			CollectionId: collectionID,
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: legacySchema}).
+		MustBuildMutable().
+		WithTimeTick(1)
+
+	msgID, err := impl.handleCreateCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return rmq.NewRmqID(1), nil
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, msgID)
+	defer function.GetManager().Release(collectionID, key)
+
+	ok, err := function.GetManager().RunWithRunner(context.Background(), collectionID, key, 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.True(t, ok)
 }
 
 func TestShardInterceptorAlterCollectionSkipsPartialSchemaForFunctionManager(t *testing.T) {
