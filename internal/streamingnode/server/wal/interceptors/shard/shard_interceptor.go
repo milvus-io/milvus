@@ -73,6 +73,7 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	if body.GetCollectionSchema() == nil && len(body.GetSchema()) == 0 {
 		return nil, status.NewUnrecoverableError("create collection message does not contain collection schema")
 	}
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	header := createCollectionMsg.Header()
 	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
 		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating collection", mlog.FieldCollectionID(header.GetCollectionId()))
@@ -89,7 +90,6 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	// Legacy CreateCollection messages keep the schema in the serialized Schema
 	// field instead of CollectionSchema. Resolve both formats so Alloc always
 	// registers the WAL lifecycle key before later schema updates.
-	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
 	return msgID, nil
 }
