@@ -105,7 +105,7 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
