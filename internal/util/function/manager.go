@@ -204,7 +204,8 @@ func (e *functionRunnerCollectionEntry) detachForClose() []*functionRunnerEntry 
 		return nil
 	}
 	e.closed = true
-	e.keyVersions = make(map[string]int32)
+	// Close detaches every lifecycle key so gcLocked collects all runners.
+	e.keyVersions = nil
 	runnerEntries := e.gcLocked()
 	e.mu.Unlock()
 	return runnerEntries
@@ -216,9 +217,9 @@ func (e *functionRunnerCollectionEntry) gcLocked() []*functionRunnerEntry {
 		for _, runnerEntry := range e.runners {
 			runnerEntries = append(runnerEntries, runnerEntry)
 		}
-		e.keyVersions = make(map[string]int32)
-		e.versionRunners = make(map[int32]*functionRunnerVersion)
-		e.runners = make(map[string]*functionRunnerEntry)
+		e.keyVersions = nil
+		e.versionRunners = nil
+		e.runners = nil
 		return runnerEntries
 	}
 
@@ -521,7 +522,15 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 		e.mu.Unlock()
 		return nil, nil, errFunctionRunnerCollectionEntryRemoved
 	}
-	if _, ok := e.keyVersions[key]; !ok && !allowKeyRegistration {
+	keyVersion, keyExists := e.keyVersions[key]
+	if !keyExists && !allowKeyRegistration {
+		e.mu.Unlock()
+		return nil, nil, nil
+	}
+	// Update performs a fast version check before building the snapshot. Check
+	// again under the entry lock because another update may have advanced the
+	// lifecycle key while that snapshot was being built.
+	if keyExists && !allowKeyRegistration && keyVersion >= schemaVersion {
 		e.mu.Unlock()
 		return nil, nil, nil
 	}
@@ -544,7 +553,9 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 	} else {
 		e.versionRunners[schemaVersion] = versionRunners
 	}
-	e.updateKeyVersionLocked(key, schemaVersion)
+	if !keyExists || keyVersion <= schemaVersion {
+		e.keyVersions[key] = schemaVersion
+	}
 
 	for _, signature := range versionRunners.signatures {
 		if e.runners[signature] == nil {
@@ -606,25 +617,6 @@ func buildFunctionRunnerVersion(schema *schemapb.CollectionSchema) (*functionRun
 		}
 	}
 	return versionRunners, functionsBySignature, nil
-}
-
-func (e *functionRunnerCollectionEntry) updateKeyVersionLocked(
-	key string,
-	schemaVersion int32,
-) {
-	if key == "" {
-		return
-	}
-
-	version, ok := e.keyVersions[key]
-	if !ok {
-		e.keyVersions[key] = schemaVersion
-		return
-	}
-
-	if version <= schemaVersion {
-		e.keyVersions[key] = schemaVersion
-	}
 }
 
 func (e *functionRunnerCollectionEntry) Materialize(
@@ -1001,22 +993,6 @@ func EmbeddingOutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error)
 	return outputFieldIDs, nil
 }
 
-func EmbeddingFunctionSignature(schema *schemapb.CollectionSchema) (string, error) {
-	if schema == nil {
-		return "", merr.WrapErrFunctionFailedMsg("collection schema is nil")
-	}
-
-	hasher := sha256.New()
-	for _, fn := range embeddingFunctions(schema) {
-		signature, err := embeddingFunctionSignature(schema, fn)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(hasher, "runner:%s|", signature)
-	}
-	return hex.EncodeToString(hasher.Sum(nil)), nil
-}
-
 // HasEmbeddingFunctions reports whether the schema has functions backed by FunctionRunner.
 func HasEmbeddingFunctions(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
@@ -1048,11 +1024,6 @@ func embeddingFunctions(schema *schemapb.CollectionSchema) []*schemapb.FunctionS
 		return functions[i].GetType() < functions[j].GetType()
 	})
 	return functions
-}
-
-func embeddingFunctionSignature(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, error) {
-	signature, _, _, err := embeddingFunctionMetadata(schema, fn)
-	return signature, err
 }
 
 func embeddingFunctionMetadata(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, []int64, []int64, error) {

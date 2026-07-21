@@ -36,15 +36,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestEmbeddingFunctionSignatureIgnoresSchemaVersionAndUnrelatedSchema(t *testing.T) {
+func TestFunctionRunnerSignatureIgnoresSchemaVersionAndUnrelatedSchema(t *testing.T) {
 	base := newBM25SignatureTestSchema()
-	baseSignature, err := EmbeddingFunctionSignature(base)
-	require.NoError(t, err)
+	baseSignature := firstEmbeddingSignature(t, base)
 
 	schemaVersionChanged := cloneCollectionSchema(base)
 	schemaVersionChanged.Version = base.GetVersion() + 1
-	signature, err := EmbeddingFunctionSignature(schemaVersionChanged)
-	require.NoError(t, err)
+	signature := firstEmbeddingSignature(t, schemaVersionChanged)
 	require.Equal(t, baseSignature, signature)
 
 	unrelatedFieldAdded := cloneCollectionSchema(base)
@@ -53,8 +51,7 @@ func TestEmbeddingFunctionSignatureIgnoresSchemaVersionAndUnrelatedSchema(t *tes
 		Name:     "extra",
 		DataType: schemapb.DataType_Int64,
 	})
-	signature, err = EmbeddingFunctionSignature(unrelatedFieldAdded)
-	require.NoError(t, err)
+	signature = firstEmbeddingSignature(t, unrelatedFieldAdded)
 	require.Equal(t, baseSignature, signature)
 
 	nonEmbeddingFunctionChanged := cloneCollectionSchema(base)
@@ -69,22 +66,19 @@ func TestEmbeddingFunctionSignatureIgnoresSchemaVersionAndUnrelatedSchema(t *tes
 			{Key: "credential", Value: "changed"},
 		},
 	})
-	signature, err = EmbeddingFunctionSignature(nonEmbeddingFunctionChanged)
-	require.NoError(t, err)
+	signature = firstEmbeddingSignature(t, nonEmbeddingFunctionChanged)
 	require.Equal(t, baseSignature, signature)
 }
 
-func TestEmbeddingFunctionSignatureOnlyChecksFunctionSchema(t *testing.T) {
+func TestFunctionRunnerSignatureTracksRequiredMetadata(t *testing.T) {
 	base := newBM25SignatureTestSchema()
-	baseSignature, err := EmbeddingFunctionSignature(base)
-	require.NoError(t, err)
+	baseSignature := firstEmbeddingSignature(t, base)
 
 	functionParamChanged := cloneCollectionSchema(base)
 	functionParamChanged.Functions[0].Params = []*commonpb.KeyValuePair{
 		{Key: "rebuild", Value: "true"},
 	}
-	signature, err := EmbeddingFunctionSignature(functionParamChanged)
-	require.NoError(t, err)
+	signature := firstEmbeddingSignature(t, functionParamChanged)
 	require.NotEqual(t, baseSignature, signature)
 
 	fieldNonFunctionMetadataChanged := cloneCollectionSchema(base)
@@ -94,14 +88,12 @@ func TestEmbeddingFunctionSignatureOnlyChecksFunctionSchema(t *testing.T) {
 	}
 	fieldNonFunctionMetadataChanged.Fields[1].IsPartitionKey = true
 	fieldNonFunctionMetadataChanged.Fields[1].IsClusteringKey = true
-	signature, err = EmbeddingFunctionSignature(fieldNonFunctionMetadataChanged)
-	require.NoError(t, err)
+	signature = firstEmbeddingSignature(t, fieldNonFunctionMetadataChanged)
 	require.Equal(t, baseSignature, signature)
 
 	inputFieldTypeChanged := cloneCollectionSchema(base)
 	inputFieldTypeChanged.Fields[1].DataType = schemapb.DataType_Int64
-	signature, err = EmbeddingFunctionSignature(inputFieldTypeChanged)
-	require.NoError(t, err)
+	signature = firstEmbeddingSignature(t, inputFieldTypeChanged)
 	require.NotEqual(t, baseSignature, signature)
 }
 
@@ -129,6 +121,38 @@ func TestFunctionRunnerManagerUpdateOnlyAdvancesSchemaVersion(t *testing.T) {
 	newVersionInvalid.Functions[0].OutputFieldIds = []int64{999}
 	err := manager.Update(1, "v1", newVersionInvalid)
 	require.ErrorContains(t, err, "output field 999 not found")
+}
+
+func TestFunctionRunnerCollectionEntrySkipsUpdateAdvancedDuringBuild(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	base := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", base))
+	requireRunnerByOutput(t, manager, 1, "v1", 102)
+
+	newer := newSchemaWithChangedOutput(base)
+	newer.Version = 3
+	require.NoError(t, manager.Update(1, "v1", newer))
+	requireRunnerByOutput(t, manager, 1, "v1", 104)
+
+	stale := cloneCollectionSchema(base)
+	stale.Version = 2
+	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(stale)
+	require.NoError(t, err)
+
+	entry := manager.getEntry(1)
+	require.NotNil(t, entry)
+	initEntries, staleEntries, err := entry.ensureVersion("v1", stale, versionRunners, functionsBySignature, false)
+	require.NoError(t, err)
+	require.Empty(t, initEntries)
+	require.Empty(t, staleEntries)
+
+	keyVersions, retainedVersions, runnerCount := functionRunnerEntrySnapshot(t, manager, 1)
+	require.Equal(t, map[string]int32{"v1": 3}, keyVersions)
+	require.Contains(t, retainedVersions, int32(3))
+	require.NotContains(t, retainedVersions, int32(2))
+	require.Equal(t, 1, runnerCount)
 }
 
 func TestBuildFunctionRunnerVersionCachesFieldIDs(t *testing.T) {
@@ -190,6 +214,16 @@ func TestFunctionRunnerManagerAllocRequiresSchema(t *testing.T) {
 
 	err := manager.Alloc(1, "v1", nil)
 	require.ErrorContains(t, err, "collection schema is nil")
+	requireFunctionRunnerEntryRemoved(t, manager, 1)
+}
+
+func TestFunctionRunnerManagerRequiresLifecycleKey(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	require.ErrorContains(t, manager.Alloc(1, "", schema), "key is empty")
+	require.ErrorContains(t, manager.Update(1, "", schema), "key is empty")
 	requireFunctionRunnerEntryRemoved(t, manager, 1)
 }
 
@@ -687,20 +721,26 @@ func TestFunctionRunnerManagerAllocRetriesAfterFinalRelease(t *testing.T) {
 
 func TestFunctionRunnerCollectionEntryCloseIsTerminal(t *testing.T) {
 	entry := newFunctionRunnerCollectionEntry(1)
-	entry.detachForClose()
-
 	schema := newBM25SignatureTestSchema()
 	versionRunners, functionsBySignature, err := buildFunctionRunnerVersion(schema)
 	require.NoError(t, err)
+	initEntries, staleEntries, err := entry.ensureVersion("v1", schema, versionRunners, functionsBySignature, true)
+	require.NoError(t, err)
+	require.Len(t, initEntries, 1)
+	require.Empty(t, staleEntries)
+
+	detachedEntries := entry.detachForClose()
+	require.Equal(t, initEntries, detachedEntries)
+
 	_, _, err = entry.ensureVersion("v1", schema, versionRunners, functionsBySignature, true)
 	require.ErrorIs(t, err, errFunctionRunnerCollectionEntryRemoved)
 
 	entry.mu.RLock()
 	defer entry.mu.RUnlock()
 	require.True(t, entry.closed)
-	require.Empty(t, entry.keyVersions)
-	require.Empty(t, entry.versionRunners)
-	require.Empty(t, entry.runners)
+	require.Nil(t, entry.keyVersions)
+	require.Nil(t, entry.versionRunners)
+	require.Nil(t, entry.runners)
 }
 
 func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose(t *testing.T) {
@@ -1528,7 +1568,7 @@ func firstEmbeddingSignature(t *testing.T, schema *schemapb.CollectionSchema) st
 
 	functions := embeddingFunctions(schema)
 	require.NotEmpty(t, functions)
-	signature, err := embeddingFunctionSignature(schema, functions[0])
+	signature, _, _, err := embeddingFunctionMetadata(schema, functions[0])
 	require.NoError(t, err)
 	return signature
 }
