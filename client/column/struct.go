@@ -121,8 +121,12 @@ func (c *columnStructArray) AppendValue(value any) error {
 	}
 	// pre-check all keys exist before mutating any sub-column.
 	for _, sub := range c.fields {
-		if _, present := row[sub.Name()]; !present {
+		value, present := row[sub.Name()]
+		if !present {
 			return errors.Newf("struct array AppendValue: missing sub-field %q", sub.Name())
+		}
+		if value == nil {
+			return errors.Newf("struct array AppendValue: sub-field %q is nil; use a nil struct row to append null", sub.Name())
 		}
 	}
 	preLens := make([]int, len(c.fields))
