@@ -49,7 +49,8 @@ func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
 		},
 	}
-	schemaInfo := newSchemaInfo(schema)
+	schemaInfo, err := newSchemaInfo(schema)
+	require.NoError(t, err)
 
 	tests := []struct {
 		name        string
@@ -171,13 +172,14 @@ func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 	oldCache := globalMetaCache
 	defer func() { globalMetaCache = oldCache }()
 
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
 			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
 			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
 		},
 	})
+	require.NoError(t, err)
 	globalMetaCache = newInsertTaskIdempotencyMockCache(t, schema, true)
 	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	channels := []string{"ch0", "ch1", "ch2"}
@@ -230,13 +232,14 @@ func TestInsertTaskIdempotencyGlobalConfig(t *testing.T) {
 	oldCache := globalMetaCache
 	defer func() { globalMetaCache = oldCache }()
 
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
 			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
 		},
 	})
+	require.NoError(t, err)
 
 	t.Run("global disabled without key clears idempotency fields", func(t *testing.T) {
 		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "false"))

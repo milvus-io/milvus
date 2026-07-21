@@ -222,13 +222,14 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyIgnoresVChannelOrder(t *tes
 	oldCache := globalMetaCache
 	defer func() { globalMetaCache = oldCache }()
 
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
+	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
 			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
 			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
 		},
 	})
+	require.NoError(t, err)
 	globalMetaCache = newInsertTaskIdempotencyMockCache(t, schema, true)
 	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	canonicalChannels := []string{"ch0", "ch1", "ch2"}
