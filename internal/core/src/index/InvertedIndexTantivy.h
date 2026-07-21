@@ -289,14 +289,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     bool
     ShouldUseOp(proto::plan::OpType op) const override {
-        // Generic LIKE, suffix/contains LIKE, and regex can be executed
-        // correctly over indexed terms, but for short varchar values they are
-        // often slower than raw scan. Keep only prefix matching on the
-        // inverted-index path.
+        // Suffix/contains LIKE and regex can be executed correctly over indexed
+        // terms, but for short varchar values they are often slower than raw
+        // scan. Keep only prefix/LIKE Match on the inverted-index path.
         switch (op) {
+            case proto::plan::OpType::Match:
             case proto::plan::OpType::PrefixMatch:
                 return SupportPatternMatch() || HasRawData();
-            case proto::plan::OpType::Match:
             case proto::plan::OpType::RegexMatch:
             case proto::plan::OpType::PostfixMatch:
             case proto::plan::OpType::InnerMatch:
