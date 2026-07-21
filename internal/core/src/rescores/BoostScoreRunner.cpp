@@ -110,16 +110,28 @@ EvalFilterOverAllBatches(exec::ExecContext* exec_context,
 
 std::optional<TargetBitmap>
 ComputeNonNativeFilterBitset(exec::ExecContext* exec_context,
-                             const std::shared_ptr<Scorer>& scorer) {
+                             const std::shared_ptr<Scorer>& scorer,
+                             std::unique_ptr<exec::ExprSet>* out_expr_set) {
     auto filter = scorer->filter();
     if (!filter) {
         return std::nullopt;
     }
     auto expr_set = BuildFilterExprSet(filter, exec_context);
     if (AllSupportOffsetInput(*expr_set)) {
+        // Native filter: no whole-segment bitset, but hand the compiled
+        // expressions back so per-chunk scoring does not rebuild them.
+        if (out_expr_set != nullptr) {
+            *out_expr_set = std::move(expr_set);
+        }
         return std::nullopt;
     }
-    return EvalFilterOverAllBatches(exec_context, *expr_set, filter);
+    auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set, filter);
+    // The non-native path is fully answered by the bitset; the expressions
+    // have been advanced to the end of the segment and must not be reused.
+    if (out_expr_set != nullptr) {
+        out_expr_set->reset();
+    }
+    return bitset;
 }
 
 void
@@ -129,7 +141,8 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     const std::shared_ptr<Scorer>& scorer,
                     FixedVector<int32_t>& offsets,
                     std::vector<std::optional<float>>& output_scores,
-                    const TargetBitmap* filter_bitset) {
+                    const TargetBitmap* filter_bitset,
+                    exec::ExprSet* prepared_expr_set) {
     AssertInfo(output_scores.size() == offsets.size(),
                "scorer score output size {} must match offsets size {}",
                output_scores.size(),
@@ -153,7 +166,12 @@ ComputeScorerScores(exec::ExecContext* exec_context,
         return;
     }
 
-    auto expr_set = BuildFilterExprSet(filter, exec_context);
+    std::unique_ptr<exec::ExprSet> owned_expr_set;
+    if (prepared_expr_set == nullptr) {
+        owned_expr_set = BuildFilterExprSet(filter, exec_context);
+        prepared_expr_set = owned_expr_set.get();
+    }
+    auto& expr_set = prepared_expr_set;
     if (AllSupportOffsetInput(*expr_set)) {
         std::vector<VectorPtr> results;
         exec::EvalCtx eval_ctx(exec_context);
@@ -193,7 +211,8 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     FixedVector<int32_t>& offsets,
                     float* output_scores,
                     bool* output_has_score,
-                    const TargetBitmap* filter_bitset) {
+                    const TargetBitmap* filter_bitset,
+                    exec::ExprSet* prepared_expr_set) {
     std::vector<std::optional<float>> scores(offsets.size());
     ComputeScorerScores(exec_context,
                         op_context,
@@ -201,7 +220,8 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                         scorer,
                         offsets,
                         scores,
-                        filter_bitset);
+                        filter_bitset,
+                        prepared_expr_set);
     CopyScoresToBuffers(scores, output_scores, output_has_score);
 }
 

@@ -578,3 +578,102 @@ TEST(BoostScoreRunnerTest, PrecomputedFilterBitsetScoresChunksConsistently) {
     EXPECT_TRUE(has_scores2[2]);
     EXPECT_FLOAT_EQ(scores2[2], 2.0F);
 }
+
+// Deciding native-vs-non-native already compiles the filter (and pins its
+// scalar indexes). A native filter yields no hoisted bitset, but the compiled
+// expressions must come back through out_expr_set so per-chunk scoring reuses
+// them instead of recompiling once per chunk. Reusing one ExprSet across
+// chunks must produce exactly what a freshly compiled one produces.
+TEST(BoostScoreRunnerTest, NativeFilterHandsBackReusableExprSet) {
+    const int64_t N = 10000;  // more than one expression batch (8192)
+    auto schema = GenTextMatchSchema();
+    auto raw_data = segcore::DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // An int64 unary range expression consumes offset input natively.
+    proto::plan::GenericValue val;
+    val.set_int64_val(0);
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(FieldId(100), DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        val);
+    auto scorer = std::make_shared<WeightScorer>(filter, 2.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_native_expr_set_reuse", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    std::unique_ptr<exec::ExprSet> expr_set;
+    auto filter_bitset =
+        ComputeNonNativeFilterBitset(&exec_context, scorer, &expr_set);
+    EXPECT_FALSE(filter_bitset.has_value());
+    ASSERT_NE(expr_set, nullptr);
+
+    // Two chunks, the second past the first expression batch, scored against
+    // the single reused ExprSet.
+    FixedVector<int32_t> chunk1 = {0, 1, 2};
+    FixedVector<int32_t> chunk2 = {9000, 9001, static_cast<int32_t>(N - 1)};
+    std::vector<std::optional<float>> reused1(chunk1.size(), std::nullopt);
+    std::vector<std::optional<float>> reused2(chunk2.size(), std::nullopt);
+    ComputeScorerScores(&exec_context,
+                        &op_context,
+                        segment.get(),
+                        scorer,
+                        chunk1,
+                        reused1,
+                        nullptr,
+                        expr_set.get());
+    ComputeScorerScores(&exec_context,
+                        &op_context,
+                        segment.get(),
+                        scorer,
+                        chunk2,
+                        reused2,
+                        nullptr,
+                        expr_set.get());
+
+    // The same chunks, each compiling its own ExprSet (the old behaviour).
+    std::vector<std::optional<float>> fresh1(chunk1.size(), std::nullopt);
+    std::vector<std::optional<float>> fresh2(chunk2.size(), std::nullopt);
+    ComputeScorerScores(
+        &exec_context, &op_context, segment.get(), scorer, chunk1, fresh1);
+    ComputeScorerScores(
+        &exec_context, &op_context, segment.get(), scorer, chunk2, fresh2);
+
+    EXPECT_EQ(reused1, fresh1);
+    EXPECT_EQ(reused2, fresh2);
+}
+
+// The non-native branch advances its ExprSet to the end of the segment while
+// building the bitset, so a spent ExprSet must never be handed back for reuse.
+TEST(BoostScoreRunnerTest, NonNativeFilterDoesNotHandBackSpentExprSet) {
+    const int64_t N = 100;
+    auto schema = GenTextMatchSchema();
+    auto raw_data = segcore::DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    segment->CreateTextIndex(FieldId(101));
+
+    auto filter = GenTextMatchTypedExpr(schema, "football");
+    auto scorer = std::make_shared<WeightScorer>(filter, 2.0F);
+
+    auto query_context = std::make_shared<exec::QueryContext>(
+        "test_non_native_expr_set", segment.get(), N, MAX_TIMESTAMP);
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context = exec::ExecContext(query_context.get());
+
+    std::unique_ptr<exec::ExprSet> expr_set;
+    auto filter_bitset =
+        ComputeNonNativeFilterBitset(&exec_context, scorer, &expr_set);
+    ASSERT_TRUE(filter_bitset.has_value());
+    EXPECT_EQ(expr_set, nullptr);
+}
+
+// Passing no sink must keep the original two-argument behaviour intact.
+TEST(BoostScoreRunnerTest, ExprSetSinkIsOptional) {
+    auto scorer = std::make_shared<WeightScorer>(nullptr, 2.0F);
+    EXPECT_FALSE(
+        ComputeNonNativeFilterBitset(nullptr, scorer, nullptr).has_value());
+}

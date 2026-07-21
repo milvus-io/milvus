@@ -30,6 +30,7 @@
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "futures/Executor.h"
 #include "futures/Future.h"
 #include "pb/plan.pb.h"
@@ -174,8 +175,12 @@ ComputeScorerScoresOnPreparedChunks(
     // A filter that cannot consume offset input (text match, GIS) is
     // evaluated over the whole segment; do that once here instead of once
     // per offset chunk inside ComputeScorerScores.
-    auto filter_bitset =
-        milvus::rescores::ComputeNonNativeFilterBitset(&exec_context, scorer);
+    // The compiled filter is reused across chunks too: deciding native vs
+    // non-native already builds it, and a native filter would otherwise be
+    // recompiled (and its scalar indexes re-pinned) once per chunk.
+    std::unique_ptr<milvus::exec::ExprSet> filter_expr_set;
+    auto filter_bitset = milvus::rescores::ComputeNonNativeFilterBitset(
+        &exec_context, scorer, &filter_expr_set);
 
     for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
          ++chunk_idx) {
@@ -199,7 +204,8 @@ ComputeScorerScoresOnPreparedChunks(
             scorer_offsets,
             output_score_chunks[chunk_idx],
             output_has_score_chunks[chunk_idx],
-            filter_bitset.has_value() ? &filter_bitset.value() : nullptr);
+            filter_bitset.has_value() ? &filter_bitset.value() : nullptr,
+            filter_expr_set.get());
     }
 }
 
