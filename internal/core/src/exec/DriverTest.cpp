@@ -38,6 +38,7 @@
 #include "expr/ITypeExpr.h"
 #include "futures/Future.h"
 #include "futures/future_c_types.h"
+#include "monitor/Monitor.h"
 #include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
@@ -244,4 +245,71 @@ TEST(DriverTest, AsyncConsumePreservesSegcoreErrorCode) {
     EXPECT_EQ(r, nullptr);
     EXPECT_EQ(s.error_code, static_cast<int>(milvus::ErrorCode::ExprInvalid));
     free((char*)(s.error_msg));
+}
+
+// A cancellation raised inside the exec driver reaches the async future as a
+// SegcoreError carrying FollyCancel (not a raw folly::FutureCancellation), so
+// asyncProduce must still count it as a during-execute cancel. The future's own
+// token is left uncanceled (bypassing the runner's early-cancel prologue) and a
+// SEPARATE, pre-canceled token is handed to the driver, so the cancellation is
+// raised mid-execution by an operator -- exactly the wrapped path this metric
+// fix covers.
+TEST(DriverTest, AsyncDriverCancellationCountsDuringMetric) {
+    auto schema = std::make_shared<Schema>();
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField("counter", DataType::INT64);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto bin_plan = schema_handle.ParseSearch("counter > 500",
+                                              "fakevec",
+                                              10,
+                                              knowhere::metric::L2,
+                                              R"({"nprobe": 10})",
+                                              3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, bin_plan.data(), bin_plan.size());
+
+    auto& counter =
+        milvus::monitor::internal_cgo_cancel_during_execute_total_search;
+    auto before = counter.Value();
+    {
+        folly::CPUThreadPoolExecutor executor(2);
+        auto future = milvus::futures::Future<int>::async(
+            &executor, 0, [&](folly::CancellationToken /*future_token*/) {
+                folly::CancellationSource driver_cancel;
+                driver_cancel.requestCancellation();
+                query::ExecPlanNodeVisitor visitor(
+                    *seg_promote, MAX_TIMESTAMP, driver_cancel.getToken());
+                auto result = visitor.get_moved_result(*plan->plan_node_);
+                return new int(0);  // unreachable: the driver throws above
+            });
+
+        std::mutex mu;
+        mu.lock();
+        future->registerReadyCallback(
+            [](CLockedGoMutex* m) { ((std::mutex*)(m))->unlock(); },
+            (CLockedGoMutex*)(&mu));
+        mu.lock();
+        auto [r, s] = future->leakyGet();
+        EXPECT_EQ(r, nullptr);
+        EXPECT_EQ(s.error_code,
+                  static_cast<int>(milvus::ErrorCode::FollyCancel));
+        free((char*)(s.error_msg));
+    }  // Future (and its Metrics) destroyed here -> during-cancel counter fires
+
+    EXPECT_DOUBLE_EQ(counter.Value(), before + 1);
 }
