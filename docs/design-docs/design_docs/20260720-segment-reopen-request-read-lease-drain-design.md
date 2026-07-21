@@ -39,8 +39,9 @@ the serving consistency boundary for sealed segments to a
   pending or active. QueryNode releases every partial `SearchResult` from the
   rejected attempt, then retries the complete sealed segment batch with jitter
   under the request context.
-- New call-scoped Retrieve lease acquisition waits cancellably for publication
-  to finish. Growing reads remain no-op and use neither behavior.
+- New call-scoped Retrieve lease acquisition fails fast while publication is
+  pending or active. QueryNode retries only that Retrieve call with jitter under
+  the request context. Growing reads remain no-op.
 - After the drain completes, Reopen atomically publishes the complete metadata
   and runtime snapshot exactly once.
 
@@ -99,8 +100,9 @@ entire `SearchResult` lifetime.
 2. Reopen drains all old search requests before publishing.
 3. Once a writer is pending, new sealed searches fail admission and cannot
    bypass it; QueryNode retries only after releasing the entire attempt.
-4. Call-scoped Retrieve reads wait cancellably behind a pending or active
-   publisher and do not expose the Search gate-busy retry signal.
+4. Call-scoped Retrieve reads fail admission behind a pending or active
+   publisher and retry only the current segment call without blocking a Segcore
+   executor thread.
 5. Growing segments do not receive a new operation gate.
 6. Reopen preparation remains non-blocking for readers; only final publication
    performs the drain.
@@ -164,7 +166,7 @@ A writer has completed, or nearly completed, preparation and is ready to
 publish:
 
 - new escaping Search leases fail admission;
-- new call-scoped Retrieve leases wait without entering;
+- new call-scoped Retrieve leases fail admission without entering;
 - existing leases may continue reduce and fill work;
 - the writer waits for the active lease count to reach zero.
 
@@ -333,22 +335,21 @@ that visit segments in opposite orders can retain partial leases and deadlock
 two publishers. The Search retry boundary is therefore the complete sealed
 segment batch, not one segment or one goroutine.
 
-Call-scoped Retrieve acquisition:
+Call-scoped Retrieve acquisition uses the same fail-fast gate operation:
 
 ```text
 lock gate mutex
-check cancellation
-while writer_pending || writer_active:
-    record the wait once
-    wait with cancellation polling
-check cancellation again
+if writer_pending || writer_active:
+    increment rejection counter
+    return the narrow transient gate-busy error
 active_readers++
 unlock gate mutex
 ```
 
-Blocking admission is allowed only for APIs whose lease is released before the
-CGO call returns. Each Retrieve worker can therefore wait on at most one
-segment gate and cannot retain another segment lease while waiting.
+Because Retrieve releases its lease before the CGO call returns, QueryNode can
+retry only the rejected segment call. No reader waits inside the Search CPU
+executor, so queued Retrieve work cannot prevent Search consume callbacks from
+transferring results to Go for eventual lease release.
 
 Read release:
 
@@ -556,13 +557,12 @@ the old lease cannot be released
 ### 9.6 Retrieve and Direct Read APIs
 
 `AsyncRetrieve`, `AsyncRetrieveByOffsets`, and direct read APIs without a
-long-lived C++ result use a cancellable blocking call-scoped lease:
+long-lived C++ result use a fail-fast call-scoped lease with per-call retry:
 
 ```text
 LazyCheckSchema before the gate, when applicable
-wait while writer_pending || writer_active
-check cancellation before admission
-acquire scoped lease
+attempt fail-fast lease acquisition
+if gate busy: return without entering and retry this segment call in QueryNode
 validate
 read and serialize
 release before returning across CGO
@@ -843,7 +843,6 @@ Responsibilities:
 
 - add `shared_ptr<GateState> operation_gate_`;
 - add non-virtual fail-fast `AcquireReadLease`;
-- add non-virtual blocking `AcquireScopedReadLease`;
 - add writer acquisition;
 - require an explicit PublishLease token for online publication;
 - add test hooks.
@@ -862,7 +861,7 @@ Responsibilities:
 - run `LazyCheckSchema` before gate acquisition;
 - perform pure snapshot compatibility validation after acquisition;
 - transfer the lease to every `AsyncSearch` result branch;
-- use cancellable blocking scoped leases for retrieve;
+- use fail-fast scoped leases for retrieve;
 - audit direct read C APIs;
 - release the lease through `DeleteSearchResult` destruction.
 - expose cancellable async index-drop entry points so the request context
@@ -956,10 +955,11 @@ Normal read-lease acquire/release must not emit INFO logs per query.
 1. Reopen remains blocked after Search returns.
 2. Reopen completes after `DeleteSearchResult`.
 3. New sealed Search fails fast and cannot bypass a pending writer.
-4. A call-scoped Retrieve waits until the active publisher releases the gate.
-5. A canceled call-scoped Retrieve wait returns `FollyCancel` without entering.
-6. Reduce/fill under an existing lease completes after writer pending.
-7. Growing Search and Retrieve do not increment the active lease count.
+4. A call-scoped Retrieve fails fast while a publisher is pending or active.
+5. QueryNode retries only the rejected Retrieve call and obeys request cancellation.
+6. Non-gate Folly errors are not retried.
+7. Reduce/fill under an existing lease completes after writer pending.
+8. Growing Search and Retrieve do not increment the active lease count.
 
 ### 18.2 Lazy Schema
 
@@ -1042,15 +1042,16 @@ The publisher has a bounded wait and returns cancellation/timeout instead of
 forcing publication by ignoring a live lease, which would reintroduce
 mixed-snapshot and resource-lifetime risks.
 
-### 19.3 Blocking Scoped Retrieve Admission
+### 19.3 Fail-fast Scoped Retrieve Retry
 
-Retrieve waits inside its Segcore executor task while a publisher is pending or
-active. A burst of Query traffic during an unusually long drain can therefore
-occupy Search CPU executor threads and increase head-of-line latency.
+Retrieve uses the same fail-fast admission signal as Search, but retries only
+the rejected segment call because no lease escapes the CGO call. Retry uses
+bounded jitter under the request context and never waits inside a Segcore
+executor task.
 
-This is accepted because Reopen is infrequent, publisher drain is bounded, and
-Retrieve waits obey request cancellation. Wait counts and wait duration should
-be observable so executor saturation can be detected.
+A long drain can increase retry traffic and latency, but it cannot occupy every
+Search CPU executor thread with gate waits or prevent Search consume callbacks
+from progressing. Rejection counts and retry duration should be observable.
 
 ### 19.4 Lazy Reopen on the Search Executor
 
@@ -1084,8 +1085,9 @@ necessary.
 4. Sealed segments use cross-thread counting leases instead of storing a Folly
    shared lock in SearchResult.
 5. SearchResult owns the lease until `DeleteSearchResult`.
-6. Escaping Search acquisition fails fast; call-scoped Retrieve acquisition
-   waits cancellably.
+6. Search and call-scoped Retrieve acquisition both fail fast; Search retries
+   the complete sealed batch after cleanup, while Retrieve retries only the
+   rejected segment call.
 7. Reduce, export, and fill do not reacquire a lease.
 8. LazyCheckSchema runs before gate acquisition.
 9. Only pure compatibility validation is allowed after gate acquisition.

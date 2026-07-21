@@ -424,21 +424,6 @@ AcquireSegmentReadLease(milvus::segcore::SegmentInterface* segment,
     return sealed->AcquireReadLease(cancel_token);
 }
 
-std::shared_ptr<milvus::segcore::SegmentReadLease>
-AcquireScopedSegmentReadLease(milvus::segcore::SegmentInterface* segment,
-                              const folly::CancellationToken& cancel_token) {
-    if (segment->type() == SegmentType::Growing) {
-        return nullptr;
-    }
-
-    auto sealed =
-        dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
-    AssertInfo(sealed != nullptr,
-               "sealed segment {} does not support scoped read leases",
-               segment->get_segment_id());
-    return sealed->AcquireScopedReadLease(cancel_token);
-}
-
 void
 ValidateSegmentSchemaCompatibility(milvus::segcore::SegmentInterface* segment,
                                    const milvus::SchemaPtr& plan_schema) {
@@ -611,8 +596,7 @@ AsyncRetrieve(CTraceContext c_trace,
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
-            auto read_lease =
-                AcquireScopedSegmentReadLease(segment, cancel_token);
+            auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
             ValidateSegmentSchemaCompatibility(segment, plan->schema_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
@@ -661,8 +645,7 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
 
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
-            auto read_lease =
-                AcquireScopedSegmentReadLease(segment, cancel_token);
+            auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
             ValidateSegmentSchemaCompatibility(segment, plan->schema_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(

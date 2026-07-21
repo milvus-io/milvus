@@ -18,8 +18,6 @@ package segments
 
 import (
 	"context"
-	"math/rand/v2"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -32,37 +30,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
-const (
-	searchGateRetryInitialBackoff = 5 * time.Millisecond
-	searchGateRetryMaxBackoff     = 100 * time.Millisecond
-)
-
-type (
-	searchResultsCleanup func([]*SearchResult)
-	searchGateRetryWait  func(context.Context, int) error
-)
-
-func waitSearchGateRetry(ctx context.Context, retryCount int) error {
-	shift := min(max(retryCount-1, 0), 5)
-	backoff := searchGateRetryInitialBackoff << shift
-	backoff = min(backoff, searchGateRetryMaxBackoff)
-	half := backoff / 2
-	delay := half + time.Duration(rand.Int64N(int64(half)+1))
-
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
+type searchResultsCleanup func([]*SearchResult)
 
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
 func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
-	return searchSegmentsWithRetry(ctx, mgr, segments, segType, searchReq, DeleteSearchResults, waitSearchGateRetry)
+	return searchSegmentsWithRetry(ctx, mgr, segments, segType, searchReq, DeleteSearchResults, waitSegmentReadGateRetry)
 }
 
 func searchSegmentsWithRetry(
@@ -72,7 +45,7 @@ func searchSegmentsWithRetry(
 	segType SegmentType,
 	searchReq *SearchRequest,
 	cleanup searchResultsCleanup,
-	waitRetry searchGateRetryWait,
+	waitRetry segmentReadGateRetryWait,
 ) ([]*SearchResult, error) {
 	retryCount := 0
 	for {

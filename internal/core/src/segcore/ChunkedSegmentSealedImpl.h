@@ -201,11 +201,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return operation_gate_.AcquireRead(cancel_token, id_);
     }
 
-    std::shared_ptr<SegmentReadLease>
-    AcquireScopedReadLease(const folly::CancellationToken& cancel_token) const {
-        return operation_gate_.AcquireReadBlocking(cancel_token, id_);
-    }
-
     void
     ValidateSchemaCompatibility(const SchemaPtr& plan_schema) const;
 
