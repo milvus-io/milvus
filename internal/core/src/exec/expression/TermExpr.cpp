@@ -26,21 +26,6 @@ namespace exec {
 
 void
 PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    if (expr_->column_.data_type_ == DataType::JSON &&
-        expr_->vals_.size() > 1) {
-        const auto expected_type = expr_->vals_[0].val_case();
-        for (size_t i = 1; i < expr_->vals_.size(); ++i) {
-            if (expr_->vals_[i].val_case() != expected_type) {
-                ThrowInfo(DataTypeInvalid,
-                          "TermExpr values must have the same type, value 0 "
-                          "has type {} but value {} has type {}",
-                          static_cast<int>(expected_type),
-                          i,
-                          static_cast<int>(expr_->vals_[i].val_case()));
-            }
-        }
-    }
-
     tracer::AutoSpan span(
         "PhyTermFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
