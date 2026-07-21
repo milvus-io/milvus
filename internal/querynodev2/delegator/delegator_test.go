@@ -2561,7 +2561,10 @@ func TestUpdateSchemaSyncsFunctionRunnerMetadata(t *testing.T) {
 func TestUpdateSchemaPanicsOnInvalidFunctionMetadata(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
+	worker := cluster.NewMockWorker(t)
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
 	workerManager := cluster.NewMockManager(t)
+	workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
 	sd := &shardDelegator{
 		collectionID:               1000,
 		vchannelName:               "test-channel",
