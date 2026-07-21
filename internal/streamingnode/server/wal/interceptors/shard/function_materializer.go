@@ -3,8 +3,6 @@ package shard
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -52,35 +50,12 @@ type collectionSchemaProvider interface {
 	GetAllCollectionSchemaInfos() map[int64]shards.CollectionSchemaInfo
 }
 
-type collectionSchemaGetter interface {
-	GetCollectionSchema(collectionID int64, schemaVersion int32) (*schemapb.CollectionSchema, error)
-}
-
 func (impl *shardInterceptor) materializeFunctionFields(
 	ctx context.Context,
 	insertMsg message.MutableInsertMessageV1,
 	collectionID int64,
 	schemaVersion int32,
-	schemaVersionProvided bool,
 ) error {
-	if !schemaVersionProvided {
-		if schemaGetter, ok := impl.shardManager.(collectionSchemaGetter); ok {
-			schema, err := schemaGetter.GetCollectionSchema(collectionID, schemaVersion)
-			if errors.Is(err, shards.ErrCollectionSchemaNotFound) {
-				// A legacy create message may not carry collection schema, and old
-				// proxies omit schema_version on inserts. There is no function
-				// metadata to execute until a schema becomes available.
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if !function.HasEmbeddingFunctions(schema) {
-				return nil
-			}
-		}
-	}
-
 	body := insertMsg.MustBody()
 	changed, err := function.GetManager().Materialize(ctx, collectionID, walFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, body)
 	if err != nil {

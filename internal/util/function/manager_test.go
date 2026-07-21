@@ -1020,6 +1020,35 @@ func TestFunctionRunnerManagerMaterializeRequiresAllocation(t *testing.T) {
 	requireFunctionRunnerEntryRemoved(t, manager, 1)
 }
 
+func TestFunctionRunnerManagerMaterializeUsesLifecycleKeyVersion(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	schema := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "v1", schema))
+
+	body := newBM25InsertRequest("message")
+	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, HasFieldData(body.GetFieldsData(), 102))
+}
+
+func TestFunctionRunnerManagerMaterializeLatestSkipsMissingLifecycleKey(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+
+	changed, err := manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newBM25InsertRequest("message"))
+	require.NoError(t, err)
+	require.False(t, changed)
+
+	schema := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "other", schema))
+	changed, err = manager.Materialize(context.Background(), 1, "v1", LatestFunctionRunnerVersion, newBM25InsertRequest("message"))
+	require.NoError(t, err)
+	require.False(t, changed)
+}
+
 func TestFunctionRunnerManagerMaterializeRejectsVersionMismatch(t *testing.T) {
 	manager, _ := newMockFunctionRunnerManager(t)
 	t.Cleanup(manager.Close)

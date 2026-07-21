@@ -23,6 +23,10 @@ import (
 
 var defaultManager FunctionRunnerManager = NewFunctionRunnerManager()
 
+// LatestFunctionRunnerVersion asks Materialize to use the version currently
+// registered by the lifecycle key. Zero is a valid schema version.
+const LatestFunctionRunnerVersion int32 = -1
+
 var (
 	errFunctionRunnerEntryRemoved           = errors.New("function runner manager entry was removed")
 	errFunctionRunnerCollectionEntryRemoved = errors.New("function runner manager collection entry was removed")
@@ -51,8 +55,9 @@ type FunctionRunnerManager interface {
 	Release(collectionID int64, key string)
 
 	// Materialize fills missing function output fields for a WAL insert request.
-	// The lifecycle key selects the managed schema snapshot, while schemaVersion
-	// verifies that the WAL and manager snapshots are consistent.
+	// The lifecycle key selects the managed schema snapshot. Passing
+	// LatestFunctionRunnerVersion uses the version currently registered by the key;
+	// an explicit schemaVersion verifies that the WAL and manager snapshots match.
 	Materialize(ctx context.Context, collectionID int64, key string, schemaVersion int32, body *msgpb.InsertRequest) (bool, error)
 
 	// TryMaterialize is used by compatibility paths for old insert messages. It
@@ -618,9 +623,12 @@ func (e *functionRunnerCollectionEntry) Materialize(
 	keyVersion, ok := e.keyVersions[key]
 	if !ok {
 		e.mu.RUnlock()
+		if schemaVersion == LatestFunctionRunnerVersion {
+			return false, nil
+		}
 		return false, merr.WrapErrFunctionFailedMsg("function runner schema for key %s is not available", key)
 	}
-	if keyVersion != schemaVersion {
+	if schemaVersion != LatestFunctionRunnerVersion && keyVersion != schemaVersion {
 		e.mu.RUnlock()
 		return false, merr.WrapErrFunctionFailedMsg("function runner schema version mismatch for key %s: expected %d, actual %d", key, schemaVersion, keyVersion)
 	}
@@ -841,6 +849,9 @@ func (m *functionRunnerManager) Materialize(
 ) (bool, error) {
 	entry := m.getEntry(collectionID)
 	if entry == nil {
+		if schemaVersion == LatestFunctionRunnerVersion {
+			return false, nil
+		}
 		return false, merr.WrapErrFunctionFailedMsg("function runners for collection %d are not allocated", collectionID)
 	}
 	changed, err := entry.Materialize(ctx, key, schemaVersion, body)

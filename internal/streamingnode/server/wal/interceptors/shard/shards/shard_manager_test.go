@@ -444,10 +444,11 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int32(1), ver)
 
-	// legacy insert (no schema_version field): skip schema validation and return current version
+	// legacy insert (no schema_version field): skip schema validation and let
+	// downstream users resolve the version from their lifecycle key.
 	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 100})
 	assert.NoError(t, err)
-	assert.Equal(t, int32(1), ver)
+	assert.Equal(t, latestCollectionSchemaVersion, ver)
 
 	_, err = m.GetCollectionSchema(100, latestCollectionSchemaVersion)
 	assert.NoError(t, err)
@@ -527,7 +528,7 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	// legacy insert while collection schema version is still 0: allow
 	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 101})
 	assert.NoError(t, err)
-	assert.Equal(t, int32(0), ver)
+	assert.Equal(t, latestCollectionSchemaVersion, ver)
 
 	createMsgSchemaVersionZero := message.NewCreateCollectionMessageBuilderV1().
 		WithVChannel("v_schema_zero").
@@ -636,7 +637,7 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	// legacy insert while effective collection schema version is still 0 (nil inner schema)
 	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 102})
 	assert.NoError(t, err)
-	assert.Equal(t, int32(0), ver)
+	assert.Equal(t, latestCollectionSchemaVersion, ver)
 
 	m.Close()
 }

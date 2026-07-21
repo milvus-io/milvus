@@ -178,7 +178,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
 	}
 	schemaVersion = correctSchemaVersion
-	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion, header.SchemaVersion != nil); err != nil {
+	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
 		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
 			mlog.Int64("collectionID", header.GetCollectionId()),
 			mlog.Int32("schemaVersion", schemaVersion),
