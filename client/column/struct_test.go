@@ -114,6 +114,41 @@ func (s *StructArraySuite) TestNullableScalarRows() {
 	}
 }
 
+func (s *StructArraySuite) TestNullableCompactSlice() {
+	column := NewColumnStructArray("profile", []Column{
+		NewColumnInt64Array("id", nil),
+		NewColumnFloatVectorArray("embedding", 2, nil),
+	})
+	column.SetNullable(true)
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{10},
+		"embedding": [][]float32{{0.1, 0.2}},
+	}))
+	s.Require().NoError(column.AppendNull())
+	s.Require().NoError(column.AppendValue(map[string]any{
+		"id":        []int64{},
+		"embedding": [][]float32{},
+	}))
+
+	var sliced Column
+	s.NotPanics(func() {
+		sliced = column.Slice(1, -1)
+	})
+	s.Require().NotNil(sliced)
+	s.True(sliced.Nullable())
+	s.Equal(2, sliced.Len())
+	s.Equal(1, sliced.ValidCount())
+	value, err := sliced.Get(0)
+	s.Require().NoError(err)
+	s.Nil(value)
+	value, err = sliced.Get(1)
+	s.Require().NoError(err)
+	s.NotNil(value)
+	for _, fieldData := range sliced.FieldData().GetStructArrays().GetFields() {
+		s.Equal([]bool{false, true}, fieldData.GetValidData())
+	}
+}
+
 func (s *StructArraySuite) TestVectorSubField() {
 	dim := 4
 	rows := [][][]float32{
